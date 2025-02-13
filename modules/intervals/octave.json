@@ -1,0 +1,17 @@
+{
+  "baseNote": {
+    "frequency": "new Fraction(442)",
+    "startTime": "new Fraction(0)",
+    "tempo": "new Fraction(60)",
+    "beatsPerMeasure": "new Fraction(4)"
+  },
+  "notes": [
+    {
+      "id": 1,
+      "startTime": "module.baseNote.getVariable('startTime')",
+      "duration": "new Fraction(60).div(module.findTempo(module.baseNote))",
+      "frequency": "new Fraction(2, 1).mul(module.baseNote.getVariable('frequency'))",
+      "color": "rgba(255,0,0,0.7)"
+    }
+  ]
+}
