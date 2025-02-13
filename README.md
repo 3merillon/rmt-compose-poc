@@ -36,7 +36,7 @@ The RMT system has wide-ranging potential applications in music technology:
 
 ## Future Development
 
-We are seeking investment and collaboration opportunities to develop RMT into a comprehensive suite of next-generation music software tools. The underlying mathematical approach has the potential to revolutionize how we create, analyze, and interact with music in the digital realm.
+I am seeking investment and collaboration opportunities to develop RMT into a comprehensive suite of next-generation music software tools. The underlying mathematical approach has the potential to revolutionize how we create, analyze, and interact with music in the digital realm.
 
 ## Learn More
 
