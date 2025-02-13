@@ -15,7 +15,7 @@ Key features:
 
 ## Demo
 
-Try out the RMT Compose demo: [https://cybercyril.com/compose/](https://cybercyril.com/compose/)
+Try out the RMT Compose demo: [https://cybercyril.com/rmt/](https://cybercyril.com/rmt/)
 
 ## Technology
 
