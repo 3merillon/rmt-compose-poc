@@ -13,6 +13,10 @@ Key features:
 - Explore microtonal and alternative tuning systems
 - Visualize complex harmonic relationships
 
+## Demo
+
+Try out the RMT Compose demo: [https://cyrilmonkewitz.com/compose/](https://cyrilmonkewitz.com/compose/)
+
 ## Technology
 
 The RMT App is built using:
@@ -36,7 +40,7 @@ The RMT system has wide-ranging potential applications in music technology:
 
 ## Future Development
 
-I am seeking investment and collaboration opportunities to develop RMT into a comprehensive suite of next-generation music software tools. The underlying mathematical approach has the potential to revolutionize how we create, analyze, and interact with music in the digital realm.
+We are seeking investment and collaboration opportunities to develop RMT into a comprehensive suite of next-generation music software tools. The underlying mathematical approach has the potential to revolutionize how we create, analyze, and interact with music in the digital realm.
 
 ## Learn More
 
