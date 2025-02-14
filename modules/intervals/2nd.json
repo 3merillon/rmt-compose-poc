@@ -10,8 +10,8 @@
         "id": 1,
         "startTime": "module.baseNote.getVariable('startTime')",
         "duration": "new Fraction(60).div(module.findTempo(module.baseNote))",
-        "frequency": "new Fraction(1, 1).mul(module.baseNote.getVariable('frequency'))",
-        "color": "rgba(128,128,128,0.7)"
+        "frequency": "new Fraction(9, 8).mul(module.baseNote.getVariable('frequency'))",
+        "color": "rgba(255,0,0,0.7)"
       }
     ]
   }

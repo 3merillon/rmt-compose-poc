@@ -63,18 +63,21 @@ function createModuleIcon(category, filename, moduleData = null) {
   moduleIcon.style.alignItems = 'center';
   moduleIcon.style.justifyContent = 'center';
   moduleIcon.style.fontFamily = "'Roboto Mono', monospace";
-  moduleIcon.style.fontSize = '10px';
+  moduleIcon.style.fontSize = '8px'; // Reduced font size to accommodate more text
+  moduleIcon.style.lineHeight = '1.2'; // Tighter line height for wrapped text
   moduleIcon.style.color = '#151525';
   moduleIcon.style.cursor = 'grab';
   moduleIcon.setAttribute('draggable', 'true');
   moduleIcon.style.touchAction = 'none';
-  moduleIcon.style.overflow = 'hidden';
-  moduleIcon.style.textOverflow = 'ellipsis';
-  moduleIcon.style.whiteSpace = 'nowrap';
+  moduleIcon.style.padding = '2px'; // Add some padding
+  moduleIcon.style.boxSizing = 'border-box';
+  moduleIcon.style.textAlign = 'center';
+  moduleIcon.style.wordWrap = 'break-word'; // Enable word wrapping
+  moduleIcon.style.overflow = 'hidden'; // Hide overflow
 
   const moduleName = filename.replace(/\.json$/i, '');
   moduleIcon.textContent = moduleName;
-  moduleIcon.title = moduleName;
+  moduleIcon.title = moduleName; // Keep the tooltip for full name
 
   if (moduleData) {
       moduleIcon.moduleData = moduleData;
