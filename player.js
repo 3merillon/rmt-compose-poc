@@ -108,6 +108,71 @@ document.addEventListener('DOMContentLoaded', async function() {
         clearSelection();
     }
 
+    function showCleanSlateConfirmation() {
+        const overlay = document.createElement('div');
+        overlay.className = 'delete-confirm-overlay';
+    
+        const modal = document.createElement('div');
+        modal.className = 'delete-confirm-modal';
+    
+        const message = document.createElement('p');
+        message.innerHTML = "Are you sure you want to <span class='modal-delete-all'>DELETE ALL</span> notes except the base note? This action cannot be undone.";
+        modal.appendChild(message);
+    
+        const btnContainer = document.createElement('div');
+        btnContainer.className = 'modal-btn-container';
+    
+        const yesButton = document.createElement('button');
+        yesButton.textContent = 'Yes, Clean Slate';
+        yesButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            cleanSlate();
+            document.body.removeChild(overlay);
+        });
+    
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = 'Cancel';
+        cancelButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            document.body.removeChild(overlay);
+        });
+    
+        btnContainer.appendChild(yesButton);
+        btnContainer.appendChild(cancelButton);
+        modal.appendChild(btnContainer);
+        overlay.appendChild(modal);
+    
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) {
+                e.stopPropagation();
+                document.body.removeChild(overlay);
+            }
+        });
+    
+        document.body.appendChild(overlay);
+    }
+
+    function cleanSlate() {
+        // Keep only the base note (id 0)
+        Object.keys(myModule.notes).forEach(id => {
+            if (id !== '0') {
+                delete myModule.notes[id];
+            }
+        });
+    
+        // Reset the nextId to 1
+        myModule.nextId = 1;
+    
+        // Re-evaluate and update the visual representation
+        evaluatedNotes = myModule.evaluateModule();
+        updateVisualNotes(evaluatedNotes);
+        createMeasureBars();
+        clearSelection();
+    
+        // Close the note widget
+        noteWidget.classList.remove('visible');
+    }
+
     /* ---------- KEEP DEPENDENCIES FUNCTIONALITY ---------- */
 
     /* Show confirmation modal for "Keep Dependencies" deletion */
@@ -762,6 +827,26 @@ document.addEventListener('DOMContentLoaded', async function() {
             deleteWrapper.appendChild(deleteDepsButton);
         
             widgetContent.appendChild(deleteWrapper);
+        }
+        
+        // Add the "Delete All" section for the base note at the bottom
+        if (note === myModule.baseNote) {
+            const deleteAllSection = document.createElement('div');
+            deleteAllSection.className = 'delete-note-row';
+            
+            const deleteHeader = document.createElement('div');
+            deleteHeader.className = 'delete-note-header';
+            deleteHeader.textContent = 'DELETE ALL NOTES';
+            
+            const cleanSlateButton = document.createElement('button');
+            cleanSlateButton.className = 'delete-note-btn delete-dependencies';
+            cleanSlateButton.textContent = 'Clean Slate';
+            cleanSlateButton.addEventListener('click', showCleanSlateConfirmation);
+            
+            deleteAllSection.appendChild(deleteHeader);
+            deleteAllSection.appendChild(cleanSlateButton);
+            
+            widgetContent.appendChild(deleteAllSection);
         }
         
         noteWidget.classList.add('visible');
