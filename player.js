@@ -19,8 +19,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail.com
 */
 document.addEventListener('DOMContentLoaded', async function() {
-    const MAX_VOICES = 4;
-    const INITIAL_VOLUME = 1 / MAX_VOICES;
+    const INITIAL_VOLUME = 0.5;
     const ATTACK_TIME_RATIO = 0.1;
     const DECAY_TIME_RATIO = 0.1;
     const SUSTAIN_LEVEL = 0.7;
@@ -106,6 +105,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
         clearSelection();
+        invalidateModuleEndTimeCache();
     }
 
     function showCleanSlateConfirmation() {
@@ -317,6 +317,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
         clearSelection();
+        invalidateModuleEndTimeCache();
     }
 
     /* ---------- END KEEP DEPENDENCIES FUNCTIONALITY ---------- */
@@ -347,9 +348,17 @@ document.addEventListener('DOMContentLoaded', async function() {
           }
         }
         return lastMeasure.id;
-      }
+    }
       
-      function getModuleEndTime() {
+    function getModuleEndTime() {
+        const currentModifiedTime = getCurrentModifiedTime();
+        
+        if (memoizedModuleEndTime !== null && currentModifiedTime === moduleLastModifiedTime) {
+            //console.log('Returning memoized module end time');
+            return memoizedModuleEndTime;
+        }
+    
+        //console.log('Calculating module end time');
         let measureEnd = 0;
         const measureNotes = Object.values(myModule.notes).filter(note =>
             note.variables.startTime && !note.variables.duration && !note.variables.frequency
@@ -361,7 +370,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 .add(myModule.findMeasureLength(lastMeasure))
                 .valueOf();
         }
-      
+    
         let lastNoteEnd = 0;
         Object.values(myModule.notes).forEach(note => {
             if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
@@ -373,8 +382,18 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
             }
         });
-      
-        return Math.max(measureEnd, lastNoteEnd);
+    
+        memoizedModuleEndTime = Math.max(measureEnd, lastNoteEnd);
+        moduleLastModifiedTime = currentModifiedTime;
+        return memoizedModuleEndTime;
+    }
+
+    // Helper function to get the current modified time of the module
+    function getCurrentModifiedTime() {
+        return Object.values(myModule.notes).reduce((maxTime, note) => {
+            const noteTime = note.lastModifiedTime || 0;
+            return Math.max(maxTime, noteTime);
+        }, 0);
     }
 
     /* ---------- END GLOBAL HELPERS FOR MEASURE ADD FUNCTIONALITY ---------- */
@@ -415,8 +434,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         console.error('Save Module button not found!');
     }
 
-    /* ----------------------- FIXED IMPORT MODULE FUNCTION ----------------------- */
-    //(async function() {
+    /* ----------------------- IMPORT MODULE FUNCTION ----------------------- */
         /* ---------- In importModuleAtTarget (ensure deletion is handled separately) ----------
     For dropped modules, we want to rewrite any reference to the base note (id 0)
     to leave targetNote references intact (so that imported expressions remain chainable).
@@ -507,10 +525,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         } catch (error) {
           console.error("Error importing module at target note:", error);
         }
-      }
+        invalidateModuleEndTimeCache();
+    }
     window.importModuleAtTarget = importModuleAtTarget;
-//      })();
-    /* ----------------------- END FIXED IMPORT MODULE FUNCTION ----------------------- */
+    /* ----------------------- END IMPORT MODULE FUNCTION ----------------------- */
 
     function showNoteVariables(note, clickedElement, measureId = null) {
         const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
@@ -829,7 +847,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             widgetContent.appendChild(deleteWrapper);
         }
         
-        // Add the "Delete All" section for the base note at the bottom
+        // The "Delete All" section for the base note at the bottom
         if (note === myModule.baseNote) {
             const deleteAllSection = document.createElement('div');
             deleteAllSection.className = 'delete-note-row';
@@ -956,7 +974,7 @@ document.addEventListener('DOMContentLoaded', async function() {
           baseNoteContent.style.boxShadow = 'none';
         });
       
-        // --- Allow dropping a module on the base note ---
+        // --- Dropping a module on the base note ---
         baseNoteCircle.element.addEventListener('dragover', (event) => {
           event.preventDefault();
         }, true);
@@ -984,7 +1002,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             // (If desired, additional handling can be implemented here.)
           }
         }, true);
-        // --- End drop functionality addition ---
+        // --- Drop functionality addition ---
       
         baseNoteCircle.element.id = 'baseNoteCircle';
         baseNoteCircle.setSize({ width: 40, height: 40 });
@@ -1181,7 +1199,7 @@ function getFrequencyRatio(note) {
     return "1/1";
   }
   
-  /* ---------- Revised createNoteElement ---------- */
+  /* ---------- CreateNoteElement ---------- */
   function createNoteElement(note, index) {
     const fractionStr = getFrequencyRatio(note);
     const parts = fractionStr.split('/');
@@ -1396,7 +1414,7 @@ function getFrequencyRatio(note) {
         finalBar.id = `measure-bar-final`;
         barsContainer.appendChild(finalBar);
         measureBars.push(finalBar);
-    
+        invalidateModuleEndTimeCache();
         updateMeasureBarPositions();
     }
     
@@ -1875,6 +1893,7 @@ function getFrequencyRatio(note) {
                 Module.loadFromJSON(moduleData).then(newModule => {
                     myModule = newModule;
                     initializeModule();
+                    invalidateModuleEndTimeCache();
                 }).catch((error) => {
                     console.error('Error loading module:', error);
                     const errorMsg = document.createElement('div');

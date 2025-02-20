@@ -18,6 +18,27 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN 
 OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail.com
 */
+
+let memoizedModuleEndTime = null;
+let moduleLastModifiedTime = 0;
+
+function invalidateModuleEndTimeCache() {
+    console.log('Invalidating module end time cache');
+    memoizedModuleEndTime = null;
+    moduleLastModifiedTime = Date.now();
+}
+
+function getCurrentModifiedTime() {
+    let maxTime = 0;
+    for (const id in myModule.notes) {
+        const note = myModule.notes[id];
+        if (note.lastModifiedTime) {
+            maxTime = Math.max(maxTime, note.lastModifiedTime);
+        }
+    }
+    return maxTime;
+}
+
 class Module {
     constructor(baseNoteVariables = {}) {
         this.notes = {};
@@ -101,11 +122,13 @@ class Module {
         const id = this.nextId++;
         const note = new Note(id, variables);
         this.notes[id] = note;
+        invalidateModuleEndTimeCache();
         return note;
     }
 
     removeNote(id) {
         delete this.notes[id];
+        invalidateModuleEndTimeCache();
     }
 
     getNoteById(id) {
@@ -143,16 +166,26 @@ class Module {
         for (let i = 0; i < n; i++) {
           const prevNote = (i === 0) ? fromNote : this.getNoteById(notesArray[i - 1].id);
           const measureLength = this.findMeasureLength(prevNote);
-          // Define the new startTime as a function.
-          const newStartTimeFunction = () => prevNote.getVariable('startTime').add(measureLength);
-          // Construct the raw string.
+          
+          // Define the new startTime as a function that doesn't reference itself
+          const newStartTimeFunction = () => {
+            if (i === 0) {
+              return prevNote.getVariable('startTime').add(measureLength);
+            } else {
+              const prevStartTime = notesArray[i - 1].getVariable('startTime');
+              return prevStartTime.add(measureLength);
+            }
+          };
+      
+          // Construct the raw string
           let rawString;
           if (prevNote.id === 0) {
-            rawString = "module.baseNote.getVariable('startTime')";
+            rawString = "module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))";
           } else {
-            rawString = "module.getNoteById(" + prevNote.id + ").getVariable('startTime').add(module.findMeasureLength(module.getNoteById(" + prevNote.id + ")))";
+            rawString = `module.getNoteById(${prevNote.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevNote.id})))`;
           }
-          // Create the new note with both the function and the raw string.
+      
+          // Create the new note with both the function and the raw string
           const newNote = this.addNote({
             startTime: newStartTimeFunction,
             startTimeString: rawString
@@ -161,9 +194,9 @@ class Module {
           notesArray.push(newNote);
         }
         return notesArray;
-      }
+    }
 
-      static async loadFromJSON(source) {
+    static async loadFromJSON(source) {
         let data;
         
         if (typeof source === 'string') {

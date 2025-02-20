@@ -42,8 +42,11 @@ class Note {
     }
 
     setVariable(name, value) {
-        // Store the value
         this.variables[name] = value;
+        this.lastModifiedTime = Date.now();
+        if (typeof invalidateModuleEndTimeCache === 'function') {
+            invalidateModuleEndTimeCache();
+        }
     }
 
     getVariable(name) {
