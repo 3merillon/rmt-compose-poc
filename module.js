@@ -23,7 +23,7 @@ let memoizedModuleEndTime = null;
 let moduleLastModifiedTime = 0;
 
 function invalidateModuleEndTimeCache() {
-    console.log('Invalidating module end time cache');
+    //console.log('Invalidating module end time cache');
     memoizedModuleEndTime = null;
     moduleLastModifiedTime = Date.now();
 }
