@@ -530,6 +530,17 @@ document.addEventListener('DOMContentLoaded', async function() {
     window.importModuleAtTarget = importModuleAtTarget;
     /* ----------------------- END IMPORT MODULE FUNCTION ----------------------- */
 
+    // Helper for determining the note image
+    function getDurationImageForBase(base) {
+      if (base === 4) return "whole.png";
+      else if (base === 2) return "half.png";
+      else if (base === 1) return "quarter.png";
+      else if (base === 0.5) return "eighth.png";
+      else if (base === 0.25) return "sixteenth.png";
+      return "";
+    }
+
+    // showNoteVariables (main loop).
     function showNoteVariables(note, clickedElement, measureId = null) {
         const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
         if (effectiveNoteId === undefined) {
@@ -551,8 +562,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         widgetContent.innerHTML = '';
         
         // Clear only the selection highlight, keep dependency and dependent classes
-        document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected').forEach(el => el.classList.remove('selected'));
-        
+        document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected')
+          .forEach(el => {
+            // Only remove 'selected' if this element’s note id is different from the current note's id
+            if (el.getAttribute('data-note-id') !== String(note.id)) {
+              el.classList.remove('selected');
+            }
+        });
         // Clear previous dependency highlights
         document.querySelectorAll('.dependency, .dependent').forEach(el => {
           el.classList.remove('dependency', 'dependent');
@@ -711,17 +727,19 @@ document.addEventListener('DOMContentLoaded', async function() {
             // Create base note buttons (left side) with updated styles.
             basePicks.forEach(bp => {
               const btn = document.createElement('button');
-              btn.textContent = bp.symbol;
+              const imageFile = getDurationImageForBase(bp.base);
+              btn.innerHTML = `<img src="images/${imageFile}" style="width:18px; height:18px;">`;
               btn.style.width = "26px";
               btn.style.height = "26px";
               btn.style.padding = "0";
-              btn.style.fontSize = "14px";
-              btn.style.lineHeight = "26px";
               btn.style.backgroundColor = "#444";
-              btn.style.color = "#fff";
               btn.style.border = "1px solid orange";
               btn.style.borderRadius = "4px";
               btn.style.cursor = "pointer";
+              btn.style.overflow = "hidden";
+              btn.style.display = "flex";
+              btn.style.justifyContent = "center";
+              btn.style.alignItems = "center";
               
               // Highlight the base button if bp.base matches the selected base (regardless of modifier)
               if (selectedBase !== null && Math.abs(bp.base - selectedBase) < 0.001) {
@@ -855,22 +873,21 @@ document.addEventListener('DOMContentLoaded', async function() {
                 updateBaseNotePosition();
               }
               
+              // Store current note as selected.
+              currentSelectedNote = note;
+              
               evaluatedNotes = myModule.evaluateModule();
               updateVisualNotes(evaluatedNotes);
               
-              const updatedElement = document.querySelector(`[data-note-id="${effectiveNoteId}"]`);
-              if (updatedElement) {
-                updatedElement.classList.add('selected');
-              }
-              
+              // Dependency highlighting remains unchanged.
               if (note !== myModule.baseNote && effectiveNoteId !== undefined) {
-                // (Dependency highlighting code remains here)
+                // (Your code for directDeps and dependents here ...)
               }
               
               evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${note.getVariable(key) !== null ? String(note.getVariable(key)) : 'null'}`;
               
-              // NEW: Force a reload of the variable widget to remove the save button and reapply selections
-              showNoteVariables(note, updatedElement, measureId);
+              // Force a reload of the widget.
+              showNoteVariables(note, null, measureId);
               
             } catch (error) {
               console.error('Error updating note:', error);
@@ -1016,6 +1033,15 @@ document.addEventListener('DOMContentLoaded', async function() {
         noteWidget.classList.add('visible');
         widgetInitiallyOpened = true;
         updateNoteWidgetHeight();
+
+        // NEW: If no clickedElement was provided, use the note's id to reapply the "selected" class.
+        // This mechanism reuses the same approach as dependency highlighting.
+        if (!clickedElement && note && note.id !== undefined) {
+          const selElem = document.querySelector(`[data-note-id="${note.id}"]`);
+          if (selElem) {
+            selElem.classList.add("selected");
+          }
+        }
     }
     
     function clearSelection() {
@@ -1690,58 +1716,66 @@ function getFrequencyRatio(note) {
     }
     
     function updateVisualNotes(evaluatedNotes) {
-        // Store current selections before updating
-        const selectedElements = document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected');
-        const selectedIds = Array.from(selectedElements).map(el => el.getAttribute('data-note-id'));
-        
-        // Clear existing notes (except base note)
-        const currentNotes = space.getChildren();
-        currentNotes.forEach(note => {
-            if (note.element.id !== 'baseNoteCircle') {
-                note.remove();
-                space.removeChild(note);
-            }
-        });
-    
-        const baseStartTime = myModule.baseNote.getVariable('startTime').valueOf();
-        newNotes = Object.entries(myModule.notes)
-            .filter(([id, note]) => note.getVariable('startTime'))
-            .map(([id, note]) => {
-                const startTime = note.getVariable('startTime').valueOf();
-                const duration = note.getVariable('duration')?.valueOf();
-                const frequency = note.getVariable('frequency')?.valueOf();
-                
-                if (duration && frequency) {
-                    // Regular note
-                    const noteRect = createNoteElement(note);
-                    const x = startTime * 200;
-                    const y = frequencyToY(frequency);
-                    const width = duration * 200;
-                    const height = 20;
-                    noteRect.setSize({ width: width, height: height });
-                    space.addChild(noteRect, { x: x, y: y });
-                    return {
-                        ...note,
-                        id: parseInt(id),
-                        element: noteRect,
-                        getBoundingBox: () => noteRect.getBoundingBox()
-                    };
-                } else {
-                    // Measure bar (we don't create visual elements for these here)
-                    return note;
-                }
-            });
-    
-        updateTimingBoundaries();
-        createMeasureBars();  // This creates the visual elements for measure bars
-    
-        // Reapply selections after recreating notes and measure bars
-        selectedIds.forEach(id => {
-            const newElement = document.querySelector(`.note-content[data-note-id="${id}"], .base-note-circle[data-note-id="${id}"], .measure-bar-triangle[data-note-id="${id}"]`);
-            if (newElement) {
-                newElement.classList.add('selected');
-            }
-        });
+      // Store current selections before updating
+      const selectedElements = document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected');
+      const selectedIds = Array.from(selectedElements).map(el => el.getAttribute('data-note-id'));
+      
+      // Clear existing notes (except base note)
+      const currentNotes = space.getChildren();
+      currentNotes.forEach(note => {
+          if (note.element.id !== 'baseNoteCircle') {
+              note.remove();
+              space.removeChild(note);
+          }
+      });
+  
+      const baseStartTime = myModule.baseNote.getVariable('startTime').valueOf();
+      newNotes = Object.entries(myModule.notes)
+          .filter(([id, note]) => note.getVariable('startTime'))
+          .map(([id, note]) => {
+              const startTime = note.getVariable('startTime').valueOf();
+              const duration = note.getVariable('duration')?.valueOf();
+              const frequency = note.getVariable('frequency')?.valueOf();
+              
+              if (duration && frequency) {
+                  // Regular note
+                  const noteRect = createNoteElement(note);
+                  const x = startTime * 200;
+                  const y = frequencyToY(frequency);
+                  const width = duration * 200;
+                  const height = 20;
+                  noteRect.setSize({ width: width, height: height });
+                  space.addChild(noteRect, { x: x, y: y });
+                  return {
+                      ...note,
+                      id: parseInt(id),
+                      element: noteRect,
+                      getBoundingBox: () => noteRect.getBoundingBox()
+                  };
+              } else {
+                  // Measure bar (we don't create visual elements for these here)
+                  return note;
+              }
+          });
+  
+      updateTimingBoundaries();
+      createMeasureBars();  // This creates the visual elements for measure bars
+  
+      // Reapply previous selections (if any)
+      selectedIds.forEach(id => {
+          const newElement = document.querySelector(`.note-content[data-note-id="${id}"], .base-note-circle[data-note-id="${id}"], .measure-bar-triangle[data-note-id="${id}"]`);
+          if (newElement) {
+              newElement.classList.add('selected');
+          }
+      });
+      
+      // NEW: Reapply the currentSelectedNote if it exists.
+      if (currentSelectedNote) {
+          const newElement = document.querySelector(`[data-note-id="${currentSelectedNote.id}"]`);
+          if (newElement) {
+              newElement.classList.add('selected');
+          }
+      }
     }
     
     let audioContext = new (window.AudioContext || window.webkitAudioContext)();
