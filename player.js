@@ -533,19 +533,19 @@ document.addEventListener('DOMContentLoaded', async function() {
     function showNoteVariables(note, clickedElement, measureId = null) {
         const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
         if (effectiveNoteId === undefined) {
-            console.error("No valid note id found for dependency highlighting.");
-            return;
+          console.error("No valid note id found for dependency highlighting.");
+          return;
         }
         
         const widgetContent = document.querySelector('.note-widget-content');
         const widgetTitle = document.getElementById('note-widget-title');
         
         if (note === myModule.baseNote) {
-            widgetTitle.textContent = 'BaseNote Variables';
+          widgetTitle.textContent = 'BaseNote Variables';
         } else if (measureId !== null) {
-            widgetTitle.textContent = `Measure [${measureId}] Variables`;
+          widgetTitle.textContent = `Measure [${measureId}] Variables`;
         } else {
-            widgetTitle.textContent = `Note [${effectiveNoteId || 'unknown'}] Variables`;
+          widgetTitle.textContent = `Note [${effectiveNoteId || 'unknown'}] Variables`;
         }
         
         widgetContent.innerHTML = '';
@@ -555,213 +555,351 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         // Clear previous dependency highlights
         document.querySelectorAll('.dependency, .dependent').forEach(el => {
-            el.classList.remove('dependency', 'dependent');
+          el.classList.remove('dependency', 'dependent');
         });
         
         if (clickedElement) {
-            clickedElement.classList.add('selected');
+          clickedElement.classList.add('selected');
         }
         
         if (note !== myModule.baseNote && effectiveNoteId !== undefined) {
-            const selfNoteId = effectiveNoteId;
-            const directDeps = myModule.getDirectDependencies(selfNoteId).filter(depId => depId !== selfNoteId);
-            directDeps.forEach(depId => {
-                if (depId === 0) {
-                    const baseNoteElement = document.querySelector('.base-note-circle');
-                    if (baseNoteElement) {
-                        baseNoteElement.classList.add('dependency');
-                    }
-                } else {
-                    let depElement = document.querySelector(`.note-content[data-note-id="${depId}"]`);
-                    if (!depElement) {
-                        depElement = document.querySelector(`.measure-bar-triangle[data-note-id="${depId}"]`);
-                    }
-                    if (depElement) {
-                        depElement.classList.add('dependency');
-                    }
-                }
-            });
+          const selfNoteId = effectiveNoteId;
+          const directDeps = myModule.getDirectDependencies(selfNoteId).filter(depId => depId !== selfNoteId);
+          directDeps.forEach(depId => {
+            if (depId === 0) {
+              const baseNoteElement = document.querySelector('.base-note-circle');
+              if (baseNoteElement) {
+                baseNoteElement.classList.add('dependency');
+              }
+            } else {
+              let depElement = document.querySelector(`.note-content[data-note-id="${depId}"]`);
+              if (!depElement) {
+                depElement = document.querySelector(`.measure-bar-triangle[data-note-id="${depId}"]`);
+              }
+              if (depElement) {
+                depElement.classList.add('dependency');
+              }
+            }
+          });
         
-            const dependents = myModule.getDependentNotes(selfNoteId).filter(depId => depId !== selfNoteId);
-            dependents.forEach(depId => {
-                let depElement = document.querySelector(`.note-content[data-note-id="${depId}"]`);
-                if (!depElement) {
-                    depElement = document.querySelector(`.measure-bar-triangle[data-note-id="${depId}"]`);
-                }
-                if (depElement) {
-                    depElement.classList.add('dependent');
-                }
-            });
+          const dependents = myModule.getDependentNotes(selfNoteId).filter(depId => depId !== selfNoteId);
+          dependents.forEach(depId => {
+            let depElement = document.querySelector(`.note-content[data-note-id="${depId}"]`);
+            if (!depElement) {
+              depElement = document.querySelector(`.measure-bar-triangle[data-note-id="${depId}"]`);
+            }
+            if (depElement) {
+              depElement.classList.add('dependent');
+            }
+          });
         }
         
         let variables = {};
         if (note === myModule.baseNote) {
-            Object.keys(note.variables).forEach(key => {
-                if (!key.endsWith('String') && key !== 'measureLength') {
-                    variables[key] = {
-                        evaluated: note.getVariable(key),
-                        raw: note.variables[key + 'String'] || note.variables[key].toString()
-                    };
-                }
-            });
-        } else if (measureId !== null) {
-            const noteInstance = myModule.getNoteById(parseInt(measureId, 10));
-            if (noteInstance && typeof noteInstance.getVariable === 'function') {
-                variables.startTime = {
-                    evaluated: noteInstance.getVariable('startTime'),
-                    raw: noteInstance.variables.startTimeString || "undefined"
-                };
-            } else {
-                console.error("Invalid measure note:", noteInstance);
+          Object.keys(note.variables).forEach(key => {
+            if (!key.endsWith('String') && key !== 'measureLength') {
+              variables[key] = {
+                evaluated: note.getVariable(key),
+                raw: note.variables[key + 'String'] || note.variables[key].toString()
+              };
             }
+          });
+        } else if (measureId !== null) {
+          const noteInstance = myModule.getNoteById(parseInt(measureId, 10));
+          if (noteInstance && typeof noteInstance.getVariable === 'function') {
+            variables.startTime = {
+              evaluated: noteInstance.getVariable('startTime'),
+              raw: noteInstance.variables.startTimeString || "undefined"
+            };
+          } else {
+            console.error("Invalid measure note:", noteInstance);
+          }
         } else {
-            const variableNames = ['startTime', 'duration', 'frequency', 'color'];
-            variableNames.forEach(key => {
-                if (note.variables && note.variables[key] !== undefined) {
-                    if (key === 'color') {
-                        const colorValue = note.getVariable(key);
-                        variables[key] = { evaluated: colorValue, raw: colorValue };
-                    } else {
-                        variables[key] = {
-                            evaluated: note.getVariable(key),
-                            raw: note.variables[key + 'String'] || note.variables[key].toString()
-                        };
-                    }
-                }
-            });
+          const variableNames = ['startTime', 'duration', 'frequency', 'color'];
+          variableNames.forEach(key => {
+            if (note.variables && note.variables[key] !== undefined) {
+              if (key === 'color') {
+                const colorValue = note.getVariable(key);
+                variables[key] = { evaluated: colorValue, raw: colorValue };
+              } else {
+                variables[key] = {
+                  evaluated: note.getVariable(key),
+                  raw: note.variables[key + 'String'] || note.variables[key].toString()
+                };
+              }
+            }
+          });
         }
         
+        // Build the widget rows for each variable.
         Object.entries(variables).forEach(([key, value]) => {
-            const variableRow = document.createElement('div');
-            variableRow.className = 'variable-row';
-            const variableNameDiv = document.createElement('div');
-            variableNameDiv.className = 'variable-name';
-            variableNameDiv.textContent = key;
-            const variableValueDiv = document.createElement('div');
-            variableValueDiv.className = 'variable-value';
-        
-            const evaluatedDiv = document.createElement('div');
-            evaluatedDiv.className = 'evaluated-value';
-            evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${value.evaluated !== null ? String(value.evaluated) : 'null'}`;
-        
-            const rawDiv = document.createElement('div');
-            rawDiv.className = 'raw-value';
-        
-            const rawInput = document.createElement('input');
-            rawInput.type = 'text';
-            rawInput.className = 'raw-value-input';
-            rawInput.value = value.raw;
-        
-            const saveButton = document.createElement('button');
-            saveButton.className = 'raw-value-save';
-            saveButton.textContent = 'Save';
-            saveButton.style.display = 'none';
-        
-            rawInput.addEventListener('input', () => {
-                saveButton.style.display = 'inline-block';
-            });
-        
-            saveButton.addEventListener('click', () => {
-                const newRawValue = rawInput.value;
-                try {
-                    if (key === 'color') {
-                        if (measureId !== null) {
-                            throw new Error('Color should not be editable for measure points');
-                        } else {
-                            note.variables[key] = newRawValue;
-                        }
-                    } else {
-                        const currentNoteId = measureId !== null ? measureId : note.id;
-                        const validatedExpression = validateExpression(myModule, currentNoteId, newRawValue, key);
-                        
-                        if(measureId !== null) {
-                            const measureNote = myModule.getNoteById(measureId);
-                            if (measureNote) {
-                                measureNote.setVariable(key, () => { 
-                                    return eval(`(function(module, Fraction) { return ${validatedExpression}; })`)(myModule, Fraction); 
-                                });
-                                measureNote.setVariable(key + 'String', newRawValue); // Store the raw input
-                            } else { 
-                                throw new Error('Unable to find measure note'); 
-                            }
-                        } else {
-                            note.setVariable(key, () => { 
-                                return eval(`(function(module, Fraction) { return ${validatedExpression}; })`)(myModule, Fraction); 
-                            });
-                            note.setVariable(key + 'String', newRawValue); // Store the raw input
-                        }
-                    }
+          const variableRow = document.createElement('div');
+          variableRow.className = 'variable-row';
+          
+          const variableNameDiv = document.createElement('div');
+          variableNameDiv.className = 'variable-name';
+          variableNameDiv.textContent = key;
+          
+          const variableValueDiv = document.createElement('div');
+          variableValueDiv.className = 'variable-value';
+          
+          const evaluatedDiv = document.createElement('div');
+          evaluatedDiv.className = 'evaluated-value';
+          evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${value.evaluated !== null ? String(value.evaluated) : 'null'}`;
+          
+          const rawDiv = document.createElement('div');
+          rawDiv.className = 'raw-value';
+          
+          // For the duration variable, add beat modification buttons.
+          if (key === 'duration') {
+            const durationPicks = document.createElement('div');
+            durationPicks.className = 'duration-picks';
+            // Use a flex container to space left (base buttons) and right (dot buttons)
+            durationPicks.style.display = 'flex';
+            durationPicks.style.justifyContent = 'space-between';
+            durationPicks.style.alignItems = 'center';
             
-                    if (note === myModule.baseNote) {
-                        updateBaseNoteFraction();
-                        updateBaseNotePosition();
-                    }
-                    
-                    evaluatedNotes = myModule.evaluateModule();
-                    updateVisualNotes(evaluatedNotes);
-                    
-                    // Ensure the current note or measure bar remains selected
-                    const updatedElement = document.querySelector(`[data-note-id="${effectiveNoteId}"]`);
-                    if (updatedElement) {
-                        updatedElement.classList.add('selected');
-                    }
+            // Left container: base note buttons
+            const leftContainer = document.createElement('div');
+            leftContainer.style.display = 'flex';
+            leftContainer.style.gap = '4px';
             
-                    // Update dependency highlights
-                    if (note !== myModule.baseNote && effectiveNoteId !== undefined) {
-                        const directDeps = myModule.getDirectDependencies(effectiveNoteId).filter(depId => depId !== effectiveNoteId);
-                        directDeps.forEach(depId => {
-                            if (depId === 0) {
-                                const baseNoteElement = document.querySelector('.base-note-circle');
-                                if (baseNoteElement) {
-                                    baseNoteElement.classList.add('dependency');
-                                }
-                            } else {
-                                let depElement = document.querySelector(`.note-content[data-note-id="${depId}"], .measure-bar-triangle[data-note-id="${depId}"]`);
-                                if (depElement) {
-                                    depElement.classList.add('dependency');
-                                }
-                            }
-                        });
+            // Right container: dot modifier buttons
+            const rightContainer = document.createElement('div');
+            rightContainer.style.display = 'flex';
+            rightContainer.style.gap = '4px';
             
-                        const dependents = myModule.getDependentNotes(effectiveNoteId).filter(depId => depId !== effectiveNoteId);
-                        dependents.forEach(depId => {
-                            let depElement = document.querySelector(`.note-content[data-note-id="${depId}"], .measure-bar-triangle[data-note-id="${depId}"]`);
-                            if (depElement) {
-                                depElement.classList.add('dependent');
-                            }
-                        });
-                    }
+            // Define the five base pick choices
+            const basePicks = [
+              { base: 4, symbol: '𝅝' },
+              { base: 2, symbol: '𝅗𝅥' },
+              { base: 1, symbol: '𝅘𝅥' },
+              { base: 0.5, symbol: '𝅘𝅥𝅮' },
+              { base: 0.25, symbol: '𝅘𝅥𝅯' }
+            ];
             
-                    // Update only the evaluated value
-                    evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${note.getVariable(key) !== null ? String(note.getVariable(key)) : 'null'}`;
-                } catch (error) {
-                    console.error('Error updating note:', error);
-                    const errorMsg = document.createElement('div');
-                    errorMsg.className = 'error-message';
-                    errorMsg.textContent = `Error: ${error.message}`;
-                    rawDiv.appendChild(errorMsg);
-                    setTimeout(() => errorMsg.remove(), 3000);
-                    rawInput.value = value.raw;
+            // Define the dot modifier options (we want only two buttons: one for a dot and one for double dot)
+            const dotPicks = [
+              { mod: 'dot', factor: 1.5, label: '.' },
+              { mod: 'double', factor: 1.25, label: '..' }
+            ];
+            
+            // Determine the default selection by extracting the current multiplier
+            let selectedBase = null;
+            let selectedMod = 1; // default multiplier (i.e. no dot)
+            let currentMultiplier = null;
+            let regex = /^new Fraction\(60\)\.div\((.*?)\)\.mul\((.*?)\)$/;
+            let m = value.raw.match(regex);
+            if (m && m[2]) {
+              currentMultiplier = parseFloat(m[2]);
+            }
+            // Check all base x mod combinations:
+            // First check no–dot case, then dot cases.
+            basePicks.forEach(bp => {
+              if (currentMultiplier !== null && Math.abs(currentMultiplier - (bp.base * 1)) < 0.001) {
+                selectedBase = bp.base;
+                selectedMod = 1;
+              }
+              dotPicks.forEach(dp => {
+                if (currentMultiplier !== null && Math.abs(currentMultiplier - (bp.base * dp.factor)) < 0.001) {
+                  selectedBase = bp.base;
+                  selectedMod = dp.factor;
                 }
+              });
             });
-        
-            rawDiv.innerHTML = `<span class="value-label">Raw:</span>`;
-            rawDiv.appendChild(rawInput);
-            rawDiv.appendChild(saveButton);
-        
-            variableValueDiv.appendChild(evaluatedDiv);
-            variableValueDiv.appendChild(rawDiv);
-        
-            variableRow.appendChild(variableNameDiv);
-            variableRow.appendChild(variableValueDiv);
-            widgetContent.appendChild(variableRow);
+            
+            // Create base note buttons (left side) with updated styles.
+            basePicks.forEach(bp => {
+              const btn = document.createElement('button');
+              btn.textContent = bp.symbol;
+              btn.style.width = "26px";
+              btn.style.height = "26px";
+              btn.style.padding = "0";
+              btn.style.fontSize = "14px";
+              btn.style.lineHeight = "26px";
+              btn.style.backgroundColor = "#444";
+              btn.style.color = "#fff";
+              btn.style.border = "1px solid orange";
+              btn.style.borderRadius = "4px";
+              btn.style.cursor = "pointer";
+              
+              // Highlight the base button if bp.base matches the selected base (regardless of modifier)
+              if (selectedBase !== null && Math.abs(bp.base - selectedBase) < 0.001) {
+                btn.style.backgroundColor = "#ff0000";
+              }
+              
+              btn.addEventListener('click', () => {
+                selectedBase = bp.base;
+                let originalExpr = value.raw;
+                let regex = /^new Fraction\(60\)\.div\((.*?)\)\.mul\((.*?)\)$/;
+                let newExpr;
+                let match = originalExpr.match(regex);
+                if (match) {
+                  newExpr = `new Fraction(60).div(${match[1]}).mul(${selectedBase * selectedMod})`;
+                } else {
+                  newExpr = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${selectedBase * selectedMod})`;
+                }
+                rawInput.value = newExpr;
+                saveButton.style.display = 'inline-block';
+                // Update highlighting for all base buttons.
+                Array.from(leftContainer.children).forEach(child => {
+                  child.style.backgroundColor = "#444";
+                });
+                btn.style.backgroundColor = "#ff0000";
+              });
+              leftContainer.appendChild(btn);
+            });
+            
+            // Create dot modifier buttons (right side) with toggle behavior.
+            dotPicks.forEach(dp => {
+              const btn = document.createElement('button');
+              btn.textContent = dp.label;
+              btn.style.width = "26px";
+              btn.style.height = "26px";
+              btn.style.padding = "0";
+              btn.style.fontSize = "14px";
+              btn.style.lineHeight = "26px";
+              btn.style.backgroundColor = "#444";
+              btn.style.color = "#fff";
+              btn.style.border = "1px solid orange";
+              btn.style.borderRadius = "4px";
+              btn.style.cursor = "pointer";
+              
+              // Highlight the dot button if selectedMod equals dp.factor
+              if (selectedMod !== null && Math.abs(selectedMod - dp.factor) < 0.001) {
+                btn.style.backgroundColor = "#ff0000";
+              }
+              
+              btn.addEventListener('click', () => {
+                // Toggle: if this dot button is already selected, unselect it (set modifier back to 1)
+                if (selectedMod !== null && Math.abs(selectedMod - dp.factor) < 0.001) {
+                  selectedMod = 1;
+                } else {
+                  selectedMod = dp.factor;
+                }
+                let originalExpr = value.raw;
+                let regex = /^new Fraction\(60\)\.div\((.*?)\)\.mul\((.*?)\)$/;
+                let newExpr;
+                let match = originalExpr.match(regex);
+                let baseForCalc = (selectedBase !== null ? selectedBase : (currentMultiplier !== null ? currentMultiplier : 1));
+                if (match) {
+                  newExpr = `new Fraction(60).div(${match[1]}).mul(${baseForCalc * selectedMod})`;
+                } else {
+                  newExpr = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${baseForCalc * selectedMod})`;
+                }
+                rawInput.value = newExpr;
+                saveButton.style.display = 'inline-block';
+                // Update highlighting for dot buttons.
+                Array.from(rightContainer.children).forEach(child => {
+                  child.style.backgroundColor = "#444";
+                });
+                // Highlight only if modifier is not 1.
+                if (Math.abs(selectedMod - 1) > 0.001) {
+                  btn.style.backgroundColor = "#ff0000";
+                }
+              });
+              rightContainer.appendChild(btn);
+            });
+            
+            durationPicks.appendChild(leftContainer);
+            durationPicks.appendChild(rightContainer);
+            variableValueDiv.appendChild(durationPicks);
+          }
+            
+          const rawInput = document.createElement('input');
+          rawInput.type = 'text';
+          rawInput.className = 'raw-value-input';
+          rawInput.value = value.raw;
+            
+          const saveButton = document.createElement('button');
+          saveButton.className = 'raw-value-save';
+          saveButton.textContent = 'Save';
+          saveButton.style.display = 'none';
+            
+          rawInput.addEventListener('input', () => {
+            saveButton.style.display = 'inline-block';
+          });
+            
+          saveButton.addEventListener('click', () => {
+            const newRawValue = rawInput.value;
+            try {
+              if (key === 'color') {
+                if (measureId !== null) {
+                  throw new Error('Color should not be editable for measure points');
+                } else {
+                  note.variables[key] = newRawValue;
+                }
+              } else {
+                const currentNoteId = measureId !== null ? measureId : note.id;
+                const validatedExpression = validateExpression(myModule, currentNoteId, newRawValue, key);
+                if (measureId !== null) {
+                  const measureNote = myModule.getNoteById(measureId);
+                  if (measureNote) {
+                    measureNote.setVariable(key, function() {
+                      return new Function("module", "Fraction", "return " + validatedExpression + ";")(myModule, Fraction);
+                    });
+                    measureNote.setVariable(key + 'String', newRawValue);
+                  } else {
+                    throw new Error('Unable to find measure note');
+                  }
+                } else {
+                  note.setVariable(key, function() {
+                    return new Function("module", "Fraction", "return " + validatedExpression + ";")(myModule, Fraction);
+                  });
+                  note.setVariable(key + 'String', newRawValue);
+                }
+              }
+              
+              if (note === myModule.baseNote) {
+                updateBaseNoteFraction();
+                updateBaseNotePosition();
+              }
+              
+              evaluatedNotes = myModule.evaluateModule();
+              updateVisualNotes(evaluatedNotes);
+              
+              const updatedElement = document.querySelector(`[data-note-id="${effectiveNoteId}"]`);
+              if (updatedElement) {
+                updatedElement.classList.add('selected');
+              }
+              
+              if (note !== myModule.baseNote && effectiveNoteId !== undefined) {
+                // (Dependency highlighting code remains here)
+              }
+              
+              evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${note.getVariable(key) !== null ? String(note.getVariable(key)) : 'null'}`;
+              
+              // NEW: Force a reload of the variable widget to remove the save button and reapply selections
+              showNoteVariables(note, updatedElement, measureId);
+              
+            } catch (error) {
+              console.error('Error updating note:', error);
+              const errorMsg = document.createElement('div');
+              errorMsg.className = 'error-message';
+              errorMsg.textContent = `Error: ${error.message}`;
+              rawDiv.appendChild(errorMsg);
+              setTimeout(() => errorMsg.remove(), 3000);
+              rawInput.value = value.raw;
+            }
+          });
+            
+          rawDiv.innerHTML = `<span class="value-label">Raw:</span>`;
+          rawDiv.appendChild(rawInput);
+          rawDiv.appendChild(saveButton);
+            
+          variableValueDiv.appendChild(evaluatedDiv);
+          variableValueDiv.appendChild(rawDiv);
+            
+          variableRow.appendChild(variableNameDiv);
+          variableRow.appendChild(variableValueDiv);
+          widgetContent.appendChild(variableRow);
         });
         
         let shouldShowAdd = false;
         if (note === myModule.baseNote && !hasMeasurePoints()) {
-            shouldShowAdd = true;
+          shouldShowAdd = true;
         } else if (measureId !== null && String(measureId) === String(getLastMeasureId())) {
-            shouldShowAdd = true;
+          shouldShowAdd = true;
         }
         if (shouldShowAdd) {
             const addMeasureSection = document.createElement('div');
@@ -839,14 +977,14 @@ document.addEventListener('DOMContentLoaded', async function() {
             keepButton.className = 'delete-note-btn keep-dependencies';
             keepButton.textContent = 'Keep Dependencies';
             keepButton.addEventListener('click', function() {
-                showDeleteConfirmationKeepDependencies(effectiveNoteId);
+            showDeleteConfirmationKeepDependencies(effectiveNoteId);
             });
         
             const deleteDepsButton = document.createElement('button');
             deleteDepsButton.className = 'delete-note-btn delete-dependencies';
             deleteDepsButton.textContent = 'Delete Dependencies';
             deleteDepsButton.addEventListener('click', function() {
-                showDeleteConfirmation(effectiveNoteId);
+            showDeleteConfirmation(effectiveNoteId);
             });
         
             deleteWrapper.appendChild(deleteHeader);
@@ -856,7 +994,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             widgetContent.appendChild(deleteWrapper);
         }
         
-        // The "Delete All" section for the base note at the bottom
         if (note === myModule.baseNote) {
             const deleteAllSection = document.createElement('div');
             deleteAllSection.className = 'delete-note-row';
