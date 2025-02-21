@@ -40,6 +40,43 @@ document.addEventListener('DOMContentLoaded', async function() {
     let dragStartY = 0;
     const DRAG_THRESHOLD = 5;
 
+    // Prevent mobile performance throttling on browser that support the Wake Lock API
+    let wakeLock = null;
+
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          console.log('Wake Lock is active');
+          wakeLock.addEventListener('release', () => {
+            console.log('Wake Lock was released');
+          });
+        } else {
+          console.warn('Wake Lock API not available in this browser.');
+        }
+      } catch (err) {
+        console.error('Could not obtain wake lock:', err);
+      }
+    }
+
+    // Listen for visibility change events to re‑request or release the wake lock
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible') {
+        // When the page becomes visible, try to re‑acquire the wake lock.
+        await requestWakeLock();
+      } else {
+        // Optionally release the wake lock when not visible
+        if (wakeLock !== null) {
+          await wakeLock.release();
+          wakeLock = null;
+          console.log('Wake Lock released due to page visibility change');
+        }
+      }
+    });
+
+    // Request the wake lock
+    requestWakeLock();
+
     /* ---------- DELETE DEPENDENCIES FUNCTIONALITY ---------- */
 
     /* Show a confirmation modal for deletion */
