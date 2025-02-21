@@ -77,6 +77,18 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Request the wake lock
     requestWakeLock();
 
+    // Initialize the resetViewBtn inner structure
+    const resetBtn = document.getElementById('resetViewBtn');
+    if (resetBtn) {
+      resetBtn.innerHTML = `
+        <div class="center-circle"></div>
+        <div class="arrow top"></div>
+        <div class="arrow bottom"></div>
+        <div class="arrow left"></div>
+        <div class="arrow right"></div>
+      `;
+    }
+
     /* ---------- DELETE DEPENDENCIES FUNCTIONALITY ---------- */
 
     /* Show a confirmation modal for deletion */
@@ -469,6 +481,17 @@ document.addEventListener('DOMContentLoaded', async function() {
         saveModuleBtn.addEventListener('click', saveModule);
     } else {
         console.error('Save Module button not found!');
+    }
+
+    const resetViewBtn = document.getElementById('resetViewBtn');
+    if (resetViewBtn) {
+      resetViewBtn.addEventListener('click', () => {
+        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        const baseNoteY = frequencyToY(baseNoteFreq);
+        const origin = space.at(0, baseNoteY);
+        // Reset view: translate the viewport to "origin".
+        viewport.translateTo(origin);
+      });
     }
 
     /* ----------------------- IMPORT MODULE FUNCTION ----------------------- */

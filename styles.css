@@ -1209,7 +1209,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     border-bottom: 30px solid rgba(51, 51, 51, 0.7); /* semi-transparent background */
     cursor: pointer;
     margin-left: -15px;
-    z-index: 1001;
+    z-index: 2;
     pointer-events: auto;
     transition: filter 0.3s ease;
     transform: translateX(0);
@@ -1239,7 +1239,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     right: 0;
     height: 30px; /* Match the height of the triangles */
     pointer-events: none;
-    z-index: 1001; /* Ensure this is higher than measure bars */
+    z-index: 2; /* Ensure this is higher than measure bars */
     transform: translateX(0.5px); /* Center the measure bar triangles on the measure bars */
 }
 
@@ -1411,3 +1411,98 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 .delete-confirm-modal button:last-child:hover {
     background-color: #8bbad7;
 }
+
+#resetViewBtn {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: transparent;
+    border: none;
+    position: relative;
+    cursor: pointer;
+    outline: none;
+    margin-right: 16px;
+  }
+  
+  /* Center circle */
+  #resetViewBtn .center-circle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 8px;
+    height: 8px;
+    background-color: #ffa800;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    transition: background-color 0.3s ease;
+  }
+  
+  /* Four triangles */
+  #resetViewBtn .arrow {
+    position: absolute;
+    width: 0;
+    height: 0;
+    border-style: solid;
+    transition: all 0.3s ease;
+  }
+  
+  /* Top triangle */
+  #resetViewBtn .arrow.top {
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 4px 4px 0 4px;
+    border-color: #ffa800 transparent transparent transparent;
+  }
+  
+  /* Bottom triangle */
+  #resetViewBtn .arrow.bottom {
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 0 4px 4px 4px;
+    border-color: transparent transparent #ffa800 transparent;
+  }
+  
+  /* Left triangle */
+  #resetViewBtn .arrow.left {
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    border-width: 4px 0 4px 4px;
+    border-color: transparent transparent transparent #ffa800;
+  }
+  
+  /* Right triangle */
+  #resetViewBtn .arrow.right {
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    border-width: 4px 4px 4px 0;
+    border-color: transparent #ffa800 transparent transparent;
+  }
+  
+  /* Hover effects */
+  #resetViewBtn:hover .center-circle {
+    background-color: #ff0000;
+  }
+  
+  #resetViewBtn:hover .arrow.top {
+    border-top-color: #ff0000;
+    transform: translateX(-50%) translateY(6px);
+  }
+  
+  #resetViewBtn:hover .arrow.bottom {
+    border-bottom-color: #ff0000;
+    transform: translateX(-50%) translateY(-6px);
+  }
+  
+  #resetViewBtn:hover .arrow.left {
+    border-left-color: #ff0000;
+    transform: translateY(-50%) translateX(6px);
+  }
+  
+  #resetViewBtn:hover .arrow.right {
+    border-right-color: #ff0000;
+    transform: translateY(-50%) translateX(-6px);
+  }

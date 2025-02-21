@@ -44,12 +44,12 @@
   <!-- Top Bar -->
   <div class="top-bar">
     <div class="controls-group">
-      <button id="playPauseBtn">
+      <button id="playPauseBtn" title="Play/Pause">
         <div class="pp">
           <span></span>
         </div>
       </button>
-      <button id="stopButton" class="stop-button">
+      <button id="stopButton" title="Stop" class="stop-button">
         <div class="stop">
           <span></span>
           <span></span>
@@ -57,22 +57,22 @@
           <span></span>
         </div>
       </button>
-      <input type="range" id="volumeSlider" min="0" max="1" step="0.01" value="1">
+      <input type="range" id="volumeSlider" title="Volume Slider" min="0" max="1" step="0.01" value="1">
     </div>
     <div class="right-controls">
+      <button id="resetViewBtn" title="Reset View"></button>
       <div class="tracking-zone">
         <label class="toggle-switch">
           <input type="checkbox" id="trackingToggle">
-          <span class="toggle-slider"></span>
+          <span class="toggle-slider" title="Playhead Tracking"></span>
         </label>
       </div>
       <div class="menu-container">
-        <button class="dropdown-button">
+        <button class="dropdown-button" title="Main Menu">
           <div class="plusminus"></div>
         </button>
         <div id="general-widget" class="widget">
           <div class="menu-actions">
-            <!-- New Reorder Module button inserted at the top -->
             <button id="reorderModuleBtn" class="module-action-btn" style="background: #add8e6;">
               Reorder Module
             </button>
