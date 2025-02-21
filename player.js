@@ -702,7 +702,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             // Define the dot modifier options (we want only two buttons: one for a dot and one for double dot)
             const dotPicks = [
               { mod: 'dot', factor: 1.5, label: '.' },
-              { mod: 'double', factor: 1.25, label: '..' }
+              { mod: 'double', factor: 1.75, label: '..' }
             ];
             
             // Determine the default selection by extracting the current multiplier
@@ -713,6 +713,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             let m = value.raw.match(regex);
             if (m && m[2]) {
               currentMultiplier = parseFloat(m[2]);
+            } else {
+              // If no multiplication is found, assume the default multiplier is 1 (representing a quarter note).
+              currentMultiplier = 1;
             }
             // Check all base x mod combinations:
             // First check no–dot case, then dot cases.
