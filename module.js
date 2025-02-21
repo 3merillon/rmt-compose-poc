@@ -28,17 +28,6 @@ function invalidateModuleEndTimeCache() {
     moduleLastModifiedTime = Date.now();
 }
 
-function getCurrentModifiedTime() {
-    let maxTime = 0;
-    for (const id in myModule.notes) {
-        const note = myModule.notes[id];
-        if (note.lastModifiedTime) {
-            maxTime = Math.max(maxTime, note.lastModifiedTime);
-        }
-    }
-    return maxTime;
-}
-
 class Module {
     constructor(baseNoteVariables = {}) {
         this.notes = {};

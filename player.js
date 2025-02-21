@@ -19,7 +19,7 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail.com
 */
 document.addEventListener('DOMContentLoaded', async function() {
-    const INITIAL_VOLUME = 0.5;
+    const INITIAL_VOLUME = 0.2;
     const ATTACK_TIME_RATIO = 0.1;
     const DECAY_TIME_RATIO = 0.1;
     const SUSTAIN_LEVEL = 0.7;
@@ -391,8 +391,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Helper function to get the current modified time of the module
     function getCurrentModifiedTime() {
         return Object.values(myModule.notes).reduce((maxTime, note) => {
-            const noteTime = note.lastModifiedTime || 0;
-            return Math.max(maxTime, noteTime);
+          const noteTime = note.lastModifiedTime || 0;
+          return Math.max(maxTime, noteTime);
         }, 0);
     }
 
@@ -766,52 +766,61 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (shouldShowAdd) {
             const addMeasureSection = document.createElement('div');
             addMeasureSection.className = 'variable-row';
-        
+          
             const addNameDiv = document.createElement('div');
             addNameDiv.className = 'variable-name';
             addNameDiv.textContent = 'Add Measure';
-        
+          
             const addValueDiv = document.createElement('div');
             addValueDiv.className = 'variable-value';
-        
+          
             const addBtn = document.createElement('button');
             addBtn.className = 'module-action-btn';
             addBtn.textContent = 'Add';
             addBtn.addEventListener('click', () => {
-                let newMeasures = [];
-              
-                if (note === myModule.baseNote && !hasMeasurePoints()) {
-                    const newMeasure = myModule.addNote({
-                        startTime: () => myModule.baseNote.getVariable('startTime'),
-                        startTimeString: "module.baseNote.getVariable('startTime')"
-                    });
-                    newMeasure.parentId = myModule.baseNote.id;
-                    newMeasures.push(newMeasure);
-                } else {
-                    const fromNote = (note === myModule.baseNote) ? myModule.baseNote : myModule.getNoteById(measureId);
-                    newMeasures = myModule.generateMeasures(fromNote, 1);
-                }
-              
-                newMeasures.forEach(measure => {
-                    measure.getVariable('startTime');
+              // Recalculate current IDs and update nextId so that a new measure gets id = maxID + 1.
+              const currentIDs = Object.keys(myModule.notes).map(id => parseInt(id, 10));
+              const maxID = currentIDs.length > 0 ? Math.max(...currentIDs) : 0;
+              myModule.nextId = maxID + 1;
+          
+              let newMeasures = [];
+              let fromNote;
+              if (note === myModule.baseNote && !hasMeasurePoints()) {
+                fromNote = myModule.baseNote;
+                const newMeasure = myModule.addNote({
+                  startTime: () => myModule.baseNote.getVariable('startTime'),
+                  startTimeString: "module.baseNote.getVariable('startTime')"
                 });
-              
-                setTimeout(() => {
-                    updateTimingBoundaries();
-                    createMeasureBars();
-                    evaluatedNotes = myModule.evaluateModule();
-              
-                    const newLast = getLastMeasureId();
-                    if (newLast !== null) {
-                        const measureTriangle = document.querySelector(`.measure-bar-triangle[data-note-id="${newLast}"]`);
-                        showNoteVariables(myModule.getNoteById(parseInt(newLast)), measureTriangle, parseInt(newLast));
-                        if (measureTriangle) {
-                            measureTriangle.classList.add('selected');
-                        }
-                    }
-                }, 0);
+                newMeasure.parentId = myModule.baseNote.id;
+                newMeasures.push(newMeasure);
+              } else {
+                // When adding to an existing measure, use that measure as the parent.
+                fromNote = (note === myModule.baseNote) ? myModule.baseNote : myModule.getNoteById(measureId);
+                newMeasures = myModule.generateMeasures(fromNote, 1);
+              }
+          
+              // Log each new measure's details (removed for production).
+          
+              // Force evaluation of startTime for each new measure.
+              newMeasures.forEach(measure => {
+                measure.getVariable('startTime');
+              });
+          
+              setTimeout(() => {
+                updateTimingBoundaries();
+                createMeasureBars();
+                evaluatedNotes = myModule.evaluateModule();
+                const newLast = getLastMeasureId();
+                if (newLast !== null) {
+                  const measureTriangle = document.querySelector(`.measure-bar-triangle[data-note-id="${newLast}"]`);
+                  showNoteVariables(myModule.getNoteById(parseInt(newLast, 10)), measureTriangle, parseInt(newLast, 10));
+                  if (measureTriangle) {
+                    measureTriangle.classList.add('selected');
+                  }
+                }
+              }, 0);
             });
-        
+          
             addValueDiv.appendChild(addBtn);
             addMeasureSection.appendChild(addNameDiv);
             addMeasureSection.appendChild(addValueDiv);
