@@ -112,85 +112,97 @@ function createModuleIcon(category, filename, moduleData = null) {
   const DRAG_THRESHOLD = 5;
   
   moduleIcon.addEventListener('pointerdown', function(e) {
-      if (e.pointerType !== 'touch') return;
-      e.preventDefault();
-      startX = e.clientX;
-      startY = e.clientY;
-      dragStarted = false;
-      moduleIcon.setPointerCapture(e.pointerId);
-      
-      function onPointerMove(ev) {
-          const deltaX = Math.abs(ev.clientX - startX);
-          const deltaY = Math.abs(ev.clientY - startY);
-          if (!dragStarted && (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD)) {
-              dragStarted = true;
-              if (moduleIcon.moduleData) {
-                  ghost = document.createElement('div');
-                  ghost.textContent = moduleName;
-                  ghost.style.position = 'fixed';
-                  ghost.style.width = '42px';
-                  ghost.style.height = '42px';
-                  ghost.style.display = 'flex';
-                  ghost.style.alignItems = 'center';
-                  ghost.style.justifyContent = 'center';
-                  ghost.style.fontFamily = "'Roboto Mono', monospace";
-                  ghost.style.fontSize = '10px';
-                  ghost.style.background = '#ffa800';
-                  ghost.style.color = '#151525';
-                  ghost.style.borderRadius = '4px';
-                  ghost.style.boxShadow = '0 2px 6px rgba(0,0,0,0.5)';
-                  ghost.style.zIndex = '9999';
-                  ghost.style.pointerEvents = 'none';
-                  ghost.style.opacity = '0.5';
-                  document.body.appendChild(ghost);
-              }
-          }
-          if (dragStarted && ghost) {
-              ghost.style.left = (ev.clientX - 21) + 'px';
-              ghost.style.top = (ev.clientY - 21) + 'px';
-          }
+    if (e.pointerType !== 'touch') return;  // Only handle touch events
+    e.preventDefault();
+    let startX = e.clientX;
+    let startY = e.clientY;
+    let dragStarted = false;
+    let ghost = null;
+    const startTimeStamp = e.timeStamp;
+    // Set a threshold in pixels – adjust as needed
+    const DRAG_THRESHOLD = 5;
+    
+    moduleIcon.setPointerCapture(e.pointerId);
+  
+    function onPointerMove(ev) {
+      const deltaX = Math.abs(ev.clientX - startX);
+      const deltaY = Math.abs(ev.clientY - startY);
+      // If movement exceeds threshold, mark drag as started
+      if (!dragStarted && (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD)) {
+        dragStarted = true;
+        // Create ghost once dragging starts
+        if (moduleIcon.moduleData) {
+          ghost = document.createElement('div');
+          ghost.textContent = moduleName; // assuming moduleName is defined in your scope
+          ghost.style.position = 'fixed';
+          ghost.style.width = '42px';
+          ghost.style.height = '42px';
+          ghost.style.display = 'flex';
+          ghost.style.alignItems = 'center';
+          ghost.style.justifyContent = 'center';
+          ghost.style.fontFamily = "'Roboto Mono', monospace";
+          ghost.style.fontSize = '10px';
+          ghost.style.background = '#ffa800';
+          ghost.style.color = '#151525';
+          ghost.style.borderRadius = '4px';
+          ghost.style.boxShadow = '0 2px 6px rgba(0,0,0,0.5)';
+          ghost.style.zIndex = '9999';
+          ghost.style.pointerEvents = 'none';
+          ghost.style.opacity = '0.5';
+          document.body.appendChild(ghost);
+        }
       }
-      
-      function onPointerUp(ev) {
-          moduleIcon.releasePointerCapture(e.pointerId);
-          document.removeEventListener('pointermove', onPointerMove);
-          document.removeEventListener('pointerup', onPointerUp);
-          if (ghost && ghost.parentNode) {
-              ghost.parentNode.removeChild(ghost);
-          }
-          if (dragStarted && moduleIcon.moduleData) {
-              let noteTarget = null;
-              if (ev.composedPath) {
-                  const path = ev.composedPath();
-                  for (const el of path) {
-                      if (el instanceof HTMLElement && el.hasAttribute('data-note-id')) {
-                          noteTarget = el;
-                          break;
-                      }
-                  }
-              }
-              if (!noteTarget) {
-                  const dropElem = document.elementFromPoint(ev.clientX, ev.clientY);
-                  if (dropElem) noteTarget = dropElem.closest('[data-note-id]');
-              }
-              if (noteTarget) {
-                  const noteId = noteTarget.getAttribute('data-note-id');
-                  if (noteId) {
-                      const targetNote = myModule.getNoteById(Number(noteId));
-                      if (targetNote) {
-                          importModuleAtTarget(targetNote, moduleIcon.moduleData);
-                      } else {
-                          console.warn("No matching module note found for id:", noteId);
-                      }
-                  }
-              }
-          }
-          ghost = null;
+      if (dragStarted && ghost) {
+        ghost.style.left = (ev.clientX - 21) + 'px';
+        ghost.style.top = (ev.clientY - 21) + 'px';
       }
-      
-      document.addEventListener('pointermove', onPointerMove);
-      document.addEventListener('pointerup', onPointerUp);
-    });
+    }
+  
+    function onPointerUp(ev) {
+      moduleIcon.releasePointerCapture(e.pointerId);
+      // Always remove ghost if it exists
+      if (ghost && ghost.parentNode) {
+        ghost.parentNode.removeChild(ghost);
+        ghost = null;
+      }
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', onPointerUp);
+      document.removeEventListener('pointercancel', onPointerUp);
+      // If dragging actually occurred, simulate drop:
+      if (dragStarted && moduleIcon.moduleData) {
+        let noteTarget = null;
+        if (ev.composedPath) {
+          const path = ev.composedPath();
+          for (const el of path) {
+            if (el instanceof HTMLElement && el.hasAttribute('data-note-id')) {
+              noteTarget = el;
+              break;
+            }
+          }
+        }
+        // Fallback if composedPath is not available
+        if (!noteTarget) {
+          const dropElem = document.elementFromPoint(ev.clientX, ev.clientY);
+          if (dropElem) noteTarget = dropElem.closest('[data-note-id]');
+        }
+        if (noteTarget) {
+          const noteId = noteTarget.getAttribute('data-note-id');
+          if (noteId) {
+            const targetNote = myModule.getNoteById(Number(noteId));
+            if (targetNote) {
+              importModuleAtTarget(targetNote, moduleIcon.moduleData);
+            } else {
+              console.warn("No matching module note found for id:", noteId);
+            }
+          }
+        }
+      }
+    }
+  
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', onPointerUp);
+    document.addEventListener('pointercancel', onPointerUp);
+  });
 
     return moduleIcon;
   }
