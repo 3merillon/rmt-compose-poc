@@ -1206,14 +1206,13 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     height: 0;
     border-left: 15px solid transparent;
     border-right: 15px solid transparent;
-    border-bottom: 30px solid #333333;
+    border-bottom: 30px solid rgba(51, 51, 51, 0.7); /* semi-transparent background */
     cursor: pointer;
     margin-left: -15px;
-    z-index: 1001; /* Increase this value to be higher than measure bars */
+    z-index: 1001;
     pointer-events: auto;
-    /*margin-bottom: 3px;*/ /* Position at the bottom of the screen */
-    transition: filter 0.3s ease; /* Only animate the glow effect */
-    transform: translateX(0); /* No transition on transform */
+    transition: filter 0.3s ease;
+    transform: translateX(0);
 }
 
 .measure-bar-triangle:hover,

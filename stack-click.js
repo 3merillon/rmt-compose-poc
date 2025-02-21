@@ -19,61 +19,58 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail.com
 */
 (function() {
-  // Global cycle state to hold last candidates and cycle index.
-  let cycleState = {
-      candidates: null,      // Array of overlapping note elements.
-      index: -1,             // Index within the candidates array.
-      lastClickedNote: null  // The last clicked note element.
-  };
-
-  window.addEventListener("click", function(event) {
-      // Identify the note element that was directly clicked.
-      let clickedNote = event.target.closest('.note-rect');
-      if (!clickedNote) return; // If no note was clicked, exit early
-
-      // Get all overlapping note elements at the click position.
-      let candidates = document.elementsFromPoint(event.clientX, event.clientY)
-          .map(el => el.closest('.note-rect'))
-          .filter(el => el !== null);
-
-      // Remove duplicates.
-      const uniqueCandidates = [...new Set(candidates)];
-
-      // If there are no candidates, exit early
-      if (uniqueCandidates.length === 0) return;
-
-      // Sort candidates by their position in the DOM (assuming this correlates with visual stacking)
-      uniqueCandidates.sort((a, b) => {
-          const aIndex = Array.from(a.parentNode.children).indexOf(a);
-          const bIndex = Array.from(b.parentNode.children).indexOf(b);
-          return bIndex - aIndex; // Higher index means "on top"
-      });
-
-      // If we're clicking on the same note as before
-      if (clickedNote === cycleState.lastClickedNote) {
-          // Move to the next candidate in the stack
-          cycleState.index = (cycleState.index + 1) % uniqueCandidates.length;
-      } else {
-          // We've clicked on a new note, reset the cycle
-          cycleState.index = 0;
-          cycleState.lastClickedNote = clickedNote;
-      }
-
-      // Update the candidates
-      cycleState.candidates = uniqueCandidates;
-
-      // Select the current candidate
-      let selectedNote = uniqueCandidates[cycleState.index];
-      
-      if (selectedNote && typeof selectedNote.click === 'function') {
-          // Simulate a click on the selected note
-          selectedNote.click();
-      } else {
-          console.warn('Selected note is not clickable:', selectedNote);
-      }
-
-      // Prevent the current event from further propagation.
-      event.preventDefault();
-      event.stopPropagation();
-  }, true); // Use capturing so this handler runs before other click handlers.
-})();
+    // Global cycle state to hold last candidates and cycle index.
+    let cycleState = {
+        candidates: null,      // Array of overlapping note or measure bar elements.
+        index: -1,             // Index within the candidates array.
+        lastClickedItem: null  // The last clicked note or measure bar element.
+    };
+  
+    window.addEventListener("click", function(event) {
+        // Identify the element that was directly clicked (either note or measure bar).
+        let clickedItem = event.target.closest('.note-rect, .measure-bar-triangle');
+        if (!clickedItem) return; // Exit if no eligible element was clicked
+  
+        // Find all overlapping elements (notes or measure bars) at the click position.
+        let candidates = document.elementsFromPoint(event.clientX, event.clientY)
+            .map(el => el.closest('.note-rect, .measure-bar-triangle'))
+            .filter(el => el !== null);
+  
+        // Remove duplicates.
+        const uniqueCandidates = [...new Set(candidates)];
+  
+        if (uniqueCandidates.length === 0) return;
+  
+        // Sort candidates by their DOM order (assuming that correlates with visual stacking).
+        uniqueCandidates.sort((a, b) => {
+            const aIndex = Array.from(a.parentNode.children).indexOf(a);
+            const bIndex = Array.from(b.parentNode.children).indexOf(b);
+            return bIndex - aIndex; // Higher index means "on top"
+        });
+  
+        // If clicking the same element as before, cycle to the next candidate.
+        if (clickedItem === cycleState.lastClickedItem) {
+            cycleState.index = (cycleState.index + 1) % uniqueCandidates.length;
+        } else {
+            // New element clicked; reset cycling.
+            cycleState.index = 0;
+            cycleState.lastClickedItem = clickedItem;
+        }
+  
+        // Update candidates in cycleState.
+        cycleState.candidates = uniqueCandidates;
+  
+        // Select the current candidate.
+        let selectedItem = uniqueCandidates[cycleState.index];
+        
+        if (selectedItem && typeof selectedItem.click === 'function') {
+            // Simulate a click on the selected element.
+            selectedItem.click();
+        } else {
+            console.warn('Selected element is not clickable:', selectedItem);
+        }
+  
+        event.preventDefault();
+        event.stopPropagation();
+    }, true); // Use capturing to run this handler first.
+  })();
