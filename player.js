@@ -442,6 +442,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     (No changes shown here; ensure that your importModuleAtTarget continues to replace base note references properly.)
     */
     async function importModuleAtTarget(targetNote, moduleData) {
+        // If playback is ongoing, enforce a pause TODO: add the new notes to the playback dynamically in real time
+        if (isPlaying) {
+          pause();
+        }
+
         try {
           const importedModule = await Module.loadFromJSON(moduleData);
       
