@@ -921,7 +921,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 if (measureId !== null) {
                   const measureNote = myModule.getNoteById(measureId);
                   if (measureNote) {
-                    measureNote.setVariable(key, function() {
+                    measureNote.setVariable(key, function () {
                       return new Function("module", "Fraction", "return " + validatedExpression + ";")(myModule, Fraction);
                     });
                     measureNote.setVariable(key + 'String', newRawValue);
@@ -929,33 +929,72 @@ document.addEventListener('DOMContentLoaded', async function() {
                     throw new Error('Unable to find measure note');
                   }
                 } else {
-                  note.setVariable(key, function() {
+                  note.setVariable(key, function () {
                     return new Function("module", "Fraction", "return " + validatedExpression + ";")(myModule, Fraction);
                   });
                   note.setVariable(key + 'String', newRawValue);
                 }
               }
-              
+          
+              // Special handling when the edited note is the base note.
               if (note === myModule.baseNote) {
                 updateBaseNoteFraction();
                 updateBaseNotePosition();
+          
+                // Recompile all notes whose raw expressions reference 'module.baseNote'
+                Object.keys(myModule.notes).forEach(nid => {
+                  if (parseInt(nid, 10) === 0) return; // Skip base note itself
+                  const depNote = myModule.getNoteById(nid);
+                  if (!depNote) return;
+                  Object.keys(depNote.variables).forEach(varKey => {
+                    if (varKey.endsWith("String")) {
+                      const rawExpr = depNote.variables[varKey];
+                      // Look for direct references to module.baseNote
+                      if (rawExpr.includes("module.baseNote")) {
+                        const baseKey = varKey.slice(0, -6);
+                        try {
+                          const newFunc = new Function("module", "Fraction", "return " + rawExpr + ";");
+                          depNote.setVariable(baseKey, function () {
+                            return newFunc(myModule, Fraction);
+                          });
+                        } catch (err) {
+                          console.error("Error recompiling dependent note", nid, "variable", baseKey, ":", err);
+                        }
+                      }
+                    }
+                  });
+                });
+              } else {
+                // For non-base-note changes, update dependents normally.
+                const dependentIds = myModule.getDependentNotes(note.id);
+                dependentIds.forEach(depId => {
+                  const depNote = myModule.getNoteById(depId);
+                  if (!depNote) return;
+                  Object.keys(depNote.variables).forEach(varKey => {
+                    if (varKey.endsWith("String")) {
+                      const baseKey = varKey.slice(0, -6);
+                      try {
+                        const newFunc = new Function("module", "Fraction", "return " + depNote.variables[varKey] + ";");
+                        depNote.setVariable(baseKey, function () {
+                          return newFunc(myModule, Fraction);
+                        });
+                      } catch (err) {
+                        console.error("Error recompiling dependent note", depId, "variable", baseKey, ":", err);
+                      }
+                    }
+                  });
+                });
               }
-              
-              // Store current note as selected.
-              currentSelectedNote = note;
-              
+          
+              // Re-evaluate module after dependency updates.
               evaluatedNotes = myModule.evaluateModule();
               updateVisualNotes(evaluatedNotes);
-              
-              // Dependency highlighting remains unchanged.
-              if (note !== myModule.baseNote && effectiveNoteId !== undefined) {
-                // (Your code for directDeps and dependents here ...)
-              }
-              
+          
               evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${note.getVariable(key) !== null ? String(note.getVariable(key)) : 'null'}`;
-              
-              // Force a reload of the widget.
-              showNoteVariables(note, null, measureId);
+          
+              // Force a re-binding of the widget by fetching the updated note element from the DOM.
+              const newElem = document.querySelector(`[data-note-id="${note.id}"]`);
+              showNoteVariables(note, newElem, measureId);
               
             } catch (error) {
               console.error('Error updating note:', error);
