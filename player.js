@@ -47,7 +47,7 @@ document.addEventListener('DOMContentLoaded', async function() {
       try {
         if ('wakeLock' in navigator) {
           wakeLock = await navigator.wakeLock.request('screen');
-          console.log('Wake Lock is active');
+          //console.log('Wake Lock is active');
           wakeLock.addEventListener('release', () => {
             console.log('Wake Lock was released');
           });
@@ -605,6 +605,36 @@ document.addEventListener('DOMContentLoaded', async function() {
       return "";
     }
 
+    // Helper that recursively recompiles a note (from its raw expressions) and all its dependent notes.
+    // visited is used to avoid cycles.
+    function recompileNoteAndDependents(noteId, visited = new Set()) {
+      if (visited.has(noteId)) return;
+      visited.add(noteId);
+      const note = myModule.getNoteById(noteId);
+      if (!note) return;
+      // For each variable that has a raw string (ending with "String"), recompile it
+      Object.keys(note.variables).forEach(varKey => {
+        if (varKey.endsWith("String")) {
+          const baseKey = varKey.slice(0, -6);
+          try {
+            const rawExpr = note.variables[varKey];
+            // Create and set the new function for this variable.
+            const newFunc = new Function("module", "Fraction", "return " + rawExpr + ";");
+            note.setVariable(baseKey, function() {
+              return newFunc(myModule, Fraction);
+            });
+          } catch (err) {
+            console.error("Error recompiling note", noteId, "variable", baseKey, ":", err);
+          }
+        }
+      });
+      // Now recompile all dependent notes
+      const dependents = myModule.getDependentNotes(noteId);
+      dependents.forEach(depId => {
+        recompileNoteAndDependents(depId, visited);
+      });
+    }
+
     // showNoteVariables (main loop).
     function showNoteVariables(note, clickedElement, measureId = null) {
         const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
@@ -919,7 +949,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 const currentNoteId = measureId !== null ? measureId : note.id;
                 const validatedExpression = validateExpression(myModule, currentNoteId, newRawValue, key);
                 if (measureId !== null) {
-                  const measureNote = myModule.getNoteById(measureId);
+                  const measureNote = myModule.getNoteById(parseInt(measureId, 10));
                   if (measureNote) {
                     measureNote.setVariable(key, function () {
                       return new Function("module", "Fraction", "return " + validatedExpression + ";")(myModule, Fraction);
@@ -935,64 +965,21 @@ document.addEventListener('DOMContentLoaded', async function() {
                   note.setVariable(key + 'String', newRawValue);
                 }
               }
+              
+              // Recompile this note and all its dependents recursively.
+              recompileNoteAndDependents(note.id);
           
-              // Special handling when the edited note is the base note.
+              // If the edited note is the BaseNote, update its fraction display and position.
               if (note === myModule.baseNote) {
                 updateBaseNoteFraction();
                 updateBaseNotePosition();
-          
-                // Recompile all notes whose raw expressions reference 'module.baseNote'
-                Object.keys(myModule.notes).forEach(nid => {
-                  if (parseInt(nid, 10) === 0) return; // Skip base note itself
-                  const depNote = myModule.getNoteById(nid);
-                  if (!depNote) return;
-                  Object.keys(depNote.variables).forEach(varKey => {
-                    if (varKey.endsWith("String")) {
-                      const rawExpr = depNote.variables[varKey];
-                      // Look for direct references to module.baseNote
-                      if (rawExpr.includes("module.baseNote")) {
-                        const baseKey = varKey.slice(0, -6);
-                        try {
-                          const newFunc = new Function("module", "Fraction", "return " + rawExpr + ";");
-                          depNote.setVariable(baseKey, function () {
-                            return newFunc(myModule, Fraction);
-                          });
-                        } catch (err) {
-                          console.error("Error recompiling dependent note", nid, "variable", baseKey, ":", err);
-                        }
-                      }
-                    }
-                  });
-                });
-              } else {
-                // For non-base-note changes, update dependents normally.
-                const dependentIds = myModule.getDependentNotes(note.id);
-                dependentIds.forEach(depId => {
-                  const depNote = myModule.getNoteById(depId);
-                  if (!depNote) return;
-                  Object.keys(depNote.variables).forEach(varKey => {
-                    if (varKey.endsWith("String")) {
-                      const baseKey = varKey.slice(0, -6);
-                      try {
-                        const newFunc = new Function("module", "Fraction", "return " + depNote.variables[varKey] + ";");
-                        depNote.setVariable(baseKey, function () {
-                          return newFunc(myModule, Fraction);
-                        });
-                      } catch (err) {
-                        console.error("Error recompiling dependent note", depId, "variable", baseKey, ":", err);
-                      }
-                    }
-                  });
-                });
               }
-          
-              // Re-evaluate module after dependency updates.
+              
+              // Reevaluate and update the visual representation.
               evaluatedNotes = myModule.evaluateModule();
               updateVisualNotes(evaluatedNotes);
-          
+              
               evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${note.getVariable(key) !== null ? String(note.getVariable(key)) : 'null'}`;
-          
-              // Force a re-binding of the widget by fetching the updated note element from the DOM.
               const newElem = document.querySelector(`[data-note-id="${note.id}"]`);
               showNoteVariables(note, newElem, measureId);
               
@@ -1060,8 +1047,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                 fromNote = (note === myModule.baseNote) ? myModule.baseNote : myModule.getNoteById(measureId);
                 newMeasures = myModule.generateMeasures(fromNote, 1);
               }
-          
-              // Log each new measure's details (removed for production).
           
               // Force evaluation of startTime for each new measure.
               newMeasures.forEach(measure => {
