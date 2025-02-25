@@ -1776,63 +1776,64 @@ function getFrequencyRatio(note) {
     });
   
     noteRect.element.addEventListener('pointerup', (e) => {
-      const overlayContainer = document.getElementById('drag-overlay-container');
-      if (overlayContainer && overlayContainer.parentNode) {
-        overlayContainer.parentNode.removeChild(overlayContainer);
-      }
-    
+      if (!dragData.originalBeatOffsetFraction) { return; }
+      
       if (dragData.hasDragged) {
         const deltaX = e.clientX - dragData.startX;
-        const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-        const beatLength = 60 / baseTempo;
-        const step = beatLength / 4; // sixteenth-note step.
-        let deltaTime = deltaX / 200;
-        let snappedDelta = Math.round(deltaTime / step) * step;
-        let newBeatOffset = dragData.originalBeatOffset + snappedDelta / beatLength;
-        newBeatOffset = Math.max(0, newBeatOffset);
-    
-        let newBeatFraction = new Fraction(newBeatOffset);
-        let newRaw = dragData.reference +
-          ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + dragData.reference +
-          ")).mul(new Fraction(" + newBeatFraction.toFraction() + ")))";
-    
+        let baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
+        let beatLength = new Fraction(60).div(baseTempo);
+        let deltaTime = new Fraction(deltaX, 200);
+        let step = beatLength.div(new Fraction(4));
+        let ratio = deltaTime.div(step);
+        let nearest = new Fraction(Math.round(Number(ratio)));
+        let snappedDelta = step.mul(nearest);
+        
+        let newBeatOffsetFraction = dragData.originalBeatOffsetFraction.add(snappedDelta.div(beatLength));
+        let newStartTimeFraction = dragData.refStart.add(newBeatOffsetFraction.mul(beatLength));
+        
+        // CLAMP: Ensure that new start is no less than the dependency's start
+        let depNote;
+        if (dragData.reference === "module.baseNote") {
+          depNote = myModule.baseNote;
+        } else {
+          let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
+          depNote = m ? myModule.getNoteById(m[1]) : myModule.baseNote;
+        }
+        let depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
+        if (newStartTimeFraction.compare(depStartFraction) < 0) {
+          newStartTimeFraction = depStartFraction;
+          newBeatOffsetFraction = newStartTimeFraction.sub(dragData.refStart).div(beatLength);
+        }
+        
+        // Build the raw expression using the precise newBeatOffsetFraction.
+        let fracStr = newBeatOffsetFraction.toFraction(); // e.g., "1/4"
+        let parts = fracStr.split('/');
+        let fractionExpr = "new Fraction(" + parts[0] + "," + parts[1] + ")";
+        let newRaw = dragData.reference + ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" 
+                     + dragData.reference + ")).mul(" + fractionExpr + "))";
+        
         note.setVariable('startTime', function() {
           return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
         });
         note.variables.startTimeString = newRaw;
         evaluatedNotes = myModule.evaluateModule();
         updateVisualNotes(evaluatedNotes);
+        
+        let overlayContainer = document.getElementById('drag-overlay-container');
+        if (overlayContainer) {
+          overlayContainer.parentNode.removeChild(overlayContainer);
+        }
         e.stopPropagation();
+      } else {
+        let overlayContainer = document.getElementById('drag-overlay-container');
+        if (overlayContainer) {
+          overlayContainer.parentNode.removeChild(overlayContainer);
+        }
       }
-    
-      // Reset drag state regardless of drag having occurred or not.
-      dragData.hasDragged = false;
-      dragData.hasCaptured = false;
+      
       if (dragData.hasCaptured) {
         noteRect.element.releasePointerCapture(e.pointerId);
       }
-    });
-    
-    noteRect.element.addEventListener('pointercancel', (e) => {
-      const overlayContainer = document.getElementById('drag-overlay-container');
-      if (overlayContainer && overlayContainer.parentNode) {
-        overlayContainer.parentNode.removeChild(overlayContainer);
-      }
-      dragData.hasDragged = false;
-      dragData.hasCaptured = false;
-      if (dragData.hasCaptured) {
-        noteRect.element.releasePointerCapture(e.pointerId);
-      }
-    });
-
-    noteRect.element.addEventListener('pointerleave', (e) => {
-      const overlayContainer = document.getElementById('drag-overlay-container');
-      if (overlayContainer && overlayContainer.parentNode) {
-        overlayContainer.parentNode.removeChild(overlayContainer);
-      }
-      // Reset drag state so no further overlay updates occur.
-      dragData.hasDragged = false;
-      dragData.hasCaptured = false;
     });
   
     // Helper: updateDragOverlay creates or updates an overlay element.

@@ -40,7 +40,7 @@
     },
     {
       "id": 9,
-      "startTime": "module.baseNote.getVariable('startTime')",
+      "startTime": "module.getNoteById(1).getVariable('startTime')",
       "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1.5)",
       "frequency": "new Fraction(1, 1).mul(module.baseNote.getVariable('frequency'))",
       "color": "rgba(255,0,0,0.7)"
