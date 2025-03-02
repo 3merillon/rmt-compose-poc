@@ -1857,70 +1857,100 @@ function createNoteElement(note, index) {
     
     const deltaX = e.clientX - dragData.startX;
     if (!dragData.hasDragged && Math.abs(deltaX) > 5) {
-      dragData.hasDragged = true;
-      noteRect.element.setPointerCapture(e.pointerId);
-      dragData.hasCaptured = true;
-      
-      // Only pause playback when actually dragging (not just hovering)
-      if (isPlaying) {
-        pause();
-      }
+        dragData.hasDragged = true;
+        noteRect.element.setPointerCapture(e.pointerId);
+        dragData.hasCaptured = true;
+        
+        // Only pause playback when actually dragging (not just hovering)
+        if (isPlaying) {
+            pause();
+        }
     }
     
     if (dragData.hasDragged) {
-      let deltaTime = new Fraction(deltaX, 200);
-      let baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
-      let beatLength = new Fraction(60).div(baseTempo);
-      let step = beatLength.div(new Fraction(4));
-      let ratio = deltaTime.div(step);
-      let nearest = new Fraction(Math.round(Number(ratio)));
-      let snappedDelta = step.mul(nearest);
-      
-      // New beat offset = originalBeatOffsetFraction + snappedDelta/beatLength.
-      let newBeatOffsetFraction = dragData.originalBeatOffsetFraction.add(snappedDelta.div(beatLength));
-      
-      // New start time = refStart + (newBeatOffset * beatLength).
-      let newStartTimeFraction = dragData.refStart.add(newBeatOffsetFraction.mul(beatLength));
-      
-      // CLAMPING: Use dragData.reference to get the dependency's startTime.
-      let depNote;
-      if (dragData.reference === "module.baseNote") {
-        depNote = myModule.baseNote;
-      } else {
-        let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
-        depNote = m ? myModule.getNoteById(m[1]) : myModule.baseNote;
-      }
-      let depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
-      if (newStartTimeFraction.compare(depStartFraction) < 0) {
-        // If new start is less than dependency start, clamp:
-        newStartTimeFraction = depStartFraction;
-        newBeatOffsetFraction = newStartTimeFraction.sub(dragData.refStart).div(beatLength);
-      }
-      
-      // For overlay drawing, use the numeric value.
-      let newStartTimeNum = Number(newStartTimeFraction.valueOf());
-      updateDragOverlay(note, newStartTimeNum, null, 'dragged');
-      
-      // Update dependency overlays using our helper.
-      let movedNotes = getMovedNotes(note, newStartTimeFraction, dragData.originalStartTime);
-      if (movedNotes.length === 0 && newBeatOffsetFraction.equals(dragData.originalBeatOffsetFraction)) {
-        movedNotes = dragData.baselineDependencies || [];
-      }
-      
-      let overlayContainer = document.getElementById('drag-overlay-container');
-      if (overlayContainer) {
-        [...overlayContainer.children].forEach(overlayElem => {
-          if (overlayElem.id && overlayElem.id.indexOf("drag-overlay-dep-") === 0) {
-            const depId = parseInt(overlayElem.id.replace("drag-overlay-dep-", ""), 10);
-            if (!movedNotes.some(item => item.note.id === depId)) {
-              overlayElem.remove();
-            }
-          }
+        // Get the current viewport scale by measuring a known distance in space
+        const spacePoint1 = space.at(0, 0);
+        const spacePoint2 = space.at(100, 0);
+        
+        // Project these points to viewport coordinates
+        const viewportPoint1 = spacePoint1.transitRaw(viewport);
+        const viewportPoint2 = spacePoint2.transitRaw(viewport);
+        
+        // Calculate the scale factor: how many viewport pixels per 100 space units
+        const viewportDistance = Math.sqrt(
+            Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
+            Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
+        );
+        const scale = viewportDistance / 100;
+        
+        // Adjust deltaX based on the current scale
+        let adjustedDeltaX = deltaX / scale;
+        
+        // Convert the adjusted pixel delta to time units
+        // Use a safer approach to create fractions from potentially non-integer values
+        const numerator = Math.round(adjustedDeltaX * 1000); // Scale up and round to avoid floating point issues
+        const denominator = 200 * 1000; // Scale up the denominator by the same factor
+        let deltaTime = new Fraction(numerator, denominator);
+        
+        let baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
+        let beatLength = new Fraction(60).div(baseTempo);
+        let step = beatLength.div(new Fraction(4));
+        let ratio = deltaTime.div(step);
+        let nearest = new Fraction(Math.round(Number(ratio)));
+        let snappedDelta = step.mul(nearest);
+        
+        // New beat offset = originalBeatOffsetFraction + snappedDelta/beatLength.
+        let newBeatOffsetFraction = dragData.originalBeatOffsetFraction.add(snappedDelta.div(beatLength));
+        
+        // New start time = refStart + (newBeatOffset * beatLength).
+        let newStartTimeFraction = dragData.refStart.add(newBeatOffsetFraction.mul(beatLength));
+        
+        // CLAMPING: Use dragData.reference to get the dependency's startTime.
+        let depNote;
+        if (dragData.reference === "module.baseNote") {
+            depNote = myModule.baseNote;
+        } else {
+            let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
+            depNote = m ? myModule.getNoteById(m[1]) : myModule.baseNote;
+        }
+        let depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
+        if (newStartTimeFraction.compare(depStartFraction) < 0) {
+            // If new start is less than dependency start, clamp:
+            newStartTimeFraction = depStartFraction;
+            newBeatOffsetFraction = newStartTimeFraction.sub(dragData.refStart).div(beatLength);
+        }
+        
+        // For overlay drawing, use the numeric value.
+        let newStartTimeNum = Number(newStartTimeFraction.valueOf());
+        
+        // Calculate the position for the overlay in the same way as the original code
+        const xCoord = newStartTimeNum * 200;
+        const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
+        const screenPos = point.transitRaw(viewport);
+        
+        // Update the overlay using the original approach
+        updateDragOverlay(note, newStartTimeNum, null, 'dragged');
+        
+        // Update dependency overlays using our helper.
+        let movedNotes = getMovedNotes(note, newStartTimeFraction, dragData.originalStartTime);
+        if (movedNotes.length === 0 && newBeatOffsetFraction.equals(dragData.originalBeatOffsetFraction)) {
+            movedNotes = dragData.baselineDependencies || [];
+        }
+        
+        let overlayContainer = document.getElementById('drag-overlay-container');
+        if (overlayContainer) {
+            [...overlayContainer.children].forEach(overlayElem => {
+                if (overlayElem.id && overlayElem.id.indexOf("drag-overlay-dep-") === 0) {
+                    const depId = parseInt(overlayElem.id.replace("drag-overlay-dep-", ""), 10);
+                    if (!movedNotes.some(item => item.note.id === depId)) {
+                        overlayElem.remove();
+                    }
+                }
+            });
+        }
+        movedNotes.forEach(item => {
+            updateDragOverlay(item.note, Number(item.newStart.valueOf()), item.note.id, 'dependency');
         });
-      }
-      movedNotes.forEach(item => {
-        updateDragOverlay(item.note, Number(item.newStart.valueOf()), item.note.id, 'dependency');
-      });
     }
   });
 
@@ -1930,42 +1960,85 @@ function createNoteElement(note, index) {
     
     const overlayContainer = document.getElementById('drag-overlay-container');
     if (overlayContainer && overlayContainer.parentNode) {
-      overlayContainer.parentNode.removeChild(overlayContainer);
+        overlayContainer.parentNode.removeChild(overlayContainer);
     }
   
     if (dragData.hasDragged) {
-      const deltaX = e.clientX - dragData.startX;
-      const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-      const beatLength = 60 / baseTempo;
-      const step = beatLength / 4; // sixteenth-note step.
-      let deltaTime = deltaX / 200;
-      let snappedDelta = Math.round(deltaTime / step) * step;
-      let newBeatOffset = dragData.originalBeatOffset + snappedDelta / beatLength;
-      newBeatOffset = Math.max(0, newBeatOffset);
-  
-      let newBeatFraction = new Fraction(newBeatOffset);
-      let newRaw = dragData.reference +
-        ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + dragData.reference +
-        ")).mul(new Fraction(" + newBeatFraction.toFraction() + ")))";
-  
-      note.setVariable('startTime', function() {
-        return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
-      });
-      note.setVariable('startTimeString', newRaw);
-      // Note: setVariable will mark the note as dirty
+        const deltaX = e.clientX - dragData.startX;
         
-      evaluatedNotes = myModule.evaluateModule();
-      updateVisualNotes(evaluatedNotes);
-      e.stopPropagation();
+        // Get the current viewport scale by measuring a known distance in space
+        const spacePoint1 = space.at(0, 0);
+        const spacePoint2 = space.at(100, 0);
+        
+        // Project these points to viewport coordinates
+        const viewportPoint1 = spacePoint1.transitRaw(viewport);
+        const viewportPoint2 = spacePoint2.transitRaw(viewport);
+        
+        // Calculate the scale factor: how many viewport pixels per 100 space units
+        const viewportDistance = Math.sqrt(
+            Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
+            Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
+        );
+        const scale = viewportDistance / 100;
+        
+        // Adjust deltaX based on the current scale
+        let adjustedDeltaX = deltaX / scale;
+        
+        const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
+        const beatLength = 60 / baseTempo;
+        const step = beatLength / 4; // sixteenth-note step.
+        
+        // Use a safer approach to create fractions from potentially non-integer values
+        const deltaTime = adjustedDeltaX / 200;
+        let snappedDelta = Math.round(deltaTime / step) * step;
+        
+        // Use a safer approach to create the new beat offset fraction
+        const newBeatOffset = Math.max(0, dragData.originalBeatOffset + snappedDelta / beatLength);
+        
+        // Convert to a proper fraction string (numerator/denominator)
+        const newBeatOffsetDecimal = newBeatOffset;
+        // Find a reasonable fraction approximation
+        const precision = 1000000; // 6 decimal places of precision
+        const numerator = Math.round(newBeatOffsetDecimal * precision);
+        const denominator = precision;
+        const gcd = findGCD(numerator, denominator);
+        const simplifiedNumerator = numerator / gcd;
+        const simplifiedDenominator = denominator / gcd;
+        
+        let newRaw = dragData.reference +
+            ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + dragData.reference +
+            ")).mul(new Fraction(" + simplifiedNumerator + ", " + simplifiedDenominator + ")))";
+  
+        note.setVariable('startTime', function() {
+            return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+        });
+        note.setVariable('startTimeString', newRaw);
+        // Note: setVariable will mark the note as dirty
+            
+        evaluatedNotes = myModule.evaluateModule();
+        updateVisualNotes(evaluatedNotes);
+        e.stopPropagation();
     }
   
     // Reset drag state regardless of drag having occurred or not.
     dragData.hasDragged = false;
     dragData.hasCaptured = false;
     if (dragData.hasCaptured) {
-      noteRect.element.releasePointerCapture(e.pointerId);
+        noteRect.element.releasePointerCapture(e.pointerId);
     }
   });
+
+  // Helper function to find the greatest common divisor (GCD)
+  function findGCD(a, b) {
+      a = Math.abs(a);
+      b = Math.abs(b);
+      while (b) {
+          const temp = b;
+          b = a % b;
+          a = temp;
+      }
+      return a;
+  }
   
   noteRect.element.addEventListener('pointercancel', (e) => {
     // Reset pointer down flag
@@ -1996,22 +2069,26 @@ function createNoteElement(note, index) {
   function updateDragOverlay(noteObj, newTime, depId, type) {
     let overlayContainer = document.getElementById('drag-overlay-container');
     if (!overlayContainer) return;
+    
     const xCoord = newTime * 200;
     const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
     const screenPos = point.transitRaw(viewport);
+    
     const overlayId = type === 'dragged' ? 'drag-overlay-dragged' : 'drag-overlay-dep-' + depId;
     let overlayElem = document.getElementById(overlayId);
+    
     if (!overlayElem) {
-      overlayElem = document.createElement('div');
-      overlayElem.id = overlayId;
-      overlayElem.style.position = 'absolute';
-      overlayElem.style.top = '0';
-      overlayElem.style.height = '100%';
-      overlayElem.style.width = '2px';
-      overlayElem.style.pointerEvents = 'none';
-      overlayElem.style.backgroundColor = type === 'dragged' ? 'rgba(255,0,0,0.5)' : 'rgba(0,0,255,0.5)';
-      overlayContainer.appendChild(overlayElem);
+        overlayElem = document.createElement('div');
+        overlayElem.id = overlayId;
+        overlayElem.style.position = 'absolute';
+        overlayElem.style.top = '0';
+        overlayElem.style.height = '100%';
+        overlayElem.style.width = '2px';
+        overlayElem.style.pointerEvents = 'none';
+        overlayElem.style.backgroundColor = type === 'dragged' ? 'rgba(255,0,0,0.5)' : 'rgba(0,0,255,0.5)';
+        overlayContainer.appendChild(overlayElem);
     }
+    
     overlayElem.style.left = screenPos.x + 'px';
   }
 
