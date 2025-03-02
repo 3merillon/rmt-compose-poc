@@ -1506,3 +1506,10 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     border-right-color: #ff0000;
     transform: translateY(-50%) translateX(-6px);
   }
+
+  .buttonsContainer div {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }

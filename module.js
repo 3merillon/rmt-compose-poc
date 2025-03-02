@@ -431,102 +431,135 @@ class Module {
    }
 
    reindexModule() {
-      // Preserve the base note as id 0.
-      const baseNote = this.baseNote;
+    // Preserve the base note as id 0.
+    const baseNote = this.baseNote;
     
-      // Store original colors keyed by note id
-      const originalColors = {};
-      for (const id in this.notes) {
-          if (this.notes[id].variables && this.notes[id].variables.color) {
-              originalColors[id] = this.notes[id].variables.color;
-          }
-      }
+    // Store original colors keyed by note id
+    const originalColors = {};
+    for (const id in this.notes) {
+        if (this.notes[id].variables && this.notes[id].variables.color) {
+            originalColors[id] = this.notes[id].variables.color;
+        }
+    }
     
-      // Separate notes (except base note) into measure notes and regular notes.
-      const measureNotes = [];
-      const regularNotes = [];
-      for (const id in this.notes) {
-          const note = this.notes[id];
-          if (Number(id) === 0) continue;
-          // Measure notes: have a startTime but no duration/frequency.
-          if (note.variables.startTime && !note.variables.duration && !note.variables.frequency) {
-              measureNotes.push(note);
-          } else {
-              regularNotes.push(note);
-          }
-      }
+    // Separate notes (except base note) into measure notes and regular notes.
+    const measureNotes = [];
+    const regularNotes = [];
+    for (const id in this.notes) {
+        const note = this.notes[id];
+        if (Number(id) === 0) continue;
+        // Measure notes: have a startTime but no duration/frequency.
+        if (note.variables.startTime && !note.variables.duration && !note.variables.frequency) {
+            measureNotes.push(note);
+        } else {
+            regularNotes.push(note);
+        }
+    }
     
-      // Sort both arrays by evaluated startTime.
-      measureNotes.sort((a, b) => a.getVariable("startTime").valueOf() - b.getVariable("startTime").valueOf());
-      regularNotes.sort((a, b) => a.getVariable("startTime").valueOf() - b.getVariable("startTime").valueOf());
+    // Sort both arrays by evaluated startTime.
+    measureNotes.sort((a, b) => a.getVariable("startTime").valueOf() - b.getVariable("startTime").valueOf());
+    regularNotes.sort((a, b) => a.getVariable("startTime").valueOf() - b.getVariable("startTime").valueOf());
     
-      // Build a mapping from old id to new sequential id.
-      const newMapping = {};
-      newMapping[baseNote.id] = 0;
-      let newId = 1;
-      for (const note of measureNotes) {
-          newMapping[note.id] = newId;
-          newId++;
-      }
-      for (const note of regularNotes) {
-          newMapping[note.id] = newId;
-          newId++;
-      }
+    // Build a mapping from old id to new sequential id.
+    const newMapping = {};
+    newMapping[baseNote.id] = 0;
+    let newId = 1;
+    for (const note of measureNotes) {
+        newMapping[note.id] = newId;
+        newId++;
+    }
+    for (const note of regularNotes) {
+        newMapping[note.id] = newId;
+        newId++;
+    }
     
-      function updateRawDependencies(str) {
-          return str.replace(/(?:module\.)?getNoteById\(\s*(\d+)\s*\)/g, (match, p1) => {
-              const oldRefId = parseInt(p1, 10);
-              if (oldRefId === 0) {
-                  return "module.baseNote";
-              }
-              const newRefId = newMapping[oldRefId];
-              if (typeof newRefId !== "number") {
-                  console.warn("No new mapping found for old id " + oldRefId);
-                  return match;
-              }
-              return "module.getNoteById(" + newRefId + ")";
-          });
-      }
+    // Store the old parentId relationships
+    const parentRelationships = {};
+    for (const id in this.notes) {
+        const note = this.notes[id];
+        if (note.parentId !== undefined) {
+            parentRelationships[id] = note.parentId;
+        }
+    }
     
-      // Create a new notes object
-      const newNotes = {};
-      newNotes[0] = baseNote;
+    function updateRawDependencies(str) {
+        return str.replace(/(?:module\.)?getNoteById\(\s*(\d+)\s*\)/g, (match, p1) => {
+            const oldRefId = parseInt(p1, 10);
+            if (oldRefId === 0) {
+                return "module.baseNote";
+            }
+            const newRefId = newMapping[oldRefId];
+            if (typeof newRefId !== "number") {
+                console.warn("No new mapping found for old id " + oldRefId);
+                return match;
+            }
+            return "module.getNoteById(" + newRefId + ")";
+        });
+    }
     
-      // Process each non-base note
-      for (const oldId in this.notes) {
-          if (Number(oldId) === 0) continue;
-          const note = this.notes[oldId];
-          const updatedId = newMapping[note.id];
-          
-          // Create new note with all variables
-          const variables = {};
-          
-          // Copy all variables
-          for (const key in note.variables) {
-              if (key.endsWith("String")) {
-                  variables[key] = updateRawDependencies(note.variables[key]);
-                  const baseKey = key.slice(0, -6);
-                  variables[baseKey] = function() {
-                      return new Function("module", "Fraction", "return " + variables[key] + ";")(this, Fraction);
-                  };
-              } else if (key === 'color') {
-                  // Copy color directly
-                  variables[key] = note.variables[key];
-              }
-          }
-          
-          // Create new note with copied variables
-          const newNote = new Note(updatedId, variables);
-          
-          // Copy parentId if it exists
-          if (typeof note.parentId !== "undefined" && newMapping.hasOwnProperty(note.parentId)) {
-              newNote.parentId = newMapping[note.parentId];
-          }
-          
-          newNotes[updatedId] = newNote;
-      }
+    // Create a new notes object
+    const newNotes = {};
+    newNotes[0] = baseNote;
     
-      // Replace the module's notes with the newly reindexed notes
-      this.notes = newNotes;
+    // Process each non-base note
+    for (const oldId in this.notes) {
+        if (Number(oldId) === 0) continue;
+        const note = this.notes[oldId];
+        const updatedId = newMapping[note.id];
+        
+        // Create new note with all variables
+        const variables = {};
+        
+        // Copy all variables
+        for (const key in note.variables) {
+            if (key.endsWith("String")) {
+                variables[key] = updateRawDependencies(note.variables[key]);
+                const baseKey = key.slice(0, -6);
+                variables[baseKey] = function() {
+                    return new Function("module", "Fraction", "return " + variables[key] + ";")(this, Fraction);
+                };
+            } else if (key === 'color') {
+                // Copy color directly
+                variables[key] = note.variables[key];
+            }
+        }
+        
+        // Create new note with copied variables
+        const newNote = new Note(updatedId, variables);
+        
+        // Update module reference
+        newNote.module = this;
+        
+        // Copy parentId if it exists and update it
+        if (parentRelationships[oldId] !== undefined) {
+            const oldParentId = parentRelationships[oldId];
+            newNote.parentId = newMapping[oldParentId] !== undefined ? newMapping[oldParentId] : 0;
+        }
+        
+        newNotes[updatedId] = newNote;
+    }
+    
+    // Replace the module's notes with the newly reindexed notes
+    this.notes = newNotes;
+    
+    // Reset all caches
+    this._evaluationCache = {};
+    this._lastEvaluationTime = 0;
+    this._dirtyNotes = new Set();
+    this._dependenciesCache = new Map();
+    this._dependentsCache = new Map();
+    
+    // Mark all notes as dirty to ensure proper reevaluation
+    for (const id in this.notes) {
+        this._dirtyNotes.add(Number(id));
+    }
+    
+    // Invalidate module end time cache if the function exists
+    if (typeof invalidateModuleEndTimeCache === 'function') {
+        invalidateModuleEndTimeCache();
+    }
+    
+    // Log the reindexing for debugging
+    console.log("Module reindexed. New mapping:", newMapping);
   }
 }
