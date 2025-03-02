@@ -2017,6 +2017,18 @@ function createNoteElement(note, index) {
             
         evaluatedNotes = myModule.evaluateModule();
         updateVisualNotes(evaluatedNotes);
+        
+        // Check if this note is currently selected in the widget
+        const isCurrentlySelected = currentSelectedNote && currentSelectedNote.id === note.id;
+        if (isCurrentlySelected) {
+            // Get the note content element
+            const noteContent = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+            if (noteContent) {
+                // Update the widget to reflect the new values
+                showNoteVariables(note, noteContent);
+            }
+        }
+        
         e.stopPropagation();
     }
   
