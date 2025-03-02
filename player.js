@@ -1995,19 +1995,24 @@ function createNoteElement(note, index) {
         // Use a safer approach to create the new beat offset fraction
         const newBeatOffset = Math.max(0, dragData.originalBeatOffset + snappedDelta / beatLength);
         
-        // Convert to a proper fraction string (numerator/denominator)
-        const newBeatOffsetDecimal = newBeatOffset;
-        // Find a reasonable fraction approximation
-        const precision = 1000000; // 6 decimal places of precision
-        const numerator = Math.round(newBeatOffsetDecimal * precision);
-        const denominator = precision;
-        const gcd = findGCD(numerator, denominator);
-        const simplifiedNumerator = numerator / gcd;
-        const simplifiedDenominator = denominator / gcd;
+        // Create a Fraction object directly using the library
+        const newBeatFraction = new Fraction(newBeatOffset);
+        
+        // Use the toFraction method to get a simplified fraction string
+        const fractionStr = newBeatFraction.toFraction();
+        
+        // Parse the fraction string to get numerator and denominator
+        let numerator, denominator;
+        if (fractionStr.includes('/')) {
+            [numerator, denominator] = fractionStr.split('/');
+        } else {
+            numerator = fractionStr;
+            denominator = '1';
+        }
         
         let newRaw = dragData.reference +
             ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + dragData.reference +
-            ")).mul(new Fraction(" + simplifiedNumerator + ", " + simplifiedDenominator + ")))";
+            ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
   
         note.setVariable('startTime', function() {
             return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
@@ -2039,18 +2044,6 @@ function createNoteElement(note, index) {
         noteRect.element.releasePointerCapture(e.pointerId);
     }
   });
-
-  // Helper function to find the greatest common divisor (GCD)
-  function findGCD(a, b) {
-      a = Math.abs(a);
-      b = Math.abs(b);
-      while (b) {
-          const temp = b;
-          b = a % b;
-          a = temp;
-      }
-      return a;
-  }
   
   noteRect.element.addEventListener('pointercancel', (e) => {
     // Reset pointer down flag
