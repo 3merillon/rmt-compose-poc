@@ -22,6 +22,8 @@ class Note {
     constructor(id, variables = {}) {
         this.id = id;
         this.variables = {};
+        this.module = null; // Initialize module reference
+        this.lastModifiedTime = Date.now();
         
         // Process each variable
         Object.entries(variables).forEach(([key, value]) => {
@@ -44,6 +46,12 @@ class Note {
     setVariable(name, value) {
         this.variables[name] = value;
         this.lastModifiedTime = Date.now();
+        
+        // Mark this note as dirty in the module if module reference exists
+        if (this.module && typeof this.module.markNoteDirty === 'function') {
+            this.module.markNoteDirty(this.id);
+        }
+        
         if (typeof invalidateModuleEndTimeCache === 'function') {
             invalidateModuleEndTimeCache();
         }

@@ -32,6 +32,15 @@ class Module {
     constructor(baseNoteVariables = {}) {
         this.notes = {};
         this.nextId = 1;
+        
+        // Add caching properties for evaluation
+        this._evaluationCache = {};
+        this._lastEvaluationTime = 0;
+        this._dirtyNotes = new Set();
+
+        // Add caching for dependencies
+        this._dependenciesCache = new Map();
+        this._dependentsCache = new Map();
 
         // Default variables for the base note
         const defaultBaseNoteVariables = {
@@ -51,10 +60,31 @@ class Module {
 
         // Create the base note with ID 0
         this.baseNote = new Note(0, finalBaseNoteVariables);
+        this.baseNote.module = this; // Set module reference
         this.notes[0] = this.baseNote;
+    }
+    
+    // Method to mark a note as dirty
+    markNoteDirty(noteId) {
+        this._dirtyNotes.add(Number(noteId));
+        
+        // Invalidate dependency caches for this note
+        this._dependenciesCache.delete(Number(noteId));
+        this._dependentsCache.clear(); // Clear all dependents cache as this could affect many notes
+        
+        // Also mark all dependent notes as dirty
+        const dependents = this.getDependentNotes(Number(noteId));
+        dependents.forEach(depId => {
+            this._dirtyNotes.add(Number(depId));
+        });
     }
 
     getDirectDependencies(noteId) {
+        // Check cache first
+        if (this._dependenciesCache.has(noteId)) {
+            return this._dependenciesCache.get(noteId);
+        }
+        
         const note = this.getNoteById(noteId);
         if (!note || !note.variables) {
             return [];
@@ -83,18 +113,38 @@ class Module {
             }
         }
         
-        return Array.from(dependencies);
+        const result = Array.from(dependencies);
+        // Store in cache
+        this._dependenciesCache.set(noteId, result);
+        return result;
     }
 
     getDependentNotes(noteId) {
         if (noteId == null) return [];
+        
+        // Check cache first
+        if (this._dependentsCache.has(noteId)) {
+            return this._dependentsCache.get(noteId);
+        }
+        
         const dependents = new Set();
-    
+        const visited = new Set(); // To prevent infinite recursion in circular dependencies
+        
         const checkDependencies = (id) => {
+            if (visited.has(id)) return;
+            visited.add(id);
+            
             for (const [checkId, note] of Object.entries(this.notes)) {
                 if (!note) continue;
                 if (checkId !== String(id)) {
-                    const deps = this.getDirectDependencies(Number(checkId));
+                    // Use cached dependencies if available
+                    let deps;
+                    if (this._dependenciesCache.has(Number(checkId))) {
+                        deps = this._dependenciesCache.get(Number(checkId));
+                    } else {
+                        deps = this.getDirectDependencies(Number(checkId));
+                    }
+                    
                     if (deps.includes(id)) {
                         dependents.add(Number(checkId));
                         checkDependencies(Number(checkId));
@@ -102,21 +152,29 @@ class Module {
                 }
             }
         };
-    
+        
         checkDependencies(noteId);
-        return Array.from(dependents);
+        
+        const result = Array.from(dependents);
+        // Store in cache
+        this._dependentsCache.set(noteId, result);
+        return result;
     }
 
     addNote(variables = {}) {
         const id = this.nextId++;
         const note = new Note(id, variables);
+        note.module = this; // Set module reference
         this.notes[id] = note;
+        this.markNoteDirty(id);
         invalidateModuleEndTimeCache();
         return note;
     }
-
+    
     removeNote(id) {
         delete this.notes[id];
+        delete this._evaluationCache[id];
+        this.markNoteDirty(id); // Mark dependents as dirty
         invalidateModuleEndTimeCache();
     }
 
@@ -125,10 +183,39 @@ class Module {
     }
 
     evaluateModule() {
-        const evaluatedNotes = {};
-        for (const id of Object.keys(this.notes)) {
-            evaluatedNotes[id] = this.notes[id].getAllVariables();
+        const currentTime = Date.now();
+        
+        // If no notes are dirty and we have a valid cache, return the cached result
+        if (this._dirtyNotes.size === 0 && 
+            Object.keys(this._evaluationCache).length > 0 && 
+            this._lastEvaluationTime > 0) {
+            return { ...this._evaluationCache };
         }
+        
+        // Start with the existing cache
+        const evaluatedNotes = { ...this._evaluationCache };
+        
+        // Get the list of notes to evaluate
+        const notesToEvaluate = this._dirtyNotes.size > 0 
+            ? [...this._dirtyNotes] 
+            : Object.keys(this.notes).map(id => parseInt(id, 10));
+        
+        // Evaluate only the dirty notes and their dependents
+        notesToEvaluate.forEach(id => {
+            const note = this.notes[id];
+            if (note) {
+                evaluatedNotes[id] = note.getAllVariables();
+            } else {
+                // If a note was deleted, remove it from the cache
+                delete evaluatedNotes[id];
+            }
+        });
+        
+        // Update the cache and reset dirty notes
+        this._evaluationCache = { ...evaluatedNotes };
+        this._lastEvaluationTime = currentTime;
+        this._dirtyNotes.clear();
+        
         return evaluatedNotes;
     }
 
@@ -239,6 +326,7 @@ class Module {
             // If noteId is a valid number, create the note with that id.
             if (!isNaN(noteId)) {
                 const note = new Note(noteId, variables);
+                note.module = moduleInstance; // Set module reference
                 moduleInstance.notes[noteId] = note;
                 // Ensure nextId is updated.
                 if (noteId >= moduleInstance.nextId) {
@@ -248,6 +336,9 @@ class Module {
                 moduleInstance.addNote(variables);
             }
         });
+        
+        // Ensure the base note has a module reference
+        moduleInstance.baseNote.module = moduleInstance;
         
         return moduleInstance;
     }
