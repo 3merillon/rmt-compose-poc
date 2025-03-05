@@ -544,6 +544,52 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             widgetContent.appendChild(addMeasureSection);
         }
         
+        // Add the evaluate section for notes and measure bars
+        if (note !== window.myModule.baseNote) {
+            const evaluateWrapper = document.createElement('div');
+            evaluateWrapper.className = 'evaluate-note-row';
+            
+            const evaluateHeader = document.createElement('div');
+            evaluateHeader.className = 'evaluate-note-header';
+            evaluateHeader.textContent = 'EVALUATE';
+            
+            const evaluateButton = document.createElement('button');
+            evaluateButton.className = 'evaluate-note-btn';
+            evaluateButton.textContent = 'Evaluate to BaseNote';
+            
+            evaluateButton.addEventListener('click', function() {
+                showEvaluateConfirmation(effectiveNoteId);
+            });
+            
+            evaluateWrapper.appendChild(evaluateHeader);
+            evaluateWrapper.appendChild(evaluateButton);
+            
+            widgetContent.appendChild(evaluateWrapper);
+        }
+        
+        // Add evaluate module button for base note
+        if (note === window.myModule.baseNote) {
+            const evaluateWrapper = document.createElement('div');
+            evaluateWrapper.className = 'evaluate-note-row';
+            
+            const evaluateHeader = document.createElement('div');
+            evaluateHeader.className = 'evaluate-note-header';
+            evaluateHeader.textContent = 'EVALUATE';
+            
+            const evaluateButton = document.createElement('button');
+            evaluateButton.className = 'evaluate-note-btn';
+            evaluateButton.textContent = 'Evaluate Module';
+            
+            evaluateButton.addEventListener('click', function() {
+                showEvaluateModuleConfirmation();
+            });
+            
+            evaluateWrapper.appendChild(evaluateHeader);
+            evaluateWrapper.appendChild(evaluateButton);
+            
+            widgetContent.appendChild(evaluateWrapper);
+        }
+        
         if (note !== window.myModule.baseNote) {
             const deleteWrapper = document.createElement('div');
             deleteWrapper.className = 'delete-note-row';
@@ -595,7 +641,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         domCache.noteWidget.classList.add('visible');
         widgetInitiallyOpened = true;
         updateNoteWidgetHeight();
-
+    
         // If no clickedElement was provided, use the note's id to reapply the "selected" class.
         if (!clickedElement && note && note.id !== undefined) {
             const selElem = document.querySelector(`[data-note-id="${note.id}"]`);
@@ -606,6 +652,838 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         
         // Store the current selected note
         currentSelectedNote = note;
+    }
+    
+    // Add confirmation modal for evaluation
+    function showEvaluateConfirmation(noteId) {
+        const overlay = document.createElement('div');
+        overlay.className = 'delete-confirm-overlay';
+    
+        const modal = document.createElement('div');
+        modal.className = 'delete-confirm-modal';
+    
+        const message = document.createElement('p');
+        message.innerHTML = "Are you sure you want to <strong>EVALUATE</strong> Note[<span style='color:#00ffff'>" 
+            + noteId + "</span>] to BaseNote? You will <span style='color:#00ffff'>lose all dependencies</span> to notes or measure bars.";
+        modal.appendChild(message);
+    
+        const btnContainer = document.createElement('div');
+        btnContainer.className = 'modal-btn-container';
+    
+        const yesButton = document.createElement('button');
+        yesButton.textContent = 'Yes';
+        yesButton.style.backgroundColor = '#00ffff';
+        yesButton.style.color = '#151525';
+        yesButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            evaluateNoteToBaseNote(noteId);
+            document.body.removeChild(overlay);
+        });
+    
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = 'Cancel';
+        cancelButton.style.backgroundColor = '#add8e6';
+        cancelButton.style.color = '#000';
+        cancelButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            document.body.removeChild(overlay);
+        });
+    
+        btnContainer.appendChild(yesButton);
+        btnContainer.appendChild(cancelButton);
+        modal.appendChild(btnContainer);
+        overlay.appendChild(modal);
+    
+        // When clicking outside modal, only remove overlay without affecting selection.
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) {
+                e.stopPropagation();
+                document.body.removeChild(overlay);
+            }
+        });
+    
+        document.body.appendChild(overlay);
+    }
+
+    function showEvaluateModuleConfirmation() {
+        const overlay = document.createElement('div');
+        overlay.className = 'delete-confirm-overlay';
+    
+        const modal = document.createElement('div');
+        modal.className = 'delete-confirm-modal';
+    
+        const message = document.createElement('p');
+        message.innerHTML = "Are you sure you want to <strong>EVALUATE</strong> the entire module? This will simplify all notes to only have dependencies to the <span style='color:#00ffff'>BaseNote</span>.";
+        modal.appendChild(message);
+    
+        const btnContainer = document.createElement('div');
+        btnContainer.className = 'modal-btn-container';
+    
+        const yesButton = document.createElement('button');
+        yesButton.textContent = 'Yes';
+        yesButton.style.backgroundColor = '#00ffff';
+        yesButton.style.color = '#151525';
+        yesButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            evaluateEntireModule();
+            document.body.removeChild(overlay);
+        });
+    
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = 'Cancel';
+        cancelButton.style.backgroundColor = '#add8e6';
+        cancelButton.style.color = '#000';
+        cancelButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            document.body.removeChild(overlay);
+        });
+    
+        btnContainer.appendChild(yesButton);
+        btnContainer.appendChild(cancelButton);
+        modal.appendChild(btnContainer);
+        overlay.appendChild(modal);
+    
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) {
+                e.stopPropagation();
+                document.body.removeChild(overlay);
+            }
+        });
+    
+        document.body.appendChild(overlay);
+    }
+    
+    // Function to evaluate a note to base note
+    function evaluateNoteToBaseNote(noteId) {
+        const note = window.myModule.getNoteById(parseInt(noteId, 10));
+        if (!note) {
+            console.error("Note not found:", noteId);
+            return;
+        }
+        
+        // Process each variable that might have dependencies
+        const variablesToProcess = ['startTime', 'duration', 'frequency'];
+        let success = true;
+        const MAX_ITERATIONS = 10;
+        
+        variablesToProcess.forEach(varName => {
+            if (!note.variables[varName + 'String']) return;
+            
+            let currentRawExpr = note.variables[varName + 'String'];
+            let newRawExpr = currentRawExpr;
+            let iterations = 0;
+            
+            // Iteratively simplify until no changes occur or max iterations reached.
+            // If the expression no longer contains any "module.getNoteById(", we break early.
+            do {
+                currentRawExpr = newRawExpr;
+                if (currentRawExpr.indexOf("module.getNoteById(") === -1) break;
+                newRawExpr = replaceNoteReferencesWithBaseNoteOnly(currentRawExpr, window.myModule);
+                iterations++;
+            } while (currentRawExpr !== newRawExpr && iterations < MAX_ITERATIONS);
+            
+            try {
+                // Test the simplified expression to ensure its value matches the original
+                const testFunc = new Function("module", "Fraction", "return " + newRawExpr + ";");
+                const testResult = testFunc(window.myModule, Fraction);
+                const originalValue = note.getVariable(varName).valueOf();
+                const newValue = testResult.valueOf();
+                
+                if (Math.abs(originalValue - newValue) > 0.0001) {
+                    console.warn(`Warning: Skipping update for ${varName} in note ${noteId} - value would change from ${originalValue} to ${newValue}`);
+                    return; // Skip updating this variable
+                }
+                
+                // Update the note's variable with the fully simplified expression
+                note.setVariable(varName, function() {
+                    return new Function("module", "Fraction", "return " + newRawExpr + ";")(window.myModule, Fraction);
+                });
+                note.setVariable(varName + 'String', newRawExpr);
+            } catch (error) {
+                console.error(`Error evaluating ${varName} for note ${noteId}:`, error);
+                showNotification(`Error evaluating ${varName}: ${error.message}`, 'error');
+                success = false;
+            }
+        });
+        
+        // Force a recursive recompilation of this note and its dependents
+        recompileNoteAndDependents(note.id);
+        
+        window.myModule.markNoteDirty(note.id);
+        window.evaluatedNotes = window.myModule.evaluateModule();
+        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+        
+        // Refresh the note widget to show the new values
+        const noteElement = document.querySelector(`[data-note-id="${noteId}"]`);
+        if (noteElement) {
+            showNoteVariables(note, noteElement);
+        }
+        
+        if (success) {
+            showNotification('Note evaluated successfully!', 'success');
+        }
+    }
+    
+    // Function to replace references to other notes with their expressions
+    // This will recursively replace references until only base note references remain
+    function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
+        // Regular expression to find note references: module.getNoteById(X)
+        const noteRefRegex = /module\.getNoteById\((\d+)\)\.getVariable\('([^']+)'\)/g;
+        const measureLengthRegex = /module\.findMeasureLength\(module\.getNoteById\((\d+)\)\)/g;
+        const tempoRegex = /module\.findTempo\(module\.getNoteById\((\d+)\)\)/g;
+        
+        // Keep replacing references until no more changes
+        let prevExpr = '';
+        let currentExpr = expr;
+        let iterations = 0;
+        const MAX_ITERATIONS = 10; // Prevent infinite loops
+        
+        while (prevExpr !== currentExpr && iterations < MAX_ITERATIONS) {
+            prevExpr = currentExpr;
+            iterations++;
+            
+            // Replace measure length references
+            currentExpr = currentExpr.replace(measureLengthRegex, (match, noteId) => {
+                if (noteId === '0') {
+                    return 'module.findMeasureLength(module.baseNote)';
+                }
+                
+                // Replace with base note reference
+                return 'module.findMeasureLength(module.baseNote)';
+            });
+            
+            // Replace tempo references
+            currentExpr = currentExpr.replace(tempoRegex, (match, noteId) => {
+                if (noteId === '0') {
+                    return 'module.findTempo(module.baseNote)';
+                }
+                
+                // Replace with base note reference
+                return 'module.findTempo(module.baseNote)';
+            });
+            
+            // Replace each note reference with its expression
+            currentExpr = currentExpr.replace(noteRefRegex, (match, noteId, varName) => {
+                // If it's a reference to the base note, keep it
+                if (noteId === '0') {
+                    return `module.baseNote.getVariable('${varName}')`;
+                }
+                
+                // Get the referenced note
+                const refNote = moduleInstance.getNoteById(parseInt(noteId, 10));
+                if (!refNote) return match; // If note not found, keep original reference
+                
+                // Get the raw expression for the variable
+                const rawExpr = refNote.variables[varName + 'String'];
+                if (!rawExpr) return match; // If no raw expression, keep original reference
+                
+                // Return the raw expression (it will be processed in the next iteration if needed)
+                return `(${rawExpr})`;
+            });
+        }
+        
+        // Replace any remaining module.getNoteById(0) with module.baseNote
+        currentExpr = currentExpr.replace(/module\.getNoteById\(0\)/g, 'module.baseNote');
+        
+        // Apply simplifications
+        return simplifyExpressions(currentExpr);
+    }
+
+    function simplifyExpressions(expr) {
+        try {
+            // Remove excess parentheses
+            let simplified = removeExcessParentheses(expr);
+            
+            // Simplify frequency expressions
+            if (simplified.includes("module.baseNote.getVariable('frequency')")) {
+                simplified = simplifyFrequencyExpression(simplified);
+            }
+            
+            // Simplify duration expressions
+            if (simplified.includes("new Fraction(60).div(module.findTempo") && 
+                !simplified.includes("module.baseNote.getVariable('startTime')")) {
+                simplified = simplifyDurationExpression(simplified);
+            }
+            
+            // Simplify startTime expressions - this is the most complex case
+            if (simplified.includes("module.baseNote.getVariable('startTime')")) {
+                simplified = simplifyStartTimeExpression(simplified);
+            }
+            
+            // Final cleanup of parentheses
+            simplified = removeExcessParentheses(simplified);
+            
+            return simplified;
+        } catch (error) {
+            console.error("Error in simplifyExpressions:", error);
+            return expr; // Return original if simplification fails
+        }
+    }
+    
+    // Remove excess parentheses
+    function removeExcessParentheses(expr) {
+        let result = expr;
+        let prev = '';
+        
+        // Replace ((x)) with (x) repeatedly until no more changes
+        while (prev !== result) {
+            prev = result;
+            result = result.replace(/\(\(([^()]*)\)\)/g, '($1)');
+        }
+        
+        return result;
+    }
+    
+    // Simplify frequency expressions like new Fraction(a,b).mul(new Fraction(c,d).mul(module.baseNote.getVariable('frequency')))
+    function simplifyFrequencyExpression(expr) {
+        try {
+            // Check if this is a frequency expression with multiple fractions
+            if (!expr.includes("module.baseNote.getVariable('frequency')") || !expr.includes("new Fraction")) {
+                return expr;
+            }
+            
+            // Extract all fractions
+            const fractions = [];
+            const fractionRegex = /new\s+Fraction\((\d+),\s*(\d+)\)/g;
+            let match;
+            
+            while ((match = fractionRegex.exec(expr)) !== null) {
+                fractions.push({
+                    n: parseInt(match[1], 10),
+                    d: parseInt(match[2], 10)
+                });
+            }
+            
+            // If we have multiple fractions, combine them
+            if (fractions.length > 1) {
+                let resultN = 1;
+                let resultD = 1;
+                
+                fractions.forEach(frac => {
+                    resultN *= frac.n;
+                    resultD *= frac.d;
+                });
+                
+                // Simplify the fraction using GCD
+                const gcd = findGCD(resultN, resultD);
+                resultN /= gcd;
+                resultD /= gcd;
+                
+                // Create a new expression with the simplified fraction
+                return `new Fraction(${resultN}, ${resultD}).mul(module.baseNote.getVariable('frequency'))`;
+            }
+        } catch (error) {
+            console.error("Error simplifying frequency expression:", error);
+        }
+        
+        return expr;
+    }
+
+    // Simplify duration expressions like new Fraction(60).div(module.findTempo(module.baseNote)).mul(X)
+    function simplifyDurationExpression(expr) {
+        try {
+            // Check if this is a simple tempo-based duration expression
+            const simpleDurationPattern = /^new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\(([^)]+)\)$/;
+            const match = expr.match(simpleDurationPattern);
+            
+            if (match) {
+                // This is already a simple duration expression, no need to simplify
+                return expr;
+            }
+            
+            // If it's a more complex expression with multiple tempo terms, try to simplify
+            const tempoTerms = [];
+            const tempoRegex = /new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\(([^)]+)\)/g;
+            let tempMatch;
+            
+            while ((tempMatch = tempoRegex.exec(expr)) !== null) {
+                const multiplier = parseFloat(tempMatch[1]);
+                if (!isNaN(multiplier)) {
+                    tempoTerms.push({
+                        term: tempMatch[0],
+                        multiplier: multiplier
+                    });
+                }
+            }
+            
+            // If we have multiple tempo terms, combine them
+            if (tempoTerms.length > 1) {
+                // Calculate the sum of multipliers
+                const totalMultiplier = tempoTerms.reduce((sum, term) => sum + term.multiplier, 0);
+                
+                // Check if the expression is a simple addition of tempo terms
+                const isSimpleAddition = expr.replace(/new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\([^)]+\)/g, '')
+                                        .replace(/\.\s*add\s*\(/g, '')
+                                        .replace(/\)/g, '')
+                                        .trim() === '';
+                
+                if (isSimpleAddition) {
+                    // Create a new expression with the combined term
+                    return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${totalMultiplier})`;
+                }
+            }
+        } catch (error) {
+            console.error("Error simplifying duration expression:", error);
+        }
+        
+        return expr;
+    }
+
+    function parseAndSimplifyExpression(expr) {
+        try {
+            // First, normalize the expression by removing all unnecessary parentheses
+            let normalizedExpr = expr.replace(/\(\(/g, '(').replace(/\)\)/g, ')');
+            while (normalizedExpr !== expr) {
+                expr = normalizedExpr;
+                normalizedExpr = expr.replace(/\(\(/g, '(').replace(/\)\)/g, ')');
+            }
+            
+            // Parse the expression into a tree structure
+            function parseExpr(e) {
+                // Base case: this is a simple term
+                if (!e.includes('.add(')) {
+                    return { type: 'term', value: e };
+                }
+                
+                // Find the outermost .add() call
+                let depth = 0;
+                let addIndex = -1;
+                for (let i = 0; i < e.length - 4; i++) {
+                    if (e[i] === '(') depth++;
+                    else if (e[i] === ')') depth--;
+                    
+                    if (depth === 0 && e.substring(i, i+5) === '.add(') {
+                        addIndex = i;
+                        break;
+                    }
+                }
+                
+                if (addIndex === -1) {
+                    return { type: 'term', value: e };
+                }
+                
+                const left = e.substring(0, addIndex);
+                
+                // Find the matching closing parenthesis
+                depth = 1;
+                let closeIndex = -1;
+                for (let i = addIndex + 5; i < e.length; i++) {
+                    if (e[i] === '(') depth++;
+                    else if (e[i] === ')') {
+                        depth--;
+                        if (depth === 0) {
+                            closeIndex = i;
+                            break;
+                        }
+                    }
+                }
+                
+                if (closeIndex === -1) {
+                    return { type: 'term', value: e };
+                }
+                
+                const right = e.substring(addIndex + 5, closeIndex);
+                
+                return {
+                    type: 'add',
+                    left: parseExpr(left),
+                    right: parseExpr(right)
+                };
+            }
+            
+            // Analyze the parsed tree to extract terms
+            function analyzeTree(node) {
+                const result = {
+                    baseStartTime: false,
+                    measureTerms: [],
+                    tempoTerms: []
+                };
+                
+                if (node.type === 'term') {
+                    const term = node.value;
+                    
+                    // Check if this is the base startTime
+                    if (term.includes("module.baseNote.getVariable('startTime')") && 
+                        !term.includes('.add(')) {
+                        result.baseStartTime = true;
+                    }
+                    
+                    // Check if this is a measure length term with multiplier
+                    const complexMeasureMatch = term.match(/new\s+Fraction\((\d+)\)\.mul\(module\.findMeasureLength\(module\.baseNote\)\)/);
+                    if (complexMeasureMatch) {
+                        const multiplier = parseInt(complexMeasureMatch[1], 10);
+                        if (!isNaN(multiplier)) {
+                            result.measureTerms.push(multiplier);
+                        }
+                    }
+                    
+                    // Check if this is a simple measure length term
+                    else if (term === 'module.findMeasureLength(module.baseNote)') {
+                        result.measureTerms.push(1);
+                    }
+                    
+                    // Check if this is a tempo term with multiplier
+                    const complexTempoMatch = term.match(/new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\(([^)]+)\)/);
+                    if (complexTempoMatch) {
+                        const multiplier = parseFloat(complexTempoMatch[1]);
+                        if (!isNaN(multiplier)) {
+                            result.tempoTerms.push(multiplier);
+                        }
+                    }
+                    
+                    // Check if this is a simple tempo term
+                    else if (term === 'new Fraction(60).div(module.findTempo(module.baseNote))') {
+                        result.tempoTerms.push(1);
+                    }
+                    
+                    return result;
+                }
+                
+                if (node.type === 'add') {
+                    const leftResult = analyzeTree(node.left);
+                    const rightResult = analyzeTree(node.right);
+                    
+                    return {
+                        baseStartTime: leftResult.baseStartTime || rightResult.baseStartTime,
+                        measureTerms: [...leftResult.measureTerms, ...rightResult.measureTerms],
+                        tempoTerms: [...leftResult.tempoTerms, ...rightResult.tempoTerms]
+                    };
+                }
+                
+                return result;
+            }
+            
+            // Parse and analyze the expression
+            const parsedExpr = parseExpr(normalizedExpr);
+            const analysis = analyzeTree(parsedExpr);
+            
+            console.log("Expression analysis:", analysis);
+            
+            // Only proceed if we have the base startTime and some terms to simplify
+            if (analysis.baseStartTime && 
+                (analysis.measureTerms.length > 0 || analysis.tempoTerms.length > 0)) {
+                
+                // Build the new expression
+                let newExpr = "module.baseNote.getVariable('startTime')";
+                
+                // Add measure length term if needed
+                if (analysis.measureTerms.length > 0) {
+                    const totalMeasures = analysis.measureTerms.reduce((sum, val) => sum + val, 0);
+                    if (totalMeasures === 1) {
+                        newExpr += ".add(module.findMeasureLength(module.baseNote))";
+                    } else {
+                        newExpr += `.add(new Fraction(${totalMeasures}).mul(module.findMeasureLength(module.baseNote)))`;
+                    }
+                }
+                
+                // Add tempo term if needed
+                if (analysis.tempoTerms.length > 0) {
+                    const totalMultiplier = analysis.tempoTerms.reduce((sum, val) => sum + val, 0);
+                    if (totalMultiplier === 1) {
+                        newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)))`;
+                    } else {
+                        newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${totalMultiplier}))`;
+                    }
+                }
+                
+                console.log("New expression from tree parsing:", newExpr);
+                
+                // Test the new expression to make sure it evaluates to the same value
+                try {
+                    const originalFunc = new Function("module", "Fraction", "return " + expr + ";");
+                    const newFunc = new Function("module", "Fraction", "return " + newExpr + ";");
+                    
+                    const originalValue = originalFunc(window.myModule, Fraction).valueOf();
+                    const newValue = newFunc(window.myModule, Fraction).valueOf();
+                    
+                    console.log("Original value:", originalValue);
+                    console.log("New value:", newValue);
+                    
+                    // If the values are the same (within a small tolerance), return the simplified expression
+                    if (Math.abs(originalValue - newValue) < 0.0001) {
+                        console.log("Tree-based simplification successful!");
+                        return newExpr;
+                    } else {
+                        console.warn(`Tree-based simplification would change value from ${originalValue} to ${newValue}, keeping original`);
+                    }
+                } catch (evalError) {
+                    console.error("Error evaluating expressions in tree-based approach:", evalError);
+                }
+            }
+        } catch (error) {
+            console.error("Error in tree-based simplification:", error);
+        }
+        
+        return expr;
+    }
+    
+    // Update the main simplifyStartTimeExpression function to try both approaches:
+    function simplifyStartTimeExpression(expr) {
+        try {
+            // First try the regex-based approach
+            const regexResult = simplifyStartTimeExpressionWithRegex(expr);
+            
+            // If the regex approach didn't simplify the expression, try the tree-based approach
+            if (regexResult === expr) {
+                return parseAndSimplifyExpression(expr);
+            }
+            
+            return regexResult;
+        } catch (error) {
+            console.error("Error in simplifyStartTimeExpression:", error);
+            return expr;
+        }
+    }
+    
+    // Simplify startTime expressions with multiple add operations
+    function simplifyStartTimeExpressionWithRegex(expr) {
+        try {
+            // First, let's do a basic check to see if this is a startTime expression
+            if (!expr.includes("module.baseNote.getVariable('startTime')")) {
+                return expr;
+            }
+            
+            console.log("Simplifying:", expr);
+            
+            // Extract all measure length terms, including those with multipliers
+            const measureTerms = [];
+            
+            // Match measure length terms with multipliers first
+            const complexMeasureRegex = /new\s+Fraction\((\d+)\)\.mul\(module\.findMeasureLength\(module\.baseNote\)\)/g;
+            let complexMeasureMatch;
+            let tempExpr = expr;
+            while ((complexMeasureMatch = complexMeasureRegex.exec(tempExpr)) !== null) {
+                const multiplier = parseInt(complexMeasureMatch[1], 10);
+                if (!isNaN(multiplier)) {
+                    measureTerms.push(multiplier);
+                    console.log("Found complex measure term with multiplier:", multiplier);
+                }
+            }
+            
+            // Now match simple measure length terms that aren't part of a multiplier expression
+            // This is trickier - we need to check that it's not preceded by .mul(
+            const simpleMeasureRegex = /module\.findMeasureLength\(module\.baseNote\)/g;
+            let simpleMeasureMatch;
+            tempExpr = expr;
+            while ((simpleMeasureMatch = simpleMeasureRegex.exec(tempExpr)) !== null) {
+                // Check if this is NOT part of a term with a multiplier
+                const beforeMatch = tempExpr.substring(0, simpleMeasureMatch.index);
+                const lastMulIndex = beforeMatch.lastIndexOf(".mul(");
+                
+                // If there's no .mul( or it's not close enough to be part of this term
+                if (lastMulIndex === -1 || simpleMeasureMatch.index - lastMulIndex > 50) {
+                    measureTerms.push(1); // Simple measure length without multiplier
+                    console.log("Found simple measure term");
+                }
+            }
+            
+            // Extract tempo terms
+            const tempoTerms = [];
+            const simpleTempoRegex = /new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)(?!\.mul)/g;
+            let simpleTempoMatch;
+            while ((simpleTempoMatch = simpleTempoRegex.exec(expr)) !== null) {
+                tempoTerms.push(1); // Simple tempo term without multiplier
+                console.log("Found simple tempo term");
+            }
+            
+            const complexTempoRegex = /new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\(([^)]+)\)/g;
+            let complexTempoMatch;
+            while ((complexTempoMatch = complexTempoRegex.exec(expr)) !== null) {
+                const multiplier = parseFloat(complexTempoMatch[1]);
+                if (!isNaN(multiplier)) {
+                    tempoTerms.push(multiplier);
+                    console.log("Found complex tempo term with multiplier:", multiplier);
+                }
+            }
+            
+            console.log("Measure terms:", measureTerms);
+            console.log("Tempo terms:", tempoTerms);
+            
+            // Only proceed if we found terms to simplify
+            if (measureTerms.length > 0 || tempoTerms.length > 0) {
+                // Build the new expression
+                let newExpr = "module.baseNote.getVariable('startTime')";
+                
+                // Add measure length term if needed
+                if (measureTerms.length > 0) {
+                    const totalMeasures = measureTerms.reduce((sum, val) => sum + val, 0);
+                    if (totalMeasures === 1) {
+                        newExpr += ".add(module.findMeasureLength(module.baseNote))";
+                    } else {
+                        newExpr += `.add(new Fraction(${totalMeasures}).mul(module.findMeasureLength(module.baseNote)))`;
+                    }
+                }
+                
+                // Add tempo term if needed
+                if (tempoTerms.length > 0) {
+                    const totalMultiplier = tempoTerms.reduce((sum, val) => sum + val, 0);
+                    if (totalMultiplier === 1) {
+                        newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)))`;
+                    } else {
+                        newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${totalMultiplier}))`;
+                    }
+                }
+                
+                console.log("New expression:", newExpr);
+                
+                // Test the new expression to make sure it evaluates to the same value
+                try {
+                    const originalFunc = new Function("module", "Fraction", "return " + expr + ";");
+                    const newFunc = new Function("module", "Fraction", "return " + newExpr + ";");
+                    
+                    const originalValue = originalFunc(window.myModule, Fraction).valueOf();
+                    const newValue = newFunc(window.myModule, Fraction).valueOf();
+                    
+                    console.log("Original value:", originalValue);
+                    console.log("New value:", newValue);
+                    
+                    // If the values are the same (within a small tolerance), return the simplified expression
+                    if (Math.abs(originalValue - newValue) < 0.0001) {
+                        console.log("Simplification successful!");
+                        return newExpr;
+                    } else {
+                        console.warn(`Simplification would change value from ${originalValue} to ${newValue}, keeping original`);
+                        return expr;
+                    }
+                } catch (evalError) {
+                    console.error("Error evaluating expressions:", evalError);
+                    return expr;
+                }
+            }
+        } catch (error) {
+            console.error("Error simplifying startTime expression:", error);
+        }
+        
+        return expr;
+    }
+    
+    // Find greatest common divisor (GCD)
+    function findGCD(a, b) {
+        a = Math.abs(a);
+        b = Math.abs(b);
+        while (b) {
+            const temp = b;
+            b = a % b;
+            a = temp;
+        }
+        return a;
+    }
+
+    // Function to evaluate the entire module
+    function evaluateEntireModule() {
+        // Get all notes except the base note
+        const noteIds = Object.keys(window.myModule.notes)
+            .map(id => parseInt(id, 10))
+            .filter(id => id !== 0);
+        
+        // Count of successfully evaluated notes
+        let successCount = 0;
+        let skippedCount = 0;
+        
+        // Evaluate each note to the base note
+        noteIds.forEach(noteId => {
+            try {
+                const note = window.myModule.getNoteById(noteId);
+                if (!note) return;
+                
+                // Process each variable that might have dependencies
+                const variablesToProcess = ['startTime', 'duration', 'frequency'];
+                let noteSuccess = true;
+                let noteSkipped = false;
+                
+                variablesToProcess.forEach(varName => {
+                    if (!note.variables[varName + 'String']) return;
+                    
+                    // Get the current raw expression
+                    const currentRawExpr = note.variables[varName + 'String'];
+                    
+                    try {
+                        // Replace all references to other notes (except base note) with their expressions
+                        const newRawExpr = replaceNoteReferencesWithBaseNoteOnly(currentRawExpr, window.myModule);
+                        
+                        // Only update if the expression changed
+                        if (newRawExpr !== currentRawExpr) {
+                            // Test the expression to make sure it's valid and preserves the original value
+                            const testFunc = new Function("module", "Fraction", "return " + newRawExpr + ";");
+                            const testResult = testFunc(window.myModule, Fraction);
+                            
+                            // Get the original value
+                            const originalValue = note.getVariable(varName).valueOf();
+                            const newValue = testResult.valueOf();
+                            
+                            // If the values are significantly different, don't update
+                            if (Math.abs(originalValue - newValue) > 0.0001) {
+                                console.warn(`Warning: Skipping update for ${varName} in note ${noteId} - value would change from ${originalValue} to ${newValue}`);
+                                noteSkipped = true;
+                                return; // Skip this variable
+                            }
+                            
+                            // If the values match, update the expression
+                            note.setVariable(varName, function() {
+                                return new Function("module", "Fraction", "return " + newRawExpr + ";")(window.myModule, Fraction);
+                            });
+                            note.setVariable(varName + 'String', newRawExpr);
+                        }
+                    } catch (error) {
+                        console.error(`Error evaluating ${varName} for note ${noteId}:`, error);
+                        noteSuccess = false;
+                    }
+                });
+                
+                // Mark this note as dirty in the module
+                window.myModule.markNoteDirty(noteId);
+                
+                if (noteSuccess) successCount++;
+                if (noteSkipped) skippedCount++;
+                
+            } catch (error) {
+                console.error(`Error evaluating note ${noteId}:`, error);
+            }
+        });
+        
+        // Reevaluate and update the visual representation
+        window.evaluatedNotes = window.myModule.evaluateModule();
+        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+        
+        // Show success notification
+        showNotification(`Module evaluation complete: ${successCount} notes processed, ${skippedCount} notes skipped`, 'success');
+    }
+    
+    // Helper function to show notifications
+    function showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.textContent = message;
+        notification.style.position = 'fixed';
+        notification.style.bottom = '20px';
+        notification.style.right = '20px';
+        notification.style.padding = '10px 20px';
+        notification.style.borderRadius = '4px';
+        notification.style.zIndex = '9999';
+        notification.style.fontFamily = "'Roboto Mono', monospace";
+        notification.style.fontSize = '14px';
+        notification.style.transition = 'opacity 0.3s ease-in-out';
+        
+        if (type === 'success') {
+            notification.style.backgroundColor = 'rgba(0, 255, 255, 0.8)';
+            notification.style.color = '#151525';
+        } else if (type === 'error') {
+            notification.style.backgroundColor = 'rgba(255, 0, 0, 0.8)';
+            notification.style.color = '#fff';
+        } else {
+            notification.style.backgroundColor = 'rgba(255, 168, 0, 0.8)';
+            notification.style.color = '#000';
+        }
+        
+        document.body.appendChild(notification);
+        
+        setTimeout(() => {
+            notification.style.opacity = '0';
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    document.body.removeChild(notification);
+                }
+            }, 300);
+        }, 3000);
     }
 
     // Helper for determining the note image
@@ -1144,7 +2022,11 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         showCleanSlateConfirmation,
         validateExpression,
         invalidateDependencyGraphCache,
-        setExternalFunctions
+        setExternalFunctions,
+        showEvaluateConfirmation,
+        showEvaluateModuleConfirmation,
+        evaluateNoteToBaseNote,
+        evaluateEntireModule
     };
 
     // Initialize when DOM is loaded
