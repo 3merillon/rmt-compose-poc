@@ -112,7 +112,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             
             // Save to localStorage
             localStorage.setItem('ui-state', JSON.stringify(uiState));
-            console.log('UI state saved to localStorage');
+            //console.log('UI state saved to localStorage');
         } catch (error) {
             console.error('Error saving UI state to localStorage:', error);
         }
@@ -311,7 +311,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     updateMaxHeight();
                     ensurePlaceholdersAtEnd();
                     
-                    console.log('UI state loaded from localStorage');
+                    //console.log('UI state loaded from localStorage');
                     return true;
                 });
             });
@@ -325,7 +325,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
     function clearUIStateFromLocalStorage() {
         try {
             localStorage.removeItem('ui-state');
-            console.log('UI state cleared from localStorage');
+            //console.log('UI state cleared from localStorage');
         } catch (error) {
             console.error('Error clearing UI state from localStorage:', error);
         }

@@ -100,10 +100,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         const octaveContainer = document.createElement('div');
         octaveContainer.id = 'octave-indicators-container';
         octaveContainer.className = 'octave-indicators-container';
-        document.body.appendChild(octaveContainer);
         
-        // We'll create 11 bars: 5 above, 5 below, and 1 for the reference note
-        for (let i = -5; i <= 5; i++) {
+        // Insert the container before the first child of the body
+        // This ensures it's at the bottom of the stacking context
+        document.body.insertBefore(octaveContainer, document.body.firstChild);
+        
+        // We'll create 17 bars: 8 above, 8 below, and 1 for the reference note
+        for (let i = -8; i <= 8; i++) {
             const indicator = document.createElement('div');
             indicator.className = 'octave-indicator';
             indicator.setAttribute('data-octave', i);
@@ -120,10 +123,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             indicator.appendChild(label);
             
             octaveContainer.appendChild(indicator);
-            console.log(`Created octave indicator for octave ${i}`);
         }
         
-        console.log("Octave indicators created, container:", octaveContainer);
         return octaveContainer;
     }
     
@@ -137,7 +138,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
         
         // Get the reference frequency (from selected note or base note)
-        // Always default to base note if no note is selected
         let referenceNote = currentSelectedNote || myModule.baseNote;
         let referenceFreq = referenceNote.getVariable('frequency').valueOf();
         
@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             
             // Create a point in space and convert to screen coordinates
             // Add 10px offset (half of the note height) to center the line on the note
-            const point = new tapspace.geometry.Point(space, { x: 0, y: y + 10.5 });
+            const point = new tapspace.geometry.Point(space, { x: 0, y: y + 10 });
             const screenPos = point.transitRaw(viewport);
             
             // Position the indicator
@@ -174,7 +174,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             const label = indicator.querySelector('.octave-label');
             if (label) {
                 if (octaveOffset === 0) {
-                    label.textContent = currentSelectedNote ? `Note [${referenceNote.id}]` : 'BaseNote';
+                    // Special case for the reference note
+                    if (referenceNote === myModule.baseNote) {
+                        label.textContent = 'BaseNote'; // Always show "BaseNote" for the base note
+                    } else {
+                        label.textContent = `Reference [${referenceNote.id}]`;
+                    }
                 } else {
                     label.textContent = octaveOffset > 0 ? `+${octaveOffset}` : octaveOffset;
                 }
@@ -189,7 +194,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     function initializeOctaveIndicators() {
         const octaveIndicators = createOctaveIndicators();
         updateOctaveIndicators();
-        console.log("Octave indicators initialized");
     }
 
     // Add CSS for octave indicators
