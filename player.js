@@ -1364,13 +1364,17 @@ function createNoteElement(note, index) {
         // Adjust deltaX based on the current scale
         let adjustedDeltaX = deltaX / scale;
         
+        // Convert the adjusted pixel delta to time units
+        // Use a safer approach to create fractions from potentially non-integer values
+        const tempNumerator = Math.round(adjustedDeltaX * 1000); // Scale up and round to avoid floating point issues
+        const tempDenominator = 200 * 1000; // Scale up the denominator by the same factor
+        let deltaTime = new Fraction(tempNumerator, tempDenominator);
+        
         const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
         const beatLength = 60 / baseTempo;
         const step = beatLength / 4; // sixteenth-note step.
         
-        // Use a safer approach to create fractions from potentially non-integer values
-        const deltaTime = adjustedDeltaX / 200;
-        let snappedDelta = Math.round(deltaTime / step) * step;
+        let snappedDelta = Math.round(deltaTime.valueOf() / step) * step;
         
         // Use a safer approach to create the new beat offset fraction
         const newBeatOffset = Math.max(0, dragData.originalBeatOffset + snappedDelta / beatLength);
@@ -1390,6 +1394,8 @@ function createNoteElement(note, index) {
             denominator = '1';
         }
         
+        // IMPORTANT: Create the new expression using new Fraction(numerator, denominator) format
+        // instead of a decimal multiplier to ensure consistent behavior
         let newRaw = dragData.reference +
             ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + dragData.reference +
             ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";

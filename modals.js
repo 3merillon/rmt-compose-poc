@@ -752,8 +752,29 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
     
         document.body.appendChild(overlay);
     }
+
+    // Utility function: Balance parentheses in an expression
+    function balanceParentheses(expr) {
+        let openCount = 0;
+        for (const char of expr) {
+        if (char === '(') openCount++;
+        else if (char === ')') openCount--;
+        }
+        // If there are extra open parentheses, append the needed closing ones.
+        if (openCount > 0) {
+        expr += ')'.repeat(openCount);
+        }
+        // If there are extra closing parentheses, remove them from the end.
+        if (openCount < 0) {
+        while (openCount < 0 && expr.endsWith(')')) {
+            expr = expr.slice(0, -1);
+            openCount++;
+        }
+        }
+        return expr;
+    }
     
-    // Function to evaluate a note to base note
+    // Function to evaluate a note to base note with iterative simplification and cleanup of extra parentheses
     function evaluateNoteToBaseNote(noteId) {
         const note = window.myModule.getNoteById(parseInt(noteId, 10));
         if (!note) {
@@ -774,7 +795,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             let iterations = 0;
             
             // Iteratively simplify until no changes occur or max iterations reached.
-            // If the expression no longer contains any "module.getNoteById(", we break early.
+            // Also break if there are no "module.getNoteById(" references.
             do {
                 currentRawExpr = newRawExpr;
                 if (currentRawExpr.indexOf("module.getNoteById(") === -1) break;
@@ -782,8 +803,15 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                 iterations++;
             } while (currentRawExpr !== newRawExpr && iterations < MAX_ITERATIONS);
             
+            // Clean up extra parentheses using your existing function
+            newRawExpr = removeExcessParentheses(newRawExpr);
+            // Then balance any remaining unbalanced parentheses using our new utility.
+            newRawExpr = balanceParentheses(newRawExpr);
+            
+            console.log(`Final simplified expression for ${varName} (note ${noteId}): ${newRawExpr}`);
+            
             try {
-                // Test the simplified expression to ensure its value matches the original
+                // Test the simplified expression to ensure its value matches the original.
                 const testFunc = new Function("module", "Fraction", "return " + newRawExpr + ";");
                 const testResult = testFunc(window.myModule, Fraction);
                 const originalValue = note.getVariable(varName).valueOf();
@@ -791,10 +819,10 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                 
                 if (Math.abs(originalValue - newValue) > 0.0001) {
                     console.warn(`Warning: Skipping update for ${varName} in note ${noteId} - value would change from ${originalValue} to ${newValue}`);
-                    return; // Skip updating this variable
+                    return; // Skip updating this variable.
                 }
                 
-                // Update the note's variable with the fully simplified expression
+                // Update the note's variable with the fully simplified expression.
                 note.setVariable(varName, function() {
                     return new Function("module", "Fraction", "return " + newRawExpr + ";")(window.myModule, Fraction);
                 });
@@ -806,14 +834,13 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             }
         });
         
-        // Force a recursive recompilation of this note and its dependents
+        // Recompile this note and its dependents so the changes propagate.
         recompileNoteAndDependents(note.id);
-        
         window.myModule.markNoteDirty(note.id);
         window.evaluatedNotes = window.myModule.evaluateModule();
         externalFunctions.updateVisualNotes(window.evaluatedNotes);
         
-        // Refresh the note widget to show the new values
+        // Refresh the note widget to reflect the updated values.
         const noteElement = document.querySelector(`[data-note-id="${noteId}"]`);
         if (noteElement) {
             showNoteVariables(note, noteElement);
@@ -827,65 +854,57 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
     // Function to replace references to other notes with their expressions
     // This will recursively replace references until only base note references remain
     function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
-        // Regular expression to find note references: module.getNoteById(X)
+        // Regular expressions for matching note references and helper calls.
         const noteRefRegex = /module\.getNoteById\((\d+)\)\.getVariable\('([^']+)'\)/g;
         const measureLengthRegex = /module\.findMeasureLength\(module\.getNoteById\((\d+)\)\)/g;
         const tempoRegex = /module\.findTempo\(module\.getNoteById\((\d+)\)\)/g;
         
-        // Keep replacing references until no more changes
         let prevExpr = '';
         let currentExpr = expr;
         let iterations = 0;
-        const MAX_ITERATIONS = 10; // Prevent infinite loops
+        const MAX_ITERATIONS = 10;
         
         while (prevExpr !== currentExpr && iterations < MAX_ITERATIONS) {
             prevExpr = currentExpr;
             iterations++;
             
-            // Replace measure length references
+            // Replace measure length references: whatever note is referenced, use base note.
             currentExpr = currentExpr.replace(measureLengthRegex, (match, noteId) => {
-                if (noteId === '0') {
-                    return 'module.findMeasureLength(module.baseNote)';
-                }
-                
-                // Replace with base note reference
                 return 'module.findMeasureLength(module.baseNote)';
             });
             
-            // Replace tempo references
+            // Replace tempo references: force use of base note.
             currentExpr = currentExpr.replace(tempoRegex, (match, noteId) => {
-                if (noteId === '0') {
-                    return 'module.findTempo(module.baseNote)';
-                }
-                
-                // Replace with base note reference
                 return 'module.findTempo(module.baseNote)';
             });
             
-            // Replace each note reference with its expression
+            // Replace note references.
             currentExpr = currentExpr.replace(noteRefRegex, (match, noteId, varName) => {
-                // If it's a reference to the base note, keep it
+                // If noteId is "0" (assuming base note is identified with id 0), then return base note getter.
                 if (noteId === '0') {
                     return `module.baseNote.getVariable('${varName}')`;
                 }
-                
-                // Get the referenced note
                 const refNote = moduleInstance.getNoteById(parseInt(noteId, 10));
-                if (!refNote) return match; // If note not found, keep original reference
-                
-                // Get the raw expression for the variable
-                const rawExpr = refNote.variables[varName + 'String'];
-                if (!rawExpr) return match; // If no raw expression, keep original reference
-                
-                // Return the raw expression (it will be processed in the next iteration if needed)
+                if (!refNote) return match;
+                // Special case: if this is the 'startTime' variable and the referenced note’s raw expression 
+                // is exactly the base note’s getter, then substitute.
+                if (varName === 'startTime' &&
+                    refNote.variables &&
+                    refNote.variables[varName + 'String'] &&
+                    refNote.variables[varName + 'String'].trim() === "module.baseNote.getVariable('startTime')") {
+                    return `module.baseNote.getVariable('${varName}')`;
+                }
+                // Otherwise, use the raw expression of that variable (wrapped in parentheses).
+                const rawExpr = refNote.variables[varName + 'String'] || '';
+                if (!rawExpr) return match;
                 return `(${rawExpr})`;
             });
         }
         
-        // Replace any remaining module.getNoteById(0) with module.baseNote
+        // Final replacement: any occurrence of module.getNoteById(0) should be replaced with module.baseNote.
         currentExpr = currentExpr.replace(/module\.getNoteById\(0\)/g, 'module.baseNote');
         
-        // Apply simplifications
+        // Apply further expression simplifications if needed.
         return simplifyExpressions(currentExpr);
     }
 
@@ -1261,7 +1280,6 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             }
             
             // Now match simple measure length terms that aren't part of a multiplier expression
-            // This is trickier - we need to check that it's not preceded by .mul(
             const simpleMeasureRegex = /module\.findMeasureLength\(module\.baseNote\)/g;
             let simpleMeasureMatch;
             tempExpr = expr;
@@ -1286,13 +1304,27 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                 console.log("Found simple tempo term");
             }
             
-            const complexTempoRegex = /new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\(([^)]+)\)/g;
+            // Modified regex to match both decimal multipliers and Fraction multipliers
+            const complexTempoRegex = /new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\((?:new\s+Fraction\((\d+),\s*(\d+)\)|([^)]+))\)/g;
             let complexTempoMatch;
             while ((complexTempoMatch = complexTempoRegex.exec(expr)) !== null) {
-                const multiplier = parseFloat(complexTempoMatch[1]);
-                if (!isNaN(multiplier)) {
-                    tempoTerms.push(multiplier);
-                    console.log("Found complex tempo term with multiplier:", multiplier);
+                // Check if we matched a Fraction or a decimal
+                if (complexTempoMatch[1] !== undefined && complexTempoMatch[2] !== undefined) {
+                    // This is a Fraction(n,d) format
+                    const numerator = parseInt(complexTempoMatch[1], 10);
+                    const denominator = parseInt(complexTempoMatch[2], 10);
+                    if (!isNaN(numerator) && !isNaN(denominator) && denominator !== 0) {
+                        const multiplier = numerator / denominator;
+                        tempoTerms.push(multiplier);
+                        console.log("Found complex tempo term with fraction multiplier:", multiplier);
+                    }
+                } else if (complexTempoMatch[3] !== undefined) {
+                    // This is a decimal multiplier
+                    const multiplier = parseFloat(complexTempoMatch[3]);
+                    if (!isNaN(multiplier)) {
+                        tempoTerms.push(multiplier);
+                        console.log("Found complex tempo term with multiplier:", multiplier);
+                    }
                 }
             }
             
@@ -1320,7 +1352,9 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     if (totalMultiplier === 1) {
                         newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)))`;
                     } else {
-                        newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${totalMultiplier}))`;
+                        // Convert to fraction for more precise representation
+                        const fracObj = new Fraction(totalMultiplier);
+                        newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${fracObj.n}, ${fracObj.d})))`;
                     }
                 }
                 
