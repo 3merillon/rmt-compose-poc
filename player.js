@@ -42,6 +42,20 @@ document.addEventListener('DOMContentLoaded', async function() {
     let dragStartX = 0;
     let dragStartY = 0;
     
+    // Expose playback state and control functions to the window object
+    window.playerState = {
+        get isPlaying() { return isPlaying; },
+        get isPaused() { return isPaused; }
+    };
+    
+    window.playerControls = {
+        pause: function() {
+            if (isPlaying && !isPaused) {
+                pause();
+            }
+        }
+    };
+    
     // Scale factors for x and y axes
     let xScaleFactor = 1.0; // Default scale factor for x-axis
     let yScaleFactor = 1.0; // Default scale factor for y-axis

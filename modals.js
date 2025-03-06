@@ -404,6 +404,11 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             saveButton.addEventListener('click', () => {
                 const newRawValue = rawInput.value;
                 try {
+                    // If playback is ongoing, pause it
+                    if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
+                        window.playerControls.pause();
+                    }
+                    
                     if (key === 'color') {
                         if (measureId !== null) {
                             throw new Error('Color should not be editable for measure points');
@@ -676,6 +681,10 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         yesButton.style.color = '#151525';
         yesButton.addEventListener('click', function(e) {
             e.stopPropagation();
+            // Pause playback if it's active
+            if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
+                window.playerControls.pause();
+            }
             evaluateNoteToBaseNote(noteId);
             document.body.removeChild(overlay);
         });
@@ -725,6 +734,11 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         yesButton.style.color = '#151525';
         yesButton.addEventListener('click', function(e) {
             e.stopPropagation();
+            // Pause playback if it's active
+            if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
+                window.playerControls.pause();
+            }
+            // Call evaluateEntireModule instead of evaluateNoteToBaseNote
             evaluateEntireModule();
             document.body.removeChild(overlay);
         });
@@ -1738,6 +1752,10 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         yesButton.textContent = 'Yes';
         yesButton.addEventListener('click', function(e) {
             e.stopPropagation();
+            // Pause playback if it's active
+            if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
+                window.playerControls.pause();
+            }
             externalFunctions.deleteNoteAndDependencies(noteId);
             document.body.removeChild(overlay);
         });
@@ -1784,7 +1802,11 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         yesButton.textContent = 'Yes';
         yesButton.addEventListener('click', function(e) {
             e.stopPropagation();
-            externalFunctions.deleteNoteKeepDependencies(noteId);
+            // Pause playback if it's active
+            if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
+                window.playerControls.pause();
+            }
+            externalFunctions.deleteNoteAndDependencies(noteId);
             document.body.removeChild(overlay);
         });
     
@@ -1828,6 +1850,10 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         yesButton.textContent = 'Yes, Clean Slate';
         yesButton.addEventListener('click', function(e) {
             e.stopPropagation();
+            // Pause playback if it's active
+            if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
+                window.playerControls.pause();
+            }
             externalFunctions.cleanSlate();
             document.body.removeChild(overlay);
         });
