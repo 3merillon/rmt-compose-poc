@@ -1409,25 +1409,49 @@ function createNoteElement(note, index) {
         evaluatedNotes = myModule.evaluateModule();
         updateVisualNotes(evaluatedNotes);
         
-        // Store the currently selected note before updating
+        // Store the currently selected note and any selected measure bar before updating
         const previouslySelectedNote = currentSelectedNote;
         
-        // Check if this note is currently selected in the widget
-        const isCurrentlySelected = currentSelectedNote && currentSelectedNote.id === note.id;
-        if (isCurrentlySelected) {
-            // Get the note content element
-            const noteContent = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
-            if (noteContent) {
-                // Update the widget to reflect the new values
-                showNoteVariables(note, noteContent);
+        // Check if there's a selected measure bar triangle
+        const selectedMeasureBar = document.querySelector('.measure-bar-triangle.selected');
+        const selectedMeasureId = selectedMeasureBar ? selectedMeasureBar.getAttribute('data-note-id') : null;
+        
+        // Check if the note widget is currently visible
+        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+        
+        if (noteWidgetVisible) {
+            // If a measure bar was selected, reselect it
+            if (selectedMeasureId) {
+                const measureTriangle = document.querySelector(`.measure-bar-triangle[data-note-id="${selectedMeasureId}"]`);
+                if (measureTriangle) {
+                    const measureNote = myModule.getNoteById(parseInt(selectedMeasureId, 10));
+                    if (measureNote) {
+                        showNoteVariables(measureNote, measureTriangle, selectedMeasureId);
+                    }
+                }
             }
-        } 
-        // If another note was selected, reapply its selection and dependency highlights
-        else if (previouslySelectedNote && previouslySelectedNote.id !== note.id) {
-            const selectedElement = document.querySelector(`[data-note-id="${previouslySelectedNote.id}"]`);
-            if (selectedElement) {
-                // Re-show the note variables to reapply dependency highlights
-                showNoteVariables(previouslySelectedNote, selectedElement);
+            // Otherwise, if this note was selected, update its widget
+            else if (previouslySelectedNote && previouslySelectedNote.id === note.id) {
+                const noteContent = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+                if (noteContent) {
+                    showNoteVariables(note, noteContent);
+                }
+            }
+            // Otherwise, if another note was selected, reselect it
+            else if (previouslySelectedNote && previouslySelectedNote.id !== note.id) {
+                // Special handling for base note
+                if (previouslySelectedNote === myModule.baseNote) {
+                    const baseNoteElement = document.querySelector('.base-note-circle');
+                    if (baseNoteElement) {
+                        showNoteVariables(myModule.baseNote, baseNoteElement);
+                    }
+                } else {
+                    // Regular note
+                    const selectedElement = document.querySelector(`[data-note-id="${previouslySelectedNote.id}"]`);
+                    if (selectedElement) {
+                        showNoteVariables(previouslySelectedNote, selectedElement);
+                    }
+                }
             }
         }
         
