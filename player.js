@@ -19,681 +19,754 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail.com
 */
 document.addEventListener('DOMContentLoaded', async function() {
-  const INITIAL_VOLUME = 0.2;
-  const ATTACK_TIME_RATIO = 0.1;
-  const DECAY_TIME_RATIO = 0.1;
-  const SUSTAIN_LEVEL = 0.7;
-  const RELEASE_TIME_RATIO = 0.2;
-  const GENERAL_VOLUME_RAMP_TIME = 0.2;
-  const OSCILLATOR_POOL_SIZE = 64; // Maximum number of oscillators to keep in the pool
-  let oscillatorPool = [];
-  let gainNodePool = [];
-  let activeOscillators = new Map(); // Map to track active oscillators by ID
-  let scheduledTimeouts = [];
-  let currentTime = 0;
-  let playheadTime = 0;
-  let isPlaying = false;
-  let isPaused = false;
-  let isFadingOut = false;
-  let pausedAtTime = 0;
-  let totalPausedTime = 0;
-  let oscillators = [];
-  let isTrackingEnabled = false;
-  let isDragging = false;
-  let dragStartX = 0;
-  let dragStartY = 0;
-  const DRAG_THRESHOLD = 5;
-
-  // Expose necessary functions to the modals module
-  if (window.modals) {
-    window.modals.setExternalFunctions({
-      updateVisualNotes: updateVisualNotes,
-      updateBaseNoteFraction: updateBaseNoteFraction,
-      updateBaseNotePosition: updateBaseNotePosition,
-      hasMeasurePoints: hasMeasurePoints,
-      getLastMeasureId: getLastMeasureId,
-      updateTimingBoundaries: updateTimingBoundaries,
-      createMeasureBars: createMeasureBars,
-      deleteNoteAndDependencies: deleteNoteAndDependencies,
-      deleteNoteKeepDependencies: deleteNoteKeepDependencies,
-      cleanSlate: cleanSlate
-    });
-  }
-
-  // Cache DOM elements
-  const domCache = {
-      resetViewBtn: document.getElementById('resetViewBtn'),
-      noteWidget: document.getElementById('note-widget'),
-      closeWidgetBtn: document.querySelector('.note-widget-close'),
-      saveModuleBtn: document.getElementById('saveModuleBtn'),
-      widgetContent: document.querySelector('.note-widget-content'),
-      widgetTitle: document.getElementById('note-widget-title'),
-      measureBarsContainer: document.getElementById('measureBarsContainer'),
-      playheadContainer: document.getElementById('playheadContainer'),
-      trianglesContainer: document.getElementById('measureBarTrianglesContainer'),
-      volumeSlider: document.getElementById('volumeSlider'),
-      loadModuleInput: document.getElementById('loadModuleInput'),
-      loadModuleBtn: document.getElementById('loadModuleBtn'),
-      reorderModuleBtn: document.getElementById('reorderModuleBtn'),
-      trackingToggle: document.getElementById('trackingToggle'),
-      playPauseBtn: document.getElementById('playPauseBtn'),
-      stopButton: document.getElementById('stopButton'),
-      ppElement: document.querySelector('.pp'),
-      dropdownButton: document.querySelector('.dropdown-button'),
-      plusminus: document.querySelector('.plusminus'),
-      generalWidget: document.getElementById('general-widget')
-  };
-
-  // Function to efficiently apply class changes to elements
-  function batchClassOperation(elements, classesToAdd = [], classesToRemove = []) {
-      if (!elements || elements.length === 0) return;
-      
-      // Process in batches to avoid layout thrashing
-      const BATCH_SIZE = 50;
-      const total = elements.length;
-      
-      for (let i = 0; i < total; i += BATCH_SIZE) {
-          const batch = Array.from(elements).slice(i, i + BATCH_SIZE);
-          
-          // Use requestAnimationFrame to batch DOM updates
-          requestAnimationFrame(() => {
-              batch.forEach(el => {
-                  if (classesToRemove.length > 0) {
-                      el.classList.remove(...classesToRemove);
-                  }
-                  if (classesToAdd.length > 0) {
-                      el.classList.add(...classesToAdd);
-                  }
-              });
-          });
-      }
-  }
-
-  // Function to efficiently clear all highlights
-  function clearAllHighlights() {
-      const highlightedElements = document.querySelectorAll('.dependency, .dependent');
-      batchClassOperation(highlightedElements, [], ['dependency', 'dependent']);
-  }
-
-  function debounce(func, wait) {
-    let timeout;
-    return function(...args) {
-        const context = this;
-        clearTimeout(timeout);
-        timeout = setTimeout(() => func.apply(context, args), wait);
+    const INITIAL_VOLUME = 0.2;
+    const ATTACK_TIME_RATIO = 0.1;
+    const DECAY_TIME_RATIO = 0.1;
+    const SUSTAIN_LEVEL = 0.7;
+    const RELEASE_TIME_RATIO = 0.2;
+    const GENERAL_VOLUME_RAMP_TIME = 0.2;
+    const OSCILLATOR_POOL_SIZE = 64; // Maximum number of oscillators to keep in the pool
+    const DRAG_THRESHOLD = 5;
+    let oscillatorPool = [];
+    let gainNodePool = [];
+    let activeOscillators = new Map(); // Map to track active oscillators by ID
+    let scheduledTimeouts = [];
+    let currentTime = 0;
+    let playheadTime = 0;
+    let isPlaying = false;
+    let isPaused = false;
+    let isFadingOut = false;
+    let totalPausedTime = 0;
+    let isTrackingEnabled = false;
+    let isDragging = false;
+    let dragStartX = 0;
+    let dragStartY = 0;
+    
+    // Scale factors for x and y axes
+    let xScaleFactor = 1.0; // Default scale factor for x-axis
+    let yScaleFactor = 1.0; // Default scale factor for y-axis
+  
+    // Expose necessary functions to the modals module
+    if (window.modals) {
+      window.modals.setExternalFunctions({
+        updateVisualNotes: updateVisualNotes,
+        updateBaseNoteFraction: updateBaseNoteFraction,
+        updateBaseNotePosition: updateBaseNotePosition,
+        hasMeasurePoints: hasMeasurePoints,
+        getLastMeasureId: getLastMeasureId,
+        updateTimingBoundaries: updateTimingBoundaries,
+        createMeasureBars: createMeasureBars,
+        deleteNoteAndDependencies: deleteNoteAndDependencies,
+        deleteNoteKeepDependencies: deleteNoteKeepDependencies,
+        cleanSlate: cleanSlate
+      });
+    }
+  
+    // Cache DOM elements
+    const domCache = {
+        resetViewBtn: document.getElementById('resetViewBtn'),
+        noteWidget: document.getElementById('note-widget'),
+        closeWidgetBtn: document.querySelector('.note-widget-close'),
+        saveModuleBtn: document.getElementById('saveModuleBtn'),
+        widgetContent: document.querySelector('.note-widget-content'),
+        widgetTitle: document.getElementById('note-widget-title'),
+        measureBarsContainer: document.getElementById('measureBarsContainer'),
+        playheadContainer: document.getElementById('playheadContainer'),
+        trianglesContainer: document.getElementById('measureBarTrianglesContainer'),
+        volumeSlider: document.getElementById('volumeSlider'),
+        loadModuleInput: document.getElementById('loadModuleInput'),
+        loadModuleBtn: document.getElementById('loadModuleBtn'),
+        reorderModuleBtn: document.getElementById('reorderModuleBtn'),
+        trackingToggle: document.getElementById('trackingToggle'),
+        playPauseBtn: document.getElementById('playPauseBtn'),
+        stopButton: document.getElementById('stopButton'),
+        ppElement: document.querySelector('.pp'),
+        dropdownButton: document.querySelector('.dropdown-button'),
+        plusminus: document.querySelector('.plusminus'),
+        generalWidget: document.getElementById('general-widget')
     };
-  }
-
-  // Prevent mobile performance throttling on browser that support the Wake Lock API
-  let wakeLock = null;
-
-  async function requestWakeLock() {
-    try {
-      if ('wakeLock' in navigator) {
-        wakeLock = await navigator.wakeLock.request('screen');
-        //console.log('Wake Lock is active');
-        wakeLock.addEventListener('release', () => {
-          console.log('Wake Lock was released');
-        });
-      } else {
-        console.warn('Wake Lock API not available in this browser.');
-      }
-    } catch (err) {
-      console.error('Could not obtain wake lock:', err);
-    }
-  }
-
-  // Listen for visibility change events to re‑request or release the wake lock
-  document.addEventListener('visibilitychange', async () => {
-    if (document.visibilityState === 'visible') {
-      // When the page becomes visible, try to re‑acquire the wake lock.
-      await requestWakeLock();
-    } else {
-      // Optionally release the wake lock when not visible
-      if (wakeLock !== null) {
-        await wakeLock.release();
-        wakeLock = null;
-        console.log('Wake Lock released due to page visibility change');
-      }
-    }
-  });
-
-  // Request the wake lock
-  requestWakeLock();
-
-  // Initialize the resetViewBtn inner structure
-  if (domCache.resetViewBtn) {
-    domCache.resetViewBtn.innerHTML = `
-      <div class="center-circle"></div>
-      <div class="arrow top"></div>
-      <div class="arrow bottom"></div>
-      <div class="arrow left"></div>
-      <div class="arrow right"></div>
-    `;
-  }
-
-  /* ---------- DELETE DEPENDENCIES FUNCTIONALITY ---------- */
-
-  /* Show a confirmation modal for deletion */
-  function showDeleteConfirmation(noteId) {
-    window.modals.showDeleteConfirmation(noteId);
-  }
-
-  /* Delete the target note and all of its dependent notes */
-  function deleteNoteAndDependencies(noteId) {
-    const dependents = myModule.getDependentNotes(noteId);
-    const idsToDelete = new Set([noteId, ...dependents]);
-    
-    idsToDelete.forEach(id => {
-        if (id !== 0) {
-            delete myModule.notes[id];
-            delete myModule._evaluationCache[id]; // Clean up the cache
-        }
-    });
-    
-    // Mark the parent notes as dirty since their dependents changed
-    const directDeps = myModule.getDirectDependencies(noteId);
-    directDeps.forEach(depId => {
-        myModule.markNoteDirty(depId);
-    });
-
-    evaluatedNotes = myModule.evaluateModule();
-    updateVisualNotes(evaluatedNotes);
-    createMeasureBars();
-    clearSelection();
-    invalidateModuleEndTimeCache();
-  }
-
-  function showCleanSlateConfirmation() {
-    window.modals.showCleanSlateConfirmation();
-  }
-
-  function cleanSlate() {
-    // Keep only the base note (id 0)
-    Object.keys(myModule.notes).forEach(id => {
-        if (id !== '0') {
-            delete myModule.notes[id];
-        }
-    });
-    
-    // Reset the nextId to 1
-    myModule.nextId = 1;
-    
-    // Reset the evaluation cache
-    myModule._evaluationCache = {};
-    myModule._dirtyNotes.clear();
-    myModule.markNoteDirty(0); // Mark the base note as dirty
-    
-    // Re-evaluate and update the visual representation
-    evaluatedNotes = myModule.evaluateModule();
-    updateVisualNotes(evaluatedNotes);
-    createMeasureBars();
-    clearSelection();
-    
-    // Close the note widget
-    domCache.noteWidget.classList.remove('visible');
-  }
-
-  /* ---------- KEEP DEPENDENCIES FUNCTIONALITY ---------- */
-
-  /* Show confirmation modal for "Keep Dependencies" deletion */
-  function showDeleteConfirmationKeepDependencies(noteId) {
-    window.modals.showDeleteConfirmationKeepDependencies(noteId);
-  }
-
-  /* ---------- updateDependentRawExpressions ----------
-  For every dependent note (that depends on the soon-deleted note with id = selectedNoteId),
-  we search its raw string expressions for any reference that calls either:
-      module.getNoteById(selectedNoteId).getVariable('X')
-  or:
-      targetNote.getVariable('X')
-  For each such occurrence, we replace it with the corresponding raw snapshot stored in selectedRaw.
-  Note: We do not wrap the replacement in extra parentheses so that the functional raw expression is preserved.
-  */
-  function updateDependentRawExpressions(selectedNoteId, selectedRaw) {
-      const regex = new RegExp(
-      "(?:module\\.)?getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\.getVariable\\('([^']+)'\\)|targetNote\\.getVariable\\('([^']+)'\\)",
-      "g"
-      );
-
-      const dependents = myModule.getDependentNotes(selectedNoteId);
-      dependents.forEach(depId => {
-          const depNote = myModule.getNoteById(depId);
-          if (!depNote) {
-              console.warn("Dependent note", depId, "not found.");
-              return;
-          }
-          Object.keys(depNote.variables).forEach(key => {
-              if (key.endsWith("String")) {
-                  let rawExp = depNote.variables[key];
-                  if (typeof rawExp !== "string") {
-                      console.warn("Skipping update for key", key, "in dependent note", depId, "as value is not a string:", rawExp);
-                      return;
-                  }
-                  // Replace references to the soon-deleted note with its raw snapshot.
-                  rawExp = rawExp.replace(regex, (match, g1, g2) => {
-                      const varName = g1 || g2;
-                      let replacement = selectedRaw[varName];
-                      if (replacement === undefined) {
-                          // Supply default: new Fraction(1,1) for frequency; for others, new Fraction(0,1)
-                          replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
-                          console.warn("No raw value for", varName, "– using default", replacement);
-                      }
-                      // Return the replacement without adding extra parentheses.
-                      return replacement;
-                  });
-                  depNote.variables[key] = rawExp;
-                  const baseKey = key.slice(0, -6);
-                  try {
-                      const newFunc = new Function("module", "Fraction", "return " + rawExp + ";");
-                      depNote.setVariable(baseKey, function() {
-                          return newFunc(myModule, Fraction);
-                      });
-                  } catch (err) {
-                      console.error("Error compiling new expression for note", depId, "variable", baseKey, ":", err);
-                  }
-              }
-          });
-      });
-  }
-
-  /* ---------- deleteNoteKeepDependencies ----------
-      When deleting a note using "Keep Dependencies," for each variable among startTime, duration, and frequency,
-      we check if a raw expression (e.g., startTimeString) already exists. If it does, we use that to preserve the
-      functional form. Otherwise, we generate a literal snapshot. The snapshot is then used in updateDependentRawExpressions.
-  */
-  function deleteNoteKeepDependencies(noteId) {
-      const selectedNote = myModule.getNoteById(noteId);
-      if (!selectedNote) return;
-      let selectedRaw = {};
-      ["startTime", "duration", "frequency"].forEach(varName => {
-          if (selectedNote.variables[varName + "String"]) {
-              // Use the existing raw expression if available.
-              selectedRaw[varName] = selectedNote.variables[varName + "String"];
-          } else {
-              const frac = selectedNote.getVariable(varName);
-              let fracStr;
-              if (frac == null) {
-                  fracStr = (varName === "frequency") ? "1/1" : "0/1";
-              } else if (frac && typeof frac.toFraction === "function") {
-                  fracStr = frac.toFraction();
-              } else {
-                  fracStr = frac.toString();
-              }
-              if (!fracStr.includes("/")) {
-                  fracStr = fracStr + "/1";
-              }
-              selectedRaw[varName] = "new Fraction(" + fracStr + ")";
-          }
-      });
-      // Update all dependent notes so that references to the soon-deleted note now use the raw snapshot.
-      updateDependentRawExpressions(noteId, selectedRaw);
-      
-      if (noteId !== 0) {
-        delete myModule.notes[noteId];
-        delete myModule._evaluationCache[noteId]; // Clean up the cache
+  
+    // Create scale factor sliders container
+    const createScaleControls = () => {
+        // Create the main container
+        const scaleControlsContainer = document.createElement('div');
+        scaleControlsContainer.id = 'scale-controls';
+        scaleControlsContainer.className = 'scale-controls';
         
-        // Mark all notes that depended on this note as dirty
-        const dependents = myModule.getDependentNotes(noteId);
-        dependents.forEach(depId => {
-            myModule.markNoteDirty(depId);
+        // Create the toggle button
+        const toggleButton = document.createElement('div');
+        toggleButton.className = 'scale-controls-toggle';
+        toggleButton.id = 'scale-controls-toggle';
+        toggleButton.title = 'Scale Controls';
+        
+        // Create the slider containers and inputs
+        scaleControlsContainer.innerHTML = `
+          <div class="y-scale-slider-container">
+            <input type="range" id="y-scale-slider" min="0.5" max="2" step="0.1" value="1.0">
+          </div>
+          <div class="x-scale-slider-container">
+            <input type="range" id="x-scale-slider" min="0.5" max="2" step="0.1" value="1.0">
+          </div>
+        `;
+        
+        document.body.appendChild(scaleControlsContainer);
+        document.body.appendChild(toggleButton);
+        
+        // Add event listeners to sliders
+        const xScaleSlider = document.getElementById('x-scale-slider');
+        const yScaleSlider = document.getElementById('y-scale-slider');
+        
+        xScaleSlider.addEventListener('input', (e) => {
+          xScaleFactor = parseFloat(e.target.value);
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
         });
+        
+        yScaleSlider.addEventListener('input', (e) => {
+          yScaleFactor = parseFloat(e.target.value);
+          updateVisualNotes(evaluatedNotes);
+        });
+        
+        // Add toggle functionality
+        toggleButton.addEventListener('click', () => {
+            toggleScaleControls();
+        });
+        
+        return { container: scaleControlsContainer, toggle: toggleButton };
+    };
+    
+    // Function to toggle scale controls visibility
+    function toggleScaleControls() {
+        const scaleControls = document.getElementById('scale-controls');
+        const toggle = document.getElementById('scale-controls-toggle');
+        
+        if (scaleControls.classList.contains('visible')) {
+            // Hide controls
+            scaleControls.classList.remove('visible');
+            toggle.classList.remove('active');
+        } else {
+            // Show controls
+            scaleControls.classList.add('visible');
+            toggle.classList.add('active');
+        }
+    }
+    
+    // Create scale controls
+    const scaleControls = createScaleControls();
+  
+    // Function to efficiently apply class changes to elements
+    function batchClassOperation(elements, classesToAdd = [], classesToRemove = []) {
+        if (!elements || elements.length === 0) return;
+        
+        // Process in batches to avoid layout thrashing
+        const BATCH_SIZE = 50;
+        const total = elements.length;
+        
+        for (let i = 0; i < total; i += BATCH_SIZE) {
+            const batch = Array.from(elements).slice(i, i + BATCH_SIZE);
+            
+            // Use requestAnimationFrame to batch DOM updates
+            requestAnimationFrame(() => {
+                batch.forEach(el => {
+                    if (classesToRemove.length > 0) {
+                        el.classList.remove(...classesToRemove);
+                    }
+                    if (classesToAdd.length > 0) {
+                        el.classList.add(...classesToAdd);
+                    }
+                });
+            });
+        }
+    }
+  
+    // Function to efficiently clear all highlights
+    function clearAllHighlights() {
+        const highlightedElements = document.querySelectorAll('.dependency, .dependent');
+        batchClassOperation(highlightedElements, [], ['dependency', 'dependent']);
+    }
+  
+    function debounce(func, wait) {
+      let timeout;
+      return function(...args) {
+          const context = this;
+          clearTimeout(timeout);
+          timeout = setTimeout(() => func.apply(context, args), wait);
+      };
+    }
+  
+    // Prevent mobile performance throttling on browser that support the Wake Lock API
+    let wakeLock = null;
+  
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          //console.log('Wake Lock is active');
+          wakeLock.addEventListener('release', () => {
+            console.log('Wake Lock was released');
+          });
+        } else {
+          console.warn('Wake Lock API not available in this browser.');
+        }
+      } catch (err) {
+        console.error('Could not obtain wake lock:', err);
       }
+    }
+  
+    // Listen for visibility change events to re‑request or release the wake lock
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible') {
+        // When the page becomes visible, try to re‑acquire the wake lock.
+        await requestWakeLock();
+      } else {
+        // Optionally release the wake lock when not visible
+        if (wakeLock !== null) {
+          await wakeLock.release();
+          wakeLock = null;
+          console.log('Wake Lock released due to page visibility change');
+        }
+      }
+    });
+  
+    // Request the wake lock
+    requestWakeLock();
+  
+    // Initialize the resetViewBtn inner structure
+    if (domCache.resetViewBtn) {
+      domCache.resetViewBtn.innerHTML = `
+        <div class="center-circle"></div>
+        <div class="arrow top"></div>
+        <div class="arrow bottom"></div>
+        <div class="arrow left"></div>
+        <div class="arrow right"></div>
+      `;
+    }
+  
+    /* ---------- DELETE DEPENDENCIES FUNCTIONALITY ---------- */
+  
+    /* Show a confirmation modal for deletion */
+    function showDeleteConfirmation(noteId) {
+      window.modals.showDeleteConfirmation(noteId);
+    }
+  
+    /* Delete the target note and all of its dependent notes */
+    function deleteNoteAndDependencies(noteId) {
+      const dependents = myModule.getDependentNotes(noteId);
+      const idsToDelete = new Set([noteId, ...dependents]);
       
+      idsToDelete.forEach(id => {
+          if (id !== 0) {
+              delete myModule.notes[id];
+              delete myModule._evaluationCache[id]; // Clean up the cache
+          }
+      });
+      
+      // Mark the parent notes as dirty since their dependents changed
+      const directDeps = myModule.getDirectDependencies(noteId);
+      directDeps.forEach(depId => {
+          myModule.markNoteDirty(depId);
+      });
+  
       evaluatedNotes = myModule.evaluateModule();
       updateVisualNotes(evaluatedNotes);
       createMeasureBars();
       clearSelection();
       invalidateModuleEndTimeCache();
-  }
-
-  /* ---------- END KEEP DEPENDENCIES FUNCTIONALITY ---------- */
-
-  /* ---------- GLOBAL HELPERS FOR MEASURE ADD FUNCTIONALITY ---------- */
-  function hasMeasurePoints() {
-      return Object.values(myModule.notes).some(note =>
-        note.variables.startTime && 
-        !note.variables.duration && 
-        !note.variables.frequency
-      );
     }
-    
-    function getLastMeasureId() {
-      const measureNotes = [];
-      for (const id in myModule.notes) {
-        const note = myModule.notes[id];
-        if (note.variables.startTime && !note.variables.duration && !note.variables.frequency) {
-          measureNotes.push(note);
-        }
-      }
-      if (measureNotes.length === 0) return null;
-      
-      let lastMeasure = measureNotes[0];
-      for (let i = 1; i < measureNotes.length; i++) {
-        if (measureNotes[i].getVariable('startTime').valueOf() > lastMeasure.getVariable('startTime').valueOf()) {
-          lastMeasure = measureNotes[i];
-        }
-      }
-      return lastMeasure.id;
-  }
-    
-  // Memoization for module end time
-  let memoizedModuleEndTime = null;
-  let moduleLastModifiedTime = 0;
-
-  function getModuleEndTime() {
-      const currentModifiedTime = getCurrentModifiedTime();
-      
-      if (memoizedModuleEndTime !== null && currentModifiedTime === moduleLastModifiedTime) {
-          //console.log('Returning memoized module end time');
-          return memoizedModuleEndTime;
-      }
   
-      //console.log('Calculating module end time');
-      let measureEnd = 0;
-      const measureNotes = Object.values(myModule.notes).filter(note =>
-          note.variables.startTime && !note.variables.duration && !note.variables.frequency
-      );
-      if (measureNotes.length > 0) {
-          measureNotes.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
-          const lastMeasure = measureNotes[measureNotes.length - 1];
-          measureEnd = lastMeasure.getVariable('startTime')
-              .add(myModule.findMeasureLength(lastMeasure))
-              .valueOf();
-      }
+    function showCleanSlateConfirmation() {
+      window.modals.showCleanSlateConfirmation();
+    }
   
-      let lastNoteEnd = 0;
-      Object.values(myModule.notes).forEach(note => {
-          if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
-              const noteStart = note.getVariable('startTime').valueOf();
-              const noteDuration = note.getVariable('duration').valueOf();
-              const noteEnd = noteStart + noteDuration;
-              if (noteEnd > lastNoteEnd) {
-                  lastNoteEnd = noteEnd;
-              }
+    function cleanSlate() {
+      // Keep only the base note (id 0)
+      Object.keys(myModule.notes).forEach(id => {
+          if (id !== '0') {
+              delete myModule.notes[id];
           }
       });
-  
-      memoizedModuleEndTime = Math.max(measureEnd, lastNoteEnd);
-      moduleLastModifiedTime = currentModifiedTime;
-      return memoizedModuleEndTime;
-  }
-
-  // Helper function to get the current modified time of the module
-  function getCurrentModifiedTime() {
-      return Object.values(myModule.notes).reduce((maxTime, note) => {
-        const noteTime = note.lastModifiedTime || 0;
-        return Math.max(maxTime, noteTime);
-      }, 0);
-  }
-
-  /* ---------- END GLOBAL HELPERS FOR MEASURE ADD FUNCTIONALITY ---------- */
-
-  let myModule = await Module.loadFromJSON('moduleSetup.json');
-  window.myModule = myModule;
-  let evaluatedNotes = myModule.evaluateModule();
-  let newNotes = Object.keys(evaluatedNotes).map(id => evaluatedNotes[id]).filter(note => 
-      note.startTime && note.duration && note.frequency
-  );
-
-  const viewport = tapspace.createView('.myspaceapp');
-  viewport.zoomable({
-      keyboardPanArrows: true,
-      keyboardPanWasd: false,
-      keyboardZoomPlusMinus: true,
-      wheelZoomInvert: false
-  });
-
-  const gestureCapturer = viewport.capturer('gesture', {
-      preventDefault: false,
-      stopPropagation: false
-  });    
-  gestureCapturer.on('gestureend', handleBackgroundGesture);
-
-  const space = tapspace.createSpace();
-  viewport.addChild(space);
-  let centerPoint = null;  // Declare centerPoint globally
-
-  let currentSelectedNote = null;
-
-  if (domCache.saveModuleBtn) {
-      domCache.saveModuleBtn.addEventListener('click', saveModule);
-  } else {
-      console.error('Save Module button not found!');
-  }
-
-  if (domCache.resetViewBtn) {
-    domCache.resetViewBtn.addEventListener('click', () => {
-      const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
-      const baseNoteY = frequencyToY(baseNoteFreq);
-      const origin = space.at(0, baseNoteY);
-      // Reset view: translate the viewport to "origin".
-      viewport.translateTo(origin);
-    });
-  }
-
-  /* ----------------------- IMPORT MODULE FUNCTION ----------------------- */
-      /* ---------- In importModuleAtTarget (ensure deletion is handled separately) ----------
-  For dropped modules, we want to rewrite any reference to the base note (id 0)
-  to leave targetNote references intact (so that imported expressions remain chainable).
-  Deletion will later remove any targetNote references.
-  (No changes shown here; ensure that your importModuleAtTarget continues to replace base note references properly.)
-  */
-  async function importModuleAtTarget(targetNote, moduleData) {
-    // If playback is ongoing, enforce a pause
-    if (isPlaying) {
-        pause();
+      
+      // Reset the nextId to 1
+      myModule.nextId = 1;
+      
+      // Reset the evaluation cache
+      myModule._evaluationCache = {};
+      myModule._dirtyNotes.clear();
+      myModule.markNoteDirty(0); // Mark the base note as dirty
+      
+      // Re-evaluate and update the visual representation
+      evaluatedNotes = myModule.evaluateModule();
+      updateVisualNotes(evaluatedNotes);
+      createMeasureBars();
+      clearSelection();
+      
+      // Close the note widget
+      domCache.noteWidget.classList.remove('visible');
     }
-
-    try {
-        const importedModule = await Module.loadFromJSON(moduleData);
-    
-        // Build a mapping from the imported module note ids to new ids in myModule.
-        const mapping = {};
-        mapping[0] = targetNote.id;
-        const currentIds = Object.keys(myModule.notes).map(id => Number(id));
-        let maxId = currentIds.length > 0 ? Math.max(...currentIds) : 0;
-        let newId = maxId + 1;
-        for (const id in importedModule.notes) {
-            if (Number(id) === 0) continue;
-            mapping[id] = newId;
-            newId++;
-        }
-    
-        function updateExpression(expr) {
-            // For a drop target that is not the base note, we want the imported module's base note references
-            // to be relative—i.e. not refer back to the target note itself, which creates recursion.
-            // Instead, if the target note has a parentId, we replace occurrences of
-            // "module.baseNote.getVariable('varName')" with "module.getNoteById(targetNote.parentId).getVariable('varName')".
-            // If targetNote.parentId is undefined, we default to 0.
-            if (targetNote.id !== 0) {
-                // Determine the appropriate note to use for relative base values.
-                let relativeId = (typeof targetNote.parentId !== 'undefined' && targetNote.parentId !== null)
-                    ? targetNote.parentId
-                    : 0;
-                    
-                expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(match, varName) {
-                    return "module.getNoteById(" + relativeId + ").getVariable('" + varName + "')";
-                });
-            } else {
-                // If dropping on the base note, leave module.baseNote references unchanged.
-                expr = expr.replace(/module\.baseNote/g, "module.baseNote");
+  
+    /* ---------- KEEP DEPENDENCIES FUNCTIONALITY ---------- */
+  
+    /* Show confirmation modal for "Keep Dependencies" deletion */
+    function showDeleteConfirmationKeepDependencies(noteId) {
+      window.modals.showDeleteConfirmationKeepDependencies(noteId);
+    }
+  
+    /* ---------- updateDependentRawExpressions ----------
+    For every dependent note (that depends on the soon-deleted note with id = selectedNoteId),
+    we search its raw string expressions for any reference that calls either:
+        module.getNoteById(selectedNoteId).getVariable('X')
+    or:
+        targetNote.getVariable('X')
+    For each such occurrence, we replace it with the corresponding raw snapshot stored in selectedRaw.
+    Note: We do not wrap the replacement in extra parentheses so that the functional raw expression is preserved.
+    */
+    function updateDependentRawExpressions(selectedNoteId, selectedRaw) {
+        const regex = new RegExp(
+        "(?:module\\.)?getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\.getVariable\\('([^']+)'\\)|targetNote\\.getVariable\\('([^']+)'\\)",
+        "g"
+        );
+  
+        const dependents = myModule.getDependentNotes(selectedNoteId);
+        dependents.forEach(depId => {
+            const depNote = myModule.getNoteById(depId);
+            if (!depNote) {
+                console.warn("Dependent note", depId, "not found.");
+                return;
             }
-        
-            // Additionally, update any module.getNoteById(<number>) references based on the mapping.
-            expr = expr.replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, function(match, p1) {
-                const oldRef = parseInt(p1, 10);
-                if (mapping.hasOwnProperty(oldRef)) {
-                    return "module.getNoteById(" + mapping[oldRef] + ")";
-                }
-                return match;
-            });
-        
-            return expr;
-        }
-    
-        // Process the imported notes (other than the base).
-        for (const id in importedModule.notes) {
-            if (Number(id) === 0) continue;
-            const impNote = importedModule.notes[id];
-            const oldId = impNote.id;
-            impNote.id = mapping[oldId];
-            if (typeof impNote.parentId !== 'undefined') {
-                const oldParent = impNote.parentId;
-                if (mapping.hasOwnProperty(oldParent)) {
-                    impNote.parentId = mapping[oldParent];
-                } else {
-                    impNote.parentId = targetNote.id;
-                }
-            }
-            for (const key in impNote.variables) {
-                if (typeof impNote.variables[key] === 'string' && key.endsWith("String")) {
-                    let originalString = impNote.variables[key];
-                    impNote.variables[key] = updateExpression(originalString);
-                    const baseKey = key.slice(0, -6);
-                    impNote.setVariable(baseKey, function() {
-                        return new Function("module", "Fraction", "return " + impNote.variables[key] + ";")(myModule, Fraction);
+            Object.keys(depNote.variables).forEach(key => {
+                if (key.endsWith("String")) {
+                    let rawExp = depNote.variables[key];
+                    if (typeof rawExp !== "string") {
+                        console.warn("Skipping update for key", key, "in dependent note", depId, "as value is not a string:", rawExp);
+                        return;
+                    }
+                    // Replace references to the soon-deleted note with its raw snapshot.
+                    rawExp = rawExp.replace(regex, (match, g1, g2) => {
+                        const varName = g1 || g2;
+                        let replacement = selectedRaw[varName];
+                        if (replacement === undefined) {
+                            // Supply default: new Fraction(1,1) for frequency; for others, new Fraction(0,1)
+                            replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
+                            console.warn("No raw value for", varName, "– using default", replacement);
+                        }
+                        // Return the replacement without adding extra parentheses.
+                        return replacement;
                     });
-                } else if (key === 'color') {
-                    impNote.variables.color = impNote.variables.color;
+                    depNote.variables[key] = rawExp;
+                    const baseKey = key.slice(0, -6);
+                    try {
+                        const newFunc = new Function("module", "Fraction", "return " + rawExp + ";");
+                        depNote.setVariable(baseKey, function() {
+                            return newFunc(myModule, Fraction);
+                        });
+                    } catch (err) {
+                        console.error("Error compiling new expression for note", depId, "variable", baseKey, ":", err);
+                    }
                 }
+            });
+        });
+    }
+  
+    /* ---------- deleteNoteKeepDependencies ----------
+        When deleting a note using "Keep Dependencies," for each variable among startTime, duration, and frequency,
+        we check if a raw expression (e.g., startTimeString) already exists. If it does, we use that to preserve the
+        functional form. Otherwise, we generate a literal snapshot. The snapshot is then used in updateDependentRawExpressions.
+    */
+    function deleteNoteKeepDependencies(noteId) {
+        const selectedNote = myModule.getNoteById(noteId);
+        if (!selectedNote) return;
+        let selectedRaw = {};
+        ["startTime", "duration", "frequency"].forEach(varName => {
+            if (selectedNote.variables[varName + "String"]) {
+                // Use the existing raw expression if available.
+                selectedRaw[varName] = selectedNote.variables[varName + "String"];
+            } else {
+                const frac = selectedNote.getVariable(varName);
+                let fracStr;
+                if (frac == null) {
+                    fracStr = (varName === "frequency") ? "1/1" : "0/1";
+                } else if (frac && typeof frac.toFraction === "function") {
+                    fracStr = frac.toFraction();
+                } else {
+                    fracStr = frac.toString();
+                }
+                if (!fracStr.includes("/")) {
+                    fracStr = fracStr + "/1";
+                }
+                selectedRaw[varName] = "new Fraction(" + fracStr + ")";
             }
-            impNote.module = myModule; // Set the module reference
-            myModule.notes[impNote.id] = impNote;
-        }
-    
-        // Clear all caches in the module
-        myModule._evaluationCache = {};
-        myModule._lastEvaluationTime = 0;
-        myModule._dependenciesCache.clear();
-        myModule._dependentsCache.clear();
+        });
+        // Update all dependent notes so that references to the soon-deleted note now use the raw snapshot.
+        updateDependentRawExpressions(noteId, selectedRaw);
         
-        // Mark all notes as dirty to force complete reevaluation
-        for (const id in myModule.notes) {
-            myModule.markNoteDirty(Number(id));
-        }
-        
-        // Invalidate module end time cache
-        invalidateModuleEndTimeCache();
-        
-        // Invalidate dependency graph cache
-        if (window.modals && window.modals.invalidateDependencyGraphCache) {
-            window.modals.invalidateDependencyGraphCache();
+        if (noteId !== 0) {
+          delete myModule.notes[noteId];
+          delete myModule._evaluationCache[noteId]; // Clean up the cache
+          
+          // Mark all notes that depended on this note as dirty
+          const dependents = myModule.getDependentNotes(noteId);
+          dependents.forEach(depId => {
+              myModule.markNoteDirty(depId);
+          });
         }
         
-        // IMPORTANT: Re-evaluate all notes and update the visual representation
         evaluatedNotes = myModule.evaluateModule();
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
-        
-        console.log("Module import complete with full cache reset");
-        
-    } catch (error) {
-        console.error("Error importing module at target note:", error);
-    }
-  }
-  window.importModuleAtTarget = importModuleAtTarget;
-  /* ----------------------- END IMPORT MODULE FUNCTION ----------------------- */
-
-  // Helper for determining the note image
-  function getDurationImageForBase(base) {
-    if (base === 4) return "whole.png";
-    else if (base === 2) return "half.png";
-    else if (base === 1) return "quarter.png";
-    else if (base === 0.5) return "eighth.png";
-    else if (base === 0.25) return "sixteenth.png";
-    return "";
-  }
-
-  // Helper that recursively recompiles a note (from its raw expressions) and all its dependent notes.
-  // visited is used to avoid cycles.
-  function recompileNoteAndDependents(noteId, visited = new Set()) {
-    if (visited.has(noteId)) return;
-    visited.add(noteId);
-    const note = myModule.getNoteById(noteId);
-    if (!note) return;
-    // For each variable that has a raw string (ending with "String"), recompile it
-    Object.keys(note.variables).forEach(varKey => {
-      if (varKey.endsWith("String")) {
-        const baseKey = varKey.slice(0, -6);
-        try {
-          const rawExpr = note.variables[varKey];
-          // Create and set the new function for this variable.
-          const newFunc = new Function("module", "Fraction", "return " + rawExpr + ";");
-          note.setVariable(baseKey, function() {
-            return newFunc(myModule, Fraction);
-          });
-        } catch (err) {
-          console.error("Error recompiling note", noteId, "variable", baseKey, ":", err);
-        }
-      }
-    });
-    // Now recompile all dependent notes
-    const dependents = myModule.getDependentNotes(noteId);
-    dependents.forEach(depId => {
-      recompileNoteAndDependents(depId, visited);
-    });
-  }
-
-    // showNoteVariables (main loop).
-    function showNoteVariables(note, clickedElement, measureId = null) {
-        window.modals.showNoteVariables(note, clickedElement, measureId);
-    }
-    
-    function clearSelection() {
-        window.modals.clearSelection();
-    }
-    
-    domCache.closeWidgetBtn.addEventListener('click', () => {
         clearSelection();
-    });
+        invalidateModuleEndTimeCache();
+    }
+  
+    /* ---------- END KEEP DEPENDENCIES FUNCTIONALITY ---------- */
+  
+    /* ---------- GLOBAL HELPERS FOR MEASURE ADD FUNCTIONALITY ---------- */
+    function hasMeasurePoints() {
+        return Object.values(myModule.notes).some(note =>
+          note.variables.startTime && 
+          !note.variables.duration && 
+          !note.variables.frequency
+        );
+      }
+      
+      function getLastMeasureId() {
+        const measureNotes = [];
+        for (const id in myModule.notes) {
+          const note = myModule.notes[id];
+          if (note.variables.startTime && !note.variables.duration && !note.variables.frequency) {
+            measureNotes.push(note);
+          }
+        }
+        if (measureNotes.length === 0) return null;
+        
+        let lastMeasure = measureNotes[0];
+        for (let i = 1; i < measureNotes.length; i++) {
+          if (measureNotes[i].getVariable('startTime').valueOf() > lastMeasure.getVariable('startTime').valueOf()) {
+            lastMeasure = measureNotes[i];
+          }
+        }
+        return lastMeasure.id;
+    }
+      
+    // Memoization for module end time
+    let memoizedModuleEndTime = null;
+    let moduleLastModifiedTime = 0;
+  
+    function getModuleEndTime() {
+        const currentModifiedTime = getCurrentModifiedTime();
+        
+        if (memoizedModuleEndTime !== null && currentModifiedTime === moduleLastModifiedTime) {
+            //console.log('Returning memoized module end time');
+            return memoizedModuleEndTime;
+        }
     
-    function addNoteClickHandler(noteElement, note) {
-      const noteRect = noteElement.element.querySelector('.note-rect');
-      const noteContent = noteElement.element.querySelector('.note-content');
-      if (noteRect && noteContent) {
-          const debouncedShowNoteVariables = debounce((note, noteContent) => {
-              currentSelectedNote = note;
-              showNoteVariables(note, noteContent);
-          }, 50); // 50ms debounce time
+        //console.log('Calculating module end time');
+        let measureEnd = 0;
+        const measureNotes = Object.values(myModule.notes).filter(note =>
+            note.variables.startTime && !note.variables.duration && !note.variables.frequency
+        );
+        if (measureNotes.length > 0) {
+            measureNotes.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
+            const lastMeasure = measureNotes[measureNotes.length - 1];
+            measureEnd = lastMeasure.getVariable('startTime')
+                .add(myModule.findMeasureLength(lastMeasure))
+                .valueOf();
+        }
+    
+        let lastNoteEnd = 0;
+        Object.values(myModule.notes).forEach(note => {
+            if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
+                const noteStart = note.getVariable('startTime').valueOf();
+                const noteDuration = note.getVariable('duration').valueOf();
+                const noteEnd = noteStart + noteDuration;
+                if (noteEnd > lastNoteEnd) {
+                    lastNoteEnd = noteEnd;
+                }
+            }
+        });
+    
+        memoizedModuleEndTime = Math.max(measureEnd, lastNoteEnd);
+        moduleLastModifiedTime = currentModifiedTime;
+        return memoizedModuleEndTime;
+    }
+  
+    // Helper function to get the current modified time of the module
+    function getCurrentModifiedTime() {
+        return Object.values(myModule.notes).reduce((maxTime, note) => {
+          const noteTime = note.lastModifiedTime || 0;
+          return Math.max(maxTime, noteTime);
+        }, 0);
+    }
+  
+    /* ---------- END GLOBAL HELPERS FOR MEASURE ADD FUNCTIONALITY ---------- */
+  
+    let myModule = await Module.loadFromJSON('moduleSetup.json');
+    window.myModule = myModule;
+    let evaluatedNotes = myModule.evaluateModule();
+    let newNotes = Object.keys(evaluatedNotes).map(id => evaluatedNotes[id]).filter(note => 
+        note.startTime && note.duration && note.frequency
+    );
+  
+    const viewport = tapspace.createView('.myspaceapp');
+    viewport.zoomable({
+        keyboardPanArrows: true,
+        keyboardPanWasd: false,
+        keyboardZoomPlusMinus: true,
+        wheelZoomInvert: false
+    });
+  
+    const gestureCapturer = viewport.capturer('gesture', {
+        preventDefault: false,
+        stopPropagation: false
+    });    
+    gestureCapturer.on('gestureend', handleBackgroundGesture);
+  
+    const space = tapspace.createSpace();
+    viewport.addChild(space);
+    let centerPoint = null;  // Declare centerPoint globally
+  
+    let currentSelectedNote = null;
+  
+    if (domCache.saveModuleBtn) {
+        domCache.saveModuleBtn.addEventListener('click', saveModule);
+    } else {
+        console.error('Save Module button not found!');
+    }
+  
+    if (domCache.resetViewBtn) {
+      domCache.resetViewBtn.addEventListener('click', () => {
+        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        const baseNoteY = frequencyToY(baseNoteFreq);
+        const origin = space.at(0, baseNoteY);
+        // Reset view: translate the viewport to "origin".
+        viewport.translateTo(origin);
+      });
+    }
+  
+    /* ----------------------- IMPORT MODULE FUNCTION ----------------------- */
+        /* ---------- In importModuleAtTarget (ensure deletion is handled separately) ----------
+    For dropped modules, we want to rewrite any reference to the base note (id 0)
+    to leave targetNote references intact (so that imported expressions remain chainable).
+    Deletion will later remove any targetNote references.
+    (No changes shown here; ensure that your importModuleAtTarget continues to replace base note references properly.)
+    */
+    async function importModuleAtTarget(targetNote, moduleData) {
+      // If playback is ongoing, enforce a pause
+      if (isPlaying) {
+          pause();
+      }
+  
+      try {
+          const importedModule = await Module.loadFromJSON(moduleData);
+      
+          // Build a mapping from the imported module note ids to new ids in myModule.
+          const mapping = {};
+          mapping[0] = targetNote.id;
+          const currentIds = Object.keys(myModule.notes).map(id => Number(id));
+          let maxId = currentIds.length > 0 ? Math.max(...currentIds) : 0;
+          let newId = maxId + 1;
+          for (const id in importedModule.notes) {
+              if (Number(id) === 0) continue;
+              mapping[id] = newId;
+              newId++;
+          }
+      
+          function updateExpression(expr) {
+              // For a drop target that is not the base note, we want the imported module's base note references
+              // to be relative—i.e. not refer back to the target note itself, which creates recursion.
+              // Instead, if the target note has a parentId, we replace occurrences of
+              // "module.baseNote.getVariable('varName')" with "module.getNoteById(targetNote.parentId).getVariable('varName')".
+              // If targetNote.parentId is undefined, we default to 0.
+              if (targetNote.id !== 0) {
+                  // Determine the appropriate note to use for relative base values.
+                  let relativeId = (typeof targetNote.parentId !== 'undefined' && targetNote.parentId !== null)
+                      ? targetNote.parentId
+                      : 0;
+                      
+                  expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(match, varName) {
+                      return "module.getNoteById(" + relativeId + ").getVariable('" + varName + "')";
+                  });
+              } else {
+                  // If dropping on the base note, leave module.baseNote references unchanged.
+                  expr = expr.replace(/module\.baseNote/g, "module.baseNote");
+              }
           
-          noteRect.addEventListener('click', (event) => {
-              event.stopPropagation();
-              debouncedShowNoteVariables(note, noteContent);
-          });
+              // Additionally, update any module.getNoteById(<number>) references based on the mapping.
+              expr = expr.replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, function(match, p1) {
+                  const oldRef = parseInt(p1, 10);
+                  if (mapping.hasOwnProperty(oldRef)) {
+                      return "module.getNoteById(" + mapping[oldRef] + ")";
+                  }
+                  return match;
+              });
+          
+              return expr;
+          }
+      
+          // Process the imported notes (other than the base).
+          for (const id in importedModule.notes) {
+              if (Number(id) === 0) continue;
+              const impNote = importedModule.notes[id];
+              const oldId = impNote.id;
+              impNote.id = mapping[oldId];
+              if (typeof impNote.parentId !== 'undefined') {
+                  const oldParent = impNote.parentId;
+                  if (mapping.hasOwnProperty(oldParent)) {
+                      impNote.parentId = mapping[oldParent];
+                  } else {
+                      impNote.parentId = targetNote.id;
+                  }
+              }
+              for (const key in impNote.variables) {
+                  if (typeof impNote.variables[key] === 'string' && key.endsWith("String")) {
+                      let originalString = impNote.variables[key];
+                      impNote.variables[key] = updateExpression(originalString);
+                      const baseKey = key.slice(0, -6);
+                      impNote.setVariable(baseKey, function() {
+                          return new Function("module", "Fraction", "return " + impNote.variables[key] + ";")(myModule, Fraction);
+                      });
+                  } else if (key === 'color') {
+                      impNote.variables.color = impNote.variables.color;
+                  }
+              }
+              impNote.module = myModule; // Set the module reference
+              myModule.notes[impNote.id] = impNote;
+          }
+      
+          // Clear all caches in the module
+          myModule._evaluationCache = {};
+          myModule._lastEvaluationTime = 0;
+          myModule._dependenciesCache.clear();
+          myModule._dependentsCache.clear();
+          
+          // Mark all notes as dirty to force complete reevaluation
+          for (const id in myModule.notes) {
+              myModule.markNoteDirty(Number(id));
+          }
+          
+          // Invalidate module end time cache
+          invalidateModuleEndTimeCache();
+          
+          // Invalidate dependency graph cache
+          if (window.modals && window.modals.invalidateDependencyGraphCache) {
+              window.modals.invalidateDependencyGraphCache();
+          }
+          
+          // IMPORTANT: Re-evaluate all notes and update the visual representation
+          evaluatedNotes = myModule.evaluateModule();
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          
+          console.log("Module import complete with full cache reset");
+          
+      } catch (error) {
+          console.error("Error importing module at target note:", error);
       }
     }
-    
-    function setupBaseNoteClickHandler() {
-        const baseNoteCircle = document.getElementById('baseNoteCircle');
-        const baseNoteElement = baseNoteCircle?.querySelector('.base-note-circle');
-        if (baseNoteCircle && baseNoteElement) {
-            baseNoteCircle.addEventListener('click', (event) => {
+    window.importModuleAtTarget = importModuleAtTarget;
+    /* ----------------------- END IMPORT MODULE FUNCTION ----------------------- */
+  
+    // Helper for determining the note image
+    function getDurationImageForBase(base) {
+      if (base === 4) return "whole.png";
+      else if (base === 2) return "half.png";
+      else if (base === 1) return "quarter.png";
+      else if (base === 0.5) return "eighth.png";
+      else if (base === 0.25) return "sixteenth.png";
+      return "";
+    }
+  
+    // Helper that recursively recompiles a note (from its raw expressions) and all its dependent notes.
+    // visited is used to avoid cycles.
+    function recompileNoteAndDependents(noteId, visited = new Set()) {
+      if (visited.has(noteId)) return;
+      visited.add(noteId);
+      const note = myModule.getNoteById(noteId);
+      if (!note) return;
+      // For each variable that has a raw string (ending with "String"), recompile it
+      Object.keys(note.variables).forEach(varKey => {
+        if (varKey.endsWith("String")) {
+          const baseKey = varKey.slice(0, -6);
+          try {
+            const rawExpr = note.variables[varKey];
+            // Create and set the new function for this variable.
+            const newFunc = new Function("module", "Fraction", "return " + rawExpr + ";");
+            note.setVariable(baseKey, function() {
+              return newFunc(myModule, Fraction);
+            });
+          } catch (err) {
+            console.error("Error recompiling note", noteId, "variable", baseKey, ":", err);
+          }
+        }
+      });
+      // Now recompile all dependent notes
+      const dependents = myModule.getDependentNotes(noteId);
+      dependents.forEach(depId => {
+        recompileNoteAndDependents(depId, visited);
+      });
+    }
+  
+      // showNoteVariables (main loop).
+      function showNoteVariables(note, clickedElement, measureId = null) {
+          window.modals.showNoteVariables(note, clickedElement, measureId);
+      }
+      
+      function clearSelection() {
+          window.modals.clearSelection();
+      }
+      
+      domCache.closeWidgetBtn.addEventListener('click', () => {
+          clearSelection();
+      });
+      
+      function addNoteClickHandler(noteElement, note) {
+        const noteRect = noteElement.element.querySelector('.note-rect');
+        const noteContent = noteElement.element.querySelector('.note-content');
+        if (noteRect && noteContent) {
+            const debouncedShowNoteVariables = debounce((note, noteContent) => {
+                currentSelectedNote = note;
+                showNoteVariables(note, noteContent);
+            }, 50); // 50ms debounce time
+            
+            noteRect.addEventListener('click', (event) => {
                 event.stopPropagation();
-                currentSelectedNote = myModule.baseNote;
-                showNoteVariables(myModule.baseNote, baseNoteElement);
+                debouncedShowNoteVariables(note, noteContent);
             });
         }
-    }
-    
-    function updateZoomableBehavior() {
-        if (isTrackingEnabled) {
-            viewport.zoomable(false);
-        } else {
-            viewport.zoomable({
-                keyboardPanArrows: true,
-                keyboardPanWasd: false,
-                keyboardZoomPlusMinus: true,
-                wheelZoomInvert: false
-            });
-        }
-    }
-    
-    function frequencyToY(freq) {
-        return -Math.log2(freq) * 100;
-    }
-    
-    function createBaseNoteDisplay() {
+      }
+      
+      function setupBaseNoteClickHandler() {
+          const baseNoteCircle = document.getElementById('baseNoteCircle');
+          const baseNoteElement = baseNoteCircle?.querySelector('.base-note-circle');
+          if (baseNoteCircle && baseNoteElement) {
+              baseNoteCircle.addEventListener('click', (event) => {
+                  event.stopPropagation();
+                  currentSelectedNote = myModule.baseNote;
+                  showNoteVariables(myModule.baseNote, baseNoteElement);
+              });
+          }
+      }
+      
+      function updateZoomableBehavior() {
+          if (isTrackingEnabled) {
+              viewport.zoomable(false);
+          } else {
+              viewport.zoomable({
+                  keyboardPanArrows: true,
+                  keyboardPanWasd: false,
+                  keyboardZoomPlusMinus: true,
+                  wheelZoomInvert: false
+              });
+          }
+      }
+      
+      function frequencyToY(freq) {
+        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        // Calculate the log ratio and apply scaling
+        const logRatio = Math.log2(baseNoteFreq / freq);
+        return logRatio * 100 * yScaleFactor;
+      }
+      
+      function createBaseNoteDisplay() {
         const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
         const baseNoteY = frequencyToY(baseNoteFreq);
         const x = -50;
@@ -1263,8 +1336,8 @@ function createNoteElement(note, index) {
         );
         const scale = viewportDistance / 100;
         
-        // Adjust deltaX based on the current scale
-        let adjustedDeltaX = deltaX / scale;
+        // Adjust deltaX based on the current scale and the user-defined xScaleFactor
+        let adjustedDeltaX = deltaX / (scale * xScaleFactor);
         
         // Convert the adjusted pixel delta to time units
         // Use a safer approach to create fractions from potentially non-integer values
@@ -1304,7 +1377,7 @@ function createNoteElement(note, index) {
         let newStartTimeNum = Number(newStartTimeFraction.valueOf());
         
         // Calculate the position for the overlay in the same way as the original code
-        const xCoord = newStartTimeNum * 200;
+        const xCoord = newStartTimeNum * 200 * xScaleFactor;
         const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
         const screenPos = point.transitRaw(viewport);
         
@@ -1361,8 +1434,8 @@ function createNoteElement(note, index) {
         );
         const scale = viewportDistance / 100;
         
-        // Adjust deltaX based on the current scale
-        let adjustedDeltaX = deltaX / scale;
+        // Adjust deltaX based on the current scale and user-defined xScaleFactor
+        let adjustedDeltaX = deltaX / (scale * xScaleFactor);
         
         // Convert the adjusted pixel delta to time units
         // Use a safer approach to create fractions from potentially non-integer values
@@ -1496,7 +1569,7 @@ function createNoteElement(note, index) {
     let overlayContainer = document.getElementById('drag-overlay-container');
     if (!overlayContainer) return;
     
-    const xCoord = newTime * 200;
+    const xCoord = newTime * 200 * xScaleFactor;
     const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
     const screenPos = point.transitRaw(viewport);
     
@@ -1583,7 +1656,7 @@ function createNoteElement(note, index) {
           const bar = document.createElement('div');
           bar.className = 'measure-bar';
           bar.id = `measure-bar-${id}`;
-          const x = note.getVariable('startTime').valueOf() * 200;
+          const x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
           bar.setAttribute("data-x", x);
           bar.setAttribute("data-note-id", id);
           barsContainer.appendChild(bar);
@@ -1617,13 +1690,13 @@ function createNoteElement(note, index) {
               x = 0;
           } else if (bar.id === 'measure-bar-final') {
               const moduleEndTime = getModuleEndTime();
-              x = moduleEndTime * 200;
+              x = moduleEndTime * 200 * xScaleFactor;
           } else {
               const noteId = bar.getAttribute("data-note-id");
               if (noteId) {
                   const note = myModule.getNoteById(parseInt(noteId, 10));
                   if (note) {
-                      x = note.getVariable('startTime').valueOf() * 200;
+                      x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
                   }
               }
           }
@@ -1638,7 +1711,7 @@ function createNoteElement(note, index) {
           if (noteId) {
               const note = myModule.getNoteById(parseInt(noteId, 10));
               if (note) {
-                  const x = note.getVariable('startTime').valueOf() * 200;
+                  const x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
                   const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
                   const screenPos = point.transitRaw(viewport);
                   triangle.style.transform = `translateX(${screenPos.x}px)`;
@@ -1672,7 +1745,7 @@ function updatePlayhead() {
             }
         }
         
-        const x = playheadTime * 200;
+        const x = playheadTime * 200 * xScaleFactor;
         if (isTrackingEnabled) {
             const viewCenter = viewport.atCenter();
             const targetPoint = space.at(x, viewCenter.transitRaw(space).y);
@@ -1704,7 +1777,7 @@ function updatePlayhead() {
           if (!isClickOnNote) {
               const clickPoint = gestureEvent.mean;
               const spacePoint = clickPoint.changeBasis(space);
-              let newPlayheadTime = spacePoint.point.x / 200;
+              let newPlayheadTime = spacePoint.point.x / (200 * xScaleFactor);
               newPlayheadTime = Math.max(0, Math.min(newPlayheadTime, getModuleEndTime()));
               playheadTime = newPlayheadTime;
               updatePlayhead();
@@ -1776,9 +1849,9 @@ function updatePlayhead() {
             if (duration && frequency) {
                 // Regular note
                 const noteRect = createNoteElement(note);
-                const x = startTime * 200;
+                const x = startTime * 200 * xScaleFactor;
                 const y = frequencyToY(frequency);
-                const width = duration * 200;
+                const width = duration * 200 * xScaleFactor;
                 const height = 20;
                 noteRect.setSize({ width: width, height: height });
                 space.addChild(noteRect, { x: x, y: y });

@@ -1546,3 +1546,198 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 .evaluate-note-btn:hover {
     background-color: #00cccc;
 }
+
+/* Scale Controls */
+.scale-controls {
+    position: fixed;
+    bottom: 10px;
+    left: 10px;
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    pointer-events: none;
+    width: 150px;
+    height: 170px; /* Height of Y slider + height of X slider */
+    opacity: 0; /* Start with controls hidden */
+    transition: opacity 0.3s ease-in-out;
+}
+
+.scale-controls.visible {
+    opacity: 1;
+}
+
+.y-scale-slider-container {
+    position: absolute;
+    height: 150px;
+    width: 30px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: auto;
+    bottom: 12px; /* Same as X slider's left margin */
+    left: 0;
+    transform: scaleY(0);
+    transform-origin: bottom center;
+    transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+}
+
+.x-scale-slider-container {
+    position: absolute;
+    width: 150px;
+    height: 30px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: auto;
+    bottom: 1px;
+    left: 20px; /* Same as Y slider's bottom margin */
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+}
+
+.scale-controls.visible .y-scale-slider-container {
+    transform: scaleY(1);
+}
+
+.scale-controls.visible .x-scale-slider-container {
+    transform: scaleX(1);
+}
+
+/* Style for vertical slider */
+.y-scale-slider-container input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 150px;
+    height: 1px;
+    background: rgba(255, 168, 0, 0.7);
+    outline: none;
+    transform: rotate(-90deg);
+    transform-origin: center;
+    border-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
+    transition-delay: 0.3s;
+}
+
+/* Style for horizontal slider */
+.x-scale-slider-container input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 150px;
+    height: 1px;
+    background: rgba(255, 168, 0, 0.7);
+    outline: none;
+    border-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
+    transition-delay: 0.3s;
+}
+
+.scale-controls.visible input[type="range"] {
+    opacity: 1;
+}
+
+/* Thumb styling for both sliders */
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    /*background: #ffa800;*/
+    border: 1px solid #ffa800;
+    cursor: pointer;
+    border-radius: 50%;
+    box-shadow: 0 0 5px rgba(255, 168, 0, 0.5);
+    transition: background 0.3s ease;
+}
+
+input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: #ffa800;
+    cursor: pointer;
+    border-radius: 50%;
+    box-shadow: 0 0 5px rgba(255, 168, 0, 0.5);
+    transition: background 0.3s ease;
+    border: none;
+}
+
+/* Hover effects */
+input[type="range"]:hover::-webkit-slider-thumb {
+    background: #ff0000;
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+}
+
+input[type="range"]:hover::-moz-range-thumb {
+    background: #ff0000;
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+}
+
+/* Active effects */
+input[type="range"]:active::-webkit-slider-thumb {
+    background: #ff0000;
+    box-shadow: 0 0 15px rgba(255, 0, 0, 0.9);
+}
+
+input[type="range"]:active::-moz-range-thumb {
+    background: #ff0000;
+    box-shadow: 0 0 15px rgba(255, 0, 0, 0.9);
+}
+
+/* Scale labels */
+.y-scale-slider-container::before {
+    content: 'Y';
+    position: absolute;
+    top: -10px;
+    left: 12px;
+    color: #ffa800;
+    font-family: 'Roboto Mono', monospace;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
+    transition-delay: 0.4s;
+}
+
+.x-scale-slider-container::before {
+    content: 'X';
+    position: absolute;
+    bottom: 5px;
+    right: -10px;
+    color: #ffa800;
+    font-family: 'Roboto Mono', monospace;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.3s ease-in-out;
+    transition-delay: 0.4s;
+}
+
+.scale-controls.visible .y-scale-slider-container::before,
+.scale-controls.visible .x-scale-slider-container::before {
+    opacity: 1;
+}
+
+/* Corner element to create a perfect L-shape */
+.scale-controls-toggle {
+    position: fixed;
+    bottom: 20px;  
+    left: 20px;    
+    width: 12px;
+    height: 12px;
+    background-color: #ffa800;
+    border-radius: 50%;
+    z-index: 1002;
+    cursor: pointer;
+    transition: background-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.scale-controls-toggle:hover {
+    background-color: #ff0000;
+    transform: scale(1.2);
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+}
+
+.scale-controls-toggle.active {
+    background-color: #ff0000;
+    box-shadow: 0 0 15px rgba(255, 0, 0, 0.9);
+}
