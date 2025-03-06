@@ -85,6 +85,157 @@ document.addEventListener('DOMContentLoaded', async function() {
         plusminus: document.querySelector('.plusminus'),
         generalWidget: document.getElementById('general-widget')
     };
+
+    // Create octave indicator bars
+    function createOctaveIndicators() {
+        console.log("Creating octave indicators");
+        
+        // Remove existing container if it exists
+        const existingContainer = document.getElementById('octave-indicators-container');
+        if (existingContainer) {
+            existingContainer.remove();
+        }
+        
+        // Create container for octave indicators
+        const octaveContainer = document.createElement('div');
+        octaveContainer.id = 'octave-indicators-container';
+        octaveContainer.className = 'octave-indicators-container';
+        document.body.appendChild(octaveContainer);
+        
+        // We'll create 11 bars: 5 above, 5 below, and 1 for the reference note
+        for (let i = -5; i <= 5; i++) {
+            const indicator = document.createElement('div');
+            indicator.className = 'octave-indicator';
+            indicator.setAttribute('data-octave', i);
+            
+            // The center one (i=0) is the reference octave
+            if (i === 0) {
+                indicator.classList.add('reference-octave');
+            }
+            
+            // Add octave label
+            const label = document.createElement('div');
+            label.className = 'octave-label';
+            label.textContent = i === 0 ? 'Reference' : (i > 0 ? `+${i}` : i);
+            indicator.appendChild(label);
+            
+            octaveContainer.appendChild(indicator);
+            console.log(`Created octave indicator for octave ${i}`);
+        }
+        
+        console.log("Octave indicators created, container:", octaveContainer);
+        return octaveContainer;
+    }
+    
+    // Update octave indicators based on the selected note or base note
+    function updateOctaveIndicators() {
+        const octaveContainer = document.getElementById('octave-indicators-container');
+        if (!octaveContainer) {
+            console.warn("Octave container not found, recreating...");
+            createOctaveIndicators();
+            return;
+        }
+        
+        // Get the reference frequency (from selected note or base note)
+        // Always default to base note if no note is selected
+        let referenceNote = currentSelectedNote || myModule.baseNote;
+        let referenceFreq = referenceNote.getVariable('frequency').valueOf();
+        
+        // Get all indicator bars
+        const indicators = octaveContainer.querySelectorAll('.octave-indicator');
+        
+        if (indicators.length === 0) {
+            console.warn("No octave indicators found in container, recreating...");
+            createOctaveIndicators();
+            return;
+        }
+        
+        // Update each indicator's position
+        indicators.forEach(indicator => {
+            const octaveOffset = parseInt(indicator.getAttribute('data-octave'));
+            // Calculate frequency for this octave (2^octaveOffset * referenceFreq)
+            const octaveFreq = referenceFreq * Math.pow(2, octaveOffset);
+            // Convert to Y position
+            const y = frequencyToY(octaveFreq);
+            
+            // Get the viewport transformation to position correctly
+            const transform = viewport.getBasis().getRaw();
+            const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+            
+            // Create a point in space and convert to screen coordinates
+            // Add 10px offset (half of the note height) to center the line on the note
+            const point = new tapspace.geometry.Point(space, { x: 0, y: y + 10.5 });
+            const screenPos = point.transitRaw(viewport);
+            
+            // Position the indicator
+            indicator.style.transform = `translateY(${screenPos.y}px)`;
+            
+            // Update the label text to show which note it's relative to
+            const label = indicator.querySelector('.octave-label');
+            if (label) {
+                if (octaveOffset === 0) {
+                    label.textContent = currentSelectedNote ? `Note [${referenceNote.id}]` : 'BaseNote';
+                } else {
+                    label.textContent = octaveOffset > 0 ? `+${octaveOffset}` : octaveOffset;
+                }
+            }
+        });
+        
+        // Request next animation frame to keep updating positions
+        requestAnimationFrame(updateOctaveIndicators);
+    }
+    
+    // Make sure to initialize the octave indicators after the viewport and space are created
+    function initializeOctaveIndicators() {
+        const octaveIndicators = createOctaveIndicators();
+        updateOctaveIndicators();
+        console.log("Octave indicators initialized");
+    }
+
+    // Add CSS for octave indicators
+    const octaveIndicatorStyles = document.createElement('style');
+    octaveIndicatorStyles.textContent = `
+        .octave-indicators-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 3;
+        }
+        
+        .octave-indicator {
+            position: absolute;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            border-top: 1px dotted rgba(255, 168, 0, 0.3);
+            pointer-events: none;
+        }
+        
+        .octave-indicator.reference-octave {
+            border-top: 1px dotted rgba(255, 168, 0, 0.7);
+        }
+        
+        .octave-label {
+            position: absolute;
+            left: 10px;
+            top: -10px;
+            color: rgba(255, 168, 0, 0.7);
+            font-family: 'Roboto Mono', monospace;
+            font-size: 10px;
+            background-color: rgba(21, 21, 37, 0.7);
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        
+        .octave-indicator.reference-octave .octave-label {
+            color: rgba(255, 168, 0, 1);
+            font-weight: bold;
+        }
+    `;
+    document.head.appendChild(octaveIndicatorStyles);
   
     // Create scale factor sliders container
     const createScaleControls = () => {
@@ -120,11 +271,16 @@ document.addEventListener('DOMContentLoaded', async function() {
           xScaleFactor = parseFloat(e.target.value);
           updateVisualNotes(evaluatedNotes);
           createMeasureBars();
+          // Make sure octave indicators update with scale changes
+          requestAnimationFrame(updateOctaveIndicators);
         });
         
         yScaleSlider.addEventListener('input', (e) => {
-          yScaleFactor = parseFloat(e.target.value);
-          updateVisualNotes(evaluatedNotes);
+            yScaleFactor = parseFloat(e.target.value);
+            updateVisualNotes(evaluatedNotes);
+            updateBaseNotePosition(); // Make sure the base note position is updated
+            // Make sure octave indicators update with scale changes
+            requestAnimationFrame(updateOctaveIndicators);
         });
         
         // Add toggle functionality
@@ -525,6 +681,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     let centerPoint = null;  // Declare centerPoint globally
   
     let currentSelectedNote = null;
+
+    initializeOctaveIndicators();
   
     if (domCache.saveModuleBtn) {
         domCache.saveModuleBtn.addEventListener('click', saveModule);
@@ -705,14 +863,22 @@ document.addEventListener('DOMContentLoaded', async function() {
       });
     }
   
-      // showNoteVariables (main loop).
-      function showNoteVariables(note, clickedElement, measureId = null) {
-          window.modals.showNoteVariables(note, clickedElement, measureId);
-      }
+    // showNoteVariables (main loop).
+    function showNoteVariables(note, clickedElement, measureId = null) {
+        if (window.modals) {
+            window.modals.showNoteVariables(note, clickedElement, measureId);
+            // Refresh octave indicators when a note is selected
+            requestAnimationFrame(updateOctaveIndicators);
+        } else {
+            console.error("window.modals is not available");
+        }
+    }
       
-      function clearSelection() {
-          window.modals.clearSelection();
-      }
+    function clearSelection() {
+        window.modals.clearSelection();
+        currentSelectedNote = null; // Ensure currentSelectedNote is reset
+        requestAnimationFrame(updateOctaveIndicators); // Update octave indicators
+    }
       
       domCache.closeWidgetBtn.addEventListener('click', () => {
           clearSelection();
@@ -1872,6 +2038,8 @@ function updatePlayhead() {
 
     updateTimingBoundaries();
     createMeasureBars();  // This creates the visual elements for measure bars
+    // Update octave indicators when notes are updated
+    requestAnimationFrame(updateOctaveIndicators);
 
     // Reapply previous selections (if any)
     selectedIds.forEach(id => {
