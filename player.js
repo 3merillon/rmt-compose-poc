@@ -1409,6 +1409,9 @@ function createNoteElement(note, index) {
         evaluatedNotes = myModule.evaluateModule();
         updateVisualNotes(evaluatedNotes);
         
+        // Store the currently selected note before updating
+        const previouslySelectedNote = currentSelectedNote;
+        
         // Check if this note is currently selected in the widget
         const isCurrentlySelected = currentSelectedNote && currentSelectedNote.id === note.id;
         if (isCurrentlySelected) {
@@ -1417,6 +1420,14 @@ function createNoteElement(note, index) {
             if (noteContent) {
                 // Update the widget to reflect the new values
                 showNoteVariables(note, noteContent);
+            }
+        } 
+        // If another note was selected, reapply its selection and dependency highlights
+        else if (previouslySelectedNote && previouslySelectedNote.id !== note.id) {
+            const selectedElement = document.querySelector(`[data-note-id="${previouslySelectedNote.id}"]`);
+            if (selectedElement) {
+                // Re-show the note variables to reapply dependency highlights
+                showNoteVariables(previouslySelectedNote, selectedElement);
             }
         }
         
