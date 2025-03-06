@@ -659,6 +659,21 @@ html, body {
     will-change: transform;
 }
 
+/* Secondary bar styles */
+.measure-bar.secondary-bar {
+    border-left: 1px solid rgba(255, 255, 255, 0.7); /* Solid line instead of dashed */
+    width: 1px;
+    height: 100%;
+}
+
+.measure-bar.secondary-bar.start-bar {
+    border-left-width: 2px; /* Slightly thicker for better visibility */
+}
+
+.measure-bar.secondary-bar.end-bar {
+    border-left-width: 2px; /* Slightly thicker for better visibility */
+}
+
 .playhead {
     position: absolute;
     top: 0;
@@ -1014,6 +1029,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     justify-content: center;
     cursor: pointer;
     color: white;
+    overflow: hidden;
 }
 
 /* Editor widget styles */

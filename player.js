@@ -150,6 +150,14 @@ document.addEventListener('DOMContentLoaded', async function() {
             return;
         }
         
+        // More accurate device detection using pixel ratio and screen width
+        const isHighDensityDisplay = window.devicePixelRatio > 1.5;
+        const isNarrowScreen = window.innerWidth < 768;
+        const isMobileLike = isHighDensityDisplay && isNarrowScreen;
+        
+        // Set the appropriate vertical offset based on display characteristics
+        const verticalOffset = isMobileLike ? 10.0 : 10.5;
+        
         // Update each indicator's position
         indicators.forEach(indicator => {
             const octaveOffset = parseInt(indicator.getAttribute('data-octave'));
@@ -163,8 +171,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
             
             // Create a point in space and convert to screen coordinates
-            // Add 10px offset (half of the note height) to center the line on the note
-            const point = new tapspace.geometry.Point(space, { x: 0, y: y + 10 });
+            // Use the device-specific vertical offset
+            const point = new tapspace.geometry.Point(space, { x: 0, y: y + verticalOffset });
             const screenPos = point.transitRaw(viewport);
             
             // Position the indicator
@@ -178,7 +186,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     if (referenceNote === myModule.baseNote) {
                         label.textContent = 'BaseNote'; // Always show "BaseNote" for the base note
                     } else {
-                        label.textContent = `Reference [${referenceNote.id}]`;
+                        label.textContent = `Note [${referenceNote.id}]`;
                     }
                 } else {
                     label.textContent = octaveOffset > 0 ? `+${octaveOffset}` : octaveOffset;
@@ -1788,108 +1796,139 @@ function createNoteElement(note, index) {
   })();
   
   function createMeasureBars() {
-      // Store current selections
-      const selectedMeasureBars = document.querySelectorAll('.measure-bar-triangle.selected');
-      const selectedMeasureBarIds = Array.from(selectedMeasureBars).map(el => el.getAttribute('data-note-id'));
-  
-      measureBars.forEach(bar => bar.remove());
-      measureBars = [];
-      if (playhead) playhead.remove();
-  
-      const barsContainer = domCache.measureBarsContainer;
-      playheadContainer = domCache.playheadContainer;
-      const trianglesContainer = domCache.trianglesContainer;
-  
-      barsContainer.innerHTML = '';
-      playheadContainer.innerHTML = '';
-      trianglesContainer.innerHTML = '';
-  
-      playhead = document.createElement('div');
-      playhead.className = 'playhead';
-      playheadContainer.appendChild(playhead);
-  
-      const measurePoints = Object.entries(myModule.notes)
-          .filter(([id, note]) => note.getVariable('startTime') && !note.getVariable('duration') && !note.getVariable('frequency'))
-          .map(([id, note]) => ({ id: parseInt(id, 10), note }));
-  
-      const baseStart = myModule.baseNote.getVariable('startTime').valueOf();
-      if (!measurePoints.some(mp => mp.note.getVariable('startTime').valueOf() === baseStart)) {
-          const originBar = document.createElement('div');
-          originBar.className = 'measure-bar';
-          originBar.id = 'measure-bar-origin';
-          originBar.setAttribute("data-x", 0);
-          barsContainer.appendChild(originBar);
-          measureBars.push(originBar);
-      }
-  
-      measurePoints.forEach(({ id, note }) => {
-          const bar = document.createElement('div');
-          bar.className = 'measure-bar';
-          bar.id = `measure-bar-${id}`;
-          const x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
-          bar.setAttribute("data-x", x);
-          bar.setAttribute("data-note-id", id);
-          barsContainer.appendChild(bar);
-          measureBars.push(bar);
-          const triangle = createMeasureBarTriangle(bar, note, id);
-          if (triangle) {
-              trianglesContainer.appendChild(triangle);
-              // Reapply selection if this measure bar was previously selected
-              if (selectedMeasureBarIds.includes(id.toString())) {
-                  triangle.classList.add('selected');
-              }
-          }
-      });
-  
-      const finalBar = document.createElement('div');
-      finalBar.className = 'measure-bar';
-      finalBar.id = `measure-bar-final`;
-      barsContainer.appendChild(finalBar);
-      measureBars.push(finalBar);
-      invalidateModuleEndTimeCache();
-      updateMeasureBarPositions();
+    // Store current selections
+    const selectedMeasureBars = document.querySelectorAll('.measure-bar-triangle.selected');
+    const selectedMeasureBarIds = Array.from(selectedMeasureBars).map(el => el.getAttribute('data-note-id'));
+
+    measureBars.forEach(bar => bar.remove());
+    measureBars = [];
+    if (playhead) playhead.remove();
+
+    const barsContainer = domCache.measureBarsContainer;
+    playheadContainer = domCache.playheadContainer;
+    const trianglesContainer = domCache.trianglesContainer;
+
+    barsContainer.innerHTML = '';
+    playheadContainer.innerHTML = '';
+    trianglesContainer.innerHTML = '';
+
+    playhead = document.createElement('div');
+    playhead.className = 'playhead';
+    playheadContainer.appendChild(playhead);
+
+    const measurePoints = Object.entries(myModule.notes)
+        .filter(([id, note]) => note.getVariable('startTime') && !note.getVariable('duration') && !note.getVariable('frequency'))
+        .map(([id, note]) => ({ id: parseInt(id, 10), note }));
+
+    // Check if there's a measure bar at exactly time 0
+    const hasZeroTimeMeasureBar = measurePoints.some(mp => mp.note.getVariable('startTime').valueOf() === 0);
+
+    // Always create the origin bar at time 0 if there's no measure bar exactly at time 0
+    if (!hasZeroTimeMeasureBar) {
+        const originBar = document.createElement('div');
+        originBar.className = 'measure-bar';
+        originBar.id = 'measure-bar-origin';
+        originBar.setAttribute("data-x", 0);
+        barsContainer.appendChild(originBar);
+        measureBars.push(originBar);
+    }
+
+    // Create the secondary start bar (solid, 3px to the left of time 0)
+    const startSecondaryBar = document.createElement('div');
+    startSecondaryBar.className = 'measure-bar secondary-bar start-bar';
+    startSecondaryBar.id = 'secondary-start-bar';
+    // We'll set its position in updateMeasureBarPositions
+    barsContainer.appendChild(startSecondaryBar);
+    measureBars.push(startSecondaryBar);
+
+    measurePoints.forEach(({ id, note }) => {
+        const bar = document.createElement('div');
+        bar.className = 'measure-bar';
+        bar.id = `measure-bar-${id}`;
+        const x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
+        bar.setAttribute("data-x", x);
+        bar.setAttribute("data-note-id", id);
+        barsContainer.appendChild(bar);
+        measureBars.push(bar);
+        const triangle = createMeasureBarTriangle(bar, note, id);
+        if (triangle) {
+            trianglesContainer.appendChild(triangle);
+            // Reapply selection if this measure bar was previously selected
+            if (selectedMeasureBarIds.includes(id.toString())) {
+                triangle.classList.add('selected');
+            }
+        }
+    });
+
+    const finalBar = document.createElement('div');
+    finalBar.className = 'measure-bar';
+    finalBar.id = `measure-bar-final`;
+    barsContainer.appendChild(finalBar);
+    measureBars.push(finalBar);
+
+    // Create the secondary end bar (solid, 3px to the right of the final bar)
+    const endSecondaryBar = document.createElement('div');
+    endSecondaryBar.className = 'measure-bar secondary-bar end-bar';
+    endSecondaryBar.id = 'secondary-end-bar';
+    // We'll set its position in updateMeasureBarPositions
+    barsContainer.appendChild(endSecondaryBar);
+    measureBars.push(endSecondaryBar);
+
+    invalidateModuleEndTimeCache();
+    updateMeasureBarPositions();
   }
   
   function updateMeasureBarPositions() {
-      const transform = viewport.getBasis().getRaw();
-      const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-  
-      measureBars.forEach(bar => {
-          let x = 0;
-          if (bar.id === 'measure-bar-origin') {
-              x = 0;
-          } else if (bar.id === 'measure-bar-final') {
-              const moduleEndTime = getModuleEndTime();
-              x = moduleEndTime * 200 * xScaleFactor;
-          } else {
-              const noteId = bar.getAttribute("data-note-id");
-              if (noteId) {
-                  const note = myModule.getNoteById(parseInt(noteId, 10));
-                  if (note) {
-                      x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
-                  }
-              }
-          }
-          const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
-          const screenPos = point.transitRaw(viewport);
-          bar.style.transform = `translate(${screenPos.x}px, 0) scale(${1 / scale}, 1)`;
-      });
-  
-      const triangles = document.querySelectorAll('.measure-bar-triangle');
-      triangles.forEach(triangle => {
-          const noteId = triangle.getAttribute("data-note-id");
-          if (noteId) {
-              const note = myModule.getNoteById(parseInt(noteId, 10));
-              if (note) {
-                  const x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
-                  const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
-                  const screenPos = point.transitRaw(viewport);
-                  triangle.style.transform = `translateX(${screenPos.x}px)`;
-              }
-          }
-      });
-  
-      requestAnimationFrame(updateMeasureBarPositions);
+    const transform = viewport.getBasis().getRaw();
+    const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+
+    let finalBarX = 0; // Store the position of the final bar
+
+    measureBars.forEach(bar => {
+        let x = 0;
+        if (bar.id === 'measure-bar-origin') {
+            x = 0;
+        } else if (bar.id === 'secondary-start-bar') {
+            // Fixed position in space coordinates: 3 pixels to the left of origin
+            // This will scale properly with the rest of the visualization
+            x = -3 / scale; // Convert 3 screen pixels to space coordinates
+        } else if (bar.id === 'measure-bar-final') {
+            const moduleEndTime = getModuleEndTime();
+            x = moduleEndTime * 200 * xScaleFactor;
+            finalBarX = x; // Store for the secondary end bar
+        } else if (bar.id === 'secondary-end-bar') {
+            const moduleEndTime = getModuleEndTime();
+            x = moduleEndTime * 200 * xScaleFactor + (3 / scale); // 3 pixels to the right in space coordinates
+        } else {
+            const noteId = bar.getAttribute("data-note-id");
+            if (noteId) {
+                const note = myModule.getNoteById(parseInt(noteId, 10));
+                if (note) {
+                    x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
+                }
+            }
+        }
+        
+        const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
+        const screenPos = point.transitRaw(viewport);
+        bar.style.transform = `translate(${screenPos.x}px, 0) scale(${1 / scale}, 1)`;
+    });
+
+    const triangles = document.querySelectorAll('.measure-bar-triangle');
+    triangles.forEach(triangle => {
+        const noteId = triangle.getAttribute("data-note-id");
+        if (noteId) {
+            const note = myModule.getNoteById(parseInt(noteId, 10));
+            if (note) {
+                const x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
+                const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
+                const screenPos = point.transitRaw(viewport);
+                triangle.style.transform = `translateX(${screenPos.x}px)`;
+            }
+        }
+    });
+
+    requestAnimationFrame(updateMeasureBarPositions);
   }
   
   let playheadAnimationId = null;
@@ -2716,11 +2755,99 @@ function loadModule(file) {
             if (isPlaying || isPaused) {
                 stop(true);
             }
+            
+            // Store the current base note properties before cleaning up
+            const currentBaseNote = {
+                id: 0,
+                frequency: myModule.baseNote.getVariable('frequency'),
+                frequencyString: myModule.baseNote.variables.frequencyString,
+                startTime: myModule.baseNote.getVariable('startTime'),
+                startTimeString: myModule.baseNote.variables.startTimeString,
+                tempo: myModule.baseNote.getVariable('tempo'),
+                tempoString: myModule.baseNote.variables.tempoString,
+                beatsPerMeasure: myModule.baseNote.getVariable('beatsPerMeasure'),
+                beatsPerMeasureString: myModule.baseNote.variables.beatsPerMeasureString,
+                color: myModule.baseNote.variables.color
+            };
+            
             cleanupCurrentModule();
+            
             Module.loadFromJSON(moduleData).then(newModule => {
+                // Preserve the original base note properties
+                if (newModule.baseNote) {
+                    // Restore ID
+                    newModule.baseNote.id = 0;
+                    
+                    // Restore frequency
+                    if (currentBaseNote.frequencyString) {
+                        newModule.baseNote.variables.frequencyString = currentBaseNote.frequencyString;
+                        newModule.baseNote.setVariable('frequency', function() {
+                            return new Function("module", "Fraction", "return " + currentBaseNote.frequencyString + ";")(newModule, Fraction);
+                        });
+                    } else if (currentBaseNote.frequency) {
+                        newModule.baseNote.setVariable('frequency', function() {
+                            return currentBaseNote.frequency;
+                        });
+                    }
+                    
+                    // Restore startTime
+                    if (currentBaseNote.startTimeString) {
+                        newModule.baseNote.variables.startTimeString = currentBaseNote.startTimeString;
+                        newModule.baseNote.setVariable('startTime', function() {
+                            return new Function("module", "Fraction", "return " + currentBaseNote.startTimeString + ";")(newModule, Fraction);
+                        });
+                    } else if (currentBaseNote.startTime) {
+                        newModule.baseNote.setVariable('startTime', function() {
+                            return currentBaseNote.startTime;
+                        });
+                    }
+                    
+                    // Restore tempo
+                    if (currentBaseNote.tempoString) {
+                        newModule.baseNote.variables.tempoString = currentBaseNote.tempoString;
+                        newModule.baseNote.setVariable('tempo', function() {
+                            return new Function("module", "Fraction", "return " + currentBaseNote.tempoString + ";")(newModule, Fraction);
+                        });
+                    } else if (currentBaseNote.tempo) {
+                        newModule.baseNote.setVariable('tempo', function() {
+                            return currentBaseNote.tempo;
+                        });
+                    }
+                    
+                    // Restore beatsPerMeasure
+                    if (currentBaseNote.beatsPerMeasureString) {
+                        newModule.baseNote.variables.beatsPerMeasureString = currentBaseNote.beatsPerMeasureString;
+                        newModule.baseNote.setVariable('beatsPerMeasure', function() {
+                            return new Function("module", "Fraction", "return " + currentBaseNote.beatsPerMeasureString + ";")(newModule, Fraction);
+                        });
+                    } else if (currentBaseNote.beatsPerMeasure) {
+                        newModule.baseNote.setVariable('beatsPerMeasure', function() {
+                            return currentBaseNote.beatsPerMeasure;
+                        });
+                    }
+                    
+                    // Restore color if it exists
+                    if (currentBaseNote.color) {
+                        newModule.baseNote.variables.color = currentBaseNote.color;
+                    }
+                }
+                
+                // Set the global module reference
                 myModule = newModule;
+                window.myModule = newModule;
+                
+                // Mark the base note as dirty to ensure it gets reevaluated
+                myModule.markNoteDirty(0);
+                
+                // Initialize the module
                 initializeModule();
                 invalidateModuleEndTimeCache();
+                
+                // Force update of the base note fraction display
+                updateBaseNoteFraction();
+                updateBaseNotePosition();
+                
+                console.log("Module loaded successfully with preserved base note properties");
             }).catch((error) => {
                 console.error('Error loading module:', error);
                 const errorMsg = document.createElement('div');
