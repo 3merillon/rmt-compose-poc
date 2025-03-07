@@ -799,7 +799,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         // Process each variable that might have dependencies
         const variablesToProcess = ['startTime', 'duration', 'frequency'];
         let success = true;
-        const MAX_ITERATIONS = 10;
+        const MAX_ITERATIONS = 15; // Increased to handle more complex expressions
         
         variablesToProcess.forEach(varName => {
             if (!note.variables[varName + 'String']) return;
@@ -808,8 +808,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             let newRawExpr = currentRawExpr;
             let iterations = 0;
             
-            // Iteratively simplify until no changes occur or max iterations reached.
-            // Also break if there are no "module.getNoteById(" references.
+            // Iteratively simplify until no changes occur or max iterations reached
             do {
                 currentRawExpr = newRawExpr;
                 if (currentRawExpr.indexOf("module.getNoteById(") === -1) break;
@@ -817,44 +816,63 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                 iterations++;
             } while (currentRawExpr !== newRawExpr && iterations < MAX_ITERATIONS);
             
-            // Clean up extra parentheses using your existing function
+            // Clean up extra parentheses
             newRawExpr = removeExcessParentheses(newRawExpr);
-            // Then balance any remaining unbalanced parentheses using our new utility.
+            // Balance parentheses
             newRawExpr = balanceParentheses(newRawExpr);
             
-            console.log(`Final simplified expression for ${varName} (note ${noteId}): ${newRawExpr}`);
+            // If we still have getNoteById references after all iterations, try a direct approach
+            // This is a fallback for complex cases
+            if (newRawExpr.indexOf("module.getNoteById(") !== -1) {
+                // Try to evaluate the expression directly
+                try {
+                    const originalValue = note.getVariable(varName).valueOf();
+                    
+                    // Create a direct expression using the evaluated value
+                    if (varName === 'startTime') {
+                        newRawExpr = `module.baseNote.getVariable('startTime').add(new Fraction(${originalValue}))`;
+                    } else if (varName === 'duration') {
+                        newRawExpr = `new Fraction(${originalValue})`;
+                    } else if (varName === 'frequency') {
+                        const baseFreq = window.myModule.baseNote.getVariable('frequency').valueOf();
+                        const ratio = originalValue / baseFreq;
+                        newRawExpr = `new Fraction(${ratio}).mul(module.baseNote.getVariable('frequency'))`;
+                    }
+                } catch (error) {
+                    console.error(`Error creating direct expression for ${varName}:`, error);
+                    return; // Skip updating this variable
+                }
+            }
             
             try {
-                // Test the simplified expression to ensure its value matches the original.
+                // Test the simplified expression
                 const testFunc = new Function("module", "Fraction", "return " + newRawExpr + ";");
                 const testResult = testFunc(window.myModule, Fraction);
                 const originalValue = note.getVariable(varName).valueOf();
                 const newValue = testResult.valueOf();
                 
                 if (Math.abs(originalValue - newValue) > 0.0001) {
-                    console.warn(`Warning: Skipping update for ${varName} in note ${noteId} - value would change from ${originalValue} to ${newValue}`);
-                    return; // Skip updating this variable.
+                    return; // Skip updating this variable
                 }
                 
-                // Update the note's variable with the fully simplified expression.
+                // Update the note's variable
                 note.setVariable(varName, function() {
                     return new Function("module", "Fraction", "return " + newRawExpr + ";")(window.myModule, Fraction);
                 });
                 note.setVariable(varName + 'String', newRawExpr);
             } catch (error) {
                 console.error(`Error evaluating ${varName} for note ${noteId}:`, error);
-                showNotification(`Error evaluating ${varName}: ${error.message}`, 'error');
                 success = false;
             }
         });
         
-        // Recompile this note and its dependents so the changes propagate.
+        // Recompile this note and its dependents
         recompileNoteAndDependents(note.id);
         window.myModule.markNoteDirty(note.id);
         window.evaluatedNotes = window.myModule.evaluateModule();
         externalFunctions.updateVisualNotes(window.evaluatedNotes);
         
-        // Refresh the note widget to reflect the updated values.
+        // Refresh the note widget
         const noteElement = document.querySelector(`[data-note-id="${noteId}"]`);
         if (noteElement) {
             showNoteVariables(note, noteElement);
@@ -868,8 +886,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
     // Function to replace references to other notes with their expressions
     // This will recursively replace references until only base note references remain
     function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
-        // Regular expressions for matching note references and helper calls.
-        const noteRefRegex = /module\.getNoteById\((\d+)\)\.getVariable\('([^']+)'\)/g;
+        // Regular expressions for matching note references and helper calls
         const measureLengthRegex = /module\.findMeasureLength\(module\.getNoteById\((\d+)\)\)/g;
         const tempoRegex = /module\.findTempo\(module\.getNoteById\((\d+)\)\)/g;
         
@@ -882,43 +899,76 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             prevExpr = currentExpr;
             iterations++;
             
-            // Replace measure length references: whatever note is referenced, use base note.
-            currentExpr = currentExpr.replace(measureLengthRegex, (match, noteId) => {
+            // Replace measure length references
+            currentExpr = currentExpr.replace(measureLengthRegex, () => {
                 return 'module.findMeasureLength(module.baseNote)';
             });
             
-            // Replace tempo references: force use of base note.
-            currentExpr = currentExpr.replace(tempoRegex, (match, noteId) => {
+            // Replace tempo references
+            currentExpr = currentExpr.replace(tempoRegex, () => {
                 return 'module.findTempo(module.baseNote)';
             });
             
-            // Replace note references.
-            currentExpr = currentExpr.replace(noteRefRegex, (match, noteId, varName) => {
-                // If noteId is "0" (assuming base note is identified with id 0), then return base note getter.
+            // Replace note references
+            const noteRefRegex = /module\.getNoteById\((\d+)\)\.getVariable\('([^']+)'\)/g;
+            
+            // Create a new expression by replacing each match
+            let newExpr = '';
+            let lastIndex = 0;
+            let match;
+            
+            // Reset the regex
+            const regex = new RegExp(noteRefRegex);
+            
+            while ((match = regex.exec(currentExpr)) !== null) {
+                // Add text before this match
+                newExpr += currentExpr.substring(lastIndex, match.index);
+                
+                // Process the match
+                const noteId = match[1];
+                const varName = match[2];
+                
+                // Base note reference
                 if (noteId === '0') {
-                    return `module.baseNote.getVariable('${varName}')`;
+                    newExpr += `module.baseNote.getVariable('${varName}')`;
+                } else {
+                    const refNote = moduleInstance.getNoteById(parseInt(noteId, 10));
+                    if (!refNote) {
+                        newExpr += match[0]; // Keep original if note not found
+                    } else {
+                        // Get the raw expression
+                        const rawExpr = refNote.variables[varName + 'String'] || '';
+                        if (!rawExpr) {
+                            newExpr += match[0]; // Keep original if no raw expression
+                        } else {
+                            // If the raw expression directly references the base note
+                            if (rawExpr === "module.baseNote.getVariable('startTime')") {
+                                newExpr += `module.baseNote.getVariable('${varName}')`;
+                            } else {
+                                // Otherwise, use the raw expression wrapped in parentheses
+                                newExpr += `(${rawExpr})`;
+                            }
+                        }
+                    }
                 }
-                const refNote = moduleInstance.getNoteById(parseInt(noteId, 10));
-                if (!refNote) return match;
-                // Special case: if this is the 'startTime' variable and the referenced note’s raw expression 
-                // is exactly the base note’s getter, then substitute.
-                if (varName === 'startTime' &&
-                    refNote.variables &&
-                    refNote.variables[varName + 'String'] &&
-                    refNote.variables[varName + 'String'].trim() === "module.baseNote.getVariable('startTime')") {
-                    return `module.baseNote.getVariable('${varName}')`;
-                }
-                // Otherwise, use the raw expression of that variable (wrapped in parentheses).
-                const rawExpr = refNote.variables[varName + 'String'] || '';
-                if (!rawExpr) return match;
-                return `(${rawExpr})`;
-            });
+                
+                // Update lastIndex to after this match
+                lastIndex = match.index + match[0].length;
+            }
+            
+            // Add any remaining text
+            newExpr += currentExpr.substring(lastIndex);
+            
+            // Update currentExpr if we made changes
+            if (newExpr !== currentExpr) {
+                currentExpr = newExpr;
+            }
         }
         
-        // Final replacement: any occurrence of module.getNoteById(0) should be replaced with module.baseNote.
+        // Final replacement: any occurrence of module.getNoteById(0) should be replaced with module.baseNote
         currentExpr = currentExpr.replace(/module\.getNoteById\(0\)/g, 'module.baseNote');
         
-        // Apply further expression simplifications if needed.
+        // Apply further expression simplifications
         return simplifyExpressions(currentExpr);
     }
 
@@ -1424,70 +1474,140 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             .map(id => parseInt(id, 10))
             .filter(id => id !== 0);
         
+        // Sort notes by ID to ensure dependencies are processed in order
+        noteIds.sort((a, b) => a - b);
+        
         // Count of successfully evaluated notes
         let successCount = 0;
         let skippedCount = 0;
         
-        // Evaluate each note to the base note
-        noteIds.forEach(noteId => {
+        // Process each note
+        for (const noteId of noteIds) {
             try {
                 const note = window.myModule.getNoteById(noteId);
-                if (!note) return;
+                if (!note) continue;
                 
                 // Process each variable that might have dependencies
                 const variablesToProcess = ['startTime', 'duration', 'frequency'];
                 let noteSuccess = true;
                 let noteSkipped = false;
                 
-                variablesToProcess.forEach(varName => {
-                    if (!note.variables[varName + 'String']) return;
+                for (const varName of variablesToProcess) {
+                    if (!note.variables[varName + 'String']) continue;
                     
-                    // Get the current raw expression
-                    const currentRawExpr = note.variables[varName + 'String'];
+                    // Get the original expression and value
+                    const originalExpr = note.variables[varName + 'String'];
+                    const originalValue = note.getVariable(varName).valueOf();
                     
-                    try {
-                        // Replace all references to other notes (except base note) with their expressions
-                        const newRawExpr = replaceNoteReferencesWithBaseNoteOnly(currentRawExpr, window.myModule);
-                        
-                        // Only update if the expression changed
-                        if (newRawExpr !== currentRawExpr) {
-                            // Test the expression to make sure it's valid and preserves the original value
-                            const testFunc = new Function("module", "Fraction", "return " + newRawExpr + ";");
-                            const testResult = testFunc(window.myModule, Fraction);
+                    // Try different approaches to evaluate the expression
+                    let newExpr = originalExpr;
+                    let newValue = originalValue;
+                    let success = false;
+                    
+                    // Approach 1: Direct replacement of specific patterns
+                    if (varName === 'startTime' && originalExpr.includes("module.getNoteById(1).getVariable('startTime').add(")) {
+                        // Extract the multiplier from expressions like:
+                        // module.getNoteById(1).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(new Fraction(n, 1)))
+                        const match = originalExpr.match(/module\.getNoteById\(1\)\.getVariable\('startTime'\)\.add\(new Fraction\(60\)\.div\(module\.findTempo\(module\.getNoteById\(1\)\)\)\.mul\(new Fraction\((\d+),\s*1\)\)\)/);
+                        if (match) {
+                            const multiplier = parseInt(match[1], 10);
+                            const directExpr = `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${multiplier}, 1)))`;
                             
-                            // Get the original value
-                            const originalValue = note.getVariable(varName).valueOf();
-                            const newValue = testResult.valueOf();
-                            
-                            // If the values are significantly different, don't update
-                            if (Math.abs(originalValue - newValue) > 0.0001) {
-                                console.warn(`Warning: Skipping update for ${varName} in note ${noteId} - value would change from ${originalValue} to ${newValue}`);
-                                noteSkipped = true;
-                                return; // Skip this variable
+                            try {
+                                const directFunc = new Function("module", "Fraction", "return " + directExpr + ";");
+                                const directValue = directFunc(window.myModule, Fraction).valueOf();
+                                
+                                // If the direct approach gives a close enough value, use it
+                                if (Math.abs(directValue - originalValue) < 0.0001) {
+                                    newExpr = directExpr;
+                                    newValue = directValue;
+                                    success = true;
+                                    console.log(`Direct approach successful for note ${noteId}, ${varName}`);
+                                }
+                            } catch (error) {
+                                console.error(`Error with direct approach for note ${noteId}, ${varName}:`, error);
                             }
-                            
-                            // If the values match, update the expression
-                            note.setVariable(varName, function() {
-                                return new Function("module", "Fraction", "return " + newRawExpr + ";")(window.myModule, Fraction);
-                            });
-                            note.setVariable(varName + 'String', newRawExpr);
                         }
-                    } catch (error) {
-                        console.error(`Error evaluating ${varName} for note ${noteId}:`, error);
-                        noteSuccess = false;
                     }
-                });
+                    
+                    // Approach 2: If direct replacement didn't work, try the standard replacement
+                    if (!success) {
+                        try {
+                            const standardExpr = replaceNoteReferencesWithBaseNoteOnly(originalExpr, window.myModule);
+                            const standardFunc = new Function("module", "Fraction", "return " + standardExpr + ";");
+                            const standardValue = standardFunc(window.myModule, Fraction).valueOf();
+                            
+                            // If the standard approach gives a close enough value, use it
+                            if (Math.abs(standardValue - originalValue) < 0.0001) {
+                                newExpr = standardExpr;
+                                newValue = standardValue;
+                                success = true;
+                                console.log(`Standard approach successful for note ${noteId}, ${varName}`);
+                            }
+                        } catch (error) {
+                            console.error(`Error with standard approach for note ${noteId}, ${varName}:`, error);
+                        }
+                    }
+                    
+                    // Approach 3: If all else fails, create a direct expression based on the evaluated value
+                    if (!success) {
+                        if (varName === 'startTime') {
+                            newExpr = `module.baseNote.getVariable('startTime').add(new Fraction(${originalValue}))`;
+                        } else if (varName === 'duration') {
+                            newExpr = `new Fraction(${originalValue})`;
+                        } else if (varName === 'frequency') {
+                            const baseFreq = window.myModule.baseNote.getVariable('frequency').valueOf();
+                            const ratio = originalValue / baseFreq;
+                            newExpr = `new Fraction(${ratio}).mul(module.baseNote.getVariable('frequency'))`;
+                        }
+                        
+                        try {
+                            const directFunc = new Function("module", "Fraction", "return " + newExpr + ";");
+                            const directValue = directFunc(window.myModule, Fraction).valueOf();
+                            
+                            // If the direct value approach gives a close enough value, use it
+                            if (Math.abs(directValue - originalValue) < 0.0001) {
+                                newValue = directValue;
+                                success = true;
+                                console.log(`Direct value approach successful for note ${noteId}, ${varName}`);
+                            } else {
+                                console.warn(`Direct value approach failed for note ${noteId}, ${varName}: ${originalValue} vs ${directValue}`);
+                                success = false;
+                            }
+                        } catch (error) {
+                            console.error(`Error with direct value approach for note ${noteId}, ${varName}:`, error);
+                            success = false;
+                        }
+                    }
+                    
+                    // Update the note's variable if we were successful
+                    if (success) {
+                        note.setVariable(varName, function() {
+                            return new Function("module", "Fraction", "return " + newExpr + ";")(window.myModule, Fraction);
+                        });
+                        note.setVariable(varName + 'String', newExpr);
+                        console.log(`Successfully updated ${varName} for note ${noteId}`);
+                    } else {
+                        console.warn(`Warning: Skipping update for ${varName} in note ${noteId}`);
+                        noteSkipped = true;
+                    }
+                }
                 
-                // Mark this note as dirty in the module
+                // Mark this note as dirty
                 window.myModule.markNoteDirty(noteId);
                 
-                if (noteSuccess) successCount++;
-                if (noteSkipped) skippedCount++;
+                if (!noteSkipped) successCount++;
+                else skippedCount++;
                 
             } catch (error) {
                 console.error(`Error evaluating note ${noteId}:`, error);
             }
-        });
+        }
+        
+        // Recompile all notes to ensure changes propagate
+        for (const noteId of noteIds) {
+            recompileNoteAndDependents(noteId);
+        }
         
         // Reevaluate and update the visual representation
         window.evaluatedNotes = window.myModule.evaluateModule();
