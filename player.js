@@ -207,9 +207,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
             }
         });
-        
-        // Request next animation frame to keep updating positions
-        requestAnimationFrame(updateOctaveIndicators);
     }
     
     // Make sure to initialize the octave indicators after the viewport and space are created
@@ -292,22 +289,32 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Add event listeners to sliders
         const xScaleSlider = document.getElementById('x-scale-slider');
         const yScaleSlider = document.getElementById('y-scale-slider');
+
+        // Throttle for slider updates
+        function throttle(func, limit) {
+            let inThrottle;
+            return function() {
+                const args = arguments;
+                const context = this;
+                if (!inThrottle) {
+                    func.apply(context, args);
+                    inThrottle = true;
+                    setTimeout(() => inThrottle = false, limit);
+                }
+            };
+        }
+
+        xScaleSlider.addEventListener('input', throttle((e) => {
+            xScaleFactor = parseFloat(e.target.value);
+            updateVisualNotes(evaluatedNotes);
+            createMeasureBars();
+        }, 50)); // Throttle to 50ms
         
-        xScaleSlider.addEventListener('input', (e) => {
-          xScaleFactor = parseFloat(e.target.value);
-          updateVisualNotes(evaluatedNotes);
-          createMeasureBars();
-          // Make sure octave indicators update with scale changes
-          requestAnimationFrame(updateOctaveIndicators);
-        });
-        
-        yScaleSlider.addEventListener('input', (e) => {
+        yScaleSlider.addEventListener('input', throttle((e) => {
             yScaleFactor = parseFloat(e.target.value);
             updateVisualNotes(evaluatedNotes);
-            updateBaseNotePosition(); // Make sure the base note position is updated
-            // Make sure octave indicators update with scale changes
-            requestAnimationFrame(updateOctaveIndicators);
-        });
+            updateBaseNotePosition();
+        }, 50)); // Throttle to 50ms
         
         // Add toggle functionality
         toggleButton.addEventListener('click', () => {
@@ -359,12 +366,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                 });
             });
         }
-    }
-  
-    // Function to efficiently clear all highlights
-    function clearAllHighlights() {
-        const highlightedElements = document.querySelectorAll('.dependency, .dependent');
-        batchClassOperation(highlightedElements, [], ['dependency', 'dependent']);
     }
   
     function debounce(func, wait) {
@@ -848,53 +849,19 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     window.importModuleAtTarget = importModuleAtTarget;
     /* ----------------------- END IMPORT MODULE FUNCTION ----------------------- */
-  
-    // Helper for determining the note image
-    function getDurationImageForBase(base) {
-      if (base === 4) return "whole.png";
-      else if (base === 2) return "half.png";
-      else if (base === 1) return "quarter.png";
-      else if (base === 0.5) return "eighth.png";
-      else if (base === 0.25) return "sixteenth.png";
-      return "";
+    
+    function animationLoop() {
+        updateOctaveIndicators();
+        updatePlayhead();
+        updateMeasureBarPositions();
+        requestAnimationFrame(animationLoop);
     }
-  
-    // Helper that recursively recompiles a note (from its raw expressions) and all its dependent notes.
-    // visited is used to avoid cycles.
-    function recompileNoteAndDependents(noteId, visited = new Set()) {
-      if (visited.has(noteId)) return;
-      visited.add(noteId);
-      const note = myModule.getNoteById(noteId);
-      if (!note) return;
-      // For each variable that has a raw string (ending with "String"), recompile it
-      Object.keys(note.variables).forEach(varKey => {
-        if (varKey.endsWith("String")) {
-          const baseKey = varKey.slice(0, -6);
-          try {
-            const rawExpr = note.variables[varKey];
-            // Create and set the new function for this variable.
-            const newFunc = new Function("module", "Fraction", "return " + rawExpr + ";");
-            note.setVariable(baseKey, function() {
-              return newFunc(myModule, Fraction);
-            });
-          } catch (err) {
-            console.error("Error recompiling note", noteId, "variable", baseKey, ":", err);
-          }
-        }
-      });
-      // Now recompile all dependent notes
-      const dependents = myModule.getDependentNotes(noteId);
-      dependents.forEach(depId => {
-        recompileNoteAndDependents(depId, visited);
-      });
-    }
-  
-    // showNoteVariables (main loop).
+    requestAnimationFrame(animationLoop);
+
+    // showNoteVariables.
     function showNoteVariables(note, clickedElement, measureId = null) {
         if (window.modals) {
             window.modals.showNoteVariables(note, clickedElement, measureId);
-            // Refresh octave indicators when a note is selected
-            requestAnimationFrame(updateOctaveIndicators);
         } else {
             console.error("window.modals is not available");
         }
@@ -903,7 +870,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     function clearSelection() {
         window.modals.clearSelection();
         currentSelectedNote = null; // Ensure currentSelectedNote is reset
-        requestAnimationFrame(updateOctaveIndicators); // Update octave indicators
     }
       
       domCache.closeWidgetBtn.addEventListener('click', () => {
@@ -1941,8 +1907,6 @@ function createNoteElement(note, index) {
             }
         }
     });
-
-    requestAnimationFrame(updateMeasureBarPositions);
   }
   
   let playheadAnimationId = null;
@@ -2021,9 +1985,6 @@ function updatePlayhead() {
   createMeasureBars();
   // Update the visual representation of notes
   updateVisualNotes(evaluatedNotes);
-
-  requestAnimationFrame(updatePlayhead);
-  requestAnimationFrame(updateMeasureBarPositions);
   
   function getColorForNote(note) {
       if (note.variables && note.variables.color) {
@@ -2095,8 +2056,6 @@ function updatePlayhead() {
 
     updateTimingBoundaries();
     createMeasureBars();  // This creates the visual elements for measure bars
-    // Update octave indicators when notes are updated
-    requestAnimationFrame(updateOctaveIndicators);
 
     // Reapply previous selections (if any)
     selectedIds.forEach(id => {
