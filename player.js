@@ -329,30 +329,11 @@ document.addEventListener('DOMContentLoaded', async function() {
             viewport.translateTo(newCenterPoint);
           }, 50));
         
-          yScaleSlider.addEventListener('input', throttle((e) => {
-            // Store the current viewport center point in space coordinates
-            const viewCenter = viewport.atCenter();
-            const centerInSpace = viewCenter.transitRaw(space);
-            
-            // Update scale factor
-            const oldScale = yScaleFactor;
+        yScaleSlider.addEventListener('input', throttle((e) => {
             yScaleFactor = parseFloat(e.target.value);
-            
-            // Update visuals with new scale
             updateVisualNotes(evaluatedNotes);
             updateBaseNotePosition();
-            
-            // Calculate new center position based on scale change
-            // For y-scale, we need to adjust the y-coordinate
-            const scaleRatio = yScaleFactor / oldScale;
-            const newCenterY = centerInSpace.y * scaleRatio;
-            
-            // Create a new point with the same x-coordinate but adjusted y-coordinate
-            const newCenterPoint = space.at(centerInSpace.x, newCenterY);
-            
-            // Translate viewport to maintain the center point
-            viewport.translateTo(newCenterPoint);
-          }, 50));
+        }, 50)); // Throttle to 50ms
         
         // Add toggle functionality
         toggleButton.addEventListener('click', () => {
