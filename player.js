@@ -524,10 +524,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     */
     function updateDependentRawExpressions(selectedNoteId, selectedRaw) {
         const regex = new RegExp(
-        "(?:module\\.)?getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\.getVariable\\('([^']+)'\\)|targetNote\\.getVariable\\('([^']+)'\\)",
-        "g"
+            "(?:module\\.)?getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\.getVariable\\('([^']+)'\\)|targetNote\\.getVariable\\('([^']+)'\\)",
+            "g"
         );
-  
+    
         const dependents = myModule.getDependentNotes(selectedNoteId);
         dependents.forEach(depId => {
             const depNote = myModule.getNoteById(depId);
@@ -535,6 +535,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 console.warn("Dependent note", depId, "not found.");
                 return;
             }
+            
             Object.keys(depNote.variables).forEach(key => {
                 if (key.endsWith("String")) {
                     let rawExp = depNote.variables[key];
@@ -542,27 +543,33 @@ document.addEventListener('DOMContentLoaded', async function() {
                         console.warn("Skipping update for key", key, "in dependent note", depId, "as value is not a string:", rawExp);
                         return;
                     }
-                    // Replace references to the soon-deleted note with its raw snapshot.
-                    rawExp = rawExp.replace(regex, (match, g1, g2) => {
-                        const varName = g1 || g2;
-                        let replacement = selectedRaw[varName];
-                        if (replacement === undefined) {
-                            // Supply default: new Fraction(1,1) for frequency; for others, new Fraction(0,1)
-                            replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
-                            console.warn("No raw value for", varName, "– using default", replacement);
-                        }
-                        // Return the replacement without adding extra parentheses.
-                        return replacement;
-                    });
-                    depNote.variables[key] = rawExp;
-                    const baseKey = key.slice(0, -6);
-                    try {
-                        const newFunc = new Function("module", "Fraction", "return " + rawExp + ";");
-                        depNote.setVariable(baseKey, function() {
-                            return newFunc(myModule, Fraction);
+                    
+                    // Check if this expression references the note being deleted
+                    if (rawExp.includes(`getNoteById(${selectedNoteId})`) || rawExp.includes("targetNote")) {
+                        // Replace references to the soon-deleted note with its raw snapshot.
+                        let newRawExp = rawExp.replace(regex, (match, g1, g2) => {
+                            const varName = g1 || g2;
+                            let replacement = selectedRaw[varName];
+                            if (replacement === undefined) {
+                                // Supply default: new Fraction(1,1) for frequency; for others, new Fraction(0,1)
+                                replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
+                                console.warn("No raw value for", varName, "– using default", replacement);
+                            }
+                            // Return the replacement without adding extra parentheses.
+                            return replacement;
                         });
-                    } catch (err) {
-                        console.error("Error compiling new expression for note", depId, "variable", baseKey, ":", err);
+                        
+                        // Update the variable with the new expression
+                        depNote.variables[key] = newRawExp;
+                        const baseKey = key.slice(0, -6);
+                        try {
+                            const newFunc = new Function("module", "Fraction", "return " + newRawExp + ";");
+                            depNote.setVariable(baseKey, function() {
+                                return newFunc(myModule, Fraction);
+                            });
+                        } catch (err) {
+                            console.error("Error compiling new expression for note", depId, "variable", baseKey, ":", err);
+                        }
                     }
                 }
             });
@@ -574,50 +581,53 @@ document.addEventListener('DOMContentLoaded', async function() {
         we check if a raw expression (e.g., startTimeString) already exists. If it does, we use that to preserve the
         functional form. Otherwise, we generate a literal snapshot. The snapshot is then used in updateDependentRawExpressions.
     */
-    function deleteNoteKeepDependencies(noteId) {
-        const selectedNote = myModule.getNoteById(noteId);
-        if (!selectedNote) return;
-        let selectedRaw = {};
-        ["startTime", "duration", "frequency"].forEach(varName => {
-            if (selectedNote.variables[varName + "String"]) {
-                // Use the existing raw expression if available.
-                selectedRaw[varName] = selectedNote.variables[varName + "String"];
-            } else {
-                const frac = selectedNote.getVariable(varName);
-                let fracStr;
-                if (frac == null) {
-                    fracStr = (varName === "frequency") ? "1/1" : "0/1";
-                } else if (frac && typeof frac.toFraction === "function") {
-                    fracStr = frac.toFraction();
+        function deleteNoteKeepDependencies(noteId) {
+            const selectedNote = myModule.getNoteById(noteId);
+            if (!selectedNote) return;
+            
+            // Create a snapshot of the raw expressions
+            let selectedRaw = {};
+            ["startTime", "duration", "frequency"].forEach(varName => {
+                if (selectedNote.variables[varName + "String"]) {
+                    // Use the existing raw expression if available.
+                    selectedRaw[varName] = selectedNote.variables[varName + "String"];
                 } else {
-                    fracStr = frac.toString();
+                    const frac = selectedNote.getVariable(varName);
+                    let fracStr;
+                    if (frac == null) {
+                        fracStr = (varName === "frequency") ? "1/1" : "0/1";
+                    } else if (frac && typeof frac.toFraction === "function") {
+                        fracStr = frac.toFraction();
+                    } else {
+                        fracStr = frac.toString();
+                    }
+                    if (!fracStr.includes("/")) {
+                        fracStr = fracStr + "/1";
+                    }
+                    selectedRaw[varName] = "new Fraction(" + fracStr + ")";
                 }
-                if (!fracStr.includes("/")) {
-                    fracStr = fracStr + "/1";
-                }
-                selectedRaw[varName] = "new Fraction(" + fracStr + ")";
+            });
+            
+            // Update all dependent notes so that references to the soon-deleted note now use the raw snapshot.
+            updateDependentRawExpressions(noteId, selectedRaw);
+            
+            if (noteId !== 0) {
+                delete myModule.notes[noteId];
+                delete myModule._evaluationCache[noteId]; // Clean up the cache
+                
+                // Mark all notes that depended on this note as dirty
+                const dependents = myModule.getDependentNotes(noteId);
+                dependents.forEach(depId => {
+                    myModule.markNoteDirty(depId);
+                });
             }
-        });
-        // Update all dependent notes so that references to the soon-deleted note now use the raw snapshot.
-        updateDependentRawExpressions(noteId, selectedRaw);
-        
-        if (noteId !== 0) {
-          delete myModule.notes[noteId];
-          delete myModule._evaluationCache[noteId]; // Clean up the cache
-          
-          // Mark all notes that depended on this note as dirty
-          const dependents = myModule.getDependentNotes(noteId);
-          dependents.forEach(depId => {
-              myModule.markNoteDirty(depId);
-          });
+            
+            evaluatedNotes = myModule.evaluateModule();
+            updateVisualNotes(evaluatedNotes);
+            createMeasureBars();
+            clearSelection();
+            invalidateModuleEndTimeCache();
         }
-        
-        evaluatedNotes = myModule.evaluateModule();
-        updateVisualNotes(evaluatedNotes);
-        createMeasureBars();
-        clearSelection();
-        invalidateModuleEndTimeCache();
-    }
   
     /* ---------- END KEEP DEPENDENCIES FUNCTIONALITY ---------- */
   

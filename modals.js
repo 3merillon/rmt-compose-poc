@@ -1926,7 +1926,8 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
                 window.playerControls.pause();
             }
-            externalFunctions.deleteNoteAndDependencies(noteId);
+            // Call deleteNoteKeepDependencies instead of deleteNoteAndDependencies
+            externalFunctions.deleteNoteKeepDependencies(noteId);
             document.body.removeChild(overlay);
         });
     
