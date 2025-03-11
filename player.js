@@ -2021,11 +2021,18 @@ function createNoteElement(note, index) {
     // Check if this is the base note
     const isBaseNote = noteObj === myModule.baseNote;
     
+    // Check if this is a silence (has startTime and duration but no frequency)
+    const isSilence = noteObj.id !== undefined && 
+                     noteObj.getVariable && 
+                     noteObj.getVariable('startTime') && 
+                     noteObj.getVariable('duration') && 
+                     !noteObj.getVariable('frequency');
+    
     // Calculate X position based on time or special case for BaseNote
     let xCoord;
     if (isBaseNote) {
-      // BaseNote has a fixed position at -50 in space coordinates
-      xCoord = -50;
+      // BaseNote has a fixed position at -29 in space coordinates
+      xCoord = -29;
     } else {
       xCoord = newTime * 200 * xScaleFactor;
     }
@@ -2037,14 +2044,14 @@ function createNoteElement(note, index) {
     let yPos = 0;
     
     if (isBaseNote) {
-        // For base note, use its fixed position
-        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
-        const baseNoteY = frequencyToY(baseNoteFreq);
-        // Add a small offset to match the visual position of the actual base note circle
-        const yOffset = 10; // Adjust this value to match the actual offset
-        const yPoint = new tapspace.geometry.Point(space, { x: 0, y: baseNoteY + yOffset });
-        const yScreenPos = yPoint.transitRaw(viewport);
-        yPos = yScreenPos.y;
+      // For base note, use its fixed position
+      const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+      const baseNoteY = frequencyToY(baseNoteFreq);
+      // Add a small offset to match the visual position of the actual base note circle
+      const yOffset = 10; // Adjust this value to match the actual offset
+      const yPoint = new tapspace.geometry.Point(space, { x: 0, y: baseNoteY + yOffset });
+      const yScreenPos = yPoint.transitRaw(viewport);
+      yPos = yScreenPos.y;
     } else if (isMeasureBar) {
       // For measure bars, position at the bottom where triangles are
       const trianglesContainer = document.getElementById('measureBarTrianglesContainer');
@@ -2054,6 +2061,65 @@ function createNoteElement(note, index) {
       } else {
         // Fallback if container not found
         yPos = window.innerHeight - 30;
+      }
+    } else if (isSilence) {
+      // For silences, find the first parent with a defined frequency
+      let parentWithFreq = null;
+      let currentNote = noteObj;
+      
+      // Function to find parent note with frequency
+      const findParentWithFrequency = (note) => {
+        if (!note) return null;
+        
+        // Get the parent reference from the startTime expression
+        let parentId = null;
+        const startTimeString = note.variables.startTimeString;
+        if (startTimeString) {
+          const match = /getNoteById\((\d+)\)/.exec(startTimeString);
+          if (match) {
+            parentId = parseInt(match[1], 10);
+          }
+        }
+        
+        // If no parent found in expression, try the parentId property
+        if (parentId === null && note.parentId !== undefined) {
+          parentId = note.parentId;
+        }
+        
+        // If still no parent, use BaseNote
+        if (parentId === null) {
+          return myModule.baseNote;
+        }
+        
+        // Get the parent note
+        const parentNote = myModule.getNoteById(parentId);
+        
+        // If parent has frequency, return it
+        if (parentNote && parentNote.getVariable && parentNote.getVariable('frequency')) {
+          return parentNote;
+        }
+        
+        // Otherwise, recursively check the parent's parent
+        return findParentWithFrequency(parentNote);
+      };
+      
+      // Find parent with frequency
+      parentWithFreq = findParentWithFrequency(currentNote);
+      
+      // If found, use its frequency for positioning
+      if (parentWithFreq) {
+        const frequency = parentWithFreq.getVariable('frequency').valueOf();
+        const y = frequencyToY(frequency);
+        const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
+        const yScreenPos = yPoint.transitRaw(viewport);
+        yPos = yScreenPos.y;
+      } else {
+        // Fallback to BaseNote frequency if no parent with frequency found
+        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        const y = frequencyToY(baseNoteFreq);
+        const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
+        const yScreenPos = yPoint.transitRaw(viewport);
+        yPos = yScreenPos.y;
       }
     } else if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
       try {
@@ -2242,17 +2308,17 @@ function createNoteElement(note, index) {
     
     if (type === 'dragged') {
       // Mix with white for dragged note (makes it lighter)
-      overlayColor = blendColors(noteColor, 'rgba(255, 255, 255, 0.8)', 0.5);
+      overlayColor = isSilence ? 'rgba(50, 50, 50, 0.5)' : blendColors(noteColor, 'rgba(255, 255, 255, 0.8)', 0.5);
       borderColor = 'white';
       shadowColor = 'rgba(255, 255, 255, 0.7)';
     } else if (type === 'dependency') {
       // Mix with red for dependencies
-      overlayColor = blendColors(noteColor, 'rgba(255, 100, 100, 0.6)', 0.5);
+      overlayColor = isSilence ? 'rgba(70, 50, 50, 0.5)' : blendColors(noteColor, 'rgba(255, 100, 100, 0.6)', 0.5);
       borderColor = 'rgba(255, 0, 0, 0.8)';
       shadowColor = 'rgba(255, 0, 0, 0.5)';
     } else if (type === 'parent') {
       // Mix with light blue for parent dependency
-      overlayColor = blendColors(noteColor, 'rgba(100, 200, 255, 0.6)', 0.5);
+      overlayColor = isSilence ? 'rgba(50, 50, 70, 0.5)' : blendColors(noteColor, 'rgba(100, 200, 255, 0.6)', 0.5);
       borderColor = 'rgba(0, 150, 255, 0.8)';
       shadowColor = 'rgba(0, 150, 255, 0.5)';
     }
@@ -2266,7 +2332,7 @@ function createNoteElement(note, index) {
       overlayElem.style.pointerEvents = 'none';
       overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
       overlayElem.style.overflow = 'hidden'; // Hide overflow
-      overlayElem.setAttribute('data-type', isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : 'note'));
+      overlayElem.setAttribute('data-type', isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : (isSilence ? 'silence' : 'note')));
       
       // Create a text element with a font size that scales with zoom
       const textElem = document.createElement('div');
@@ -2277,14 +2343,16 @@ function createNoteElement(note, index) {
       textElem.style.fontFamily = "'Roboto Mono', monospace";
       
       if (type === 'dragged') {
-        textElem.textContent = `Note ${noteObj.id}`;
+        textElem.textContent = isSilence ? `Silence ${noteObj.id}` : `Note ${noteObj.id}`;
       } else if (type === 'dependency') {
-        textElem.textContent = `Dep ${noteObj.id}`;
+        textElem.textContent = isSilence ? `Dep Silence ${noteObj.id}` : `Dep ${noteObj.id}`;
       } else if (type === 'parent') {
         if (isBaseNote) {
           textElem.textContent = 'BaseNote';
         } else if (isMeasureBar) {
           textElem.textContent = `Measure ${noteObj.id}`;
+        } else if (isSilence) {
+          textElem.textContent = `Parent Silence ${noteObj.id}`;
         } else {
           textElem.textContent = `Parent ${noteObj.id}`;
         }
@@ -2306,15 +2374,21 @@ function createNoteElement(note, index) {
           textElem.textContent = 'BaseNote';
         } else if (isMeasureBar) {
           textElem.textContent = `Measure ${noteObj.id}`;
+        } else if (isSilence) {
+          textElem.textContent = `Parent Silence ${noteObj.id}`;
         } else {
           textElem.textContent = `Parent ${noteObj.id}`;
         }
+      } else if (type === 'dragged') {
+        textElem.textContent = isSilence ? `Silence ${noteObj.id}` : `Note ${noteObj.id}`;
+      } else if (type === 'dependency') {
+        textElem.textContent = isSilence ? `Dep Silence ${noteObj.id}` : `Dep ${noteObj.id}`;
       }
     }
     
     // Get the current element type
     const currentType = overlayElem.getAttribute('data-type');
-    const newType = isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : 'note');
+    const newType = isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : (isSilence ? 'silence' : 'note'));
     
     // If the type has changed, recreate the element
     if (currentType !== newType) {
@@ -2330,45 +2404,20 @@ function createNoteElement(note, index) {
     
     // Style based on note type
     if (isBaseNote) {
-        // For base note, create a circle
-        overlayElem.style.backgroundColor = overlayColor;
-        overlayElem.style.border = `2px solid ${borderColor}`;
-        overlayElem.style.borderRadius = '50%'; // Make it circular
-        overlayElem.style.boxShadow = `0 0 8px ${shadowColor}`;
-        overlayElem.style.display = 'flex';
-        overlayElem.style.alignItems = 'center';
-        overlayElem.style.justifyContent = 'center';
-        
-        // Get the BaseNote's position in space coordinates
-        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
-        const baseNoteY = frequencyToY(baseNoteFreq);
-        const xOffset = -29; // The BaseNote's fixed X position in space
-        const yOffset = 10; // Adjustment to match visual position
-        
-        // Create a point in space at the BaseNote's position
-        const baseNotePoint = new tapspace.geometry.Point(space, { 
-          x: xOffset, 
-          y: baseNoteY + yOffset 
-        });
-        
-        // Convert to screen coordinates
-        const baseNoteScreen = baseNotePoint.transitRaw(viewport);
-        
-        // Get the actual size of the BaseNote circle (40px in space coordinates)
-        const baseNoteSize = 40;
-        const origin = new tapspace.geometry.Point(space, { x: 0, y: 0 });
-        const sizePoint = new tapspace.geometry.Point(space, { x: baseNoteSize, y: baseNoteSize });
-        const originScreen = origin.transitRaw(viewport);
-        const sizeScreen = sizePoint.transitRaw(viewport);
-        
-        // Calculate the screen size based on the current scale
-        const screenSize = Math.abs(sizeScreen.x - originScreen.x);
-        
-        // Position and size the overlay to match the BaseNote exactly
-        overlayElem.style.width = `${screenSize}px`;
-        overlayElem.style.height = `${screenSize}px`; // Make it a perfect circle
-        overlayElem.style.left = `${baseNoteScreen.x - screenSize / 2}px`;
-        overlayElem.style.top = `${baseNoteScreen.y - screenSize / 2}px`;
+      // For base note, create a circle
+      overlayElem.style.backgroundColor = overlayColor;
+      overlayElem.style.border = `2px solid ${borderColor}`;
+      overlayElem.style.borderRadius = '50%'; // Make it circular
+      overlayElem.style.boxShadow = `0 0 8px ${shadowColor}`;
+      overlayElem.style.display = 'flex';
+      overlayElem.style.alignItems = 'center';
+      overlayElem.style.justifyContent = 'center';
+      
+      // Position the base note circle
+      overlayElem.style.left = `${screenPos.x - screenWidth / 2}px`;
+      overlayElem.style.top = `${yPos - screenHeight / 2}px`;
+      overlayElem.style.width = `${screenWidth}px`;
+      overlayElem.style.height = `${screenHeight}px`;
     } else if (isMeasureBar) {
       // For measure bars, create a triangle
       overlayElem.style.backgroundColor = 'transparent';
@@ -2391,7 +2440,7 @@ function createNoteElement(note, index) {
         textElem.style.transform = 'translateX(-50%)';
       }
     } else {
-      // For regular notes
+      // For regular notes and silences
       overlayElem.style.backgroundColor = overlayColor;
       overlayElem.style.border = `2px solid ${borderColor}`;
       overlayElem.style.borderRadius = '6px'; // Match the note's border radius
@@ -2405,6 +2454,27 @@ function createNoteElement(note, index) {
       overlayElem.style.top = `${yPos}px`;
       overlayElem.style.width = `${screenWidth}px`;
       overlayElem.style.height = `${screenHeight}px`;
+      
+      // For silences, add a special indicator
+      if (isSilence) {
+        overlayElem.style.borderStyle = 'dashed';
+        
+        // Add a silence icon if not already present
+        if (!overlayElem.querySelector('.silence-icon')) {
+          const silenceIcon = document.createElement('div');
+          silenceIcon.className = 'silence-icon';
+          silenceIcon.style.position = 'absolute';
+          silenceIcon.style.top = '2px';
+          silenceIcon.style.right = '2px';
+          silenceIcon.style.width = '10px';
+          silenceIcon.style.height = '10px';
+          silenceIcon.style.borderRadius = '50%';
+          silenceIcon.style.backgroundColor = 'transparent';
+          silenceIcon.style.border = '2px solid white';
+          silenceIcon.style.opacity = '0.7';
+          overlayElem.appendChild(silenceIcon);
+        }
+      }
     }
     
     // For dependencies and parent, add connection lines to the dragged note
