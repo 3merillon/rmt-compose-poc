@@ -1492,18 +1492,19 @@ function createNoteElement(note, index) {
     // Create and/or clear the overlay container.
     let overlayContainer = document.getElementById('drag-overlay-container');
     if (!overlayContainer) {
-      overlayContainer = document.createElement('div');
-      overlayContainer.id = 'drag-overlay-container';
-      overlayContainer.style.position = 'fixed';
-      overlayContainer.style.top = '0';
-      overlayContainer.style.left = '0';
-      overlayContainer.style.width = '100%';
-      overlayContainer.style.height = '100%';
-      overlayContainer.style.pointerEvents = 'none';
-      overlayContainer.style.zIndex = '10000';
-      document.body.appendChild(overlayContainer);
-    } else {
-      overlayContainer.innerHTML = '';
+    // Create the container if it doesn't exist
+    overlayContainer = document.createElement('div');
+    overlayContainer.id = 'drag-overlay-container';
+    overlayContainer.style.position = 'fixed';
+    overlayContainer.style.top = '0';
+    overlayContainer.style.left = '0';
+    overlayContainer.style.width = '100%';
+    overlayContainer.style.height = '100%';
+    overlayContainer.style.pointerEvents = 'none';
+    overlayContainer.style.zIndex = '3'; // Set to 3 to match the octave indicators z-index
+    
+    // Insert the container at the beginning of the body to ensure it's below the menu bar
+    document.body.insertBefore(overlayContainer, document.body.firstChild);
     }
     
     // Precompute baseline dependencies using the unmodified (original) start.
@@ -1528,13 +1529,14 @@ function createNoteElement(note, index) {
             pause();
         }
         
-        // Store the original parent dependency
+        // Store the original parent dependency and reference
         if (dragData.reference === "module.baseNote") {
             dragData.originalParent = myModule.baseNote;
         } else {
             let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
             dragData.originalParent = m ? myModule.getNoteById(parseInt(m[1], 10)) : myModule.baseNote;
         }
+        dragData.originalReference = dragData.reference;
         
         // Store the original start time
         dragData.originalStartTimeFraction = new Fraction(note.getVariable('startTime').valueOf());
@@ -1578,65 +1580,103 @@ function createNoteElement(note, index) {
         // New start time = refStart + (newBeatOffset * beatLength).
         let newStartTimeFraction = dragData.refStart.add(newBeatOffsetFraction.mul(beatLength));
         
-        // CLAMPING: Use dragData.reference to get the dependency's startTime.
-        let depNote;
-        if (dragData.reference === "module.baseNote") {
-            depNote = myModule.baseNote;
+        // Determine the actual parent the note will drop on
+        // Check if we're close to the original position
+        const tolerance = new Fraction(1, 100); // 0.01 time units
+        let actualParent;
+        let actualParentStartTime;
+        
+        if (newStartTimeFraction.sub(dragData.originalStartTimeFraction).abs().compare(tolerance) < 0) {
+            // We're very close to the original position, use the original parent
+            actualParent = dragData.originalParent;
+            actualParentStartTime = new Fraction(actualParent.getVariable('startTime').valueOf());
         } else {
-            let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
-            depNote = m ? myModule.getNoteById(m[1]) : myModule.baseNote;
-        }
-        let depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
-        
-        // Original dependency and start time for reference
-        const originalDepNote = depNote;
-        const originalDepStartFraction = depStartFraction;
-        
-        // NEW FUNCTIONALITY: If new start is less than dependency start, try to reattach to parent dependency
-        if (newStartTimeFraction.compare(depStartFraction) < 0) {
-            // Try to find a valid ancestor dependency that allows this position
-            let newDependency = findValidAncestorDependency(depNote, newStartTimeFraction);
+            // We're not close to the original position, determine the appropriate parent
+            // CLAMPING: Use dragData.reference to get the dependency's startTime.
+            let depNote;
+            if (dragData.reference === "module.baseNote") {
+                depNote = myModule.baseNote;
+            } else {
+                let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
+                depNote = m ? myModule.getNoteById(m[1]) : myModule.baseNote;
+            }
+            let depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
             
-            if (newDependency) {
-                // We found a valid ancestor dependency
-                depNote = newDependency;
-                depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
+            // Original dependency and start time for reference
+            const originalDepNote = depNote;
+            const originalDepStartFraction = depStartFraction;
+            
+            // If new start is less than dependency start, try to reattach to parent dependency
+            if (newStartTimeFraction.compare(depStartFraction) < 0) {
+                // Try to find a valid ancestor dependency that allows this position
+                let newDependency = findValidAncestorDependency(depNote, newStartTimeFraction);
+                
+                if (newDependency) {
+                    // We found a valid ancestor dependency
+                    depNote = newDependency;
+                    depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
+                } else {
+                    // If we couldn't find a valid ancestor, clamp to the current dependency
+                    newStartTimeFraction = depStartFraction;
+                }
+            }
+            
+            // Check if we need to adjust for measure dependencies when dragging forward
+            if (isMeasureDependency(depNote)) {
+                // Keep checking for next measures as long as we're past the current measure's end
+                let currentMeasure = depNote;
+                let currentMeasureStartTime = depStartFraction;
+                let foundNextMeasure = true;
+                
+                while (foundNextMeasure) {
+                    // Get the measure length
+                    const measureLength = myModule.findMeasureLength(currentMeasure);
+                    const measureEndTime = currentMeasureStartTime.add(measureLength);
+                    
+                    // If we're dragging beyond the current measure's end
+                    if (newStartTimeFraction.compare(measureEndTime) >= 0) {
+                        // Try to find the next measure in the chain
+                        const nextMeasure = findNextMeasureInChain(currentMeasure);
+                        if (nextMeasure) {
+                            // Update to use the next measure as dependency
+                            currentMeasure = nextMeasure;
+                            currentMeasureStartTime = new Fraction(nextMeasure.getVariable('startTime').valueOf());
+                            
+                            // Continue checking with this new measure
+                            foundNextMeasure = true;
+                        } else {
+                            // No more measures in the chain
+                            foundNextMeasure = false;
+                        }
+                    } else {
+                        // We're within the current measure's bounds
+                        foundNextMeasure = false;
+                    }
+                }
+                
+                // Update the dependency to the final measure we found
+                depNote = currentMeasure;
+                depStartFraction = currentMeasureStartTime;
                 
                 // Update the reference for display purposes
-                if (depNote === myModule.baseNote) {
-                    dragData.reference = "module.baseNote";
-                } else {
-                    dragData.reference = `module.getNoteById(${depNote.id})`;
-                }
-            } else {
-                // If we couldn't find a valid ancestor, clamp to the current dependency
-                newStartTimeFraction = depStartFraction;
+                dragData.reference = `module.getNoteById(${depNote.id})`;
             }
-        }
-        
-        // NEW FUNCTIONALITY: Check if we need to adjust for measure dependencies when dragging forward
-        if (isMeasureDependency(depNote)) {
-            // Get the measure length
-            const measureLength = myModule.findMeasureLength(depNote);
-            const measureEndTime = depStartFraction.add(measureLength);
             
-            // If we're dragging beyond the current measure's end
-            if (newStartTimeFraction.compare(measureEndTime) >= 0) {
-                // Try to find the next measure in the chain
-                const nextMeasure = findNextMeasureInChain(depNote);
-                if (nextMeasure) {
-                    // Update to use the next measure as dependency
-                    depNote = nextMeasure;
-                    depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
-                    
-                    // Update the reference for display purposes
-                    dragData.reference = `module.getNoteById(${depNote.id})`;
-                }
-            }
+            actualParent = depNote;
+            actualParentStartTime = depStartFraction;
         }
         
-        // Store the current dependency and calculated new start time for use in pointerup
-        dragData.currentDepNote = depNote;
+        // IMPORTANT: Clamp to ensure we don't drag before the parent's start time
+        if (newStartTimeFraction.compare(actualParentStartTime) < 0) {
+            newStartTimeFraction = new Fraction(actualParentStartTime);
+            
+            // Recalculate the beat offset based on the clamped start time
+            const timeOffset = newStartTimeFraction.sub(dragData.refStart);
+            newBeatOffsetFraction = timeOffset.div(beatLength);
+        }
+        
+        // Store the current values for use in pointerup
+        dragData.currentDepNote = actualParent;
         dragData.newStartTimeFraction = newStartTimeFraction;
         
         // For overlay drawing, use the numeric value.
@@ -1649,6 +1689,10 @@ function createNoteElement(note, index) {
         
         // Update the overlay using the original approach
         updateDragOverlay(note, newStartTimeNum, null, 'dragged');
+        
+        // Display the parent dependency overlay
+        const parentStartTime = actualParent.getVariable('startTime').valueOf();
+        updateDragOverlay(actualParent, parentStartTime, null, 'parent');
         
         // Update dependency overlays using our helper.
         // Always show dependencies, even if we're at the original position
@@ -1684,7 +1728,7 @@ function createNoteElement(note, index) {
         });
         
         // Store the current dependency and calculated new start time for use in pointerup
-        dragData.currentDepNote = depNote;
+        dragData.currentDepNote = actualParent;
         dragData.newStartTimeFraction = newStartTimeFraction;
         dragData.newBeatOffsetFraction = newBeatOffsetFraction;
     }
@@ -1958,21 +2002,60 @@ function createNoteElement(note, index) {
       document.body.appendChild(overlayContainer);
     }
     
-    const overlayId = type === 'dragged' ? 'drag-overlay-dragged' : 'drag-overlay-dep-' + depId;
+    const overlayId = type === 'dragged' ? 'drag-overlay-dragged' : 
+                      type === 'dependency' ? 'drag-overlay-dep-' + depId :
+                      'drag-overlay-parent';
     let overlayElem = document.getElementById(overlayId);
     
     // Get the current viewport transform to account for zoom
     const transform = viewport.getBasis().getRaw();
     const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
     
-    // Calculate X position based on time
-    const xCoord = newTime * 200 * xScaleFactor;
+    // Check if this is a measure bar
+    const isMeasureBar = noteObj.id !== undefined && 
+                         noteObj.getVariable && 
+                         noteObj.getVariable('startTime') && 
+                         !noteObj.getVariable('duration') && 
+                         !noteObj.getVariable('frequency');
+    
+    // Check if this is the base note
+    const isBaseNote = noteObj === myModule.baseNote;
+    
+    // Calculate X position based on time or special case for BaseNote
+    let xCoord;
+    if (isBaseNote) {
+      // BaseNote has a fixed position at -50 in space coordinates
+      xCoord = -50;
+    } else {
+      xCoord = newTime * 200 * xScaleFactor;
+    }
+    
     const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
     const screenPos = point.transitRaw(viewport);
     
-    // Get Y position based on frequency
+    // Get Y position based on frequency or special type
     let yPos = 0;
-    if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
+    
+    if (isBaseNote) {
+        // For base note, use its fixed position
+        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        const baseNoteY = frequencyToY(baseNoteFreq);
+        // Add a small offset to match the visual position of the actual base note circle
+        const yOffset = 10; // Adjust this value to match the actual offset
+        const yPoint = new tapspace.geometry.Point(space, { x: 0, y: baseNoteY + yOffset });
+        const yScreenPos = yPoint.transitRaw(viewport);
+        yPos = yScreenPos.y;
+    } else if (isMeasureBar) {
+      // For measure bars, position at the bottom where triangles are
+      const trianglesContainer = document.getElementById('measureBarTrianglesContainer');
+      if (trianglesContainer) {
+        const rect = trianglesContainer.getBoundingClientRect();
+        yPos = rect.top;
+      } else {
+        // Fallback if container not found
+        yPos = window.innerHeight - 30;
+      }
+    } else if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
       try {
         const frequency = noteObj.getVariable('frequency').valueOf();
         const y = frequencyToY(frequency);
@@ -1998,11 +2081,19 @@ function createNoteElement(note, index) {
       }
     }
     
-    // Calculate width based on duration in space units
+    // Calculate width and height based on note type
     let width = 100; // Default width in space units
     let height = 20;  // Default height in space units
     
-    if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
+    if (isBaseNote) {
+      // For base note, use a circle shape
+      width = 40;
+      height = 40;
+    } else if (isMeasureBar) {
+      // For measure bars, use triangle dimensions
+      width = 30;
+      height = 30;
+    } else if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
       try {
         const duration = noteObj.getVariable('duration').valueOf();
         width = duration * 200 * xScaleFactor; // Convert duration to space units
@@ -2146,52 +2237,61 @@ function createNoteElement(note, index) {
     
     // Create the blended colors
     let overlayColor;
+    let borderColor;
+    let shadowColor;
+    
     if (type === 'dragged') {
       // Mix with white for dragged note (makes it lighter)
       overlayColor = blendColors(noteColor, 'rgba(255, 255, 255, 0.8)', 0.5);
-    } else {
-      // Mix with light grey for dependencies
-      overlayColor = blendColors(noteColor, 'rgba(200, 200, 200, 0.6)', 0.5);
+      borderColor = 'white';
+      shadowColor = 'rgba(255, 255, 255, 0.7)';
+    } else if (type === 'dependency') {
+      // Mix with red for dependencies
+      overlayColor = blendColors(noteColor, 'rgba(255, 100, 100, 0.6)', 0.5);
+      borderColor = 'rgba(255, 0, 0, 0.8)';
+      shadowColor = 'rgba(255, 0, 0, 0.5)';
+    } else if (type === 'parent') {
+      // Mix with light blue for parent dependency
+      overlayColor = blendColors(noteColor, 'rgba(100, 200, 255, 0.6)', 0.5);
+      borderColor = 'rgba(0, 150, 255, 0.8)';
+      shadowColor = 'rgba(0, 150, 255, 0.5)';
     }
     
+    // Create or update the overlay element
     if (!overlayElem) {
       // Create a new overlay element
       overlayElem = document.createElement('div');
       overlayElem.id = overlayId;
       overlayElem.style.position = 'absolute';
-      overlayElem.style.backgroundColor = overlayColor;
-      overlayElem.style.border = '2px solid white'; // White border for all overlays
-      overlayElem.style.borderRadius = '6px'; // Match the note's border radius
       overlayElem.style.pointerEvents = 'none';
       overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
-      overlayElem.style.display = 'flex';
-      overlayElem.style.alignItems = 'center';
-      overlayElem.style.justifyContent = 'center';
-      overlayElem.style.color = 'white';
-      overlayElem.style.fontFamily = "'Roboto Mono', monospace";
       overlayElem.style.overflow = 'hidden'; // Hide overflow
-      
-      // Add box shadow to make it more visible
-      overlayElem.style.boxShadow = type === 'dragged' 
-        ? '0 0 10px rgba(255, 255, 255, 0.7)' 
-        : '0 0 8px rgba(200, 200, 200, 0.5)';
+      overlayElem.setAttribute('data-type', isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : 'note'));
       
       // Create a text element with a font size that scales with zoom
       const textElem = document.createElement('div');
       textElem.style.fontSize = '10px'; // Base font size
       textElem.style.whiteSpace = 'nowrap';
       textElem.style.textShadow = '0 0 1px black'; // Match note text shadow
-      textElem.textContent = type === 'dragged' ? `Note ${noteObj.id}` : `Dep ${noteObj.id}`;
-      overlayElem.appendChild(textElem);
+      textElem.style.color = 'white';
+      textElem.style.fontFamily = "'Roboto Mono', monospace";
       
+      if (type === 'dragged') {
+        textElem.textContent = `Note ${noteObj.id}`;
+      } else if (type === 'dependency') {
+        textElem.textContent = `Dep ${noteObj.id}`;
+      } else if (type === 'parent') {
+        if (isBaseNote) {
+          textElem.textContent = 'BaseNote';
+        } else if (isMeasureBar) {
+          textElem.textContent = `Measure ${noteObj.id}`;
+        } else {
+          textElem.textContent = `Parent ${noteObj.id}`;
+        }
+      }
+      
+      overlayElem.appendChild(textElem);
       overlayContainer.appendChild(overlayElem);
-    } else {
-      // Update the color in case it changed
-      overlayElem.style.backgroundColor = overlayColor;
-      overlayElem.style.border = '2px solid white';
-      overlayElem.style.boxShadow = type === 'dragged' 
-        ? '0 0 10px rgba(255, 255, 255, 0.7)' 
-        : '0 0 8px rgba(200, 200, 200, 0.5)';
     }
     
     // Update the text element's font size based on scale
@@ -2199,24 +2299,124 @@ function createNoteElement(note, index) {
     if (textElem) {
       // Scale the font size inversely with the viewport scale
       textElem.style.fontSize = `${10 / scale}px`;
+      
+      // Update text content if needed
+      if (type === 'parent') {
+        if (isBaseNote) {
+          textElem.textContent = 'BaseNote';
+        } else if (isMeasureBar) {
+          textElem.textContent = `Measure ${noteObj.id}`;
+        } else {
+          textElem.textContent = `Parent ${noteObj.id}`;
+        }
+      }
     }
     
-    // Update the overlay's position and size
-    overlayElem.style.left = `${screenPos.x - 0.5}px`;
-    overlayElem.style.top = `${yPos}px`;
-    overlayElem.style.width = `${screenWidth}px`;
-    overlayElem.style.height = `${screenHeight}px`;
+    // Get the current element type
+    const currentType = overlayElem.getAttribute('data-type');
+    const newType = isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : 'note');
     
-    // For dependencies, add a simple line to the dragged note
-    if (type === 'dependency') {
+    // If the type has changed, recreate the element
+    if (currentType !== newType) {
+      overlayElem.setAttribute('data-type', newType);
+      
+      // Reset all styles
+      overlayElem.style.cssText = '';
+      overlayElem.style.position = 'absolute';
+      overlayElem.style.pointerEvents = 'none';
+      overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
+      overlayElem.style.overflow = 'hidden';
+    }
+    
+    // Style based on note type
+    if (isBaseNote) {
+        // For base note, create a circle
+        overlayElem.style.backgroundColor = overlayColor;
+        overlayElem.style.border = `2px solid ${borderColor}`;
+        overlayElem.style.borderRadius = '50%'; // Make it circular
+        overlayElem.style.boxShadow = `0 0 8px ${shadowColor}`;
+        overlayElem.style.display = 'flex';
+        overlayElem.style.alignItems = 'center';
+        overlayElem.style.justifyContent = 'center';
+        
+        // Get the BaseNote's position in space coordinates
+        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        const baseNoteY = frequencyToY(baseNoteFreq);
+        const xOffset = -29; // The BaseNote's fixed X position in space
+        const yOffset = 10; // Adjustment to match visual position
+        
+        // Create a point in space at the BaseNote's position
+        const baseNotePoint = new tapspace.geometry.Point(space, { 
+          x: xOffset, 
+          y: baseNoteY + yOffset 
+        });
+        
+        // Convert to screen coordinates
+        const baseNoteScreen = baseNotePoint.transitRaw(viewport);
+        
+        // Get the actual size of the BaseNote circle (40px in space coordinates)
+        const baseNoteSize = 40;
+        const origin = new tapspace.geometry.Point(space, { x: 0, y: 0 });
+        const sizePoint = new tapspace.geometry.Point(space, { x: baseNoteSize, y: baseNoteSize });
+        const originScreen = origin.transitRaw(viewport);
+        const sizeScreen = sizePoint.transitRaw(viewport);
+        
+        // Calculate the screen size based on the current scale
+        const screenSize = Math.abs(sizeScreen.x - originScreen.x);
+        
+        // Position and size the overlay to match the BaseNote exactly
+        overlayElem.style.width = `${screenSize}px`;
+        overlayElem.style.height = `${screenSize}px`; // Make it a perfect circle
+        overlayElem.style.left = `${baseNoteScreen.x - screenSize / 2}px`;
+        overlayElem.style.top = `${baseNoteScreen.y - screenSize / 2}px`;
+    } else if (isMeasureBar) {
+      // For measure bars, create a triangle
+      overlayElem.style.backgroundColor = 'transparent';
+      overlayElem.style.width = '0';
+      overlayElem.style.height = '0';
+      overlayElem.style.borderLeft = '15px solid transparent';
+      overlayElem.style.borderRight = '15px solid transparent';
+      overlayElem.style.borderBottom = `30px solid ${overlayColor}`;
+      overlayElem.style.filter = `drop-shadow(0 0 5px ${shadowColor})`;
+      
+      // Position the triangle
+      overlayElem.style.left = `${screenPos.x - 15}px`; // Center the triangle
+      overlayElem.style.top = `${yPos}px`;
+      
+      // Position the text below the triangle
+      if (textElem) {
+        textElem.style.position = 'absolute';
+        textElem.style.bottom = '-20px';
+        textElem.style.left = '50%';
+        textElem.style.transform = 'translateX(-50%)';
+      }
+    } else {
+      // For regular notes
+      overlayElem.style.backgroundColor = overlayColor;
+      overlayElem.style.border = `2px solid ${borderColor}`;
+      overlayElem.style.borderRadius = '6px'; // Match the note's border radius
+      overlayElem.style.boxShadow = `0 0 8px ${shadowColor}`;
+      overlayElem.style.display = 'flex';
+      overlayElem.style.alignItems = 'center';
+      overlayElem.style.justifyContent = 'center';
+      
+      // Position the note
+      overlayElem.style.left = `${screenPos.x - 0.5}px`;
+      overlayElem.style.top = `${yPos}px`;
+      overlayElem.style.width = `${screenWidth}px`;
+      overlayElem.style.height = `${screenHeight}px`;
+    }
+    
+    // For dependencies and parent, add connection lines to the dragged note
+    if (type === 'dependency' || type === 'parent') {
       const draggedElem = document.getElementById('drag-overlay-dragged');
       if (draggedElem) {
-        let connectionLine = document.getElementById(`connection-line-${depId}`);
+        let connectionLine = document.getElementById(`connection-line-${type === 'parent' ? 'parent' : depId}`);
         if (!connectionLine) {
           connectionLine = document.createElement('div');
-          connectionLine.id = `connection-line-${depId}`;
+          connectionLine.id = `connection-line-${type === 'parent' ? 'parent' : depId}`;
           connectionLine.style.position = 'absolute';
-          connectionLine.style.backgroundColor = 'rgba(255, 255, 255, 0.7)'; // White connection lines
+          connectionLine.style.backgroundColor = type === 'dependency' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 150, 255, 0.7)';
           connectionLine.style.height = '2px';
           connectionLine.style.transformOrigin = 'left center';
           connectionLine.style.zIndex = '9999';
@@ -2225,13 +2425,24 @@ function createNoteElement(note, index) {
         
         // Get positions
         const draggedRect = draggedElem.getBoundingClientRect();
-        const depRect = overlayElem.getBoundingClientRect();
+        const targetRect = overlayElem.getBoundingClientRect();
         
         // Calculate line position
-        const startX = draggedRect.left + draggedRect.width / 2;
-        const startY = draggedRect.top + draggedRect.height / 2;
-        const endX = depRect.left + depRect.width / 2;
-        const endY = depRect.top + depRect.height / 2;
+        let startX, startY, endX, endY;
+        
+        if (type === 'dependency') {
+          // For dependencies, draw line from dragged note to dependency
+          startX = draggedRect.left + draggedRect.width / 2;
+          startY = draggedRect.top + draggedRect.height / 2;
+          endX = targetRect.left + targetRect.width / 2;
+          endY = targetRect.top + targetRect.height / 2;
+        } else {
+          // For parent, draw line from parent to dragged note
+          startX = targetRect.left + targetRect.width / 2;
+          startY = targetRect.top + targetRect.height / 2;
+          endX = draggedRect.left + draggedRect.width / 2;
+          endY = draggedRect.top + draggedRect.height / 2;
+        }
         
         // Calculate distance and angle
         const dx = endX - startX;
@@ -2246,7 +2457,7 @@ function createNoteElement(note, index) {
         connectionLine.style.transform = `rotate(${angle}deg)`;
       } else {
         // If there's no dragged element, remove the connection line
-        let connectionLine = document.getElementById(`connection-line-${depId}`);
+        let connectionLine = document.getElementById(`connection-line-${type === 'parent' ? 'parent' : depId}`);
         if (connectionLine) {
           connectionLine.remove();
         }

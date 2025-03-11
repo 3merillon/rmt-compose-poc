@@ -92,6 +92,13 @@ class Module {
         
         const dependencies = new Set();
         
+        // Add explicit dependencies if any
+        if (this._explicitDependencies && this._explicitDependencies.has(noteId)) {
+            const explicitDeps = this._explicitDependencies.get(noteId);
+            explicitDeps.forEach(depId => dependencies.add(depId));
+        }
+        
+        // Add dependencies from variable expressions
         function findReferences(expr) {
             const regex = /getNoteById\((\d+)\)/g;
             const references = new Set();
@@ -220,14 +227,20 @@ class Module {
     }
 
 	findMeasureLength(note) {
-		// Get current tempo and beats per measure
-		const tempo = this.findTempo(note);
-		const beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
-		// Calculate measure length: (beats/measure) / (beats/minute) * (60 seconds/minute)
-		return beatsPerMeasure.div(tempo).mul(60);
-	}
+        // Explicitly track dependency on BaseNote
+        this._trackDependency(note.id, 0);
+        
+        // Get current tempo and beats per measure
+        const tempo = this.findTempo(note);
+        const beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
+        // Calculate measure length: (beats/measure) / (beats/minute) * (60 seconds/minute)
+        return beatsPerMeasure.div(tempo).mul(60);
+    }
 
     findTempo(note) {
+        // Explicitly track dependency on BaseNote
+        this._trackDependency(note.id, 0);
+        
         while (note) {
             if (note.variables.tempo) {
                 return note.getVariable('tempo');
@@ -235,6 +248,23 @@ class Module {
             note = this.getNoteById(note.parentId);
         }
         return this.baseNote.getVariable('tempo');
+    }
+
+    _trackDependency(noteId, dependencyId) {
+        // Skip if noteId is undefined or null
+        if (noteId == null) return;
+        
+        // Get or create the dependencies set for this note
+        if (!this._explicitDependencies) {
+            this._explicitDependencies = new Map();
+        }
+        
+        if (!this._explicitDependencies.has(noteId)) {
+            this._explicitDependencies.set(noteId, new Set());
+        }
+        
+        // Add the dependency
+        this._explicitDependencies.get(noteId).add(dependencyId);
     }
 
     generateMeasures(fromNote, n) {
