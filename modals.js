@@ -528,6 +528,82 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     measure.getVariable('startTime');
                 });
                 
+                // Get the newly added measure (should be just one)
+                const newMeasure = newMeasures[0];
+                
+                if (newMeasure) {
+                    // Calculate the start and end times of the new measure
+                    const newMeasureStart = newMeasure.getVariable('startTime').valueOf();
+                    const measureLength = window.myModule.findMeasureLength(newMeasure).valueOf();
+                    const newMeasureEnd = newMeasureStart + measureLength;
+                    
+                    // Find all notes that directly depend on the previous measure
+                    const directDependents = [];
+                    
+                    // Helper function to check if a note directly depends on the measure
+                    const isDirectlyDependentOnMeasure = (noteId, measureId) => {
+                        const note = window.myModule.getNoteById(noteId);
+                        if (!note || !note.variables || !note.variables.startTimeString) {
+                            return false;
+                        }
+                        
+                        // Check if the startTimeString directly references the measure
+                        const startTimeString = note.variables.startTimeString;
+                        const regex = new RegExp(`module\\.getNoteById\\(\\s*${measureId}\\s*\\)\\.getVariable\\('startTime'\\)`);
+                        return regex.test(startTimeString);
+                    };
+                    
+                    // Find all notes that directly depend on the previous measure
+                    Object.keys(window.myModule.notes).forEach(id => {
+                        const noteId = parseInt(id, 10);
+                        if (noteId !== newMeasure.id && isDirectlyDependentOnMeasure(noteId, fromNote.id)) {
+                            directDependents.push(noteId);
+                        }
+                    });
+                    
+                    // For each directly dependent note, check if its start time falls within the new measure
+                    directDependents.forEach(depId => {
+                        const depNote = window.myModule.getNoteById(depId);
+                        
+                        // Skip if not a valid note
+                        if (!depNote || !depNote.getVariable) {
+                            return;
+                        }
+                        
+                        // Get the note's start time
+                        const noteStartTime = depNote.getVariable('startTime').valueOf();
+                        
+                        // Check if the note's start time falls within the new measure
+                        if (noteStartTime >= newMeasureStart && noteStartTime < newMeasureEnd) {
+                            // Calculate the beat offset from the new measure's start
+                            const baseTempo = window.myModule.baseNote.getVariable('tempo').valueOf();
+                            const beatLength = 60 / baseTempo;
+                            const beatOffset = (noteStartTime - newMeasureStart) / beatLength;
+                            
+                            // Create a new fraction for the beat offset
+                            let beatOffsetFraction;
+                            if (Number.isInteger(beatOffset)) {
+                                beatOffsetFraction = `new Fraction(${beatOffset}, 1)`;
+                            } else {
+                                // Convert to a fraction with reasonable precision
+                                const fraction = new Fraction(beatOffset);
+                                beatOffsetFraction = `new Fraction(${fraction.n}, ${fraction.d})`;
+                            }
+                            
+                            // Create a completely new expression using the new measure as the parent
+                            const newRaw = `module.getNoteById(${newMeasure.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${newMeasure.id}))).mul(${beatOffsetFraction}))`;
+                            
+                            // Update the note's startTime
+                            depNote.setVariable('startTime', function() {
+                                return new Function("module", "Fraction", "return " + newRaw + ";")(window.myModule, Fraction);
+                            });
+                            depNote.setVariable('startTimeString', newRaw);
+                            
+                            console.log(`Relinked note ${depId} to new measure ${newMeasure.id} with beat offset ${beatOffset}`);
+                        }
+                    });
+                }
+                
                 setTimeout(() => {
                     externalFunctions.updateTimingBoundaries();
                     externalFunctions.createMeasureBars();
