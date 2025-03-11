@@ -262,6 +262,17 @@ document.addEventListener('DOMContentLoaded', async function() {
   
     // Create scale factor sliders container
     const createScaleControls = () => {
+        // Remove any existing scale controls first to prevent listener stacking
+        const existingContainer = document.getElementById('scale-controls');
+        const existingToggle = document.getElementById('scale-controls-toggle');
+        
+        if (existingContainer) {
+          existingContainer.remove();
+        }
+        if (existingToggle) {
+          existingToggle.remove();
+        }
+        
         // Create the main container
         const scaleControlsContainer = document.createElement('div');
         scaleControlsContainer.id = 'scale-controls';
@@ -276,10 +287,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Create the slider containers and inputs
         scaleControlsContainer.innerHTML = `
           <div class="y-scale-slider-container">
-            <input type="range" id="y-scale-slider" min="0.5" max="2" step="0.1" value="1.0">
+            <input type="range" id="y-scale-slider" min="0.3" max="5" step="0.1" value="1.0">
           </div>
           <div class="x-scale-slider-container">
-            <input type="range" id="x-scale-slider" min="0.5" max="2" step="0.1" value="1.0">
+            <input type="range" id="x-scale-slider" min="0.3" max="2" step="0.1" value="1.0">
           </div>
         `;
         
@@ -289,58 +300,129 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Add event listeners to sliders
         const xScaleSlider = document.getElementById('x-scale-slider');
         const yScaleSlider = document.getElementById('y-scale-slider');
-
-        // Throttle for slider updates
+      
+        // Store references to the handler functions so they can be removed if needed
+        const handlers = {
+          xInput: null,
+          yInput: null,
+          xChange: null,
+          yChange: null,
+          toggle: null
+        };
+      
+        // Throttle for slider updates during dragging
         function throttle(func, limit) {
-            let inThrottle;
-            return function() {
-                const args = arguments;
-                const context = this;
-                if (!inThrottle) {
-                    func.apply(context, args);
-                    inThrottle = true;
-                    setTimeout(() => inThrottle = false, limit);
-                }
-            };
+          let inThrottle;
+          return function() {
+            const args = arguments;
+            const context = this;
+            if (!inThrottle) {
+              func.apply(context, args);
+              inThrottle = true;
+              setTimeout(() => inThrottle = false, limit);
+            }
+          };
         }
-
-        xScaleSlider.addEventListener('input', throttle((e) => {
-            // Store the current viewport center point in space coordinates
-            const viewCenter = viewport.atCenter();
-            const centerInSpace = viewCenter.transitRaw(space);
-            
-            // Update scale factor
-            const oldScale = xScaleFactor;
-            xScaleFactor = parseFloat(e.target.value);
-            
-            // Update visuals with new scale
-            updateVisualNotes(evaluatedNotes);
-            createMeasureBars();
-            
-            // Calculate new center position based on scale change
-            // We want to keep the same logical position centered
-            const scaleRatio = xScaleFactor / oldScale;
-            const newCenterX = centerInSpace.x * scaleRatio;
-            
-            // Create a new point with the adjusted x-coordinate but same y-coordinate
-            const newCenterPoint = space.at(newCenterX, centerInSpace.y);
-            
-            // Translate viewport to maintain the center point
-            viewport.translateTo(newCenterPoint);
-          }, 50));
+      
+        // Throttled handler for continuous updates during dragging
+        handlers.xInput = throttle((e) => {
+          // Store the current viewport center point in space coordinates
+          const viewCenter = viewport.atCenter();
+          const centerInSpace = viewCenter.transitRaw(space);
+          
+          // Update scale factor
+          const oldScale = xScaleFactor;
+          xScaleFactor = parseFloat(e.target.value);
+          
+          // Update visuals with new scale
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          
+          // Calculate new center position based on scale change
+          // We want to keep the same logical position centered
+          const scaleRatio = xScaleFactor / oldScale;
+          const newCenterX = centerInSpace.x * scaleRatio;
+          
+          // Create a new point with the adjusted x-coordinate but same y-coordinate
+          const newCenterPoint = space.at(newCenterX, centerInSpace.y);
+          
+          // Translate viewport to maintain the center point
+          viewport.translateTo(newCenterPoint);
+        }, 50);
+      
+        // Throttled handler for Y scale updates
+        handlers.yInput = throttle((e) => {
+          yScaleFactor = parseFloat(e.target.value);
+          updateVisualNotes(evaluatedNotes);
+          updateBaseNotePosition();
+        }, 50);
+      
+        // Handler for when X slider interaction ends
+        handlers.xChange = (e) => {
+          // Store the current viewport center point in space coordinates
+          const viewCenter = viewport.atCenter();
+          const centerInSpace = viewCenter.transitRaw(space);
+          
+          // Update scale factor with final value
+          const oldScale = xScaleFactor;
+          xScaleFactor = parseFloat(e.target.value);
+          
+          // Update visuals with new scale
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          
+          // Calculate new center position based on scale change
+          const scaleRatio = xScaleFactor / oldScale;
+          const newCenterX = centerInSpace.x * scaleRatio;
+          
+          // Create a new point with the adjusted x-coordinate but same y-coordinate
+          const newCenterPoint = space.at(newCenterX, centerInSpace.y);
+          
+          // Translate viewport to maintain the center point
+          viewport.translateTo(newCenterPoint);
+        };
+      
+        // Handler for when Y slider interaction ends
+        handlers.yChange = (e) => {
+          // Update with final value
+          yScaleFactor = parseFloat(e.target.value);
+          updateVisualNotes(evaluatedNotes);
+          updateBaseNotePosition();
+        };
         
-        yScaleSlider.addEventListener('input', throttle((e) => {
-            yScaleFactor = parseFloat(e.target.value);
-            updateVisualNotes(evaluatedNotes);
-            updateBaseNotePosition();
-        }, 50)); // Throttle to 50ms
+        // Toggle handler
+        handlers.toggle = () => {
+          toggleScaleControls();
+        };
+      
+        // Add event listeners
+        xScaleSlider.addEventListener('input', handlers.xInput);
+        yScaleSlider.addEventListener('input', handlers.yInput);
+        xScaleSlider.addEventListener('change', handlers.xChange);
+        yScaleSlider.addEventListener('change', handlers.yChange);
+        toggleButton.addEventListener('click', handlers.toggle);
         
-        // Add toggle functionality
-        toggleButton.addEventListener('click', () => {
-            toggleScaleControls();
-        });
+        // Store the handlers on the elements themselves for potential cleanup
+        scaleControlsContainer.handlers = handlers;
         
-        return { container: scaleControlsContainer, toggle: toggleButton };
+        return { 
+          container: scaleControlsContainer, 
+          toggle: toggleButton,
+          cleanup: () => {
+            // Function to remove all event listeners
+            if (xScaleSlider) {
+              xScaleSlider.removeEventListener('input', handlers.xInput);
+              xScaleSlider.removeEventListener('change', handlers.xChange);
+            }
+            if (yScaleSlider) {
+              yScaleSlider.removeEventListener('input', handlers.yInput);
+              yScaleSlider.removeEventListener('change', handlers.yChange);
+            }
+            if (toggleButton) {
+              toggleButton.removeEventListener('click', handlers.toggle);
+            }
+          }
+        };
     };
     
     // Function to toggle scale controls visibility
