@@ -890,6 +890,9 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         const measureLengthRegex = /module\.findMeasureLength\(module\.getNoteById\((\d+)\)\)/g;
         const tempoRegex = /module\.findTempo\(module\.getNoteById\((\d+)\)\)/g;
         
+        // NEW: Pattern for the formula created when dragging notes
+        const draggedNotePattern = /module\.getNoteById\((\d+)\)\.getVariable\('startTime'\)\.add\(new Fraction\(60\)\.div\(module\.findTempo\(module\.getNoteById\(\d+\)\)\)\.mul\(new Fraction\(([^,]+),\s*([^)]+)\)\)\)/g;
+        
         let prevExpr = '';
         let currentExpr = expr;
         let iterations = 0;
@@ -907,6 +910,33 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             // Replace tempo references
             currentExpr = currentExpr.replace(tempoRegex, () => {
                 return 'module.findTempo(module.baseNote)';
+            });
+            
+            // NEW: Handle the dragged note pattern
+            currentExpr = currentExpr.replace(draggedNotePattern, (match, noteId, numerator, denominator) => {
+                const refNote = moduleInstance.getNoteById(parseInt(noteId, 10));
+                if (!refNote) return match;
+                
+                // Get the reference note's start time
+                const refStartTime = refNote.getVariable('startTime').valueOf();
+                
+                // Calculate the beat offset
+                const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
+                const beatLength = 60 / baseTempo;
+                const beatOffset = new Fraction(numerator, denominator).valueOf();
+                
+                // Calculate the absolute time
+                const absoluteTime = refStartTime + (beatOffset * beatLength);
+                
+                // Create a direct expression using the base note
+                const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
+                const offset = absoluteTime - baseStartTime;
+                
+                // Convert to beats
+                const offsetBeats = offset / beatLength;
+                
+                // Create the new expression
+                return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetBeats})))`;
             });
             
             // Replace note references
@@ -1480,6 +1510,9 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         let successCount = 0;
         let skippedCount = 0;
         
+        // First pass: process all notes and collect those that fail
+        const failedNotes = [];
+        
         // Process each note
         for (const noteId of noteIds) {
             try {
@@ -1509,79 +1542,14 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                         continue;
                     }
                     
-                    // For measure notes, handle startTime specially
-                    if (isMeasureNote && varName === 'startTime') {
-                        // Extract measure count from the expression
-                        let measureCount = 1;
-                        let referenceNoteId = 0;
-                        
-                        // Try to find a pattern like "module.getNoteById(X).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(X)))"
-                        const measurePattern = /module\.getNoteById\((\d+)\)\.getVariable\('startTime'\)\.add\(module\.findMeasureLength\(module\.getNoteById\(\d+\)\)\)/;
-                        const match = originalExpr.match(measurePattern);
-                        
-                        if (match) {
-                            referenceNoteId = parseInt(match[1], 10);
-                            
-                            // If the reference is another measure note, find its relation to the base note
-                            if (referenceNoteId !== 0) {
-                                const refNote = window.myModule.getNoteById(referenceNoteId);
-                                if (refNote && refNote.variables.startTimeString) {
-                                    // Recursively process the reference note first
-                                    const refExpr = refNote.variables.startTimeString;
-                                    
-                                    // Check if the reference note has already been simplified to use baseNote
-                                    if (refExpr.includes("module.baseNote.getVariable('startTime').add(new Fraction(")) {
-                                        // Extract the measure count from the reference note
-                                        const refMatch = refExpr.match(/module\.baseNote\.getVariable\('startTime'\)\.add\(new Fraction\((\d+)\)\.mul\(module\.findMeasureLength\(module\.baseNote\)\)\)/);
-                                        if (refMatch) {
-                                            measureCount = parseInt(refMatch[1], 10) + 1;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // Create the new expression with the correct measure count
-                            const newExpr = `module.baseNote.getVariable('startTime').add(new Fraction(${measureCount}).mul(module.findMeasureLength(module.baseNote)))`;
-                            
-                            // Test the new expression
-                            try {
-                                const testFunc = new Function("module", "Fraction", "return " + newExpr + ";");
-                                const testResult = testFunc(window.myModule, Fraction);
-                                
-                                // If the values are close enough, use the new expression
-                                if (Math.abs(testResult.valueOf() - originalValue) < 0.0001) {
-                                    note.setVariable('startTime', function() {
-                                        return new Function("module", "Fraction", "return " + newExpr + ";")(window.myModule, Fraction);
-                                    });
-                                    note.setVariable('startTimeString', newExpr);
-                                    noteSuccess = true;
-                                    continue;
-                                }
-                            } catch (error) {
-                                console.error(`Error testing new expression for measure note ${noteId}:`, error);
-                            }
-                        }
-                    }
+                    // Try to simplify the expression
+                    let newExpr;
                     
-                    // For other variables or if the special measure handling failed, use the standard replacement
-                    let newExpr = originalExpr;
-                    let iterations = 0;
-                    const MAX_ITERATIONS = 15;
-                    
-                    // Iteratively simplify until no changes occur or max iterations reached
-                    do {
-                        const currentExpr = newExpr;
-                        if (currentExpr.indexOf("module.getNoteById(") === -1) break;
-                        newExpr = replaceNoteReferencesWithBaseNoteOnly(currentExpr, window.myModule);
-                        iterations++;
-                    } while (newExpr !== originalExpr && iterations < MAX_ITERATIONS);
-                    
-                    // Clean up and balance parentheses
-                    newExpr = removeExcessParentheses(newExpr);
-                    newExpr = balanceParentheses(newExpr);
-                    
-                    // Test the new expression
                     try {
+                        // Use our replaceNoteReferencesWithBaseNoteOnly function
+                        newExpr = replaceNoteReferencesWithBaseNoteOnly(originalExpr, window.myModule);
+                        
+                        // Test the new expression
                         const testFunc = new Function("module", "Fraction", "return " + newExpr + ";");
                         const testResult = testFunc(window.myModule, Fraction);
                         
@@ -1593,25 +1561,117 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                             note.setVariable(varName + 'String', newExpr);
                             noteSuccess = true;
                         } else {
-                            skippedCount++;
-                            noteSuccess = false;
+                            // If values don't match, try a direct approach
+                            const directExpr = createDirectExpression(varName, originalValue, window.myModule);
+                            
+                            // Test the direct expression
+                            const directFunc = new Function("module", "Fraction", "return " + directExpr + ";");
+                            const directResult = directFunc(window.myModule, Fraction);
+                            
+                            if (Math.abs(directResult.valueOf() - originalValue) < 0.0001) {
+                                note.setVariable(varName, function() {
+                                    return new Function("module", "Fraction", "return " + directExpr + ";")(window.myModule, Fraction);
+                                });
+                                note.setVariable(varName + 'String', directExpr);
+                                noteSuccess = true;
+                            } else {
+                                noteSuccess = false;
+                                failedNotes.push({
+                                    noteId,
+                                    varName,
+                                    originalExpr,
+                                    originalValue
+                                });
+                            }
                         }
                     } catch (error) {
                         console.error(`Error evaluating ${varName} for note ${noteId}:`, error);
-                        skippedCount++;
                         noteSuccess = false;
+                        failedNotes.push({
+                            noteId,
+                            varName,
+                            originalExpr,
+                            originalValue,
+                            error: error.message
+                        });
                     }
                 }
                 
                 if (noteSuccess) {
                     successCount++;
                     window.myModule.markNoteDirty(noteId);
+                } else {
+                    skippedCount++;
                 }
                 
             } catch (error) {
                 console.error(`Error evaluating note ${noteId}:`, error);
                 skippedCount++;
+                failedNotes.push({
+                    noteId,
+                    error: error.message
+                });
             }
+        }
+        
+        // Second pass: try to fix failed notes using a direct approach
+        for (const failedNote of failedNotes) {
+            try {
+                const note = window.myModule.getNoteById(failedNote.noteId);
+                if (!note) continue;
+                
+                const varName = failedNote.varName;
+                const originalValue = failedNote.originalValue;
+                
+                // Create a direct expression using the evaluated value
+                const directExpr = createDirectExpression(varName, originalValue, window.myModule);
+                
+                // Test the direct expression
+                const directFunc = new Function("module", "Fraction", "return " + directExpr + ";");
+                const directResult = directFunc(window.myModule, Fraction);
+                
+                if (Math.abs(directResult.valueOf() - originalValue) < 0.0001) {
+                    note.setVariable(varName, function() {
+                        return new Function("module", "Fraction", "return " + directExpr + ";")(window.myModule, Fraction);
+                    });
+                    note.setVariable(varName + 'String', directExpr);
+                    successCount++;
+                    skippedCount--;
+                    window.myModule.markNoteDirty(failedNote.noteId);
+                }
+            } catch (error) {
+                console.error(`Error in second pass for note ${failedNote.noteId}:`, error);
+            }
+        }
+        
+        // Helper function to create a direct expression based on the variable type and value
+        function createDirectExpression(varName, value, moduleInstance) {
+            const baseNote = moduleInstance.baseNote;
+            
+            if (varName === 'startTime') {
+                const baseStartTime = baseNote.getVariable('startTime').valueOf();
+                const offset = value - baseStartTime;
+                
+                // Convert to beats
+                const baseTempo = baseNote.getVariable('tempo').valueOf();
+                const beatLength = 60 / baseTempo;
+                const offsetBeats = offset / beatLength;
+                
+                return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetBeats})))`;
+            } else if (varName === 'duration') {
+                const baseTempo = baseNote.getVariable('tempo').valueOf();
+                const beatLength = 60 / baseTempo;
+                const durationBeats = value / beatLength;
+                
+                return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${durationBeats}))`;
+            } else if (varName === 'frequency') {
+                const baseFreq = baseNote.getVariable('frequency').valueOf();
+                const ratio = value / baseFreq;
+                
+                return `new Fraction(${ratio}).mul(module.baseNote.getVariable('frequency'))`;
+            }
+            
+            throw new Error(`Unsupported variable type: ${varName}`);
         }
         
         // Recompile all notes to ensure changes propagate

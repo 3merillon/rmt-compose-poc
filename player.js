@@ -523,11 +523,18 @@ document.addEventListener('DOMContentLoaded', async function() {
     Note: We do not wrap the replacement in extra parentheses so that the functional raw expression is preserved.
     */
     function updateDependentRawExpressions(selectedNoteId, selectedRaw) {
-        const regex = new RegExp(
+        // Create a regex that matches all references to the selected note ID
+        const getVarRegex = new RegExp(
             "(?:module\\.)?getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\.getVariable\\('([^']+)'\\)|targetNote\\.getVariable\\('([^']+)'\\)",
             "g"
         );
-    
+        
+        // Create a regex that matches all other references to the selected note ID (like in findTempo)
+        const otherRefRegex = new RegExp(
+            "module\\.(?:findTempo|findMeasureLength)\\(\\s*module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\s*\\)",
+            "g"
+        );
+        
         const dependents = myModule.getDependentNotes(selectedNoteId);
         dependents.forEach(depId => {
             const depNote = myModule.getNoteById(depId);
@@ -546,8 +553,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     // Check if this expression references the note being deleted
                     if (rawExp.includes(`getNoteById(${selectedNoteId})`) || rawExp.includes("targetNote")) {
-                        // Replace references to the soon-deleted note with its raw snapshot.
-                        let newRawExp = rawExp.replace(regex, (match, g1, g2) => {
+                        // Replace getVariable references to the soon-deleted note with its raw snapshot
+                        let newRawExp = rawExp.replace(getVarRegex, (match, g1, g2) => {
                             const varName = g1 || g2;
                             let replacement = selectedRaw[varName];
                             if (replacement === undefined) {
@@ -555,9 +562,24 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
                                 console.warn("No raw value for", varName, "– using default", replacement);
                             }
-                            // Return the replacement without adding extra parentheses.
+                            // Return the replacement without adding extra parentheses
                             return replacement;
                         });
+                        
+                        // Replace findTempo and findMeasureLength references
+                        newRawExp = newRawExp.replace(otherRefRegex, (match) => {
+                            // Replace with reference to baseNote
+                            if (match.includes("findTempo")) {
+                                return "module.findTempo(module.baseNote)";
+                            } else if (match.includes("findMeasureLength")) {
+                                return "module.findMeasureLength(module.baseNote)";
+                            }
+                            return match; // Shouldn't reach here
+                        });
+                        
+                        // Also replace any remaining direct references to the deleted note
+                        const directRefRegex = new RegExp("module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)", "g");
+                        newRawExp = newRawExp.replace(directRefRegex, "module.baseNote");
                         
                         // Update the variable with the new expression
                         depNote.variables[key] = newRawExp;
@@ -1505,6 +1527,17 @@ function createNoteElement(note, index) {
         if (isPlaying) {
             pause();
         }
+        
+        // Store the original parent dependency
+        if (dragData.reference === "module.baseNote") {
+            dragData.originalParent = myModule.baseNote;
+        } else {
+            let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
+            dragData.originalParent = m ? myModule.getNoteById(parseInt(m[1], 10)) : myModule.baseNote;
+        }
+        
+        // Store the original start time
+        dragData.originalStartTimeFraction = new Fraction(note.getVariable('startTime').valueOf());
     }
     
     if (dragData.hasDragged) {
@@ -1541,7 +1574,7 @@ function createNoteElement(note, index) {
         
         // New beat offset = originalBeatOffsetFraction + snappedDelta/beatLength.
         let newBeatOffsetFraction = dragData.originalBeatOffsetFraction.add(snappedDelta.div(beatLength));
-        
+    
         // New start time = refStart + (newBeatOffset * beatLength).
         let newStartTimeFraction = dragData.refStart.add(newBeatOffsetFraction.mul(beatLength));
         
@@ -1554,11 +1587,57 @@ function createNoteElement(note, index) {
             depNote = m ? myModule.getNoteById(m[1]) : myModule.baseNote;
         }
         let depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
+        
+        // Original dependency and start time for reference
+        const originalDepNote = depNote;
+        const originalDepStartFraction = depStartFraction;
+        
+        // NEW FUNCTIONALITY: If new start is less than dependency start, try to reattach to parent dependency
         if (newStartTimeFraction.compare(depStartFraction) < 0) {
-            // If new start is less than dependency start, clamp:
-            newStartTimeFraction = depStartFraction;
-            newBeatOffsetFraction = newStartTimeFraction.sub(dragData.refStart).div(beatLength);
+            // Try to find a valid ancestor dependency that allows this position
+            let newDependency = findValidAncestorDependency(depNote, newStartTimeFraction);
+            
+            if (newDependency) {
+                // We found a valid ancestor dependency
+                depNote = newDependency;
+                depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
+                
+                // Update the reference for display purposes
+                if (depNote === myModule.baseNote) {
+                    dragData.reference = "module.baseNote";
+                } else {
+                    dragData.reference = `module.getNoteById(${depNote.id})`;
+                }
+            } else {
+                // If we couldn't find a valid ancestor, clamp to the current dependency
+                newStartTimeFraction = depStartFraction;
+            }
         }
+        
+        // NEW FUNCTIONALITY: Check if we need to adjust for measure dependencies when dragging forward
+        if (isMeasureDependency(depNote)) {
+            // Get the measure length
+            const measureLength = myModule.findMeasureLength(depNote);
+            const measureEndTime = depStartFraction.add(measureLength);
+            
+            // If we're dragging beyond the current measure's end
+            if (newStartTimeFraction.compare(measureEndTime) >= 0) {
+                // Try to find the next measure in the chain
+                const nextMeasure = findNextMeasureInChain(depNote);
+                if (nextMeasure) {
+                    // Update to use the next measure as dependency
+                    depNote = nextMeasure;
+                    depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
+                    
+                    // Update the reference for display purposes
+                    dragData.reference = `module.getNoteById(${depNote.id})`;
+                }
+            }
+        }
+        
+        // Store the current dependency and calculated new start time for use in pointerup
+        dragData.currentDepNote = depNote;
+        dragData.newStartTimeFraction = newStartTimeFraction;
         
         // For overlay drawing, use the numeric value.
         let newStartTimeNum = Number(newStartTimeFraction.valueOf());
@@ -1572,11 +1651,15 @@ function createNoteElement(note, index) {
         updateDragOverlay(note, newStartTimeNum, null, 'dragged');
         
         // Update dependency overlays using our helper.
+        // Always show dependencies, even if we're at the original position
         let movedNotes = getMovedNotes(note, newStartTimeFraction, dragData.originalStartTime);
-        if (movedNotes.length === 0 && newBeatOffsetFraction.equals(dragData.originalBeatOffsetFraction)) {
+        
+        // If no dependencies were found, use the baseline dependencies
+        if (movedNotes.length === 0) {
             movedNotes = dragData.baselineDependencies || [];
         }
         
+        // Clean up any dependency overlays that are no longer needed
         let overlayContainer = document.getElementById('drag-overlay-container');
         if (overlayContainer) {
             [...overlayContainer.children].forEach(overlayElem => {
@@ -1584,13 +1667,26 @@ function createNoteElement(note, index) {
                     const depId = parseInt(overlayElem.id.replace("drag-overlay-dep-", ""), 10);
                     if (!movedNotes.some(item => item.note.id === depId)) {
                         overlayElem.remove();
+                        
+                        // Also remove any connection lines
+                        const connectionLine = document.getElementById(`connection-line-${depId}`);
+                        if (connectionLine) {
+                            connectionLine.remove();
+                        }
                     }
                 }
             });
         }
+        
+        // Update all dependency overlays
         movedNotes.forEach(item => {
             updateDragOverlay(item.note, Number(item.newStart.valueOf()), item.note.id, 'dependency');
         });
+        
+        // Store the current dependency and calculated new start time for use in pointerup
+        dragData.currentDepNote = depNote;
+        dragData.newStartTimeFraction = newStartTimeFraction;
+        dragData.newBeatOffsetFraction = newBeatOffsetFraction;
     }
   });
 
@@ -1598,76 +1694,99 @@ function createNoteElement(note, index) {
     // Reset pointer down flag
     dragData.pointerIsDown = false;
     
+    // Clean up all overlay elements
     const overlayContainer = document.getElementById('drag-overlay-container');
-    if (overlayContainer && overlayContainer.parentNode) {
-        overlayContainer.parentNode.removeChild(overlayContainer);
+    if (overlayContainer) {
+        // First remove all connection lines
+        const connectionLines = overlayContainer.querySelectorAll('[id^="connection-line-"]');
+        connectionLines.forEach(line => line.remove());
+        
+        // Then remove all overlays
+        const overlays = overlayContainer.querySelectorAll('[id^="drag-overlay-"]');
+        overlays.forEach(overlay => overlay.remove());
+        
+        // Finally remove the container itself
+        overlayContainer.remove();
     }
-  
+    
     if (dragData.hasDragged) {
-        const deltaX = e.clientX - dragData.startX;
+        // Check if we're close to the original position
+        const newStartTimeFraction = dragData.newStartTimeFraction;
+        const originalStartTimeFraction = dragData.originalStartTimeFraction;
         
-        // Get the current viewport scale by measuring a known distance in space
-        const spacePoint1 = space.at(0, 0);
-        const spacePoint2 = space.at(100, 0);
+        // Define a tolerance for considering it "close to original position"
+        const tolerance = new Fraction(1, 100); // 0.01 time units
         
-        // Project these points to viewport coordinates
-        const viewportPoint1 = spacePoint1.transitRaw(viewport);
-        const viewportPoint2 = spacePoint2.transitRaw(viewport);
-        
-        // Calculate the scale factor: how many viewport pixels per 100 space units
-        const viewportDistance = Math.sqrt(
-            Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
-            Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
-        );
-        const scale = viewportDistance / 100;
-        
-        // Adjust deltaX based on the current scale and user-defined xScaleFactor
-        let adjustedDeltaX = deltaX / (scale * xScaleFactor);
-        
-        // Convert the adjusted pixel delta to time units
-        // Use a safer approach to create fractions from potentially non-integer values
-        const tempNumerator = Math.round(adjustedDeltaX * 1000); // Scale up and round to avoid floating point issues
-        const tempDenominator = 200 * 1000; // Scale up the denominator by the same factor
-        let deltaTime = new Fraction(tempNumerator, tempDenominator);
-        
-        const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-        const beatLength = 60 / baseTempo;
-        const step = beatLength / 4; // sixteenth-note step.
-        
-        let snappedDelta = Math.round(deltaTime.valueOf() / step) * step;
-        
-        // Use a safer approach to create the new beat offset fraction
-        const newBeatOffset = Math.max(0, dragData.originalBeatOffset + snappedDelta / beatLength);
-        
-        // Create a Fraction object directly using the library
-        const newBeatFraction = new Fraction(newBeatOffset);
-        
-        // Use the toFraction method to get a simplified fraction string
-        const fractionStr = newBeatFraction.toFraction();
-        
-        // Parse the fraction string to get numerator and denominator
-        let numerator, denominator;
-        if (fractionStr.includes('/')) {
-            [numerator, denominator] = fractionStr.split('/');
-        } else {
-            numerator = fractionStr;
-            denominator = '1';
-        }
-        
-        // IMPORTANT: Create the new expression using new Fraction(numerator, denominator) format
-        // instead of a decimal multiplier to ensure consistent behavior
-        let newRaw = dragData.reference +
-            ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + dragData.reference +
-            ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
-  
-        note.setVariable('startTime', function() {
-            return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
-        });
-        note.setVariable('startTimeString', newRaw);
-        // Note: setVariable will mark the note as dirty
+        if (newStartTimeFraction && originalStartTimeFraction && 
+            newStartTimeFraction.sub(originalStartTimeFraction).abs().compare(tolerance) < 0) {
+            // We're very close to the original position, use the original parent
+            const originalParent = dragData.originalParent;
             
-        evaluatedNotes = myModule.evaluateModule();
-        updateVisualNotes(evaluatedNotes);
+            if (originalParent) {
+                // Get the original reference string from the note's variables
+                const originalRawString = note.variables.startTimeString;
+                
+                // Only update if we actually changed something
+                if (dragData.reference !== dragData.originalReference) {
+                    // Restore the original startTime function and string
+                    note.setVariable('startTime', function() {
+                        return new Function("module", "Fraction", "return " + originalRawString + ";")(myModule, Fraction);
+                    });
+                    note.setVariable('startTimeString', originalRawString);
+                    
+                    // Reevaluate and update
+                    evaluatedNotes = myModule.evaluateModule();
+                    updateVisualNotes(evaluatedNotes);
+                }
+            }
+        } else {
+            // We're not close to the original position, use the current dependency
+            const depNote = dragData.currentDepNote || myModule.baseNote;
+            
+            if (depNote && newStartTimeFraction) {
+                // Get the actual start time of the new dependency
+                const depStartTime = new Fraction(depNote.getVariable('startTime').valueOf());
+                
+                // Calculate the offset from the dependency's start time to our desired position
+                const timeOffset = newStartTimeFraction.sub(depStartTime);
+                
+                // Convert this to beats based on the tempo
+                const baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
+                const beatLength = new Fraction(60).div(baseTempo);
+                const beatOffset = timeOffset.div(beatLength);
+                
+                // Create the reference string
+                let depReference = depNote === myModule.baseNote ? 
+                    "module.baseNote" : 
+                    `module.getNoteById(${depNote.id})`;
+                
+                // Get the fraction string for the beat offset
+                const fractionStr = beatOffset.toFraction();
+                let numerator, denominator;
+                
+                if (fractionStr.includes('/')) {
+                    [numerator, denominator] = fractionStr.split('/');
+                } else {
+                    numerator = fractionStr;
+                    denominator = '1';
+                }
+                
+                // Create the new expression
+                let newRaw = depReference +
+                    ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
+                    ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
+                
+                // Update the note's startTime
+                note.setVariable('startTime', function() {
+                    return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                });
+                note.setVariable('startTimeString', newRaw);
+                
+                // Reevaluate and update
+                evaluatedNotes = myModule.evaluateModule();
+                updateVisualNotes(evaluatedNotes);
+            }
+        }
         
         // Store the currently selected note and any selected measure bar before updating
         const previouslySelectedNote = currentSelectedNote;
@@ -1726,6 +1845,77 @@ function createNoteElement(note, index) {
     }
   });
   
+  // Helper function to check if a note is a measure bar
+  function isMeasureDependency(note) {
+      return note && note.variables && 
+             note.variables.startTime && 
+             !note.variables.duration && 
+             !note.variables.frequency;
+  }
+  
+  // Helper function to find the next measure in the chain
+  function findNextMeasureInChain(measureNote) {
+      // Get all measure notes
+      const measureNotes = Object.values(myModule.notes).filter(note => 
+          note.variables.startTime && 
+          !note.variables.duration && 
+          !note.variables.frequency
+      );
+      
+      if (!measureNotes.length) return null;
+      
+      // Sort by start time
+      measureNotes.sort((a, b) => 
+          a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf()
+      );
+      
+      // Find the current measure's index
+      const currentIndex = measureNotes.findIndex(note => note.id === measureNote.id);
+      if (currentIndex === -1 || currentIndex === measureNotes.length - 1) {
+          return null; // Not found or last measure
+      }
+      
+      // Return the next measure
+      return measureNotes[currentIndex + 1];
+  }
+  
+  // Helper function to find a valid ancestor dependency that allows the desired position
+  function findValidAncestorDependency(note, desiredStartTime) {
+      if (!note) return null;
+      
+      // If this is already the base note, there's no ancestor
+      if (note === myModule.baseNote) return null;
+      
+      // Try to find the direct dependency of this note
+      let parentId = null;
+      const rawStartTime = note.variables.startTimeString;
+      if (rawStartTime) {
+          const match = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(rawStartTime);
+          if (match) {
+              parentId = parseInt(match[1], 10);
+          }
+      }
+      
+      if (parentId === null) {
+          // If we couldn't find a direct reference, try the base note
+          return myModule.baseNote;
+      }
+      
+      const parentNote = myModule.getNoteById(parentId);
+      if (!parentNote) return myModule.baseNote;
+      
+      // Check if the parent's start time allows our desired position
+      const parentStartTime = new Fraction(parentNote.getVariable('startTime').valueOf());
+      
+      if (desiredStartTime.compare(parentStartTime) >= 0) {
+          // This parent allows our desired position
+          return parentNote;
+      }
+      
+      // Recursively check the parent's ancestors
+      return findValidAncestorDependency(parentNote, desiredStartTime);
+  }
+  
   noteRect.element.addEventListener('pointercancel', (e) => {
     // Reset pointer down flag
     dragData.pointerIsDown = false;
@@ -1754,28 +1944,314 @@ function createNoteElement(note, index) {
   // Helper: updateDragOverlay creates or updates an overlay element.
   function updateDragOverlay(noteObj, newTime, depId, type) {
     let overlayContainer = document.getElementById('drag-overlay-container');
-    if (!overlayContainer) return;
-    
-    const xCoord = newTime * 200 * xScaleFactor;
-    const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
-    const screenPos = point.transitRaw(viewport);
+    if (!overlayContainer) {
+      // Create the container if it doesn't exist
+      overlayContainer = document.createElement('div');
+      overlayContainer.id = 'drag-overlay-container';
+      overlayContainer.style.position = 'fixed';
+      overlayContainer.style.top = '0';
+      overlayContainer.style.left = '0';
+      overlayContainer.style.width = '100%';
+      overlayContainer.style.height = '100%';
+      overlayContainer.style.pointerEvents = 'none';
+      overlayContainer.style.zIndex = '10000';
+      document.body.appendChild(overlayContainer);
+    }
     
     const overlayId = type === 'dragged' ? 'drag-overlay-dragged' : 'drag-overlay-dep-' + depId;
     let overlayElem = document.getElementById(overlayId);
     
-    if (!overlayElem) {
-        overlayElem = document.createElement('div');
-        overlayElem.id = overlayId;
-        overlayElem.style.position = 'absolute';
-        overlayElem.style.top = '0';
-        overlayElem.style.height = '100%';
-        overlayElem.style.width = '2px';
-        overlayElem.style.pointerEvents = 'none';
-        overlayElem.style.backgroundColor = type === 'dragged' ? 'rgba(255,0,0,0.5)' : 'rgba(0,0,255,0.5)';
-        overlayContainer.appendChild(overlayElem);
+    // Get the current viewport transform to account for zoom
+    const transform = viewport.getBasis().getRaw();
+    const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+    
+    // Calculate X position based on time
+    const xCoord = newTime * 200 * xScaleFactor;
+    const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
+    const screenPos = point.transitRaw(viewport);
+    
+    // Get Y position based on frequency
+    let yPos = 0;
+    if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
+      try {
+        const frequency = noteObj.getVariable('frequency').valueOf();
+        const y = frequencyToY(frequency);
+        const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
+        const yScreenPos = yPoint.transitRaw(viewport);
+        yPos = yScreenPos.y;
+      } catch (e) {
+        console.error('Error getting frequency:', e);
+        yPos = 100; // Fallback position
+      }
+    } else if (noteObj.frequency) {
+      try {
+        const frequency = typeof noteObj.frequency === 'function' 
+          ? noteObj.frequency().valueOf() 
+          : noteObj.frequency.valueOf();
+        const y = frequencyToY(frequency);
+        const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
+        const yScreenPos = yPoint.transitRaw(viewport);
+        yPos = yScreenPos.y;
+      } catch (e) {
+        console.error('Error getting frequency from note object:', e);
+        yPos = 100; // Fallback position
+      }
     }
     
-    overlayElem.style.left = screenPos.x + 'px';
+    // Calculate width based on duration in space units
+    let width = 100; // Default width in space units
+    let height = 20;  // Default height in space units
+    
+    if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
+      try {
+        const duration = noteObj.getVariable('duration').valueOf();
+        width = duration * 200 * xScaleFactor; // Convert duration to space units
+      } catch (e) {
+        console.error('Error getting duration:', e);
+      }
+    } else if (noteObj.duration) {
+      try {
+        const duration = typeof noteObj.duration === 'function'
+          ? noteObj.duration().valueOf()
+          : noteObj.duration.valueOf();
+        width = duration * 200 * xScaleFactor; // Convert duration to space units
+      } catch (e) {
+        console.error('Error getting duration from note object:', e);
+      }
+    }
+    
+    // For screen dimensions, we need to use the same transformation that tapspace uses
+    // Create a point at the origin and another at (width, height)
+    const origin = new tapspace.geometry.Point(space, { x: 0, y: 0 });
+    const corner = new tapspace.geometry.Point(space, { x: width, y: height });
+    
+    // Convert both to screen coordinates
+    const originScreen = origin.transitRaw(viewport);
+    const cornerScreen = corner.transitRaw(viewport);
+    
+    // Calculate screen dimensions from the difference
+    const screenWidth = Math.abs(cornerScreen.x - originScreen.x);
+    const screenHeight = Math.abs(cornerScreen.y - originScreen.y);
+    
+    // Get the note's actual color
+    let noteColor = getColorForNote(noteObj);
+    
+    // Function to blend colors
+    function blendColors(color1, color2, ratio) {
+      // Parse the colors
+      let r1, g1, b1, a1, r2, g2, b2, a2;
+      
+      // Helper function to parse rgba
+      function parseRgba(color) {
+        const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+        if (rgba) {
+          return {
+            r: parseInt(rgba[1]),
+            g: parseInt(rgba[2]),
+            b: parseInt(rgba[3]),
+            a: rgba[4] ? parseFloat(rgba[4]) : 1
+          };
+        }
+        return null;
+      }
+      
+      // Helper function to parse hex
+      function parseHex(color) {
+        let hex = color.replace('#', '');
+        if (hex.length === 3) {
+          hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+        }
+        return {
+          r: parseInt(hex.substring(0, 2), 16),
+          g: parseInt(hex.substring(2, 4), 16),
+          b: parseInt(hex.substring(4, 6), 16),
+          a: 1
+        };
+      }
+      
+      // Helper function to parse hsla
+      function parseHsla(color) {
+        const hsla = color.match(/hsla?\(([^,]+),\s*([^,]+)%,\s*([^,]+)%(?:,\s*([\d.]+))?\)/);
+        if (hsla) {
+          // Convert HSL to RGB
+          const h = parseFloat(hsla[1]) / 360;
+          const s = parseFloat(hsla[2]) / 100;
+          const l = parseFloat(hsla[3]) / 100;
+          const a = hsla[4] ? parseFloat(hsla[4]) : 1;
+          
+          let r, g, b;
+          
+          if (s === 0) {
+            r = g = b = l;
+          } else {
+            const hue2rgb = (p, q, t) => {
+              if (t < 0) t += 1;
+              if (t > 1) t -= 1;
+              if (t < 1/6) return p + (q - p) * 6 * t;
+              if (t < 1/2) return q;
+              if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+              return p;
+            };
+            
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+            
+            r = hue2rgb(p, q, h + 1/3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1/3);
+          }
+          
+          return {
+            r: Math.round(r * 255),
+            g: Math.round(g * 255),
+            b: Math.round(b * 255),
+            a: a
+          };
+        }
+        return null;
+      }
+      
+      // Parse color1
+      let color1Obj;
+      if (color1.startsWith('rgba') || color1.startsWith('rgb')) {
+        color1Obj = parseRgba(color1);
+      } else if (color1.startsWith('#')) {
+        color1Obj = parseHex(color1);
+      } else if (color1.startsWith('hsla') || color1.startsWith('hsl')) {
+        color1Obj = parseHsla(color1);
+      }
+      
+      // Parse color2
+      let color2Obj;
+      if (color2.startsWith('rgba') || color2.startsWith('rgb')) {
+        color2Obj = parseRgba(color2);
+      } else if (color2.startsWith('#')) {
+        color2Obj = parseHex(color2);
+      } else if (color2.startsWith('hsla') || color2.startsWith('hsl')) {
+        color2Obj = parseHsla(color2);
+      }
+      
+      if (!color1Obj || !color2Obj) {
+        return color1; // Return original if parsing failed
+      }
+      
+      // Blend the colors
+      const r = Math.round(color1Obj.r * (1 - ratio) + color2Obj.r * ratio);
+      const g = Math.round(color1Obj.g * (1 - ratio) + color2Obj.g * ratio);
+      const b = Math.round(color1Obj.b * (1 - ratio) + color2Obj.b * ratio);
+      const a = color1Obj.a * (1 - ratio) + color2Obj.a * ratio;
+      
+      return `rgba(${r}, ${g}, ${b}, ${a})`;
+    }
+    
+    // Create the blended colors
+    let overlayColor;
+    if (type === 'dragged') {
+      // Mix with white for dragged note (makes it lighter)
+      overlayColor = blendColors(noteColor, 'rgba(255, 255, 255, 0.8)', 0.5);
+    } else {
+      // Mix with light grey for dependencies
+      overlayColor = blendColors(noteColor, 'rgba(200, 200, 200, 0.6)', 0.5);
+    }
+    
+    if (!overlayElem) {
+      // Create a new overlay element
+      overlayElem = document.createElement('div');
+      overlayElem.id = overlayId;
+      overlayElem.style.position = 'absolute';
+      overlayElem.style.backgroundColor = overlayColor;
+      overlayElem.style.border = '2px solid white'; // White border for all overlays
+      overlayElem.style.borderRadius = '6px'; // Match the note's border radius
+      overlayElem.style.pointerEvents = 'none';
+      overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
+      overlayElem.style.display = 'flex';
+      overlayElem.style.alignItems = 'center';
+      overlayElem.style.justifyContent = 'center';
+      overlayElem.style.color = 'white';
+      overlayElem.style.fontFamily = "'Roboto Mono', monospace";
+      overlayElem.style.overflow = 'hidden'; // Hide overflow
+      
+      // Add box shadow to make it more visible
+      overlayElem.style.boxShadow = type === 'dragged' 
+        ? '0 0 10px rgba(255, 255, 255, 0.7)' 
+        : '0 0 8px rgba(200, 200, 200, 0.5)';
+      
+      // Create a text element with a font size that scales with zoom
+      const textElem = document.createElement('div');
+      textElem.style.fontSize = '10px'; // Base font size
+      textElem.style.whiteSpace = 'nowrap';
+      textElem.style.textShadow = '0 0 1px black'; // Match note text shadow
+      textElem.textContent = type === 'dragged' ? `Note ${noteObj.id}` : `Dep ${noteObj.id}`;
+      overlayElem.appendChild(textElem);
+      
+      overlayContainer.appendChild(overlayElem);
+    } else {
+      // Update the color in case it changed
+      overlayElem.style.backgroundColor = overlayColor;
+      overlayElem.style.border = '2px solid white';
+      overlayElem.style.boxShadow = type === 'dragged' 
+        ? '0 0 10px rgba(255, 255, 255, 0.7)' 
+        : '0 0 8px rgba(200, 200, 200, 0.5)';
+    }
+    
+    // Update the text element's font size based on scale
+    const textElem = overlayElem.querySelector('div');
+    if (textElem) {
+      // Scale the font size inversely with the viewport scale
+      textElem.style.fontSize = `${10 / scale}px`;
+    }
+    
+    // Update the overlay's position and size
+    overlayElem.style.left = `${screenPos.x - 0.5}px`;
+    overlayElem.style.top = `${yPos}px`;
+    overlayElem.style.width = `${screenWidth}px`;
+    overlayElem.style.height = `${screenHeight}px`;
+    
+    // For dependencies, add a simple line to the dragged note
+    if (type === 'dependency') {
+      const draggedElem = document.getElementById('drag-overlay-dragged');
+      if (draggedElem) {
+        let connectionLine = document.getElementById(`connection-line-${depId}`);
+        if (!connectionLine) {
+          connectionLine = document.createElement('div');
+          connectionLine.id = `connection-line-${depId}`;
+          connectionLine.style.position = 'absolute';
+          connectionLine.style.backgroundColor = 'rgba(255, 255, 255, 0.7)'; // White connection lines
+          connectionLine.style.height = '2px';
+          connectionLine.style.transformOrigin = 'left center';
+          connectionLine.style.zIndex = '9999';
+          overlayContainer.appendChild(connectionLine);
+        }
+        
+        // Get positions
+        const draggedRect = draggedElem.getBoundingClientRect();
+        const depRect = overlayElem.getBoundingClientRect();
+        
+        // Calculate line position
+        const startX = draggedRect.left + draggedRect.width / 2;
+        const startY = draggedRect.top + draggedRect.height / 2;
+        const endX = depRect.left + depRect.width / 2;
+        const endY = depRect.top + depRect.height / 2;
+        
+        // Calculate distance and angle
+        const dx = endX - startX;
+        const dy = endY - startY;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+        
+        // Position the line
+        connectionLine.style.width = `${distance}px`;
+        connectionLine.style.left = `${startX}px`;
+        connectionLine.style.top = `${startY}px`;
+        connectionLine.style.transform = `rotate(${angle}deg)`;
+      } else {
+        // If there's no dragged element, remove the connection line
+        let connectionLine = document.getElementById(`connection-line-${depId}`);
+        if (connectionLine) {
+          connectionLine.remove();
+        }
+      }
+    }
   }
 
   return noteRect;
