@@ -1530,8 +1530,9 @@ function createNoteElement(note, index) {
   };
 
   // On pointerdown, capture baseline data.
-  noteRect.element.addEventListener('pointerdown', (e) => {
+  noteRect.element.addEventListener('pointerdown', function(e) {
     dragData.startX = e.clientX;
+    dragData.startY = e.clientY;
     dragData.hasDragged = false;
     dragData.hasCaptured = false;
     dragData.pointerIsDown = true;  // Set flag when pointer is down
@@ -1556,7 +1557,7 @@ function createNoteElement(note, index) {
       depNote = myModule.baseNote;
     } else {
       let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
-      depNote = m ? myModule.getNoteById(m[1]) : myModule.baseNote;
+      depNote = m ? myModule.getNoteById(parseInt(m[1], 10)) : myModule.baseNote;
     }
     // Store the dependency's startTime as a Fraction.
     dragData.refStart = new Fraction(depNote.getVariable('startTime').valueOf());
@@ -1574,26 +1575,34 @@ function createNoteElement(note, index) {
     // Create and/or clear the overlay container.
     let overlayContainer = document.getElementById('drag-overlay-container');
     if (!overlayContainer) {
-    // Create the container if it doesn't exist
-    overlayContainer = document.createElement('div');
-    overlayContainer.id = 'drag-overlay-container';
-    overlayContainer.style.position = 'fixed';
-    overlayContainer.style.top = '0';
-    overlayContainer.style.left = '0';
-    overlayContainer.style.width = '100%';
-    overlayContainer.style.height = '100%';
-    overlayContainer.style.pointerEvents = 'none';
-    overlayContainer.style.zIndex = '3'; // Set to 3 to match the octave indicators z-index
-    
-    // Insert the container at the beginning of the body to ensure it's below the menu bar
-    document.body.insertBefore(overlayContainer, document.body.firstChild);
+      // Create the container if it doesn't exist
+      overlayContainer = document.createElement('div');
+      overlayContainer.id = 'drag-overlay-container';
+      overlayContainer.style.position = 'fixed';
+      overlayContainer.style.top = '0';
+      overlayContainer.style.left = '0';
+      overlayContainer.style.width = '100%';
+      overlayContainer.style.height = '100%';
+      overlayContainer.style.pointerEvents = 'none';
+      overlayContainer.style.zIndex = '3'; // Set to 3 to match the octave indicators z-index
+      
+      // Insert the container at the beginning of the body to ensure it's below the menu bar
+      document.body.insertBefore(overlayContainer, document.body.firstChild);
+    } else {
+      // Clear any existing overlays
+      while (overlayContainer.firstChild) {
+        overlayContainer.removeChild(overlayContainer.firstChild);
+      }
     }
     
     // Precompute baseline dependencies using the unmodified (original) start.
     dragData.baselineDependencies = getMovedNotes(note, origStart, origStart);
+    
+    // Capture the pointer to ensure we get all events even if the pointer moves off the element
+    noteRect.element.setPointerCapture(e.pointerId);
   });
 
-  noteRect.element.addEventListener('pointermove', (e) => {
+  noteRect.element.addEventListener('pointermove', function(e) {
     // Only process move events if pointer is down
     if (!dragData.pointerIsDown) return;
     
@@ -1603,7 +1612,6 @@ function createNoteElement(note, index) {
     const deltaX = e.clientX - dragData.startX;
     if (!dragData.hasDragged && Math.abs(deltaX) > 5) {
         dragData.hasDragged = true;
-        noteRect.element.setPointerCapture(e.pointerId);
         dragData.hasCaptured = true;
         
         // Only pause playback when actually dragging (not just hovering)
@@ -1816,7 +1824,7 @@ function createNoteElement(note, index) {
     }
   });
 
-  noteRect.element.addEventListener('pointerup', (e) => {
+  noteRect.element.addEventListener('pointerup', function(e) {
     // Reset pointer down flag
     dragData.pointerIsDown = false;
     
@@ -1830,9 +1838,6 @@ function createNoteElement(note, index) {
         // Then remove all overlays
         const overlays = overlayContainer.querySelectorAll('[id^="drag-overlay-"]');
         overlays.forEach(overlay => overlay.remove());
-        
-        // Finally remove the container itself
-        overlayContainer.remove();
     }
     
     if (dragData.hasDragged) {
@@ -1965,9 +1970,13 @@ function createNoteElement(note, index) {
   
     // Reset drag state regardless of drag having occurred or not.
     dragData.hasDragged = false;
-    dragData.hasCaptured = false;
     if (dragData.hasCaptured) {
-        noteRect.element.releasePointerCapture(e.pointerId);
+        try {
+            noteRect.element.releasePointerCapture(e.pointerId);
+        } catch (err) {
+            console.log('Error releasing pointer capture:', err);
+        }
+        dragData.hasCaptured = false;
     }
   });
   
@@ -2042,7 +2051,7 @@ function createNoteElement(note, index) {
       return findValidAncestorDependency(parentNote, desiredStartTime);
   }
   
-  noteRect.element.addEventListener('pointercancel', (e) => {
+  noteRect.element.addEventListener('pointercancel', function(e) {
     // Reset pointer down flag
     dragData.pointerIsDown = false;
     
@@ -2051,13 +2060,17 @@ function createNoteElement(note, index) {
       overlayContainer.parentNode.removeChild(overlayContainer);
     }
     dragData.hasDragged = false;
-    dragData.hasCaptured = false;
     if (dragData.hasCaptured) {
-      noteRect.element.releasePointerCapture(e.pointerId);
+      try {
+        noteRect.element.releasePointerCapture(e.pointerId);
+      } catch (err) {
+        console.log('Error releasing pointer capture:', err);
+      }
+      dragData.hasCaptured = false;
     }
   });
 
-  noteRect.element.addEventListener('pointerleave', (e) => {
+  noteRect.element.addEventListener('pointerleave', function(e) {
     // Only clean up overlay if we're not actively dragging
     if (!dragData.hasDragged) {
       const overlayContainer = document.getElementById('drag-overlay-container');
