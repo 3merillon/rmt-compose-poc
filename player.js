@@ -1725,7 +1725,7 @@ function createNoteElement(note, index) {
       
       // New beat offset = originalBeatOffsetFraction + snappedDelta/beatLength.
       let newBeatOffsetFraction = dragData.originalBeatOffsetFraction.add(snappedDelta.div(beatLength));
-  
+      
       // New start time = refStart + (newBeatOffset * beatLength).
       let newStartTimeFraction = dragData.refStart.add(newBeatOffsetFraction.mul(beatLength));
       
@@ -1740,79 +1740,138 @@ function createNoteElement(note, index) {
         actualParent = dragData.originalParent;
         actualParentStartTime = new Fraction(actualParent.getVariable('startTime').valueOf());
       } else {
-        // We're not close to the original position, determine the appropriate parent
-        // CLAMPING: Use dragData.reference to get the dependency's startTime.
-        let depNote;
-        if (dragData.reference === "module.baseNote") {
-          depNote = myModule.baseNote;
-        } else {
-          let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
-          depNote = m ? myModule.getNoteById(m[1]) : myModule.baseNote;
-        }
-        let depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
+        // We're not close to the original position
+        // IMPORTANT: Recalculate the correct dependency path from the original note
         
-        // Original dependency and start time for reference
-        const originalDepNote = depNote;
-        const originalDepStartFraction = depStartFraction;
+        // First, determine if we're dragging forward or backward from the original position
+        const isDraggingForward = newStartTimeFraction.compare(dragData.originalStartTimeFraction) > 0;
         
-        // If new start is less than dependency start, try to reattach to parent dependency
-        if (newStartTimeFraction.compare(depStartFraction) < 0) {
-          // Try to find a valid ancestor dependency that allows this position
-          let newDependency = findValidAncestorDependency(depNote, newStartTimeFraction);
+        // Start with the original parent
+        let currentParent = dragData.originalParent;
+        let currentParentStartTime = new Fraction(currentParent.getVariable('startTime').valueOf());
+        
+        if (isDraggingForward) {
+          // Dragging forward in time
           
-          if (newDependency) {
-            // We found a valid ancestor dependency
-            depNote = newDependency;
-            depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
-          } else {
-            // If we couldn't find a valid ancestor, clamp to the current dependency
-            newStartTimeFraction = depStartFraction;
-          }
-        }
-        
-        // Check if we need to adjust for measure dependencies when dragging forward
-        if (isMeasureDependency(depNote)) {
-          // Keep checking for next measures as long as we're past the current measure's end
-          let currentMeasure = depNote;
-          let currentMeasureStartTime = depStartFraction;
-          let foundNextMeasure = true;
+          // Check if the original parent is a measure
+          const isMeasure = currentParent.id !== 0 && 
+                           !currentParent.variables.duration && 
+                           !currentParent.variables.frequency;
           
-          while (foundNextMeasure) {
-            // Get the measure length
-            const measureLength = myModule.findMeasureLength(currentMeasure);
-            const measureEndTime = currentMeasureStartTime.add(measureLength);
+          if (isMeasure) {
+            // This is a measure dependency
+            // Follow the measure chain forward until we find the appropriate measure
             
-            // If we're dragging beyond the current measure's end
-            if (newStartTimeFraction.compare(measureEndTime) >= 0) {
-              // Try to find the next measure in the chain
-              const nextMeasure = findNextMeasureInChain(currentMeasure);
-              if (nextMeasure) {
-                // Update to use the next measure as dependency
-                currentMeasure = nextMeasure;
-                currentMeasureStartTime = new Fraction(nextMeasure.getVariable('startTime').valueOf());
+            let foundNextMeasure = true;
+            while (foundNextMeasure) {
+              // Calculate current measure's end time
+              const measureLength = myModule.findMeasureLength(currentParent);
+              const measureEndTime = currentParentStartTime.add(measureLength);
+              
+              // If we're past this measure's end, try to find the next one in the chain
+              if (newStartTimeFraction.compare(measureEndTime) >= 0) {
+                // Find all notes that directly depend on this measure
+                const dependentMeasures = [];
                 
-                // Continue checking with this new measure
-                foundNextMeasure = true;
+                for (const id in myModule.notes) {
+                  const checkNote = myModule.getNoteById(parseInt(id, 10));
+                  if (!checkNote || !checkNote.variables || !checkNote.variables.startTimeString) continue;
+                  
+                  // Check if this note directly references our current measure
+                  const startTimeString = checkNote.variables.startTimeString;
+                  const regex = new RegExp(`getNoteById\\(\\s*${currentParent.id}\\s*\\)`);
+                  
+                  if (regex.test(startTimeString) && 
+                      !checkNote.variables.duration && 
+                      !checkNote.variables.frequency) {
+                    dependentMeasures.push(checkNote);
+                  }
+                }
+                
+                if (dependentMeasures.length > 0) {
+                  // Sort by start time to find the earliest one
+                  dependentMeasures.sort((a, b) => 
+                    a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf()
+                  );
+                  
+                  // Use the earliest dependent measure
+                  currentParent = dependentMeasures[0];
+                  currentParentStartTime = new Fraction(currentParent.getVariable('startTime').valueOf());
+                  foundNextMeasure = true;
+                } else {
+                  // No more measures in this chain
+                  foundNextMeasure = false;
+                }
               } else {
-                // No more measures in the chain
+                // We're within this measure's bounds
                 foundNextMeasure = false;
               }
-            } else {
-              // We're within the current measure's bounds
-              foundNextMeasure = false;
             }
           }
+        } else {
+          // Dragging backward in time
           
-          // Update the dependency to the final measure we found
-          depNote = currentMeasure;
-          depStartFraction = currentMeasureStartTime;
-          
-          // Update the reference for display purposes
-          dragData.reference = `module.getNoteById(${depNote.id})`;
+          // If we're dragging before the current parent's start time,
+          // we need to find an appropriate ancestor
+          if (newStartTimeFraction.compare(currentParentStartTime) < 0) {
+            // Start by finding the full ancestor chain of the original parent
+            const ancestorChain = [];
+            let ancestor = currentParent;
+            
+            while (ancestor && ancestor.id !== 0) {
+              // Find the parent by examining the startTimeString
+              if (ancestor.variables && ancestor.variables.startTimeString) {
+                const parentMatch = /getNoteById\((\d+)\)/.exec(ancestor.variables.startTimeString);
+                if (parentMatch) {
+                  const parentId = parseInt(parentMatch[1], 10);
+                  ancestor = myModule.getNoteById(parentId);
+                  if (ancestor) {
+                    ancestorChain.push(ancestor);
+                  }
+                } else if (ancestor.variables.startTimeString.includes("module.baseNote")) {
+                  // This references the base note
+                  ancestorChain.push(myModule.baseNote);
+                  break;
+                } else {
+                  // No parent reference found
+                  break;
+                }
+              } else {
+                // No startTimeString
+                break;
+              }
+            }
+            
+            // Make sure base note is included if not already
+            if (ancestorChain.length === 0 || ancestorChain[ancestorChain.length - 1].id !== 0) {
+              ancestorChain.push(myModule.baseNote);
+            }
+            
+            // Find the appropriate ancestor
+            for (let i = 0; i < ancestorChain.length; i++) {
+              const ancestor = ancestorChain[i];
+              const ancestorStartTime = new Fraction(ancestor.getVariable('startTime').valueOf());
+              
+              if (newStartTimeFraction.compare(ancestorStartTime) >= 0) {
+                // This ancestor starts before or at our new time
+                currentParent = ancestor;
+                currentParentStartTime = ancestorStartTime;
+                break;
+              }
+            }
+          }
         }
         
-        actualParent = depNote;
-        actualParentStartTime = depStartFraction;
+        // Force reattachment to BaseNote if dragging before the BaseNote's start (origin)
+        const baseNoteStart = new Fraction(myModule.baseNote.getVariable('startTime').valueOf());
+        if (newStartTimeFraction.compare(baseNoteStart) < 0) {
+            newStartTimeFraction = baseNoteStart;
+            currentParent = myModule.baseNote;
+            currentParentStartTime = baseNoteStart;
+        }
+
+        actualParent = currentParent;
+        actualParentStartTime = currentParentStartTime;
       }
       
       // IMPORTANT: Clamp to ensure we don't drag before the parent's start time
@@ -1880,6 +1939,11 @@ function createNoteElement(note, index) {
       dragData.currentDepNote = actualParent;
       dragData.newStartTimeFraction = newStartTimeFraction;
       dragData.newBeatOffsetFraction = newBeatOffsetFraction;
+      
+      // Update the reference for display purposes
+      dragData.reference = actualParent.id === 0 ? 
+        "module.baseNote" : 
+        `module.getNoteById(${actualParent.id})`;
     }
   }
   
@@ -2480,8 +2544,12 @@ function createNoteElement(note, index) {
     // Update the text element's font size based on scale
     const textElem = overlayElem.querySelector('div');
     if (textElem) {
-      // Scale the font size inversely with the viewport scale
-      textElem.style.fontSize = `${10 / scale}px`;
+      // Get the overlay's current bounding rectangle
+      const overlayRect = overlayElem.getBoundingClientRect();
+      // Compute a dynamic font size as a fraction of the overlay's height
+      // (adjust the multiplier as needed to achieve the desired visual effect)
+      const dynamicFontSize = overlayRect.height * 0.4;
+      textElem.style.fontSize = `${dynamicFontSize}px`;
       
       // Update text content if needed
       if (type === 'parent') {
