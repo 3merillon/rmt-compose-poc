@@ -1526,16 +1526,23 @@ function createNoteElement(note, index) {
     originalStartTime: 0,
     originalRaw: "",
     reference: "module.baseNote",
-    pointerIsDown: false  // Add this flag to track if pointer is down
+    pointerIsDown: false,  // Flag to track if pointer is down
+    pointerId: null,       // Store the pointer ID for proper cleanup
+    moveHandler: null,     // Store references to event handlers for cleanup
+    upHandler: null,
+    cancelHandler: null
   };
 
   // On pointerdown, capture baseline data.
-  noteRect.element.addEventListener('pointerdown', function(e) {
+  noteRect.element.addEventListener('pointerdown', (e) => {
+    // Reset any existing drag state first
+    cleanupDragState();
+    
     dragData.startX = e.clientX;
-    dragData.startY = e.clientY;
     dragData.hasDragged = false;
     dragData.hasCaptured = false;
-    dragData.pointerIsDown = true;  // Set flag when pointer is down
+    dragData.pointerIsDown = true;
+    dragData.pointerId = e.pointerId;
     
     // Store original startTime as Fraction.
     let origStart = new Fraction(note.getVariable('startTime').valueOf());
@@ -1572,413 +1579,455 @@ function createNoteElement(note, index) {
     // (Optionally, for backward compatibility, also store it in originalBeatOffset.)
     dragData.originalBeatOffset = dragData.originalBeatOffsetFraction;
     
-    // Create and/or clear the overlay container.
-    let overlayContainer = document.getElementById('drag-overlay-container');
-    if (!overlayContainer) {
-      // Create the container if it doesn't exist
-      overlayContainer = document.createElement('div');
-      overlayContainer.id = 'drag-overlay-container';
-      overlayContainer.style.position = 'fixed';
-      overlayContainer.style.top = '0';
-      overlayContainer.style.left = '0';
-      overlayContainer.style.width = '100%';
-      overlayContainer.style.height = '100%';
-      overlayContainer.style.pointerEvents = 'none';
-      overlayContainer.style.zIndex = '3'; // Set to 3 to match the octave indicators z-index
-      
-      // Insert the container at the beginning of the body to ensure it's below the menu bar
-      document.body.insertBefore(overlayContainer, document.body.firstChild);
-    } else {
-      // Clear any existing overlays
-      while (overlayContainer.firstChild) {
-        overlayContainer.removeChild(overlayContainer.firstChild);
-      }
-    }
-    
     // Precompute baseline dependencies using the unmodified (original) start.
     dragData.baselineDependencies = getMovedNotes(note, origStart, origStart);
     
-    // Capture the pointer to ensure we get all events even if the pointer moves off the element
-    noteRect.element.setPointerCapture(e.pointerId);
+    // Create move, up, and cancel handlers
+    dragData.moveHandler = handlePointerMove.bind(null, note);
+    dragData.upHandler = handlePointerUp.bind(null, note);
+    dragData.cancelHandler = handlePointerCancel.bind(null, note);
+    
+    // Add event listeners to document to ensure we catch all events
+    document.addEventListener('pointermove', dragData.moveHandler);
+    document.addEventListener('pointerup', dragData.upHandler);
+    document.addEventListener('pointercancel', dragData.cancelHandler);
   });
-
-  noteRect.element.addEventListener('pointermove', function(e) {
-    // Only process move events if pointer is down
-    if (!dragData.pointerIsDown) return;
+  
+  // Clean up all drag-related state and event listeners
+  function cleanupDragState() {
+    // Remove any existing event listeners
+    if (dragData.moveHandler) {
+      document.removeEventListener('pointermove', dragData.moveHandler);
+      dragData.moveHandler = null;
+    }
+    if (dragData.upHandler) {
+      document.removeEventListener('pointerup', dragData.upHandler);
+      dragData.upHandler = null;
+    }
+    if (dragData.cancelHandler) {
+      document.removeEventListener('pointercancel', dragData.cancelHandler);
+      dragData.cancelHandler = null;
+    }
+    
+    // Release pointer capture if we have it
+    if (dragData.hasCaptured && dragData.pointerId !== null) {
+      try {
+        noteRect.element.releasePointerCapture(dragData.pointerId);
+      } catch (err) {
+        console.log('Error releasing pointer capture:', err);
+      }
+    }
+    
+    // Remove any overlay container
+    const overlayContainer = document.getElementById('drag-overlay-container');
+    if (overlayContainer) {
+      overlayContainer.remove();
+    }
+    
+    // Reset drag state
+    dragData.hasDragged = false;
+    dragData.hasCaptured = false;
+    dragData.pointerIsDown = false;
+    dragData.pointerId = null;
+  }
+  
+  // Handle pointer move events
+  function handlePointerMove(note, e) {
+    // Only process move events for the specific pointer that started the drag
+    if (!dragData.pointerIsDown || e.pointerId !== dragData.pointerId) return;
     
     // Guard: ensure our Fraction field is set.
-    if (!dragData.originalBeatOffsetFraction) { return; }
+    if (!dragData.originalBeatOffsetFraction) return;
     
     const deltaX = e.clientX - dragData.startX;
     if (!dragData.hasDragged && Math.abs(deltaX) > 5) {
-        dragData.hasDragged = true;
+      dragData.hasDragged = true;
+      
+      try {
+        noteRect.element.setPointerCapture(dragData.pointerId);
         dragData.hasCaptured = true;
+      } catch (err) {
+        console.log('Error setting pointer capture:', err);
+      }
+      
+      // Only pause playback when actually dragging (not just hovering)
+      if (isPlaying) {
+        pause();
+      }
+      
+      // Create and/or clear the overlay container only when we start dragging
+      let overlayContainer = document.getElementById('drag-overlay-container');
+      if (!overlayContainer) {
+        // Create the container if it doesn't exist
+        overlayContainer = document.createElement('div');
+        overlayContainer.id = 'drag-overlay-container';
+        overlayContainer.style.position = 'fixed';
+        overlayContainer.style.top = '0';
+        overlayContainer.style.left = '0';
+        overlayContainer.style.width = '100%';
+        overlayContainer.style.height = '100%';
+        overlayContainer.style.pointerEvents = 'none';
+        overlayContainer.style.zIndex = '3'; // Set to 3 to match the octave indicators z-index
         
-        // Only pause playback when actually dragging (not just hovering)
-        if (isPlaying) {
-            pause();
+        // Insert the container at the beginning of the body to ensure it's below the menu bar
+        document.body.insertBefore(overlayContainer, document.body.firstChild);
+      } else {
+        // Clear any existing overlays
+        while (overlayContainer.firstChild) {
+          overlayContainer.removeChild(overlayContainer.firstChild);
         }
-        
-        // Store the original parent dependency and reference
-        if (dragData.reference === "module.baseNote") {
-            dragData.originalParent = myModule.baseNote;
-        } else {
-            let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
-            dragData.originalParent = m ? myModule.getNoteById(parseInt(m[1], 10)) : myModule.baseNote;
-        }
-        dragData.originalReference = dragData.reference;
-        
-        // Store the original start time
-        dragData.originalStartTimeFraction = new Fraction(note.getVariable('startTime').valueOf());
+      }
+      
+      // Store the original parent dependency and reference
+      if (dragData.reference === "module.baseNote") {
+        dragData.originalParent = myModule.baseNote;
+      } else {
+        let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
+        dragData.originalParent = m ? myModule.getNoteById(parseInt(m[1], 10)) : myModule.baseNote;
+      }
+      dragData.originalReference = dragData.reference;
+      
+      // Store the original start time
+      dragData.originalStartTimeFraction = new Fraction(note.getVariable('startTime').valueOf());
     }
     
     if (dragData.hasDragged) {
-        // Get the current viewport scale by measuring a known distance in space
-        const spacePoint1 = space.at(0, 0);
-        const spacePoint2 = space.at(100, 0);
-        
-        // Project these points to viewport coordinates
-        const viewportPoint1 = spacePoint1.transitRaw(viewport);
-        const viewportPoint2 = spacePoint2.transitRaw(viewport);
-        
-        // Calculate the scale factor: how many viewport pixels per 100 space units
-        const viewportDistance = Math.sqrt(
-            Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
-            Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
-        );
-        const scale = viewportDistance / 100;
-        
-        // Adjust deltaX based on the current scale and the user-defined xScaleFactor
-        let adjustedDeltaX = deltaX / (scale * xScaleFactor);
-        
-        // Convert the adjusted pixel delta to time units
-        // Use a safer approach to create fractions from potentially non-integer values
-        const numerator = Math.round(adjustedDeltaX * 1000); // Scale up and round to avoid floating point issues
-        const denominator = 200 * 1000; // Scale up the denominator by the same factor
-        let deltaTime = new Fraction(numerator, denominator);
-        
-        let baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
-        let beatLength = new Fraction(60).div(baseTempo);
-        let step = beatLength.div(new Fraction(4));
-        let ratio = deltaTime.div(step);
-        let nearest = new Fraction(Math.round(Number(ratio)));
-        let snappedDelta = step.mul(nearest);
-        
-        // New beat offset = originalBeatOffsetFraction + snappedDelta/beatLength.
-        let newBeatOffsetFraction = dragData.originalBeatOffsetFraction.add(snappedDelta.div(beatLength));
-    
-        // New start time = refStart + (newBeatOffset * beatLength).
-        let newStartTimeFraction = dragData.refStart.add(newBeatOffsetFraction.mul(beatLength));
-        
-        // Determine the actual parent the note will drop on
-        // Check if we're close to the original position
-        const tolerance = new Fraction(1, 100); // 0.01 time units
-        let actualParent;
-        let actualParentStartTime;
-        
-        if (newStartTimeFraction.sub(dragData.originalStartTimeFraction).abs().compare(tolerance) < 0) {
-            // We're very close to the original position, use the original parent
-            actualParent = dragData.originalParent;
-            actualParentStartTime = new Fraction(actualParent.getVariable('startTime').valueOf());
-        } else {
-            // We're not close to the original position, determine the appropriate parent
-            // CLAMPING: Use dragData.reference to get the dependency's startTime.
-            let depNote;
-            if (dragData.reference === "module.baseNote") {
-                depNote = myModule.baseNote;
-            } else {
-                let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
-                depNote = m ? myModule.getNoteById(m[1]) : myModule.baseNote;
-            }
-            let depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
-            
-            // Original dependency and start time for reference
-            const originalDepNote = depNote;
-            const originalDepStartFraction = depStartFraction;
-            
-            // If new start is less than dependency start, try to reattach to parent dependency
-            if (newStartTimeFraction.compare(depStartFraction) < 0) {
-                // Try to find a valid ancestor dependency that allows this position
-                let newDependency = findValidAncestorDependency(depNote, newStartTimeFraction);
-                
-                if (newDependency) {
-                    // We found a valid ancestor dependency
-                    depNote = newDependency;
-                    depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
-                } else {
-                    // If we couldn't find a valid ancestor, clamp to the current dependency
-                    newStartTimeFraction = depStartFraction;
-                }
-            }
-            
-            // Check if we need to adjust for measure dependencies when dragging forward
-            if (isMeasureDependency(depNote)) {
-                // Keep checking for next measures as long as we're past the current measure's end
-                let currentMeasure = depNote;
-                let currentMeasureStartTime = depStartFraction;
-                let foundNextMeasure = true;
-                
-                while (foundNextMeasure) {
-                    // Get the measure length
-                    const measureLength = myModule.findMeasureLength(currentMeasure);
-                    const measureEndTime = currentMeasureStartTime.add(measureLength);
-                    
-                    // If we're dragging beyond the current measure's end
-                    if (newStartTimeFraction.compare(measureEndTime) >= 0) {
-                        // Try to find the next measure in the chain
-                        const nextMeasure = findNextMeasureInChain(currentMeasure);
-                        if (nextMeasure) {
-                            // Update to use the next measure as dependency
-                            currentMeasure = nextMeasure;
-                            currentMeasureStartTime = new Fraction(nextMeasure.getVariable('startTime').valueOf());
-                            
-                            // Continue checking with this new measure
-                            foundNextMeasure = true;
-                        } else {
-                            // No more measures in the chain
-                            foundNextMeasure = false;
-                        }
-                    } else {
-                        // We're within the current measure's bounds
-                        foundNextMeasure = false;
-                    }
-                }
-                
-                // Update the dependency to the final measure we found
-                depNote = currentMeasure;
-                depStartFraction = currentMeasureStartTime;
-                
-                // Update the reference for display purposes
-                dragData.reference = `module.getNoteById(${depNote.id})`;
-            }
-            
-            actualParent = depNote;
-            actualParentStartTime = depStartFraction;
-        }
-        
-        // IMPORTANT: Clamp to ensure we don't drag before the parent's start time
-        if (newStartTimeFraction.compare(actualParentStartTime) < 0) {
-            newStartTimeFraction = new Fraction(actualParentStartTime);
-            
-            // Recalculate the beat offset based on the clamped start time
-            const timeOffset = newStartTimeFraction.sub(dragData.refStart);
-            newBeatOffsetFraction = timeOffset.div(beatLength);
-        }
-        
-        // Store the current values for use in pointerup
-        dragData.currentDepNote = actualParent;
-        dragData.newStartTimeFraction = newStartTimeFraction;
-        
-        // For overlay drawing, use the numeric value.
-        let newStartTimeNum = Number(newStartTimeFraction.valueOf());
-        
-        // Calculate the position for the overlay in the same way as the original code
-        const xCoord = newStartTimeNum * 200 * xScaleFactor;
-        const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
-        const screenPos = point.transitRaw(viewport);
-        
-        // Update the overlay using the original approach
-        updateDragOverlay(note, newStartTimeNum, null, 'dragged');
-        
-        // Display the parent dependency overlay
-        const parentStartTime = actualParent.getVariable('startTime').valueOf();
-        updateDragOverlay(actualParent, parentStartTime, null, 'parent');
-        
-        // Update dependency overlays using our helper.
-        // Always show dependencies, even if we're at the original position
-        let movedNotes = getMovedNotes(note, newStartTimeFraction, dragData.originalStartTime);
-        
-        // If no dependencies were found, use the baseline dependencies
-        if (movedNotes.length === 0) {
-            movedNotes = dragData.baselineDependencies || [];
-        }
-        
-        // Clean up any dependency overlays that are no longer needed
-        let overlayContainer = document.getElementById('drag-overlay-container');
-        if (overlayContainer) {
-            [...overlayContainer.children].forEach(overlayElem => {
-                if (overlayElem.id && overlayElem.id.indexOf("drag-overlay-dep-") === 0) {
-                    const depId = parseInt(overlayElem.id.replace("drag-overlay-dep-", ""), 10);
-                    if (!movedNotes.some(item => item.note.id === depId)) {
-                        overlayElem.remove();
-                        
-                        // Also remove any connection lines
-                        const connectionLine = document.getElementById(`connection-line-${depId}`);
-                        if (connectionLine) {
-                            connectionLine.remove();
-                        }
-                    }
-                }
-            });
-        }
-        
-        // Update all dependency overlays
-        movedNotes.forEach(item => {
-            updateDragOverlay(item.note, Number(item.newStart.valueOf()), item.note.id, 'dependency');
-        });
-        
-        // Store the current dependency and calculated new start time for use in pointerup
-        dragData.currentDepNote = actualParent;
-        dragData.newStartTimeFraction = newStartTimeFraction;
-        dragData.newBeatOffsetFraction = newBeatOffsetFraction;
-    }
-  });
-
-  noteRect.element.addEventListener('pointerup', function(e) {
-    // Reset pointer down flag
-    dragData.pointerIsDown = false;
-    
-    // Clean up all overlay elements
-    const overlayContainer = document.getElementById('drag-overlay-container');
-    if (overlayContainer) {
-        // First remove all connection lines
-        const connectionLines = overlayContainer.querySelectorAll('[id^="connection-line-"]');
-        connectionLines.forEach(line => line.remove());
-        
-        // Then remove all overlays
-        const overlays = overlayContainer.querySelectorAll('[id^="drag-overlay-"]');
-        overlays.forEach(overlay => overlay.remove());
-    }
-    
-    if (dragData.hasDragged) {
-        // Check if we're close to the original position
-        const newStartTimeFraction = dragData.newStartTimeFraction;
-        const originalStartTimeFraction = dragData.originalStartTimeFraction;
-        
-        // Define a tolerance for considering it "close to original position"
-        const tolerance = new Fraction(1, 100); // 0.01 time units
-        
-        if (newStartTimeFraction && originalStartTimeFraction && 
-            newStartTimeFraction.sub(originalStartTimeFraction).abs().compare(tolerance) < 0) {
-            // We're very close to the original position, use the original parent
-            const originalParent = dragData.originalParent;
-            
-            if (originalParent) {
-                // Get the original reference string from the note's variables
-                const originalRawString = note.variables.startTimeString;
-                
-                // Only update if we actually changed something
-                if (dragData.reference !== dragData.originalReference) {
-                    // Restore the original startTime function and string
-                    note.setVariable('startTime', function() {
-                        return new Function("module", "Fraction", "return " + originalRawString + ";")(myModule, Fraction);
-                    });
-                    note.setVariable('startTimeString', originalRawString);
-                    
-                    // Reevaluate and update
-                    evaluatedNotes = myModule.evaluateModule();
-                    updateVisualNotes(evaluatedNotes);
-                }
-            }
-        } else {
-            // We're not close to the original position, use the current dependency
-            const depNote = dragData.currentDepNote || myModule.baseNote;
-            
-            if (depNote && newStartTimeFraction) {
-                // Get the actual start time of the new dependency
-                const depStartTime = new Fraction(depNote.getVariable('startTime').valueOf());
-                
-                // Calculate the offset from the dependency's start time to our desired position
-                const timeOffset = newStartTimeFraction.sub(depStartTime);
-                
-                // Convert this to beats based on the tempo
-                const baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
-                const beatLength = new Fraction(60).div(baseTempo);
-                const beatOffset = timeOffset.div(beatLength);
-                
-                // Create the reference string
-                let depReference = depNote === myModule.baseNote ? 
-                    "module.baseNote" : 
-                    `module.getNoteById(${depNote.id})`;
-                
-                // Get the fraction string for the beat offset
-                const fractionStr = beatOffset.toFraction();
-                let numerator, denominator;
-                
-                if (fractionStr.includes('/')) {
-                    [numerator, denominator] = fractionStr.split('/');
-                } else {
-                    numerator = fractionStr;
-                    denominator = '1';
-                }
-                
-                // Create the new expression
-                let newRaw = depReference +
-                    ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
-                    ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
-                
-                // Update the note's startTime
-                note.setVariable('startTime', function() {
-                    return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
-                });
-                note.setVariable('startTimeString', newRaw);
-                
-                // Reevaluate and update
-                evaluatedNotes = myModule.evaluateModule();
-                updateVisualNotes(evaluatedNotes);
-            }
-        }
-        
-        // Store the currently selected note and any selected measure bar before updating
-        const previouslySelectedNote = currentSelectedNote;
-        
-        // Check if there's a selected measure bar triangle
-        const selectedMeasureBar = document.querySelector('.measure-bar-triangle.selected');
-        const selectedMeasureId = selectedMeasureBar ? selectedMeasureBar.getAttribute('data-note-id') : null;
-        
-        // Check if the note widget is currently visible
-        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
-        
-        if (noteWidgetVisible) {
-            // If a measure bar was selected, reselect it
-            if (selectedMeasureId) {
-                const measureTriangle = document.querySelector(`.measure-bar-triangle[data-note-id="${selectedMeasureId}"]`);
-                if (measureTriangle) {
-                    const measureNote = myModule.getNoteById(parseInt(selectedMeasureId, 10));
-                    if (measureNote) {
-                        showNoteVariables(measureNote, measureTriangle, selectedMeasureId);
-                    }
-                }
-            }
-            // Otherwise, if this note was selected, update its widget
-            else if (previouslySelectedNote && previouslySelectedNote.id === note.id) {
-                const noteContent = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
-                if (noteContent) {
-                    showNoteVariables(note, noteContent);
-                }
-            }
-            // Otherwise, if another note was selected, reselect it
-            else if (previouslySelectedNote && previouslySelectedNote.id !== note.id) {
-                // Special handling for base note
-                if (previouslySelectedNote === myModule.baseNote) {
-                    const baseNoteElement = document.querySelector('.base-note-circle');
-                    if (baseNoteElement) {
-                        showNoteVariables(myModule.baseNote, baseNoteElement);
-                    }
-                } else {
-                    // Regular note
-                    const selectedElement = document.querySelector(`[data-note-id="${previouslySelectedNote.id}"]`);
-                    if (selectedElement) {
-                        showNoteVariables(previouslySelectedNote, selectedElement);
-                    }
-                }
-            }
-        }
-        
-        e.stopPropagation();
-    }
+      // Get the current viewport scale by measuring a known distance in space
+      const spacePoint1 = space.at(0, 0);
+      const spacePoint2 = space.at(100, 0);
+      
+      // Project these points to viewport coordinates
+      const viewportPoint1 = spacePoint1.transitRaw(viewport);
+      const viewportPoint2 = spacePoint2.transitRaw(viewport);
+      
+      // Calculate the scale factor: how many viewport pixels per 100 space units
+      const viewportDistance = Math.sqrt(
+        Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
+        Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
+      );
+      const scale = viewportDistance / 100;
+      
+      // Adjust deltaX based on the current scale and the user-defined xScaleFactor
+      let adjustedDeltaX = deltaX / (scale * xScaleFactor);
+      
+      // Convert the adjusted pixel delta to time units
+      // Use a safer approach to create fractions from potentially non-integer values
+      const numerator = Math.round(adjustedDeltaX * 1000); // Scale up and round to avoid floating point issues
+      const denominator = 200 * 1000; // Scale up the denominator by the same factor
+      let deltaTime = new Fraction(numerator, denominator);
+      
+      let baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
+      let beatLength = new Fraction(60).div(baseTempo);
+      let step = beatLength.div(new Fraction(4));
+      let ratio = deltaTime.div(step);
+      let nearest = new Fraction(Math.round(Number(ratio)));
+      let snappedDelta = step.mul(nearest);
+      
+      // New beat offset = originalBeatOffsetFraction + snappedDelta/beatLength.
+      let newBeatOffsetFraction = dragData.originalBeatOffsetFraction.add(snappedDelta.div(beatLength));
   
-    // Reset drag state regardless of drag having occurred or not.
-    dragData.hasDragged = false;
-    if (dragData.hasCaptured) {
-        try {
-            noteRect.element.releasePointerCapture(e.pointerId);
-        } catch (err) {
-            console.log('Error releasing pointer capture:', err);
+      // New start time = refStart + (newBeatOffset * beatLength).
+      let newStartTimeFraction = dragData.refStart.add(newBeatOffsetFraction.mul(beatLength));
+      
+      // Determine the actual parent the note will drop on
+      // Check if we're close to the original position
+      const tolerance = new Fraction(1, 100); // 0.01 time units
+      let actualParent;
+      let actualParentStartTime;
+      
+      if (newStartTimeFraction.sub(dragData.originalStartTimeFraction).abs().compare(tolerance) < 0) {
+        // We're very close to the original position, use the original parent
+        actualParent = dragData.originalParent;
+        actualParentStartTime = new Fraction(actualParent.getVariable('startTime').valueOf());
+      } else {
+        // We're not close to the original position, determine the appropriate parent
+        // CLAMPING: Use dragData.reference to get the dependency's startTime.
+        let depNote;
+        if (dragData.reference === "module.baseNote") {
+          depNote = myModule.baseNote;
+        } else {
+          let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
+          depNote = m ? myModule.getNoteById(m[1]) : myModule.baseNote;
         }
-        dragData.hasCaptured = false;
+        let depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
+        
+        // Original dependency and start time for reference
+        const originalDepNote = depNote;
+        const originalDepStartFraction = depStartFraction;
+        
+        // If new start is less than dependency start, try to reattach to parent dependency
+        if (newStartTimeFraction.compare(depStartFraction) < 0) {
+          // Try to find a valid ancestor dependency that allows this position
+          let newDependency = findValidAncestorDependency(depNote, newStartTimeFraction);
+          
+          if (newDependency) {
+            // We found a valid ancestor dependency
+            depNote = newDependency;
+            depStartFraction = new Fraction(depNote.getVariable('startTime').valueOf());
+          } else {
+            // If we couldn't find a valid ancestor, clamp to the current dependency
+            newStartTimeFraction = depStartFraction;
+          }
+        }
+        
+        // Check if we need to adjust for measure dependencies when dragging forward
+        if (isMeasureDependency(depNote)) {
+          // Keep checking for next measures as long as we're past the current measure's end
+          let currentMeasure = depNote;
+          let currentMeasureStartTime = depStartFraction;
+          let foundNextMeasure = true;
+          
+          while (foundNextMeasure) {
+            // Get the measure length
+            const measureLength = myModule.findMeasureLength(currentMeasure);
+            const measureEndTime = currentMeasureStartTime.add(measureLength);
+            
+            // If we're dragging beyond the current measure's end
+            if (newStartTimeFraction.compare(measureEndTime) >= 0) {
+              // Try to find the next measure in the chain
+              const nextMeasure = findNextMeasureInChain(currentMeasure);
+              if (nextMeasure) {
+                // Update to use the next measure as dependency
+                currentMeasure = nextMeasure;
+                currentMeasureStartTime = new Fraction(nextMeasure.getVariable('startTime').valueOf());
+                
+                // Continue checking with this new measure
+                foundNextMeasure = true;
+              } else {
+                // No more measures in the chain
+                foundNextMeasure = false;
+              }
+            } else {
+              // We're within the current measure's bounds
+              foundNextMeasure = false;
+            }
+          }
+          
+          // Update the dependency to the final measure we found
+          depNote = currentMeasure;
+          depStartFraction = currentMeasureStartTime;
+          
+          // Update the reference for display purposes
+          dragData.reference = `module.getNoteById(${depNote.id})`;
+        }
+        
+        actualParent = depNote;
+        actualParentStartTime = depStartFraction;
+      }
+      
+      // IMPORTANT: Clamp to ensure we don't drag before the parent's start time
+      if (newStartTimeFraction.compare(actualParentStartTime) < 0) {
+        newStartTimeFraction = new Fraction(actualParentStartTime);
+        
+        // Recalculate the beat offset based on the clamped start time
+        const timeOffset = newStartTimeFraction.sub(dragData.refStart);
+        newBeatOffsetFraction = timeOffset.div(beatLength);
+      }
+      
+      // Store the current values for use in pointerup
+      dragData.currentDepNote = actualParent;
+      dragData.newStartTimeFraction = newStartTimeFraction;
+      
+      // For overlay drawing, use the numeric value.
+      let newStartTimeNum = Number(newStartTimeFraction.valueOf());
+      
+      // Calculate the position for the overlay in the same way as the original code
+      const xCoord = newStartTimeNum * 200 * xScaleFactor;
+      const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
+      const screenPos = point.transitRaw(viewport);
+      
+      // Update the overlay using the original approach
+      updateDragOverlay(note, newStartTimeNum, null, 'dragged');
+      
+      // Display the parent dependency overlay
+      const parentStartTime = actualParent.getVariable('startTime').valueOf();
+      updateDragOverlay(actualParent, parentStartTime, null, 'parent');
+      
+      // Update dependency overlays using our helper.
+      // Always show dependencies, even if we're at the original position
+      let movedNotes = getMovedNotes(note, newStartTimeFraction, dragData.originalStartTime);
+      
+      // If no dependencies were found, use the baseline dependencies
+      if (movedNotes.length === 0) {
+        movedNotes = dragData.baselineDependencies || [];
+      }
+      
+      // Clean up any dependency overlays that are no longer needed
+      let overlayContainer = document.getElementById('drag-overlay-container');
+      if (overlayContainer) {
+        [...overlayContainer.children].forEach(overlayElem => {
+          if (overlayElem.id && overlayElem.id.indexOf("drag-overlay-dep-") === 0) {
+            const depId = parseInt(overlayElem.id.replace("drag-overlay-dep-", ""), 10);
+            if (!movedNotes.some(item => item.note.id === depId)) {
+              overlayElem.remove();
+              
+              // Also remove any connection lines
+              const connectionLine = document.getElementById(`connection-line-${depId}`);
+              if (connectionLine) {
+                connectionLine.remove();
+              }
+            }
+          }
+        });
+      }
+      
+      // Update all dependency overlays
+      movedNotes.forEach(item => {
+        updateDragOverlay(item.note, Number(item.newStart.valueOf()), item.note.id, 'dependency');
+      });
+      
+      // Store the current dependency and calculated new start time for use in pointerup
+      dragData.currentDepNote = actualParent;
+      dragData.newStartTimeFraction = newStartTimeFraction;
+      dragData.newBeatOffsetFraction = newBeatOffsetFraction;
     }
-  });
+  }
+  
+  // Handle pointer up events
+  function handlePointerUp(note, e) {
+    // Only process up events for the specific pointer that started the drag
+    if (e.pointerId !== dragData.pointerId) return;
+    
+    if (dragData.hasDragged) {
+      // Check if we're close to the original position
+      const newStartTimeFraction = dragData.newStartTimeFraction;
+      const originalStartTimeFraction = dragData.originalStartTimeFraction;
+      
+      // Define a tolerance for considering it "close to original position"
+      const tolerance = new Fraction(1, 100); // 0.01 time units
+      
+      if (newStartTimeFraction && originalStartTimeFraction && 
+          newStartTimeFraction.sub(originalStartTimeFraction).abs().compare(tolerance) < 0) {
+        // We're very close to the original position, use the original parent
+        const originalParent = dragData.originalParent;
+        
+        if (originalParent) {
+          // Get the original reference string from the note's variables
+          const originalRawString = note.variables.startTimeString;
+          
+          // Only update if we actually changed something
+          if (dragData.reference !== dragData.originalReference) {
+            // Restore the original startTime function and string
+            note.setVariable('startTime', function() {
+              return new Function("module", "Fraction", "return " + originalRawString + ";")(myModule, Fraction);
+            });
+            note.setVariable('startTimeString', originalRawString);
+            
+            // Reevaluate and update
+            evaluatedNotes = myModule.evaluateModule();
+            updateVisualNotes(evaluatedNotes);
+          }
+        }
+      } else {
+        // We're not close to the original position, use the current dependency
+        const depNote = dragData.currentDepNote || myModule.baseNote;
+        
+        if (depNote && newStartTimeFraction) {
+          // Get the actual start time of the new dependency
+          const depStartTime = new Fraction(depNote.getVariable('startTime').valueOf());
+          
+          // Calculate the offset from the dependency's start time to our desired position
+          const timeOffset = newStartTimeFraction.sub(depStartTime);
+          
+          // Convert this to beats based on the tempo
+          const baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
+          const beatLength = new Fraction(60).div(baseTempo);
+          const beatOffset = timeOffset.div(beatLength);
+          
+          // Create the reference string
+          let depReference = depNote === myModule.baseNote ? 
+            "module.baseNote" : 
+            `module.getNoteById(${depNote.id})`;
+          
+          // Get the fraction string for the beat offset
+          const fractionStr = beatOffset.toFraction();
+          let numerator, denominator;
+          
+          if (fractionStr.includes('/')) {
+            [numerator, denominator] = fractionStr.split('/');
+          } else {
+            numerator = fractionStr;
+            denominator = '1';
+          }
+          
+          // Create the new expression
+          let newRaw = depReference +
+            ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
+            ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
+          
+          // Update the note's startTime
+          note.setVariable('startTime', function() {
+            return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+          });
+          note.setVariable('startTimeString', newRaw);
+          
+          // Reevaluate and update
+          evaluatedNotes = myModule.evaluateModule();
+          updateVisualNotes(evaluatedNotes);
+        }
+      }
+      
+      // Store the currently selected note and any selected measure bar before updating
+      const previouslySelectedNote = currentSelectedNote;
+      
+      // Check if there's a selected measure bar triangle
+      const selectedMeasureBar = document.querySelector('.measure-bar-triangle.selected');
+      const selectedMeasureId = selectedMeasureBar ? selectedMeasureBar.getAttribute('data-note-id') : null;
+      
+      // Check if the note widget is currently visible
+      const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+      
+      if (noteWidgetVisible) {
+        // If a measure bar was selected, reselect it
+        if (selectedMeasureId) {
+          const measureTriangle = document.querySelector(`.measure-bar-triangle[data-note-id="${selectedMeasureId}"]`);
+          if (measureTriangle) {
+            const measureNote = myModule.getNoteById(parseInt(selectedMeasureId, 10));
+            if (measureNote) {
+              showNoteVariables(measureNote, measureTriangle, selectedMeasureId);
+            }
+          }
+        }
+        // Otherwise, if this note was selected, update its widget
+        else if (previouslySelectedNote && previouslySelectedNote.id === note.id) {
+          const noteContent = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+          if (noteContent) {
+            showNoteVariables(note, noteContent);
+          }
+        }
+        // Otherwise, if another note was selected, reselect it
+        else if (previouslySelectedNote && previouslySelectedNote.id !== note.id) {
+          // Special handling for base note
+          if (previouslySelectedNote === myModule.baseNote) {
+            const baseNoteElement = document.querySelector('.base-note-circle');
+            if (baseNoteElement) {
+              showNoteVariables(myModule.baseNote, baseNoteElement);
+            }
+          } else {
+            // Regular note
+            const selectedElement = document.querySelector(`[data-note-id="${previouslySelectedNote.id}"]`);
+            if (selectedElement) {
+              showNoteVariables(previouslySelectedNote, selectedElement);
+            }
+          }
+        }
+      }
+      
+      e.stopPropagation();
+    }
+    
+    // Clean up all drag state
+    cleanupDragState();
+  }
+  
+  // Handle pointer cancel events
+  function handlePointerCancel(note, e) {
+    // Only process cancel events for the specific pointer that started the drag
+    if (e.pointerId !== dragData.pointerId) return;
+    
+    // Clean up all drag state
+    cleanupDragState();
+  }
   
   // Helper function to check if a note is a measure bar
   function isMeasureDependency(note) {
@@ -2050,35 +2099,6 @@ function createNoteElement(note, index) {
       // Recursively check the parent's ancestors
       return findValidAncestorDependency(parentNote, desiredStartTime);
   }
-  
-  noteRect.element.addEventListener('pointercancel', function(e) {
-    // Reset pointer down flag
-    dragData.pointerIsDown = false;
-    
-    const overlayContainer = document.getElementById('drag-overlay-container');
-    if (overlayContainer && overlayContainer.parentNode) {
-      overlayContainer.parentNode.removeChild(overlayContainer);
-    }
-    dragData.hasDragged = false;
-    if (dragData.hasCaptured) {
-      try {
-        noteRect.element.releasePointerCapture(e.pointerId);
-      } catch (err) {
-        console.log('Error releasing pointer capture:', err);
-      }
-      dragData.hasCaptured = false;
-    }
-  });
-
-  noteRect.element.addEventListener('pointerleave', function(e) {
-    // Only clean up overlay if we're not actively dragging
-    if (!dragData.hasDragged) {
-      const overlayContainer = document.getElementById('drag-overlay-container');
-      if (overlayContainer && overlayContainer.parentNode) {
-        overlayContainer.parentNode.removeChild(overlayContainer);
-      }
-    }
-  });
 
   // Helper: updateDragOverlay creates or updates an overlay element.
   function updateDragOverlay(noteObj, newTime, depId, type) {
