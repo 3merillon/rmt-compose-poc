@@ -102,8 +102,6 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Create octave indicator bars
     function createOctaveIndicators() {
-        console.log("Creating octave indicators");
-        
         // Remove existing container if it exists
         const existingContainer = document.getElementById('octave-indicators-container');
         if (existingContainer) {
@@ -165,12 +163,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
         
         // More accurate device detection using pixel ratio and screen width
-        const isHighDensityDisplay = window.devicePixelRatio > 1.5;
-        const isNarrowScreen = window.innerWidth < 768;
-        const isMobileLike = isHighDensityDisplay && isNarrowScreen;
+        //const isHighDensityDisplay = window.devicePixelRatio > 1.5;
+        //const isNarrowScreen = window.innerWidth < 768;
+        //const isMobileLike = isHighDensityDisplay && isNarrowScreen;
         
         // Set the appropriate vertical offset based on display characteristics
-        const verticalOffset = isMobileLike ? 10.0 : 10.5;
+        const verticalOffset = 10;//isMobileLike ? 10.0 : 10.5;
         
         // Update each indicator's position
         indicators.forEach(indicator => {
@@ -325,7 +323,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
       
         // Throttled handler for continuous updates during dragging
-        handlers.xInput = throttle((e) => {
+        handlers.xInput = (e) => {
           // Store the current viewport center point in space coordinates
           const viewCenter = viewport.atCenter();
           const centerInSpace = viewCenter.transitRaw(space);
@@ -348,14 +346,14 @@ document.addEventListener('DOMContentLoaded', async function() {
           
           // Translate viewport to maintain the center point
           viewport.translateTo(newCenterPoint);
-        }, 50);
+        };
       
         // Throttled handler for Y scale updates
-        handlers.yInput = throttle((e) => {
+        handlers.yInput = (e) => {
           yScaleFactor = parseFloat(e.target.value);
           updateVisualNotes(evaluatedNotes);
           updateBaseNotePosition();
-        }, 50);
+        };
       
         // Handler for when X slider interaction ends
         handlers.xChange = (e) => {
@@ -974,7 +972,7 @@ document.addEventListener('DOMContentLoaded', async function() {
           updateVisualNotes(evaluatedNotes);
           createMeasureBars();
           
-          console.log("Module import complete with full cache reset");
+          //console.log("Module import complete with full cache reset");
           
       } catch (error) {
           console.error("Error importing module at target note:", error);
@@ -1429,19 +1427,20 @@ function createNoteElement(note, index) {
         transition: border-color 0.3s ease, box-shadow 0.3s ease;
         display: flex;
         align-items: center;
-        padding-left: 4px;
+        padding-left: 16px; /* Increased padding to make room for buttons */
         position: relative;
       ">
         <div class="note-id" style="
           position: absolute;
           top: 0;
-          left: 2.5px;
+          left: 9px;
           color: #ffa800;
           font-size: 2px;
           font-family: 'Roboto Mono', 'IBM Plex Mono', monospace;
           line-height: 1;
           padding: 1px;
         ">[${note.id}]</div>
+        
         <div style="
           display: flex;
           align-items: center;
@@ -1641,54 +1640,54 @@ function createNoteElement(note, index) {
     
     const deltaX = e.clientX - dragData.startX;
     if (!dragData.hasDragged && Math.abs(deltaX) > 5) {
-      dragData.hasDragged = true;
-      
-      try {
-        noteRect.element.setPointerCapture(dragData.pointerId);
-        dragData.hasCaptured = true;
-      } catch (err) {
-        console.log('Error setting pointer capture:', err);
-      }
-      
-      // Only pause playback when actually dragging (not just hovering)
-      if (isPlaying) {
-        pause();
-      }
-      
-      // Create and/or clear the overlay container only when we start dragging
-      let overlayContainer = document.getElementById('drag-overlay-container');
-      if (!overlayContainer) {
-        // Create the container if it doesn't exist
-        overlayContainer = document.createElement('div');
-        overlayContainer.id = 'drag-overlay-container';
-        overlayContainer.style.position = 'fixed';
-        overlayContainer.style.top = '0';
-        overlayContainer.style.left = '0';
-        overlayContainer.style.width = '100%';
-        overlayContainer.style.height = '100%';
-        overlayContainer.style.pointerEvents = 'none';
-        overlayContainer.style.zIndex = '3'; // Set to 3 to match the octave indicators z-index
+        dragData.hasDragged = true;
         
-        // Insert the container at the beginning of the body to ensure it's below the menu bar
-        document.body.insertBefore(overlayContainer, document.body.firstChild);
-      } else {
-        // Clear any existing overlays
-        while (overlayContainer.firstChild) {
-          overlayContainer.removeChild(overlayContainer.firstChild);
+        try {
+            noteRect.element.setPointerCapture(dragData.pointerId);
+            dragData.hasCaptured = true;
+        } catch (err) {
+            console.log('Error setting pointer capture:', err);
         }
-      }
-      
-      // Store the original parent dependency and reference
-      if (dragData.reference === "module.baseNote") {
-        dragData.originalParent = myModule.baseNote;
-      } else {
-        let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
-        dragData.originalParent = m ? myModule.getNoteById(parseInt(m[1], 10)) : myModule.baseNote;
-      }
-      dragData.originalReference = dragData.reference;
-      
-      // Store the original start time
-      dragData.originalStartTimeFraction = new Fraction(note.getVariable('startTime').valueOf());
+        
+        // Only pause playback when actually dragging (not just hovering)
+        if (isPlaying) {
+            pause();
+        }
+        
+        // Create and/or clear the overlay container only when we start dragging
+        let overlayContainer = document.getElementById('drag-overlay-container');
+        if (!overlayContainer) {
+            // Create the container if it doesn't exist
+            overlayContainer = document.createElement('div');
+            overlayContainer.id = 'drag-overlay-container';
+            overlayContainer.style.position = 'fixed';
+            overlayContainer.style.top = '0';
+            overlayContainer.style.left = '0';
+            overlayContainer.style.width = '100%';
+            overlayContainer.style.height = '100%';
+            overlayContainer.style.pointerEvents = 'none';
+            overlayContainer.style.zIndex = '1000'; // Make sure this is high enough
+            
+            // Insert the container at the beginning of the body to ensure it's below the menu bar
+            document.body.appendChild(overlayContainer);
+        } else {
+            // Clear any existing overlays
+            while (overlayContainer.firstChild) {
+                overlayContainer.removeChild(overlayContainer.firstChild);
+            }
+        }
+        
+        // Store the original parent dependency and reference
+        if (dragData.reference === "module.baseNote") {
+            dragData.originalParent = myModule.baseNote;
+        } else {
+            let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
+            dragData.originalParent = m ? myModule.getNoteById(parseInt(m[1], 10)) : myModule.baseNote;
+        }
+        dragData.originalReference = dragData.reference;
+        
+        // Store the original start time
+        dragData.originalStartTimeFraction = new Fraction(note.getVariable('startTime').valueOf());
     }
     
     if (dragData.hasDragged) {
@@ -2091,77 +2090,6 @@ function createNoteElement(note, index) {
     
     // Clean up all drag state
     cleanupDragState();
-  }
-  
-  // Helper function to check if a note is a measure bar
-  function isMeasureDependency(note) {
-      return note && note.variables && 
-             note.variables.startTime && 
-             !note.variables.duration && 
-             !note.variables.frequency;
-  }
-  
-  // Helper function to find the next measure in the chain
-  function findNextMeasureInChain(measureNote) {
-      // Get all measure notes
-      const measureNotes = Object.values(myModule.notes).filter(note => 
-          note.variables.startTime && 
-          !note.variables.duration && 
-          !note.variables.frequency
-      );
-      
-      if (!measureNotes.length) return null;
-      
-      // Sort by start time
-      measureNotes.sort((a, b) => 
-          a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf()
-      );
-      
-      // Find the current measure's index
-      const currentIndex = measureNotes.findIndex(note => note.id === measureNote.id);
-      if (currentIndex === -1 || currentIndex === measureNotes.length - 1) {
-          return null; // Not found or last measure
-      }
-      
-      // Return the next measure
-      return measureNotes[currentIndex + 1];
-  }
-  
-  // Helper function to find a valid ancestor dependency that allows the desired position
-  function findValidAncestorDependency(note, desiredStartTime) {
-      if (!note) return null;
-      
-      // If this is already the base note, there's no ancestor
-      if (note === myModule.baseNote) return null;
-      
-      // Try to find the direct dependency of this note
-      let parentId = null;
-      const rawStartTime = note.variables.startTimeString;
-      if (rawStartTime) {
-          const match = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(rawStartTime);
-          if (match) {
-              parentId = parseInt(match[1], 10);
-          }
-      }
-      
-      if (parentId === null) {
-          // If we couldn't find a direct reference, try the base note
-          return myModule.baseNote;
-      }
-      
-      const parentNote = myModule.getNoteById(parentId);
-      if (!parentNote) return myModule.baseNote;
-      
-      // Check if the parent's start time allows our desired position
-      const parentStartTime = new Fraction(parentNote.getVariable('startTime').valueOf());
-      
-      if (desiredStartTime.compare(parentStartTime) >= 0) {
-          // This parent allows our desired position
-          return parentNote;
-      }
-      
-      // Recursively check the parent's ancestors
-      return findValidAncestorDependency(parentNote, desiredStartTime);
   }
 
   // Helper: updateDragOverlay creates or updates an overlay element.
@@ -2718,7 +2646,392 @@ function createNoteElement(note, index) {
     }
   }
 
-  return noteRect;
+  // Calculate dimensions and position for the note
+  const startTime = note.getVariable('startTime').valueOf();
+  const frequency = note.getVariable('frequency').valueOf();
+  const duration = note.getVariable('duration').valueOf();
+  const x = startTime * 200 * xScaleFactor;
+  const y = frequencyToY(frequency);
+  const width = duration * 200 * xScaleFactor;
+  const height = 20;
+  
+  // Set the size of the note
+  noteRect.setSize({ width: width, height: height });
+  
+  // Create a container for the note and its octave buttons
+  const noteContainer = tapspace.createItem(`
+    <div class="note-container" style="
+      position: relative;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    "></div>
+  `);
+  
+  // Set the size of the container to match the note
+  noteContainer.setSize({ width: width, height: height });
+  
+  // Add the note to the container first
+  noteContainer.addChild(noteRect, { x: 0, y: 0 });
+  
+  // Add the container to the space
+  space.addChild(noteContainer, { x: 0, y: 0 });
+  
+  // Create octave control buttons
+  const upButton = tapspace.createItem(`
+    <div style="
+      width: 10px;
+      height: 10px;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      margin-top: 0px;
+      margin-left: 0.75px;
+      pointer-events: auto;
+    ">
+      <div class="octave-button octave-up" style="
+        width: 10px;
+        height: 10px;
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        border-radius: 5px 0 0 0;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 7px;
+        color: white;
+        text-shadow: 0 0 1px black;
+        box-sizing: border-box;
+      ">▲</div>
+    </div>
+  `);
+  
+  const downButton = tapspace.createItem(`
+    <div style="
+      width: 10px;
+      height: 10px;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      margin-top: 0px;
+      margin-left: 0.75px;
+      pointer-events: auto;
+    ">
+      <div class="octave-button octave-down" style="
+        width: 10px;
+        height: 10px;
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.4);
+        border-radius: 0 0 0 5px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 7px;
+        color: white;
+        text-shadow: 0 0 1px black;
+        box-sizing: border-box;
+      ">▼</div>
+    </div>
+  `);
+  
+  // Set the size of the buttons
+  upButton.setSize({ width: 10, height: 10 });
+  downButton.setSize({ width: 10, height: 10 });
+  
+  // Get the button elements
+  const upButtonElement = upButton.element.querySelector('.octave-button');
+  const downButtonElement = downButton.element.querySelector('.octave-button');
+  
+  // Add hover effects
+  upButtonElement.addEventListener('mouseenter', () => {
+    upButtonElement.style.background = 'rgba(255, 255, 255, 0.4)';
+  });
+  
+  upButtonElement.addEventListener('mouseleave', () => {
+    upButtonElement.style.background = 'rgba(255, 255, 255, 0.2)';
+  });
+  
+  downButtonElement.addEventListener('mouseenter', () => {
+    downButtonElement.style.background = 'rgba(255, 255, 255, 0.4)';
+  });
+  
+  downButtonElement.addEventListener('mouseleave', () => {
+    downButtonElement.style.background = 'rgba(255, 255, 255, 0.2)';
+  });
+  
+  // Add click handlers
+  upButton.element.addEventListener('click', (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    handleOctaveChange(note.id, 'up');
+  });
+  
+  upButtonElement.addEventListener('click', (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    handleOctaveChange(note.id, 'up');
+  });
+  
+  // for the down button
+  downButton.element.addEventListener('click', (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    handleOctaveChange(note.id, 'down');
+  });
+  
+  downButtonElement.addEventListener('click', (event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    handleOctaveChange(note.id, 'down');
+  });
+  
+  // Add the buttons to the container AFTER the note
+  // This ensures they appear on top in the stacking order
+  noteContainer.addChild(upButton, { x: 0, y: 0 });
+  noteContainer.addChild(downButton, { x: 0, y: 10 });
+  
+  // Store the buttons in the note for future reference
+  noteRect.octaveButtons = {
+    up: upButton,
+    down: downButton,
+    container: noteContainer
+  };
+
+  return noteContainer;
+}
+
+// Function to handle octave changes
+function handleOctaveChange(noteId, direction) {
+  // Get the note by ID
+  const note = myModule.getNoteById(parseInt(noteId, 10));
+  if (!note) {
+    console.error(`Note with ID ${noteId} not found`);
+    return;
+  }
+  
+  // Pause playback if currently playing
+  if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused) {
+    if (window.playerControls && window.playerControls.pause) {
+      window.playerControls.pause();
+    }
+  }
+  
+  // Get the current frequency
+  const currentFrequency = note.getVariable('frequency');
+  if (!currentFrequency) {
+    console.error(`Note ${noteId} has no frequency`);
+    return;
+  }
+  
+  // Store the currently selected note
+  const selectedNote = currentSelectedNote;
+  const selectedElement = selectedNote ? 
+    document.querySelector(`.note-content[data-note-id="${selectedNote.id}"].selected, .base-note-circle[data-note-id="${selectedNote.id}"].selected, .measure-bar-triangle[data-note-id="${selectedNote.id}"].selected`) : 
+    null;
+  
+  // Check if the note widget is visible
+  const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+  
+  // Update the note's frequency
+  try {
+    // Get the raw expression
+    const rawExpression = note.variables.frequencyString;
+    let newRaw;
+    
+    // If there's no raw expression, create a simple one
+    if (!rawExpression) {
+      // Calculate the new frequency (multiply or divide by 2 for octave shift)
+      let newFrequency;
+      if (direction === 'up') {
+        // Double the frequency to go up an octave
+        newFrequency = currentFrequency.mul(new Fraction(2, 1));
+      } else if (direction === 'down') {
+        // Halve the frequency to go down an octave
+        newFrequency = currentFrequency.mul(new Fraction(1, 2));
+      } else {
+        console.error(`Invalid direction: ${direction}`);
+        return;
+      }
+      
+      // Create a direct expression using the new frequency value
+      newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
+    } 
+    // Case 1: Simple fraction - new Fraction(n, d)
+    else if (rawExpression.match(/^new\s+Fraction\(\d+,\s*\d+\)$/)) {
+      const fractionMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)/);
+      if (fractionMatch) {
+        const oldNum = parseInt(fractionMatch[1], 10);
+        const oldDenom = parseInt(fractionMatch[2], 10);
+        
+        // Calculate the new fraction
+        let newNum, newDenom;
+        if (direction === 'up') {
+          newNum = oldNum * 2;
+          newDenom = oldDenom;
+        } else {
+          newNum = oldNum;
+          newDenom = oldDenom * 2;
+        }
+        
+        // Simplify the fraction
+        const gcd = findGCD(newNum, newDenom);
+        newNum /= gcd;
+        newDenom /= gcd;
+        
+        // Create the new expression
+        newRaw = `new Fraction(${newNum}, ${newDenom})`;
+      } else {
+        newRaw = rawExpression; // Keep original if no match
+      }
+    }
+    // Case 2: Multiplication by baseNote frequency
+    else if (rawExpression.includes("module.baseNote.getVariable('frequency')")) {
+      // Extract the ratio from the expression
+      const ratioMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)\.mul\(module\.baseNote\.getVariable\('frequency'\)\)/);
+      if (ratioMatch) {
+        const oldNum = parseInt(ratioMatch[1], 10);
+        const oldDenom = parseInt(ratioMatch[2], 10);
+        
+        // Calculate the new ratio
+        let newNum, newDenom;
+        if (direction === 'up') {
+          newNum = oldNum * 2;
+          newDenom = oldDenom;
+        } else {
+          newNum = oldNum;
+          newDenom = oldDenom * 2;
+        }
+        
+        // Simplify the fraction
+        const gcd = findGCD(newNum, newDenom);
+        newNum /= gcd;
+        newDenom /= gcd;
+        
+        // Create the new expression preserving the dependency
+        newRaw = `new Fraction(${newNum}, ${newDenom}).mul(module.baseNote.getVariable('frequency'))`;
+      } else {
+        // Handle more complex expressions with baseNote frequency
+        if (direction === 'up') {
+          newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
+        } else {
+          newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
+        }
+      }
+    }
+    // Case 3: Reference to another note's frequency
+    else if (rawExpression.includes("getNoteById") && rawExpression.includes("getVariable('frequency')")) {
+      // For references to other notes, we need to preserve the dependency structure
+      // Extract any existing ratio multiplier
+      const ratioMultiplierMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)\.mul\((.*?)\.getVariable\('frequency'\)\)/);
+      
+      if (ratioMultiplierMatch) {
+        // There's already a ratio multiplier
+        const oldNum = parseInt(ratioMultiplierMatch[1], 10);
+        const oldDenom = parseInt(ratioMultiplierMatch[2], 10);
+        const dependency = ratioMultiplierMatch[3]; // This is the module.getNoteById(...) part
+        
+        // Calculate the new ratio
+        let newNum, newDenom;
+        if (direction === 'up') {
+          newNum = oldNum * 2;
+          newDenom = oldDenom;
+        } else {
+          newNum = oldNum;
+          newDenom = oldDenom * 2;
+        }
+        
+        // Simplify the fraction
+        const gcd = findGCD(newNum, newDenom);
+        newNum /= gcd;
+        newDenom /= gcd;
+        
+        // Create the new expression preserving the dependency
+        newRaw = `new Fraction(${newNum}, ${newDenom}).mul(${dependency}.getVariable('frequency'))`;
+      } else {
+        // No existing ratio multiplier, add one
+        if (direction === 'up') {
+          newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
+        } else {
+          newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
+        }
+      }
+    }
+    // Case 4: Any other expression - multiply by 2 or 1/2
+    else {
+      if (direction === 'up') {
+        newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
+      } else {
+        newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
+      }
+    }
+    
+    // Update the note's frequency with the new expression
+    note.setVariable('frequency', function() {
+      return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+    });
+    note.setVariable('frequencyString', newRaw);
+    
+    // If this is the base note, update its fraction display
+    if (note === myModule.baseNote) {
+      updateBaseNoteFraction();
+      updateBaseNotePosition();
+    }
+    
+    // Re-evaluate the module and update visuals
+    evaluatedNotes = myModule.evaluateModule();
+    updateVisualNotes(evaluatedNotes);
+    
+    // If there was a selected note and the widget was visible, restore the selection
+    if (selectedNote && noteWidgetVisible) {
+      // Find the new element for the selected note
+      let newSelectedElement;
+      
+      if (selectedNote === myModule.baseNote) {
+        // Special handling for base note
+        newSelectedElement = document.querySelector('.base-note-circle');
+      } else {
+        // For regular notes or measure bars
+        newSelectedElement = document.querySelector(
+          `.note-content[data-note-id="${selectedNote.id}"], ` +
+          `.measure-bar-triangle[data-note-id="${selectedNote.id}"]`
+        );
+      }
+      
+      // If we found the element, show the variables to restore selection and highlights
+      if (newSelectedElement) {
+        // For measure bars, we need to pass the measureId parameter
+        if (newSelectedElement.classList.contains('measure-bar-triangle')) {
+          window.modals.showNoteVariables(selectedNote, newSelectedElement, selectedNote.id);
+        } else {
+          window.modals.showNoteVariables(selectedNote, newSelectedElement);
+        }
+      }
+    }
+    
+  } catch (error) {
+    console.error(`Error updating frequency for note ${noteId}:`, error);
+  }
+}
+
+// Make handleOctaveChange globally accessible
+window.handleOctaveChange = handleOctaveChange;
+
+// Helper function to find the greatest common divisor (GCD)
+function findGCD(a, b) {
+  a = Math.abs(a);
+  b = Math.abs(b);
+  while (b) {
+    const temp = b;
+    b = a % b;
+    a = temp;
+  }
+  return a;
 }
 
   (function() {
@@ -3212,7 +3525,7 @@ function playNote(note, startTime) {
 
 function preparePlayback(fromTime) {
   return new Promise((resolve) => {
-      console.time('Playback preparation');
+      //console.time('Playback preparation');
       
       // Step 1: Ensure audio context is running
       const resumePromise = audioContext.state === 'suspended' 
@@ -3254,8 +3567,6 @@ function preparePlayback(fromTime) {
               }
           }
           
-          console.log(`Prepared ${activeNotes.length} notes from time ${fromTime} to ${moduleEndTime}`);
-          
           // Step 5: Pre-create all oscillators and gain nodes
           const preparedNotes = activeNotes.map(note => {
               const noteStart = note.startTime.valueOf();
@@ -3277,7 +3588,7 @@ function preparePlayback(fromTime) {
               };
           });
           
-          console.timeEnd('Playback preparation');
+          //console.timeEnd('Playback preparation');
           resolve(preparedNotes);
       });
   });
@@ -3537,7 +3848,8 @@ document.addEventListener('mouseup', (event) => {
             !event.target.closest('.note-rect') && 
             !event.target.closest('#baseNoteCircle') &&
             !event.target.closest('.measure-bar-triangle') &&
-            !event.target.closest('.delete-confirm-overlay')) {
+            !event.target.closest('.delete-confirm-overlay') &&
+            !event.target.closest('.octave-button')) {
             clearSelection();
         }
         if (!domCache.generalWidget.contains(event.target) && !domCache.dropdownButton.contains(event.target)) {
@@ -3676,7 +3988,7 @@ function reorderCurrentModule() {
             evaluatedNotes = myModule.evaluateModule();
             updateVisualNotes(evaluatedNotes);
             
-            console.log("Module reordering complete with full cache reset");
+            //console.log("Module reordering complete with full cache reset");
         }).catch(error => {
             console.error('Error reordering module:', error);
             const errorMsg = document.createElement('div');
@@ -3789,7 +4101,7 @@ function loadModule(file) {
                 updateBaseNoteFraction();
                 updateBaseNotePosition();
                 
-                console.log("Module loaded successfully with preserved base note properties");
+                //console.log("Module loaded successfully with preserved base note properties");
             }).catch((error) => {
                 console.error('Error loading module:', error);
                 const errorMsg = document.createElement('div');

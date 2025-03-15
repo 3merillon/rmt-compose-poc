@@ -219,10 +219,110 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             const variableValueDiv = document.createElement('div');
             variableValueDiv.className = 'variable-value';
             
-            const evaluatedDiv = document.createElement('div');
+            // Create the evaluated value div
+            let evaluatedDiv = document.createElement('div');
             evaluatedDiv.className = 'evaluated-value';
-            evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${value.evaluated !== null ? String(value.evaluated) : 'null'}`;
             
+            // Add octave buttons for frequency variable
+            if (key === 'frequency') {
+                // Create a container for the evaluated value and octave buttons
+                const evaluatedContainer = document.createElement('div');
+                evaluatedContainer.style.display = 'flex';
+                evaluatedContainer.style.justifyContent = 'space-between';
+                evaluatedContainer.style.alignItems = 'center';
+                
+                // Add the evaluated value text
+                const evaluatedText = document.createElement('div');
+                evaluatedText.innerHTML = `<span class="value-label">Evaluated:</span> ${value.evaluated !== null ? String(value.evaluated) : 'null'}`;
+                evaluatedContainer.appendChild(evaluatedText);
+                
+                // Create octave buttons container
+                const octaveButtonsContainer = document.createElement('div');
+                octaveButtonsContainer.style.display = 'flex';
+                octaveButtonsContainer.style.flexDirection = 'column';
+                octaveButtonsContainer.style.marginLeft = '10px';
+                
+                // Create up octave button
+                const upOctaveButton = document.createElement('button');
+                upOctaveButton.className = 'octave-button octave-up-widget';
+                upOctaveButton.textContent = '▲';
+                upOctaveButton.style.width = '20px';
+                upOctaveButton.style.height = '12px';
+                upOctaveButton.style.padding = '0';
+                upOctaveButton.style.background = 'rgba(255, 255, 255, 0.2)';
+                upOctaveButton.style.border = '1px solid rgba(255, 255, 255, 0.4)';
+                upOctaveButton.style.borderRadius = '3px 3px 0 0';
+                upOctaveButton.style.cursor = 'pointer';
+                upOctaveButton.style.display = 'flex';
+                upOctaveButton.style.alignItems = 'center';
+                upOctaveButton.style.justifyContent = 'center';
+                upOctaveButton.style.fontSize = '8px';
+                upOctaveButton.style.color = 'white';
+                upOctaveButton.style.marginBottom = '1px';
+                
+                // Create down octave button
+                const downOctaveButton = document.createElement('button');
+                downOctaveButton.className = 'octave-button octave-down-widget';
+                downOctaveButton.textContent = '▼';
+                downOctaveButton.style.width = '20px';
+                downOctaveButton.style.height = '12px';
+                downOctaveButton.style.padding = '0';
+                downOctaveButton.style.background = 'rgba(255, 255, 255, 0.2)';
+                downOctaveButton.style.border = '1px solid rgba(255, 255, 255, 0.4)';
+                downOctaveButton.style.borderRadius = '0 0 3px 3px';
+                downOctaveButton.style.cursor = 'pointer';
+                downOctaveButton.style.display = 'flex';
+                downOctaveButton.style.alignItems = 'center';
+                downOctaveButton.style.justifyContent = 'center';
+                downOctaveButton.style.fontSize = '8px';
+                downOctaveButton.style.color = 'white';
+                
+                // Add hover effects
+                upOctaveButton.addEventListener('mouseenter', () => {
+                    upOctaveButton.style.background = 'rgba(255, 255, 255, 0.4)';
+                });
+                
+                upOctaveButton.addEventListener('mouseleave', () => {
+                    upOctaveButton.style.background = 'rgba(255, 255, 255, 0.2)';
+                });
+                
+                downOctaveButton.addEventListener('mouseenter', () => {
+                    downOctaveButton.style.background = 'rgba(255, 255, 255, 0.4)';
+                });
+                
+                downOctaveButton.addEventListener('mouseleave', () => {
+                    downOctaveButton.style.background = 'rgba(255, 255, 255, 0.2)';
+                });
+                
+                // Add click handlers
+                upOctaveButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    event.preventDefault();
+                    // Use window.handleOctaveChange to access the global function
+                    window.handleOctaveChange(note.id, 'up');
+                });
+                
+                downOctaveButton.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    event.preventDefault();
+                    // Use window.handleOctaveChange to access the global function
+                    window.handleOctaveChange(note.id, 'down');
+                });
+                
+                // Add buttons to container
+                octaveButtonsContainer.appendChild(upOctaveButton);
+                octaveButtonsContainer.appendChild(downOctaveButton);
+                
+                // Add buttons container to evaluated container
+                evaluatedContainer.appendChild(octaveButtonsContainer);
+                
+                // Replace the original evaluated div with our container
+                evaluatedDiv.appendChild(evaluatedContainer);
+            } else {
+                // For non-frequency variables, just use the standard format
+                evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${value.evaluated !== null ? String(value.evaluated) : 'null'}`;
+            }
+                        
             const rawDiv = document.createElement('div');
             rawDiv.className = 'raw-value';
             
