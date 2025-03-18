@@ -46,6 +46,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         createMeasureBars: null,
         deleteNoteAndDependencies: null,
         deleteNoteKeepDependencies: null,
+        checkAndUpdateDependentNotes: null,
         cleanSlate: null
     };
 
@@ -88,6 +89,33 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             clearTimeout(timeout);
             timeout = setTimeout(() => func.apply(context, args), wait);
         };
+    }
+
+    // Function to extract the tempo part correctly, handling nested parentheses
+    function extractTempoPart(expr) {
+        if (!expr.startsWith("new Fraction(60).div(")) {
+            return "new Fraction(60).div(module.findTempo(module.baseNote))";
+        }
+        
+        // Start after "new Fraction(60).div("
+        let start = "new Fraction(60).div(".length;
+        let openParens = 1; // We already have one open parenthesis
+        let end = start;
+        
+        // Find the matching closing parenthesis
+        while (end < expr.length && openParens > 0) {
+            if (expr[end] === '(') openParens++;
+            else if (expr[end] === ')') openParens--;
+            end++;
+        }
+        
+        // If we found a matching closing parenthesis
+        if (openParens === 0) {
+            return expr.substring(0, end);
+        }
+        
+        // Default if we couldn't parse correctly
+        return "new Fraction(60).div(module.findTempo(module.baseNote))";
     }
 
     // Show note variables in the widget
@@ -246,36 +274,36 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                 const upOctaveButton = document.createElement('button');
                 upOctaveButton.className = 'octave-button octave-up-widget';
                 upOctaveButton.textContent = '▲';
-                upOctaveButton.style.width = '20px';
-                upOctaveButton.style.height = '12px';
+                upOctaveButton.style.width = '26px';  // Match the width of duration buttons
+                upOctaveButton.style.height = '26px'; // Match the height of duration buttons
                 upOctaveButton.style.padding = '0';
-                upOctaveButton.style.background = 'rgba(255, 255, 255, 0.2)';
-                upOctaveButton.style.border = '1px solid rgba(255, 255, 255, 0.4)';
-                upOctaveButton.style.borderRadius = '3px 3px 0 0';
+                upOctaveButton.style.backgroundColor = '#444'; // Match the background of duration buttons
+                upOctaveButton.style.border = '1px solid orange'; // Match the orange border
+                upOctaveButton.style.borderRadius = '4px'; // Match the border radius
                 upOctaveButton.style.cursor = 'pointer';
                 upOctaveButton.style.display = 'flex';
                 upOctaveButton.style.alignItems = 'center';
                 upOctaveButton.style.justifyContent = 'center';
-                upOctaveButton.style.fontSize = '8px';
-                upOctaveButton.style.color = 'white';
-                upOctaveButton.style.marginBottom = '1px';
-                
+                upOctaveButton.style.fontSize = '14px'; // Larger font size to match duration buttons
+                upOctaveButton.style.color = '#fff';
+                upOctaveButton.style.marginBottom = '4px'; // Add some spacing between buttons
+
                 // Create down octave button
                 const downOctaveButton = document.createElement('button');
                 downOctaveButton.className = 'octave-button octave-down-widget';
                 downOctaveButton.textContent = '▼';
-                downOctaveButton.style.width = '20px';
-                downOctaveButton.style.height = '12px';
+                downOctaveButton.style.width = '26px';  // Match the width of duration buttons
+                downOctaveButton.style.height = '26px'; // Match the height of duration buttons
                 downOctaveButton.style.padding = '0';
-                downOctaveButton.style.background = 'rgba(255, 255, 255, 0.2)';
-                downOctaveButton.style.border = '1px solid rgba(255, 255, 255, 0.4)';
-                downOctaveButton.style.borderRadius = '0 0 3px 3px';
+                downOctaveButton.style.backgroundColor = '#444'; // Match the background of duration buttons
+                downOctaveButton.style.border = '1px solid orange'; // Match the orange border
+                downOctaveButton.style.borderRadius = '4px'; // Match the border radius
                 downOctaveButton.style.cursor = 'pointer';
                 downOctaveButton.style.display = 'flex';
                 downOctaveButton.style.alignItems = 'center';
                 downOctaveButton.style.justifyContent = 'center';
-                downOctaveButton.style.fontSize = '8px';
-                downOctaveButton.style.color = 'white';
+                downOctaveButton.style.fontSize = '14px'; // Larger font size to match duration buttons
+                downOctaveButton.style.color = '#fff';
                 
                 // Add hover effects
                 upOctaveButton.addEventListener('mouseenter', () => {
@@ -423,11 +451,25 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     btn.style.display = "flex";
                     btn.style.justifyContent = "center";
                     btn.style.alignItems = "center";
+                    btn.style.transition = "background-color 0.3s ease"; // Add transition for smooth hover effect
                     
                     // Highlight the base button if bp.base matches the selected base (regardless of modifier)
                     if (selectedBase !== null && Math.abs(bp.base - selectedBase) < 0.001) {
                         btn.style.backgroundColor = "#ff0000";
                     }
+                    
+                    // Add hover effects
+                    btn.addEventListener('mouseenter', () => {
+                        if (!(selectedBase !== null && Math.abs(bp.base - selectedBase) < 0.001)) {
+                            btn.style.backgroundColor = "rgba(255, 255, 255, 0.4)";
+                        }
+                    });
+                    
+                    btn.addEventListener('mouseleave', () => {
+                        if (!(selectedBase !== null && Math.abs(bp.base - selectedBase) < 0.001)) {
+                            btn.style.backgroundColor = "#444";
+                        }
+                    });
                     
                     btn.addEventListener('click', () => {
                         selectedBase = bp.base;
@@ -457,13 +499,23 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                             else fraction = new Fraction(Math.round(multiplier * 4), 4); // Approximate as quarters
                         }
                         
-                        // Extract the tempo part from the original expression
-                        let tempoRegex = /^new Fraction\(60\)\.div\((.*?)\)/;
-                        let tempoMatch = originalExpr.match(tempoRegex);
-                        let tempoPart = tempoMatch ? tempoMatch[0] : "new Fraction(60).div(module.findTempo(module.baseNote))";
+                        // Instead of trying to parse the original expression, create a new one from scratch
+                        // First, determine what tempo reference to use
+                        let tempoReference;
+                        if (originalExpr.includes("module.getNoteById")) {
+                            // Try to extract the note ID
+                            const noteIdMatch = originalExpr.match(/module\.getNoteById\((\d+)\)/);
+                            if (noteIdMatch && noteIdMatch[1]) {
+                                tempoReference = `module.findTempo(module.getNoteById(${noteIdMatch[1]}))`;
+                            } else {
+                                tempoReference = "module.findTempo(module.baseNote)";
+                            }
+                        } else {
+                            tempoReference = "module.findTempo(module.baseNote)";
+                        }
                         
                         // Create the new expression
-                        newExpr = `${tempoPart}.mul(new Fraction(${fraction.n}, ${fraction.d}))`;
+                        newExpr = `new Fraction(60).div(${tempoReference}).mul(new Fraction(${fraction.n}, ${fraction.d}))`;
                         
                         rawInput.value = newExpr;
                         saveButton.style.display = 'inline-block';
@@ -498,11 +550,25 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     btn.style.border = "1px solid orange";
                     btn.style.borderRadius = "4px";
                     btn.style.cursor = "pointer";
+                    btn.style.transition = "background-color 0.3s ease"; // Add transition for smooth hover effect
                     
                     // Highlight the dot button if selectedMod equals dp.factor
                     if (selectedMod !== null && Math.abs(selectedMod - dp.factor) < 0.001) {
                         btn.style.backgroundColor = "#ff0000";
                     }
+                    
+                    // Add hover effects
+                    btn.addEventListener('mouseenter', () => {
+                        if (!(selectedMod !== null && Math.abs(selectedMod - dp.factor) < 0.001)) {
+                            btn.style.backgroundColor = "rgba(255, 255, 255, 0.4)";
+                        }
+                    });
+                    
+                    btn.addEventListener('mouseleave', () => {
+                        if (!(selectedMod !== null && Math.abs(selectedMod - dp.factor) < 0.001)) {
+                            btn.style.backgroundColor = "#444";
+                        }
+                    });
                     
                     btn.addEventListener('click', () => {
                         // Toggle: if this dot button is already selected, unselect it (set modifier back to 1)
@@ -539,10 +605,8 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                         }
                         
                         // Extract the tempo part from the original expression
-                        let tempoRegex = /^new Fraction\(60\)\.div\((.*?)\)/;
-                        let tempoMatch = originalExpr.match(tempoRegex);
-                        let tempoPart = tempoMatch ? tempoMatch[0] : "new Fraction(60).div(module.findTempo(module.baseNote))";
-                        
+                        let tempoPart = extractTempoPart(originalExpr);
+                
                         // Create the new expression
                         newExpr = `${tempoPart}.mul(new Fraction(${fraction.n}, ${fraction.d}))`;
                         
@@ -599,6 +663,13 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     } else {
                         const currentNoteId = measureId !== null ? measureId : note.id;
                         const validatedExpression = validateExpression(window.myModule, currentNoteId, newRawValue, key);
+                        
+                        // If this is a duration change, store the original duration
+                        let originalDuration;
+                        if (key === 'duration') {
+                            originalDuration = note.getVariable('duration').valueOf();
+                        }
+                        
                         if (measureId !== null) {
                             const measureNote = window.myModule.getNoteById(parseInt(measureId, 10));
                             if (measureNote) {
@@ -607,6 +678,15 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                                 });
                                 measureNote.setVariable(key + 'String', newRawValue);
                                 // Note: setVariable will mark the note as dirty
+                                
+                                // If this is a duration change, check and update dependent notes
+                                if (key === 'duration') {
+                                    const updatedDuration = note.getVariable('duration').valueOf();
+                                    if (Math.abs(originalDuration - updatedDuration) > 0.001) {
+                                        // Use the external function instead of direct call
+                                        externalFunctions.checkAndUpdateDependentNotes(noteId, originalDuration, updatedDuration);
+                                    }
+                                }
                             } else {
                                 throw new Error('Unable to find measure note');
                             }
@@ -616,6 +696,14 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                             });
                             note.setVariable(key + 'String', newRawValue);
                             // Note: setVariable will mark the note as dirty
+                            
+                            // If this is a duration change, check and update dependent notes
+                            if (key === 'duration') {
+                                const updatedDuration = note.getVariable('duration').valueOf();
+                                if (Math.abs(originalDuration - updatedDuration) > 0.001) {
+                                    externalFunctions.checkAndUpdateDependentNotes(note.id, originalDuration, updatedDuration);
+                                }
+                            }
                         }
                     }
                     
@@ -2332,7 +2420,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         if (!expression || expression.trim() === '') {
             throw new Error('Expression cannot be empty or undefined');
         }
-
+    
         if (expression.includes(`getNoteById(${noteId})`)) {
             throw new Error('Expression cannot reference itself directly');
         }
@@ -2341,7 +2429,39 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             throw new Error('Circular dependency detected in expression');
         }
         
+        // First, check if the expression has balanced parentheses
+        let openParens = 0;
+        for (const char of expression) {
+            if (char === '(') openParens++;
+            else if (char === ')') openParens--;
+            if (openParens < 0) {
+                throw new Error('Unbalanced parentheses: too many closing parentheses');
+            }
+        }
+        if (openParens > 0) {
+            throw new Error('Unbalanced parentheses: missing closing parentheses');
+        }
+        
         try {
+            // For duration expressions with the specific pattern we're generating
+            if (variableType === 'duration' && 
+                expression.startsWith('new Fraction(60).div(') && 
+                expression.includes(').mul(new Fraction(')) {
+                
+                // This is our standard duration format, validate it directly
+                const testFunc = new Function('module', 'Fraction', `
+                    return ${expression};
+                `);
+                const result = testFunc(moduleInstance, Fraction);
+                
+                if (!(result instanceof Fraction)) {
+                    throw new Error('Duration expression must result in a Fraction');
+                }
+                
+                return expression;
+            }
+            
+            // For other expressions
             const testFunc = new Function('module', 'Fraction', `
                 let result = ${expression};
                 if (result === undefined || result === null) {

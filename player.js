@@ -72,6 +72,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         createMeasureBars: createMeasureBars,
         deleteNoteAndDependencies: deleteNoteAndDependencies,
         deleteNoteKeepDependencies: deleteNoteKeepDependencies,
+        checkAndUpdateDependentNotes: checkAndUpdateDependentNotes,
         cleanSlate: cleanSlate
       });
     }
@@ -732,6 +733,143 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
   
     /* ---------- END KEEP DEPENDENCIES FUNCTIONALITY ---------- */
+
+    // Function to check and update dependent notes when a note's duration changes
+    function checkAndUpdateDependentNotes(noteId, oldDuration, newDuration) {
+      // Get the note
+      const note = myModule.getNoteById(noteId);
+      if (!note) return;
+      
+      // Get the note's start time
+      const noteStartTime = note.getVariable('startTime').valueOf();
+      
+      // Get the base note's start time (absolute minimum time)
+      const baseNoteStartTime = myModule.baseNote.getVariable('startTime').valueOf();
+      
+      // Get all dependent notes
+      const dependentNotes = myModule.getDependentNotes(noteId);
+      
+      // Process each dependent note
+      dependentNotes.forEach(depId => {
+          const depNote = myModule.getNoteById(depId);
+          if (!depNote) return;
+          
+          // Check if this note has a duration dependency on the resized note
+          const startTimeString = depNote.variables.startTimeString || '';
+          
+          // Check for duration dependency with subtraction
+          const durationSubMatch = startTimeString.match(new RegExp(`module\\.getNoteById\\(${noteId}\\)\\.getVariable\\('startTime'\\)\\.add\\(module\\.getNoteById\\(${noteId}\\)\\.getVariable\\('duration'\\)\\)\\.sub\\(.*?\\)`));
+          
+          if (durationSubMatch) {
+              // This is a note that depends on the parent's duration with a negative offset
+              // We need to check if it now starts before the parent
+              const depStartTime = depNote.getVariable('startTime').valueOf();
+              
+              if (depStartTime < noteStartTime) {
+                  console.log(`Dependent note ${depId} now starts before its parent ${noteId}. Adjusting...`);
+                  
+                  // Find a suitable parent up the tree
+                  let currentParent = note;
+                  let suitableParent = null;
+                  
+                  // Try to find the parent's parent using the startTimeString
+                  while (currentParent && currentParent.id !== 0) {
+                      const parentStartTimeString = currentParent.variables.startTimeString || '';
+                      const parentMatch = parentStartTimeString.match(/module\.getNoteById\((\d+)\)/);
+                      
+                      if (parentMatch) {
+                          const parentId = parseInt(parentMatch[1], 10);
+                          const parent = myModule.getNoteById(parentId);
+                          
+                          if (parent) {
+                              // Check if using this parent would allow the note to be after the parent's start time
+                              const parentStartTime = parent.getVariable('startTime').valueOf();
+                              
+                              if (parentStartTime <= depStartTime) {
+                                  suitableParent = parent;
+                                  break;
+                              }
+                              
+                              // Move up the tree
+                              currentParent = parent;
+                          } else {
+                              break;
+                          }
+                      } else if (parentStartTimeString.includes('module.baseNote')) {
+                          // If the parent references the base note, use the base note as the suitable parent
+                          suitableParent = myModule.baseNote;
+                          break;
+                      } else {
+                          break;
+                      }
+                  }
+                  
+                  // If we couldn't find a suitable parent, use the base note
+                  if (!suitableParent) {
+                      suitableParent = myModule.baseNote;
+                  }
+                  
+                  // Create a new expression based on the suitable parent
+                  let newRaw;
+                  
+                  if (suitableParent === myModule.baseNote) {
+                      // For the base note, create a direct dependency
+                      // Ensure we don't go before the base note's start time
+                      const offset = Math.max(depStartTime, baseNoteStartTime) - baseNoteStartTime;
+                      
+                      // Convert to beats
+                      const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
+                      const beatLength = 60 / baseTempo;
+                      const beatOffset = offset / beatLength;
+                      
+                      // Create a fraction for the beat offset
+                      const offsetFraction = new Fraction(beatOffset);
+                      
+                      newRaw = `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`;
+                  } else {
+                      // For other parents, check if we can use their duration
+                      const parentStartTime = suitableParent.getVariable('startTime').valueOf();
+                      const parentDuration = suitableParent.getVariable('duration')?.valueOf() || 0;
+                      const parentEndTime = parentStartTime + parentDuration;
+                      
+                      if (Math.abs(depStartTime - parentEndTime) < 0.01) {
+                          // If the position is very close to the parent's end, use the duration dependency
+                          newRaw = `module.getNoteById(${suitableParent.id}).getVariable('startTime').add(module.getNoteById(${suitableParent.id}).getVariable('duration'))`;
+                      } else {
+                          // Otherwise, use a beat offset
+                          // Ensure we don't go before the parent's start time
+                          const offset = Math.max(depStartTime, parentStartTime) - parentStartTime;
+                          
+                          // Convert to beats
+                          const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
+                          const beatLength = 60 / baseTempo;
+                          const beatOffset = offset / beatLength;
+                          
+                          // Create a fraction for the beat offset
+                          const offsetFraction = new Fraction(beatOffset);
+                          
+                          newRaw = `module.getNoteById(${suitableParent.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${suitableParent.id}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`;
+                      }
+                  }
+                  
+                  console.log(`Rewriting dependency for note ${depId} from "${startTimeString}" to "${newRaw}"`);
+                  
+                  // Update the dependent note's startTime
+                  depNote.setVariable('startTime', function() {
+                      return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                  });
+                  depNote.setVariable('startTimeString', newRaw);
+                  
+                  // Mark the note as dirty
+                  myModule.markNoteDirty(depId);
+              }
+          }
+      });
+      
+      // Re-evaluate the module
+      evaluatedNotes = myModule.evaluateModule();
+      updateVisualNotes(evaluatedNotes);
+    }
   
     /* ---------- GLOBAL HELPERS FOR MEASURE ADD FUNCTIONALITY ---------- */
     function hasMeasurePoints() {
@@ -1952,131 +2090,227 @@ function createNoteElement(note, index) {
     if (e.pointerId !== dragData.pointerId) return;
     
     if (dragData.hasDragged) {
-      // Check if we're close to the original position
-      const newStartTimeFraction = dragData.newStartTimeFraction;
-      const originalStartTimeFraction = dragData.originalStartTimeFraction;
-      
-      // Define a tolerance for considering it "close to original position"
-      const tolerance = new Fraction(1, 100); // 0.01 time units
-      
-      if (newStartTimeFraction && originalStartTimeFraction && 
-          newStartTimeFraction.sub(originalStartTimeFraction).abs().compare(tolerance) < 0) {
-        // We're very close to the original position, use the original parent
+        // Get the new position the user dragged to
+        const newStartTimeFraction = dragData.newStartTimeFraction;
+        const originalStartTimeFraction = dragData.originalStartTimeFraction;
+        
+        // Get the current dependency note from dragData
+        const currentDepNote = dragData.currentDepNote || myModule.baseNote;
         const originalParent = dragData.originalParent;
         
-        if (originalParent) {
-          // Get the original reference string from the note's variables
-          const originalRawString = note.variables.startTimeString;
-          
-          // Only update if we actually changed something
-          if (dragData.reference !== dragData.originalReference) {
-            // Restore the original startTime function and string
-            note.setVariable('startTime', function() {
-              return new Function("module", "Fraction", "return " + originalRawString + ";")(myModule, Fraction);
-            });
-            note.setVariable('startTimeString', originalRawString);
-            
-            // Reevaluate and update
-            evaluatedNotes = myModule.evaluateModule();
-            updateVisualNotes(evaluatedNotes);
-          }
-        }
-      } else {
-        // We're not close to the original position, use the current dependency
-        const depNote = dragData.currentDepNote || myModule.baseNote;
+        // Check if the original expression referenced another note's duration
+        const originalStartTimeString = note.variables.startTimeString || '';
+        const durationDependencyMatch = originalStartTimeString.match(/module\.getNoteById\((\d+)\)\.getVariable\('duration'\)/);
         
-        if (depNote && newStartTimeFraction) {
-          // Get the actual start time of the new dependency
-          const depStartTime = new Fraction(depNote.getVariable('startTime').valueOf());
-          
-          // Calculate the offset from the dependency's start time to our desired position
-          const timeOffset = newStartTimeFraction.sub(depStartTime);
-          
-          // Convert this to beats based on the tempo
-          const baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
-          const beatLength = new Fraction(60).div(baseTempo);
-          const beatOffset = timeOffset.div(beatLength);
-          
-          // Create the reference string
-          let depReference = depNote === myModule.baseNote ? 
-            "module.baseNote" : 
-            `module.getNoteById(${depNote.id})`;
-          
-          // Get the fraction string for the beat offset
-          const fractionStr = beatOffset.toFraction();
-          let numerator, denominator;
-          
-          if (fractionStr.includes('/')) {
-            [numerator, denominator] = fractionStr.split('/');
-          } else {
-            numerator = fractionStr;
-            denominator = '1';
-          }
-          
-          // Create the new expression
-          let newRaw = depReference +
-            ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
-            ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
-          
-          // Update the note's startTime
-          note.setVariable('startTime', function() {
-            return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
-          });
-          note.setVariable('startTimeString', newRaw);
-          
-          // Reevaluate and update
-          evaluatedNotes = myModule.evaluateModule();
-          updateVisualNotes(evaluatedNotes);
-        }
-      }
-      
-      // Store the currently selected note and any selected measure bar before updating
-      const previouslySelectedNote = currentSelectedNote;
-      
-      // Check if there's a selected measure bar triangle
-      const selectedMeasureBar = document.querySelector('.measure-bar-triangle.selected');
-      const selectedMeasureId = selectedMeasureBar ? selectedMeasureBar.getAttribute('data-note-id') : null;
-      
-      // Check if the note widget is currently visible
-      const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
-      
-      if (noteWidgetVisible) {
-        // If a measure bar was selected, reselect it
-        if (selectedMeasureId) {
-          const measureTriangle = document.querySelector(`.measure-bar-triangle[data-note-id="${selectedMeasureId}"]`);
-          if (measureTriangle) {
-            const measureNote = myModule.getNoteById(parseInt(selectedMeasureId, 10));
-            if (measureNote) {
-              showNoteVariables(measureNote, measureTriangle, selectedMeasureId);
+        // Define a tolerance for considering it "close to original position"
+        const tolerance = new Fraction(1, 100); // 0.01 time units
+        
+        // Check if we're keeping the same parent (either close to original position or explicitly same parent)
+        const keepingSameParent = (originalParent && currentDepNote && originalParent.id === currentDepNote.id) ||
+                                 (newStartTimeFraction && originalStartTimeFraction && 
+                                  newStartTimeFraction.sub(originalStartTimeFraction).abs().compare(tolerance) < 0);
+        
+        // Case 1: We have a duration dependency and we're keeping the same parent
+        if (durationDependencyMatch && keepingSameParent) {
+            const depId = durationDependencyMatch[1];
+            const depNote = myModule.getNoteById(parseInt(depId, 10));
+            
+            if (depNote && depNote.id === currentDepNote.id) {
+                // Calculate where the note would be without dragging (original position)
+                const depStartTime = depNote.getVariable('startTime').valueOf();
+                const depDuration = depNote.getVariable('duration').valueOf();
+                const originalPosition = depStartTime + depDuration;
+                
+                // Calculate the offset from that position to where the user dragged
+                const dragOffset = newStartTimeFraction.valueOf() - originalPosition;
+                
+                // Create a new expression that includes this offset
+                let newRaw;
+                
+                if (Math.abs(dragOffset) < 0.01) {
+                    // If the offset is very small, just use the original dependency
+                    newRaw = `module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration'))`;
+                } else {
+                    // Convert the offset to beats
+                    const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
+                    const beatLength = 60 / baseTempo;
+                    const beatOffset = dragOffset / beatLength;
+                    
+                    // Create a fraction for the beat offset
+                    const offsetFraction = new Fraction(beatOffset);
+                    
+                    // Add or subtract the offset based on its sign
+                    if (beatOffset >= 0) {
+                        // Positive offset - add to the duration
+                        newRaw = `module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).add(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`;
+                    } else {
+                        // Negative offset - subtract from the duration
+                        // We need to use the absolute value of the fraction for subtraction
+                        const absOffsetFraction = new Fraction(Math.abs(offsetFraction.valueOf()));
+                        newRaw = `module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).sub(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${absOffsetFraction.n}, ${absOffsetFraction.d})))`;
+                    }
+                }
+                
+                // Update the note's startTime
+                note.setVariable('startTime', function() {
+                    return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                });
+                note.setVariable('startTimeString', newRaw);
+                
+                // Reevaluate and update
+                evaluatedNotes = myModule.evaluateModule();
+                updateVisualNotes(evaluatedNotes);
+                
+                // Skip the rest of the function since we've handled this special case
+                e.stopPropagation();
+                cleanupDragState();
+                
+                // Update the note widget if it's open
+                const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+                if (noteWidgetVisible && currentSelectedNote) {
+                    if (currentSelectedNote === myModule.baseNote) {
+                        // Special handling for base note
+                        const baseNoteElement = document.querySelector('.base-note-circle');
+                        if (baseNoteElement) {
+                            showNoteVariables(myModule.baseNote, baseNoteElement);
+                        }
+                    } else {
+                        // Regular note or measure bar
+                        const selectedElement = document.querySelector(
+                            `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                            `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+                        );
+                        
+                        if (selectedElement) {
+                            if (selectedElement.classList.contains('measure-bar-triangle')) {
+                                showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
+                            } else {
+                                showNoteVariables(currentSelectedNote, selectedElement);
+                            }
+                        }
+                    }
+                }
+                
+                return;
             }
-          }
         }
-        // Otherwise, if this note was selected, update its widget
-        else if (previouslySelectedNote && previouslySelectedNote.id === note.id) {
-          const noteContent = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
-          if (noteContent) {
-            showNoteVariables(note, noteContent);
-          }
-        }
-        // Otherwise, if another note was selected, reselect it
-        else if (previouslySelectedNote && previouslySelectedNote.id !== note.id) {
-          // Special handling for base note
-          if (previouslySelectedNote === myModule.baseNote) {
-            const baseNoteElement = document.querySelector('.base-note-circle');
-            if (baseNoteElement) {
-              showNoteVariables(myModule.baseNote, baseNoteElement);
+        
+        // Case 2: We're very close to the original position
+        if (newStartTimeFraction && originalStartTimeFraction && 
+            newStartTimeFraction.sub(originalStartTimeFraction).abs().compare(tolerance) < 0) {
+            
+            if (originalParent) {
+                // Get the original reference string from the note's variables
+                const originalRawString = note.variables.startTimeString;
+                
+                // Only update if we actually changed something
+                if (dragData.reference !== dragData.originalReference) {
+                    // Restore the original startTime function and string
+                    note.setVariable('startTime', function() {
+                        return new Function("module", "Fraction", "return " + originalRawString + ";")(myModule, Fraction);
+                    });
+                    note.setVariable('startTimeString', originalRawString);
+                    
+                    // Reevaluate and update
+                    evaluatedNotes = myModule.evaluateModule();
+                    updateVisualNotes(evaluatedNotes);
+                }
             }
-          } else {
-            // Regular note
-            const selectedElement = document.querySelector(`[data-note-id="${previouslySelectedNote.id}"]`);
-            if (selectedElement) {
-              showNoteVariables(previouslySelectedNote, selectedElement);
-            }
-          }
         }
-      }
-      
-      e.stopPropagation();
+        // Case 3: We're changing to a new parent dependency
+        else {
+            if (currentDepNote && newStartTimeFraction) {
+                // Get the actual start time of the new dependency
+                const depStartTime = new Fraction(currentDepNote.getVariable('startTime').valueOf());
+                
+                // Calculate the offset from the dependency's start time to our desired position
+                const timeOffset = newStartTimeFraction.sub(depStartTime);
+                
+                // Convert this to beats based on the tempo
+                const baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
+                const beatLength = new Fraction(60).div(baseTempo);
+                const beatOffset = timeOffset.div(beatLength);
+                
+                // Create the reference string
+                let depReference = currentDepNote === myModule.baseNote ? 
+                    "module.baseNote" : 
+                    `module.getNoteById(${currentDepNote.id})`;
+                
+                // Get the fraction string for the beat offset
+                const fractionStr = beatOffset.toFraction();
+                let numerator, denominator;
+                
+                if (fractionStr.includes('/')) {
+                    [numerator, denominator] = fractionStr.split('/');
+                } else {
+                    numerator = fractionStr;
+                    denominator = '1';
+                }
+                
+                // Create the new expression
+                let newRaw;
+                
+                // Check if we're attaching to a note that has a duration and the offset is very close to that duration
+                if (currentDepNote.getVariable('duration')) {
+                    const depDuration = currentDepNote.getVariable('duration').valueOf();
+                    const durationInBeats = depDuration / beatLength.valueOf();
+                    const offsetInBeats = beatOffset.valueOf();
+                    
+                    // If the offset is very close to the duration, use the duration dependency
+                    if (Math.abs(offsetInBeats - durationInBeats) < 0.1) {
+                        newRaw = `${depReference}.getVariable('startTime').add(${depReference}.getVariable('duration'))`;
+                    } else {
+                        // Standard beat offset expression
+                        newRaw = depReference +
+                            ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
+                            ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
+                    }
+                } else {
+                    // Standard beat offset expression
+                    newRaw = depReference +
+                        ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
+                        ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
+                }
+                
+                // Update the note's startTime
+                note.setVariable('startTime', function() {
+                    return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                });
+                note.setVariable('startTimeString', newRaw);
+                
+                // Reevaluate and update
+                evaluatedNotes = myModule.evaluateModule();
+                updateVisualNotes(evaluatedNotes);
+            }
+        }
+        
+        // Update the note widget if it's open
+        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+        if (noteWidgetVisible && currentSelectedNote) {
+            if (currentSelectedNote === myModule.baseNote) {
+                // Special handling for base note
+                const baseNoteElement = document.querySelector('.base-note-circle');
+                if (baseNoteElement) {
+                    showNoteVariables(myModule.baseNote, baseNoteElement);
+                }
+            } else {
+                // Regular note or measure bar
+                const selectedElement = document.querySelector(
+                    `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                    `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+                );
+                
+                if (selectedElement) {
+                    if (selectedElement.classList.contains('measure-bar-triangle')) {
+                        showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
+                    } else {
+                        showNoteVariables(currentSelectedNote, selectedElement);
+                    }
+                }
+            }
+        }
+        
+        e.stopPropagation();
     }
     
     // Clean up all drag state
@@ -3017,7 +3251,7 @@ function handleResizeMove(ev) {
       console.error("Error in handleResizeMove:", error);
   }
 }
-  
+
   // Handle pointer up to complete resize
   function handleResizeUp(ev) {
     if (!isResizing) return;
@@ -3112,6 +3346,9 @@ function handleResizeMove(ev) {
         const newDurationString = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFraction.n}, ${beatsFraction.d}))`;
         console.log("New duration expression:", newDurationString);
         
+        // Store the original duration before updating
+        const originalDuration = note.getVariable('duration').valueOf();
+        
         // Update the note's duration
         note.setVariable('durationString', newDurationString);
         
@@ -3128,9 +3365,43 @@ function handleResizeMove(ev) {
         
         note.setVariable('duration', durationFunc);
         
+        // Get the new duration after updating
+        const updatedDuration = note.getVariable('duration').valueOf();
+        
+        // Check and update dependent notes if the duration has changed
+        if (Math.abs(originalDuration - updatedDuration) > 0.001) {
+            checkAndUpdateDependentNotes(note.id, originalDuration, updatedDuration);
+        }
+        
         // Re-evaluate and update the visual representation
         window.evaluatedNotes = myModule.evaluateModule();
         updateVisualNotes(window.evaluatedNotes);
+        
+        // Update the note widget if it's open
+        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+        if (noteWidgetVisible && currentSelectedNote) {
+            if (currentSelectedNote === myModule.baseNote) {
+                // Special handling for base note
+                const baseNoteElement = document.querySelector('.base-note-circle');
+                if (baseNoteElement) {
+                    showNoteVariables(myModule.baseNote, baseNoteElement);
+                }
+            } else {
+                // Regular note or measure bar
+                const selectedElement = document.querySelector(
+                    `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                    `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+                );
+                
+                if (selectedElement) {
+                    if (selectedElement.classList.contains('measure-bar-triangle')) {
+                        showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
+                    } else {
+                        showNoteVariables(currentSelectedNote, selectedElement);
+                    }
+                }
+            }
+        }
     } catch (error) {
         console.error("Error updating note duration:", error);
         // Try to revert to original size if there's an error
@@ -3150,14 +3421,6 @@ function handleResizeMove(ev) {
     if (feedbackElement) {
         feedbackElement.remove();
     }
-    
-    // If note widget is open and showing this note, refresh it
-    if (currentSelectedNote && currentSelectedNote.id === note.id) {
-        const noteContent = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
-        if (noteContent) {
-            showNoteVariables(note, noteContent);
-        }
-    }
   }
   
   // Function to update the visualization of dependent notes during resize
@@ -3175,7 +3438,13 @@ function handleResizeMove(ev) {
     // Calculate the duration change
     const durationDelta = newDuration - originalDuration;
     
-    // For each dependent note, determine if and how it would be affected
+    // Get the base note's start time (absolute minimum time)
+    const baseNoteStartTime = myModule.baseNote.getVariable('startTime').valueOf();
+    
+    // Create a map to store the new positions of all affected notes
+    const newPositions = new Map();
+    
+    // First pass: calculate new positions for direct dependents
     dependentNoteIds.forEach(noteId => {
         const dependentNote = myModule.getNoteById(noteId);
         if (!dependentNote) return;
@@ -3199,15 +3468,104 @@ function handleResizeMove(ev) {
         if (!dependentFrequency) return;
         
         // Calculate the new position based on the duration change
-        const newStartTime = dependentStartTime + durationDelta;
+        let newStartTime = dependentStartTime + durationDelta;
         
+        // Clamp to the base note's start time (absolute minimum)
+        newStartTime = Math.max(baseNoteStartTime, newStartTime);
+        
+        // Store the new position
+        newPositions.set(noteId, {
+            noteId,
+            note: dependentNote,
+            originalStartTime: dependentStartTime,
+            newStartTime,
+            duration: dependentDuration,
+            frequency: dependentFrequency
+        });
+    });
+    
+    // Second pass: calculate new positions for indirect dependents (dependencies of dependencies)
+    // We'll do this iteratively until no more changes are made
+    let changes = true;
+    while (changes) {
+        changes = false;
+        
+        // For each note that we've already calculated a new position for
+        for (const [noteId, posInfo] of newPositions) {
+            // Get all notes that depend on this note
+            const secondaryDependents = myModule.getDependentNotes(noteId);
+            
+            secondaryDependents.forEach(depId => {
+                // Skip if we've already calculated a position for this note
+                if (newPositions.has(depId)) return;
+                
+                const depNote = myModule.getNoteById(depId);
+                if (!depNote) return;
+                
+                // Skip measure points (they don't have duration)
+                if (!depNote.getVariable('duration')) return;
+                
+                // Check if this note's startTime depends on the current note's duration or startTime
+                const startTimeString = depNote.variables.startTimeString || '';
+                const isDurationDependent = startTimeString.includes(`getNoteById(${noteId}).getVariable('duration')`);
+                const isStartTimeDependent = startTimeString.includes(`getNoteById(${noteId}).getVariable('startTime')`);
+                
+                // If this note doesn't depend on the duration or startTime, skip it
+                if (!isDurationDependent && !isStartTimeDependent) return;
+                
+                // Get the current position and dimensions of the dependent note
+                const dependentStartTime = depNote.getVariable('startTime').valueOf();
+                const dependentDuration = depNote.getVariable('duration').valueOf();
+                const dependentFrequency = depNote.getVariable('frequency')?.valueOf();
+                
+                // If no frequency (silence), skip it
+                if (!dependentFrequency) return;
+                
+                // Calculate the new position
+                let newStartTime;
+                
+                if (isDurationDependent) {
+                    // This note depends on the duration of a note we've already moved
+                    const parentNewStartTime = posInfo.newStartTime;
+                    const parentDuration = posInfo.duration;
+                    
+                    // Calculate based on the parent's new position and duration
+                    newStartTime = parentNewStartTime + parentDuration;
+                } else if (isStartTimeDependent) {
+                    // This note depends on the start time of a note we've already moved
+                    // Calculate the delta between the original and new start times
+                    const delta = posInfo.newStartTime - posInfo.originalStartTime;
+                    newStartTime = dependentStartTime + delta;
+                }
+                
+                // Clamp to the base note's start time (absolute minimum)
+                newStartTime = Math.max(baseNoteStartTime, newStartTime);
+                
+                // Store the new position
+                newPositions.set(depId, {
+                    noteId: depId,
+                    note: depNote,
+                    originalStartTime: dependentStartTime,
+                    newStartTime,
+                    duration: dependentDuration,
+                    frequency: dependentFrequency
+                });
+                
+                // We made a change, so we need to do another pass
+                changes = true;
+            });
+        }
+    }
+    
+    // Create visual representations for all affected notes
+    for (const posInfo of newPositions.values()) {
         // Create a visual representation of the note at its new position
-        const noteColor = getColorForNote(dependentNote);
+        const noteColor = getColorForNote(posInfo.note);
         
         // Convert to screen coordinates
-        const x = newStartTime * 200 * xScaleFactor;
-        const y = frequencyToY(dependentFrequency);
-        const width = dependentDuration * 200 * xScaleFactor;
+        const x = posInfo.newStartTime * 200 * xScaleFactor;
+        const y = frequencyToY(posInfo.frequency);
+        const width = posInfo.duration * 200 * xScaleFactor;
         const height = 20;
         
         const point = new tapspace.geometry.Point(space, { x, y });
@@ -3247,40 +3605,65 @@ function handleResizeMove(ev) {
         noteIdLabel.style.fontSize = '8px';
         noteIdLabel.style.color = 'white';
         noteIdLabel.style.fontFamily = "'Roboto Mono', monospace";
-        noteIdLabel.textContent = `[${noteId}]`;
+        noteIdLabel.textContent = `[${posInfo.noteId}]`;
         ghostNote.appendChild(noteIdLabel);
         
         // Add an arrow connecting the original position to the new position
-        const originalX = dependentStartTime * 200 * xScaleFactor;
+        const originalX = posInfo.originalStartTime * 200 * xScaleFactor;
         const originalPoint = new tapspace.geometry.Point(space, { x: originalX, y });
         const originalScreenPos = originalPoint.transitRaw(viewport);
         
+        // Determine if the note is moving forward or backward
+        const isMovingForward = screenPos.x >= originalScreenPos.x;
+        
+        // Create the arrow with the correct direction
         const arrow = document.createElement('div');
         arrow.className = 'resize-ghost-arrow';
         arrow.style.position = 'absolute';
-        arrow.style.left = `${originalScreenPos.x}px`;
         arrow.style.top = `${screenPos.y + screenHeight/2}px`; // Use screen height for centering
-        arrow.style.width = `${screenPos.x - originalScreenPos.x}px`;
+        
+        if (isMovingForward) {
+            // Moving forward (right): arrow starts at original position and points right
+            arrow.style.left = `${originalScreenPos.x}px`;
+            arrow.style.width = `${screenPos.x - originalScreenPos.x}px`;
+            
+            // Add arrowhead pointing right
+            const arrowhead = document.createElement('div');
+            arrowhead.style.position = 'absolute';
+            arrowhead.style.right = '0';
+            arrowhead.style.top = '-3px';
+            arrowhead.style.width = '0';
+            arrowhead.style.height = '0';
+            arrowhead.style.borderTop = '3px solid transparent';
+            arrowhead.style.borderBottom = '3px solid transparent';
+            arrowhead.style.borderLeft = '6px solid white';
+            arrow.appendChild(arrowhead);
+        } else {
+            // Moving backward (left): arrow starts at new position and points left
+            arrow.style.left = `${screenPos.x}px`;
+            arrow.style.width = `${originalScreenPos.x - screenPos.x}px`;
+            
+            // Add arrowhead pointing left
+            const arrowhead = document.createElement('div');
+            arrowhead.style.position = 'absolute';
+            arrowhead.style.left = '0';
+            arrowhead.style.top = '-3px';
+            arrowhead.style.width = '0';
+            arrowhead.style.height = '0';
+            arrowhead.style.borderTop = '3px solid transparent';
+            arrowhead.style.borderBottom = '3px solid transparent';
+            arrowhead.style.borderRight = '6px solid white';
+            arrow.appendChild(arrowhead);
+        }
+        
         arrow.style.height = '1px';
         arrow.style.backgroundColor = 'white';
         arrow.style.zIndex = '999';
         
-        // Add arrowhead
-        const arrowhead = document.createElement('div');
-        arrowhead.style.position = 'absolute';
-        arrowhead.style.right = '0';
-        arrowhead.style.top = '-3px';
-        arrowhead.style.width = '0';
-        arrowhead.style.height = '0';
-        arrowhead.style.borderTop = '3px solid transparent';
-        arrowhead.style.borderBottom = '3px solid transparent';
-        arrowhead.style.borderLeft = '6px solid white';
-        arrow.appendChild(arrowhead);
-        
         // Add to overlay
         dependentOverlay.appendChild(arrow);
         dependentOverlay.appendChild(ghostNote);
-    });
+    }
   }
   
   // Update visual feedback during resize
