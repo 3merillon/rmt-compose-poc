@@ -1792,3 +1792,27 @@ input[type="range"]:active::-moz-range-thumb {
     color: rgba(255, 168, 0, 1);
     font-weight: bold;
 }
+
+/* Resize handle styles */
+.resize-handle-icon {
+    transition: background-color 0.3s ease;
+}
+  
+.note-rect:hover .resize-handle-icon {
+    background: rgba(255, 255, 255, 0.9);
+}
+  
+/* Add a visual indicator when resizing */
+.note-rect.resizing {
+    outline: 2px dashed #ffa800;
+}
+
+.resize-ghost-note {
+    transition: all 0.1s ease-out;
+    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+.resize-ghost-arrow {
+    transition: all 0.1s ease-out;
+    opacity: 0.7;
+}

@@ -364,14 +364,32 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                 let selectedBase = null;
                 let selectedMod = 1; // default multiplier (i.e. no dot)
                 let currentMultiplier = null;
-                let regex = /^new Fraction\(60\)\.div\((.*?)\)\.mul\((.*?)\)$/;
-                let m = value.raw.match(regex);
-                if (m && m[2]) {
-                    currentMultiplier = parseFloat(m[2]);
+                
+                // First try to match the decimal format: mul(0.5)
+                let decimalRegex = /^new Fraction\(60\)\.div\((.*?)\)\.mul\(([\d\.]+)\)$/;
+                let decimalMatch = value.raw.match(decimalRegex);
+                
+                if (decimalMatch && decimalMatch[2]) {
+                    currentMultiplier = parseFloat(decimalMatch[2]);
                 } else {
-                    // If no multiplication is found, assume the default multiplier is 1 (representing a quarter note).
-                    currentMultiplier = 1;
+                    // Try to match the Fraction format: mul(new Fraction(1, 2))
+                    let fractionRegex = /^new Fraction\(60\)\.div\((.*?)\)\.mul\(new Fraction\((\d+),\s*(\d+)\)\)$/;
+                    let fractionMatch = value.raw.match(fractionRegex);
+                    
+                    if (fractionMatch && fractionMatch[2] && fractionMatch[3]) {
+                        const numerator = parseInt(fractionMatch[2], 10);
+                        const denominator = parseInt(fractionMatch[3], 10);
+                        if (!isNaN(numerator) && !isNaN(denominator) && denominator !== 0) {
+                            currentMultiplier = numerator / denominator;
+                        }
+                    } else {
+                        // If no multiplication is found, assume the default multiplier is 1 (representing a quarter note).
+                        currentMultiplier = 1;
+                    }
                 }
+                
+                console.log("Current multiplier detected:", currentMultiplier);
+                
                 // Check all base x mod combinations:
                 // First check no–dot case, then dot cases.
                 basePicks.forEach(bp => {
@@ -386,6 +404,8 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                         }
                     });
                 });
+                
+                console.log("Selected base:", selectedBase, "Selected mod:", selectedMod);
                 
                 // Create base note buttons (left side) with updated styles.
                 basePicks.forEach(bp => {
@@ -412,21 +432,54 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     btn.addEventListener('click', () => {
                         selectedBase = bp.base;
                         let originalExpr = value.raw;
-                        let regex = /^new Fraction\(60\)\.div\((.*?)\)\.mul\((.*?)\)$/;
                         let newExpr;
-                        let match = originalExpr.match(regex);
-                        if (match) {
-                            newExpr = `new Fraction(60).div(${match[1]}).mul(${selectedBase * selectedMod})`;
-                        } else {
-                            newExpr = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${selectedBase * selectedMod})`;
+                        
+                        // Create the new expression using Fraction format
+                        const baseForCalc = selectedBase;
+                        const modForCalc = selectedMod;
+                        const multiplier = baseForCalc * modForCalc;
+                        
+                        // Convert the multiplier to a Fraction
+                        let fraction;
+                        try {
+                            fraction = new Fraction(multiplier);
+                        } catch (err) {
+                            console.error("Error creating fraction:", err);
+                            // Fallback to manual fraction creation
+                            if (multiplier === 0.25) fraction = new Fraction(1, 4);
+                            else if (multiplier === 0.5) fraction = new Fraction(1, 2);
+                            else if (multiplier === 0.75) fraction = new Fraction(3, 4);
+                            else if (multiplier === 1) fraction = new Fraction(1, 1);
+                            else if (multiplier === 1.5) fraction = new Fraction(3, 2);
+                            else if (multiplier === 2) fraction = new Fraction(2, 1);
+                            else if (multiplier === 3) fraction = new Fraction(3, 1);
+                            else if (multiplier === 4) fraction = new Fraction(4, 1);
+                            else fraction = new Fraction(Math.round(multiplier * 4), 4); // Approximate as quarters
                         }
+                        
+                        // Extract the tempo part from the original expression
+                        let tempoRegex = /^new Fraction\(60\)\.div\((.*?)\)/;
+                        let tempoMatch = originalExpr.match(tempoRegex);
+                        let tempoPart = tempoMatch ? tempoMatch[0] : "new Fraction(60).div(module.findTempo(module.baseNote))";
+                        
+                        // Create the new expression
+                        newExpr = `${tempoPart}.mul(new Fraction(${fraction.n}, ${fraction.d}))`;
+                        
                         rawInput.value = newExpr;
                         saveButton.style.display = 'inline-block';
-                        // Update highlighting for all base buttons.
+                        
+                        // Update highlighting for all base buttons
                         Array.from(leftContainer.children).forEach(child => {
                             child.style.backgroundColor = "#444";
                         });
                         btn.style.backgroundColor = "#ff0000";
+                        
+                        // Clear highlighting for dot buttons if we're selecting a base without a dot
+                        if (Math.abs(selectedMod - 1) < 0.001) {
+                            Array.from(rightContainer.children).forEach(child => {
+                                child.style.backgroundColor = "#444";
+                            });
+                        }
                     });
                     leftContainer.appendChild(btn);
                 });
@@ -458,23 +511,50 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                         } else {
                             selectedMod = dp.factor;
                         }
+                        
                         let originalExpr = value.raw;
-                        let regex = /^new Fraction\(60\)\.div\((.*?)\)\.mul\((.*?)\)$/;
                         let newExpr;
-                        let match = originalExpr.match(regex);
-                        let baseForCalc = (selectedBase !== null ? selectedBase : (currentMultiplier !== null ? currentMultiplier : 1));
-                        if (match) {
-                            newExpr = `new Fraction(60).div(${match[1]}).mul(${baseForCalc * selectedMod})`;
-                        } else {
-                            newExpr = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${baseForCalc * selectedMod})`;
+                        
+                        // Create the new expression using Fraction format
+                        const baseForCalc = selectedBase !== null ? selectedBase : 1; // Default to quarter note
+                        const modForCalc = selectedMod;
+                        const multiplier = baseForCalc * modForCalc;
+                        
+                        // Convert the multiplier to a Fraction
+                        let fraction;
+                        try {
+                            fraction = new Fraction(multiplier);
+                        } catch (err) {
+                            console.error("Error creating fraction:", err);
+                            // Fallback to manual fraction creation
+                            if (multiplier === 0.25) fraction = new Fraction(1, 4);
+                            else if (multiplier === 0.5) fraction = new Fraction(1, 2);
+                            else if (multiplier === 0.75) fraction = new Fraction(3, 4);
+                            else if (multiplier === 1) fraction = new Fraction(1, 1);
+                            else if (multiplier === 1.5) fraction = new Fraction(3, 2);
+                            else if (multiplier === 2) fraction = new Fraction(2, 1);
+                            else if (multiplier === 3) fraction = new Fraction(3, 1);
+                            else if (multiplier === 4) fraction = new Fraction(4, 1);
+                            else fraction = new Fraction(Math.round(multiplier * 4), 4); // Approximate as quarters
                         }
+                        
+                        // Extract the tempo part from the original expression
+                        let tempoRegex = /^new Fraction\(60\)\.div\((.*?)\)/;
+                        let tempoMatch = originalExpr.match(tempoRegex);
+                        let tempoPart = tempoMatch ? tempoMatch[0] : "new Fraction(60).div(module.findTempo(module.baseNote))";
+                        
+                        // Create the new expression
+                        newExpr = `${tempoPart}.mul(new Fraction(${fraction.n}, ${fraction.d}))`;
+                        
                         rawInput.value = newExpr;
                         saveButton.style.display = 'inline-block';
-                        // Update highlighting for dot buttons.
+                        
+                        // Update highlighting for dot buttons
                         Array.from(rightContainer.children).forEach(child => {
                             child.style.backgroundColor = "#444";
                         });
-                        // Highlight only if modifier is not 1.
+                        
+                        // Highlight only if modifier is not 1
                         if (Math.abs(selectedMod - 1) > 0.001) {
                             btn.style.backgroundColor = "#ff0000";
                         }

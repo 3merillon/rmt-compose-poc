@@ -2803,6 +2803,513 @@ function createNoteElement(note, index) {
     container: noteContainer
   };
 
+  // CREATE RESIZE HANDLE
+  // Create the resize handle for the right edge of the note
+  const resizeHandle = tapspace.createItem(`
+    <div style="
+      width: 10px;
+      height: 100%;
+      position: absolute;
+      right: 0;
+      top: 0;
+      cursor: ew-resize;
+      background: rgba(255, 255, 255, 0.2);
+      border-left: 1px solid rgba(255, 255, 255, 0.4);
+      border-radius: 0 5px 5px 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: auto;
+    ">
+      <div class="resize-handle-icon" style="
+        width: 2px;
+        height: 10px;
+        background: rgba(255, 255, 255, 0.7);
+      "></div>
+    </div>
+  `);
+  
+  // Set size and position of the resize handle
+  resizeHandle.setSize({ width: 10, height: height });
+  
+  // Add the resize handle to the note container
+  noteContainer.addChild(resizeHandle, { x: width - 10, y: 0 });
+  
+  // Set up resize functionality - use local variables to avoid conflicts
+  let isResizing = false;
+  let resizeStartX = 0;
+  let resizeOriginalWidth = 0;
+  let resizeOriginalDuration = 0;
+  
+  // Store the resize handle for future reference
+  noteRect.resizeHandle = resizeHandle;
+  
+  // Handle pointer down event on the resize handle
+  resizeHandle.element.addEventListener('pointerdown', function(e) {
+    // Make sure we're only handling events on the resize handle itself
+    if (!e.target.closest('.resize-handle-icon') && !e.target.closest('[style*="cursor: ew-resize"]')) {
+        return;
+    }
+    
+    e.stopPropagation(); // Stop event from bubbling to parent elements
+    e.preventDefault();
+    
+    // Pause playback if currently playing
+    if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused) {
+        if (window.playerControls && window.playerControls.pause) {
+            window.playerControls.pause();
+        }
+    }
+    
+    // Get the current viewport transform to account for zoom
+    const transform = viewport.getBasis().getRaw();
+    const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+    
+    isResizing = true;
+    resizeStartX = e.clientX;
+    
+    // Store original width and duration
+    resizeOriginalWidth = width; // Use the width that was passed to createNoteElement
+    resizeOriginalDuration = note.getVariable('duration').valueOf();
+    
+    // Store the current scale for consistent resizing
+    resizeOriginalScale = scale;
+    
+    console.log("Starting resize with original width:", resizeOriginalWidth);
+    console.log("Starting resize with original duration:", resizeOriginalDuration);
+    console.log("Starting resize with scale:", scale);
+    
+    // Add class for visual feedback
+    noteRect.element.classList.add('resizing');
+    
+    // Set pointer capture to ensure we get all events
+    resizeHandle.element.setPointerCapture(e.pointerId);
+    
+    // Create overlay container for dependent notes visualization
+    const existingOverlay = document.getElementById('resize-dependent-overlay');
+    if (existingOverlay) {
+        existingOverlay.remove();
+    }
+    
+    const dependentOverlay = document.createElement('div');
+    dependentOverlay.id = 'resize-dependent-overlay';
+    dependentOverlay.style.position = 'fixed';
+    dependentOverlay.style.top = '0';
+    dependentOverlay.style.left = '0';
+    dependentOverlay.style.width = '100%';
+    dependentOverlay.style.height = '100%';
+    dependentOverlay.style.pointerEvents = 'none';
+    dependentOverlay.style.zIndex = '999';
+    document.body.appendChild(dependentOverlay);
+    
+    // Add event listeners for pointer move and up
+    document.addEventListener('pointermove', handleResizeMove);
+    document.addEventListener('pointerup', handleResizeUp);
+    document.addEventListener('pointercancel', handleResizeUp);
+    
+    // Create visual feedback element
+    const feedbackElement = document.createElement('div');
+    feedbackElement.id = 'resize-feedback';
+    feedbackElement.style.position = 'fixed';
+    feedbackElement.style.top = '10px';
+    feedbackElement.style.left = '50%';
+    feedbackElement.style.transform = 'translateX(-50%)';
+    feedbackElement.style.background = 'rgba(0, 0, 0, 0.7)';
+    feedbackElement.style.color = '#ffa800';
+    feedbackElement.style.padding = '5px 10px';
+    feedbackElement.style.borderRadius = '4px';
+    feedbackElement.style.fontFamily = "'Roboto Mono', monospace";
+    feedbackElement.style.fontSize = '14px';
+    feedbackElement.style.zIndex = '10000';
+    document.body.appendChild(feedbackElement);
+    updateResizeFeedback(resizeOriginalDuration);
+    
+    // Add CSS for ghost notes and arrows
+    const styleElement = document.getElementById('resize-ghost-styles');
+    if (!styleElement) {
+        const style = document.createElement('style');
+        style.id = 'resize-ghost-styles';
+        style.textContent = `
+            .resize-ghost-note {
+                transition: all 0.1s ease-out;
+                box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+            }
+            
+            .resize-ghost-arrow {
+                transition: all 0.1s ease-out;
+                opacity: 0.7;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+});
+
+// Handle pointer move during resize
+function handleResizeMove(ev) {
+  if (!isResizing) return;
+  
+  try {
+      // Get the current viewport transform to account for zoom
+      const transform = viewport.getBasis().getRaw();
+      const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+      
+      // Calculate delta in screen pixels
+      const screenDeltaX = ev.clientX - resizeStartX;
+      
+      // Convert screen delta to space delta using the same approach as in note drag
+      // Create two points in space coordinates that are 100 units apart
+      const spacePoint1 = space.at(0, 0);
+      const spacePoint2 = space.at(100, 0);
+      
+      // Project these points to viewport coordinates
+      const viewportPoint1 = spacePoint1.transitRaw(viewport);
+      const viewportPoint2 = spacePoint2.transitRaw(viewport);
+      
+      // Calculate the scale factor: how many viewport pixels per 100 space units
+      const viewportDistance = Math.sqrt(
+          Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
+          Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
+      );
+      const viewportScale = viewportDistance / 100;
+      
+      // Adjust deltaX based on the current viewport scale and xScaleFactor
+      const deltaX = screenDeltaX / (viewportScale * xScaleFactor);
+      
+      // Log values for debugging
+      console.log("Screen Delta X:", screenDeltaX);
+      console.log("Viewport Scale:", viewportScale);
+      console.log("Adjusted Delta X:", deltaX);
+      console.log("Resize Original width:", resizeOriginalWidth);
+      console.log("Resize Original duration:", resizeOriginalDuration);
+      
+      // Calculate new width
+      const newWidth = Math.max(20, resizeOriginalWidth + deltaX); // Ensure minimum width
+      
+      // Calculate new duration in time units
+      const newDuration = newWidth / (200 * xScaleFactor);
+      
+      // Calculate beats based on tempo
+      const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
+      const beatLength = 60 / baseTempo;
+      const newDurationBeats = newDuration / beatLength;
+      
+      // Snap to sixteenth note increments
+      const sixteenthNote = 0.25; // A sixteenth of a beat
+      const snappedBeats = Math.max(sixteenthNote, Math.round(newDurationBeats / sixteenthNote) * sixteenthNote);
+      
+      // Calculate the snapped width
+      const snappedDuration = snappedBeats * beatLength;
+      const snappedWidth = snappedDuration * 200 * xScaleFactor;
+      
+      // Update note rectangle size
+      noteRect.setSize({ width: snappedWidth, height: height });
+      noteContainer.setSize({ width: snappedWidth, height: height });
+      
+      // Update position of resize handle
+      resizeHandle.translateTo(noteContainer.at(snappedWidth - 10, 0));
+      
+      // Update visual feedback
+      updateResizeFeedback(snappedDuration, snappedBeats);
+      
+      // Update dependent notes visualization
+      updateDependentNotesVisualization(note, resizeOriginalDuration, snappedDuration, scale);
+  } catch (error) {
+      console.error("Error in handleResizeMove:", error);
+  }
+}
+  
+  // Handle pointer up to complete resize
+  function handleResizeUp(ev) {
+    if (!isResizing) return;
+    
+    try {
+        resizeHandle.element.releasePointerCapture(ev.pointerId);
+    } catch (err) {
+        console.log('Error releasing pointer capture:', err);
+    }
+    
+    isResizing = false;
+    
+    // Remove resizing class
+    noteRect.element.classList.remove('resizing');
+    
+    // Remove event listeners
+    document.removeEventListener('pointermove', handleResizeMove);
+    document.removeEventListener('pointerup', handleResizeUp);
+    document.removeEventListener('pointercancel', handleResizeUp);
+    
+    // Remove the dependent notes overlay
+    const dependentOverlay = document.getElementById('resize-dependent-overlay');
+    if (dependentOverlay) {
+        dependentOverlay.remove();
+    }
+    
+    try {
+        // Get the current viewport transform to account for zoom
+        const transform = viewport.getBasis().getRaw();
+        const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+        
+        // Calculate delta in screen pixels
+        const screenDeltaX = ev.clientX - resizeStartX;
+        
+        // Convert screen delta to space delta using the same approach as in note drag
+        // Create two points in space coordinates that are 100 units apart
+        const spacePoint1 = space.at(0, 0);
+        const spacePoint2 = space.at(100, 0);
+        
+        // Project these points to viewport coordinates
+        const viewportPoint1 = spacePoint1.transitRaw(viewport);
+        const viewportPoint2 = spacePoint2.transitRaw(viewport);
+        
+        // Calculate the scale factor: how many viewport pixels per 100 space units
+        const viewportDistance = Math.sqrt(
+            Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
+            Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
+        );
+        const viewportScale = viewportDistance / 100;
+        
+        // Adjust deltaX based on the current viewport scale and xScaleFactor
+        const deltaX = screenDeltaX / (viewportScale * xScaleFactor);
+        
+        // Calculate new width based on the original width and delta
+        const newWidth = Math.max(20, resizeOriginalWidth + deltaX);
+        
+        // Calculate new duration in time units
+        const newDuration = newWidth / (200 * xScaleFactor);
+        
+        // Calculate beats based on tempo
+        const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
+        const beatLength = 60 / baseTempo;
+        const newDurationBeats = newDuration / beatLength;
+        
+        // Snap to sixteenth note increments
+        const sixteenthNote = 0.25; // A sixteenth of a beat
+        const snappedBeats = Math.max(sixteenthNote, Math.round(newDurationBeats / sixteenthNote) * sixteenthNote);
+        
+        console.log("Final snapped beats:", snappedBeats);
+        
+        // Use the Fraction library to create a precise representation
+        let beatsFraction;
+        try {
+            beatsFraction = new Fraction(snappedBeats);
+        } catch (err) {
+            console.error("Error creating fraction:", err);
+            // Fallback to manual fraction creation
+            if (snappedBeats === 0.25) beatsFraction = new Fraction(1, 4);
+            else if (snappedBeats === 0.5) beatsFraction = new Fraction(1, 2);
+            else if (snappedBeats === 0.75) beatsFraction = new Fraction(3, 4);
+            else if (snappedBeats === 1) beatsFraction = new Fraction(1, 1);
+            else if (snappedBeats === 1.25) beatsFraction = new Fraction(5, 4);
+            else if (snappedBeats === 1.5) beatsFraction = new Fraction(3, 2);
+            else if (snappedBeats === 1.75) beatsFraction = new Fraction(7, 4);
+            else if (snappedBeats === 2) beatsFraction = new Fraction(2, 1);
+            else beatsFraction = new Fraction(Math.round(snappedBeats * 4), 4); // Approximate as quarters
+        }
+        
+        console.log("Beats as fraction:", beatsFraction.n, "/", beatsFraction.d);
+        
+        // Create the duration expression as a string using the Fraction
+        const newDurationString = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFraction.n}, ${beatsFraction.d}))`;
+        console.log("New duration expression:", newDurationString);
+        
+        // Update the note's duration
+        note.setVariable('durationString', newDurationString);
+        
+        // Create the function with a try-catch to handle errors
+        const durationFunc = function() {
+            try {
+                return new Function("module", "Fraction", "return " + newDurationString + ";")(myModule, Fraction);
+            } catch (error) {
+                console.error("Error in duration function:", error);
+                // Return a default duration if there's an error
+                return new Fraction(60).div(myModule.baseNote.getVariable('tempo')).mul(1);
+            }
+        };
+        
+        note.setVariable('duration', durationFunc);
+        
+        // Re-evaluate and update the visual representation
+        window.evaluatedNotes = myModule.evaluateModule();
+        updateVisualNotes(window.evaluatedNotes);
+    } catch (error) {
+        console.error("Error updating note duration:", error);
+        // Try to revert to original size if there's an error
+        try {
+            noteRect.setSize({ width: resizeOriginalWidth, height: height });
+            noteContainer.setSize({ width: resizeOriginalWidth, height: height });
+            if (resizeHandle) {
+                resizeHandle.translateTo(noteContainer.at(resizeOriginalWidth - 10, 0));
+            }
+        } catch (revertError) {
+            console.error("Error reverting to original size:", revertError);
+        }
+    }
+    
+    // Remove feedback element
+    const feedbackElement = document.getElementById('resize-feedback');
+    if (feedbackElement) {
+        feedbackElement.remove();
+    }
+    
+    // If note widget is open and showing this note, refresh it
+    if (currentSelectedNote && currentSelectedNote.id === note.id) {
+        const noteContent = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+        if (noteContent) {
+            showNoteVariables(note, noteContent);
+        }
+    }
+  }
+  
+  // Function to update the visualization of dependent notes during resize
+  function updateDependentNotesVisualization(resizedNote, originalDuration, newDuration, scale) {
+    const dependentOverlay = document.getElementById('resize-dependent-overlay');
+    if (!dependentOverlay) return;
+    
+    // Clear previous visualizations
+    dependentOverlay.innerHTML = '';
+    
+    // Get all notes that depend on the resized note
+    const dependentNoteIds = myModule.getDependentNotes(resizedNote.id);
+    if (!dependentNoteIds || dependentNoteIds.length === 0) return;
+    
+    // Calculate the duration change
+    const durationDelta = newDuration - originalDuration;
+    
+    // For each dependent note, determine if and how it would be affected
+    dependentNoteIds.forEach(noteId => {
+        const dependentNote = myModule.getNoteById(noteId);
+        if (!dependentNote) return;
+        
+        // Skip measure points (they don't have duration)
+        if (!dependentNote.getVariable('duration')) return;
+        
+        // Check if this note's startTime depends on the resized note's duration
+        const startTimeString = dependentNote.variables.startTimeString || '';
+        const isDurationDependent = startTimeString.includes(`getNoteById(${resizedNote.id}).getVariable('duration')`);
+        
+        // If this note doesn't depend on the duration, skip it
+        if (!isDurationDependent) return;
+        
+        // Get the current position and dimensions of the dependent note
+        const dependentStartTime = dependentNote.getVariable('startTime').valueOf();
+        const dependentDuration = dependentNote.getVariable('duration').valueOf();
+        const dependentFrequency = dependentNote.getVariable('frequency')?.valueOf();
+        
+        // If no frequency (silence), skip it
+        if (!dependentFrequency) return;
+        
+        // Calculate the new position based on the duration change
+        const newStartTime = dependentStartTime + durationDelta;
+        
+        // Create a visual representation of the note at its new position
+        const noteColor = getColorForNote(dependentNote);
+        
+        // Convert to screen coordinates
+        const x = newStartTime * 200 * xScaleFactor;
+        const y = frequencyToY(dependentFrequency);
+        const width = dependentDuration * 200 * xScaleFactor;
+        const height = 20;
+        
+        const point = new tapspace.geometry.Point(space, { x, y });
+        const screenPos = point.transitRaw(viewport);
+        
+        // Calculate width in screen pixels accounting for zoom
+        const widthPoint = new tapspace.geometry.Point(space, { x: x + width, y });
+        const widthScreenPos = widthPoint.transitRaw(viewport);
+        const screenWidth = widthScreenPos.x - screenPos.x;
+        
+        // Calculate height in screen pixels accounting for zoom
+        const heightPoint = new tapspace.geometry.Point(space, { x, y: y + height });
+        const heightScreenPos = heightPoint.transitRaw(viewport);
+        const screenHeight = heightScreenPos.y - screenPos.y;
+        
+        // Create a ghost note element
+        const ghostNote = document.createElement('div');
+        ghostNote.className = 'resize-ghost-note';
+        ghostNote.style.position = 'absolute';
+        ghostNote.style.left = `${screenPos.x}px`;
+        ghostNote.style.top = `${screenPos.y}px`;
+        ghostNote.style.width = `${screenWidth}px`; // Use calculated screen width
+        ghostNote.style.height = `${screenHeight}px`; // Use calculated screen height
+        ghostNote.style.backgroundColor = noteColor;
+        ghostNote.style.opacity = '0.6';
+        ghostNote.style.borderRadius = '6px';
+        ghostNote.style.border = '1px dashed white';
+        ghostNote.style.boxSizing = 'border-box';
+        ghostNote.style.zIndex = '1000';
+        ghostNote.style.pointerEvents = 'none';
+        
+        // Add a label showing the note ID
+        const noteIdLabel = document.createElement('div');
+        noteIdLabel.style.position = 'absolute';
+        noteIdLabel.style.top = '2px';
+        noteIdLabel.style.left = '5px';
+        noteIdLabel.style.fontSize = '8px';
+        noteIdLabel.style.color = 'white';
+        noteIdLabel.style.fontFamily = "'Roboto Mono', monospace";
+        noteIdLabel.textContent = `[${noteId}]`;
+        ghostNote.appendChild(noteIdLabel);
+        
+        // Add an arrow connecting the original position to the new position
+        const originalX = dependentStartTime * 200 * xScaleFactor;
+        const originalPoint = new tapspace.geometry.Point(space, { x: originalX, y });
+        const originalScreenPos = originalPoint.transitRaw(viewport);
+        
+        const arrow = document.createElement('div');
+        arrow.className = 'resize-ghost-arrow';
+        arrow.style.position = 'absolute';
+        arrow.style.left = `${originalScreenPos.x}px`;
+        arrow.style.top = `${screenPos.y + screenHeight/2}px`; // Use screen height for centering
+        arrow.style.width = `${screenPos.x - originalScreenPos.x}px`;
+        arrow.style.height = '1px';
+        arrow.style.backgroundColor = 'white';
+        arrow.style.zIndex = '999';
+        
+        // Add arrowhead
+        const arrowhead = document.createElement('div');
+        arrowhead.style.position = 'absolute';
+        arrowhead.style.right = '0';
+        arrowhead.style.top = '-3px';
+        arrowhead.style.width = '0';
+        arrowhead.style.height = '0';
+        arrowhead.style.borderTop = '3px solid transparent';
+        arrowhead.style.borderBottom = '3px solid transparent';
+        arrowhead.style.borderLeft = '6px solid white';
+        arrow.appendChild(arrowhead);
+        
+        // Add to overlay
+        dependentOverlay.appendChild(arrow);
+        dependentOverlay.appendChild(ghostNote);
+    });
+  }
+  
+  // Update visual feedback during resize
+  function updateResizeFeedback(duration, beats) {
+      const feedbackElement = document.getElementById('resize-feedback');
+      if (!feedbackElement) return;
+      
+      // Guard against undefined or NaN values
+      if (duration === undefined || isNaN(duration) || beats === undefined || isNaN(beats)) {
+          feedbackElement.textContent = "Adjusting duration...";
+          return;
+      }
+      
+      // Format the beats value for display
+      let beatsDisplay;
+      if (beats === 0.25) beatsDisplay = "1/16 note";
+      else if (beats === 0.5) beatsDisplay = "1/8 note";
+      else if (beats === 0.75) beatsDisplay = "dotted 1/8";
+      else if (beats === 1) beatsDisplay = "1/4 note";
+      else if (beats === 1.5) beatsDisplay = "dotted 1/4";
+      else if (beats === 2) beatsDisplay = "1/2 note";
+      else if (beats === 3) beatsDisplay = "dotted 1/2";
+      else if (beats === 4) beatsDisplay = "whole note";
+      else beatsDisplay = beats.toFixed(2) + " beats";
+      
+      feedbackElement.textContent = `Duration: ${beatsDisplay} (${duration.toFixed(3)}s)`;
+  }
+  // END OF RESIZE HANDLE CODE
+
   return noteContainer;
 }
 
@@ -3298,7 +3805,7 @@ function updatePlayhead() {
             space.removeChild(note);
         }
     });
-
+  
     const baseStartTime = myModule.baseNote.getVariable('startTime').valueOf();
     
     // IMPORTANT: Update the global newNotes array with all playable notes
@@ -3322,6 +3829,12 @@ function updatePlayhead() {
                 noteRect.setSize({ width: width, height: height });
                 space.addChild(noteRect, { x: x, y: y });
                 
+                // ADD THIS CODE HERE - Update resize handle position if it exists
+                if (noteRect.resizeHandle) {
+                  noteRect.resizeHandle.translateTo(noteRect.at(width - 10, 0));
+                }
+                // END OF ADDED CODE
+                
                 // Add to newNotes array for playback
                 newNotes.push({
                     ...note,
@@ -3335,10 +3848,10 @@ function updatePlayhead() {
                 newNotes.push(note);
             }
         });
-
+  
     updateTimingBoundaries();
     createMeasureBars();  // This creates the visual elements for measure bars
-
+  
     // Reapply previous selections (if any)
     selectedIds.forEach(id => {
         const newElement = document.querySelector(`.note-content[data-note-id="${id}"], .base-note-circle[data-note-id="${id}"], .measure-bar-triangle[data-note-id="${id}"]`);
@@ -3357,7 +3870,7 @@ function updatePlayhead() {
     
     // Ensure we invalidate the module end time cache
     invalidateModuleEndTimeCache();
-}
+  }
 
 let audioContext = new (window.AudioContext || window.webkitAudioContext)();
 let generalVolumeGainNode = audioContext.createGain();
