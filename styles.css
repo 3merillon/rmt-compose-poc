@@ -1560,7 +1560,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 /* Scale Controls */
 .scale-controls {
     position: fixed;
-    bottom: 10px;
+    bottom: 11px;
     left: 10px;
     z-index: 1000;
     display: flex;
@@ -1815,4 +1815,113 @@ input[type="range"]:active::-moz-range-thumb {
 .resize-ghost-arrow {
     transition: all 0.1s ease-out;
     opacity: 0.7;
+}
+
+/* Lock button styles */
+.lock-button {
+    position: fixed;
+    bottom: 20px;
+    right: 11px;
+    width: 24px;
+    height: 24px;
+    background: transparent;
+    border: none;
+    pointer-events: none; /* Make container transparent to mouse events */
+    z-index: 1002;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s ease;
+}
+
+.lock-icon {
+    width: 100%;
+    height: 100%;
+    transition: transform 0.3s ease;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.lock-body {
+    fill: #f00;
+    transition: fill 0.3s ease;
+    transform-origin: bottom center;
+}
+
+.lock-shackle-group {
+    transition: transform 0.3s ease;
+    transform-origin: 50% 40%;
+}
+
+.lock-shackle {
+    fill: none;
+    stroke: #f00;
+    stroke-width: 4;
+    transition: transform 0.3s ease;
+    transform-origin: 19px 16px; /* Set rotation origin to right arm of shackle */
+}
+
+/* States for the SVG elements directly */
+.lock-icon:hover .lock-body {
+    fill: #ffa800;
+    stroke: #ffa800;
+}
+
+.lock-icon:hover .lock-shackle {
+    stroke: #ffa800;
+}
+
+/* Locked state */
+.lock-button.locked .lock-shackle-group {
+    transition-delay: 0.3s;
+    transform: translateY(0);
+}
+
+.lock-button.locked .lock-shackle {
+    transition-delay: 0s;
+    transform: rotateY(0deg);
+    stroke: #f00;
+}
+
+.lock-button.locked .lock-body {
+    fill: #f00;
+    stroke: #f00;
+}
+
+/* Unlocked state */
+.lock-button:not(.locked) .lock-shackle-group {
+    transition-delay: 0s;
+    transform: translateY(-6px);
+}
+
+.lock-button:not(.locked) .lock-shackle {
+    transition-delay: 0.3s;
+    transform: rotateY(180deg);
+    stroke: #ffa800;
+}
+
+.lock-button:not(.locked) .lock-body {
+    fill: #ffa800;
+    stroke: #ffa800;
+}
+
+/* Hover effects for locked state */
+.lock-button.locked .lock-icon:hover .lock-body {
+    fill: #ffa800;
+    stroke: #ffa800;
+}
+
+.lock-button.locked .lock-icon:hover .lock-shackle {
+    stroke: #ffa800;
+}
+
+/* Hover effects for unlocked state */
+.lock-button:not(.locked) .lock-icon:hover .lock-body {
+    fill: #f00;
+    stroke: #f00;
+}
+
+.lock-button:not(.locked) .lock-icon:hover .lock-shackle {
+    stroke: #f00;
 }

@@ -35,10 +35,10 @@
   <script src="note.js?v=0.0.0"></script>
   <script src="module.js?v=0.0.2"></script>
   <script defer src="https://unpkg.com/tapspace@2.0.0-alpha.24/dist/tapspace.min.js"></script>
-  <link rel="stylesheet" href="styles.css?v=0.0.4">
-  <script defer src="modals.js?v=0.0.4"></script>
+  <link rel="stylesheet" href="styles.css?v=0.0.5">
+  <script defer src="modals.js?v=0.0.5"></script>
   <script defer src="menu-bar.js?v=0.0.2"></script>
-  <script defer src="player.js?v=0.0.6"></script>
+  <script defer src="player.js?v=0.0.7"></script>
   <script src="stack-click.js?v=0.0.0"></script>
 </head>
 <body>
@@ -131,6 +131,15 @@
   <div id="measureBarsContainer" class="measure-bars-container"></div>
   <div id="playheadContainer" class="measure-bars-container"></div>
   <div id="measureBarTrianglesContainer"></div>
-
+  <button id="lockButton" title="Lock Notes" class="lock-button locked" aria-label="Lock notes" aria-pressed="true">
+    <svg class="lock-icon" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+      <g>
+        <g class="lock-shackle-group">
+          <path class="lock-shackle" d="M 5 23 L 5 18 A 7 7 0 0 1 19 16 L 19 29" />
+        </g>
+        <rect class="lock-body" x="0" y="22" width="24" height="16" rx="6" ry="6" />
+      </g>
+    </svg>
+  </button>
 </body>
 </html>

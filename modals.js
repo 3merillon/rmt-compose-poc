@@ -33,7 +33,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
     let currentSelectedNote = null;
     let widgetInitiallyOpened = false;
     const TOP_HEADER_HEIGHT = 50;
-    const MIN_BUFFER = 20;
+    const MIN_BUFFER = 19;
 
     // References to external functions (will be set by init)
     let externalFunctions = {

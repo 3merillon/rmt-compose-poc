@@ -41,6 +41,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     let isDragging = false;
     let dragStartX = 0;
     let dragStartY = 0;
+    let isLocked = false; // unlocked by default
     
     // Expose playback state and control functions to the window object
     window.playerState = {
@@ -1674,6 +1675,8 @@ function createNoteElement(note, index) {
   noteRect.element.addEventListener('pointerdown', (e) => {
     // Reset any existing drag state first
     cleanupDragState();
+    // Disable dragging when locked
+    if (isLocked) return;
     
     dragData.startX = e.clientX;
     dragData.hasDragged = false;
@@ -3003,12 +3006,7 @@ function createNoteElement(note, index) {
   upButton.element.addEventListener('click', (event) => {
     event.stopPropagation();
     event.preventDefault();
-    handleOctaveChange(note.id, 'up');
-  });
-  
-  upButtonElement.addEventListener('click', (event) => {
-    event.stopPropagation();
-    event.preventDefault();
+    if (isLocked) return; // Disable octave change when locked
     handleOctaveChange(note.id, 'up');
   });
   
@@ -3016,12 +3014,7 @@ function createNoteElement(note, index) {
   downButton.element.addEventListener('click', (event) => {
     event.stopPropagation();
     event.preventDefault();
-    handleOctaveChange(note.id, 'down');
-  });
-  
-  downButtonElement.addEventListener('click', (event) => {
-    event.stopPropagation();
-    event.preventDefault();
+    if (isLocked) return; // Disable octave change when locked
     handleOctaveChange(note.id, 'down');
   });
   
@@ -3084,6 +3077,8 @@ function createNoteElement(note, index) {
     if (!e.target.closest('.resize-handle-icon') && !e.target.closest('[style*="cursor: ew-resize"]')) {
         return;
     }
+    // Disable resizing when locked
+    if (isLocked) return;
     
     e.stopPropagation(); // Stop event from bubbling to parent elements
     e.preventDefault();
@@ -5299,5 +5294,29 @@ function endDrag(e) {
     document.removeEventListener('mouseup', endDrag);
     document.removeEventListener('touchend', endDrag);
 }
+
+// Lock functionality
+const lockButton = document.getElementById('lockButton');
+const lockIcon = lockButton.querySelector('.lock-icon');
+
+// Update button icon based on lock state
+function updateLockButton() {
+  if (isLocked) {
+    lockButton.classList.add('locked');
+    lockButton.setAttribute('aria-pressed', 'true');
+  } else {
+    lockButton.classList.remove('locked');
+    lockButton.setAttribute('aria-pressed', 'false');
+  }
+}
+
+// Toggle lock state and update UI
+lockIcon.addEventListener('click', () => {
+  isLocked = !isLocked;
+  updateLockButton();
+});
+
+// Initialize lock button state on page load
+updateLockButton();
 
 });
