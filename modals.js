@@ -33,7 +33,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
     let currentSelectedNote = null;
     let widgetInitiallyOpened = false;
     const TOP_HEADER_HEIGHT = 50;
-    const MIN_BUFFER = 19;
+    const MIN_BUFFER = 20;
 
     // References to external functions (will be set by init)
     let externalFunctions = {
@@ -416,8 +416,6 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     }
                 }
                 
-                console.log("Current multiplier detected:", currentMultiplier);
-                
                 // Check all base x mod combinations:
                 // First check no–dot case, then dot cases.
                 basePicks.forEach(bp => {
@@ -432,8 +430,6 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                         }
                     });
                 });
-                
-                console.log("Selected base:", selectedBase, "Selected mod:", selectedMod);
                 
                 // Create base note buttons (left side) with updated styles.
                 basePicks.forEach(bp => {
@@ -653,6 +649,21 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                         window.playerControls.pause();
                     }
                     
+                    // Store the current selected note for later
+                    const currentlySelectedNote = note;
+                    
+                    // Check if this is a measure bar triangle
+                    const isMeasureBar = measureId !== null;
+                    let currentZIndex = null;
+                    
+                    // If it's a measure bar triangle, store its current z-index
+                    if (isMeasureBar) {
+                        const triangleElement = document.querySelector(`.measure-bar-triangle[data-note-id="${measureId}"]`);
+                        if (triangleElement) {
+                            currentZIndex = window.getComputedStyle(triangleElement).zIndex;
+                        }
+                    }
+                    
                     if (key === 'color') {
                         if (measureId !== null) {
                             throw new Error('Color should not be editable for measure points');
@@ -709,7 +720,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     
                     // Recompile this note and all its dependents recursively.
                     recompileNoteAndDependents(note.id);
-                
+    
                     // If the edited note is the BaseNote, update its fraction display and position.
                     if (note === window.myModule.baseNote) {
                         externalFunctions.updateBaseNoteFraction();
@@ -720,8 +731,31 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     window.evaluatedNotes = window.myModule.evaluateModule();
                     externalFunctions.updateVisualNotes(window.evaluatedNotes);
                     
-                    evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${note.getVariable(key) !== null ? String(note.getVariable(key)) : 'null'}`;
-                    const newElem = document.querySelector(`[data-note-id="${note.id}"]`);
+                    // Find the new element for the note after DOM update
+                    let newElem;
+                    
+                    if (isMeasureBar) {
+                        // For measure bars, find the triangle element
+                        newElem = document.querySelector(`.measure-bar-triangle[data-note-id="${measureId}"]`);
+                        
+                        // Restore the z-index if we have it
+                        if (newElem && currentZIndex) {
+                            newElem.style.zIndex = currentZIndex;
+                        }
+                    } else {
+                        // For regular notes
+                        newElem = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+                        
+                        // Re-apply the bring to front functionality for tapspace notes
+                        if (currentlySelectedNote && currentlySelectedNote.id !== 0 && newElem) {
+                            // Only bring to front if it's not the base note
+                            if (externalFunctions.bringSelectedNoteToFront) {
+                                externalFunctions.bringSelectedNoteToFront(currentlySelectedNote, newElem);
+                            }
+                        }
+                    }
+                    
+                    // Now show the note variables (which will also mark it as selected)
                     showNoteVariables(note, newElem, measureId);
                     
                 } catch (error) {
@@ -2109,21 +2143,39 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
 
     // Clear selection and close widget
     function clearSelection() {
+        // Use the exposed function from player.js
+        if (externalFunctions.clearLastSelectedNote) {
+          externalFunctions.clearLastSelectedNote();
+        }
+
         domCache.noteWidget.classList.remove('visible');
-        currentSelectedNote = null;
+        currentSelectedNote = null; // Ensure currentSelectedNote is reset
         
         // Use our optimized batch operation
         const elementsToClean = document.querySelectorAll(
-            '.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected, ' +
-            '.note-content.dependency, .note-content.dependent, .base-note-circle.dependency, ' +
-            '.measure-bar-triangle.dependency, .measure-bar-triangle.dependent'
+          '.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected, ' +
+          '.note-content.dependency, .note-content.dependent, .base-note-circle.dependency, ' +
+          '.measure-bar-triangle.dependency, .measure-bar-triangle.dependent'
         );
         
         batchClassOperation(elementsToClean, [], ['selected', 'dependency', 'dependent']);
         
         const baseNoteCircle = document.getElementById('baseNoteCircle');
         if (baseNoteCircle) {
-            baseNoteCircle.classList.remove('selected', 'dependency', 'dependent');
+          baseNoteCircle.classList.remove('selected', 'dependency', 'dependent');
+        }
+        
+        // Restore all notes in the stack to their original positions
+        if (externalFunctions.originalNoteOrder) {
+          externalFunctions.originalNoteOrder.forEach((noteData, noteId) => {
+            const note = window.myModule.getNoteById(parseInt(noteId, 10));
+            if (note && externalFunctions.restoreNotePosition) {
+              externalFunctions.restoreNotePosition(note);
+            }
+          });
+          externalFunctions.originalNoteOrder.clear();
+        } else {
+          console.warn("originalNoteOrder not found in externalFunctions");
         }
     }
 

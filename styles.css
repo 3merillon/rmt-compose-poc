@@ -1584,8 +1584,8 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     justify-content: center;
     align-items: center;
     pointer-events: auto;
-    bottom: 12px; /* Same as X slider's left margin */
-    left: 0;
+    bottom: 11px;
+    left: 1px;
     transform: scaleY(0);
     transform-origin: bottom center;
     transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55);
@@ -1600,7 +1600,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     align-items: center;
     pointer-events: auto;
     bottom: 1px;
-    left: 20px; /* Same as Y slider's bottom margin */
+    left: 20px;
     transform: scaleX(0);
     transform-origin: left center;
     transition: transform 0.4s cubic-bezier(0.68, -0.55, 0.27, 1.55);
@@ -1700,7 +1700,7 @@ input[type="range"]:active::-moz-range-thumb {
     content: 'Y';
     position: absolute;
     top: -10px;
-    left: 12px;
+    left: 11px;
     color: #ffa800;
     font-family: 'Roboto Mono', monospace;
     font-size: 14px;
@@ -1712,7 +1712,7 @@ input[type="range"]:active::-moz-range-thumb {
 .x-scale-slider-container::before {
     content: 'X';
     position: absolute;
-    bottom: 5px;
+    bottom: 6px;
     right: -10px;
     color: #ffa800;
     font-family: 'Roboto Mono', monospace;
@@ -1845,7 +1845,7 @@ input[type="range"]:active::-moz-range-thumb {
 
 .lock-body {
     fill: #f00;
-    transition: fill 0.3s ease;
+    transition: fill 0.3s ease 0s, stroke 0.3s ease 0s;
     transform-origin: bottom center;
 }
 
@@ -1858,7 +1858,8 @@ input[type="range"]:active::-moz-range-thumb {
     fill: none;
     stroke: #f00;
     stroke-width: 4;
-    transition: transform 0.3s ease;
+    transition: transform 0.3s ease, stroke 0.3s ease;
+    /* In our transition shorthand the first value applies to transform and the second to stroke */
     transform-origin: 19px 16px; /* Set rotation origin to right arm of shackle */
 }
 
@@ -1879,7 +1880,8 @@ input[type="range"]:active::-moz-range-thumb {
 }
 
 .lock-button.locked .lock-shackle {
-    transition-delay: 0s;
+    /* For locked state both transform and stroke change immediately */
+    transition-delay: 0s, 0s;
     transform: rotateY(0deg);
     stroke: #f00;
 }
@@ -1896,7 +1898,8 @@ input[type="range"]:active::-moz-range-thumb {
 }
 
 .lock-button:not(.locked) .lock-shackle {
-    transition-delay: 0.3s;
+    /* Here we force the stroke (color) to update immediately (0s delay) while keeping a 0.3s delay on the transform */
+    transition-delay: 0.3s, 0s;
     transform: rotateY(180deg);
     stroke: #ffa800;
 }

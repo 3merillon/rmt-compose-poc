@@ -42,6 +42,13 @@ document.addEventListener('DOMContentLoaded', async function() {
     let dragStartX = 0;
     let dragStartY = 0;
     let isLocked = false; // unlocked by default
+    let lastSelectedNote = null;
+    let originalNoteOrder = new Map();
+    let stackClickState = {
+      lastClickPosition: null,
+      stackedNotes: [],
+      currentIndex: -1
+    };
     
     // Expose playback state and control functions to the window object
     window.playerState = {
@@ -74,7 +81,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         deleteNoteAndDependencies: deleteNoteAndDependencies,
         deleteNoteKeepDependencies: deleteNoteKeepDependencies,
         checkAndUpdateDependentNotes: checkAndUpdateDependentNotes,
-        cleanSlate: cleanSlate
+        cleanSlate: cleanSlate,
+        bringSelectedNoteToFront: bringSelectedNoteToFront,
+        restoreNotePosition: restoreNotePosition,
+        clearLastSelectedNote: clearLastSelectedNote,
+        originalNoteOrder: originalNoteOrder
       });
     }
   
@@ -1128,13 +1139,144 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     requestAnimationFrame(animationLoop);
 
+    function bringSelectedNoteToFront(note, clickedElement) {
+      if (!note || !clickedElement) return;
+      
+      // Update the stack click state
+      if (window.updateStackClickSelectedNote) {
+        window.updateStackClickSelectedNote(note.id);
+      }
+      
+      // Find the note's container
+      const noteId = note.id;
+      const allItems = space.getChildren();
+      
+      for (const item of allItems) {
+        if (item.element && 
+            item.element.querySelector && 
+            item.element.querySelector(`.note-content[data-note-id="${noteId}"]`)) {
+          
+          // Store the original position if we haven't already
+          if (!originalNoteOrder.has(noteId)) {
+            const parent = item.getParent();
+            if (parent) {
+              const siblings = parent.getChildren();
+              const index = siblings.indexOf(item);
+              originalNoteOrder.set(noteId, {
+                parent: parent,
+                index: index,
+                originalPointerEvents: item.element.querySelector(`.note-content[data-note-id="${noteId}"]`).style.pointerEvents || 'auto'
+              });
+            }
+          }
+          
+          // Bring to front in DOM order
+          item.bringToFront();
+          lastSelectedNote = note;
+          return;
+        }
+      }
+    }
+    
+    // Function to just restore pointer-events without changing DOM position
+    function restoreNotePointerEvents(note) {
+      if (!note || !originalNoteOrder.has(note.id)) return;
+      
+      const noteData = originalNoteOrder.get(note.id);
+      const allItems = space.getChildren();
+      
+      for (const item of allItems) {
+        if (item.element && 
+            item.element.querySelector && 
+            item.element.querySelector(`.note-content[data-note-id="${note.id}"]`)) {
+          
+          // Restore pointer-events
+          const noteContent = item.element.querySelector(`.note-content[data-note-id="${note.id}"]`);
+          if (noteContent) {
+            noteContent.style.pointerEvents = noteData.originalPointerEvents || 'auto';
+          }
+          
+          break;
+        }
+      }
+    }
+    
+    // Function to restore a note to its original position
+    function restoreNotePosition(note) {
+      if (!note || !originalNoteOrder.has(note.id)) return;
+      
+      const noteData = originalNoteOrder.get(note.id);
+      const allItems = space.getChildren();
+      let noteItem = null;
+      
+      // Find the note item
+      for (const item of allItems) {
+        if (item.element && 
+            item.element.querySelector && 
+            item.element.querySelector(`.note-content[data-note-id="${note.id}"]`)) {
+          noteItem = item;
+          break;
+        }
+      }
+      
+      if (!noteItem || !noteData.parent) return;
+      
+      // Get current children of the parent
+      const currentChildren = noteData.parent.getChildren();
+      
+      // If the index is valid and there's a child at that position
+      if (noteData.index >= 0 && noteData.index < currentChildren.length) {
+        // If it's not the first child, send it below the appropriate sibling
+        if (noteData.index > 0) {
+          const targetSibling = currentChildren[noteData.index];
+          if (targetSibling) {
+            noteItem.sendBelow(targetSibling);
+          }
+        } else {
+          // If it was the first child, send it to the back
+          noteItem.sendToBack();
+        }
+      }
+      
+      // Restore pointer-events
+      const noteContent = noteItem.element.querySelector(`.note-content[data-note-id="${note.id}"]`);
+      if (noteContent) {
+        noteContent.style.pointerEvents = noteData.originalPointerEvents || 'auto';
+      }
+      
+      // Remove from tracking
+      originalNoteOrder.delete(note.id);
+    }
+
+    // Function to clear the last selected note
+    function clearLastSelectedNote() {
+      if (lastSelectedNote) {
+        restoreNotePosition(lastSelectedNote);
+        lastSelectedNote = null;
+      }
+      
+      // Restore all notes in the stack to their original positions
+      originalNoteOrder.forEach((noteData, noteId) => {
+        const note = myModule.getNoteById(parseInt(noteId, 10));
+        if (note) {
+          restoreNotePosition(note);
+        }
+      });
+      originalNoteOrder.clear();
+    }
+
     // showNoteVariables.
     function showNoteVariables(note, clickedElement, measureId = null) {
-        if (window.modals) {
-            window.modals.showNoteVariables(note, clickedElement, measureId);
-        } else {
-            console.error("window.modals is not available");
+      if (window.modals) {
+        // Before calling window.modals.showNoteVariables, bring selected note to front
+        if (note !== window.myModule.baseNote && measureId === null) {
+          bringSelectedNoteToFront(note, clickedElement);
         }
+        
+        window.modals.showNoteVariables(note, clickedElement, measureId);
+      } else {
+        console.error("window.modals is not available");
+      }
     }
       
     function clearSelection() {
@@ -3725,144 +3867,200 @@ function handleOctaveChange(noteId, direction) {
   
   // Update the note's frequency
   try {
-    // Get the raw expression
-    const rawExpression = note.variables.frequencyString;
-    let newRaw;
-    
-    // If there's no raw expression, create a simple one
-    if (!rawExpression) {
-      // Calculate the new frequency (multiply or divide by 2 for octave shift)
-      let newFrequency;
-      if (direction === 'up') {
-        // Double the frequency to go up an octave
-        newFrequency = currentFrequency.mul(new Fraction(2, 1));
-      } else if (direction === 'down') {
-        // Halve the frequency to go down an octave
-        newFrequency = currentFrequency.mul(new Fraction(1, 2));
-      } else {
-        console.error(`Invalid direction: ${direction}`);
-        return;
-      }
+    // Special case for BaseNote - always simplify to a direct Fraction
+    if (note === myModule.baseNote) {
+      // Get the current raw expression
+      const rawExpression = note.variables.frequencyString || '';
       
-      // Create a direct expression using the new frequency value
-      newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
-    } 
-    // Case 1: Simple fraction - new Fraction(n, d)
-    else if (rawExpression.match(/^new\s+Fraction\(\d+,\s*\d+\)$/)) {
-      const fractionMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)/);
+      // Try to extract the direct fraction values
+      let newRaw;
+      
+      // Check if it's a simple Fraction
+      const fractionMatch = rawExpression.match(/new\s+Fraction\((\d+)(?:,\s*(\d+))?\)/);
       if (fractionMatch) {
-        const oldNum = parseInt(fractionMatch[1], 10);
-        const oldDenom = parseInt(fractionMatch[2], 10);
+        // Extract numerator and denominator
+        let numerator = parseInt(fractionMatch[1], 10);
+        let denominator = fractionMatch[2] ? parseInt(fractionMatch[2], 10) : 1;
         
-        // Calculate the new fraction
-        let newNum, newDenom;
+        // Apply octave change
         if (direction === 'up') {
-          newNum = oldNum * 2;
-          newDenom = oldDenom;
-        } else {
-          newNum = oldNum;
-          newDenom = oldDenom * 2;
+          numerator *= 2;
+        } else if (direction === 'down') {
+          denominator *= 2;
         }
         
         // Simplify the fraction
-        const gcd = findGCD(newNum, newDenom);
-        newNum /= gcd;
-        newDenom /= gcd;
+        const gcd = findGCD(numerator, denominator);
+        numerator /= gcd;
+        denominator /= gcd;
         
-        // Create the new expression
-        newRaw = `new Fraction(${newNum}, ${newDenom})`;
+        // Create the new expression as a simple fraction
+        newRaw = `new Fraction(${numerator}, ${denominator})`;
       } else {
-        newRaw = rawExpression; // Keep original if no match
-      }
-    }
-    // Case 2: Multiplication by baseNote frequency
-    else if (rawExpression.includes("module.baseNote.getVariable('frequency')")) {
-      // Extract the ratio from the expression
-      const ratioMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)\.mul\(module\.baseNote\.getVariable\('frequency'\)\)/);
-      if (ratioMatch) {
-        const oldNum = parseInt(ratioMatch[1], 10);
-        const oldDenom = parseInt(ratioMatch[2], 10);
+        // If not a simple fraction, get the current value and create a new fraction
+        const currentValue = currentFrequency.valueOf();
+        let newValue;
         
-        // Calculate the new ratio
-        let newNum, newDenom;
         if (direction === 'up') {
-          newNum = oldNum * 2;
-          newDenom = oldDenom;
+          newValue = currentValue * 2;
+        } else if (direction === 'down') {
+          newValue = currentValue / 2;
         } else {
-          newNum = oldNum;
-          newDenom = oldDenom * 2;
+          console.error(`Invalid direction: ${direction}`);
+          return;
         }
         
-        // Simplify the fraction
-        const gcd = findGCD(newNum, newDenom);
-        newNum /= gcd;
-        newDenom /= gcd;
-        
-        // Create the new expression preserving the dependency
-        newRaw = `new Fraction(${newNum}, ${newDenom}).mul(module.baseNote.getVariable('frequency'))`;
-      } else {
-        // Handle more complex expressions with baseNote frequency
-        if (direction === 'up') {
-          newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
-        } else {
-          newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
-        }
+        // Create a new fraction from the value
+        const newFraction = new Fraction(newValue);
+        newRaw = `new Fraction(${newFraction.n}, ${newFraction.d})`;
       }
-    }
-    // Case 3: Reference to another note's frequency
-    else if (rawExpression.includes("getNoteById") && rawExpression.includes("getVariable('frequency')")) {
-      // For references to other notes, we need to preserve the dependency structure
-      // Extract any existing ratio multiplier
-      const ratioMultiplierMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)\.mul\((.*?)\.getVariable\('frequency'\)\)/);
       
-      if (ratioMultiplierMatch) {
-        // There's already a ratio multiplier
-        const oldNum = parseInt(ratioMultiplierMatch[1], 10);
-        const oldDenom = parseInt(ratioMultiplierMatch[2], 10);
-        const dependency = ratioMultiplierMatch[3]; // This is the module.getNoteById(...) part
-        
-        // Calculate the new ratio
-        let newNum, newDenom;
+      // Update the BaseNote with the simplified fraction
+      note.setVariable('frequency', function() {
+        return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+      });
+      note.setVariable('frequencyString', newRaw);
+    } else {
+      // For regular notes, use the existing logic
+      // Get the raw expression
+      const rawExpression = note.variables.frequencyString;
+      let newRaw;
+      
+      // If there's no raw expression, create a simple one
+      if (!rawExpression) {
+        // Calculate the new frequency (multiply or divide by 2 for octave shift)
+        let newFrequency;
         if (direction === 'up') {
-          newNum = oldNum * 2;
-          newDenom = oldDenom;
+          // Double the frequency to go up an octave
+          newFrequency = currentFrequency.mul(new Fraction(2, 1));
+        } else if (direction === 'down') {
+          // Halve the frequency to go down an octave
+          newFrequency = currentFrequency.mul(new Fraction(1, 2));
         } else {
-          newNum = oldNum;
-          newDenom = oldDenom * 2;
+          console.error(`Invalid direction: ${direction}`);
+          return;
         }
         
-        // Simplify the fraction
-        const gcd = findGCD(newNum, newDenom);
-        newNum /= gcd;
-        newDenom /= gcd;
+        // Create a direct expression using the new frequency value
+        newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
+      } 
+      // Case 1: Simple fraction - new Fraction(n, d)
+      else if (rawExpression.match(/^new\s+Fraction\(\d+,\s*\d+\)$/)) {
+        const fractionMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)/);
+        if (fractionMatch) {
+          const oldNum = parseInt(fractionMatch[1], 10);
+          const oldDenom = parseInt(fractionMatch[2], 10);
+          
+          // Calculate the new fraction
+          let newNum, newDenom;
+          if (direction === 'up') {
+            newNum = oldNum * 2;
+            newDenom = oldDenom;
+          } else {
+            newNum = oldNum;
+            newDenom = oldDenom * 2;
+          }
+          
+          // Simplify the fraction
+          const gcd = findGCD(newNum, newDenom);
+          newNum /= gcd;
+          newDenom /= gcd;
+          
+          // Create the new expression
+          newRaw = `new Fraction(${newNum}, ${newDenom})`;
+        } else {
+          newRaw = rawExpression; // Keep original if no match
+        }
+      }
+      // Case 2: Multiplication by baseNote frequency
+      else if (rawExpression.includes("module.baseNote.getVariable('frequency')")) {
+        // Extract the ratio from the expression
+        const ratioMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)\.mul\(module\.baseNote\.getVariable\('frequency'\)\)/);
+        if (ratioMatch) {
+          const oldNum = parseInt(ratioMatch[1], 10);
+          const oldDenom = parseInt(ratioMatch[2], 10);
+          
+          // Calculate the new ratio
+          let newNum, newDenom;
+          if (direction === 'up') {
+            newNum = oldNum * 2;
+            newDenom = oldDenom;
+          } else {
+            newNum = oldNum;
+            newDenom = oldDenom * 2;
+          }
+          
+          // Simplify the fraction
+          const gcd = findGCD(newNum, newDenom);
+          newNum /= gcd;
+          newDenom /= gcd;
+          
+          // Create the new expression preserving the dependency
+          newRaw = `new Fraction(${newNum}, ${newDenom}).mul(module.baseNote.getVariable('frequency'))`;
+        } else {
+          // Handle more complex expressions with baseNote frequency
+          if (direction === 'up') {
+            newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
+          } else {
+            newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
+          }
+        }
+      }
+      // Case 3: Reference to another note's frequency
+      else if (rawExpression.includes("getNoteById") && rawExpression.includes("getVariable('frequency')")) {
+        // For references to other notes, we need to preserve the dependency structure
+        // Extract any existing ratio multiplier
+        const ratioMultiplierMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)\.mul\((.*?)\.getVariable\('frequency'\)\)/);
         
-        // Create the new expression preserving the dependency
-        newRaw = `new Fraction(${newNum}, ${newDenom}).mul(${dependency}.getVariable('frequency'))`;
-      } else {
-        // No existing ratio multiplier, add one
+        if (ratioMultiplierMatch) {
+          // There's already a ratio multiplier
+          const oldNum = parseInt(ratioMultiplierMatch[1], 10);
+          const oldDenom = parseInt(ratioMultiplierMatch[2], 10);
+          const dependency = ratioMultiplierMatch[3]; // This is the module.getNoteById(...) part
+          
+          // Calculate the new ratio
+          let newNum, newDenom;
+          if (direction === 'up') {
+            newNum = oldNum * 2;
+            newDenom = oldDenom;
+          } else {
+            newNum = oldNum;
+            newDenom = oldDenom * 2;
+          }
+          
+          // Simplify the fraction
+          const gcd = findGCD(newNum, newDenom);
+          newNum /= gcd;
+          newDenom /= gcd;
+          
+          // Create the new expression preserving the dependency
+          newRaw = `new Fraction(${newNum}, ${newDenom}).mul(${dependency}.getVariable('frequency'))`;
+        } else {
+          // No existing ratio multiplier, add one
+          if (direction === 'up') {
+            newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
+          } else {
+            newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
+          }
+        }
+      }
+      // Case 4: Any other expression - multiply by 2 or 1/2
+      else {
         if (direction === 'up') {
           newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
         } else {
           newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
         }
       }
-    }
-    // Case 4: Any other expression - multiply by 2 or 1/2
-    else {
-      if (direction === 'up') {
-        newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
-      } else {
-        newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
-      }
+      
+      // Update the note's frequency with the new expression
+      note.setVariable('frequency', function() {
+        return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+      });
+      note.setVariable('frequencyString', newRaw);
     }
     
-    // Update the note's frequency with the new expression
-    note.setVariable('frequency', function() {
-      return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
-    });
-    note.setVariable('frequencyString', newRaw);
-    
-    // If this is the base note, update its fraction display
+    // If this is the base note, update its fraction display and position
     if (note === myModule.baseNote) {
       updateBaseNoteFraction();
       updateBaseNotePosition();
@@ -5310,7 +5508,7 @@ function updateLockButton() {
   }
 }
 
-// Toggle lock state and update UI
+// Toggle lock state and update UI when clicking the SVG
 lockIcon.addEventListener('click', () => {
   isLocked = !isLocked;
   updateLockButton();
