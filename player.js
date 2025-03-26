@@ -3341,23 +3341,19 @@ function handleResizeMove(ev) {
           Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
           Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
       );
-      const viewportScale = viewportDistance / 100;
       
-      // Adjust deltaX based on the current viewport scale and xScaleFactor
-      const deltaX = screenDeltaX / (viewportScale * xScaleFactor);
+      // Convert screen pixels to space units (without xScaleFactor)
+      const spaceUnitsPerScreenPixel = 100 / viewportDistance;
+      const deltaInSpaceUnits = screenDeltaX * spaceUnitsPerScreenPixel;
       
-      // Log values for debugging
-      console.log("Screen Delta X:", screenDeltaX);
-      console.log("Viewport Scale:", viewportScale);
-      console.log("Adjusted Delta X:", deltaX);
-      console.log("Resize Original width:", resizeOriginalWidth);
-      console.log("Resize Original duration:", resizeOriginalDuration);
-      
-      // Calculate new width
-      const newWidth = Math.max(20, resizeOriginalWidth + deltaX); // Ensure minimum width
+      // Calculate new width in space units
+      const newWidthInSpaceUnits = Math.max(20, resizeOriginalWidth + deltaInSpaceUnits);
       
       // Calculate new duration in time units
-      const newDuration = newWidth / (200 * xScaleFactor);
+      // The relationship between width in space units and duration is:
+      // width = duration * 200 * xScaleFactor
+      // So: duration = width / (200 * xScaleFactor)
+      const newDuration = newWidthInSpaceUnits / (200 * xScaleFactor);
       
       // Calculate beats based on tempo
       const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
@@ -3389,176 +3385,170 @@ function handleResizeMove(ev) {
   }
 }
 
-  // Handle pointer up to complete resize
-  function handleResizeUp(ev) {
-    if (!isResizing) return;
-    
-    try {
-        resizeHandle.element.releasePointerCapture(ev.pointerId);
-    } catch (err) {
-        console.log('Error releasing pointer capture:', err);
-    }
-    
-    isResizing = false;
-    
-    // Remove resizing class
-    noteRect.element.classList.remove('resizing');
-    
-    // Remove event listeners
-    document.removeEventListener('pointermove', handleResizeMove);
-    document.removeEventListener('pointerup', handleResizeUp);
-    document.removeEventListener('pointercancel', handleResizeUp);
-    
-    // Remove the dependent notes overlay
-    const dependentOverlay = document.getElementById('resize-dependent-overlay');
-    if (dependentOverlay) {
-        dependentOverlay.remove();
-    }
-    
-    try {
-        // Get the current viewport transform to account for zoom
-        const transform = viewport.getBasis().getRaw();
-        const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-        
-        // Calculate delta in screen pixels
-        const screenDeltaX = ev.clientX - resizeStartX;
-        
-        // Convert screen delta to space delta using the same approach as in note drag
-        // Create two points in space coordinates that are 100 units apart
-        const spacePoint1 = space.at(0, 0);
-        const spacePoint2 = space.at(100, 0);
-        
-        // Project these points to viewport coordinates
-        const viewportPoint1 = spacePoint1.transitRaw(viewport);
-        const viewportPoint2 = spacePoint2.transitRaw(viewport);
-        
-        // Calculate the scale factor: how many viewport pixels per 100 space units
-        const viewportDistance = Math.sqrt(
-            Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
-            Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
-        );
-        const viewportScale = viewportDistance / 100;
-        
-        // Adjust deltaX based on the current viewport scale and xScaleFactor
-        const deltaX = screenDeltaX / (viewportScale * xScaleFactor);
-        
-        // Calculate new width based on the original width and delta
-        const newWidth = Math.max(20, resizeOriginalWidth + deltaX);
-        
-        // Calculate new duration in time units
-        const newDuration = newWidth / (200 * xScaleFactor);
-        
-        // Calculate beats based on tempo
-        const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-        const beatLength = 60 / baseTempo;
-        const newDurationBeats = newDuration / beatLength;
-        
-        // Snap to sixteenth note increments
-        const sixteenthNote = 0.25; // A sixteenth of a beat
-        const snappedBeats = Math.max(sixteenthNote, Math.round(newDurationBeats / sixteenthNote) * sixteenthNote);
-        
-        console.log("Final snapped beats:", snappedBeats);
-        
-        // Use the Fraction library to create a precise representation
-        let beatsFraction;
-        try {
-            beatsFraction = new Fraction(snappedBeats);
-        } catch (err) {
-            console.error("Error creating fraction:", err);
-            // Fallback to manual fraction creation
-            if (snappedBeats === 0.25) beatsFraction = new Fraction(1, 4);
-            else if (snappedBeats === 0.5) beatsFraction = new Fraction(1, 2);
-            else if (snappedBeats === 0.75) beatsFraction = new Fraction(3, 4);
-            else if (snappedBeats === 1) beatsFraction = new Fraction(1, 1);
-            else if (snappedBeats === 1.25) beatsFraction = new Fraction(5, 4);
-            else if (snappedBeats === 1.5) beatsFraction = new Fraction(3, 2);
-            else if (snappedBeats === 1.75) beatsFraction = new Fraction(7, 4);
-            else if (snappedBeats === 2) beatsFraction = new Fraction(2, 1);
-            else beatsFraction = new Fraction(Math.round(snappedBeats * 4), 4); // Approximate as quarters
-        }
-        
-        console.log("Beats as fraction:", beatsFraction.n, "/", beatsFraction.d);
-        
-        // Create the duration expression as a string using the Fraction
-        const newDurationString = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFraction.n}, ${beatsFraction.d}))`;
-        console.log("New duration expression:", newDurationString);
-        
-        // Store the original duration before updating
-        const originalDuration = note.getVariable('duration').valueOf();
-        
-        // Update the note's duration
-        note.setVariable('durationString', newDurationString);
-        
-        // Create the function with a try-catch to handle errors
-        const durationFunc = function() {
-            try {
-                return new Function("module", "Fraction", "return " + newDurationString + ";")(myModule, Fraction);
-            } catch (error) {
-                console.error("Error in duration function:", error);
-                // Return a default duration if there's an error
-                return new Fraction(60).div(myModule.baseNote.getVariable('tempo')).mul(1);
-            }
-        };
-        
-        note.setVariable('duration', durationFunc);
-        
-        // Get the new duration after updating
-        const updatedDuration = note.getVariable('duration').valueOf();
-        
-        // Check and update dependent notes if the duration has changed
-        if (Math.abs(originalDuration - updatedDuration) > 0.001) {
-            checkAndUpdateDependentNotes(note.id, originalDuration, updatedDuration);
-        }
-        
-        // Re-evaluate and update the visual representation
-        window.evaluatedNotes = myModule.evaluateModule();
-        updateVisualNotes(window.evaluatedNotes);
-        
-        // Update the note widget if it's open
-        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
-        if (noteWidgetVisible && currentSelectedNote) {
-            if (currentSelectedNote === myModule.baseNote) {
-                // Special handling for base note
-                const baseNoteElement = document.querySelector('.base-note-circle');
-                if (baseNoteElement) {
-                    showNoteVariables(myModule.baseNote, baseNoteElement);
-                }
-            } else {
-                // Regular note or measure bar
-                const selectedElement = document.querySelector(
-                    `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
-                    `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
-                );
-                
-                if (selectedElement) {
-                    if (selectedElement.classList.contains('measure-bar-triangle')) {
-                        showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
-                    } else {
-                        showNoteVariables(currentSelectedNote, selectedElement);
-                    }
-                }
-            }
-        }
-    } catch (error) {
-        console.error("Error updating note duration:", error);
-        // Try to revert to original size if there's an error
-        try {
-            noteRect.setSize({ width: resizeOriginalWidth, height: height });
-            noteContainer.setSize({ width: resizeOriginalWidth, height: height });
-            if (resizeHandle) {
-                resizeHandle.translateTo(noteContainer.at(resizeOriginalWidth - 10, 0));
-            }
-        } catch (revertError) {
-            console.error("Error reverting to original size:", revertError);
-        }
-    }
-    
-    // Remove feedback element
-    const feedbackElement = document.getElementById('resize-feedback');
-    if (feedbackElement) {
-        feedbackElement.remove();
-    }
+function handleResizeUp(ev) {
+  if (!isResizing) return;
+  
+  try {
+      resizeHandle.element.releasePointerCapture(ev.pointerId);
+  } catch (err) {
+      console.log('Error releasing pointer capture:', err);
   }
+  
+  isResizing = false;
+  
+  // Remove resizing class
+  noteRect.element.classList.remove('resizing');
+  
+  // Remove event listeners
+  document.removeEventListener('pointermove', handleResizeMove);
+  document.removeEventListener('pointerup', handleResizeUp);
+  document.removeEventListener('pointercancel', handleResizeUp);
+  
+  // Remove the dependent notes overlay
+  const dependentOverlay = document.getElementById('resize-dependent-overlay');
+  if (dependentOverlay) {
+      dependentOverlay.remove();
+  }
+  
+  try {
+      // Get the current viewport transform to account for zoom
+      const transform = viewport.getBasis().getRaw();
+      const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+      
+      // Calculate delta in screen pixels
+      const screenDeltaX = ev.clientX - resizeStartX;
+      
+      // Convert screen delta to space delta using the same approach as in note drag
+      // Create two points in space coordinates that are 100 units apart
+      const spacePoint1 = space.at(0, 0);
+      const spacePoint2 = space.at(100, 0);
+      
+      // Project these points to viewport coordinates
+      const viewportPoint1 = spacePoint1.transitRaw(viewport);
+      const viewportPoint2 = spacePoint2.transitRaw(viewport);
+      
+      // Calculate the scale factor: how many viewport pixels per 100 space units
+      const viewportDistance = Math.sqrt(
+          Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
+          Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
+      );
+      
+      // Convert screen pixels to space units (without xScaleFactor)
+      const spaceUnitsPerScreenPixel = 100 / viewportDistance;
+      const deltaInSpaceUnits = screenDeltaX * spaceUnitsPerScreenPixel;
+      
+      // Calculate new width in space units
+      const newWidthInSpaceUnits = Math.max(20, resizeOriginalWidth + deltaInSpaceUnits);
+      
+      // Calculate new duration in time units
+      const newDuration = newWidthInSpaceUnits / (200 * xScaleFactor);
+      
+      // Calculate beats based on tempo
+      const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
+      const beatLength = 60 / baseTempo;
+      const newDurationBeats = newDuration / beatLength;
+      
+      // Snap to sixteenth note increments
+      const sixteenthNote = 0.25; // A sixteenth of a beat
+      const snappedBeats = Math.max(sixteenthNote, Math.round(newDurationBeats / sixteenthNote) * sixteenthNote);
+      
+      // Use the Fraction library to create a precise representation
+      let beatsFraction;
+      try {
+          beatsFraction = new Fraction(snappedBeats);
+      } catch (err) {
+          console.error("Error creating fraction:", err);
+          // Fallback to manual fraction creation
+          if (snappedBeats === 0.25) beatsFraction = new Fraction(1, 4);
+          else if (snappedBeats === 0.5) beatsFraction = new Fraction(1, 2);
+          else if (snappedBeats === 0.75) beatsFraction = new Fraction(3, 4);
+          else if (snappedBeats === 1) beatsFraction = new Fraction(1, 1);
+          else if (snappedBeats === 1.25) beatsFraction = new Fraction(5, 4);
+          else if (snappedBeats === 1.5) beatsFraction = new Fraction(3, 2);
+          else if (snappedBeats === 1.75) beatsFraction = new Fraction(7, 4);
+          else if (snappedBeats === 2) beatsFraction = new Fraction(2, 1);
+          else beatsFraction = new Fraction(Math.round(snappedBeats * 4), 4); // Approximate as quarters
+      }
+      
+      // Create the duration expression as a string using the Fraction
+      const newDurationString = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFraction.n}, ${beatsFraction.d}))`;
+      
+      // Store the original duration before updating
+      const originalDuration = note.getVariable('duration').valueOf();
+      
+      // Update the note's duration
+      note.setVariable('durationString', newDurationString);
+      
+      // Create the function with a try-catch to handle errors
+      const durationFunc = function() {
+          try {
+              return new Function("module", "Fraction", "return " + newDurationString + ";")(myModule, Fraction);
+          } catch (error) {
+              console.error("Error in duration function:", error);
+              // Return a default duration if there's an error
+              return new Fraction(60).div(myModule.baseNote.getVariable('tempo')).mul(1);
+          }
+      };
+      
+      note.setVariable('duration', durationFunc);
+      
+      // Get the new duration after updating
+      const updatedDuration = note.getVariable('duration').valueOf();
+      
+      // Check and update dependent notes if the duration has changed
+      if (Math.abs(originalDuration - updatedDuration) > 0.001) {
+          checkAndUpdateDependentNotes(note.id, originalDuration, updatedDuration);
+      }
+      
+      // Re-evaluate and update the visual representation
+      window.evaluatedNotes = myModule.evaluateModule();
+      updateVisualNotes(window.evaluatedNotes);
+      
+      // Update the note widget if it's open
+      const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+      if (noteWidgetVisible && currentSelectedNote) {
+          if (currentSelectedNote === myModule.baseNote) {
+              // Special handling for base note
+              const baseNoteElement = document.querySelector('.base-note-circle');
+              if (baseNoteElement) {
+                  showNoteVariables(myModule.baseNote, baseNoteElement);
+              }
+          } else {
+              // Regular note or measure bar
+              const selectedElement = document.querySelector(
+                  `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                  `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+              );
+              
+              if (selectedElement) {
+                  if (selectedElement.classList.contains('measure-bar-triangle')) {
+                      showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
+                  } else {
+                      showNoteVariables(currentSelectedNote, selectedElement);
+                  }
+              }
+          }
+      }
+  } catch (error) {
+      console.error("Error updating note duration:", error);
+      // Try to revert to original size if there's an error
+      try {
+          noteRect.setSize({ width: resizeOriginalWidth, height: height });
+          noteContainer.setSize({ width: resizeOriginalWidth, height: height });
+          if (resizeHandle) {
+              resizeHandle.translateTo(noteContainer.at(resizeOriginalWidth - 10, 0));
+          }
+      } catch (revertError) {
+          console.error("Error reverting to original size:", revertError);
+      }
+  }
+  
+  // Remove feedback element
+  const feedbackElement = document.getElementById('resize-feedback');
+  if (feedbackElement) {
+      feedbackElement.remove();
+  }
+}
   
   // Function to update the visualization of dependent notes during resize
   function updateDependentNotesVisualization(resizedNote, originalDuration, newDuration, scale) {
