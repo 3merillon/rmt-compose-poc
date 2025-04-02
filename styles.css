@@ -1035,8 +1035,8 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 /* Editor widget styles */
 .note-widget {
     position: fixed;
-    bottom: 20px;
-    left: 20px;
+    bottom: 19px;
+    left: 19px;
     background: rgba(21, 21, 37, 0.88);
     backdrop-filter: blur(5px);
     border: 1px dotted #ffa800;
@@ -1370,6 +1370,16 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     margin-bottom: 20px;
     font-size: 14px;
     line-height: 1.4;
+}
+
+.evaluate-note-btn.liberate-dependencies {
+    background-color: #00ccff;
+    color: #151525;
+    margin-bottom: 8px;
+}
+
+.evaluate-note-btn.liberate-dependencies:hover {
+    background-color: #00a3cc;
 }
 
 /* Style spans for dynamic text inside modals */

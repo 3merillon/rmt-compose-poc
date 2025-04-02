@@ -33,7 +33,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
     let currentSelectedNote = null;
     let widgetInitiallyOpened = false;
     const TOP_HEADER_HEIGHT = 50;
-    const MIN_BUFFER = 20;
+    const MIN_BUFFER = 19;
 
     // References to external functions (will be set by init)
     let externalFunctions = {
@@ -116,6 +116,77 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         
         // Default if we couldn't parse correctly
         return "new Fraction(60).div(module.findTempo(module.baseNote))";
+    }
+
+    // Liberate dependencies from a note
+    function liberateDependencies(noteId) {
+        const selectedNote = myModule.getNoteById(noteId);
+        if (!selectedNote) return;
+        
+        // Store the currently selected note for later
+        const currentSelectedNote = selectedNote;
+        
+        // Check if this is a measure bar (has startTime but no duration)
+        const isMeasureBar = selectedNote.variables.startTime && !selectedNote.variables.duration;
+        
+        // Don't allow liberating dependencies on measure bars
+        if (isMeasureBar) {
+            showNotification('Cannot liberate dependencies on measure bars', 'error');
+            return;
+        }
+        
+        // Create a snapshot of the raw expressions
+        let selectedRaw = {};
+        ["startTime", "duration", "frequency"].forEach(varName => {
+            if (selectedNote.variables[varName + "String"]) {
+                // Use the existing raw expression if available.
+                selectedRaw[varName] = selectedNote.variables[varName + "String"];
+            } else {
+                const frac = selectedNote.getVariable(varName);
+                let fracStr;
+                if (frac == null) {
+                    fracStr = (varName === "frequency") ? "1/1" : "0/1";
+                } else if (frac && typeof frac.toFraction === "function") {
+                    fracStr = frac.toFraction();
+                } else {
+                    fracStr = frac.toString();
+                }
+                if (!fracStr.includes("/")) {
+                    fracStr = fracStr + "/1";
+                }
+                selectedRaw[varName] = "new Fraction(" + fracStr + ")";
+            }
+        });
+        
+        // Use the external function to update dependent notes
+        externalFunctions.updateDependentRawExpressions(noteId, selectedRaw);
+        
+        // Mark all notes that depended on this note as dirty
+        const dependents = myModule.getDependentNotes(noteId);
+        dependents.forEach(depId => {
+            myModule.markNoteDirty(depId);
+        });
+        
+        // Re-evaluate the module
+        evaluatedNotes = myModule.evaluateModule();
+        externalFunctions.updateVisualNotes(evaluatedNotes);
+        
+        // Find the new element for the note after DOM update
+        const newElem = document.querySelector(`.note-content[data-note-id="${noteId}"]`);
+        
+        // Re-apply the bring to front functionality for the selected note
+        if (currentSelectedNote && currentSelectedNote.id !== 0 && newElem) {
+            // Only bring to front if it's not the base note
+            if (externalFunctions.bringSelectedNoteToFront) {
+                externalFunctions.bringSelectedNoteToFront(currentSelectedNote, newElem);
+            }
+        }
+        
+        // Now show the note variables (which will also mark it as selected)
+        showNoteVariables(currentSelectedNote, newElem);
+        
+        // Show notification
+        showNotification('Dependencies liberated successfully!', 'success');
     }
 
     // Show note variables in the widget
@@ -782,18 +853,27 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         });
         
         let shouldShowAdd = false;
-        if (note === window.myModule.baseNote && !externalFunctions.hasMeasurePoints()) {
+        if (note === window.myModule.baseNote) {
+            // Always show the button for the base note, regardless of whether measure points exist
             shouldShowAdd = true;
-        } else if (measureId !== null && String(measureId) === String(externalFunctions.getLastMeasureId())) {
-            shouldShowAdd = true;
+        } else if (measureId !== null) {
+            // For measure bars, check if this is the last measure in its chain
+            shouldShowAdd = externalFunctions.isLastMeasureInChain(measureId);
         }
+        
         if (shouldShowAdd) {
             const addMeasureSection = document.createElement('div');
             addMeasureSection.className = 'variable-row';
             
             const addNameDiv = document.createElement('div');
             addNameDiv.className = 'variable-name';
-            addNameDiv.textContent = 'Add Measure';
+            
+            // Change the label based on whether it's the base note or a measure
+            if (note === window.myModule.baseNote) {
+                addNameDiv.textContent = 'Add New Measure Chain';
+            } else {
+                addNameDiv.textContent = 'Add Measure';
+            }
             
             const addValueDiv = document.createElement('div');
             addValueDiv.className = 'variable-value';
@@ -809,7 +889,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             
                 let newMeasures = [];
                 let fromNote;
-                if (note === window.myModule.baseNote && !externalFunctions.hasMeasurePoints()) {
+                if (note === window.myModule.baseNote) {
                     fromNote = window.myModule.baseNote;
                     const newMeasure = window.myModule.addNote({
                         startTime: () => window.myModule.baseNote.getVariable('startTime'),
@@ -897,7 +977,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                             
                             // Update the note's startTime
                             depNote.setVariable('startTime', function() {
-                                return new Function("module", "Fraction", "return " + newRaw + ";")(window.myModule, Fraction);
+                                return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
                             });
                             depNote.setVariable('startTimeString', newRaw);
                             
@@ -936,6 +1016,25 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             evaluateHeader.className = 'evaluate-note-header';
             evaluateHeader.textContent = 'EVALUATE';
             
+            evaluateWrapper.appendChild(evaluateHeader);
+            
+            // Check if this is a measure bar (has startTime but no duration)
+            const isMeasureBar = note.variables.startTime && !note.variables.duration;
+            
+            // Only add the Liberate Dependencies button for non-measure bar notes
+            if (!isMeasureBar) {
+                // Add the Liberate Dependencies button
+                const liberateButton = document.createElement('button');
+                liberateButton.className = 'evaluate-note-btn liberate-dependencies';
+                liberateButton.textContent = 'Liberate Dependencies';
+                
+                liberateButton.addEventListener('click', function() {
+                    showLiberateConfirmation(effectiveNoteId);
+                });
+                
+                evaluateWrapper.appendChild(liberateButton);
+            }
+            
             const evaluateButton = document.createElement('button');
             evaluateButton.className = 'evaluate-note-btn';
             evaluateButton.textContent = 'Evaluate to BaseNote';
@@ -944,7 +1043,6 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                 showEvaluateConfirmation(effectiveNoteId);
             });
             
-            evaluateWrapper.appendChild(evaluateHeader);
             evaluateWrapper.appendChild(evaluateButton);
             
             widgetContent.appendChild(evaluateWrapper);
@@ -1037,6 +1135,61 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         currentSelectedNote = note;
     }
     
+    // Add confirmation modal for liberating a note
+    function showLiberateConfirmation(noteId) {
+        const overlay = document.createElement('div');
+        overlay.className = 'delete-confirm-overlay';
+    
+        const modal = document.createElement('div');
+        modal.className = 'delete-confirm-modal';
+    
+        const message = document.createElement('p');
+        message.innerHTML = "Are you sure you want to <strong>LIBERATE</strong> all dependencies from Note[<span style='color:#00ccff'>" 
+            + noteId + "</span>]? This will replace all references to this note with raw values.";
+        modal.appendChild(message);
+    
+        const btnContainer = document.createElement('div');
+        btnContainer.className = 'modal-btn-container';
+    
+        const yesButton = document.createElement('button');
+        yesButton.textContent = 'Yes';
+        yesButton.style.backgroundColor = '#00ccff';
+        yesButton.style.color = '#151525';
+        yesButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            // Pause playback if it's active
+            if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
+                window.playerControls.pause();
+            }
+            liberateDependencies(noteId);
+            document.body.removeChild(overlay);
+        });
+    
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = 'Cancel';
+        cancelButton.style.backgroundColor = '#add8e6';
+        cancelButton.style.color = '#000';
+        cancelButton.addEventListener('click', function(e) {
+            e.stopPropagation();
+            document.body.removeChild(overlay);
+        });
+    
+        btnContainer.appendChild(yesButton);
+        btnContainer.appendChild(cancelButton);
+        modal.appendChild(btnContainer);
+        overlay.appendChild(modal);
+    
+        // When clicking outside modal, only remove overlay without affecting selection.
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) {
+                e.stopPropagation();
+                document.body.removeChild(overlay);
+            }
+        });
+    
+        document.body.appendChild(overlay);
+    }
+
     // Add confirmation modal for evaluation
     function showEvaluateConfirmation(noteId) {
         const overlay = document.createElement('div');
@@ -1174,6 +1327,9 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             return;
         }
         
+        // Store the currently selected note for later
+        const currentSelectedNote = note;
+        
         // Process each variable that might have dependencies
         const variablesToProcess = ['startTime', 'duration', 'frequency'];
         let success = true;
@@ -1250,11 +1406,19 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         window.evaluatedNotes = window.myModule.evaluateModule();
         externalFunctions.updateVisualNotes(window.evaluatedNotes);
         
-        // Refresh the note widget
-        const noteElement = document.querySelector(`[data-note-id="${noteId}"]`);
-        if (noteElement) {
-            showNoteVariables(note, noteElement);
+        // Find the new element for the note after DOM update
+        const newElem = document.querySelector(`.note-content[data-note-id="${noteId}"]`);
+        
+        // Re-apply the bring to front functionality for the selected note
+        if (currentSelectedNote && currentSelectedNote.id !== 0 && newElem) {
+            // Only bring to front if it's not the base note
+            if (externalFunctions.bringSelectedNoteToFront) {
+                externalFunctions.bringSelectedNoteToFront(currentSelectedNote, newElem);
+            }
         }
+        
+        // Now show the note variables (which will also mark it as selected)
+        showNoteVariables(currentSelectedNote, newElem);
         
         if (success) {
             showNotification('Note evaluated successfully!', 'success');
@@ -2183,29 +2347,45 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
     function updateNoteWidgetHeight() {
         const widget = domCache.noteWidget;
         if (!widget) return;
-
+    
+        // Get the header and content elements
         const header = widget.querySelector('.note-widget-header');
-        const headerHeight = header ? header.getBoundingClientRect().height : 0;
-        const rect = widget.getBoundingClientRect();
-        const availableSpace = window.innerHeight - rect.top - MIN_BUFFER;
-
         const content = widget.querySelector('.note-widget-content');
-        if (content) {
-            const contentNaturalHeight = content.scrollHeight;
-            const widgetDesiredHeight = headerHeight + contentNaturalHeight + 5;
-            const minInitialHeight = widgetInitiallyOpened ? 40 : 300;
-            const effectiveHeight = Math.max(minInitialHeight, Math.min(availableSpace, widgetDesiredHeight));
+        if (!header || !content) return;
         
-            widget.style.height = effectiveHeight + "px";
-            widget.style.maxHeight = effectiveHeight + "px";
+        // Get the header height
+        const headerHeight = header.offsetHeight;
         
-            let contentMax = effectiveHeight - headerHeight - 5;
-            contentMax = Math.max(contentMax, 40);
-            content.style.maxHeight = contentMax + "px";
-            content.style.overflowY = "auto";
-        }
-
-        widget.style.overflow = "hidden";
+        // Get the widget's current position
+        const rect = widget.getBoundingClientRect();
+        
+        // Calculate available space
+        const availableSpace = window.innerHeight - rect.top - MIN_BUFFER;
+    
+        // Calculate the content's natural height
+        const contentNaturalHeight = content.scrollHeight;
+        
+        // Use a fixed padding value (no calculations)
+        const PADDING = 5;
+        
+        // Calculate the desired widget height
+        const widgetDesiredHeight = headerHeight + contentNaturalHeight + PADDING;
+        
+        // Determine minimum height based on initial state
+        const minInitialHeight = widgetInitiallyOpened ? 40 : 300;
+        
+        // Calculate effective height
+        const effectiveHeight = Math.max(minInitialHeight, Math.min(availableSpace, widgetDesiredHeight));
+        
+        // Apply the height to the widget
+        widget.style.height = effectiveHeight + "px";
+        
+        // Calculate content height directly from widget height
+        const contentHeight = effectiveHeight - headerHeight - PADDING;
+        
+        // Apply the height to the content
+        content.style.height = Math.max(40, contentHeight) + "px";
+        content.style.overflowY = "auto";
     }
 
     // Handle window resize for widget positioning

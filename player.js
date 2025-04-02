@@ -76,10 +76,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         updateBaseNotePosition: updateBaseNotePosition,
         hasMeasurePoints: hasMeasurePoints,
         getLastMeasureId: getLastMeasureId,
+        isLastMeasureInChain: isLastMeasureInChain,
         updateTimingBoundaries: updateTimingBoundaries,
         createMeasureBars: createMeasureBars,
         deleteNoteAndDependencies: deleteNoteAndDependencies,
         deleteNoteKeepDependencies: deleteNoteKeepDependencies,
+        updateDependentRawExpressions: updateDependentRawExpressions,
         checkAndUpdateDependentNotes: checkAndUpdateDependentNotes,
         cleanSlate: cleanSlate,
         bringSelectedNoteToFront: bringSelectedNoteToFront,
@@ -885,30 +887,54 @@ document.addEventListener('DOMContentLoaded', async function() {
   
     /* ---------- GLOBAL HELPERS FOR MEASURE ADD FUNCTIONALITY ---------- */
     function hasMeasurePoints() {
-        return Object.values(myModule.notes).some(note =>
+      // Simply check if there are any measure points in the module
+      return Object.values(myModule.notes).some(note =>
           note.variables.startTime && 
           !note.variables.duration && 
           !note.variables.frequency
-        );
-      }
-      
-      function getLastMeasureId() {
-        const measureNotes = [];
-        for (const id in myModule.notes) {
+      );
+    }
+    
+    // Returns the ID of the absolute last measure by time
+    function getLastMeasureId() {
+      const measureNotes = [];
+      for (const id in myModule.notes) {
           const note = myModule.notes[id];
           if (note.variables.startTime && !note.variables.duration && !note.variables.frequency) {
-            measureNotes.push(note);
+              measureNotes.push(note);
           }
-        }
-        if (measureNotes.length === 0) return null;
-        
-        let lastMeasure = measureNotes[0];
-        for (let i = 1; i < measureNotes.length; i++) {
+      }
+      if (measureNotes.length === 0) return null;
+      
+      let lastMeasure = measureNotes[0];
+      for (let i = 1; i < measureNotes.length; i++) {
           if (measureNotes[i].getVariable('startTime').valueOf() > lastMeasure.getVariable('startTime').valueOf()) {
-            lastMeasure = measureNotes[i];
+              lastMeasure = measureNotes[i];
           }
-        }
-        return lastMeasure.id;
+      }
+      return lastMeasure.id;
+    }
+    
+    // Helper function to determine if a measure is the last in its chain
+    function isLastMeasureInChain(measureId) {
+        const measure = myModule.getNoteById(parseInt(measureId, 10));
+        if (!measure) return false;
+        
+        // Check if there are any measures that depend on this one
+        return !Object.values(myModule.notes).some(otherNote => {
+            if (otherNote.id === measure.id) return false;
+            if (!otherNote.variables.startTimeString) return false;
+            
+            // Check if the other note's startTimeString references this measure
+            const startTimeString = otherNote.variables.startTimeString;
+            const regex = new RegExp(`module\\.getNoteById\\(\\s*${measure.id}\\s*\\)\\.getVariable\\('startTime'\\)`);
+            
+            // Only consider measure bars (notes without duration and frequency)
+            return regex.test(startTimeString) && 
+                  otherNote.variables.startTime && 
+                  !otherNote.variables.duration && 
+                  !otherNote.variables.frequency;
+        });
     }
       
     // Memoization for module end time
