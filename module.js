@@ -14,7 +14,7 @@ portions of the Software.
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
 LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
 IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, IN CONNECTION WITH THE SOFTWARE
 OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail.com
 */
@@ -37,27 +37,28 @@ class Module {
         this._evaluationCache = {};
         this._lastEvaluationTime = 0;
         this._dirtyNotes = new Set();
-
+    
         // Add caching for dependencies
         this._dependenciesCache = new Map();
         this._dependentsCache = new Map();
-
+    
         // Default variables for the base note
         const defaultBaseNoteVariables = {
             frequency: () => new Fraction(440),
             startTime: () => new Fraction(0),
             tempo: () => new Fraction(60), // beats per minute
             beatsPerMeasure: () => new Fraction(4),
+            instrument: 'sine-wave', // Default instrument for base note
             measureLength: () => {
                 const tempo = this.getNoteById(0).getVariable('tempo');
                 const beatsPerMeasure = this.getNoteById(0).getVariable('beatsPerMeasure');
                 return beatsPerMeasure.div(tempo).mul(60);
             },
         };
-
+    
         // Merge default variables with provided variables
         const finalBaseNoteVariables = { ...defaultBaseNoteVariables, ...baseNoteVariables };
-
+    
         // Create the base note with ID 0
         this.baseNote = new Note(0, finalBaseNoteVariables);
         this.baseNote.module = this; // Set module reference
@@ -250,6 +251,43 @@ class Module {
         return this.baseNote.getVariable('tempo');
     }
 
+    findInstrument(note) {
+        // Explicitly track dependency on BaseNote
+        this._trackDependency(note.id, 0);
+        
+        // If the note has its own instrument defined, return it
+        if (note.variables.instrument !== undefined) {
+            return note.getVariable('instrument');
+        }
+        
+        // Otherwise, look for instrument in frequency dependencies
+        let currentNote = note;
+        
+        // First, try to find a parent note through frequency dependency
+        const freqString = currentNote.variables.frequencyString;
+        if (freqString) {
+            // Look for a reference to another note's frequency
+            const noteRefMatch = freqString.match(/module\.getNoteById\((\d+)\)\.getVariable\('frequency'\)/);
+            if (noteRefMatch) {
+                const parentId = parseInt(noteRefMatch[1], 10);
+                const parentNote = this.getNoteById(parentId);
+                if (parentNote) {
+                    // Recursively check the parent note
+                    return this.findInstrument(parentNote);
+                }
+            }
+            
+            // Look for a reference to the base note's frequency
+            if (freqString.includes("module.baseNote.getVariable('frequency')")) {
+                return this.findInstrument(this.baseNote);
+            }
+        }
+        
+        // If no instrument found in dependencies, return the default
+        console.log ('No parent instrument found');
+        return 'sine-wave';
+    }
+
     _trackDependency(noteId, dependencyId) {
         // Skip if noteId is undefined or null
         if (noteId == null) return;
@@ -321,7 +359,8 @@ class Module {
             tempo: () => (new Function("module", "Fraction", "getNoteById", "return " + data.baseNote.tempo + ";"))(null, Fraction, null),
             tempoString: data.baseNote.tempo,
             beatsPerMeasure: () => (new Function("module", "Fraction", "getNoteById", "return " + data.baseNote.beatsPerMeasure + ";"))(null, Fraction, null),
-            beatsPerMeasureString: data.baseNote.beatsPerMeasure
+            beatsPerMeasureString: data.baseNote.beatsPerMeasure,
+            instrument: data.baseNote.instrument || 'sine-wave'
         };
     
         // Create a new Module instance with the above base note.
@@ -335,8 +374,8 @@ class Module {
             // Process all properties except "id".
             Object.entries(noteData).forEach(([key, value]) => {
                 if (key !== 'id') {
-                    if (key === 'color') {
-                        // Store color as direct value
+                    if (key === 'color' || key === 'instrument') {
+                        // Store color and instrument as direct values
                         variables[key] = value;
                     } else if (typeof value === "string" && (value.includes('module.') || value.includes('new Fraction') || value.includes('eval(') || value.includes('getNoteById'))) {
                         // Create a new function that takes module, Fraction, and getNoteById as parameters.
@@ -433,7 +472,7 @@ class Module {
           // Remove "String" suffix.
           const prop = key.slice(0, -6);
           baseObj[prop] = this.baseNote.variables[key];
-        } else if (key === "color") {
+        } else if (key === "color" || key === "instrument") {
           baseObj[key] = this.baseNote.variables[key];
         }
       });
@@ -448,7 +487,7 @@ class Module {
           if (key.endsWith("String")) {
             const prop = key.slice(0, -6);
             noteObj[prop] = note.variables[key];
-          } else if (key === "color") {
+          } else if (key === "color" || key === "instrument") {
             noteObj[key] = note.variables[key];
           }
         });
@@ -548,8 +587,8 @@ class Module {
                 variables[baseKey] = function() {
                     return new Function("module", "Fraction", "return " + variables[key] + ";")(this, Fraction);
                 };
-            } else if (key === 'color') {
-                // Copy color directly
+            } else if (key === 'color' || key === 'instrument') {
+                // Copy color and instrument directly
                 variables[key] = note.variables[key];
             }
         }

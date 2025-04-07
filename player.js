@@ -4469,6 +4469,8 @@ let generalVolumeGainNode = audioContext.createGain();
 let compressor = audioContext.createDynamicsCompressor();
 generalVolumeGainNode.connect(compressor);
 compressor.connect(audioContext.destination);
+let instrumentManager = new InstrumentManager(audioContext);
+window.instrumentManager = instrumentManager;
 
 function initAudioContext() {
     if (!audioContext) {
@@ -4533,105 +4535,8 @@ function generateOscillatorId() {
   return Math.random().toString(36).substr(2, 9);
 }
 
-function playNote(note, startTime) {
-  try {
-      // Always create a new oscillator for each note
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      // Configure oscillator
-      oscillator.frequency.value = note.frequency.valueOf();
-      oscillator.type = 'sine';
-      gainNode.gain.value = 0;
-      
-      // Set up ADSR envelope
-      const duration = note.duration.valueOf();
-      const attackTime = duration * ATTACK_TIME_RATIO;
-      const decayTime = duration * DECAY_TIME_RATIO;
-      const releaseTime = duration * RELEASE_TIME_RATIO;
-      const sustainTime = duration - attackTime - decayTime - releaseTime;
-      
-      // Schedule gain changes
-      gainNode.gain.cancelScheduledValues(startTime);
-      gainNode.gain.setValueAtTime(0, startTime);
-      gainNode.gain.linearRampToValueAtTime(INITIAL_VOLUME, startTime + attackTime);
-      gainNode.gain.linearRampToValueAtTime(INITIAL_VOLUME * SUSTAIN_LEVEL, startTime + attackTime + decayTime);
-      gainNode.gain.setValueAtTime(INITIAL_VOLUME * SUSTAIN_LEVEL, startTime + attackTime + decayTime + sustainTime);
-      gainNode.gain.linearRampToValueAtTime(0, startTime + duration);
-      
-      // Connect audio nodes
-      oscillator.connect(gainNode);
-      gainNode.connect(generalVolumeGainNode);
-      
-      // Generate unique ID for this oscillator
-      const oscId = generateOscillatorId();
-      
-      // Store in active oscillators map
-      activeOscillators.set(oscId, { 
-          oscillator, 
-          gainNode,
-          started: false, // Track if the oscillator has been started
-          stopped: false  // Track if the oscillator has been stopped
-      });
-      
-      // Schedule start and stop with a timeout to ensure we don't miss the event
-      const startDelay = Math.max(0, (startTime - audioContext.currentTime) * 1000);
-      const stopDelay = Math.max(0, (startTime + duration - audioContext.currentTime) * 1000);
-      
-      const startTimeout = setTimeout(() => {
-          if (activeOscillators.has(oscId)) {
-              const oscObj = activeOscillators.get(oscId);
-              if (!oscObj.started && !oscObj.stopped) {
-                  oscObj.started = true;
-                  try {
-                      oscillator.start();
-                  } catch (e) {
-                      console.error('Error starting oscillator:', e);
-                  }
-              }
-          }
-      }, startDelay);
-      
-      const stopTimeout = setTimeout(() => {
-          if (activeOscillators.has(oscId)) {
-              const oscObj = activeOscillators.get(oscId);
-              if (oscObj.started && !oscObj.stopped) {
-                  oscObj.stopped = true;
-                  try {
-                      oscillator.stop();
-                      // Clean up this oscillator
-                      oscillator.disconnect();
-                      gainNode.disconnect();
-                      activeOscillators.delete(oscId);
-                  } catch (e) {
-                      console.error('Error stopping oscillator:', e);
-                  }
-              }
-          }
-      }, stopDelay);
-      
-      // Store timeouts for cleanup
-      scheduledTimeouts.push(startTimeout, stopTimeout);
-      
-      // Set up onended handler as a backup for cleanup
-      oscillator.onended = () => {
-          if (activeOscillators.has(oscId)) {
-              const oscObj = activeOscillators.get(oscId);
-              oscObj.stopped = true;
-              oscillator.disconnect();
-              gainNode.disconnect();
-              activeOscillators.delete(oscId);
-          }
-      };
-  } catch (e) {
-      console.error('Error in playNote:', e);
-  }
-}
-
 function preparePlayback(fromTime) {
   return new Promise((resolve) => {
-      //console.time('Playback preparation');
-      
       // Step 1: Ensure audio context is running
       const resumePromise = audioContext.state === 'suspended' 
           ? audioContext.resume() 
@@ -4645,13 +4550,11 @@ function preparePlayback(fromTime) {
           const evaluatedNotes = myModule.evaluateModule();
           const moduleEndTime = getModuleEndTime();
           
-          // Step 4: Find all notes that should be played
+          // Step 4: Find all notes that should be played.
+          // Include the full note instance for instrument lookup.
           const activeNotes = [];
-          
-          // Process all notes in the module
           for (const id in myModule.notes) {
               const note = myModule.notes[id];
-              
               // Skip notes without required properties
               if (!note.getVariable('startTime') || !note.getVariable('duration') || !note.getVariable('frequency')) {
                   continue;
@@ -4664,6 +4567,7 @@ function preparePlayback(fromTime) {
               // Only include notes that overlap with the playback period
               if (noteEnd > fromTime && noteStart < moduleEndTime) {
                   activeNotes.push({
+                      noteInstance: note,  // store the full note instance
                       id: note.id,
                       startTime: note.getVariable('startTime'),
                       duration: note.getVariable('duration'),
@@ -4672,29 +4576,61 @@ function preparePlayback(fromTime) {
               }
           }
           
-          // Step 5: Pre-create all oscillators and gain nodes
-          const preparedNotes = activeNotes.map(note => {
-              const noteStart = note.startTime.valueOf();
-              const noteDuration = note.duration.valueOf();
-              const noteEnd = noteStart + noteDuration;
-              
-              // Calculate adjusted start time and duration based on fromTime
-              const adjustedStart = Math.max(0, noteStart - fromTime);
-              const adjustedDuration = noteEnd - Math.max(noteStart, fromTime);
-              
-              return {
-                  note: {
-                      ...note,
-                      startTime: new Fraction(adjustedStart),
-                      duration: new Fraction(adjustedDuration)
-                  },
-                  oscillator: audioContext.createOscillator(),
-                  gainNode: audioContext.createGain()
-              };
+          // Collect all unique instruments used in this playback
+          const uniqueInstruments = new Set();
+          activeNotes.forEach(note => {
+              const instrumentName = myModule.findInstrument(note.noteInstance).toLowerCase();
+              uniqueInstruments.add(instrumentName);
           });
           
-          //console.timeEnd('Playback preparation');
-          resolve(preparedNotes);
+          // Wait for all sample instruments to load
+          const loadPromises = Array.from(uniqueInstruments).map(instrumentName => {
+              const instrument = instrumentManager.getInstrument(instrumentName);
+              // If it's a sample instrument, wait for it to load
+              if (instrument && instrument.type === 'sample' && typeof instrument.waitForLoad === 'function') {
+                  return instrument.waitForLoad();
+              }
+              return Promise.resolve();
+          });
+          
+          // When all samples are loaded, continue with playback preparation
+          Promise.all(loadPromises).then(() => {
+              // Step 5: Pre-create all oscillators and gain nodes.
+              const preparedNotes = activeNotes.map(activeNote => {
+                  const noteStart = activeNote.startTime.valueOf();
+                  const noteDuration = activeNote.duration.valueOf();
+                  const noteEnd = noteStart + noteDuration;
+                  
+                  // Calculate adjusted start time and duration.
+                  const adjustedStart = Math.max(0, noteStart - fromTime);
+                  const adjustedDuration = noteEnd - Math.max(noteStart, fromTime);
+                  
+                  // Determine the instrument using the full note instance.
+                  const instrumentName = myModule.findInstrument(activeNote.noteInstance).toLowerCase();
+                  
+                  // Use the instrument manager to create the oscillator
+                  const oscillator = instrumentManager.createOscillator(instrumentName, activeNote.frequency.valueOf());
+                  
+                  const gainNode = audioContext.createGain();
+                  
+                  return {
+                      note: {
+                          ...activeNote,
+                          startTime: new Fraction(adjustedStart),
+                          duration: new Fraction(adjustedDuration),
+                          instrument: instrumentName
+                      },
+                      oscillator: oscillator,
+                      gainNode: gainNode
+                  };
+              });
+              
+              resolve(preparedNotes);
+          }).catch(error => {
+              console.error("Error loading samples:", error);
+              // Resolve with empty array to avoid blocking playback completely
+              resolve([]);
+          });
       });
   });
 }
@@ -4704,169 +4640,56 @@ function play(fromTime = null) {
   if (isPlaying) {
       stop(false);
   }
-  
   if (fromTime === null) {
       fromTime = playheadTime;
   }
   if (fromTime >= getModuleEndTime()) {
       fromTime = 0;
   }
-  
-  // Show loading indicator or change button state
-  domCache.ppElement.classList.add('loading');
-  
-  // Prepare everything before starting playback
-  preparePlayback(fromTime).then((preparedNotes) => {
-      // Now we can start the actual playback with everything prepared
-      isPlaying = true;
-      isPaused = false;
-      
-      // Set timing variables
-      const startTime = audioContext.currentTime + 0.1; // Small buffer to ensure all notes start correctly
-      currentTime = startTime - fromTime;
-      playheadTime = fromTime;
-      totalPausedTime = 0;
-      
-      // Start all prepared notes
-      preparedNotes.forEach(({ note, oscillator, gainNode }) => {
-          try {
-              // Configure oscillator
-              oscillator.frequency.value = note.frequency.valueOf();
-              oscillator.type = 'sine';
-              gainNode.gain.value = 0;
-              
-              // Set up ADSR envelope
-              const duration = note.duration.valueOf();
-              const attackTime = duration * ATTACK_TIME_RATIO;
-              const decayTime = duration * DECAY_TIME_RATIO;
-              const releaseTime = duration * RELEASE_TIME_RATIO;
-              const sustainTime = duration - attackTime - decayTime - releaseTime;
-              
-              // Schedule gain changes
-              const noteStartTime = startTime + note.startTime.valueOf();
-              gainNode.gain.cancelScheduledValues(noteStartTime);
-              gainNode.gain.setValueAtTime(0, noteStartTime);
-              gainNode.gain.linearRampToValueAtTime(INITIAL_VOLUME, noteStartTime + attackTime);
-              gainNode.gain.linearRampToValueAtTime(INITIAL_VOLUME * SUSTAIN_LEVEL, noteStartTime + attackTime + decayTime);
-              gainNode.gain.setValueAtTime(INITIAL_VOLUME * SUSTAIN_LEVEL, noteStartTime + attackTime + decayTime + sustainTime);
-              gainNode.gain.linearRampToValueAtTime(0, noteStartTime + duration);
-              
-              // Connect audio nodes
-              oscillator.connect(gainNode);
-              gainNode.connect(generalVolumeGainNode);
-              
-              // Generate unique ID for this oscillator
-              const oscId = generateOscillatorId();
-              
-              // Store in active oscillators map
-              activeOscillators.set(oscId, { 
-                  oscillator, 
-                  gainNode,
-                  started: false,
-                  stopped: false
-              });
-              
-              // Start the oscillator
-              oscillator.start(noteStartTime);
-              oscillator.stop(noteStartTime + duration);
-              
-              // Mark as started once we've called start
-              const oscObj = activeOscillators.get(oscId);
-              if (oscObj) {
-                  oscObj.started = true;
-              }
-              
-              // Set up onended handler for cleanup
-              oscillator.onended = () => {
-                  if (activeOscillators.has(oscId)) {
-                      const oscObj = activeOscillators.get(oscId);
-                      oscObj.stopped = true;
-                      oscillator.disconnect();
-                      gainNode.disconnect();
-                      activeOscillators.delete(oscId);
-                  }
-              };
-          } catch (e) {
-              console.error('Failed to play prepared note:', e, note);
-          }
-      });
-      
-      // Update UI to show playing state
-      domCache.ppElement.classList.remove('loading');
-      domCache.ppElement.classList.add('open');
-  });
-}
 
-function startPlayback(fromTime) {
-  // This is now just a wrapper around our new preparation and playback system
   preparePlayback(fromTime).then((preparedNotes) => {
-      const startTime = audioContext.currentTime + 0.1;
-      currentTime = startTime - fromTime;
-      playheadTime = fromTime;
-      totalPausedTime = 0;
+    isPlaying = true;
+    isPaused = false;
+    const startTime = audioContext.currentTime + 0.1; // small delay buffer
+    currentTime = startTime - fromTime;
+    playheadTime = fromTime;
+    totalPausedTime = 0;
+    
+    // Iterate over each prepared note and schedule playback.
+    preparedNotes.forEach(prep => {
+      const noteStart = startTime + prep.note.startTime.valueOf();
+      const noteDuration = prep.note.duration.valueOf();
+      const instrumentName = prep.note.instrument;
       
-      preparedNotes.forEach(({ note, oscillator, gainNode }) => {
-          try {
-              // Configure oscillator
-              oscillator.frequency.value = note.frequency.valueOf();
-              oscillator.type = 'sine';
-              gainNode.gain.value = 0;
-              
-              // Set up ADSR envelope
-              const duration = note.duration.valueOf();
-              const attackTime = duration * ATTACK_TIME_RATIO;
-              const decayTime = duration * DECAY_TIME_RATIO;
-              const releaseTime = duration * RELEASE_TIME_RATIO;
-              const sustainTime = duration - attackTime - decayTime - releaseTime;
-              
-              // Schedule gain changes
-              const noteStartTime = startTime + note.startTime.valueOf();
-              gainNode.gain.cancelScheduledValues(noteStartTime);
-              gainNode.gain.setValueAtTime(0, noteStartTime);
-              gainNode.gain.linearRampToValueAtTime(INITIAL_VOLUME, noteStartTime + attackTime);
-              gainNode.gain.linearRampToValueAtTime(INITIAL_VOLUME * SUSTAIN_LEVEL, noteStartTime + attackTime + decayTime);
-              gainNode.gain.setValueAtTime(INITIAL_VOLUME * SUSTAIN_LEVEL, noteStartTime + attackTime + decayTime + sustainTime);
-              gainNode.gain.linearRampToValueAtTime(0, noteStartTime + duration);
-              
-              // Connect audio nodes
-              oscillator.connect(gainNode);
-              gainNode.connect(generalVolumeGainNode);
-              
-              // Generate unique ID for this oscillator
-              const oscId = generateOscillatorId();
-              
-              // Store in active oscillators map
-              activeOscillators.set(oscId, { 
-                  oscillator, 
-                  gainNode,
-                  started: false,
-                  stopped: false
-              });
-              
-              // Start the oscillator
-              oscillator.start(noteStartTime);
-              oscillator.stop(noteStartTime + duration);
-              
-              // Mark as started once we've called start
-              const oscObj = activeOscillators.get(oscId);
-              if (oscObj) {
-                  oscObj.started = true;
-              }
-              
-              // Set up onended handler for cleanup
-              oscillator.onended = () => {
-                  if (activeOscillators.has(oscId)) {
-                      const oscObj = activeOscillators.get(oscId);
-                      oscObj.stopped = true;
-                      oscillator.disconnect();
-                      gainNode.disconnect();
-                      activeOscillators.delete(oscId);
-                  }
-              };
-          } catch (e) {
-              console.error('Failed to play prepared note:', e, note);
-          }
+      // Use the instrument manager to apply the envelope
+      instrumentManager.applyEnvelope(instrumentName, prep.gainNode, noteStart, noteDuration, INITIAL_VOLUME);
+      
+      // Connect the oscillator and gain node.
+      prep.oscillator.connect(prep.gainNode);
+      prep.gainNode.connect(generalVolumeGainNode);
+      
+      // Start and stop the oscillator.
+      prep.oscillator.start(noteStart);
+      prep.oscillator.stop(noteStart + noteDuration);
+      
+      // Optionally add onended cleanup if desired.
+      const oscId = generateOscillatorId();
+      activeOscillators.set(oscId, {
+          oscillator: prep.oscillator,
+          gainNode: prep.gainNode,
+          started: true,
+          stopped: false
       });
+      
+      prep.oscillator.onended = () => {
+          if (activeOscillators.has(oscId)) {
+              activeOscillators.delete(oscId);
+          }
+      };
+    });
+    // Update UI to show playing state
+    domCache.ppElement.classList.remove('loading');
+    domCache.ppElement.classList.add('open');
   });
 }
 
@@ -5257,7 +5080,8 @@ function createModuleJSON() {
             frequency: myModule.baseNote.variables.frequencyString || `new Fraction(${myModule.baseNote.variables.frequency.n}, ${myModule.baseNote.variables.frequency.d})`,
             startTime: myModule.baseNote.variables.startTimeString || `new Fraction(${myModule.baseNote.variables.startTime.n}, ${myModule.baseNote.variables.startTime.d})`,
             tempo: myModule.baseNote.variables.tempoString || `new Fraction(${myModule.baseNote.variables.tempo.n}, ${myModule.baseNote.variables.tempo.d})`,
-            beatsPerMeasure: myModule.baseNote.variables.beatsPerMeasureString || `new Fraction(${myModule.baseNote.variables.beatsPerMeasure.n}, ${myModule.baseNote.variables.beatsPerMeasure.d})`
+            beatsPerMeasure: myModule.baseNote.variables.beatsPerMeasureString || `new Fraction(${myModule.baseNote.variables.beatsPerMeasure.n}, ${myModule.baseNote.variables.beatsPerMeasure.d})`,
+            instrument: myModule.baseNote.variables.instrument || 'sine-wave'
         },
         notes: []
     };

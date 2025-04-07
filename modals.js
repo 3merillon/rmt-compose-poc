@@ -279,6 +279,15 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     };
                 }
             });
+            
+            // Make sure instrument is included for the base note
+            if (!variables.instrument) {
+                variables.instrument = {
+                    evaluated: note.getVariable('instrument') || 'sine-wave',
+                    raw: note.getVariable('instrument') || 'sine-wave',
+                    isInherited: false
+                };
+            }
         } else if (measureId !== null) {
             const noteInstance = window.myModule.getNoteById(parseInt(measureId, 10));
             if (noteInstance && typeof noteInstance.getVariable === 'function') {
@@ -294,8 +303,8 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             variableNames.forEach(key => {
                 if (note.variables && note.variables[key] !== undefined) {
                     if (key === 'color') {
-                        const colorValue = note.getVariable(key);
-                        variables[key] = { evaluated: colorValue, raw: colorValue };
+                        const value = note.getVariable(key);
+                        variables[key] = { evaluated: value, raw: value };
                     } else {
                         variables[key] = {
                             evaluated: note.getVariable(key),
@@ -304,126 +313,521 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     }
                 }
             });
+            
+            // Handle instrument with inheritance
+            const hasOwnInstrument = note.variables.instrument !== undefined;
+            const inheritedInstrument = window.myModule.findInstrument(note);
+    
+            variables.instrument = {
+                evaluated: hasOwnInstrument ? note.getVariable('instrument') : inheritedInstrument,
+                raw: hasOwnInstrument ? note.getVariable('instrument') : inheritedInstrument,
+                isInherited: !hasOwnInstrument
+            };
         }
         
         // Build the widget rows for each variable.
         Object.entries(variables).forEach(([key, value]) => {
-            const variableRow = document.createElement('div');
-            variableRow.className = 'variable-row';
+        const variableRow = document.createElement('div');
+        variableRow.className = 'variable-row';
+        
+        const variableNameDiv = document.createElement('div');
+        variableNameDiv.className = 'variable-name';
+        variableNameDiv.textContent = key;
+        
+        const variableValueDiv = document.createElement('div');
+        variableValueDiv.className = 'variable-value';
+        
+        // Create the evaluated value div
+        let evaluatedDiv = document.createElement('div');
+        evaluatedDiv.className = 'evaluated-value';
+        
+        // Special handling for instrument variable
+        if (key === 'instrument') {
+            // Create a container for instrument selection
+            const instrumentContainer = document.createElement('div');
+            instrumentContainer.style.display = 'flex';
+            instrumentContainer.style.flexDirection = 'column';
+            instrumentContainer.style.gap = '8px';
             
-            const variableNameDiv = document.createElement('div');
-            variableNameDiv.className = 'variable-name';
-            variableNameDiv.textContent = key;
-            
-            const variableValueDiv = document.createElement('div');
-            variableValueDiv.className = 'variable-value';
-            
-            // Create the evaluated value div
-            let evaluatedDiv = document.createElement('div');
-            evaluatedDiv.className = 'evaluated-value';
-            
-            // Add octave buttons for frequency variable
-            if (key === 'frequency') {
-                // Create a container for the evaluated value and octave buttons
-                const evaluatedContainer = document.createElement('div');
-                evaluatedContainer.style.display = 'flex';
-                evaluatedContainer.style.justifyContent = 'space-between';
-                evaluatedContainer.style.alignItems = 'center';
-                
-                // Add the evaluated value text
-                const evaluatedText = document.createElement('div');
-                evaluatedText.innerHTML = `<span class="value-label">Evaluated:</span> ${value.evaluated !== null ? String(value.evaluated) : 'null'}`;
-                evaluatedContainer.appendChild(evaluatedText);
-                
-                // Create octave buttons container
-                const octaveButtonsContainer = document.createElement('div');
-                octaveButtonsContainer.style.display = 'flex';
-                octaveButtonsContainer.style.flexDirection = 'column';
-                octaveButtonsContainer.style.marginLeft = '10px';
-                
-                // Create up octave button
-                const upOctaveButton = document.createElement('button');
-                upOctaveButton.className = 'octave-button octave-up-widget';
-                upOctaveButton.textContent = '▲';
-                upOctaveButton.style.width = '26px';  // Match the width of duration buttons
-                upOctaveButton.style.height = '26px'; // Match the height of duration buttons
-                upOctaveButton.style.padding = '0';
-                upOctaveButton.style.backgroundColor = '#444'; // Match the background of duration buttons
-                upOctaveButton.style.border = '1px solid orange'; // Match the orange border
-                upOctaveButton.style.borderRadius = '4px'; // Match the border radius
-                upOctaveButton.style.cursor = 'pointer';
-                upOctaveButton.style.display = 'flex';
-                upOctaveButton.style.alignItems = 'center';
-                upOctaveButton.style.justifyContent = 'center';
-                upOctaveButton.style.fontSize = '14px'; // Larger font size to match duration buttons
-                upOctaveButton.style.color = '#fff';
-                upOctaveButton.style.marginBottom = '4px'; // Add some spacing between buttons
-
-                // Create down octave button
-                const downOctaveButton = document.createElement('button');
-                downOctaveButton.className = 'octave-button octave-down-widget';
-                downOctaveButton.textContent = '▼';
-                downOctaveButton.style.width = '26px';  // Match the width of duration buttons
-                downOctaveButton.style.height = '26px'; // Match the height of duration buttons
-                downOctaveButton.style.padding = '0';
-                downOctaveButton.style.backgroundColor = '#444'; // Match the background of duration buttons
-                downOctaveButton.style.border = '1px solid orange'; // Match the orange border
-                downOctaveButton.style.borderRadius = '4px'; // Match the border radius
-                downOctaveButton.style.cursor = 'pointer';
-                downOctaveButton.style.display = 'flex';
-                downOctaveButton.style.alignItems = 'center';
-                downOctaveButton.style.justifyContent = 'center';
-                downOctaveButton.style.fontSize = '14px'; // Larger font size to match duration buttons
-                downOctaveButton.style.color = '#fff';
-                
-                // Add hover effects
-                upOctaveButton.addEventListener('mouseenter', () => {
-                    upOctaveButton.style.background = 'rgba(255, 255, 255, 0.4)';
-                });
-                
-                upOctaveButton.addEventListener('mouseleave', () => {
-                    upOctaveButton.style.background = 'rgba(255, 255, 255, 0.2)';
-                });
-                
-                downOctaveButton.addEventListener('mouseenter', () => {
-                    downOctaveButton.style.background = 'rgba(255, 255, 255, 0.4)';
-                });
-                
-                downOctaveButton.addEventListener('mouseleave', () => {
-                    downOctaveButton.style.background = 'rgba(255, 255, 255, 0.2)';
-                });
-                
-                // Add click handlers
-                upOctaveButton.addEventListener('click', (event) => {
-                    event.stopPropagation();
-                    event.preventDefault();
-                    // Use window.handleOctaveChange to access the global function
-                    window.handleOctaveChange(note.id, 'up');
-                });
-                
-                downOctaveButton.addEventListener('click', (event) => {
-                    event.stopPropagation();
-                    event.preventDefault();
-                    // Use window.handleOctaveChange to access the global function
-                    window.handleOctaveChange(note.id, 'down');
-                });
-                
-                // Add buttons to container
-                octaveButtonsContainer.appendChild(upOctaveButton);
-                octaveButtonsContainer.appendChild(downOctaveButton);
-                
-                // Add buttons container to evaluated container
-                evaluatedContainer.appendChild(octaveButtonsContainer);
-                
-                // Replace the original evaluated div with our container
-                evaluatedDiv.appendChild(evaluatedContainer);
+            // Add the evaluated value text with inheritance indicator
+            const evaluatedText = document.createElement('div');
+            if (value.isInherited) {
+                evaluatedText.innerHTML = `<span class="value-label">Inherited:</span> <span style="color: #aaa;">${value.evaluated}</span>`;
             } else {
-                // For non-frequency variables, just use the standard format
-                evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${value.evaluated !== null ? String(value.evaluated) : 'null'}`;
+                evaluatedText.innerHTML = `<span class="value-label">Current:</span> ${value.evaluated}`;
             }
+            instrumentContainer.appendChild(evaluatedText);
+            
+            // Create instrument dropdown
+            const instrumentSelect = document.createElement('select');
+            instrumentSelect.className = 'instrument-select';
+            instrumentSelect.style.padding = '4px';
+            instrumentSelect.style.backgroundColor = '#333';
+            instrumentSelect.style.color = '#ffa800';
+            instrumentSelect.style.border = '1px solid #ffa800';
+            instrumentSelect.style.borderRadius = '4px';
+            instrumentSelect.style.width = '100%';
+            instrumentSelect.style.marginTop = '5px';
+            
+            // Get instruments dynamically from the instrument manager
+            let synthInstruments = [];
+            let sampleInstruments = [];
+
+            if (window.instrumentManager) {
+                try {
+                    // Get all available instruments
+                    const allInstruments = window.instrumentManager.getAvailableInstruments();
+                    
+                    // Separate instruments by type
+                    allInstruments.forEach(instName => {
+                        const instrument = window.instrumentManager.getInstrument(instName);
+                        if (instrument) {
+                            if (instrument.type === 'sample') {
+                                sampleInstruments.push(instName);
+                            } else {
+                                synthInstruments.push(instName);
+                            }
+                        }
+                    });
+                    
+                    // Sort each category alphabetically
+                    //synthInstruments.sort();
+                    sampleInstruments.sort();
+                } catch (err) {
+                    console.warn('Failed to get available instruments from instrumentManager:', err);
+                    // Fallback to default instruments if there's an error
+                    synthInstruments = ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone'];
+                    sampleInstruments = [];
+                }
+            } else {
+                // Fallback to default instruments if instrumentManager is not available
+                synthInstruments = ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone'];
+                sampleInstruments = [];
+            }
+
+            // Create optgroup for synthesized instruments
+            if (synthInstruments.length > 0) {
+                const synthGroup = document.createElement('optgroup');
+                synthGroup.label = 'Synthesized';
+                
+                synthInstruments.forEach(inst => {
+                    const option = document.createElement('option');
+                    option.value = inst;
+                    option.textContent = inst;
+                    if (value.evaluated === inst) {
+                        option.selected = true;
+                    }
+                    synthGroup.appendChild(option);
+                });
+                
+                instrumentSelect.appendChild(synthGroup);
+            }
+
+            // Create optgroup for sample-based instruments
+            if (sampleInstruments.length > 0) {
+                const sampleGroup = document.createElement('optgroup');
+                sampleGroup.label = 'Samples';
+                
+                sampleInstruments.forEach(inst => {
+                    const option = document.createElement('option');
+                    option.value = inst;
+                    option.textContent = inst;
+                    if (value.evaluated === inst) {
+                        option.selected = true;
+                    }
+                    sampleGroup.appendChild(option);
+                });
+                
+                instrumentSelect.appendChild(sampleGroup);
+            }
+
+            // If no instruments were added (unlikely), add a default option
+            if (instrumentSelect.children.length === 0) {
+                const option = document.createElement('option');
+                option.value = 'sine-wave';
+                option.textContent = 'sine-wave';
+                if (value.evaluated === 'sine-wave') {
+                    option.selected = true;
+                }
+                instrumentSelect.appendChild(option);
+            }
+            
+            // Create save button (initially hidden)
+            const saveButton = document.createElement('button');
+            saveButton.className = 'raw-value-save';
+            saveButton.textContent = 'Save';
+            saveButton.style.display = 'none';
+            saveButton.style.marginTop = '5px';
+            
+            // Add change handler for the dropdown to show the save button
+            instrumentSelect.addEventListener('input', () => {
+                saveButton.style.display = 'block';
+            });
+            
+            // Add click handler for the save button
+            saveButton.addEventListener('click', () => {
+                try {
+                    // If playback is ongoing, pause it
+                    if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
+                        window.playerControls.pause();
+                    }
+                    
+                    // Store the current selected note for later
+                    const currentlySelectedNote = note;
+                    
+                    // Update the instrument value
+                    const newValue = instrumentSelect.value;
+                    note.setVariable('instrument', newValue);
+                    
+                    // Reevaluate and update the visual representation
+                    window.evaluatedNotes = window.myModule.evaluateModule();
+                    externalFunctions.updateVisualNotes(window.evaluatedNotes);
+                    
+                    // Find the new element for the note after DOM update
+                    const newElem = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+                    
+                    // Re-apply the bring to front functionality for the selected note
+                    if (currentlySelectedNote && currentlySelectedNote.id !== 0 && newElem) {
+                        // Only bring to front if it's not the base note
+                        if (externalFunctions.bringSelectedNoteToFront) {
+                            externalFunctions.bringSelectedNoteToFront(currentlySelectedNote, newElem);
+                        }
+                    }
+                    
+                    // Now show the note variables (which will also mark it as selected)
+                    showNoteVariables(currentlySelectedNote, newElem);
+                    
+                } catch (error) {
+                    console.error('Error updating instrument:', error);
+                    const errorMsg = document.createElement('div');
+                    errorMsg.className = 'error-message';
+                    errorMsg.textContent = `Error: ${error.message}`;
+                    instrumentContainer.appendChild(errorMsg);
+                    setTimeout(() => errorMsg.remove(), 3000);
+                    instrumentSelect.value = value.evaluated;
+                }
+            });
+            
+            // Add a "Use Inherited" button if the note has its own instrument value
+            // and it's not the base note (which can't inherit)
+            if (!value.isInherited && note.id !== 0) {
+                const resetButton = document.createElement('button');
+                resetButton.className = 'raw-value-save';
+                resetButton.textContent = 'Use Inherited';
+                resetButton.style.backgroundColor = '#555';
+                resetButton.style.marginTop = '5px';
+                
+                resetButton.addEventListener('click', () => {
+                    try {
+                        // If playback is ongoing, pause it
+                        if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
+                            window.playerControls.pause();
+                        }
                         
+                        // Store the current selected note for later
+                        const currentlySelectedNote = note;
+                        
+                        // Delete the instrument property to use inheritance
+                        delete note.variables.instrument;
+                        
+                        // Mark the note as dirty
+                        window.myModule.markNoteDirty(note.id);
+                        
+                        // Reevaluate and update the visual representation
+                        window.evaluatedNotes = window.myModule.evaluateModule();
+                        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+                        
+                        // Find the new element for the note after DOM update
+                        const newElem = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+                        
+                        // Re-apply the bring to front functionality for the selected note
+                        if (currentlySelectedNote && currentlySelectedNote.id !== 0 && newElem) {
+                            // Only bring to front if it's not the base note
+                            if (externalFunctions.bringSelectedNoteToFront) {
+                                externalFunctions.bringSelectedNoteToFront(currentlySelectedNote, newElem);
+                            }
+                        }
+                        
+                        // Now show the note variables (which will also mark it as selected)
+                        showNoteVariables(currentlySelectedNote, newElem);
+                        
+                    } catch (error) {
+                        console.error('Error resetting instrument:', error);
+                        const errorMsg = document.createElement('div');
+                        errorMsg.className = 'error-message';
+                        errorMsg.textContent = `Error: ${error.message}`;
+                        instrumentContainer.appendChild(errorMsg);
+                        setTimeout(() => errorMsg.remove(), 3000);
+                    }
+                });
+                
+                instrumentContainer.appendChild(resetButton);
+            }
+            
+            // Add dropdown and save button to the container
+            instrumentContainer.appendChild(instrumentSelect);
+            instrumentContainer.appendChild(saveButton);
+            
+            // Add the instrument container to the evaluated div
+            evaluatedDiv.appendChild(instrumentContainer);
+            
+            // Add the evaluated div to the variable value div
+            variableValueDiv.appendChild(evaluatedDiv);
+            
+            // For instrument, we skip adding the raw div entirely
+            
+        } else if (key === 'frequency') { // Add octave buttons for frequency variable
+            // Create a container for the evaluated value and octave buttons
+            const evaluatedContainer = document.createElement('div');
+            evaluatedContainer.style.display = 'flex';
+            evaluatedContainer.style.justifyContent = 'space-between';
+            evaluatedContainer.style.alignItems = 'center';
+            
+            // Add the evaluated value text
+            const evaluatedText = document.createElement('div');
+            evaluatedText.innerHTML = `<span class="value-label">Evaluated:</span> ${value.evaluated !== null ? String(value.evaluated) : 'null'}`;
+            evaluatedContainer.appendChild(evaluatedText);
+            
+            // Create octave buttons container
+            const octaveButtonsContainer = document.createElement('div');
+            octaveButtonsContainer.style.display = 'flex';
+            octaveButtonsContainer.style.flexDirection = 'column';
+            octaveButtonsContainer.style.marginLeft = '10px';
+            
+            // Create up octave button
+            const upOctaveButton = document.createElement('button');
+            upOctaveButton.className = 'octave-button octave-up-widget';
+            upOctaveButton.textContent = '▲';
+            upOctaveButton.style.width = '26px';  // Match the width of duration buttons
+            upOctaveButton.style.height = '26px'; // Match the height of duration buttons
+            upOctaveButton.style.padding = '0';
+            upOctaveButton.style.backgroundColor = '#444'; // Match the background of duration buttons
+            upOctaveButton.style.border = '1px solid orange'; // Match the orange border
+            upOctaveButton.style.borderRadius = '4px'; // Match the border radius
+            upOctaveButton.style.cursor = 'pointer';
+            upOctaveButton.style.display = 'flex';
+            upOctaveButton.style.alignItems = 'center';
+            upOctaveButton.style.justifyContent = 'center';
+            upOctaveButton.style.fontSize = '14px'; // Larger font size to match duration buttons
+            upOctaveButton.style.color = '#fff';
+            upOctaveButton.style.marginBottom = '4px'; // Add some spacing between buttons
+
+            // Create down octave button
+            const downOctaveButton = document.createElement('button');
+            downOctaveButton.className = 'octave-button octave-down-widget';
+            downOctaveButton.textContent = '▼';
+            downOctaveButton.style.width = '26px';  // Match the width of duration buttons
+            downOctaveButton.style.height = '26px'; // Match the height of duration buttons
+            downOctaveButton.style.padding = '0';
+            downOctaveButton.style.backgroundColor = '#444'; // Match the background of duration buttons
+            downOctaveButton.style.border = '1px solid orange'; // Match the orange border
+            downOctaveButton.style.borderRadius = '4px'; // Match the border radius
+            downOctaveButton.style.cursor = 'pointer';
+            downOctaveButton.style.display = 'flex';
+            downOctaveButton.style.alignItems = 'center';
+            downOctaveButton.style.justifyContent = 'center';
+            downOctaveButton.style.fontSize = '14px'; // Larger font size to match duration buttons
+            downOctaveButton.style.color = '#fff';
+            
+            // Add hover effects
+            upOctaveButton.addEventListener('mouseenter', () => {
+                upOctaveButton.style.background = 'rgba(255, 255, 255, 0.4)';
+            });
+            
+            upOctaveButton.addEventListener('mouseleave', () => {
+                upOctaveButton.style.background = 'rgba(255, 255, 255, 0.2)';
+            });
+            
+            downOctaveButton.addEventListener('mouseenter', () => {
+                downOctaveButton.style.background = 'rgba(255, 255, 255, 0.4)';
+            });
+            
+            downOctaveButton.addEventListener('mouseleave', () => {
+                downOctaveButton.style.background = 'rgba(255, 255, 255, 0.2)';
+            });
+            
+            // Add click handlers
+            upOctaveButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                // Use window.handleOctaveChange to access the global function
+                window.handleOctaveChange(note.id, 'up');
+            });
+            
+            downOctaveButton.addEventListener('click', (event) => {
+                event.stopPropagation();
+                event.preventDefault();
+                // Use window.handleOctaveChange to access the global function
+                window.handleOctaveChange(note.id, 'down');
+            });
+            
+            // Add buttons to container
+            octaveButtonsContainer.appendChild(upOctaveButton);
+            octaveButtonsContainer.appendChild(downOctaveButton);
+            
+            // Add buttons container to evaluated container
+            evaluatedContainer.appendChild(octaveButtonsContainer);
+            
+            // Replace the original evaluated div with our container
+            evaluatedDiv.appendChild(evaluatedContainer);
+            
+            variableValueDiv.appendChild(evaluatedDiv);
+            
             const rawDiv = document.createElement('div');
             rawDiv.className = 'raw-value';
+            
+            const rawInput = document.createElement('input');
+            rawInput.type = 'text';
+            rawInput.className = 'raw-value-input';
+            rawInput.value = value.raw;
+                
+            const saveButton = document.createElement('button');
+            saveButton.className = 'raw-value-save';
+            saveButton.textContent = 'Save';
+            saveButton.style.display = 'none';
+                
+            rawInput.addEventListener('input', () => {
+                saveButton.style.display = 'inline-block';
+            });
+                
+            saveButton.addEventListener('click', () => {
+                const newRawValue = rawInput.value;
+                try {
+                    // If playback is ongoing, pause it
+                    if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused && window.playerControls && window.playerControls.pause) {
+                        window.playerControls.pause();
+                    }
+                    
+                    // Store the current selected note for later
+                    const currentlySelectedNote = note;
+                    
+                    // Check if this is a measure bar triangle
+                    const isMeasureBar = measureId !== null;
+                    let currentZIndex = null;
+                    
+                    // If it's a measure bar triangle, store its current z-index
+                    if (isMeasureBar) {
+                        const triangleElement = document.querySelector(`.measure-bar-triangle[data-note-id="${measureId}"]`);
+                        if (triangleElement) {
+                            currentZIndex = window.getComputedStyle(triangleElement).zIndex;
+                        }
+                    }
+                    
+                    if (key === 'color') {
+                        if (measureId !== null) {
+                            throw new Error('Color should not be editable for measure points');
+                        } else {
+                            note.variables[key] = newRawValue;
+                            window.myModule.markNoteDirty(note.id); // Mark as dirty
+                        }
+                    } else {
+                        const currentNoteId = measureId !== null ? measureId : note.id;
+                        const validatedExpression = validateExpression(window.myModule, currentNoteId, newRawValue, key);
+                        
+                        // If this is a duration change, store the original duration
+                        let originalDuration;
+                        if (key === 'duration') {
+                            originalDuration = note.getVariable('duration').valueOf();
+                        }
+                        
+                        if (measureId !== null) {
+                            const measureNote = window.myModule.getNoteById(parseInt(measureId, 10));
+                            if (measureNote) {
+                                measureNote.setVariable(key, function () {
+                                    return new Function("module", "Fraction", "return " + validatedExpression + ";")(window.myModule, Fraction);
+                                });
+                                measureNote.setVariable(key + 'String', newRawValue);
+                                // Note: setVariable will mark the note as dirty
+                                
+                                // If this is a duration change, check and update dependent notes
+                                if (key === 'duration') {
+                                    const updatedDuration = note.getVariable('duration').valueOf();
+                                    if (Math.abs(originalDuration - updatedDuration) > 0.001) {
+                                        // Use the external function instead of direct call
+                                        externalFunctions.checkAndUpdateDependentNotes(noteId, originalDuration, updatedDuration);
+                                    }
+                                }
+                            } else {
+                                throw new Error('Unable to find measure note');
+                            }
+                        } else {
+                            note.setVariable(key, function () {
+                                return new Function("module", "Fraction", "return " + validatedExpression + ";")(window.myModule, Fraction);
+                            });
+                            note.setVariable(key + 'String', newRawValue);
+                            // Note: setVariable will mark the note as dirty
+                            
+                            // If this is a duration change, check and update dependent notes
+                            if (key === 'duration') {
+                                const updatedDuration = note.getVariable('duration').valueOf();
+                                if (Math.abs(originalDuration - updatedDuration) > 0.001) {
+                                    externalFunctions.checkAndUpdateDependentNotes(note.id, originalDuration, updatedDuration);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Recompile this note and all its dependents recursively.
+                    recompileNoteAndDependents(note.id);
+
+                    // If the edited note is the BaseNote, update its fraction display and position.
+                    if (note === window.myModule.baseNote) {
+                        externalFunctions.updateBaseNoteFraction();
+                        externalFunctions.updateBaseNotePosition();
+                    }
+                    
+                    // Reevaluate and update the visual representation.
+                    window.evaluatedNotes = window.myModule.evaluateModule();
+                    externalFunctions.updateVisualNotes(window.evaluatedNotes);
+                    
+                    // Find the new element for the note after DOM update
+                    let newElem;
+                    
+                    if (isMeasureBar) {
+                        // For measure bars, find the triangle element
+                        newElem = document.querySelector(`.measure-bar-triangle[data-note-id="${measureId}"]`);
+                        
+                        // Restore the z-index if we have it
+                        if (newElem && currentZIndex) {
+                            newElem.style.zIndex = currentZIndex;
+                        }
+                    } else {
+                        // For regular notes
+                        newElem = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+                        
+                        // Re-apply the bring to front functionality for tapspace notes
+                        if (currentlySelectedNote && currentlySelectedNote.id !== 0 && newElem) {
+                            // Only bring to front if it's not the base note
+                            if (externalFunctions.bringSelectedNoteToFront) {
+                                externalFunctions.bringSelectedNoteToFront(currentlySelectedNote, newElem);
+                            }
+                        }
+                    }
+                    
+                    // Now show the note variables (which will also mark it as selected)
+                    showNoteVariables(note, newElem, measureId);
+                    
+                } catch (error) {
+                    console.error('Error updating note:', error);
+                    const errorMsg = document.createElement('div');
+                    errorMsg.className = 'error-message';
+                    errorMsg.textContent = `Error: ${error.message}`;
+                    rawDiv.appendChild(errorMsg);
+                    setTimeout(() => errorMsg.remove(), 3000);
+                    rawInput.value = value.raw;
+                }
+            });
+                
+            rawDiv.innerHTML = `<span class="value-label">Raw:</span>`;
+            rawDiv.appendChild(rawInput);
+            rawDiv.appendChild(saveButton);
+                
+            variableValueDiv.appendChild(rawDiv);
+        } else {
+            // For non-frequency, non-instrument variables, use the standard format
+            evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${value.evaluated !== null ? String(value.evaluated) : 'null'}`;
+            
+            variableValueDiv.appendChild(evaluatedDiv);
             
             // For the duration variable, add beat modification buttons.
             if (key === 'duration') {
@@ -698,6 +1102,9 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                 variableValueDiv.appendChild(durationPicks);
             }
                 
+            const rawDiv = document.createElement('div');
+            rawDiv.className = 'raw-value';
+            
             const rawInput = document.createElement('input');
             rawInput.type = 'text';
             rawInput.className = 'raw-value-input';
@@ -791,7 +1198,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     
                     // Recompile this note and all its dependents recursively.
                     recompileNoteAndDependents(note.id);
-    
+
                     // If the edited note is the BaseNote, update its fraction display and position.
                     if (note === window.myModule.baseNote) {
                         externalFunctions.updateBaseNoteFraction();
@@ -844,13 +1251,14 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             rawDiv.appendChild(rawInput);
             rawDiv.appendChild(saveButton);
                 
-            variableValueDiv.appendChild(evaluatedDiv);
             variableValueDiv.appendChild(rawDiv);
-                
-            variableRow.appendChild(variableNameDiv);
-            variableRow.appendChild(variableValueDiv);
-            widgetContent.appendChild(variableRow);
+        }
+        
+        variableRow.appendChild(variableNameDiv);
+        variableRow.appendChild(variableValueDiv);
+        widgetContent.appendChild(variableRow);
         });
+                        
         
         let shouldShowAdd = false;
         if (note === window.myModule.baseNote) {
@@ -2359,7 +2767,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         // Get the widget's current position
         const rect = widget.getBoundingClientRect();
         
-        // Calculate available space
+        // Calculate available space - this is the key part that needs fixing
         const availableSpace = window.innerHeight - rect.top - MIN_BUFFER;
     
         // Calculate the content's natural height
@@ -2374,7 +2782,8 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         // Determine minimum height based on initial state
         const minInitialHeight = widgetInitiallyOpened ? 40 : 300;
         
-        // Calculate effective height
+        // Calculate effective height - IMPORTANT: Always use the maximum available space
+        // This is the key fix - we're ensuring the widget can expand to use available space
         const effectiveHeight = Math.max(minInitialHeight, Math.min(availableSpace, widgetDesiredHeight));
         
         // Apply the height to the widget
@@ -2391,35 +2800,31 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
     // Handle window resize for widget positioning
     function handleWindowResize() {
         const widget = domCache.noteWidget;
-        if (!widget) return;
-
+        if (!widget || !widget.classList.contains('visible')) return;
+    
         const header = widget.querySelector('.note-widget-header');
         const headerHeight = header ? header.getBoundingClientRect().height : 0;
         const rect = widget.getBoundingClientRect();
-
+    
         const availableHeight = window.innerHeight - TOP_HEADER_HEIGHT + 5;
         const maxWidgetHeight = availableHeight - headerHeight;
-
+    
         const maxLeft = window.innerWidth - rect.width - MIN_BUFFER;
         const maxTop = window.innerHeight - Math.min(rect.height, maxWidgetHeight) - MIN_BUFFER;
-
+    
         if (rect.right > window.innerWidth - MIN_BUFFER) {
             widget.style.left = Math.max(MIN_BUFFER, maxLeft) + "px";
         }
-
+    
         if (rect.bottom > window.innerHeight - MIN_BUFFER) {
             widget.style.top = Math.max(TOP_HEADER_HEIGHT + MIN_BUFFER, maxTop) + "px";
         }
-
+    
         if (rect.top < TOP_HEADER_HEIGHT + MIN_BUFFER) {
             widget.style.top = (TOP_HEADER_HEIGHT + MIN_BUFFER) + "px";
         }
-
-        if (rect.height > maxWidgetHeight) {
-            widget.style.height = maxWidgetHeight + "px";
-            widget.style.maxHeight = maxWidgetHeight + "px";
-        }
-
+    
+        // Update the widget height on window resize
         updateNoteWidgetHeight();
     }
 

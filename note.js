@@ -33,14 +33,19 @@ class Note {
             } else if (key.endsWith('String')) {
                 // Store string representations directly
                 this.variables[key] = value;
-            } else if (key === 'color') {
-                // Store color as a direct value
+            } else if (key === 'color' || key === 'instrument') {
+                // Store color and instrument as direct values
                 this.variables[key] = value;
             } else {
                 // Wrap other values in a function
                 this.variables[key] = () => value;
             }
         });
+        
+        // Only set default instrument for the base note (id 0)
+        if (id === 0 && !variables.instrument) {
+            this.variables.instrument = 'sine-wave';
+        }
     }
 
     setVariable(name, value) {
