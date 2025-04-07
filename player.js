@@ -1046,9 +1046,20 @@ document.addEventListener('DOMContentLoaded', async function() {
       if (isPlaying) {
           pause();
       }
-  
+    
       try {
-          const importedModule = await Module.loadFromJSON(moduleData);
+          // Check if moduleData is a string or an object
+          let importedModule;
+          let filename = null;
+          
+          // If moduleData has a filename property, extract it
+          if (typeof moduleData === 'object' && moduleData.filename) {
+              filename = moduleData.filename;
+              importedModule = await Module.loadFromJSON(moduleData);
+          } else {
+              // Otherwise, use the standard loading process
+              importedModule = await Module.loadFromJSON(moduleData);
+          }
       
           // Build a mapping from the imported module note ids to new ids in myModule.
           const mapping = {};
@@ -1100,6 +1111,12 @@ document.addEventListener('DOMContentLoaded', async function() {
               const impNote = importedModule.notes[id];
               const oldId = impNote.id;
               impNote.id = mapping[oldId];
+              
+              // If we have a filename, store it in the note
+              if (filename) {
+                  impNote.originalFilename = filename;
+              }
+              
               if (typeof impNote.parentId !== 'undefined') {
                   const oldParent = impNote.parentId;
                   if (mapping.hasOwnProperty(oldParent)) {
@@ -1812,14 +1829,14 @@ function createNoteElement(note, index) {
   noteRect.element.addEventListener('drop', (event) => {
     event.preventDefault();
     try {
-      let data = event.dataTransfer.getData('application/json');
-      if (!data) data = event.dataTransfer.getData('text/plain');
-      if (data) {
-        const moduleData = JSON.parse(data);
-        importModuleAtTarget(note, moduleData);
-      }
+        let data = event.dataTransfer.getData('application/json');
+        if (!data) data = event.dataTransfer.getData('text/plain');
+        if (data) {
+            const moduleData = JSON.parse(data);
+            importModuleAtTarget(note, moduleData);
+        }
     } catch (err) {
-      console.error("Error during desktop drop:", err);
+        console.error("Error during desktop drop:", err);
     }
   }, true);
 

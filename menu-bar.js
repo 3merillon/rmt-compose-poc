@@ -80,9 +80,16 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     const textContainer = icon.querySelector('div');
                     const moduleName = textContainer ? textContainer.textContent.trim() : '';
                     
+                    // Get the filename from the data attribute or moduleData
+                    let filename = icon.getAttribute('data-filename') || moduleName;
+                    if (icon.moduleData && icon.moduleData.filename) {
+                        filename = icon.moduleData.filename;
+                    }
+                    
                     // Create a module entry with all necessary information
                     const moduleEntry = {
                         name: moduleName, // In uploaded modules, this name is already sanitized
+                        filename: filename, // Store the filename separately
                         originalCategory: icon.getAttribute('data-original-category') || category,
                         currentCategory: category,
                         isUploaded: icon.getAttribute('data-uploaded') === 'true'
@@ -90,6 +97,10 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     
                     // If this is an uploaded module, store the full module data
                     if (moduleEntry.isUploaded && icon.moduleData) {
+                        // Ensure the filename is set in the moduleData
+                        if (!icon.moduleData.filename) {
+                            icon.moduleData.filename = filename;
+                        }
                         moduleEntry.moduleData = icon.moduleData;
                     }
                     
@@ -214,7 +225,14 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                                 if (moduleInfo.isUploaded && moduleInfo.moduleData) {
                                     moduleData = moduleInfo.moduleData;
                                     // Use the stored name directly (which is already sanitized)
-                                    const icon = createModuleIcon(categoryObj.name, moduleInfo.name, moduleData);
+                                    const displayName = moduleInfo.name;
+                                    
+                                    // Ensure the filename is set in the moduleData
+                                    if (!moduleData.filename) {
+                                        moduleData.filename = displayName;
+                                    }
+                                    
+                                    const icon = createModuleIcon(categoryObj.name, displayName, moduleData);
                                     icon.setAttribute('data-uploaded', 'true');
                                     sectionContainer.appendChild(icon);
                                     continue;
@@ -797,13 +815,14 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     try {
                         const moduleData = JSON.parse(e.target.result);
                         
-                        // Generate a unique filename with timestamp and sanitize it (replace spaces)
-                        const timestamp = new Date().toISOString().replace(/:/g, '').replace(/\..+/, '');
-                        let filename = `module - ${timestamp}.json`;
-                        filename = filename.replace(/\s+/g, '_');
+                        // Use the original filename (without .json extension) as the display name
+                        const originalFilename = file.name.replace(/\.json$/i, '');
                         
-                        // Create the icon with the module data. For uploaded modules, use the sanitized filename as-is.
-                        const icon = createModuleIcon(category, filename, moduleData);
+                        // Store the original filename in the moduleData
+                        moduleData.filename = originalFilename;
+                        
+                        // Create the icon with the module data and original filename
+                        const icon = createModuleIcon(category, originalFilename, moduleData);
                         
                         icon.setAttribute('data-uploaded', 'true');
                         icon.setAttribute('data-original-filename', file.name);
@@ -816,7 +835,7 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                         sectionContainer.appendChild(icon);
                         ensurePlaceholdersAtEnd();
                         saveUIStateToLocalStorage();
-                        showNotification(`Module "${file.name}" uploaded successfully`, 'success');
+                        showNotification(`Module "${originalFilename}" uploaded successfully`, 'success');
                     } catch (error) {
                         console.error("Error parsing JSON:", error);
                         showNotification(`Invalid JSON file: ${error.message}`, 'error');
@@ -844,6 +863,9 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         const isUploaded = moduleIcon.getAttribute('data-uploaded') === 'true' || /module_-/.test(filename);
         moduleIcon.setAttribute('data-uploaded', isUploaded ? 'true' : 'false');
         
+        // Store the original filename for reference
+        moduleIcon.setAttribute('data-filename', filename);
+        
         moduleIcon.style.width = '42px';
         moduleIcon.style.height = '42px';
         moduleIcon.style.display = 'flex';
@@ -866,14 +888,8 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         moduleIcon.style.border = '1px solid transparent';
         moduleIcon.style.transition = 'border-color 0.3s, box-shadow 0.3s';
     
-        // Remove .json extension when displaying the text if uploaded.
-        let displayName = filename;
-        if (!isUploaded) {
-            displayName = filename.replace(/\.json$/i, '');
-        } else {
-            // For uploaded modules, assume filename is already sanitized.
-            displayName = filename.replace(/\.json$/i, '');
-        }
+        // Use the provided filename directly as the display name, removing .json extension if present
+        let displayName = filename.replace(/\.json$/i, '');
     
         const textContainer = document.createElement('div');
         textContainer.style.width = '100%';
@@ -950,6 +966,10 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         };
     
         if (moduleData) {
+            // Store the filename in the moduleData object
+            if (!moduleData.filename) {
+                moduleData.filename = displayName;
+            }
             moduleIcon.moduleData = moduleData;
         } else if (isUploaded) {
             // For uploaded modules, do not attempt to fetch
@@ -972,6 +992,8 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
                     return response.json();
                 })
                 .then(data => {
+                    // Store the filename in the moduleData object
+                    data.filename = displayName;
                     moduleIcon.moduleData = data;
                 })
                 .catch(err => {
@@ -989,6 +1011,10 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             this.style.opacity = '0.5';
             
             if (moduleIcon.moduleData) {
+                // Make sure the filename is included in the moduleData
+                if (!moduleIcon.moduleData.filename) {
+                    moduleIcon.moduleData.filename = filename.replace(/\.json$/i, '');
+                }
                 const jsonData = JSON.stringify(moduleIcon.moduleData);
                 event.dataTransfer.setData('application/json', jsonData);
                 event.dataTransfer.setData('text/plain', jsonData);
