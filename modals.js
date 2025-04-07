@@ -201,10 +201,17 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         const widgetContent = domCache.widgetContent;
         const widgetTitle = domCache.widgetTitle;
         
+        // Check if this is a silence note (has startTime and duration but no frequency)
+        const isSilence = note && note.getVariable('startTime') && 
+                         note.getVariable('duration') && 
+                         !note.getVariable('frequency');
+        
         if (note === window.myModule.baseNote) {
             widgetTitle.textContent = 'BaseNote Variables';
         } else if (measureId !== null) {
             widgetTitle.textContent = `Measure [${measureId}] Variables`;
+        } else if (isSilence) {
+            widgetTitle.textContent = `Silence [${effectiveNoteId || 'unknown'}] Variables`;
         } else {
             widgetTitle.textContent = `Note [${effectiveNoteId || 'unknown'}] Variables`;
         }

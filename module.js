@@ -255,6 +255,12 @@ class Module {
         // Explicitly track dependency on BaseNote
         this._trackDependency(note.id, 0);
         
+        // Check if this is a silence note (has no frequency)
+        if (!note.variables.frequency && !note.getVariable('frequency')) {
+            // For silence notes, return a default instrument (they won't make sound anyway)
+            return 'sine-wave';
+        }
+        
         // If the note has its own instrument defined, return it
         if (note.variables.instrument !== undefined) {
             return note.getVariable('instrument');
@@ -283,8 +289,7 @@ class Module {
             }
         }
         
-        // If no instrument found in dependencies, return the default
-        console.log ('No parent instrument found');
+        // If no instrument found in dependencies, return the default without logging
         return 'sine-wave';
     }
 

@@ -157,69 +157,72 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // Update octave indicators based on the selected note or base note
     function updateOctaveIndicators() {
-        const octaveContainer = document.getElementById('octave-indicators-container');
-        if (!octaveContainer) {
-            console.warn("Octave container not found, recreating...");
-            createOctaveIndicators();
-            return;
-        }
-        
-        // Get the reference frequency (from selected note or base note)
-        let referenceNote = currentSelectedNote || myModule.baseNote;
-        let referenceFreq = referenceNote.getVariable('frequency').valueOf();
-        
-        // Get all indicator bars
-        const indicators = octaveContainer.querySelectorAll('.octave-indicator');
-        
-        if (indicators.length === 0) {
-            console.warn("No octave indicators found in container, recreating...");
-            createOctaveIndicators();
-            return;
-        }
-        
-        // More accurate device detection using pixel ratio and screen width
-        //const isHighDensityDisplay = window.devicePixelRatio > 1.5;
-        //const isNarrowScreen = window.innerWidth < 768;
-        //const isMobileLike = isHighDensityDisplay && isNarrowScreen;
-        
-        // Set the appropriate vertical offset based on display characteristics
-        const verticalOffset = 10;//isMobileLike ? 10.0 : 10.5;
-        
-        // Update each indicator's position
-        indicators.forEach(indicator => {
-            const octaveOffset = parseInt(indicator.getAttribute('data-octave'));
-            // Calculate frequency for this octave (2^octaveOffset * referenceFreq)
-            const octaveFreq = referenceFreq * Math.pow(2, octaveOffset);
-            // Convert to Y position
-            const y = frequencyToY(octaveFreq);
-            
-            // Get the viewport transformation to position correctly
-            const transform = viewport.getBasis().getRaw();
-            const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-            
-            // Create a point in space and convert to screen coordinates
-            // Use the device-specific vertical offset
-            const point = new tapspace.geometry.Point(space, { x: 0, y: y + verticalOffset });
-            const screenPos = point.transitRaw(viewport);
-            
-            // Position the indicator
-            indicator.style.transform = `translateY(${screenPos.y}px)`;
-            
-            // Update the label text to show which note it's relative to
-            const label = indicator.querySelector('.octave-label');
-            if (label) {
-                if (octaveOffset === 0) {
-                    // Special case for the reference note
-                    if (referenceNote === myModule.baseNote) {
-                        label.textContent = 'BaseNote'; // Always show "BaseNote" for the base note
-                    } else {
-                        label.textContent = `Note [${referenceNote.id}]`;
-                    }
-                } else {
-                    label.textContent = octaveOffset > 0 ? `+${octaveOffset}` : octaveOffset;
-                }
-            }
-        });
+      const octaveContainer = document.getElementById('octave-indicators-container');
+      if (!octaveContainer) {
+          console.warn("Octave container not found, recreating...");
+          createOctaveIndicators();
+          return;
+      }
+      
+      // Get the reference frequency (from selected note or base note)
+      let referenceNote = currentSelectedNote || myModule.baseNote;
+      
+      // Check if the reference note is a silence (has no frequency)
+      if (referenceNote && !referenceNote.getVariable('frequency')) {
+          // For silence notes, use the base note frequency instead
+          referenceNote = myModule.baseNote;
+      }
+      
+      let referenceFreq = referenceNote.getVariable('frequency').valueOf();
+      
+      // Get all indicator bars
+      const indicators = octaveContainer.querySelectorAll('.octave-indicator');
+      
+      if (indicators.length === 0) {
+          console.warn("No octave indicators found in container, recreating...");
+          createOctaveIndicators();
+          return;
+      }
+      
+      // Set the appropriate vertical offset
+      const verticalOffset = 10;
+      
+      // Update each indicator's position
+      indicators.forEach(indicator => {
+          const octaveOffset = parseInt(indicator.getAttribute('data-octave'));
+          // Calculate frequency for this octave (2^octaveOffset * referenceFreq)
+          const octaveFreq = referenceFreq * Math.pow(2, octaveOffset);
+          // Convert to Y position
+          const y = frequencyToY(octaveFreq);
+          
+          // Get the viewport transformation to position correctly
+          const transform = viewport.getBasis().getRaw();
+          const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+          
+          // Create a point in space and convert to screen coordinates
+          const point = new tapspace.geometry.Point(space, { x: 0, y: y + verticalOffset });
+          const screenPos = point.transitRaw(viewport);
+          
+          // Position the indicator
+          indicator.style.transform = `translateY(${screenPos.y}px)`;
+          
+          // Update the label text to show which note it's relative to
+          const label = indicator.querySelector('.octave-label');
+          if (label) {
+              if (octaveOffset === 0) {
+                  // Special case for the reference note
+                  if (referenceNote === myModule.baseNote) {
+                      label.textContent = 'BaseNote'; // Always show "BaseNote" for the base note
+                  } else if (!referenceNote.getVariable('frequency')) {
+                      label.textContent = `Silence [${referenceNote.id}]`; // Show "Silence" for silence notes
+                  } else {
+                      label.textContent = `Note [${referenceNote.id}]`;
+                  }
+              } else {
+                  label.textContent = octaveOffset > 0 ? `+${octaveOffset}` : octaveOffset;
+              }
+          }
+      });
     }
     
     // Make sure to initialize the octave indicators after the viewport and space are created
@@ -1706,11 +1709,24 @@ function getMovedNotes(draggedNote, newDraggedStart, originalDraggedStart) {
 
 /* ---------- CreateNoteElement ---------- */
 function createNoteElement(note, index) {
-  // Calculate fraction string and extract numerator/denom for display.
-  const fractionStr = getFrequencyRatio(note);
-  const parts = fractionStr.split('/');
-  const numerator = parts[0] || "undefined";
-  const denominator = parts[1] || "undefined";
+  // Check if this is a silence note (has startTime and duration but no frequency)
+  const isSilence = note.getVariable('startTime') && note.getVariable('duration') && !note.getVariable('frequency');
+  
+  // Calculate fraction string and extract numerator/denom for display
+  let fractionStr, numerator, denominator;
+  
+  if (!isSilence) {
+    // For regular notes, get the frequency ratio
+    fractionStr = getFrequencyRatio(note);
+    const parts = fractionStr.split('/');
+    numerator = parts[0] || "undefined";
+    denominator = parts[1] || "undefined";
+  } else {
+    // For silence notes, we'll display a different label
+    numerator = "silence";
+    denominator = "";
+  }
+  
   const noteColor = getColorForNote(note);
 
   // Measure text widths for proper layout.
@@ -1745,13 +1761,13 @@ function createNoteElement(note, index) {
         overflow: hidden;
         width: 100%;
         height: 100%;
-        background-color: ${noteColor};
+        background-color: ${isSilence ? 'rgba(50, 50, 50, 0.7)' : noteColor};
         border-radius: 6px;
-        border: 1px solid #636363;
+        border: ${isSilence ? '1px dashed #636363' : '1px solid #636363'};
         transition: border-color 0.3s ease, box-shadow 0.3s ease;
         display: flex;
         align-items: center;
-        padding-left: 16px; /* Increased padding to make room for buttons */
+        padding-left: 16px;
         position: relative;
       ">
         <div class="note-id" style="
@@ -1783,22 +1799,33 @@ function createNoteElement(note, index) {
             justify-content: center;
             height: 100%;
           ">
-            <div style="
-              position: relative;
-              display: flex;
-              flex-direction: column;
-              align-items: flex-start;
-              gap: 0px;
-            ">
-              <span>${numerator}</span>
+            ${isSilence ? `
               <div style="
-                width: ${maxWidth}px;
-                height: 1px;
-                background: white;
-                margin: 0;
-              "></div>
-              <span>${denominator}</span>
-            </div>
+                position: relative;
+                display: flex;
+                flex-direction: column;
+                align-items: flex-start;
+              ">
+                <span>silence</span>
+              </div>
+            ` : `
+              <div style="
+                position: relative;
+                display: flex;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0px;
+              ">
+                <span>${numerator}</span>
+                <div style="
+                  width: ${maxWidth}px;
+                  height: 1px;
+                  background: white;
+                  margin: 0;
+                "></div>
+                <span>${denominator}</span>
+              </div>
+            `}
           </div>
         </div>
       </div>
@@ -1877,6 +1904,7 @@ function createNoteElement(note, index) {
     // Determine the dependency via the raw expression.
     // Look for a pattern "module.getNoteById(<id>)".
     let referenceMatch = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.originalRaw);
+    
     if (referenceMatch) {
       dragData.reference = "module.getNoteById(" + referenceMatch[1] + ")";
     } else {
@@ -2107,6 +2135,7 @@ function createNoteElement(note, index) {
                   const regex = new RegExp(`getNoteById\\(\\s*${currentParent.id}\\s*\\)`);
                   
                   if (regex.test(startTimeString) && 
+                      checkNote.variables.startTime && 
                       !checkNote.variables.duration && 
                       !checkNote.variables.frequency) {
                     dependentMeasures.push(checkNote);
@@ -2365,669 +2394,653 @@ function createNoteElement(note, index) {
                     } else {
                         // Regular note or measure bar
                         const selectedElement = document.querySelector(
-                            `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
-                            `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
-                        );
-                        
-                        if (selectedElement) {
-                            if (selectedElement.classList.contains('measure-bar-triangle')) {
-                                showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
-                            } else {
-                                showNoteVariables(currentSelectedNote, selectedElement);
-                            }
-                        }
-                    }
-                }
-                
-                return;
-            }
-        }
-        
-        // Case 2: We're very close to the original position
-        if (newStartTimeFraction && originalStartTimeFraction && 
-            newStartTimeFraction.sub(originalStartTimeFraction).abs().compare(tolerance) < 0) {
-            
-            if (originalParent) {
-                // Get the original reference string from the note's variables
-                const originalRawString = note.variables.startTimeString;
-                
-                // Only update if we actually changed something
-                if (dragData.reference !== dragData.originalReference) {
-                    // Restore the original startTime function and string
-                    note.setVariable('startTime', function() {
-                        return new Function("module", "Fraction", "return " + originalRawString + ";")(myModule, Fraction);
-                    });
-                    note.setVariable('startTimeString', originalRawString);
-                    
-                    // Reevaluate and update
-                    evaluatedNotes = myModule.evaluateModule();
-                    updateVisualNotes(evaluatedNotes);
-                }
-            }
-        }
-        // Case 3: We're changing to a new parent dependency
-        else {
-            if (currentDepNote && newStartTimeFraction) {
-                // Get the actual start time of the new dependency
-                const depStartTime = new Fraction(currentDepNote.getVariable('startTime').valueOf());
-                
-                // Calculate the offset from the dependency's start time to our desired position
-                const timeOffset = newStartTimeFraction.sub(depStartTime);
-                
-                // Convert this to beats based on the tempo
-                const baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
-                const beatLength = new Fraction(60).div(baseTempo);
-                const beatOffset = timeOffset.div(beatLength);
-                
-                // Create the reference string
-                let depReference = currentDepNote === myModule.baseNote ? 
-                    "module.baseNote" : 
-                    `module.getNoteById(${currentDepNote.id})`;
-                
-                // Get the fraction string for the beat offset
-                const fractionStr = beatOffset.toFraction();
-                let numerator, denominator;
-                
-                if (fractionStr.includes('/')) {
-                    [numerator, denominator] = fractionStr.split('/');
-                } else {
-                    numerator = fractionStr;
-                    denominator = '1';
-                }
-                
-                // Create the new expression
-                let newRaw;
-                
-                // Check if we're attaching to a note that has a duration and the offset is very close to that duration
-                if (currentDepNote.getVariable('duration')) {
-                    const depDuration = currentDepNote.getVariable('duration').valueOf();
-                    const durationInBeats = depDuration / beatLength.valueOf();
-                    const offsetInBeats = beatOffset.valueOf();
-                    
-                    // If the offset is very close to the duration, use the duration dependency
-                    if (Math.abs(offsetInBeats - durationInBeats) < 0.1) {
-                        newRaw = `${depReference}.getVariable('startTime').add(${depReference}.getVariable('duration'))`;
-                    } else {
-                        // Standard beat offset expression
-                        newRaw = depReference +
-                            ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
-                            ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
-                    }
-                } else {
-                    // Standard beat offset expression
-                    newRaw = depReference +
-                        ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
-                        ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
-                }
-                
-                // Update the note's startTime
-                note.setVariable('startTime', function() {
-                    return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
-                });
-                note.setVariable('startTimeString', newRaw);
-                
-                // Reevaluate and update
-                evaluatedNotes = myModule.evaluateModule();
-                updateVisualNotes(evaluatedNotes);
-            }
-        }
-        
-        // Update the note widget if it's open
-        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
-        if (noteWidgetVisible && currentSelectedNote) {
-            if (currentSelectedNote === myModule.baseNote) {
-                // Special handling for base note
-                const baseNoteElement = document.querySelector('.base-note-circle');
-                if (baseNoteElement) {
-                    showNoteVariables(myModule.baseNote, baseNoteElement);
-                }
-            } else {
-                // Regular note or measure bar
-                const selectedElement = document.querySelector(
-                    `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
-                    `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
-                );
-                
-                if (selectedElement) {
-                    if (selectedElement.classList.contains('measure-bar-triangle')) {
-                        showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
-                    } else {
-                        showNoteVariables(currentSelectedNote, selectedElement);
-                    }
-                }
-            }
-        }
-        
-        e.stopPropagation();
-    }
-    
-    // Clean up all drag state
-    cleanupDragState();
+                          `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                          `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+                      );
+                      
+                      if (selectedElement) {
+                          if (selectedElement.classList.contains('measure-bar-triangle')) {
+                              showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
+                          } else {
+                              showNoteVariables(currentSelectedNote, selectedElement);
+                          }
+                      }
+                  }
+              }
+              
+              return;
+          }
+      }
+      
+      // Case 2: We're very close to the original position
+      if (newStartTimeFraction && originalStartTimeFraction && 
+          newStartTimeFraction.sub(originalStartTimeFraction).abs().compare(tolerance) < 0) {
+          
+          if (originalParent) {
+              // Get the original reference string from the note's variables
+              const originalRawString = note.variables.startTimeString;
+              
+              // Only update if we actually changed something
+              if (dragData.reference !== dragData.originalReference) {
+                  // Restore the original startTime function and string
+                  note.setVariable('startTime', function() {
+                      return new Function("module", "Fraction", "return " + originalRawString + ";")(myModule, Fraction);
+                  });
+                  note.setVariable('startTimeString', originalRawString);
+                  
+                  // Reevaluate and update
+                  evaluatedNotes = myModule.evaluateModule();
+                  updateVisualNotes(evaluatedNotes);
+              }
+          }
+      }
+      // Case 3: We're changing to a new parent dependency
+      else {
+          if (currentDepNote && newStartTimeFraction) {
+              // Get the actual start time of the new dependency
+              const depStartTime = new Fraction(currentDepNote.getVariable('startTime').valueOf());
+              
+              // Calculate the offset from the dependency's start time to our desired position
+              const timeOffset = newStartTimeFraction.sub(depStartTime);
+              
+              // Convert this to beats based on the tempo
+              const baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
+              const beatLength = new Fraction(60).div(baseTempo);
+              const beatOffset = timeOffset.div(beatLength);
+              
+              // Create the reference string
+              let depReference = currentDepNote === myModule.baseNote ? 
+                  "module.baseNote" : 
+                  `module.getNoteById(${currentDepNote.id})`;
+              
+              // Get the fraction string for the beat offset
+              const fractionStr = beatOffset.toFraction();
+              let numerator, denominator;
+              
+              if (fractionStr.includes('/')) {
+                  [numerator, denominator] = fractionStr.split('/');
+              } else {
+                  numerator = fractionStr;
+                  denominator = '1';
+              }
+              
+              // Create the new expression
+              let newRaw;
+              
+              // Check if we're attaching to a note that has a duration and the offset is very close to that duration
+              if (currentDepNote.getVariable('duration')) {
+                  const depDuration = currentDepNote.getVariable('duration').valueOf();
+                  const durationInBeats = depDuration / beatLength.valueOf();
+                  const offsetInBeats = beatOffset.valueOf();
+                  
+                  // If the offset is very close to the duration, use the duration dependency
+                  if (Math.abs(offsetInBeats - durationInBeats) < 0.1) {
+                      newRaw = `${depReference}.getVariable('startTime').add(${depReference}.getVariable('duration'))`;
+                  } else {
+                      // Standard beat offset expression
+                      newRaw = depReference +
+                          ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
+                          ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
+                  }
+              } else {
+                  // Standard beat offset expression
+                  newRaw = depReference +
+                      ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
+                      ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
+              }
+              
+              // Update the note's startTime
+              note.setVariable('startTime', function() {
+                  return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+              });
+              note.setVariable('startTimeString', newRaw);
+              
+              // Reevaluate and update
+              evaluatedNotes = myModule.evaluateModule();
+              updateVisualNotes(evaluatedNotes);
+          }
+      }
+      
+      // Update the note widget if it's open
+      const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+      if (noteWidgetVisible && currentSelectedNote) {
+          if (currentSelectedNote === myModule.baseNote) {
+              // Special handling for base note
+              const baseNoteElement = document.querySelector('.base-note-circle');
+              if (baseNoteElement) {
+                  showNoteVariables(myModule.baseNote, baseNoteElement);
+              }
+          } else {
+              // Regular note or measure bar
+              const selectedElement = document.querySelector(
+                  `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                  `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+              );
+              
+              if (selectedElement) {
+                  if (selectedElement.classList.contains('measure-bar-triangle')) {
+                      showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
+                  } else {
+                      showNoteVariables(currentSelectedNote, selectedElement);
+                  }
+              }
+          }
+      }
+      
+      e.stopPropagation();
   }
   
-  // Handle pointer cancel events
-  function handlePointerCancel(note, e) {
-    // Only process cancel events for the specific pointer that started the drag
-    if (e.pointerId !== dragData.pointerId) return;
-    
-    // Clean up all drag state
-    cleanupDragState();
-  }
+  // Clean up all drag state
+  cleanupDragState();
+}
 
-  // Helper: updateDragOverlay creates or updates an overlay element.
-  function updateDragOverlay(noteObj, newTime, depId, type) {
-    let overlayContainer = document.getElementById('drag-overlay-container');
-    if (!overlayContainer) {
-      // Create the container if it doesn't exist
-      overlayContainer = document.createElement('div');
-      overlayContainer.id = 'drag-overlay-container';
-      overlayContainer.style.position = 'fixed';
-      overlayContainer.style.top = '0';
-      overlayContainer.style.left = '0';
-      overlayContainer.style.width = '100%';
-      overlayContainer.style.height = '100%';
-      overlayContainer.style.pointerEvents = 'none';
-      overlayContainer.style.zIndex = '10000';
-      document.body.appendChild(overlayContainer);
-    }
-    
-    const overlayId = type === 'dragged' ? 'drag-overlay-dragged' : 
-                      type === 'dependency' ? 'drag-overlay-dep-' + depId :
-                      'drag-overlay-parent';
-    let overlayElem = document.getElementById(overlayId);
-    
-    // Get the current viewport transform to account for zoom
-    const transform = viewport.getBasis().getRaw();
-    const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-    
-    // Check if this is a measure bar
-    const isMeasureBar = noteObj.id !== undefined && 
-                         noteObj.getVariable && 
-                         noteObj.getVariable('startTime') && 
-                         !noteObj.getVariable('duration') && 
-                         !noteObj.getVariable('frequency');
-    
-    // Check if this is the base note
-    const isBaseNote = noteObj === myModule.baseNote;
-    
-    // Check if this is a silence (has startTime and duration but no frequency)
-    const isSilence = noteObj.id !== undefined && 
-                     noteObj.getVariable && 
-                     noteObj.getVariable('startTime') && 
-                     noteObj.getVariable('duration') && 
-                     !noteObj.getVariable('frequency');
-    
-    // Calculate X position based on time or special case for BaseNote
-    let xCoord;
-    if (isBaseNote) {
-      // BaseNote has a fixed position at -29 in space coordinates
-      xCoord = -29;
+// Handle pointer cancel events
+function handlePointerCancel(note, e) {
+  // Only process cancel events for the specific pointer that started the drag
+  if (e.pointerId !== dragData.pointerId) return;
+  
+  // Clean up all drag state
+  cleanupDragState();
+}
+
+// Helper: updateDragOverlay creates or updates an overlay element.
+function updateDragOverlay(noteObj, newTime, depId, type) {
+  let overlayContainer = document.getElementById('drag-overlay-container');
+  if (!overlayContainer) {
+    // Create the container if it doesn't exist
+    overlayContainer = document.createElement('div');
+    overlayContainer.id = 'drag-overlay-container';
+    overlayContainer.style.position = 'fixed';
+    overlayContainer.style.top = '0';
+    overlayContainer.style.left = '0';
+    overlayContainer.style.width = '100%';
+    overlayContainer.style.height = '100%';
+    overlayContainer.style.pointerEvents = 'none';
+    overlayContainer.style.zIndex = '10000';
+    document.body.appendChild(overlayContainer);
+  }
+  
+  const overlayId = type === 'dragged' ? 'drag-overlay-dragged' : 
+                    type === 'dependency' ? 'drag-overlay-dep-' + depId :
+                    'drag-overlay-parent';
+  let overlayElem = document.getElementById(overlayId);
+  
+  // Get the current viewport transform to account for zoom
+  const transform = viewport.getBasis().getRaw();
+  const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+  
+  // Check if this is a measure bar
+  const isMeasureBar = noteObj.id !== undefined && 
+                       noteObj.getVariable && 
+                       noteObj.getVariable('startTime') && 
+                       !noteObj.getVariable('duration') && 
+                       !noteObj.getVariable('frequency');
+  
+  // Check if this is the base note
+  const isBaseNote = noteObj === myModule.baseNote;
+  
+  // Check if this is a silence (has startTime and duration but no frequency)
+  const isSilence = noteObj.id !== undefined && 
+                   noteObj.getVariable && 
+                   noteObj.getVariable('startTime') && 
+                   noteObj.getVariable('duration') && 
+                   !noteObj.getVariable('frequency');
+  
+  // Calculate X position based on time or special case for BaseNote
+  let xCoord;
+  if (isBaseNote) {
+    // BaseNote has a fixed position at -29 in space coordinates
+    xCoord = -29;
+  } else {
+    xCoord = newTime * 200 * xScaleFactor;
+  }
+  
+  const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
+  const screenPos = point.transitRaw(viewport);
+  
+  // Get Y position based on frequency or special type
+  let yPos = 0;
+  
+  if (isBaseNote) {
+    // For base note, use its fixed position
+    const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+    const baseNoteY = frequencyToY(baseNoteFreq);
+    // Add a small offset to match the visual position of the actual base note circle
+    const yOffset = 10; // Adjust this value to match the actual offset
+    const yPoint = new tapspace.geometry.Point(space, { x: 0, y: baseNoteY + yOffset });
+    const yScreenPos = yPoint.transitRaw(viewport);
+    yPos = yScreenPos.y;
+  } else if (isMeasureBar) {
+    // For measure bars, position at the bottom where triangles are
+    const trianglesContainer = document.getElementById('measureBarTrianglesContainer');
+    if (trianglesContainer) {
+      const rect = trianglesContainer.getBoundingClientRect();
+      yPos = rect.top;
     } else {
-      xCoord = newTime * 200 * xScaleFactor;
+      // Fallback if container not found
+      yPos = window.innerHeight - 30;
     }
+  } else if (isSilence) {
+    // For silences, find the first parent with a defined frequency
+    let parentWithFreq = null;
+    let currentNote = noteObj;
     
-    const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
-    const screenPos = point.transitRaw(viewport);
+    // Function to find parent note with frequency
+    const findParentWithFrequency = (note) => {
+      if (!note) return null;
+      
+      // Get the parent reference from the startTime expression
+      let parentId = null;
+      const startTimeString = note.variables.startTimeString;
+      if (startTimeString) {
+        const match = /getNoteById\((\d+)\)/.exec(startTimeString);
+        if (match) {
+          parentId = parseInt(match[1], 10);
+        }
+      }
+      
+      // If no parent found in expression, try the parentId property
+      if (parentId === null && note.parentId !== undefined) {
+        parentId = note.parentId;
+      }
+      
+      // If still no parent, use BaseNote
+      if (parentId === null) {
+        return myModule.baseNote;
+      }
+      
+      // Get the parent note
+      const parentNote = myModule.getNoteById(parentId);
+      
+      // If parent has frequency, return it
+      if (parentNote && parentNote.getVariable && parentNote.getVariable('frequency')) {
+        return parentNote;
+      }
+      
+      // Otherwise, recursively check the parent's parent
+      return findParentWithFrequency(parentNote);
+    };
     
-    // Get Y position based on frequency or special type
-    let yPos = 0;
+    // Find parent with frequency
+    parentWithFreq = findParentWithFrequency(currentNote);
     
-    if (isBaseNote) {
-      // For base note, use its fixed position
-      const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
-      const baseNoteY = frequencyToY(baseNoteFreq);
-      // Add a small offset to match the visual position of the actual base note circle
-      const yOffset = 10; // Adjust this value to match the actual offset
-      const yPoint = new tapspace.geometry.Point(space, { x: 0, y: baseNoteY + yOffset });
+    // If found, use its frequency for positioning
+    if (parentWithFreq) {
+      const frequency = parentWithFreq.getVariable('frequency').valueOf();
+      const y = frequencyToY(frequency);
+      const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
       const yScreenPos = yPoint.transitRaw(viewport);
       yPos = yScreenPos.y;
-    } else if (isMeasureBar) {
-      // For measure bars, position at the bottom where triangles are
-      const trianglesContainer = document.getElementById('measureBarTrianglesContainer');
-      if (trianglesContainer) {
-        const rect = trianglesContainer.getBoundingClientRect();
-        yPos = rect.top;
-      } else {
-        // Fallback if container not found
-        yPos = window.innerHeight - 30;
-      }
-    } else if (isSilence) {
-      // For silences, find the first parent with a defined frequency
-      let parentWithFreq = null;
-      let currentNote = noteObj;
-      
-      // Function to find parent note with frequency
-      const findParentWithFrequency = (note) => {
-        if (!note) return null;
-        
-        // Get the parent reference from the startTime expression
-        let parentId = null;
-        const startTimeString = note.variables.startTimeString;
-        if (startTimeString) {
-          const match = /getNoteById\((\d+)\)/.exec(startTimeString);
-          if (match) {
-            parentId = parseInt(match[1], 10);
-          }
-        }
-        
-        // If no parent found in expression, try the parentId property
-        if (parentId === null && note.parentId !== undefined) {
-          parentId = note.parentId;
-        }
-        
-        // If still no parent, use BaseNote
-        if (parentId === null) {
-          return myModule.baseNote;
-        }
-        
-        // Get the parent note
-        const parentNote = myModule.getNoteById(parentId);
-        
-        // If parent has frequency, return it
-        if (parentNote && parentNote.getVariable && parentNote.getVariable('frequency')) {
-          return parentNote;
-        }
-        
-        // Otherwise, recursively check the parent's parent
-        return findParentWithFrequency(parentNote);
-      };
-      
-      // Find parent with frequency
-      parentWithFreq = findParentWithFrequency(currentNote);
-      
-      // If found, use its frequency for positioning
-      if (parentWithFreq) {
-        const frequency = parentWithFreq.getVariable('frequency').valueOf();
-        const y = frequencyToY(frequency);
-        const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
-        const yScreenPos = yPoint.transitRaw(viewport);
-        yPos = yScreenPos.y;
-      } else {
-        // Fallback to BaseNote frequency if no parent with frequency found
-        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
-        const y = frequencyToY(baseNoteFreq);
-        const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
-        const yScreenPos = yPoint.transitRaw(viewport);
-        yPos = yScreenPos.y;
-      }
-    } else if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
-      try {
-        const frequency = noteObj.getVariable('frequency').valueOf();
-        const y = frequencyToY(frequency);
-        const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
-        const yScreenPos = yPoint.transitRaw(viewport);
-        yPos = yScreenPos.y;
-      } catch (e) {
-        console.error('Error getting frequency:', e);
-        yPos = 100; // Fallback position
-      }
-    } else if (noteObj.frequency) {
-      try {
-        const frequency = typeof noteObj.frequency === 'function' 
-          ? noteObj.frequency().valueOf() 
-          : noteObj.frequency.valueOf();
-        const y = frequencyToY(frequency);
-        const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
-        const yScreenPos = yPoint.transitRaw(viewport);
-        yPos = yScreenPos.y;
-      } catch (e) {
-        console.error('Error getting frequency from note object:', e);
-        yPos = 100; // Fallback position
-      }
+    } else {
+      // Fallback to BaseNote frequency if no parent with frequency found
+      const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+      const y = frequencyToY(baseNoteFreq);
+      const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
+      const yScreenPos = yPoint.transitRaw(viewport);
+      yPos = yScreenPos.y;
     }
-    
-    // Calculate width and height based on note type
-    let width = 100; // Default width in space units
-    let height = 20;  // Default height in space units
-    
-    if (isBaseNote) {
-      // For base note, use a circle shape
-      width = 40;
-      height = 40;
-    } else if (isMeasureBar) {
-      // For measure bars, use triangle dimensions
-      width = 30;
-      height = 30;
-    } else if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
-      try {
-        const duration = noteObj.getVariable('duration').valueOf();
-        width = duration * 200 * xScaleFactor; // Convert duration to space units
-      } catch (e) {
-        console.error('Error getting duration:', e);
-      }
-    } else if (noteObj.duration) {
-      try {
-        const duration = typeof noteObj.duration === 'function'
-          ? noteObj.duration().valueOf()
-          : noteObj.duration.valueOf();
-        width = duration * 200 * xScaleFactor; // Convert duration to space units
-      } catch (e) {
-        console.error('Error getting duration from note object:', e);
-      }
+  } else if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
+    try {
+      const frequency = noteObj.getVariable('frequency').valueOf();
+      const y = frequencyToY(frequency);
+      const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
+      const yScreenPos = yPoint.transitRaw(viewport);
+      yPos = yScreenPos.y;
+    } catch (e) {
+      console.error('Error getting frequency:', e);
+      yPos = 100; // Fallback position
     }
+  } else if (noteObj.frequency) {
+    try {
+      const frequency = typeof noteObj.frequency === 'function' 
+        ? noteObj.frequency().valueOf() 
+        : noteObj.frequency.valueOf();
+      const y = frequencyToY(frequency);
+      const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
+      const yScreenPos = yPoint.transitRaw(viewport);
+      yPos = yScreenPos.y;
+    } catch (e) {
+      console.error('Error getting frequency from note object:', e);
+      yPos = 100; // Fallback position
+    }
+  }
+  
+  // Calculate width and height based on note type
+  let width = 100; // Default width in space units
+  let height = 20;  // Default height in space units
+  
+  if (isBaseNote) {
+    // For base note, use a circle shape
+    width = 40;
+    height = 40;
+  } else if (isMeasureBar) {
+    // For measure bars, use triangle dimensions
+    width = 30;
+    height = 30;
+  } else if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
+    try {
+      const duration = noteObj.getVariable('duration').valueOf();
+      width = duration * 200 * xScaleFactor; // Convert duration to space units
+    } catch (e) {
+      console.error('Error getting duration:', e);
+    }
+  } else if (noteObj.duration) {
+    try {
+      const duration = typeof noteObj.duration === 'function'
+        ? noteObj.duration().valueOf()
+        : noteObj.duration.valueOf();
+      width = duration * 200 * xScaleFactor; // Convert duration to space units
+    } catch (e) {
+      console.error('Error getting duration from note object:', e);
+    }
+  }
+  
+  // For screen dimensions, we need to use the same transformation that tapspace uses
+  // Create a point at the origin and another at (width, height)
+  const origin = new tapspace.geometry.Point(space, { x: 0, y: 0 });
+  const corner = new tapspace.geometry.Point(space, { x: width, y: height });
+  
+  // Convert both to screen coordinates
+  const originScreen = origin.transitRaw(viewport);
+  const cornerScreen = corner.transitRaw(viewport);
+  
+  // Calculate screen dimensions from the difference
+  const screenWidth = Math.abs(cornerScreen.x - originScreen.x);
+  const screenHeight = Math.abs(cornerScreen.y - originScreen.y);
+  
+  // Get the note's actual color
+  let noteColor = getColorForNote(noteObj);
+  
+  // Function to blend colors
+  function blendColors(color1, color2, ratio) {
+    // Parse the colors
+    let r1, g1, b1, a1, r2, g2, b2, a2;
     
-    // For screen dimensions, we need to use the same transformation that tapspace uses
-    // Create a point at the origin and another at (width, height)
-    const origin = new tapspace.geometry.Point(space, { x: 0, y: 0 });
-    const corner = new tapspace.geometry.Point(space, { x: width, y: height });
-    
-    // Convert both to screen coordinates
-    const originScreen = origin.transitRaw(viewport);
-    const cornerScreen = corner.transitRaw(viewport);
-    
-    // Calculate screen dimensions from the difference
-    const screenWidth = Math.abs(cornerScreen.x - originScreen.x);
-    const screenHeight = Math.abs(cornerScreen.y - originScreen.y);
-    
-    // Get the note's actual color
-    let noteColor = getColorForNote(noteObj);
-    
-    // Function to blend colors
-    function blendColors(color1, color2, ratio) {
-      // Parse the colors
-      let r1, g1, b1, a1, r2, g2, b2, a2;
-      
-      // Helper function to parse rgba
-      function parseRgba(color) {
-        const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-        if (rgba) {
-          return {
-            r: parseInt(rgba[1]),
-            g: parseInt(rgba[2]),
-            b: parseInt(rgba[3]),
-            a: rgba[4] ? parseFloat(rgba[4]) : 1
-          };
-        }
-        return null;
-      }
-      
-      // Helper function to parse hex
-      function parseHex(color) {
-        let hex = color.replace('#', '');
-        if (hex.length === 3) {
-          hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-        }
+    // Helper function to parse rgba
+    function parseRgba(color) {
+      const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+      if (rgba) {
         return {
-          r: parseInt(hex.substring(0, 2), 16),
-          g: parseInt(hex.substring(2, 4), 16),
-          b: parseInt(hex.substring(4, 6), 16),
-          a: 1
+          r: parseInt(rgba[1]),
+          g: parseInt(rgba[2]),
+          b: parseInt(rgba[3]),
+          a: rgba[4] ? parseFloat(rgba[4]) : 1
         };
       }
-      
-      // Helper function to parse hsla
-      function parseHsla(color) {
-        const hsla = color.match(/hsla?\(([^,]+),\s*([^,]+)%,\s*([^,]+)%(?:,\s*([\d.]+))?\)/);
-        if (hsla) {
-          // Convert HSL to RGB
-          const h = parseFloat(hsla[1]) / 360;
-          const s = parseFloat(hsla[2]) / 100;
-          const l = parseFloat(hsla[3]) / 100;
-          const a = hsla[4] ? parseFloat(hsla[4]) : 1;
-          
-          let r, g, b;
-          
-          if (s === 0) {
-            r = g = b = l;
-          } else {
-            const hue2rgb = (p, q, t) => {
-              if (t < 0) t += 1;
-              if (t > 1) t -= 1;
-              if (t < 1/6) return p + (q - p) * 6 * t;
-              if (t < 1/2) return q;
-              if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-              return p;
-            };
-            
-            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-            const p = 2 * l - q;
-            
-            r = hue2rgb(p, q, h + 1/3);
-            g = hue2rgb(p, q, h);
-            b = hue2rgb(p, q, h - 1/3);
-          }
-          
-          return {
-            r: Math.round(r * 255),
-            g: Math.round(g * 255),
-            b: Math.round(b * 255),
-            a: a
-          };
-        }
-        return null;
-      }
-      
-      // Parse color1
-      let color1Obj;
-      if (color1.startsWith('rgba') || color1.startsWith('rgb')) {
-        color1Obj = parseRgba(color1);
-      } else if (color1.startsWith('#')) {
-        color1Obj = parseHex(color1);
-      } else if (color1.startsWith('hsla') || color1.startsWith('hsl')) {
-        color1Obj = parseHsla(color1);
-      }
-      
-      // Parse color2
-      let color2Obj;
-      if (color2.startsWith('rgba') || color2.startsWith('rgb')) {
-        color2Obj = parseRgba(color2);
-      } else if (color2.startsWith('#')) {
-        color2Obj = parseHex(color2);
-      } else if (color2.startsWith('hsla') || color2.startsWith('hsl')) {
-        color2Obj = parseHsla(color2);
-      }
-      
-      if (!color1Obj || !color2Obj) {
-        return color1; // Return original if parsing failed
-      }
-      
-      // Blend the colors
-      const r = Math.round(color1Obj.r * (1 - ratio) + color2Obj.r * ratio);
-      const g = Math.round(color1Obj.g * (1 - ratio) + color2Obj.g * ratio);
-      const b = Math.round(color1Obj.b * (1 - ratio) + color2Obj.b * ratio);
-      const a = color1Obj.a * (1 - ratio) + color2Obj.a * ratio;
-      
-      return `rgba(${r}, ${g}, ${b}, ${a})`;
+      return null;
     }
     
-    // Create the blended colors
-    let overlayColor;
-    let borderColor;
-    let shadowColor;
+    // Helper function to parse hex
+    function parseHex(color) {
+      let hex = color.replace('#', '');
+      if (hex.length === 3) {
+        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+      }
+      return {
+        r: parseInt(hex.substring(0, 2), 16),
+        g: parseInt(hex.substring(2, 4), 16),
+        b: parseInt(hex.substring(4, 6), 16),
+        a: 1
+      };
+    }
+    
+    // Helper function to parse hsla
+    function parseHsla(color) {
+      const hsla = color.match(/hsla?\(([^,]+),\s*([^,]+)%,\s*([^,]+)%(?:,\s*([\d.]+))?\)/);
+      if (hsla) {
+        // Convert HSL to RGB
+        const h = parseFloat(hsla[1]) / 360;
+        const s = parseFloat(hsla[2]) / 100;
+        const l = parseFloat(hsla[3]) / 100;
+        const a = hsla[4] ? parseFloat(hsla[4]) : 1;
+        
+        let r, g, b;
+        
+        if (s === 0) {
+          r = g = b = l;
+        } else {
+          const hue2rgb = (p, q, t) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1/6) return p + (q - p) * 6 * t;
+            if (t < 1/2) return q;
+            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+          };
+          
+          const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+          const p = 2 * l - q;
+          
+          r = hue2rgb(p, q, h + 1/3);
+          g = hue2rgb(p, q, h);
+          b = hue2rgb(p, q, h - 1/3);
+        }
+        
+        return {
+          r: Math.round(r * 255),
+          g: Math.round(g * 255),
+          b: Math.round(b * 255),
+          a: a
+        };
+      }
+      return null;
+    }
+    
+    // Parse color1
+    let color1Obj;
+    if (color1.startsWith('rgba') || color1.startsWith('rgb')) {
+      color1Obj = parseRgba(color1);
+    } else if (color1.startsWith('#')) {
+      color1Obj = parseHex(color1);
+    } else if (color1.startsWith('hsla') || color1.startsWith('hsl')) {
+      color1Obj = parseHsla(color1);
+    }
+    
+    // Parse color2
+    let color2Obj;
+    if (color2.startsWith('rgba') || color2.startsWith('rgb')) {
+      color2Obj = parseRgba(color2);
+    } else if (color2.startsWith('#')) {
+      color2Obj = parseHex(color2);
+    } else if (color2.startsWith('hsla') || color2.startsWith('hsl')) {
+      color2Obj = parseHsla(color2);
+    }
+    
+    if (!color1Obj || !color2Obj) {
+      return color1; // Return original if parsing failed
+    }
+    
+    // Blend the colors
+    const r = Math.round(color1Obj.r * (1 - ratio) + color2Obj.r * ratio);
+    const g = Math.round(color1Obj.g * (1 - ratio) + color2Obj.g * ratio);
+    const b = Math.round(color1Obj.b * (1 - ratio) + color2Obj.b * ratio);
+    const a = color1Obj.a * (1 - ratio) + color2Obj.a * ratio;
+    
+    return `rgba(${r}, ${g}, ${b}, ${a})`;
+  }
+  
+  // Create the blended colors
+  let overlayColor;
+  let borderColor;
+  let shadowColor;
+  
+  if (type === 'dragged') {
+    // Mix with white for dragged note (makes it lighter)
+    overlayColor = isSilence ? 'rgba(50, 50, 50, 0.5)' : blendColors(noteColor, 'rgba(255, 255, 255, 0.8)', 0.5);
+    borderColor = 'white';
+    shadowColor = 'rgba(255, 255, 255, 0.7)';
+  } else if (type === 'dependency') {
+    // Mix with red for dependencies
+    overlayColor = isSilence ? 'rgba(70, 50, 50, 0.5)' : blendColors(noteColor, 'rgba(255, 100, 100, 0.6)', 0.5);
+    borderColor = 'rgba(255, 0, 0, 0.8)';
+    shadowColor = 'rgba(255, 0, 0, 0.5)';
+  } else if (type === 'parent') {
+    // Mix with light blue for parent dependency
+    overlayColor = isSilence ? 'rgba(50, 50, 70, 0.5)' : blendColors(noteColor, 'rgba(100, 200, 255, 0.6)', 0.5);
+    borderColor = 'rgba(0, 150, 255, 0.8)';
+    shadowColor = 'rgba(0, 150, 255, 0.5)';
+  }
+  
+  // Create or update the overlay element
+  if (!overlayElem) {
+    // Create a new overlay element
+    overlayElem = document.createElement('div');
+    overlayElem.id = overlayId;
+    overlayElem.style.position = 'absolute';
+    overlayElem.style.pointerEvents = 'none';
+    overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
+    overlayElem.style.overflow = 'hidden'; // Hide overflow
+    overlayElem.setAttribute('data-type', isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : (isSilence ? 'silence' : 'note')));
+    
+    // Create a text element with a font size that scales with zoom
+    const textElem = document.createElement('div');
+    textElem.style.fontSize = '10px'; // Base font size
+    textElem.style.whiteSpace = 'nowrap';
+    textElem.style.textShadow = '0 0 1px black'; // Match note text shadow
+    textElem.style.color = 'white';
+    textElem.style.fontFamily = "'Roboto Mono', monospace";
     
     if (type === 'dragged') {
-      // Mix with white for dragged note (makes it lighter)
-      overlayColor = isSilence ? 'rgba(50, 50, 50, 0.5)' : blendColors(noteColor, 'rgba(255, 255, 255, 0.8)', 0.5);
-      borderColor = 'white';
-      shadowColor = 'rgba(255, 255, 255, 0.7)';
+      textElem.textContent = isSilence ? `Silence ${noteObj.id}` : `Note ${noteObj.id}`;
     } else if (type === 'dependency') {
-      // Mix with red for dependencies
-      overlayColor = isSilence ? 'rgba(70, 50, 50, 0.5)' : blendColors(noteColor, 'rgba(255, 100, 100, 0.6)', 0.5);
-      borderColor = 'rgba(255, 0, 0, 0.8)';
-      shadowColor = 'rgba(255, 0, 0, 0.5)';
+      textElem.textContent = isSilence ? `Dep Silence ${noteObj.id}` : `Dep ${noteObj.id}`;
     } else if (type === 'parent') {
-      // Mix with light blue for parent dependency
-      overlayColor = isSilence ? 'rgba(50, 50, 70, 0.5)' : blendColors(noteColor, 'rgba(100, 200, 255, 0.6)', 0.5);
-      borderColor = 'rgba(0, 150, 255, 0.8)';
-      shadowColor = 'rgba(0, 150, 255, 0.5)';
-    }
-    
-    // Create or update the overlay element
-    if (!overlayElem) {
-      // Create a new overlay element
-      overlayElem = document.createElement('div');
-      overlayElem.id = overlayId;
-      overlayElem.style.position = 'absolute';
-      overlayElem.style.pointerEvents = 'none';
-      overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
-      overlayElem.style.overflow = 'hidden'; // Hide overflow
-      overlayElem.setAttribute('data-type', isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : (isSilence ? 'silence' : 'note')));
-      
-      // Create a text element with a font size that scales with zoom
-      const textElem = document.createElement('div');
-      textElem.style.fontSize = '10px'; // Base font size
-      textElem.style.whiteSpace = 'nowrap';
-      textElem.style.textShadow = '0 0 1px black'; // Match note text shadow
-      textElem.style.color = 'white';
-      textElem.style.fontFamily = "'Roboto Mono', monospace";
-      
-      if (type === 'dragged') {
-        textElem.textContent = isSilence ? `Silence ${noteObj.id}` : `Note ${noteObj.id}`;
-      } else if (type === 'dependency') {
-        textElem.textContent = isSilence ? `Dep Silence ${noteObj.id}` : `Dep ${noteObj.id}`;
-      } else if (type === 'parent') {
-        if (isBaseNote) {
-          textElem.textContent = 'BaseNote';
-        } else if (isMeasureBar) {
-          textElem.textContent = `Measure ${noteObj.id}`;
-        } else if (isSilence) {
-          textElem.textContent = `Parent Silence ${noteObj.id}`;
-        } else {
-          textElem.textContent = `Parent ${noteObj.id}`;
-        }
+      if (isBaseNote) {
+        textElem.textContent = 'BaseNote';
+      } else if (isMeasureBar) {
+        textElem.textContent = `Measure ${noteObj.id}`;
+      } else if (isSilence) {
+        textElem.textContent = `Parent Silence ${noteObj.id}`;
+      } else {
+        textElem.textContent = `Parent ${noteObj.id}`;
       }
-      
-      overlayElem.appendChild(textElem);
-      overlayContainer.appendChild(overlayElem);
     }
     
-    // Update the text element's font size based on scale
-    const textElem = overlayElem.querySelector('div');
+    overlayElem.appendChild(textElem);
+    overlayContainer.appendChild(overlayElem);
+  }
+  
+  // Update the text element's font size based on scale
+  const textElem = overlayElem.querySelector('div');
+  if (textElem) {
+    // Get the overlay's current bounding rectangle
+    const overlayRect = overlayElem.getBoundingClientRect();
+    // Compute a dynamic font size as a fraction of the overlay's height
+    // (adjust the multiplier as needed to achieve the desired visual effect)
+    const dynamicFontSize = overlayRect.height * 0.4;
+    textElem.style.fontSize = `${dynamicFontSize}px`;
+    
+    // Update text content if needed
+    if (type === 'parent') {
+      if (isBaseNote) {
+        textElem.textContent = 'BaseNote';
+      } else if (isMeasureBar) {
+        textElem.textContent = `Measure ${noteObj.id}`;
+      } else if (isSilence) {
+        textElem.textContent = `Parent Silence ${noteObj.id}`;
+      } else {
+        textElem.textContent = `Parent ${noteObj.id}`;
+      }
+    } else if (type === 'dragged') {
+      textElem.textContent = isSilence ? `Silence ${noteObj.id}` : `Note ${noteObj.id}`;
+    } else if (type === 'dependency') {
+      textElem.textContent = isSilence ? `Dep Silence ${noteObj.id}` : `Dep ${noteObj.id}`;
+    }
+  }
+  
+  // Get the current element type
+  const currentType = overlayElem.getAttribute('data-type');
+  const newType = isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : (isSilence ? 'silence' : 'note'));
+  
+  // If the type has changed, recreate the element
+  if (currentType !== newType) {
+    overlayElem.setAttribute('data-type', newType);
+    
+    // Reset all styles
+    overlayElem.style.cssText = '';
+    overlayElem.style.position = 'absolute';
+    overlayElem.style.pointerEvents = 'none';
+    overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
+    overlayElem.style.overflow = 'hidden';
+  }
+  
+  // Style based on note type
+  if (isBaseNote) {
+    // For base note, create a circle
+    overlayElem.style.backgroundColor = overlayColor;
+    overlayElem.style.border = `2px solid ${borderColor}`;
+    overlayElem.style.borderRadius = '50%'; // Make it circular
+    overlayElem.style.boxShadow = `0 0 8px ${shadowColor}`;
+    overlayElem.style.display = 'flex';
+    overlayElem.style.alignItems = 'center';
+    overlayElem.style.justifyContent = 'center';
+    
+    // Position the base note circle
+    overlayElem.style.left = `${screenPos.x - screenWidth / 2}px`;
+    overlayElem.style.top = `${yPos - screenHeight / 2}px`;
+    overlayElem.style.width = `${screenWidth}px`;
+    overlayElem.style.height = `${screenHeight}px`;
+  } else if (isMeasureBar) {
+    // For measure bars, create a triangle
+    overlayElem.style.backgroundColor = 'transparent';
+    overlayElem.style.width = '0';
+    overlayElem.style.height = '0';
+    overlayElem.style.borderLeft = '15px solid transparent';
+    overlayElem.style.borderRight = '15px solid transparent';
+    overlayElem.style.borderBottom = `30px solid ${overlayColor}`;
+    overlayElem.style.filter = `drop-shadow(0 0 5px ${shadowColor})`;
+    
+    // Position the triangle
+    overlayElem.style.left = `${screenPos.x - 15}px`; // Center the triangle
+    overlayElem.style.top = `${yPos}px`;
+    
+    // Position the text below the triangle
     if (textElem) {
-      // Get the overlay's current bounding rectangle
-      const overlayRect = overlayElem.getBoundingClientRect();
-      // Compute a dynamic font size as a fraction of the overlay's height
-      // (adjust the multiplier as needed to achieve the desired visual effect)
-      const dynamicFontSize = overlayRect.height * 0.4;
-      textElem.style.fontSize = `${dynamicFontSize}px`;
-      
-      // Update text content if needed
-      if (type === 'parent') {
-        if (isBaseNote) {
-          textElem.textContent = 'BaseNote';
-        } else if (isMeasureBar) {
-          textElem.textContent = `Measure ${noteObj.id}`;
-        } else if (isSilence) {
-          textElem.textContent = `Parent Silence ${noteObj.id}`;
-        } else {
-          textElem.textContent = `Parent ${noteObj.id}`;
-        }
-      } else if (type === 'dragged') {
-        textElem.textContent = isSilence ? `Silence ${noteObj.id}` : `Note ${noteObj.id}`;
-      } else if (type === 'dependency') {
-        textElem.textContent = isSilence ? `Dep Silence ${noteObj.id}` : `Dep ${noteObj.id}`;
-      }
+      textElem.style.position = 'absolute';
+      textElem.style.bottom = '-20px';
+      textElem.style.left = '50%';
+      textElem.style.transform = 'translateX(-50%)';
     }
+  } else {
+    // For regular notes and silences
+    overlayElem.style.backgroundColor = overlayColor;
+    overlayElem.style.border = isSilence ? `2px dashed ${borderColor}` : `2px solid ${borderColor}`;
+    overlayElem.style.borderRadius = '6px'; // Match the note's border radius
+    overlayElem.style.boxShadow = `0 0 8px ${shadowColor}`;
+    overlayElem.style.display = 'flex';
+    overlayElem.style.alignItems = 'center';
+    overlayElem.style.justifyContent = 'center';
     
-    // Get the current element type
-    const currentType = overlayElem.getAttribute('data-type');
-    const newType = isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : (isSilence ? 'silence' : 'note'));
+    // Position the note
+    overlayElem.style.left = `${screenPos.x - 0.5}px`;
+    overlayElem.style.top = `${yPos}px`;
+    overlayElem.style.width = `${screenWidth}px`;
+    overlayElem.style.height = `${screenHeight}px`;
     
-    // If the type has changed, recreate the element
-    if (currentType !== newType) {
-      overlayElem.setAttribute('data-type', newType);
-      
-      // Reset all styles
-      overlayElem.style.cssText = '';
-      overlayElem.style.position = 'absolute';
-      overlayElem.style.pointerEvents = 'none';
-      overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
-      overlayElem.style.overflow = 'hidden';
+    // For silences, dashed border
+    if (isSilence) {
+      overlayElem.style.borderStyle = 'dashed';
     }
-    
-    // Style based on note type
-    if (isBaseNote) {
-      // For base note, create a circle
-      overlayElem.style.backgroundColor = overlayColor;
-      overlayElem.style.border = `2px solid ${borderColor}`;
-      overlayElem.style.borderRadius = '50%'; // Make it circular
-      overlayElem.style.boxShadow = `0 0 8px ${shadowColor}`;
-      overlayElem.style.display = 'flex';
-      overlayElem.style.alignItems = 'center';
-      overlayElem.style.justifyContent = 'center';
-      
-      // Position the base note circle
-      overlayElem.style.left = `${screenPos.x - screenWidth / 2}px`;
-      overlayElem.style.top = `${yPos - screenHeight / 2}px`;
-      overlayElem.style.width = `${screenWidth}px`;
-      overlayElem.style.height = `${screenHeight}px`;
-    } else if (isMeasureBar) {
-      // For measure bars, create a triangle
-      overlayElem.style.backgroundColor = 'transparent';
-      overlayElem.style.width = '0';
-      overlayElem.style.height = '0';
-      overlayElem.style.borderLeft = '15px solid transparent';
-      overlayElem.style.borderRight = '15px solid transparent';
-      overlayElem.style.borderBottom = `30px solid ${overlayColor}`;
-      overlayElem.style.filter = `drop-shadow(0 0 5px ${shadowColor})`;
-      
-      // Position the triangle
-      overlayElem.style.left = `${screenPos.x - 15}px`; // Center the triangle
-      overlayElem.style.top = `${yPos}px`;
-      
-      // Position the text below the triangle
-      if (textElem) {
-        textElem.style.position = 'absolute';
-        textElem.style.bottom = '-20px';
-        textElem.style.left = '50%';
-        textElem.style.transform = 'translateX(-50%)';
+  }
+  
+  // For dependencies and parent, add connection lines to the dragged note
+  if (type === 'dependency' || type === 'parent') {
+    const draggedElem = document.getElementById('drag-overlay-dragged');
+    if (draggedElem) {
+      let connectionLine = document.getElementById(`connection-line-${type === 'parent' ? 'parent' : depId}`);
+      if (!connectionLine) {
+        connectionLine = document.createElement('div');
+        connectionLine.id = `connection-line-${type === 'parent' ? 'parent' : depId}`;
+        connectionLine.style.position = 'absolute';
+        connectionLine.style.backgroundColor = type === 'dependency' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 150, 255, 0.7)';
+        connectionLine.style.height = '2px';
+        connectionLine.style.transformOrigin = 'left center';
+        connectionLine.style.zIndex = '9999';
+        overlayContainer.appendChild(connectionLine);
       }
-    } else {
-      // For regular notes and silences
-      overlayElem.style.backgroundColor = overlayColor;
-      overlayElem.style.border = `2px solid ${borderColor}`;
-      overlayElem.style.borderRadius = '6px'; // Match the note's border radius
-      overlayElem.style.boxShadow = `0 0 8px ${shadowColor}`;
-      overlayElem.style.display = 'flex';
-      overlayElem.style.alignItems = 'center';
-      overlayElem.style.justifyContent = 'center';
       
-      // Position the note
-      overlayElem.style.left = `${screenPos.x - 0.5}px`;
-      overlayElem.style.top = `${yPos}px`;
-      overlayElem.style.width = `${screenWidth}px`;
-      overlayElem.style.height = `${screenHeight}px`;
-      
-      // For silences, add a special indicator
-      if (isSilence) {
-        overlayElem.style.borderStyle = 'dashed';
-        
-        // Add a silence icon if not already present
-        if (!overlayElem.querySelector('.silence-icon')) {
-          const silenceIcon = document.createElement('div');
-          silenceIcon.className = 'silence-icon';
-          silenceIcon.style.position = 'absolute';
-          silenceIcon.style.top = '2px';
-          silenceIcon.style.right = '2px';
-          silenceIcon.style.width = '10px';
-          silenceIcon.style.height = '10px';
-          silenceIcon.style.borderRadius = '50%';
-          silenceIcon.style.backgroundColor = 'transparent';
-          silenceIcon.style.border = '2px solid white';
-          silenceIcon.style.opacity = '0.7';
-          overlayElem.appendChild(silenceIcon);
-        }
-      }
-    }
-    
-    // For dependencies and parent, add connection lines to the dragged note
-    if (type === 'dependency' || type === 'parent') {
-      const draggedElem = document.getElementById('drag-overlay-dragged');
-      if (draggedElem) {
-        let connectionLine = document.getElementById(`connection-line-${type === 'parent' ? 'parent' : depId}`);
-        if (!connectionLine) {
-          connectionLine = document.createElement('div');
-          connectionLine.id = `connection-line-${type === 'parent' ? 'parent' : depId}`;
-          connectionLine.style.position = 'absolute';
-          connectionLine.style.backgroundColor = type === 'dependency' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 150, 255, 0.7)';
-          connectionLine.style.height = '2px';
-          connectionLine.style.transformOrigin = 'left center';
-          connectionLine.style.zIndex = '9999';
-          overlayContainer.appendChild(connectionLine);
-        }
-        
-        // Get positions
-        const draggedRect = draggedElem.getBoundingClientRect();
+      // Get positions
+      const draggedRect = draggedElem.getBoundingClientRect();
         const targetRect = overlayElem.getBoundingClientRect();
         
         // Calculate line position
@@ -3070,10 +3083,69 @@ function createNoteElement(note, index) {
 
   // Calculate dimensions and position for the note
   const startTime = note.getVariable('startTime').valueOf();
-  const frequency = note.getVariable('frequency').valueOf();
   const duration = note.getVariable('duration').valueOf();
   const x = startTime * 200 * xScaleFactor;
-  const y = frequencyToY(frequency);
+  
+  // Determine y position based on whether it's a silence or regular note
+  let y;
+  if (note.getVariable('frequency')) {
+    // Regular note with frequency
+    const frequency = note.getVariable('frequency').valueOf();
+    y = frequencyToY(frequency);
+  } else {
+    // Silence note - find a parent with frequency
+    let parentWithFreq = null;
+    
+    // Function to find parent note with frequency
+    const findParentWithFrequency = (note) => {
+      if (!note) return null;
+      
+      // Get the parent reference from the startTime expression
+      let parentId = null;
+      const startTimeString = note.variables.startTimeString;
+      if (startTimeString) {
+        const match = /getNoteById\((\d+)\)/.exec(startTimeString);
+        if (match) {
+          parentId = parseInt(match[1], 10);
+        }
+      }
+      
+      // If no parent found in expression, try the parentId property
+      if (parentId === null && note.parentId !== undefined) {
+        parentId = note.parentId;
+      }
+      
+      // If still no parent, use BaseNote
+      if (parentId === null) {
+        return myModule.baseNote;
+      }
+      
+      // Get the parent note
+      const parentNote = myModule.getNoteById(parentId);
+      
+      // If parent has frequency, return it
+      if (parentNote && parentNote.getVariable && parentNote.getVariable('frequency')) {
+        return parentNote;
+      }
+      
+      // Otherwise, recursively check the parent's parent
+      return findParentWithFrequency(parentNote);
+    };
+    
+    // Find parent with frequency
+    parentWithFreq = findParentWithFrequency(note);
+    
+    // If found, use its frequency for positioning
+    if (parentWithFreq) {
+      const parentFreq = parentWithFreq.getVariable('frequency').valueOf();
+      y = frequencyToY(parentFreq);
+    } else {
+      // Fallback to BaseNote frequency if no parent with frequency found
+      const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+      y = frequencyToY(baseNoteFreq);
+    }
+  }
+  
   const width = duration * 200 * xScaleFactor;
   const height = 20;
   
@@ -3096,124 +3168,127 @@ function createNoteElement(note, index) {
   // Add the note to the container first
   noteContainer.addChild(noteRect, { x: 0, y: 0 });
   
-  // Add the container to the space
-  space.addChild(noteContainer, { x: 0, y: 0 });
+  // Add the container to the space with the correct position
+  space.addChild(noteContainer, { x: x, y: y });
   
-  // Create octave control buttons
-  const upButton = tapspace.createItem(`
-    <div style="
-      width: 10px;
-      height: 10px;
-      background: transparent;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-      margin-top: 0px;
-      margin-left: 0.75px;
-      pointer-events: auto;
-    ">
-      <div class="octave-button octave-up" style="
+  // Only add octave buttons for notes with frequency (not for silence notes)
+  if (note.getVariable('frequency')) {
+    // Create octave control buttons
+    const upButton = tapspace.createItem(`
+      <div style="
         width: 10px;
         height: 10px;
-        background: rgba(255, 255, 255, 0.2);
-        border: 1px solid rgba(255, 255, 255, 0.4);
-        border-radius: 5px 0 0 0;
-        cursor: pointer;
+        background: transparent;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 7px;
-        color: white;
-        text-shadow: 0 0 1px black;
-        box-sizing: border-box;
-      ">▲</div>
-    </div>
-  `);
-  
-  const downButton = tapspace.createItem(`
-    <div style="
-      width: 10px;
-      height: 10px;
-      background: transparent;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-      margin-top: 0px;
-      margin-left: 0.75px;
-      pointer-events: auto;
-    ">
-      <div class="octave-button octave-down" style="
+        padding: 0;
+        margin-top: 0px;
+        margin-left: 0.75px;
+        pointer-events: auto;
+      ">
+        <div class="octave-button octave-up" style="
+          width: 10px;
+          height: 10px;
+          background: rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.4);
+          border-radius: 5px 0 0 0;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 7px;
+          color: white;
+          text-shadow: 0 0 1px black;
+          box-sizing: border-box;
+        ">▲</div>
+      </div>
+    `);
+    
+    const downButton = tapspace.createItem(`
+      <div style="
         width: 10px;
         height: 10px;
-        background: rgba(255, 255, 255, 0.2);
-        border: 1px solid rgba(255, 255, 255, 0.4);
-        border-radius: 0 0 0 5px;
-        cursor: pointer;
+        background: transparent;
         display: flex;
         align-items: center;
         justify-content: center;
-        font-size: 7px;
-        color: white;
-        text-shadow: 0 0 1px black;
-        box-sizing: border-box;
-      ">▼</div>
-    </div>
-  `);
-  
-  // Set the size of the buttons
-  upButton.setSize({ width: 10, height: 10 });
-  downButton.setSize({ width: 10, height: 10 });
-  
-  // Get the button elements
-  const upButtonElement = upButton.element.querySelector('.octave-button');
-  const downButtonElement = downButton.element.querySelector('.octave-button');
-  
-  // Add hover effects
-  upButtonElement.addEventListener('mouseenter', () => {
-    upButtonElement.style.background = 'rgba(255, 255, 255, 0.4)';
-  });
-  
-  upButtonElement.addEventListener('mouseleave', () => {
-    upButtonElement.style.background = 'rgba(255, 255, 255, 0.2)';
-  });
-  
-  downButtonElement.addEventListener('mouseenter', () => {
-    downButtonElement.style.background = 'rgba(255, 255, 255, 0.4)';
-  });
-  
-  downButtonElement.addEventListener('mouseleave', () => {
-    downButtonElement.style.background = 'rgba(255, 255, 255, 0.2)';
-  });
-  
-  // Add click handlers
-  upButton.element.addEventListener('click', (event) => {
-    event.stopPropagation();
-    event.preventDefault();
-    if (isLocked) return; // Disable octave change when locked
-    handleOctaveChange(note.id, 'up');
-  });
-  
-  // for the down button
-  downButton.element.addEventListener('click', (event) => {
-    event.stopPropagation();
-    event.preventDefault();
-    if (isLocked) return; // Disable octave change when locked
-    handleOctaveChange(note.id, 'down');
-  });
-  
-  // Add the buttons to the container AFTER the note
-  // This ensures they appear on top in the stacking order
-  noteContainer.addChild(upButton, { x: 0, y: 0 });
-  noteContainer.addChild(downButton, { x: 0, y: 10 });
-  
-  // Store the buttons in the note for future reference
-  noteRect.octaveButtons = {
-    up: upButton,
-    down: downButton,
-    container: noteContainer
-  };
+        padding: 0;
+        margin-top: 0px;
+        margin-left: 0.75px;
+        pointer-events: auto;
+      ">
+        <div class="octave-button octave-down" style="
+          width: 10px;
+          height: 10px;
+          background: rgba(255, 255, 255, 0.2);
+          border: 1px solid rgba(255, 255, 255, 0.4);
+          border-radius: 0 0 0 5px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 7px;
+          color: white;
+          text-shadow: 0 0 1px black;
+          box-sizing: border-box;
+        ">▼</div>
+      </div>
+    `);
+    
+    // Set the size of the buttons
+    upButton.setSize({ width: 10, height: 10 });
+    downButton.setSize({ width: 10, height: 10 });
+    
+    // Get the button elements
+    const upButtonElement = upButton.element.querySelector('.octave-button');
+    const downButtonElement = downButton.element.querySelector('.octave-button');
+    
+    // Add hover effects
+    upButtonElement.addEventListener('mouseenter', () => {
+      upButtonElement.style.background = 'rgba(255, 255, 255, 0.4)';
+    });
+    
+    upButtonElement.addEventListener('mouseleave', () => {
+      upButtonElement.style.background = 'rgba(255, 255, 255, 0.2)';
+    });
+    
+    downButtonElement.addEventListener('mouseenter', () => {
+      downButtonElement.style.background = 'rgba(255, 255, 255, 0.4)';
+    });
+    
+    downButtonElement.addEventListener('mouseleave', () => {
+      downButtonElement.style.background = 'rgba(255, 255, 255, 0.2)';
+    });
+    
+    // Add click handlers
+    upButton.element.addEventListener('click', (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      if (isLocked) return; // Disable octave change when locked
+      handleOctaveChange(note.id, 'up');
+    });
+    
+    // for the down button
+    downButton.element.addEventListener('click', (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      if (isLocked) return; // Disable octave change when locked
+      handleOctaveChange(note.id, 'down');
+    });
+    
+    // Add the buttons to the container AFTER the note
+    // This ensures they appear on top in the stacking order
+    noteContainer.addChild(upButton, { x: 0, y: 0 });
+    noteContainer.addChild(downButton, { x: 0, y: 10 });
+    
+    // Store the buttons in the note for future reference
+    noteRect.octaveButtons = {
+      up: upButton,
+      down: downButton,
+      container: noteContainer
+    };
+  }
 
   // CREATE RESIZE HANDLE
   // Create the resize handle for the right edge of the note
@@ -3289,10 +3364,6 @@ function createNoteElement(note, index) {
     // Store the current scale for consistent resizing
     resizeOriginalScale = scale;
     
-    console.log("Starting resize with original width:", resizeOriginalWidth);
-    console.log("Starting resize with original duration:", resizeOriginalDuration);
-    console.log("Starting resize with scale:", scale);
-    
     // Add class for visual feedback
     noteRect.element.classList.add('resizing');
     
@@ -3356,242 +3427,242 @@ function createNoteElement(note, index) {
         `;
         document.head.appendChild(style);
     }
-});
+  });
 
-// Handle pointer move during resize
-function handleResizeMove(ev) {
-  if (!isResizing) return;
-  
-  try {
-      // Get the current viewport transform to account for zoom
-      const transform = viewport.getBasis().getRaw();
-      const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-      
-      // Calculate delta in screen pixels
-      const screenDeltaX = ev.clientX - resizeStartX;
-      
-      // Convert screen delta to space delta using the same approach as in note drag
-      // Create two points in space coordinates that are 100 units apart
-      const spacePoint1 = space.at(0, 0);
-      const spacePoint2 = space.at(100, 0);
-      
-      // Project these points to viewport coordinates
-      const viewportPoint1 = spacePoint1.transitRaw(viewport);
-      const viewportPoint2 = spacePoint2.transitRaw(viewport);
-      
-      // Calculate the scale factor: how many viewport pixels per 100 space units
-      const viewportDistance = Math.sqrt(
-          Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
-          Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
-      );
-      
-      // Convert screen pixels to space units (without xScaleFactor)
-      const spaceUnitsPerScreenPixel = 100 / viewportDistance;
-      const deltaInSpaceUnits = screenDeltaX * spaceUnitsPerScreenPixel;
-      
-      // Calculate new width in space units
-      const newWidthInSpaceUnits = Math.max(20, resizeOriginalWidth + deltaInSpaceUnits);
-      
-      // Calculate new duration in time units
-      // The relationship between width in space units and duration is:
-      // width = duration * 200 * xScaleFactor
-      // So: duration = width / (200 * xScaleFactor)
-      const newDuration = newWidthInSpaceUnits / (200 * xScaleFactor);
-      
-      // Calculate beats based on tempo
-      const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-      const beatLength = 60 / baseTempo;
-      const newDurationBeats = newDuration / beatLength;
-      
-      // Snap to sixteenth note increments
-      const sixteenthNote = 0.25; // A sixteenth of a beat
-      const snappedBeats = Math.max(sixteenthNote, Math.round(newDurationBeats / sixteenthNote) * sixteenthNote);
-      
-      // Calculate the snapped width
-      const snappedDuration = snappedBeats * beatLength;
-      const snappedWidth = snappedDuration * 200 * xScaleFactor;
-      
-      // Update note rectangle size
-      noteRect.setSize({ width: snappedWidth, height: height });
-      noteContainer.setSize({ width: snappedWidth, height: height });
-      
-      // Update position of resize handle
-      resizeHandle.translateTo(noteContainer.at(snappedWidth - 10, 0));
-      
-      // Update visual feedback
-      updateResizeFeedback(snappedDuration, snappedBeats);
-      
-      // Update dependent notes visualization
-      updateDependentNotesVisualization(note, resizeOriginalDuration, snappedDuration, scale);
-  } catch (error) {
-      console.error("Error in handleResizeMove:", error);
+  // Handle pointer move during resize
+  function handleResizeMove(ev) {
+    if (!isResizing) return;
+    
+    try {
+        // Get the current viewport transform to account for zoom
+        const transform = viewport.getBasis().getRaw();
+        const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+        
+        // Calculate delta in screen pixels
+        const screenDeltaX = ev.clientX - resizeStartX;
+        
+        // Convert screen delta to space delta using the same approach as in note drag
+        // Create two points in space coordinates that are 100 units apart
+        const spacePoint1 = space.at(0, 0);
+        const spacePoint2 = space.at(100, 0);
+        
+        // Project these points to viewport coordinates
+        const viewportPoint1 = spacePoint1.transitRaw(viewport);
+        const viewportPoint2 = spacePoint2.transitRaw(viewport);
+        
+        // Calculate the scale factor: how many viewport pixels per 100 space units
+        const viewportDistance = Math.sqrt(
+            Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
+            Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
+        );
+        
+        // Convert screen pixels to space units (without xScaleFactor)
+        const spaceUnitsPerScreenPixel = 100 / viewportDistance;
+        const deltaInSpaceUnits = screenDeltaX * spaceUnitsPerScreenPixel;
+        
+        // Calculate new width in space units
+        const newWidthInSpaceUnits = Math.max(20, resizeOriginalWidth + deltaInSpaceUnits);
+        
+        // Calculate new duration in time units
+        // The relationship between width in space units and duration is:
+        // width = duration * 200 * xScaleFactor
+        // So: duration = width / (200 * xScaleFactor)
+        const newDuration = newWidthInSpaceUnits / (200 * xScaleFactor);
+        
+        // Calculate beats based on tempo
+        const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
+        const beatLength = 60 / baseTempo;
+        const newDurationBeats = newDuration / beatLength;
+        
+        // Snap to sixteenth note increments
+        const sixteenthNote = 0.25; // A sixteenth of a beat
+        const snappedBeats = Math.max(sixteenthNote, Math.round(newDurationBeats / sixteenthNote) * sixteenthNote);
+        
+        // Calculate the snapped width
+        const snappedDuration = snappedBeats * beatLength;
+        const snappedWidth = snappedDuration * 200 * xScaleFactor;
+        
+        // Update note rectangle size
+        noteRect.setSize({ width: snappedWidth, height: height });
+        noteContainer.setSize({ width: snappedWidth, height: height });
+        
+        // Update position of resize handle
+        resizeHandle.translateTo(noteContainer.at(snappedWidth - 10, 0));
+        
+        // Update visual feedback
+        updateResizeFeedback(snappedDuration, snappedBeats);
+        
+        // Update dependent notes visualization
+        updateDependentNotesVisualization(note, resizeOriginalDuration, snappedDuration, scale);
+    } catch (error) {
+        console.error("Error in handleResizeMove:", error);
+    }
   }
-}
 
-function handleResizeUp(ev) {
-  if (!isResizing) return;
-  
-  try {
-      resizeHandle.element.releasePointerCapture(ev.pointerId);
-  } catch (err) {
-      console.log('Error releasing pointer capture:', err);
+  function handleResizeUp(ev) {
+    if (!isResizing) return;
+    
+    try {
+        resizeHandle.element.releasePointerCapture(ev.pointerId);
+    } catch (err) {
+        console.log('Error releasing pointer capture:', err);
+    }
+    
+    isResizing = false;
+    
+    // Remove resizing class
+    noteRect.element.classList.remove('resizing');
+    
+    // Remove event listeners
+    document.removeEventListener('pointermove', handleResizeMove);
+    document.removeEventListener('pointerup', handleResizeUp);
+    document.removeEventListener('pointercancel', handleResizeUp);
+    
+    // Remove the dependent notes overlay
+    const dependentOverlay = document.getElementById('resize-dependent-overlay');
+    if (dependentOverlay) {
+        dependentOverlay.remove();
+    }
+    
+    try {
+        // Get the current viewport transform to account for zoom
+        const transform = viewport.getBasis().getRaw();
+        const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+        
+        // Calculate delta in screen pixels
+        const screenDeltaX = ev.clientX - resizeStartX;
+        
+        // Convert screen delta to space delta using the same approach as in note drag
+        // Create two points in space coordinates that are 100 units apart
+        const spacePoint1 = space.at(0, 0);
+        const spacePoint2 = space.at(100, 0);
+        
+        // Project these points to viewport coordinates
+        const viewportPoint1 = spacePoint1.transitRaw(viewport);
+        const viewportPoint2 = spacePoint2.transitRaw(viewport);
+        
+        // Calculate the scale factor: how many viewport pixels per 100 space units
+        const viewportDistance = Math.sqrt(
+            Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
+            Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
+        );
+        
+        // Convert screen pixels to space units (without xScaleFactor)
+        const spaceUnitsPerScreenPixel = 100 / viewportDistance;
+        const deltaInSpaceUnits = screenDeltaX * spaceUnitsPerScreenPixel;
+        
+        // Calculate new width in space units
+        const newWidthInSpaceUnits = Math.max(20, resizeOriginalWidth + deltaInSpaceUnits);
+        
+        // Calculate new duration in time units
+        const newDuration = newWidthInSpaceUnits / (200 * xScaleFactor);
+        
+        // Calculate beats based on tempo
+        const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
+        const beatLength = 60 / baseTempo;
+        const newDurationBeats = newDuration / beatLength;
+        
+        // Snap to sixteenth note increments
+        const sixteenthNote = 0.25; // A sixteenth of a beat
+        const snappedBeats = Math.max(sixteenthNote, Math.round(newDurationBeats / sixteenthNote) * sixteenthNote);
+        
+        // Use the Fraction library to create a precise representation
+        let beatsFraction;
+        try {
+            beatsFraction = new Fraction(snappedBeats);
+        } catch (err) {
+            console.error("Error creating fraction:", err);
+            // Fallback to manual fraction creation
+            if (snappedBeats === 0.25) beatsFraction = new Fraction(1, 4);
+            else if (snappedBeats === 0.5) beatsFraction = new Fraction(1, 2);
+            else if (snappedBeats === 0.75) beatsFraction = new Fraction(3, 4);
+            else if (snappedBeats === 1) beatsFraction = new Fraction(1, 1);
+            else if (snappedBeats === 1.25) beatsFraction = new Fraction(5, 4);
+            else if (snappedBeats === 1.5) beatsFraction = new Fraction(3, 2);
+            else if (snappedBeats === 1.75) beatsFraction = new Fraction(7, 4);
+            else if (snappedBeats === 2) beatsFraction = new Fraction(2, 1);
+            else beatsFraction = new Fraction(Math.round(snappedBeats * 4), 4); // Approximate as quarters
+        }
+        
+        // Create the duration expression as a string using the Fraction
+        const newDurationString = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFraction.n}, ${beatsFraction.d}))`;
+        
+        // Store the original duration before updating
+        const originalDuration = note.getVariable('duration').valueOf();
+        
+        // Update the note's duration
+        note.setVariable('durationString', newDurationString);
+        
+        // Create the function with a try-catch to handle errors
+        const durationFunc = function() {
+            try {
+                return new Function("module", "Fraction", "return " + newDurationString + ";")(myModule, Fraction);
+            } catch (error) {
+                console.error("Error in duration function:", error);
+                // Return a default duration if there's an error
+                return new Fraction(60).div(myModule.baseNote.getVariable('tempo')).mul(1);
+            }
+        };
+        
+        note.setVariable('duration', durationFunc);
+        
+        // Get the new duration after updating
+        const updatedDuration = note.getVariable('duration').valueOf();
+        
+        // Check and update dependent notes if the duration has changed
+        if (Math.abs(originalDuration - updatedDuration) > 0.001) {
+            checkAndUpdateDependentNotes(note.id, originalDuration, updatedDuration);
+        }
+        
+        // Re-evaluate and update the visual representation
+        window.evaluatedNotes = myModule.evaluateModule();
+        updateVisualNotes(window.evaluatedNotes);
+        
+        // Update the note widget if it's open
+        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+        if (noteWidgetVisible && currentSelectedNote) {
+            if (currentSelectedNote === myModule.baseNote) {
+                // Special handling for base note
+                const baseNoteElement = document.querySelector('.base-note-circle');
+                if (baseNoteElement) {
+                    showNoteVariables(myModule.baseNote, baseNoteElement);
+                }
+            } else {
+                // Regular note or measure bar
+                const selectedElement = document.querySelector(
+                    `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                    `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+                );
+                
+                if (selectedElement) {
+                    if (selectedElement.classList.contains('measure-bar-triangle')) {
+                        showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
+                    } else {
+                        showNoteVariables(currentSelectedNote, selectedElement);
+                    }
+                }
+            }
+        }
+    } catch (error) {
+        console.error("Error updating note duration:", error);
+        // Try to revert to original size if there's an error
+        try {
+            noteRect.setSize({ width: resizeOriginalWidth, height: height });
+            noteContainer.setSize({ width: resizeOriginalWidth, height: height });
+            if (resizeHandle) {
+                resizeHandle.translateTo(noteContainer.at(resizeOriginalWidth - 10, 0));
+            }
+        } catch (revertError) {
+            console.error("Error reverting to original size:", revertError);
+        }
+    }
+    
+    // Remove feedback element
+    const feedbackElement = document.getElementById('resize-feedback');
+    if (feedbackElement) {
+        feedbackElement.remove();
+    }
   }
-  
-  isResizing = false;
-  
-  // Remove resizing class
-  noteRect.element.classList.remove('resizing');
-  
-  // Remove event listeners
-  document.removeEventListener('pointermove', handleResizeMove);
-  document.removeEventListener('pointerup', handleResizeUp);
-  document.removeEventListener('pointercancel', handleResizeUp);
-  
-  // Remove the dependent notes overlay
-  const dependentOverlay = document.getElementById('resize-dependent-overlay');
-  if (dependentOverlay) {
-      dependentOverlay.remove();
-  }
-  
-  try {
-      // Get the current viewport transform to account for zoom
-      const transform = viewport.getBasis().getRaw();
-      const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-      
-      // Calculate delta in screen pixels
-      const screenDeltaX = ev.clientX - resizeStartX;
-      
-      // Convert screen delta to space delta using the same approach as in note drag
-      // Create two points in space coordinates that are 100 units apart
-      const spacePoint1 = space.at(0, 0);
-      const spacePoint2 = space.at(100, 0);
-      
-      // Project these points to viewport coordinates
-      const viewportPoint1 = spacePoint1.transitRaw(viewport);
-      const viewportPoint2 = spacePoint2.transitRaw(viewport);
-      
-      // Calculate the scale factor: how many viewport pixels per 100 space units
-      const viewportDistance = Math.sqrt(
-          Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
-          Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
-      );
-      
-      // Convert screen pixels to space units (without xScaleFactor)
-      const spaceUnitsPerScreenPixel = 100 / viewportDistance;
-      const deltaInSpaceUnits = screenDeltaX * spaceUnitsPerScreenPixel;
-      
-      // Calculate new width in space units
-      const newWidthInSpaceUnits = Math.max(20, resizeOriginalWidth + deltaInSpaceUnits);
-      
-      // Calculate new duration in time units
-      const newDuration = newWidthInSpaceUnits / (200 * xScaleFactor);
-      
-      // Calculate beats based on tempo
-      const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-      const beatLength = 60 / baseTempo;
-      const newDurationBeats = newDuration / beatLength;
-      
-      // Snap to sixteenth note increments
-      const sixteenthNote = 0.25; // A sixteenth of a beat
-      const snappedBeats = Math.max(sixteenthNote, Math.round(newDurationBeats / sixteenthNote) * sixteenthNote);
-      
-      // Use the Fraction library to create a precise representation
-      let beatsFraction;
-      try {
-          beatsFraction = new Fraction(snappedBeats);
-      } catch (err) {
-          console.error("Error creating fraction:", err);
-          // Fallback to manual fraction creation
-          if (snappedBeats === 0.25) beatsFraction = new Fraction(1, 4);
-          else if (snappedBeats === 0.5) beatsFraction = new Fraction(1, 2);
-          else if (snappedBeats === 0.75) beatsFraction = new Fraction(3, 4);
-          else if (snappedBeats === 1) beatsFraction = new Fraction(1, 1);
-          else if (snappedBeats === 1.25) beatsFraction = new Fraction(5, 4);
-          else if (snappedBeats === 1.5) beatsFraction = new Fraction(3, 2);
-          else if (snappedBeats === 1.75) beatsFraction = new Fraction(7, 4);
-          else if (snappedBeats === 2) beatsFraction = new Fraction(2, 1);
-          else beatsFraction = new Fraction(Math.round(snappedBeats * 4), 4); // Approximate as quarters
-      }
-      
-      // Create the duration expression as a string using the Fraction
-      const newDurationString = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFraction.n}, ${beatsFraction.d}))`;
-      
-      // Store the original duration before updating
-      const originalDuration = note.getVariable('duration').valueOf();
-      
-      // Update the note's duration
-      note.setVariable('durationString', newDurationString);
-      
-      // Create the function with a try-catch to handle errors
-      const durationFunc = function() {
-          try {
-              return new Function("module", "Fraction", "return " + newDurationString + ";")(myModule, Fraction);
-          } catch (error) {
-              console.error("Error in duration function:", error);
-              // Return a default duration if there's an error
-              return new Fraction(60).div(myModule.baseNote.getVariable('tempo')).mul(1);
-          }
-      };
-      
-      note.setVariable('duration', durationFunc);
-      
-      // Get the new duration after updating
-      const updatedDuration = note.getVariable('duration').valueOf();
-      
-      // Check and update dependent notes if the duration has changed
-      if (Math.abs(originalDuration - updatedDuration) > 0.001) {
-          checkAndUpdateDependentNotes(note.id, originalDuration, updatedDuration);
-      }
-      
-      // Re-evaluate and update the visual representation
-      window.evaluatedNotes = myModule.evaluateModule();
-      updateVisualNotes(window.evaluatedNotes);
-      
-      // Update the note widget if it's open
-      const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
-      if (noteWidgetVisible && currentSelectedNote) {
-          if (currentSelectedNote === myModule.baseNote) {
-              // Special handling for base note
-              const baseNoteElement = document.querySelector('.base-note-circle');
-              if (baseNoteElement) {
-                  showNoteVariables(myModule.baseNote, baseNoteElement);
-              }
-          } else {
-              // Regular note or measure bar
-              const selectedElement = document.querySelector(
-                  `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
-                  `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
-              );
-              
-              if (selectedElement) {
-                  if (selectedElement.classList.contains('measure-bar-triangle')) {
-                      showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
-                  } else {
-                      showNoteVariables(currentSelectedNote, selectedElement);
-                  }
-              }
-          }
-      }
-  } catch (error) {
-      console.error("Error updating note duration:", error);
-      // Try to revert to original size if there's an error
-      try {
-          noteRect.setSize({ width: resizeOriginalWidth, height: height });
-          noteContainer.setSize({ width: resizeOriginalWidth, height: height });
-          if (resizeHandle) {
-              resizeHandle.translateTo(noteContainer.at(resizeOriginalWidth - 10, 0));
-          }
-      } catch (revertError) {
-          console.error("Error reverting to original size:", revertError);
-      }
-  }
-  
-  // Remove feedback element
-  const feedbackElement = document.getElementById('resize-feedback');
-  if (feedbackElement) {
-      feedbackElement.remove();
-  }
-}
   
   // Function to update the visualization of dependent notes during resize
   function updateDependentNotesVisualization(resizedNote, originalDuration, newDuration, scale) {
@@ -3632,10 +3703,66 @@ function handleResizeUp(ev) {
         // Get the current position and dimensions of the dependent note
         const dependentStartTime = dependentNote.getVariable('startTime').valueOf();
         const dependentDuration = dependentNote.getVariable('duration').valueOf();
-        const dependentFrequency = dependentNote.getVariable('frequency')?.valueOf();
         
-        // If no frequency (silence), skip it
-        if (!dependentFrequency) return;
+        // Check if this is a silence note
+        const isSilence = !dependentNote.getVariable('frequency');
+        let dependentFrequency = null;
+        
+        // For silence notes, we need to find a parent with frequency for positioning
+        if (isSilence) {
+            // Find a parent with frequency
+            let parentWithFreq = null;
+            
+            // Function to find parent note with frequency
+            const findParentWithFrequency = (note) => {
+                if (!note) return null;
+                
+                // Get the parent reference from the startTime expression
+                let parentId = null;
+                const startTimeString = note.variables.startTimeString;
+                if (startTimeString) {
+                    const match = /getNoteById\((\d+)\)/.exec(startTimeString);
+                    if (match) {
+                        parentId = parseInt(match[1], 10);
+                    }
+                }
+                
+                // If no parent found in expression, try the parentId property
+                if (parentId === null && note.parentId !== undefined) {
+                    parentId = note.parentId;
+                }
+                
+                // If still no parent, use BaseNote
+                if (parentId === null) {
+                    return myModule.baseNote;
+                }
+                
+                // Get the parent note
+                const parentNote = myModule.getNoteById(parentId);
+                
+                // If parent has frequency, return it
+                if (parentNote && parentNote.getVariable && parentNote.getVariable('frequency')) {
+                    return parentNote;
+                }
+                
+                // Otherwise, recursively check the parent's parent
+                return findParentWithFrequency(parentNote);
+            };
+            
+            // Find parent with frequency
+            parentWithFreq = findParentWithFrequency(dependentNote);
+            
+            // If found, use its frequency for positioning
+            if (parentWithFreq) {
+                dependentFrequency = parentWithFreq.getVariable('frequency').valueOf();
+            } else {
+                // Fallback to BaseNote frequency if no parent with frequency found
+                dependentFrequency = myModule.baseNote.getVariable('frequency').valueOf();
+            }
+        } else {
+            // Regular note with frequency
+            dependentFrequency = dependentNote.getVariable('frequency').valueOf();
+        }
         
         // Calculate the new position based on the duration change
         let newStartTime = dependentStartTime + durationDelta;
@@ -3650,7 +3777,8 @@ function handleResizeUp(ev) {
             originalStartTime: dependentStartTime,
             newStartTime,
             duration: dependentDuration,
-            frequency: dependentFrequency
+            frequency: dependentFrequency,
+            isSilence: isSilence
         });
     });
     
@@ -3686,10 +3814,66 @@ function handleResizeUp(ev) {
                 // Get the current position and dimensions of the dependent note
                 const dependentStartTime = depNote.getVariable('startTime').valueOf();
                 const dependentDuration = depNote.getVariable('duration').valueOf();
-                const dependentFrequency = depNote.getVariable('frequency')?.valueOf();
                 
-                // If no frequency (silence), skip it
-                if (!dependentFrequency) return;
+                // Check if this is a silence note
+                const isSilence = !depNote.getVariable('frequency');
+                let dependentFrequency = null;
+                
+                // For silence notes, we need to find a parent with frequency for positioning
+                if (isSilence) {
+                    // Find a parent with frequency
+                    let parentWithFreq = null;
+                    
+                    // Function to find parent note with frequency
+                    const findParentWithFrequency = (note) => {
+                        if (!note) return null;
+                        
+                        // Get the parent reference from the startTime expression
+                        let parentId = null;
+                        const startTimeString = note.variables.startTimeString;
+                        if (startTimeString) {
+                            const match = /getNoteById\((\d+)\)/.exec(startTimeString);
+                            if (match) {
+                                parentId = parseInt(match[1], 10);
+                            }
+                        }
+                        
+                        // If no parent found in expression, try the parentId property
+                        if (parentId === null && note.parentId !== undefined) {
+                            parentId = note.parentId;
+                        }
+                        
+                        // If still no parent, use BaseNote
+                        if (parentId === null) {
+                            return myModule.baseNote;
+                        }
+                        
+                        // Get the parent note
+                        const parentNote = myModule.getNoteById(parentId);
+                        
+                        // If parent has frequency, return it
+                        if (parentNote && parentNote.getVariable && parentNote.getVariable('frequency')) {
+                            return parentNote;
+                        }
+                        
+                        // Otherwise, recursively check the parent's parent
+                        return findParentWithFrequency(parentNote);
+                    };
+                    
+                    // Find parent with frequency
+                    parentWithFreq = findParentWithFrequency(depNote);
+                    
+                    // If found, use its frequency for positioning
+                    if (parentWithFreq) {
+                        dependentFrequency = parentWithFreq.getVariable('frequency').valueOf();
+                    } else {
+                        // Fallback to BaseNote frequency if no parent with frequency found
+                        dependentFrequency = myModule.baseNote.getVariable('frequency').valueOf();
+                    }
+                } else {
+                    // Regular note with frequency
+                    dependentFrequency = depNote.getVariable('frequency').valueOf();
+                }
                 
                 // Calculate the new position
                 let newStartTime;
@@ -3718,7 +3902,8 @@ function handleResizeUp(ev) {
                     originalStartTime: dependentStartTime,
                     newStartTime,
                     duration: dependentDuration,
-                    frequency: dependentFrequency
+                    frequency: dependentFrequency,
+                    isSilence: isSilence
                 });
                 
                 // We made a change, so we need to do another pass
@@ -3730,7 +3915,7 @@ function handleResizeUp(ev) {
     // Create visual representations for all affected notes
     for (const posInfo of newPositions.values()) {
         // Create a visual representation of the note at its new position
-        const noteColor = getColorForNote(posInfo.note);
+        const noteColor = posInfo.isSilence ? 'rgba(50, 50, 50, 0.7)' : getColorForNote(posInfo.note);
         
         // Convert to screen coordinates
         const x = posInfo.newStartTime * 200 * xScaleFactor;
@@ -3762,7 +3947,7 @@ function handleResizeUp(ev) {
         ghostNote.style.backgroundColor = noteColor;
         ghostNote.style.opacity = '0.6';
         ghostNote.style.borderRadius = '6px';
-        ghostNote.style.border = '1px dashed white';
+        ghostNote.style.border = posInfo.isSilence ? '1px dashed white' : '1px solid white';
         ghostNote.style.boxSizing = 'border-box';
         ghostNote.style.zIndex = '1000';
         ghostNote.style.pointerEvents = 'none';
@@ -3775,7 +3960,7 @@ function handleResizeUp(ev) {
         noteIdLabel.style.fontSize = '8px';
         noteIdLabel.style.color = 'white';
         noteIdLabel.style.fontFamily = "'Roboto Mono', monospace";
-        noteIdLabel.textContent = `[${posInfo.noteId}]`;
+        noteIdLabel.textContent = posInfo.isSilence ? `Silence [${posInfo.noteId}]` : `[${posInfo.noteId}]`;
         ghostNote.appendChild(noteIdLabel);
         
         // Add an arrow connecting the original position to the new position
@@ -4428,30 +4613,18 @@ function updatePlayhead() {
             const duration = note.getVariable('duration')?.valueOf();
             const frequency = note.getVariable('frequency')?.valueOf();
             
-            if (duration && frequency) {
-                // Regular note
-                const noteRect = createNoteElement(note);
-                const x = startTime * 200 * xScaleFactor;
-                const y = frequencyToY(frequency);
-                const width = duration * 200 * xScaleFactor;
-                const height = 20;
-                noteRect.setSize({ width: width, height: height });
-                space.addChild(noteRect, { x: x, y: y });
-                
-                // ADD THIS CODE HERE - Update resize handle position if it exists
-                if (noteRect.resizeHandle) {
-                  noteRect.resizeHandle.translateTo(noteRect.at(width - 10, 0));
-                }
-                // END OF ADDED CODE
+            if (duration) {
+                // Note with duration (either regular note with frequency or silence note without frequency)
+                const noteContainer = createNoteElement(note);
                 
                 // Add to newNotes array for playback
                 newNotes.push({
                     ...note,
                     id: parseInt(id),
-                    element: noteRect,
-                    getBoundingBox: () => noteRect.getBoundingBox()
+                    element: noteContainer,
+                    getBoundingBox: () => noteContainer.getBoundingClientRect()
                 });
-            } else {
+            } else if (!duration && !frequency) {
                 // Measure bar (we don't create visual elements for these here)
                 // Still add to newNotes for reference
                 newNotes.push(note);
@@ -4573,7 +4746,7 @@ function preparePlayback(fromTime) {
           for (const id in myModule.notes) {
               const note = myModule.notes[id];
               // Skip notes without required properties
-              if (!note.getVariable('startTime') || !note.getVariable('duration') || !note.getVariable('frequency')) {
+              if (!note.getVariable('startTime') || !note.getVariable('duration')) {
                   continue;
               }
               
@@ -4593,9 +4766,12 @@ function preparePlayback(fromTime) {
               }
           }
           
-          // Collect all unique instruments used in this playback
+          // Collect all unique instruments used in this playback (only for notes with frequency)
           const uniqueInstruments = new Set();
           activeNotes.forEach(note => {
+              // Skip silence notes (they have no frequency)
+              if (!note.frequency) return;
+              
               const instrumentName = myModule.findInstrument(note.noteInstance).toLowerCase();
               uniqueInstruments.add(instrumentName);
           });
@@ -4621,6 +4797,19 @@ function preparePlayback(fromTime) {
                   // Calculate adjusted start time and duration.
                   const adjustedStart = Math.max(0, noteStart - fromTime);
                   const adjustedDuration = noteEnd - Math.max(noteStart, fromTime);
+                  
+                  // For silence notes, we don't need to create oscillators
+                  if (!activeNote.frequency) {
+                      return {
+                          note: {
+                              ...activeNote,
+                              startTime: new Fraction(adjustedStart),
+                              duration: new Fraction(adjustedDuration)
+                          },
+                          oscillator: null,
+                          gainNode: null
+                      };
+                  }
                   
                   // Determine the instrument using the full note instance.
                   const instrumentName = myModule.findInstrument(activeNote.noteInstance).toLowerCase();
@@ -4677,6 +4866,11 @@ function play(fromTime = null) {
       const noteStart = startTime + prep.note.startTime.valueOf();
       const noteDuration = prep.note.duration.valueOf();
       const instrumentName = prep.note.instrument;
+      
+      // Skip playback for silence notes (they have no frequency)
+      if (!prep.note.frequency) {
+        return;
+      }
       
       // Use the instrument manager to apply the envelope
       instrumentManager.applyEnvelope(instrumentName, prep.gainNode, noteStart, noteDuration, INITIAL_VOLUME);
