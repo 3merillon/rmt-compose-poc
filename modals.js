@@ -189,6 +189,36 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
         showNotification('Dependencies liberated successfully!', 'success');
     }
 
+    function findParentWithFrequency(note) {
+        // Returns the nearest ancestor note with a frequency, or null
+        if (!note) return null;
+        let parentId = null;
+        // Try to extract parent from startTimeString
+        const startTimeString = note.variables.startTimeString;
+        if (startTimeString) {
+            const match = /getNoteById\((\d+)\)/.exec(startTimeString);
+            if (match) parentId = parseInt(match[1], 10);
+        }
+        // Try parentId property if present
+        if (parentId === null && note.parentId !== undefined) parentId = note.parentId;
+        // Fallback to base note
+        if (parentId === null) parentId = 0;
+        if (parentId === note.id) return null; // avoid self-loop
+        const parent = window.myModule.getNoteById(parentId);
+        if (!parent) return null;
+        if (typeof parent.getVariable === 'function' && parent.getVariable('frequency')) return parent;
+        return findParentWithFrequency(parent);
+    }
+
+    function replaceFrequencyParentInFormula(formula, newParentId) {
+        // Replace only the .mul(module.getNoteById(...).getVariable('frequency'))
+        // part of the formula with the correct parent note ID.
+        return formula.replace(
+            /\.mul\s*\(\s*module\.getNoteById\(\s*\d+\s*\)\.getVariable\('frequency'\)\s*\)/,
+            `.mul(module.getNoteById(${newParentId}).getVariable('frequency'))`
+        );
+    }
+
     // Show note variables in the widget
     function showNoteVariables(note, clickedElement, measureId = null) {
         const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
@@ -1421,6 +1451,372 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             addMeasureSection.appendChild(addValueDiv);
             widgetContent.appendChild(addMeasureSection);
         }
+
+        // --- BEGIN ADD NOTE/SILENCE SECTION ---
+
+        if (note !== window.myModule.baseNote && !(measureId !== null)) {
+            const addSection = document.createElement('div');
+            addSection.className = 'variable-row add-note-section';
+            addSection.style.marginBottom = '18px';
+            addSection.style.borderTop = '2px solid #00ffcc';
+
+            const addHeader = document.createElement('div');
+            addHeader.className = 'variable-name';
+            addHeader.style.color = '#00ffcc';
+            addHeader.textContent = 'ADD NOTE / SILENCE';
+            addHeader.style.marginBottom = '8px';
+            addSection.appendChild(addHeader);
+
+            // Mode toggle
+            const modeToggleContainer = document.createElement('div');
+            modeToggleContainer.style.display = 'flex';
+            modeToggleContainer.style.alignItems = 'center';
+            modeToggleContainer.style.gap = '10px';
+            modeToggleContainer.style.marginBottom = '10px';
+
+            const noteRadio = document.createElement('input');
+            noteRadio.type = 'radio';
+            noteRadio.name = 'addType';
+            noteRadio.value = 'note';
+            noteRadio.id = 'addTypeNote';
+            noteRadio.checked = true;
+
+            const noteLabel = document.createElement('label');
+            noteLabel.textContent = 'Note';
+            noteLabel.htmlFor = 'addTypeNote';
+
+            const silenceRadio = document.createElement('input');
+            silenceRadio.type = 'radio';
+            silenceRadio.name = 'addType';
+            silenceRadio.value = 'silence';
+            silenceRadio.id = 'addTypeSilence';
+
+            const silenceLabel = document.createElement('label');
+            silenceLabel.textContent = 'Silence';
+            silenceLabel.htmlFor = 'addTypeSilence';
+
+            modeToggleContainer.appendChild(noteRadio);
+            modeToggleContainer.appendChild(noteLabel);
+            modeToggleContainer.appendChild(silenceRadio);
+            modeToggleContainer.appendChild(silenceLabel);
+            addSection.appendChild(modeToggleContainer);
+
+            // At start/end toggle
+            const posToggleContainer = document.createElement('div');
+            posToggleContainer.style.display = 'flex';
+            posToggleContainer.style.alignItems = 'center';
+            posToggleContainer.style.gap = '10px';
+            posToggleContainer.style.marginBottom = '10px';
+
+            const atStartRadio = document.createElement('input');
+            atStartRadio.type = 'radio';
+            atStartRadio.name = 'addPos';
+            atStartRadio.value = 'start';
+            atStartRadio.id = 'addPosStart';
+
+            const atStartLabel = document.createElement('label');
+            atStartLabel.textContent = 'At Start';
+            atStartLabel.htmlFor = 'addPosStart';
+
+            const atEndRadio = document.createElement('input');
+            atEndRadio.type = 'radio';
+            atEndRadio.name = 'addPos';
+            atEndRadio.value = 'end';
+            atEndRadio.id = 'addPosEnd';
+            atEndRadio.checked = true;
+
+            const atEndLabel = document.createElement('label');
+            atEndLabel.textContent = 'At End';
+            atEndLabel.htmlFor = 'addPosEnd';
+
+            posToggleContainer.appendChild(atStartRadio);
+            posToggleContainer.appendChild(atStartLabel);
+            posToggleContainer.appendChild(atEndRadio);
+            posToggleContainer.appendChild(atEndLabel);
+            addSection.appendChild(posToggleContainer);
+
+            const noteId = note.id;
+
+            // Frequency row
+            const freqRow = document.createElement('div');
+            freqRow.className = 'variable-row';
+            freqRow.style.padding = '0';
+            freqRow.style.marginBottom = '8px';
+
+            const freqNameDiv = document.createElement('div');
+            freqNameDiv.className = 'variable-name';
+            freqNameDiv.textContent = 'Frequency';
+            freqNameDiv.style.fontSize = '13px';
+
+            const freqValueDiv = document.createElement('div');
+            freqValueDiv.className = 'variable-value';
+
+            const freqEvalDiv = document.createElement('div');
+            freqEvalDiv.className = 'evaluated-value';
+            freqEvalDiv.innerHTML = `<span class="value-label">Evaluated:</span> 
+                <span id="add-note-freq-eval"></span>`;
+
+            const freqRawDiv = document.createElement('div');
+            freqRawDiv.className = 'raw-value';
+            freqRawDiv.innerHTML = `<span class="value-label">Raw:</span>`;
+            const freqInput = document.createElement('input');
+            freqInput.type = 'text';
+            freqInput.className = 'raw-value-input';
+
+            // --- Set default frequency formula (parent logic for silences) ---
+            let defaultFreqFormula = `new Fraction(1,1).mul(module.getNoteById(${noteId}).getVariable('frequency'))`;
+            if (!note.getVariable('frequency')) {
+                const parentWithFreq = findParentWithFrequency(note);
+                if (parentWithFreq) {
+                    defaultFreqFormula = `new Fraction(1,1).mul(module.getNoteById(${parentWithFreq.id}).getVariable('frequency'))`;
+                } else {
+                    defaultFreqFormula = `new Fraction(1,1).mul(module.baseNote.getVariable('frequency'))`;
+                }
+            }
+            freqInput.value = defaultFreqFormula;
+
+            freqRawDiv.appendChild(freqInput);
+
+            freqValueDiv.appendChild(freqEvalDiv);
+            freqValueDiv.appendChild(freqRawDiv);
+            freqRow.appendChild(freqNameDiv);
+            freqRow.appendChild(freqValueDiv);
+
+            // Duration row
+            const durRow = document.createElement('div');
+            durRow.className = 'variable-row';
+            durRow.style.padding = '0';
+            durRow.style.marginBottom = '8px';
+
+            const durNameDiv = document.createElement('div');
+            durNameDiv.className = 'variable-name';
+            durNameDiv.textContent = 'Duration';
+            durNameDiv.style.fontSize = '13px';
+
+            const durValueDiv = document.createElement('div');
+            durValueDiv.className = 'variable-value';
+
+            const durEvalDiv = document.createElement('div');
+            durEvalDiv.className = 'evaluated-value';
+            durEvalDiv.innerHTML = `<span class="value-label">Evaluated:</span> 
+                <span id="add-note-dur-eval"></span>`;
+
+            const durRawDiv = document.createElement('div');
+            durRawDiv.className = 'raw-value';
+            durRawDiv.innerHTML = `<span class="value-label">Raw:</span>`;
+            const durInput = document.createElement('input');
+            durInput.type = 'text';
+            durInput.className = 'raw-value-input';
+            // --- Set duration as a literal copy of selected note's durationString ---
+            let defaultDurFormula = note.variables.durationString || "new Fraction(1,1)";
+            durInput.value = defaultDurFormula;
+
+            durRawDiv.appendChild(durInput);
+
+            durValueDiv.appendChild(durEvalDiv);
+            durValueDiv.appendChild(durRawDiv);
+            durRow.appendChild(durNameDiv);
+            durRow.appendChild(durValueDiv);
+
+            // Start time row
+            const stRow = document.createElement('div');
+            stRow.className = 'variable-row';
+            stRow.style.padding = '0';
+            stRow.style.marginBottom = '8px';
+
+            const stNameDiv = document.createElement('div');
+            stNameDiv.className = 'variable-name';
+            stNameDiv.textContent = 'Start Time';
+            stNameDiv.style.fontSize = '13px';
+
+            const stValueDiv = document.createElement('div');
+            stValueDiv.className = 'variable-value';
+
+            const stEvalDiv = document.createElement('div');
+            stEvalDiv.className = 'evaluated-value';
+            stEvalDiv.innerHTML = `<span class="value-label">Evaluated:</span> 
+                <span id="add-note-st-eval"></span>`;
+
+            const stRawDiv = document.createElement('div');
+            stRawDiv.className = 'raw-value';
+            stRawDiv.innerHTML = `<span class="value-label">Raw:</span>`;
+            const stInput = document.createElement('input');
+            stInput.type = 'text';
+            stInput.className = 'raw-value-input';
+
+            function updateStartTimeFormula() {
+                let base = `module.getNoteById(${noteId}).getVariable('startTime')`;
+                let dur = `module.getNoteById(${noteId}).getVariable('duration')`;
+                let autoFormula = atStartRadio.checked
+                    ? base
+                    : `(${base}).add(${dur})`;
+                stInput.value = autoFormula;
+                stInput.dispatchEvent(new Event('input'));
+            }
+            updateStartTimeFormula();
+
+            stInput.addEventListener('input', () => {
+                try {
+                    const val = new Function("module", "Fraction", "return " + stInput.value + ";")(window.myModule, Fraction);
+                    stEvalDiv.querySelector('span#add-note-st-eval').textContent = val.toFraction ? val.toFraction() : val;
+                } catch (e) {
+                    stEvalDiv.querySelector('span#add-note-st-eval').textContent = "Invalid";
+                }
+            });
+
+            atStartRadio.addEventListener('change', updateStartTimeFormula);
+            atEndRadio.addEventListener('change', updateStartTimeFormula);
+
+            stRawDiv.appendChild(stInput);
+            stValueDiv.appendChild(stEvalDiv);
+            stValueDiv.appendChild(stRawDiv);
+            stRow.appendChild(stNameDiv);
+            stRow.appendChild(stValueDiv);
+
+            // Append fields
+            addSection.appendChild(freqRow);
+            addSection.appendChild(durRow);
+            addSection.appendChild(stRow);
+
+            function updateModeFields() {
+                if (silenceRadio.checked) {
+                    freqRow.style.display = 'none';
+                    freqInput.value = '';
+                } else {
+                    freqRow.style.display = '';
+                    if (!freqInput.value) freqInput.value = defaultFreqFormula;
+                }
+            }
+            noteRadio.addEventListener('change', updateModeFields);
+            silenceRadio.addEventListener('change', updateModeFields);
+
+            freqInput.addEventListener('input', () => {
+                try {
+                    const val = new Function("module", "Fraction", "return " + freqInput.value + ";")(window.myModule, Fraction);
+                    freqEvalDiv.querySelector('span#add-note-freq-eval').textContent = val.toFraction ? val.toFraction() : val;
+                } catch (e) {
+                    freqEvalDiv.querySelector('span#add-note-freq-eval').textContent = "Invalid";
+                }
+            });
+            durInput.addEventListener('input', () => {
+                try {
+                    const val = new Function("module", "Fraction", "return " + durInput.value + ";")(window.myModule, Fraction);
+                    durEvalDiv.querySelector('span#add-note-dur-eval').textContent = val.toFraction ? val.toFraction() : val;
+                } catch (e) {
+                    durEvalDiv.querySelector('span#add-note-dur-eval').textContent = "Invalid";
+                }
+            });
+
+            // Initial evaluation
+            freqInput.dispatchEvent(new Event('input'));
+            durInput.dispatchEvent(new Event('input'));
+            stInput.dispatchEvent(new Event('input'));
+
+            // --- Create Button ---
+            const createBtn = document.createElement('button');
+            createBtn.textContent = 'Create Note';
+            createBtn.className = 'module-action-btn';
+            createBtn.style.marginTop = '10px';
+            createBtn.style.background = '#00ffcc';
+            createBtn.style.color = '#151525';
+
+            // Helper to replace the parent note id in the frequency formula (for silences)
+            function replaceFrequencyParentInFormula(formula, newParentId) {
+                return formula.replace(
+                    /\.mul\s*\(\s*module\.getNoteById\(\s*\d+\s*\)\.getVariable\('frequency'\)\s*\)/,
+                    `.mul(module.getNoteById(${newParentId}).getVariable('frequency'))`
+                );
+            }
+
+            createBtn.addEventListener('click', () => {
+                try {
+                    let freqFormula = freqInput.value;
+                    let durFormula = durInput.value; // Use as literal
+                    let stFormula = stInput.value;
+
+                    let isSilence = silenceRadio.checked;
+                    let variables = {};
+
+                    variables.startTime = function() {
+                        return new Function("module", "Fraction", "return " + stFormula + ";")(window.myModule, Fraction);
+                    };
+                    variables.startTimeString = stFormula;
+
+                    // Duration: use as literal (no dependency rewrite)
+                    variables.duration = function() {
+                        return new Function("module", "Fraction", "return " + durFormula + ";")(window.myModule, Fraction);
+                    };
+                    variables.durationString = durFormula;
+
+                    // --- COLOR + FREQUENCY LOGIC ---
+                    let colorToUse = null;
+                    let freqFormulaToUse = freqFormula;
+                    if (!isSilence) {
+                        // If the selected note is a silence, use its parent for frequency/color
+                        if (!note.getVariable('frequency')) {
+                            const parentWithFreq = findParentWithFrequency(note);
+                            if (parentWithFreq) {
+                                freqFormulaToUse = replaceFrequencyParentInFormula(freqFormula, parentWithFreq.id);
+                                if (parentWithFreq.variables && parentWithFreq.variables.color) {
+                                    colorToUse = parentWithFreq.variables.color;
+                                }
+                            } else {
+                                freqFormulaToUse = replaceFrequencyParentInFormula(freqFormula, 0);
+                            }
+                        } else {
+                            if (note.variables && note.variables.color) {
+                                colorToUse = note.variables.color;
+                            }
+                        }
+                        variables.frequency = function() {
+                            return new Function("module", "Fraction", "return " + freqFormulaToUse + ";")(window.myModule, Fraction);
+                        };
+                        variables.frequencyString = freqFormulaToUse;
+                    } else {
+                        // For silence, inherit color from parent with frequency
+                        const parentWithFreq = findParentWithFrequency(note);
+                        if (parentWithFreq && parentWithFreq.variables && parentWithFreq.variables.color) {
+                            colorToUse = parentWithFreq.variables.color;
+                        }
+                    }
+                    if (colorToUse) {
+                        variables.color = colorToUse;
+                    }
+
+                    // Add the note to the module
+                    const newNote = window.myModule.addNote(variables);
+
+                    // Only mark the new note as dirty
+                    if (typeof window.myModule.markNoteDirty === 'function') {
+                        window.myModule.markNoteDirty(newNote.id);
+                    }
+
+                    window.evaluatedNotes = window.myModule.evaluateModule();
+                    if (typeof externalFunctions.updateVisualNotes === 'function') {
+                        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+                    }
+                    if (typeof externalFunctions.createMeasureBars === 'function') {
+                        externalFunctions.createMeasureBars();
+                    }
+
+                    // Show the new note in the widget
+                    const newElem = document.querySelector(`.note-content[data-note-id="${newNote.id}"]`);
+                    if (newElem && window.modals && typeof window.modals.showNoteVariables === 'function') {
+                        window.modals.showNoteVariables(newNote, newElem);
+                    }
+
+                } catch (err) {
+                    alert("Error creating note: " + err.message);
+                }
+            });
+
+            addSection.appendChild(createBtn);
+
+            // Insert before the evaluate section
+            widgetContent.appendChild(addSection);
+        }
+
+        // --- END ADD NOTE/SILENCE SECTION ---
         
         // Add the evaluate section for notes and measure bars
         if (note !== window.myModule.baseNote) {
@@ -1462,6 +1858,279 @@ For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail
             
             widgetContent.appendChild(evaluateWrapper);
         }
+
+        // --- BEGIN ADD NOTE/SILENCE SECTION FOR BASENOTE ---
+        if (note === window.myModule.baseNote) {
+            const addSection = document.createElement('div');
+            addSection.className = 'variable-row add-note-section';
+            addSection.style.marginBottom = '18px';
+            addSection.style.borderTop = '2px solid #00ffcc';
+
+            const addHeader = document.createElement('div');
+            addHeader.className = 'variable-name';
+            addHeader.style.color = '#00ffcc';
+            addHeader.textContent = 'ADD NOTE / SILENCE';
+            addHeader.style.marginBottom = '8px';
+            addSection.appendChild(addHeader);
+
+            // Mode toggle: Note or Silence
+            const modeToggleContainer = document.createElement('div');
+            modeToggleContainer.style.display = 'flex';
+            modeToggleContainer.style.alignItems = 'center';
+            modeToggleContainer.style.gap = '10px';
+            modeToggleContainer.style.marginBottom = '10px';
+
+            const noteRadio = document.createElement('input');
+            noteRadio.type = 'radio';
+            noteRadio.name = 'addTypeBase';
+            noteRadio.value = 'note';
+            noteRadio.id = 'addTypeBaseNote';
+            noteRadio.checked = true;
+
+            const noteLabel = document.createElement('label');
+            noteLabel.textContent = 'Note';
+            noteLabel.htmlFor = 'addTypeBaseNote';
+
+            const silenceRadio = document.createElement('input');
+            silenceRadio.type = 'radio';
+            silenceRadio.name = 'addTypeBase';
+            silenceRadio.value = 'silence';
+            silenceRadio.id = 'addTypeBaseSilence';
+
+            const silenceLabel = document.createElement('label');
+            silenceLabel.textContent = 'Silence';
+            silenceLabel.htmlFor = 'addTypeBaseSilence';
+
+            modeToggleContainer.appendChild(noteRadio);
+            modeToggleContainer.appendChild(noteLabel);
+            modeToggleContainer.appendChild(silenceRadio);
+            modeToggleContainer.appendChild(silenceLabel);
+            addSection.appendChild(modeToggleContainer);
+
+            // Frequency row
+            const freqRow = document.createElement('div');
+            freqRow.className = 'variable-row';
+            freqRow.style.padding = '0';
+            freqRow.style.marginBottom = '8px';
+
+            const freqNameDiv = document.createElement('div');
+            freqNameDiv.className = 'variable-name';
+            freqNameDiv.textContent = 'Frequency';
+            freqNameDiv.style.fontSize = '13px';
+
+            const freqValueDiv = document.createElement('div');
+            freqValueDiv.className = 'variable-value';
+
+            const freqEvalDiv = document.createElement('div');
+            freqEvalDiv.className = 'evaluated-value';
+            freqEvalDiv.innerHTML = `<span class="value-label">Evaluated:</span> 
+                <span id="add-note-freq-eval"></span>`;
+
+            const freqRawDiv = document.createElement('div');
+            freqRawDiv.className = 'raw-value';
+            freqRawDiv.innerHTML = `<span class="value-label">Raw:</span>`;
+            const freqInput = document.createElement('input');
+            freqInput.type = 'text';
+            freqInput.className = 'raw-value-input';
+            freqInput.value = `new Fraction(1,1).mul(module.baseNote.getVariable('frequency'))`;
+            freqRawDiv.appendChild(freqInput);
+
+            freqValueDiv.appendChild(freqEvalDiv);
+            freqValueDiv.appendChild(freqRawDiv);
+            freqRow.appendChild(freqNameDiv);
+            freqRow.appendChild(freqValueDiv);
+
+            // Duration row
+            const durRow = document.createElement('div');
+            durRow.className = 'variable-row';
+            durRow.style.padding = '0';
+            durRow.style.marginBottom = '8px';
+
+            const durNameDiv = document.createElement('div');
+            durNameDiv.className = 'variable-name';
+            durNameDiv.textContent = 'Duration';
+            durNameDiv.style.fontSize = '13px';
+
+            const durValueDiv = document.createElement('div');
+            durValueDiv.className = 'variable-value';
+
+            const durEvalDiv = document.createElement('div');
+            durEvalDiv.className = 'evaluated-value';
+            durEvalDiv.innerHTML = `<span class="value-label">Evaluated:</span> 
+                <span id="add-note-dur-eval"></span>`;
+
+            const durRawDiv = document.createElement('div');
+            durRawDiv.className = 'raw-value';
+            durRawDiv.innerHTML = `<span class="value-label">Raw:</span>`;
+            const durInput = document.createElement('input');
+            durInput.type = 'text';
+            durInput.className = 'raw-value-input';
+            durInput.value = `new Fraction(60).div(module.baseNote.getVariable('tempo'))`; // 1 beat at current tempo
+            durRawDiv.appendChild(durInput);
+
+            durValueDiv.appendChild(durEvalDiv);
+            durValueDiv.appendChild(durRawDiv);
+            durRow.appendChild(durNameDiv);
+            durRow.appendChild(durValueDiv);
+
+            // Start time row
+            const stRow = document.createElement('div');
+            stRow.className = 'variable-row';
+            stRow.style.padding = '0';
+            stRow.style.marginBottom = '8px';
+
+            const stNameDiv = document.createElement('div');
+            stNameDiv.className = 'variable-name';
+            stNameDiv.textContent = 'Start Time';
+            stNameDiv.style.fontSize = '13px';
+
+            const stValueDiv = document.createElement('div');
+            stValueDiv.className = 'variable-value';
+
+            const stEvalDiv = document.createElement('div');
+            stEvalDiv.className = 'evaluated-value';
+            stEvalDiv.innerHTML = `<span class="value-label">Evaluated:</span> 
+                <span id="add-note-st-eval"></span>`;
+
+            const stRawDiv = document.createElement('div');
+            stRawDiv.className = 'raw-value';
+            stRawDiv.innerHTML = `<span class="value-label">Raw:</span>`;
+            const stInput = document.createElement('input');
+            stInput.type = 'text';
+            stInput.className = 'raw-value-input';
+            stInput.value = `module.baseNote.getVariable('startTime')`;
+            stRawDiv.appendChild(stInput);
+
+            stValueDiv.appendChild(stEvalDiv);
+            stValueDiv.appendChild(stRawDiv);
+            stRow.appendChild(stNameDiv);
+            stRow.appendChild(stValueDiv);
+
+            // Append fields
+            addSection.appendChild(freqRow);
+            addSection.appendChild(durRow);
+            addSection.appendChild(stRow);
+
+            // Toggle frequency row for silence
+            function updateModeFields() {
+                if (silenceRadio.checked) {
+                    freqRow.style.display = 'none';
+                    freqInput.value = '';
+                } else {
+                    freqRow.style.display = '';
+                    if (!freqInput.value) freqInput.value = `new Fraction(1,1).mul(module.baseNote.getVariable('frequency'))`;
+                }
+            }
+            noteRadio.addEventListener('change', updateModeFields);
+            silenceRadio.addEventListener('change', updateModeFields);
+
+            freqInput.addEventListener('input', () => {
+                try {
+                    const val = new Function("module", "Fraction", "return " + freqInput.value + ";")(window.myModule, Fraction);
+                    freqEvalDiv.querySelector('span#add-note-freq-eval').textContent = val.toFraction ? val.toFraction() : val;
+                } catch (e) {
+                    freqEvalDiv.querySelector('span#add-note-freq-eval').textContent = "Invalid";
+                }
+            });
+            durInput.addEventListener('input', () => {
+                try {
+                    const val = new Function("module", "Fraction", "return " + durInput.value + ";")(window.myModule, Fraction);
+                    durEvalDiv.querySelector('span#add-note-dur-eval').textContent = val.toFraction ? val.toFraction() : val;
+                } catch (e) {
+                    durEvalDiv.querySelector('span#add-note-dur-eval').textContent = "Invalid";
+                }
+            });
+            stInput.addEventListener('input', () => {
+                try {
+                    const val = new Function("module", "Fraction", "return " + stInput.value + ";")(window.myModule, Fraction);
+                    stEvalDiv.querySelector('span#add-note-st-eval').textContent = val.toFraction ? val.toFraction() : val;
+                } catch (e) {
+                    stEvalDiv.querySelector('span#add-note-st-eval').textContent = "Invalid";
+                }
+            });
+
+            // Initial evaluation
+            freqInput.dispatchEvent(new Event('input'));
+            durInput.dispatchEvent(new Event('input'));
+            stInput.dispatchEvent(new Event('input'));
+
+            // --- Create Button ---
+            const createBtn = document.createElement('button');
+            createBtn.textContent = 'Create';
+            createBtn.className = 'module-action-btn';
+            createBtn.style.marginTop = '10px';
+            createBtn.style.background = '#00ffcc';
+            createBtn.style.color = '#151525';
+
+            createBtn.addEventListener('click', () => {
+                try {
+                    // Pause playback if necessary
+                    if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused &&
+                        window.playerControls && window.playerControls.pause) {
+                        window.playerControls.pause();
+                    }
+
+                    let freqFormula = freqInput.value;
+                    let durFormula = durInput.value;
+                    let stFormula = stInput.value;
+
+                    let isSilence = silenceRadio.checked;
+                    let variables = {};
+
+                    variables.startTime = function() {
+                        return new Function("module", "Fraction", "return " + stFormula + ";")(window.myModule, Fraction);
+                    };
+                    variables.startTimeString = stFormula;
+
+                    variables.duration = function() {
+                        return new Function("module", "Fraction", "return " + durFormula + ";")(window.myModule, Fraction);
+                    };
+                    variables.durationString = durFormula;
+
+                    if (!isSilence) {
+                        variables.frequency = function() {
+                            return new Function("module", "Fraction", "return " + freqFormula + ";")(window.myModule, Fraction);
+                        };
+                        variables.frequencyString = freqFormula;
+                    }
+
+                    // Always assign a random color
+                    const hue = Math.floor(Math.random() * 360);
+                    variables.color = `hsla(${hue}, 70%, 60%, 0.7)`;
+
+                    // Add the note to the module
+                    const newNote = window.myModule.addNote(variables);
+
+                    // Only mark the new note as dirty
+                    if (typeof window.myModule.markNoteDirty === 'function') {
+                        window.myModule.markNoteDirty(newNote.id);
+                    }
+
+                    window.evaluatedNotes = window.myModule.evaluateModule();
+                    if (typeof externalFunctions.updateVisualNotes === 'function') {
+                        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+                    }
+                    if (typeof externalFunctions.createMeasureBars === 'function') {
+                        externalFunctions.createMeasureBars();
+                    }
+
+                    // Show the new note in the widget
+                    const newElem = document.querySelector(`.note-content[data-note-id="${newNote.id}"]`);
+                    if (newElem && window.modals && typeof window.modals.showNoteVariables === 'function') {
+                        window.modals.showNoteVariables(newNote, newElem);
+                    }
+
+                } catch (err) {
+                    alert("Error creating note: " + err.message);
+                }
+            });
+
+            addSection.appendChild(createBtn);
+
+            // Insert before the evaluate section
+            widgetContent.appendChild(addSection);
+        }
+        // --- END ADD NOTE/SILENCE SECTION FOR BASENOTE ---
         
         // Add evaluate module button for base note
         if (note === window.myModule.baseNote) {

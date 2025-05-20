@@ -697,7 +697,7 @@
       "id": 104,
       "startTime": "module.getNoteById(102).getVariable('startTime').add(module.getNoteById(102).getVariable('duration'))",
       "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1)",
-      "frequency": "new Fraction(63, 64).mul(module.baseNote.getVariable('frequency'))",
+      "frequency": "new Fraction(1, 1).mul(module.baseNote.getVariable('frequency'))",
       "color": "rgba(0,0,255,0.7)"
     },
     {
