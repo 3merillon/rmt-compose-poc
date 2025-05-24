@@ -1,29 +1,6 @@
-/*
-Custom Reference-Only License
-Copyright (c) 2025 Cyril Monkewitz
-All rights reserved.
-This software and associated documentation files (the "Software") are provided for reference and
-educational purposes only. Permission is explicitly NOT granted to:
-Use the Software for commercial purposes
-Modify the Software
-Distribute the Software
-Sublicense the Software
-Use the Software in any production environment
-The above copyright notice and this permission notice shall be included in all copies or substantial
-portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
-LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, IN CONNECTION WITH THE SOFTWARE
-OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail.com
-*/
-
-let memoizedModuleEndTime = null;
-let moduleLastModifiedTime = 0;
+let memoizedModuleEndTime = null, moduleLastModifiedTime = 0;
 
 function invalidateModuleEndTimeCache() {
-    //console.log('Invalidating module end time cache');
     memoizedModuleEndTime = null;
     moduleLastModifiedTime = Date.now();
 }
@@ -32,74 +9,52 @@ class Module {
     constructor(baseNoteVariables = {}) {
         this.notes = {};
         this.nextId = 1;
-        
-        // Add caching properties for evaluation
         this._evaluationCache = {};
         this._lastEvaluationTime = 0;
         this._dirtyNotes = new Set();
-    
-        // Add caching for dependencies
         this._dependenciesCache = new Map();
         this._dependentsCache = new Map();
-    
-        // Default variables for the base note
+
         const defaultBaseNoteVariables = {
             frequency: () => new Fraction(440),
             startTime: () => new Fraction(0),
-            tempo: () => new Fraction(60), // beats per minute
+            tempo: () => new Fraction(60),
             beatsPerMeasure: () => new Fraction(4),
-            instrument: 'sine-wave', // Default instrument for base note
+            instrument: 'sine-wave',
             measureLength: () => {
                 const tempo = this.getNoteById(0).getVariable('tempo');
                 const beatsPerMeasure = this.getNoteById(0).getVariable('beatsPerMeasure');
                 return beatsPerMeasure.div(tempo).mul(60);
             },
         };
-    
-        // Merge default variables with provided variables
+
         const finalBaseNoteVariables = { ...defaultBaseNoteVariables, ...baseNoteVariables };
-    
-        // Create the base note with ID 0
         this.baseNote = new Note(0, finalBaseNoteVariables);
-        this.baseNote.module = this; // Set module reference
+        this.baseNote.module = this;
         this.notes[0] = this.baseNote;
     }
     
-    // Method to mark a note as dirty
     markNoteDirty(noteId) {
         this._dirtyNotes.add(Number(noteId));
-        
-        // Invalidate dependency caches for this note
         this._dependenciesCache.delete(Number(noteId));
-        this._dependentsCache.clear(); // Clear all dependents cache as this could affect many notes
-        
-        // Also mark all dependent notes as dirty
+        this._dependentsCache.clear();
         const dependents = this.getDependentNotes(Number(noteId));
-        dependents.forEach(depId => {
-            this._dirtyNotes.add(Number(depId));
-        });
+        dependents.forEach(depId => this._dirtyNotes.add(Number(depId)));
     }
 
     getDirectDependencies(noteId) {
-        // Check cache first
-        if (this._dependenciesCache.has(noteId)) {
-            return this._dependenciesCache.get(noteId);
-        }
+        if (this._dependenciesCache.has(noteId)) return this._dependenciesCache.get(noteId);
         
         const note = this.getNoteById(noteId);
-        if (!note || !note.variables) {
-            return [];
-        }
+        if (!note || !note.variables) return [];
         
         const dependencies = new Set();
         
-        // Add explicit dependencies if any
         if (this._explicitDependencies && this._explicitDependencies.has(noteId)) {
             const explicitDeps = this._explicitDependencies.get(noteId);
             explicitDeps.forEach(depId => dependencies.add(depId));
         }
         
-        // Add dependencies from variable expressions
         function findReferences(expr) {
             const regex = /getNoteById\((\d+)\)/g;
             const references = new Set();
@@ -122,21 +77,16 @@ class Module {
         }
         
         const result = Array.from(dependencies);
-        // Store in cache
         this._dependenciesCache.set(noteId, result);
         return result;
     }
 
     getDependentNotes(noteId) {
         if (noteId == null) return [];
-        
-        // Check cache first
-        if (this._dependentsCache.has(noteId)) {
-            return this._dependentsCache.get(noteId);
-        }
+        if (this._dependentsCache.has(noteId)) return this._dependentsCache.get(noteId);
         
         const dependents = new Set();
-        const visited = new Set(); // To prevent infinite recursion in circular dependencies
+        const visited = new Set();
         
         const checkDependencies = (id) => {
             if (visited.has(id)) return;
@@ -145,7 +95,6 @@ class Module {
             for (const [checkId, note] of Object.entries(this.notes)) {
                 if (!note) continue;
                 if (checkId !== String(id)) {
-                    // Use cached dependencies if available
                     let deps;
                     if (this._dependenciesCache.has(Number(checkId))) {
                         deps = this._dependenciesCache.get(Number(checkId));
@@ -162,17 +111,16 @@ class Module {
         };
         
         checkDependencies(noteId);
-        
         const result = Array.from(dependents);
-        // Store in cache
         this._dependentsCache.set(noteId, result);
         return result;
     }
 
     addNote(variables = {}) {
         const id = this.nextId++;
+        console.log(`Adding new note with ID ${id}, nextId is now ${this.nextId}`);
         const note = new Note(id, variables);
-        note.module = this; // Set module reference
+        note.module = this;
         this.notes[id] = note;
         this.markNoteDirty(id);
         invalidateModuleEndTimeCache();
@@ -182,7 +130,7 @@ class Module {
     removeNote(id) {
         delete this.notes[id];
         delete this._evaluationCache[id];
-        this.markNoteDirty(id); // Mark dependents as dirty
+        this.markNoteDirty(id);
         invalidateModuleEndTimeCache();
     }
 
@@ -193,33 +141,26 @@ class Module {
     evaluateModule() {
         const currentTime = Date.now();
         
-        // If no notes are dirty and we have a valid cache, return the cached result
         if (this._dirtyNotes.size === 0 && 
             Object.keys(this._evaluationCache).length > 0 && 
             this._lastEvaluationTime > 0) {
             return { ...this._evaluationCache };
         }
         
-        // Start with the existing cache
         const evaluatedNotes = { ...this._evaluationCache };
-        
-        // Get the list of notes to evaluate
         const notesToEvaluate = this._dirtyNotes.size > 0 
             ? [...this._dirtyNotes] 
             : Object.keys(this.notes).map(id => parseInt(id, 10));
         
-        // Evaluate only the dirty notes and their dependents
         notesToEvaluate.forEach(id => {
             const note = this.notes[id];
             if (note) {
                 evaluatedNotes[id] = note.getAllVariables();
             } else {
-                // If a note was deleted, remove it from the cache
                 delete evaluatedNotes[id];
             }
         });
         
-        // Update the cache and reset dirty notes
         this._evaluationCache = { ...evaluatedNotes };
         this._lastEvaluationTime = currentTime;
         this._dirtyNotes.clear();
@@ -227,86 +168,49 @@ class Module {
         return evaluatedNotes;
     }
 
-	findMeasureLength(note) {
-        // Explicitly track dependency on BaseNote
+    findMeasureLength(note) {
         this._trackDependency(note.id, 0);
-        
-        // Get current tempo and beats per measure
         const tempo = this.findTempo(note);
         const beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
-        // Calculate measure length: (beats/measure) / (beats/minute) * (60 seconds/minute)
         return beatsPerMeasure.div(tempo).mul(60);
     }
 
     findTempo(note) {
-        // Explicitly track dependency on BaseNote
         this._trackDependency(note.id, 0);
-        
         while (note) {
-            if (note.variables.tempo) {
-                return note.getVariable('tempo');
-            }
+            if (note.variables.tempo) return note.getVariable('tempo');
             note = this.getNoteById(note.parentId);
         }
         return this.baseNote.getVariable('tempo');
     }
 
     findInstrument(note) {
-        // Explicitly track dependency on BaseNote
         this._trackDependency(note.id, 0);
+        if (!note.variables.frequency && !note.getVariable('frequency')) return 'sine-wave';
+        if (note.variables.instrument !== undefined) return note.getVariable('instrument');
         
-        // Check if this is a silence note (has no frequency)
-        if (!note.variables.frequency && !note.getVariable('frequency')) {
-            // For silence notes, return a default instrument (they won't make sound anyway)
-            return 'sine-wave';
-        }
-        
-        // If the note has its own instrument defined, return it
-        if (note.variables.instrument !== undefined) {
-            return note.getVariable('instrument');
-        }
-        
-        // Otherwise, look for instrument in frequency dependencies
         let currentNote = note;
-        
-        // First, try to find a parent note through frequency dependency
         const freqString = currentNote.variables.frequencyString;
         if (freqString) {
-            // Look for a reference to another note's frequency
             const noteRefMatch = freqString.match(/module\.getNoteById\((\d+)\)\.getVariable\('frequency'\)/);
             if (noteRefMatch) {
                 const parentId = parseInt(noteRefMatch[1], 10);
                 const parentNote = this.getNoteById(parentId);
-                if (parentNote) {
-                    // Recursively check the parent note
-                    return this.findInstrument(parentNote);
-                }
+                if (parentNote) return this.findInstrument(parentNote);
             }
             
-            // Look for a reference to the base note's frequency
             if (freqString.includes("module.baseNote.getVariable('frequency')")) {
                 return this.findInstrument(this.baseNote);
             }
         }
         
-        // If no instrument found in dependencies, return the default without logging
         return 'sine-wave';
     }
 
     _trackDependency(noteId, dependencyId) {
-        // Skip if noteId is undefined or null
         if (noteId == null) return;
-        
-        // Get or create the dependencies set for this note
-        if (!this._explicitDependencies) {
-            this._explicitDependencies = new Map();
-        }
-        
-        if (!this._explicitDependencies.has(noteId)) {
-            this._explicitDependencies.set(noteId, new Set());
-        }
-        
-        // Add the dependency
+        if (!this._explicitDependencies) this._explicitDependencies = new Map();
+        if (!this._explicitDependencies.has(noteId)) this._explicitDependencies.set(noteId, new Set());
         this._explicitDependencies.get(noteId).add(dependencyId);
     }
 
@@ -316,7 +220,6 @@ class Module {
           const prevNote = (i === 0) ? fromNote : this.getNoteById(notesArray[i - 1].id);
           const measureLength = this.findMeasureLength(prevNote);
           
-          // Define the new startTime as a function that doesn't reference itself
           const newStartTimeFunction = () => {
             if (i === 0) {
               return prevNote.getVariable('startTime').add(measureLength);
@@ -326,7 +229,6 @@ class Module {
             }
           };
       
-          // Construct the raw string
           let rawString;
           if (prevNote.id === 0) {
             rawString = "module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))";
@@ -334,7 +236,6 @@ class Module {
             rawString = `module.getNoteById(${prevNote.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevNote.id})))`;
           }
       
-          // Create the new note with both the function and the raw string
           const newNote = this.addNote({
             startTime: newStartTimeFunction,
             startTimeString: rawString
@@ -355,7 +256,6 @@ class Module {
             data = source;
         }
         
-        // Create base note variables using the provided strings.
         const baseNoteVariables = {
             frequency: () => (new Function("module", "Fraction", "getNoteById", "return " + data.baseNote.frequency + ";"))(null, Fraction, null),
             frequencyString: data.baseNote.frequency,
@@ -368,41 +268,32 @@ class Module {
             instrument: data.baseNote.instrument || 'sine-wave'
         };
     
-        // Create a new Module instance with the above base note.
         const moduleInstance = new Module(baseNoteVariables);
         
-        // Process each note in data.notes.
         data.notes.forEach((noteData) => {
             const variables = {};
             const noteId = parseInt(noteData.id);
             
-            // Process all properties except "id".
             Object.entries(noteData).forEach(([key, value]) => {
                 if (key !== 'id') {
                     if (key === 'color' || key === 'instrument') {
-                        // Store color and instrument as direct values
                         variables[key] = value;
                     } else if (typeof value === "string" && (value.includes('module.') || value.includes('new Fraction') || value.includes('eval(') || value.includes('getNoteById'))) {
-                        // Create a new function that takes module, Fraction, and getNoteById as parameters.
                         const func = new Function("module", "Fraction", "getNoteById", "return " + value + ";");
-                        // When called, pass the module instance, Fraction, and the module's getNoteById (bound to moduleInstance).
                         variables[key] = function() {
                             return func(moduleInstance, Fraction, moduleInstance.getNoteById.bind(moduleInstance));
                         };
                         variables[key + 'String'] = value;
                     } else {
-                        // Otherwise, store the value directly.
                         variables[key] = value;
                     }
                 }
             });
             
-            // If noteId is a valid number, create the note with that id.
             if (!isNaN(noteId)) {
                 const note = new Note(noteId, variables);
-                note.module = moduleInstance; // Set module reference
+                note.module = moduleInstance;
                 moduleInstance.notes[noteId] = note;
-                // Ensure nextId is updated.
                 if (noteId >= moduleInstance.nextId) {
                     moduleInstance.nextId = noteId + 1;
                 }
@@ -411,9 +302,7 @@ class Module {
             }
         });
         
-        // Ensure the base note has a module reference
         moduleInstance.baseNote.module = moduleInstance;
-        
         return moduleInstance;
     }
 
@@ -457,24 +346,18 @@ class Module {
     }
 
     async exportOrderedModule() {
-        // Export the live module to a raw data object.
         const moduleData = this.createModuleJSON();
-        // Load the temporary module using loadFromJSON so that baseNote expressions are handled correctly.
         const tempModule = await Module.loadFromJSON(moduleData);
-        // Reorder the temporary module (currently reindexModule is a dummy).
         tempModule.reindexModule();
-        // Return its JSON string.
         return JSON.stringify(tempModule.createModuleJSON(), null, 2);
     }
 
     createModuleJSON() {
       const moduleObj = {};
     
-      // Export base note:
       const baseObj = {};
       Object.keys(this.baseNote.variables).forEach(key => {
         if (key.endsWith("String")) {
-          // Remove "String" suffix.
           const prop = key.slice(0, -6);
           baseObj[prop] = this.baseNote.variables[key];
         } else if (key === "color" || key === "instrument") {
@@ -483,7 +366,6 @@ class Module {
       });
       moduleObj.baseNote = baseObj;
     
-      // Export notes (except base note)
       const notesArray = [];
       Object.values(this.notes).forEach(note => {
         if (note.id === 0) return;
@@ -505,10 +387,7 @@ class Module {
    }
 
    reindexModule() {
-    // Preserve the base note as id 0.
     const baseNote = this.baseNote;
-    
-    // Store original colors keyed by note id
     const originalColors = {};
     for (const id in this.notes) {
         if (this.notes[id].variables && this.notes[id].variables.color) {
@@ -516,13 +395,11 @@ class Module {
         }
     }
     
-    // Separate notes (except base note) into measure notes and regular notes.
     const measureNotes = [];
     const regularNotes = [];
     for (const id in this.notes) {
         const note = this.notes[id];
         if (Number(id) === 0) continue;
-        // Measure notes: have a startTime but no duration/frequency.
         if (note.variables.startTime && !note.variables.duration && !note.variables.frequency) {
             measureNotes.push(note);
         } else {
@@ -530,11 +407,9 @@ class Module {
         }
     }
     
-    // Sort both arrays by evaluated startTime.
     measureNotes.sort((a, b) => a.getVariable("startTime").valueOf() - b.getVariable("startTime").valueOf());
     regularNotes.sort((a, b) => a.getVariable("startTime").valueOf() - b.getVariable("startTime").valueOf());
     
-    // Build a mapping from old id to new sequential id.
     const newMapping = {};
     newMapping[baseNote.id] = 0;
     let newId = 1;
@@ -547,7 +422,6 @@ class Module {
         newId++;
     }
     
-    // Store the old parentId relationships
     const parentRelationships = {};
     for (const id in this.notes) {
         const note = this.notes[id];
@@ -571,20 +445,16 @@ class Module {
         });
     }
     
-    // Create a new notes object
     const newNotes = {};
     newNotes[0] = baseNote;
     
-    // Process each non-base note
     for (const oldId in this.notes) {
         if (Number(oldId) === 0) continue;
         const note = this.notes[oldId];
         const updatedId = newMapping[note.id];
         
-        // Create new note with all variables
         const variables = {};
         
-        // Copy all variables
         for (const key in note.variables) {
             if (key.endsWith("String")) {
                 variables[key] = updateRawDependencies(note.variables[key]);
@@ -593,18 +463,13 @@ class Module {
                     return new Function("module", "Fraction", "return " + variables[key] + ";")(this, Fraction);
                 };
             } else if (key === 'color' || key === 'instrument') {
-                // Copy color and instrument directly
                 variables[key] = note.variables[key];
             }
         }
         
-        // Create new note with copied variables
         const newNote = new Note(updatedId, variables);
-        
-        // Update module reference
         newNote.module = this;
         
-        // Copy parentId if it exists and update it
         if (parentRelationships[oldId] !== undefined) {
             const oldParentId = parentRelationships[oldId];
             newNote.parentId = newMapping[oldParentId] !== undefined ? newMapping[oldParentId] : 0;
@@ -613,27 +478,21 @@ class Module {
         newNotes[updatedId] = newNote;
     }
     
-    // Replace the module's notes with the newly reindexed notes
     this.notes = newNotes;
-    
-    // Reset all caches
     this._evaluationCache = {};
     this._lastEvaluationTime = 0;
     this._dirtyNotes = new Set();
     this._dependenciesCache = new Map();
     this._dependentsCache = new Map();
     
-    // Mark all notes as dirty to ensure proper reevaluation
     for (const id in this.notes) {
         this._dirtyNotes.add(Number(id));
     }
     
-    // Invalidate module end time cache if the function exists
     if (typeof invalidateModuleEndTimeCache === 'function') {
         invalidateModuleEndTimeCache();
     }
     
-    // Log the reindexing for debugging
     console.log("Module reindexed. New mapping:", newMapping);
   }
 }

@@ -1,30 +1,3 @@
-<!--
-  Custom Reference-Only License
-
-  Copyright (c) 2025 Cyril Monkewitz
-
-  All rights reserved.
-
-  This software and associated documentation files (the "Software") are provided for reference and
-  educational purposes only. Permission is explicitly NOT granted to:
-  
-  1. Use the Software for commercial purposes
-  2. Modify the Software
-  3. Distribute the Software
-  4. Sublicense the Software
-  5. Use the Software in any production environment
-
-  The above copyright notice and this permission notice shall be included in all copies or substantial
-  portions of the Software.
-
-  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
-  LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-  WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
-  OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
-  For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail.com
--->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -33,32 +6,26 @@
   <title>[RMT] Compose -Proof Of Concept</title>
   <script src="fraction.min.js?v=0.0.0"></script>
   <script src="note.js?v=0.0.1"></script>
-  <script src="module.js?v=0.0.4"></script>
+  <script src="module.js?v=0.0.5"></script>
   <script defer src="https://unpkg.com/tapspace@2.0.0-alpha.24/dist/tapspace.min.js"></script>
   <link rel="stylesheet" href="styles.css?v=0.0.6">
-  <script defer src="modals.js?v=0.0.7"></script>
-  <script defer src="menu-bar.js?v=0.0.2"></script>
+  <script defer src="modals.js?v=0.0.9"></script>
+  <script defer src="menu-bar.js?v=0.0.3"></script>
   <script src="instruments/instrument-manager.js?v=0.0.0"></script>
   <script src="instruments/synth-instruments.js?v=0.0.0"></script>
   <script src="instruments/sample-instruments.js?v=0.0.0"></script>
-  <script defer src="player.js?v=0.0.9"></script>
+  <script defer src="player.js?v=0.1.0"></script>
   <script src="stack-click.js?v=0.0.1"></script>
 </head>
 <body>
-  <!-- Top Bar -->
   <div class="top-bar">
     <div class="controls-group">
       <button id="playPauseBtn" title="Play/Pause">
-        <div class="pp">
-          <span></span>
-        </div>
+        <div class="pp"><span></span></div>
       </button>
       <button id="stopButton" title="Stop" class="stop-button">
         <div class="stop">
-          <span></span>
-          <span></span>
-          <span></span>
-          <span></span>
+          <span></span><span></span><span></span><span></span>
         </div>
       </button>
       <input type="range" id="volumeSlider" title="Volume Slider" min="0" max="1" step="0.01" value="1">
@@ -77,59 +44,38 @@
         </button>
         <div id="general-widget" class="widget">
           <div class="menu-actions">
-            <button id="reorderModuleBtn" class="module-action-btn" style="background: #add8e6;">
-              Reorder Module
-            </button>
-            <button id="saveModuleBtn" class="module-action-btn">
-              Save Module
-            </button>
+            <button id="reorderModuleBtn" class="module-action-btn" style="background: #add8e6;">Reorder Module</button>
+            <button id="saveModuleBtn" class="module-action-btn">Save Module</button>
             <input type="file" id="loadModuleInput" accept=".json" style="display: none;">
-            <button id="loadModuleBtn" class="module-action-btn">
-              Load Module
-            </button>
+            <button id="loadModuleBtn" class="module-action-btn">Load Module</button>
           </div>
           <div class="widget-footer">
             <div class="info-section">
-              <a href="https://cybercyril.com" target="_blank" class="info-link">
-                - discover "<b>Relative Music Theory</b>" -
-              </a>
+              <a href="https://cybercyril.com" target="_blank" class="info-link">- discover "<b>Relative Music Theory</b>" -</a>
             </div>
             <div class="support-section">
-              <a href="https://donate.stripe.com/7sIdR3dQMciZb1m8ww" target="_blank" class="donate-button">
-                Donate
-              </a>
+              <a href="https://donate.stripe.com/7sIdR3dQMciZb1m8ww" target="_blank" class="donate-button">Donate</a>
             </div>
-            <div class="widget-copyright">
-              © 2025 Cyril Monkewitz
-            </div>
+            <div class="widget-copyright">© 2025 Cyril Monkewitz</div>
           </div>
         </div>
       </div>
     </div>
   </div>
-
-  <!-- Second Top Bar -->
   <div class="second-top-bar">
     <div class="icons-wrapper">
-      <div class="icons-container">
-        <!-- The icons will be dynamically generated in module-icons.js -->
-      </div>
+      <div class="icons-container"></div>
     </div>
     <div class="separator"></div>
     <div class="pull-tab"></div>
   </div>
-
-  <!-- Tapspace Container -->
   <div class="myspaceapp"></div>
-  <!-- Note Widget -->
   <div id="note-widget" class="note-widget">
     <div class="note-widget-header">
       <span id="note-widget-title" class="note-widget-title">Note Variables</span>
       <button class="note-widget-close">×</button>
     </div>
-    <div class="note-widget-content">
-      <!-- Variables will be displayed here -->
-    </div>
+    <div class="note-widget-content"></div>
   </div>
   <div id="measureBarsContainer" class="measure-bars-container"></div>
   <div id="playheadContainer" class="measure-bars-container"></div>

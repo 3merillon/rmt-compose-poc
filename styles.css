@@ -1,23 +1,3 @@
-/*
-Custom Reference-Only License
-Copyright (c) 2025 Cyril Monkewitz
-All rights reserved.
-This software and associated documentation files (the "Software") are provided for reference and
-educational purposes only. Permission is explicitly NOT granted to:
-Use the Software for commercial purposes
-Modify the Software
-Distribute the Software
-Sublicense the Software
-Use the Software in any production environment
-The above copyright notice and this permission notice shall be included in all copies or substantial
-portions of the Software.
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT
-LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
-IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE
-OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-For licensing inquiries or commercial use, please contact: cyril.monkewitz@gmail.com
-*/
 @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap');
 
 html, body {
@@ -47,7 +27,6 @@ html, body {
   border-bottom: 1px dotted #ffa800;
 }
 
-/* Second Top Bar container */
 .second-top-bar {
     position: fixed;
     top: 50px;
@@ -67,12 +46,11 @@ html, body {
   -webkit-backdrop-filter: none;
 }
 
-/* Icons-wrapper: scrollable content area */
 .icons-wrapper {
     flex-grow: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    min-height: 0; /* Allow it to shrink to zero */
+    min-height: 0;
 }
   
 .icons-wrapper.collapsed {
@@ -80,7 +58,6 @@ html, body {
   border-bottom: none;
 }
 
-/* Scrollbar styles for the icons-wrapper */
 .icons-wrapper::-webkit-scrollbar {
     width: 8px;
     background-color: transparent;
@@ -95,7 +72,6 @@ html, body {
     background-color: rgba(255, 168, 0, 0.8);
 }
 
-/* Icons-container: flex container for icons */
 .icons-container {
     display: flex;
     flex-wrap: wrap;
@@ -115,13 +91,11 @@ html, body {
   background-color: rgba(255, 168, 0, 0.8);
 }
 
-/* Separator: dotted line at the bottom */
 .separator {
     height: 1px;
     border-bottom: 1px dotted #ffa800;
 }
   
-/* Pull tab */
 .pull-tab {
     position: absolute;
     bottom: -16px;
@@ -142,9 +116,6 @@ html, body {
     background: #ff0000;
 }
 
-/* Each icon:
-   42px square with no margin since container padding provides the vertical gap.
-*/
 .icons-container .icon {
   flex: 0 0 auto;
   width: 42px;
@@ -153,11 +124,6 @@ html, body {
   border-radius: 4px;
 }
 
-/* Toggle Button:
-   Fixed within the second top bar.
-   Dimensions: 40px by 16px.
-   Using child spans for 3 centered dark lines.
-*/
 .second-bar-toggle {
   position: absolute;
   top: 9px; 
@@ -181,11 +147,10 @@ html, body {
   background: #ff0000;
 }
 
-/* Child spans for the dark lines inside the toggle button */
 .second-bar-toggle .toggle-line {
   position: absolute;
   left: 50%;
-  width: 60%;  /* slightly less wide */
+  width: 60%;
   height: 1px;
   background-color: #151525;
   transform: translateX(-50%);
@@ -209,78 +174,74 @@ html, body {
 .right-controls {
     display: flex;
     align-items: center;
-    /*gap: 20px;*/
     margin-right: 36px;
 }
 
-		#playPauseBtn {
-            display: flex;
-			align-items: center;
-			justify-content: center;
-            width: 20px;
-            height: 20px;
-            background-color: transparent;
-            border: none;
-            cursor: pointer;
-            z-index: 10;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .pp {
-            position: relative;
-            width: 20px;
-            height: 20px;
-            transition: all 0.5s ease-in-out;
-        }
-        .pp::before,
-        .pp::after,
-        .pp span {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 20px;
-            height: 2px;
-            border-radius: 2px;
-            background-color: #ffa800;
-            transform-origin: center;
-            transition: all 0.5s ease-in-out;
-        }
-        .pp::before {
-            transform: translate(-50%, -275%) rotate(30deg);
-        }
-        .pp::after {
-            transform: translate(-50%, 175%) rotate(-30deg);
-        }
-        .pp span {
-            transform: translate(-90%, -50%) rotate(90deg);
-        }
-        .pp:hover::before,
-        .pp:hover::after,
-        .pp:hover span {
-            filter: drop-shadow(0 0 10px #ffa800);
-        }
-        .pp.open::before {
-            transform: translate(-75%, -50%) rotate(270deg) ;
-        }
-        .pp.open::after {
-            transform: translate(-25%, -50%) rotate(90deg);
-        }
-        .pp.open span {
-            transform: translate(-25%, -50%) rotate(90deg);
-        }
-        .pp.open::before,
-        .pp.open::after,
-        .pp.open span {
-            background-color: #ff0000;
-        }
-        .pp.open:hover::before,
-        .pp.open::after,
-        .pp.open span {
-            filter: drop-shadow(0 0 10px #ff0000);
-        }
-/* Add glow effect on hover */
+#playPauseBtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    background-color: transparent;
+    border: none;
+    cursor: pointer;
+    z-index: 10;
+}
+.pp {
+    position: relative;
+    width: 20px;
+    height: 20px;
+    transition: all 0.5s ease-in-out;
+}
+.pp::before,
+.pp::after,
+.pp span {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 20px;
+    height: 2px;
+    border-radius: 2px;
+    background-color: #ffa800;
+    transform-origin: center;
+    transition: all 0.5s ease-in-out;
+}
+.pp::before {
+    transform: translate(-50%, -275%) rotate(30deg);
+}
+.pp::after {
+    transform: translate(-50%, 175%) rotate(-30deg);
+}
+.pp span {
+    transform: translate(-90%, -50%) rotate(90deg);
+}
+.pp:hover::before,
+.pp:hover::after,
+.pp:hover span {
+    filter: drop-shadow(0 0 10px #ffa800);
+}
+.pp.open::before {
+    transform: translate(-75%, -50%) rotate(270deg) ;
+}
+.pp.open::after {
+    transform: translate(-25%, -50%) rotate(90deg);
+}
+.pp.open span {
+    transform: translate(-25%, -50%) rotate(90deg);
+}
+.pp.open::before,
+.pp.open::after,
+.pp.open span {
+    background-color: #ff0000;
+}
+.pp.open:hover::before,
+.pp.open::after,
+.pp.open span {
+    filter: drop-shadow(0 0 10px #ff0000);
+}
+
 .stop-button:hover .stop span {
     filter: drop-shadow(0 0 10px #ff0000);
 }
@@ -322,7 +283,6 @@ html, body {
     pointer-events: none;
 }
 
-/* Original square positioning */
 .stop span:nth-child(1) {
     top: 0.5%;
     left: 50%;
@@ -347,7 +307,6 @@ html, body {
     transform: translateY(-50%) rotate(90deg);
 }
 
-/* Hover animation to create X */
 .stop-button:hover .stop span {
     background-color: #ff0000;
 }
@@ -356,36 +315,30 @@ html, body {
     top: 45%;
     left: 0%;
     transform: rotate(45deg);
-    /*transform-origin: top left;*/
 }
 
 .stop-button:hover .stop span:nth-child(2) {
     top: 45%;
     left: 0%;
     transform: rotate(-45deg);
-    /*transform-origin: top right;*/
 }
 
 .stop-button:hover .stop span:nth-child(3) {
     top: 45%;
     left: 0%;
     transform: rotate(45deg);
-    /*transform-origin: bottom left;*/
 }
 
 .stop-button:hover .stop span:nth-child(4) {
     top: 45%;
     left: 0%;
     transform:  rotate(-45deg);
-    /*transform-origin: bottom right;*/
 }
 
-/* Add glow effect on hover */
 .stop-button:hover .stop span {
     filter: drop-shadow(0 0 10px #ff0000);
 }
 
-/* Dropdown button styling */
 .dropdown-button {
     width: 20px;
     height: 20px;
@@ -455,7 +408,7 @@ html, body {
     border-bottom: 1px dotted #ffa800;
     padding: 20px;
     min-width: 250px;
-    max-height: calc(100vh - 100px); /* Adjust this value as needed */
+    max-height: calc(100vh - 100px);
     overflow-y: auto;
     color: #ffa800;
     transform-origin: top center;
@@ -527,7 +480,6 @@ html, body {
     background: rgba(255, 168, 0, 0.2);
 }
 
-/* Volume slider styling */
 #volumeSlider {
     -webkit-appearance: none;
     width: 100px;
@@ -547,7 +499,7 @@ html, body {
     border-radius: 50%;
     box-shadow: 0 0 10px rgba(255, 168, 0, 0.7);
     transition: all 0.2s ease-in-out;
-    touch-action: manipulation; /* Better touch handling */
+    touch-action: manipulation;
 }
 
 #volumeSlider::-webkit-slider-thumb:active,
@@ -556,7 +508,6 @@ html, body {
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
 }
 
-/* For Firefox */
 #volumeSlider::-moz-range-thumb {
     width: 16px;
     height: 16px;
@@ -575,14 +526,12 @@ html, body {
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
 }
 
-/* Add these for better touch support */
 #volumeSlider::-webkit-slider-thumb:focus,
 #volumeSlider::-webkit-slider-thumb:focus-visible {
     background: #ff0000;
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
 }
 
-/* For mobile touch events */
 @media (hover: none) {
     #volumeSlider::-webkit-slider-thumb:active {
         background: #ff0000 !important;
@@ -605,7 +554,6 @@ html, body {
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.7) !important;
 }
 
-
 .module-zone {
     display: flex;
     align-items: center;
@@ -618,21 +566,21 @@ html, body {
     width: 100%;
     height: 100%;
     z-index: 1;
-    background: transparent; /* Ensure Tapspace container has a transparent background */
+    background: transparent;
 }
 
 .right-bar {
     position: fixed;
-    top: 50px; /* Adjusted to accommodate the top bar */
+    top: 50px;
     right: 0;
     width: 300px;
-    height: calc(100% - 50px); /* Adjusted to accommodate the top bar */
+    height: calc(100% - 50px);
     background-color: #f1f1f1;
     border-left: 1px solid #ccc;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
     z-index: 2;
     overflow-y: auto;
-    display: none; /* Initially hidden */
+    display: none;
 }
 
 .note-details h3 {
@@ -654,32 +602,31 @@ html, body {
     top: 0;
     width: 1px;
     height: 100%;
-    border-left: 1px dashed rgba(255, 255, 255, 0.5); /* Standard dashed line */
+    border-left: 1px dashed rgba(255, 255, 255, 0.5);
     transform-origin: left;
     will-change: transform;
 }
 
-/* Secondary bar styles */
 .measure-bar.secondary-bar {
-    border-left: 1px solid rgba(255, 255, 255, 0.7); /* Solid line instead of dashed */
+    border-left: 1px solid rgba(255, 255, 255, 0.7);
     width: 1px;
     height: 100%;
 }
 
 .measure-bar.secondary-bar.start-bar {
-    border-left-width: 2px; /* Slightly thicker for better visibility */
+    border-left-width: 2px;
 }
 
 .measure-bar.secondary-bar.end-bar {
-    border-left-width: 2px; /* Slightly thicker for better visibility */
+    border-left-width: 2px;
 }
 
 .playhead {
     position: absolute;
     top: 0;
-    width: 1px; /* Changed to 1px */
+    width: 1px;
     height: 100%;
-    background-color: #ffa800; /* Changed to orange */
+    background-color: #ffa800;
     box-shadow: 
         0 0 5px #ffa800,
         0 0 10px #ffa800,
@@ -698,7 +645,6 @@ html, body {
     color: #ffa800;
 }
 
-/* Toggle switch styling */
 .toggle-switch {
     position: relative;
     display: inline-block;
@@ -738,7 +684,7 @@ html, body {
 }
 
 input:checked + .toggle-slider {
-    background-color: #333; /* Kept dark background */
+    background-color: #333;
 }
 
 input:checked + .toggle-slider:before {
@@ -746,8 +692,6 @@ input:checked + .toggle-slider:before {
     background-color: #ff0000;
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
 }
-
-
 
 .tempo-container {
     display: flex;
@@ -759,7 +703,7 @@ input:checked + .toggle-slider:before {
     align-items: center;
     gap: 8px;
     width: 100%;
-	justify-content: space-between;
+    justify-content: space-between;
 }
 
 .tempo-input-group label {
@@ -798,7 +742,6 @@ input:checked + .toggle-slider:before {
     opacity: 1;
 }
 
-/* Firefox */
 #tempo-input[type='number'] {
     -moz-appearance: textfield;
 }
@@ -833,7 +776,7 @@ input:checked + .toggle-slider:before {
     align-items: center;
     gap: 8px;
     width: 100%;
-	justify-content: space-between;
+    justify-content: space-between;
 }
 
 .frequency-input-group label {
@@ -872,7 +815,6 @@ input:checked + .toggle-slider:before {
     opacity: 1;
 }
 
-/* Firefox */
 #frequency-input[type='number'] {
     -moz-appearance: textfield;
 }
@@ -896,7 +838,6 @@ input:checked + .toggle-slider:before {
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
 }
 
-/* Style for both input spinners */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
     filter: sepia(100%) hue-rotate(5deg) saturate(500%);
@@ -978,21 +919,18 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     cursor: pointer;
 }
 
-/* Common styles for all fractions */
 .note-rect .note-content > div,
 .base-note-fraction {
     font-family: 'Roboto Mono', 'IBM Plex Mono', monospace;
     font-weight: 400;
 }
 
-/* Styles for note fractions */
 .note-rect .note-content > div {
     font-size: 8px;
     color: white;
     text-shadow: 0 0 1px black;
 }
 
-/* Styles for base note fraction */
 .base-note-fraction {
     color: white;
     font-size: 12px;
@@ -1016,7 +954,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     margin: 2px 0;
 }
 
-/* Base note circle styles */
 .base-note-circle {
     position: absolute;
     z-index: 10;
@@ -1032,7 +969,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     overflow: hidden;
 }
 
-/* Editor widget styles */
 .note-widget {
     position: fixed;
     bottom: 19px;
@@ -1089,17 +1025,17 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .note-widget-content::-webkit-scrollbar {
-    width: 8px; /* Adjust as needed */
+    width: 8px;
     background-color: transparent;
 }
 
 .note-widget-content::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 168, 0, 0.6); /* Adjust color and transparency */
-    border-radius: 4px; /* Adjust for roundness */
+    background-color: rgba(255, 168, 0, 0.6);
+    border-radius: 4px;
 }
 
 .note-widget-content::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 168, 0, 0.8); /* Darker on hover */
+    background-color: rgba(255, 168, 0, 0.8);
 }
 
 .variable-row {
@@ -1152,7 +1088,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     padding: 8px;
     border-radius: 4px;
     box-sizing: border-box;
-    margin-bottom: 5px;  /* spacing between input and save button */
+    margin-bottom: 5px;
 }
 
 .raw-value-input:focus {
@@ -1216,7 +1152,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     height: 0;
     border-left: 15px solid transparent;
     border-right: 15px solid transparent;
-    border-bottom: 30px solid rgba(51, 51, 51, 0.7); /* semi-transparent background */
+    border-bottom: 30px solid rgba(51, 51, 51, 0.7);
     cursor: pointer;
     margin-left: -15px;
     z-index: 2;
@@ -1227,14 +1163,13 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 
 .measure-bar-triangle:hover,
 .measure-bar-triangle.selected {
-    /*border-bottom-color: #ffa800;*/
     filter: drop-shadow(0 0 5px #ffa800);
     transition: filter 0.3s ease;
 }
 
 .measure-id {
     position: absolute;
-    bottom: -27px; /* Align the text to the bottom of the triangle */
+    bottom: -27px;
     left: 50%;
     transform: translateX(-50%);
     color: #ffa800;
@@ -1247,10 +1182,10 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     bottom: 0;
     left: 0;
     right: 0;
-    height: 30px; /* Match the height of the triangles */
+    height: 30px;
     pointer-events: none;
-    z-index: 2; /* Ensure this is higher than measure bars */
-    transform: translateX(0.5px); /* Center the measure bar triangles on the measure bars */
+    z-index: 2;
+    transform: translateX(0.5px);
 }
 
 .menu-actions {
@@ -1297,13 +1232,12 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     transition: filter 0.3s ease;
 }
 
-/* Delete Note UI Section styled like the ADD MEASURE section but with custom colors */
 .delete-note-row {
     margin-bottom: 15px;
     padding: 8px;
     background: rgba(255, 168, 0, 0.05);
     border-radius: 4px;
-    border-top: 2px solid #ff0000; /* red top border to keep the red “bar” look */
+    border-top: 2px solid #ff0000;
 }
 
 .delete-note-header {
@@ -1318,7 +1252,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     padding: 8px;
     border: none;
     border-radius: 4px;
-    margin-bottom: 5px;  /* vertical spacing between buttons */
+    margin-bottom: 5px;
     font-size: 14px;
     cursor: pointer;
     transition: background-color 0.3s ease;
@@ -1328,12 +1262,10 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     opacity: 0.9;
 }
 
-/* Violet for "Keep Dependencies" - a mix between light blue and red */
 .delete-note-btn.keep-dependencies {
-    background-color: #00ffff;  /* BlueViolet: you can adjust this shade as needed */
+    background-color: #00ffff;
 }
 
-/* Red for "Delete Dependencies" */
 .delete-note-btn.delete-dependencies {
     background-color: #ff0000;
 }
@@ -1344,7 +1276,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(21, 21, 37, 0.8); /* dark semi-transparent background */
+    background-color: rgba(21, 21, 37, 0.8);
     backdrop-filter: blur(5px);
     -webkit-backdrop-filter: blur(5px);
     display: flex;
@@ -1354,15 +1286,15 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .delete-confirm-modal {
-    background-color: rgba(21, 21, 37, 0.88); /* dark background matching the menu */
-    border: 1px dotted #ffa800; /* orange dotted border */
+    background-color: rgba(21, 21, 37, 0.88);
+    border: 1px dotted #ffa800;
     border-radius: 5px;
     padding: 20px;
     max-width: 300px;
     width: 90%;
     text-align: center;
     font-family: 'Roboto Mono', monospace;
-    color: #ffa800; /* orange text */
+    color: #ffa800;
     box-shadow: 0 0 10px rgba(255, 168, 0, 0.7);
 }
 
@@ -1382,24 +1314,22 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     background-color: #00a3cc;
 }
 
-/* Style spans for dynamic text inside modals */
 .modal-note-id {
-    color: #ff0000; /* red for Note[N] */
+    color: #ff0000;
 }
 
 .modal-delete-all {
-    color: #ff0000; /* red text for DELETE ALL */
+    color: #ff0000;
 }
 
 .modal-keep {
-    color: #add8e6; /* light blue for KEEP */
+    color: #add8e6;
 }
 
-/* Button container with spacing */
 .modal-btn-container {
     display: flex;
     justify-content: center;
-    gap: 15px; /* space between buttons */
+    gap: 15px;
     margin-top: 10px;
 }
 
@@ -1412,9 +1342,8 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     transition: background 0.3s ease;
 }
 
-/* Yes button styles */
 .delete-confirm-modal button:first-child {
-    background-color: #ff0000; /* red background for DELETE */
+    background-color: #ff0000;
     color: #fff;
 }
 
@@ -1422,9 +1351,8 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     background-color: #cc0000;
 }
 
-/* Cancel button styles */
 .delete-confirm-modal button:last-child {
-    background-color: #add8e6; /* light blue background */
+    background-color: #add8e6;
     color: #000;
 }
 
@@ -1444,7 +1372,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     margin-right: 16px;
   }
   
-  /* Center circle */
   #resetViewBtn .center-circle {
     position: absolute;
     top: 50%;
@@ -1457,7 +1384,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     transition: background-color 0.3s ease;
   }
   
-  /* Four triangles */
   #resetViewBtn .arrow {
     position: absolute;
     width: 0;
@@ -1466,7 +1392,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     transition: all 0.3s ease;
   }
   
-  /* Top triangle */
   #resetViewBtn .arrow.top {
     top: 0;
     left: 50%;
@@ -1475,7 +1400,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     border-color: #ffa800 transparent transparent transparent;
   }
   
-  /* Bottom triangle */
   #resetViewBtn .arrow.bottom {
     bottom: 0;
     left: 50%;
@@ -1484,7 +1408,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     border-color: transparent transparent #ffa800 transparent;
   }
   
-  /* Left triangle */
   #resetViewBtn .arrow.left {
     left: 0;
     top: 50%;
@@ -1493,7 +1416,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     border-color: transparent transparent transparent #ffa800;
   }
   
-  /* Right triangle */
   #resetViewBtn .arrow.right {
     right: 0;
     top: 50%;
@@ -1502,7 +1424,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     border-color: transparent #ffa800 transparent transparent;
   }
   
-  /* Hover effects */
   #resetViewBtn:hover .center-circle {
     background-color: #ff0000;
   }
@@ -1534,13 +1455,12 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     text-align: center;
   }
 
-/* Evaluate Note UI Section styling */
 .evaluate-note-row {
     margin-bottom: 15px;
     padding: 8px;
     background: rgba(255, 168, 0, 0.05);
     border-radius: 4px;
-    border-top: 2px solid #00ffff; /* cyan top border */
+    border-top: 2px solid #00ffff;
 }
 
 .evaluate-note-header {
@@ -1567,7 +1487,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     background-color: #00cccc;
 }
 
-/* Scale Controls */
 .scale-controls {
     position: fixed;
     bottom: 11px;
@@ -1577,8 +1496,8 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     flex-direction: column;
     pointer-events: none;
     width: 150px;
-    height: 170px; /* Height of Y slider + height of X slider */
-    opacity: 0; /* Start with controls hidden */
+    height: 170px;
+    opacity: 0;
     transition: opacity 0.3s ease-in-out;
 }
 
@@ -1624,7 +1543,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     transform: scaleX(1);
 }
 
-/* Style for vertical slider */
 .y-scale-slider-container input[type="range"] {
     -webkit-appearance: none;
     appearance: none;
@@ -1640,7 +1558,6 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     transition-delay: 0.3s;
 }
 
-/* Style for horizontal slider */
 .x-scale-slider-container input[type="range"] {
     -webkit-appearance: none;
     appearance: none;
@@ -1658,13 +1575,11 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     opacity: 1;
 }
 
-/* Thumb styling for both sliders */
 input[type="range"]::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 12px;
     height: 12px;
-    /*background: #ffa800;*/
     border: 1px solid #ffa800;
     cursor: pointer;
     border-radius: 50%;
@@ -1683,7 +1598,6 @@ input[type="range"]::-moz-range-thumb {
     border: none;
 }
 
-/* Hover effects */
 input[type="range"]:hover::-webkit-slider-thumb {
     background: #ff0000;
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
@@ -1694,7 +1608,6 @@ input[type="range"]:hover::-moz-range-thumb {
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
 }
 
-/* Active effects */
 input[type="range"]:active::-webkit-slider-thumb {
     background: #ff0000;
     box-shadow: 0 0 15px rgba(255, 0, 0, 0.9);
@@ -1705,7 +1618,6 @@ input[type="range"]:active::-moz-range-thumb {
     box-shadow: 0 0 15px rgba(255, 0, 0, 0.9);
 }
 
-/* Scale labels */
 .y-scale-slider-container::before {
     content: 'Y';
     position: absolute;
@@ -1737,7 +1649,6 @@ input[type="range"]:active::-moz-range-thumb {
     opacity: 1;
 }
 
-/* Corner element to create a perfect L-shape */
 .scale-controls-toggle {
     position: fixed;
     bottom: 20px;  
@@ -1762,7 +1673,6 @@ input[type="range"]:active::-moz-range-thumb {
     box-shadow: 0 0 15px rgba(255, 0, 0, 0.9);
 }
 
-/* Octave indicator styles */
 .octave-indicators-container {
     position: fixed;
     top: 0;
@@ -1770,7 +1680,7 @@ input[type="range"]:active::-moz-range-thumb {
     width: 100%;
     height: 100%;
     pointer-events: none;
-    z-index: 1; /* Lower z-index to ensure it's below the menu bars */
+    z-index: 1;
 }
 
 .octave-indicator {
@@ -1803,7 +1713,6 @@ input[type="range"]:active::-moz-range-thumb {
     font-weight: bold;
 }
 
-/* Resize handle styles */
 .resize-handle-icon {
     transition: background-color 0.3s ease;
 }
@@ -1812,7 +1721,6 @@ input[type="range"]:active::-moz-range-thumb {
     background: rgba(255, 255, 255, 0.9);
 }
   
-/* Add a visual indicator when resizing */
 .note-rect.resizing {
     outline: 2px dashed #ffa800;
 }
@@ -1827,7 +1735,6 @@ input[type="range"]:active::-moz-range-thumb {
     opacity: 0.7;
 }
 
-/* Lock button styles */
 .lock-button {
     position: fixed;
     bottom: 20px;
@@ -1836,7 +1743,7 @@ input[type="range"]:active::-moz-range-thumb {
     height: 24px;
     background: transparent;
     border: none;
-    pointer-events: none; /* Make container transparent to mouse events */
+    pointer-events: none;
     z-index: 1002;
     padding: 0;
     display: flex;
@@ -1869,11 +1776,9 @@ input[type="range"]:active::-moz-range-thumb {
     stroke: #f00;
     stroke-width: 4;
     transition: transform 0.3s ease, stroke 0.3s ease;
-    /* In our transition shorthand the first value applies to transform and the second to stroke */
-    transform-origin: 19px 16px; /* Set rotation origin to right arm of shackle */
+    transform-origin: 19px 16px;
 }
 
-/* States for the SVG elements directly */
 .lock-icon:hover .lock-body {
     fill: #ffa800;
     stroke: #ffa800;
@@ -1883,14 +1788,12 @@ input[type="range"]:active::-moz-range-thumb {
     stroke: #ffa800;
 }
 
-/* Locked state */
 .lock-button.locked .lock-shackle-group {
     transition-delay: 0.3s;
     transform: translateY(0);
 }
 
 .lock-button.locked .lock-shackle {
-    /* For locked state both transform and stroke change immediately */
     transition-delay: 0s, 0s;
     transform: rotateY(0deg);
     stroke: #f00;
@@ -1901,14 +1804,12 @@ input[type="range"]:active::-moz-range-thumb {
     stroke: #f00;
 }
 
-/* Unlocked state */
 .lock-button:not(.locked) .lock-shackle-group {
     transition-delay: 0s;
     transform: translateY(-6px);
 }
 
 .lock-button:not(.locked) .lock-shackle {
-    /* Here we force the stroke (color) to update immediately (0s delay) while keeping a 0.3s delay on the transform */
     transition-delay: 0.3s, 0s;
     transform: rotateY(180deg);
     stroke: #ffa800;
@@ -1919,7 +1820,6 @@ input[type="range"]:active::-moz-range-thumb {
     stroke: #ffa800;
 }
 
-/* Hover effects for locked state */
 .lock-button.locked .lock-icon:hover .lock-body {
     fill: #ffa800;
     stroke: #ffa800;
@@ -1929,7 +1829,6 @@ input[type="range"]:active::-moz-range-thumb {
     stroke: #ffa800;
 }
 
-/* Hover effects for unlocked state */
 .lock-button:not(.locked) .lock-icon:hover .lock-body {
     fill: #f00;
     stroke: #f00;
