@@ -546,11 +546,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
         
-        // NEW: Handle instrument inheritance
         const selectedNoteInstrument = myModule.findInstrument(selectedNote);
         const directDependents = myModule.getDependentNotes(noteId);
         
-        // Give instrument to direct dependents that don't already have one
         directDependents.forEach(depId => {
             const depNote = myModule.getNoteById(depId);
             if (depNote && !depNote.variables.instrument) {
@@ -793,6 +791,59 @@ document.addEventListener('DOMContentLoaded', async function() {
   
     const space = tapspace.createSpace();
     viewport.addChild(space);
+
+    const canvasEl = document.querySelector('.myspaceapp');
+    canvasEl.addEventListener('dragover', (event) => {
+        if (event.dataTransfer.types.includes('application/json')) {
+            event.preventDefault();
+        }
+    }, false);
+    canvasEl.addEventListener('drop', (event) => {
+        if (!event.dataTransfer.types.includes('application/json')) return;
+
+        event.preventDefault();
+
+        const dropX = event.clientX;
+        const dropY = event.clientY;
+
+        const elements = document.elementsFromPoint(dropX, dropY);
+
+        let targetNoteId = null;
+        let isBaseNote = false;
+        for (const el of elements) {
+            if (el.classList.contains('note-content') && el.hasAttribute('data-note-id')) {
+            targetNoteId = Number(el.getAttribute('data-note-id'));
+            break;
+            }
+            if (el.classList.contains('base-note-circle') && el.hasAttribute('data-note-id')) {
+            targetNoteId = Number(el.getAttribute('data-note-id'));
+            isBaseNote = true;
+            break;
+            }
+        }
+
+        if (targetNoteId === null) {
+            targetNoteId = 0;
+            isBaseNote = true;
+        }
+
+        let data;
+        try {
+            data = event.dataTransfer.getData('application/json');
+            if (!data) data = event.dataTransfer.getData('text/plain');
+            if (!data) return;
+            data = JSON.parse(data);
+        } catch (err) {
+            console.error('Could not parse dropped module data', err);
+            return;
+        }
+
+        let targetNote = window.myModule.getNoteById(targetNoteId);
+        if (!targetNote) targetNote = window.myModule.baseNote;
+
+        importModuleAtTarget(targetNote, data);
+    }, false);
+
     let centerPoint = null;
   
     let currentSelectedNote = null;
@@ -1176,29 +1227,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             baseNoteContent.style.boxShadow = 'none';
         });
       
-        baseNoteCircle.element.addEventListener('dragover', (event) => {
-            event.preventDefault();
-        }, true);
-      
-        baseNoteCircle.element.addEventListener('drop', (event) => {
-            event.preventDefault();
-            try {
-                let data = event.dataTransfer.getData('application/json');
-                if (!data) {
-                    data = event.dataTransfer.getData('text/plain');
-                }
-                if (data) {
-                    const moduleData = JSON.parse(data);
-                    importModuleAtTarget(myModule.baseNote, moduleData);
-                }
-            } catch (err) {
-                console.error("Error during drop on base note:", err);
-            }
-        }, true);
-      
         baseNoteCircle.element.addEventListener('pointerup', function(e) {
             if (e.pointerType === 'touch') {
-                // The element now has a data-note-id so the standard mobile pointerup in module-icons.js will work.
             }
         }, true);
       
@@ -1566,23 +1596,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         addNoteClickHandler(noteRect, note);
-
-        noteRect.element.addEventListener('dragover', (event) => {
-            event.preventDefault();
-        }, true);
-        noteRect.element.addEventListener('drop', (event) => {
-            event.preventDefault();
-            try {
-                let data = event.dataTransfer.getData('application/json');
-                if (!data) data = event.dataTransfer.getData('text/plain');
-                if (data) {
-                    const moduleData = JSON.parse(data);
-                    importModuleAtTarget(note, moduleData);
-                }
-            } catch (err) {
-                console.error("Error during desktop drop:", err);
-            }
-        }, true);
 
         let dragData = {
             startX: 0,
@@ -3646,7 +3659,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                 showNoteVariables(measurePoint, triangle, id);
             });
             
-            // Apply lock state if locked
             if (isLocked) {
                 triangle.style.pointerEvents = 'none';
                 triangle.style.opacity = '0.7';
@@ -4753,14 +4765,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         allNoteElements.forEach(element => {
             if (isLocked) {
                 element.style.pointerEvents = 'none';
-                // Also disable any child elements
                 const children = element.querySelectorAll('*');
                 children.forEach(child => {
                     child.style.pointerEvents = 'none';
                 });
             } else {
                 element.style.pointerEvents = 'auto';
-                // Re-enable child elements
                 const children = element.querySelectorAll('*');
                 children.forEach(child => {
                     child.style.pointerEvents = 'auto';
@@ -4768,7 +4778,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
         
-        // Handle octave buttons specifically
         const octaveButtons = document.querySelectorAll('.octave-button, .octave-up, .octave-down');
         octaveButtons.forEach(button => {
             if (isLocked) {
@@ -4780,7 +4789,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
         
-        // Handle resize handles
         const resizeHandles = document.querySelectorAll('.resize-handle-icon, [style*="cursor: ew-resize"]');
         resizeHandles.forEach(handle => {
             if (isLocked) {

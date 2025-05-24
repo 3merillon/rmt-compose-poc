@@ -660,28 +660,51 @@
         
         moduleIcon.addEventListener('drop', function(event) {
             event.preventDefault();
-            try {
-                let data = event.dataTransfer.getData('application/json');
-                if (!data) data = event.dataTransfer.getData('text/plain');
-                if (data) {
-                    const moduleData = JSON.parse(data);
-                    const targetNote = window.myModule.getNoteById(parseInt(noteId, 10));
-                    if (targetNote) {
-                        window.importModuleAtTarget(targetNote, moduleData)
-                            .then(() => {
-                                window.evaluatedNotes = window.myModule.evaluateModule();
-                                if (typeof externalFunctions.updateVisualNotes === 'function') {
-                                    externalFunctions.updateVisualNotes(window.evaluatedNotes);
-                                }
-                                if (typeof externalFunctions.createMeasureBars === 'function') {
-                                    externalFunctions.createMeasureBars();
-                                }
-                                invalidateModuleEndTimeCache();
-                            });
-                    }
+
+            const sourceIcon = draggedElement;
+            const targetIcon = this;
+            if (
+                sourceIcon &&
+                sourceIcon !== targetIcon &&
+                sourceIcon.classList.contains('icon') &&
+                targetIcon.classList.contains('icon')
+            ) {
+                const sourceParent = sourceIcon.parentNode;
+                const targetParent = targetIcon.parentNode;
+                const sourceNext = sourceIcon.nextSibling;
+                const targetNext = targetIcon.nextSibling;
+                targetParent.insertBefore(sourceIcon, targetNext);
+                sourceParent.insertBefore(targetIcon, sourceNext);
+
+                const targetCategory = targetIcon.getAttribute('data-category');
+                const sourceCategory = sourceIcon.getAttribute('data-category');
+                if (targetCategory && sourceCategory && targetCategory !== sourceCategory) {
+                    sourceIcon.setAttribute('data-category', targetCategory);
+                    targetIcon.setAttribute('data-category', sourceCategory);
                 }
-            } catch (err) {
-                console.error("Error during desktop drop:", err);
+
+                [sourceIcon, targetIcon].forEach(icon => {
+                    icon.classList.remove('drag-over');
+                    icon.style.border = '1px solid transparent';
+                    icon.style.backgroundColor = '#ffa800';
+                });
+
+                if (typeof window.menuBar?.saveUIStateToLocalStorage === 'function') {
+                    window.menuBar.saveUIStateToLocalStorage();
+                }
+                return;
+            }
+
+            if (this.classList.contains('empty-placeholder') && draggedElementType === 'module' && draggedElement !== this) {
+                const targetParent = this.parentNode;
+                const targetCategory = this.getAttribute('data-category');
+                targetParent.appendChild(draggedElement);
+                draggedElement.setAttribute('data-category', targetCategory);
+                if (typeof ensurePlaceholdersAtEnd === 'function') ensurePlaceholdersAtEnd();
+                if (typeof window.menuBar?.saveUIStateToLocalStorage === 'function') {
+                    window.menuBar.saveUIStateToLocalStorage();
+                }
+                return;
             }
         });
         
