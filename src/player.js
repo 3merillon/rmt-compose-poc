@@ -5,7 +5,7 @@ import { modals } from './modals/index.js';
 import { updateStackClickSelectedNote } from './stack-click.js';
 import { eventBus } from './utils/event-bus.js';
 import { audioEngine } from './player/audio-engine.js';
-import { setModule } from './store/app-state.js';
+import { setModule, setEvaluatedNotes } from './store/app-state.js';
 
 document.addEventListener('DOMContentLoaded', async function() {
     const INITIAL_VOLUME = 0.2, ATTACK_TIME_RATIO = 0.1, DECAY_TIME_RATIO = 0.1, SUSTAIN_LEVEL = 0.7, RELEASE_TIME_RATIO = 0.2, GENERAL_VOLUME_RAMP_TIME = 0.2, OSCILLATOR_POOL_SIZE = 64, DRAG_THRESHOLD = 5;
@@ -365,7 +365,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             if ('wakeLock' in navigator) {
                 wakeLock = await navigator.wakeLock.request('screen');
                 wakeLock.addEventListener('release', () => {
-                    console.log('Wake Lock was released');
                 });
             } else {
                 console.warn('Wake Lock API not available in this browser.');
@@ -382,12 +381,43 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (wakeLock !== null) {
                 await wakeLock.release();
                 wakeLock = null;
-                console.log('Wake Lock released due to page visibility change');
             }
         }
     });
   
     requestWakeLock();
+
+    function notify(message, type = 'info') {
+        try {
+            const notification = document.createElement('div');
+            notification.textContent = message;
+            Object.assign(notification.style, {
+                position: 'fixed',
+                bottom: '20px',
+                right: '20px',
+                padding: '10px 20px',
+                borderRadius: '4px',
+                zIndex: '9999',
+                fontFamily: "'Roboto Mono', monospace",
+                fontSize: '14px',
+                transition: 'opacity 0.3s ease-in-out'
+            });
+            if (type === 'success') {
+                Object.assign(notification.style, { backgroundColor: 'rgba(0, 255, 255, 0.8)', color: '#151525' });
+            } else if (type === 'error') {
+                Object.assign(notification.style, { backgroundColor: 'rgba(255, 0, 0, 0.8)', color: '#fff' });
+            } else {
+                Object.assign(notification.style, { backgroundColor: 'rgba(255, 168, 0, 0.8)', color: '#000' });
+            }
+            document.body.appendChild(notification);
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => { if (notification.parentNode) document.body.removeChild(notification); }, 300);
+            }, 3000);
+        } catch (e) {
+            console.warn('notify failed', e);
+        }
+    }
   
     if (domCache.resetViewBtn) {
         domCache.resetViewBtn.innerHTML = `
@@ -420,6 +450,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
         clearSelection();
@@ -443,6 +474,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         myModule.markNoteDirty(0);
         
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
         clearSelection();
@@ -552,7 +584,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             const depNote = myModule.getNoteById(depId);
             if (depNote && !depNote.variables.instrument) {
                 depNote.setVariable('instrument', selectedNoteInstrument);
-                console.log(`Assigned instrument "${selectedNoteInstrument}" to dependent note ${depId}`);
             }
         });
         
@@ -569,6 +600,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
         
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
         clearSelection();
@@ -594,7 +626,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                 const depStartTime = depNote.getVariable('startTime').valueOf();
                 
                 if (depStartTime < noteStartTime) {
-                    console.log(`Dependent note ${depId} now starts before its parent ${noteId}. Adjusting...`);
                     
                     let currentParent = note;
                     let suitableParent = null;
@@ -659,7 +690,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                         }
                     }
                     
-                    console.log(`Rewriting dependency for note ${depId} from "${startTimeString}" to "${newRaw}"`);
                     
                     depNote.setVariable('startTime', function() {
                         return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
@@ -672,6 +702,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
         
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
     }
   
@@ -766,12 +797,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         }, 0);
     }
   
-    let myModule = await Module.loadFromJSON('moduleSetup.json');
+    let myModule = await Module.loadFromJSON('modules/defaultModule.json');
     setModule(myModule);
-    window.myModule = myModule;
     updateNotesPointerEvents();
     let evaluatedNotes = myModule.evaluateModule();
-    let newNotes = Object.keys(evaluatedNotes).map(id => evaluatedNotes[id]).filter(note => 
+    setEvaluatedNotes(evaluatedNotes);
+    let newNotes = Object.keys(evaluatedNotes).map(id => evaluatedNotes[id]).filter(note =>
         note.startTime && note.duration && note.frequency
     );
   
@@ -809,21 +840,20 @@ document.addEventListener('DOMContentLoaded', async function() {
         const elements = document.elementsFromPoint(dropX, dropY);
 
         let targetNoteId = null;
-        let isBaseNote = false;
+        // Robustly detect the nearest container that carries data-note-id, so base note drops work too
+        let targetContainer = null;
         for (const el of elements) {
-            if (el.classList.contains('note-content') && el.hasAttribute('data-note-id')) {
-            targetNoteId = Number(el.getAttribute('data-note-id'));
-            break;
+            const container = el.closest ? el.closest('[data-note-id]') : null;
+            if (container) {
+                targetContainer = container;
+                break;
             }
-            if (el.classList.contains('base-note-circle') && el.hasAttribute('data-note-id')) {
-            targetNoteId = Number(el.getAttribute('data-note-id'));
-            isBaseNote = true;
-            break;
-            }
+        }
+        if (targetContainer) {
+            targetNoteId = Number(targetContainer.getAttribute('data-note-id'));
         }
 
         if (targetNoteId === null) {
-            console.info('Drop ignored: no note under cursor');
             return;
         }
 
@@ -838,8 +868,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             return;
         }
 
-        let targetNote = window.myModule.getNoteById(targetNoteId);
-        if (!targetNote) targetNote = window.myModule.baseNote;
+        let targetNote = myModule.getNoteById(targetNoteId);
+        if (!targetNote) targetNote = myModule.baseNote;
 
         importModuleAtTarget(targetNote, data);
     }, false);
@@ -971,11 +1001,11 @@ document.addEventListener('DOMContentLoaded', async function() {
                 modals.invalidateDependencyGraphCache();
             }
             
-            window.evaluatedNotes = myModule.evaluateModule();
-            updateVisualNotes(window.evaluatedNotes);
+            evaluatedNotes = myModule.evaluateModule();
+            setEvaluatedNotes(evaluatedNotes);
+            updateVisualNotes(evaluatedNotes);
             createMeasureBars();
             
-            console.log("Module import complete with full cache reset");
             
         } catch (error) {
             console.error("Error importing module at target note:", error);
@@ -1102,7 +1132,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     function showNoteVariables(note, clickedElement, measureId = null) {
         if (modals) {
-            if (note !== window.myModule.baseNote && measureId === null) {
+            if (note !== myModule.baseNote && measureId === null) {
                 bringSelectedNoteToFront(note, clickedElement);
             }
             
@@ -1653,7 +1683,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 try {
                     noteRect.element.releasePointerCapture(dragData.pointerId);
                 } catch (err) {
-                    console.log('Error releasing pointer capture:', err);
+                    console.warn('Error releasing pointer capture:', err);
                 }
             }
             
@@ -1681,7 +1711,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     noteRect.element.setPointerCapture(dragData.pointerId);
                     dragData.hasCaptured = true;
                 } catch (err) {
-                    console.log('Error setting pointer capture:', err);
+                    console.warn('Error setting pointer capture:', err);
                 }
                 
                 if (isPlaying) {
@@ -1972,6 +2002,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                         note.setVariable('startTimeString', newRaw);
                         
                         evaluatedNotes = myModule.evaluateModule();
+                        setEvaluatedNotes(evaluatedNotes);
                         updateVisualNotes(evaluatedNotes);
                         
                         e.stopPropagation();
@@ -2017,6 +2048,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                             note.setVariable('startTimeString', originalRawString);
                             
                             evaluatedNotes = myModule.evaluateModule();
+                            setEvaluatedNotes(evaluatedNotes);
                             updateVisualNotes(evaluatedNotes);
                         }
                     }
@@ -2071,6 +2103,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                         note.setVariable('startTimeString', newRaw);
                         
                         evaluatedNotes = myModule.evaluateModule();
+                        setEvaluatedNotes(evaluatedNotes);
                         updateVisualNotes(evaluatedNotes);
                     }
                 }
@@ -2934,7 +2967,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 resizeHandle.element.releasePointerCapture(ev.pointerId);
             } catch (err) {
-                console.log('Error releasing pointer capture:', err);
+                console.warn('Error releasing pointer capture:', err);
             }
             
             isResizing = false;
@@ -3020,8 +3053,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                     checkAndUpdateDependentNotes(note.id, originalDuration, updatedDuration);
                 }
                 
-                window.evaluatedNotes = myModule.evaluateModule();
-                updateVisualNotes(window.evaluatedNotes);
+                evaluatedNotes = myModule.evaluateModule();
+                setEvaluatedNotes(evaluatedNotes);
+                updateVisualNotes(evaluatedNotes);
                 
                 const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
                 if (noteWidgetVisible && currentSelectedNote) {
@@ -4124,7 +4158,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             Module.loadFromJSON(data).then(newModule => {
                 myModule = newModule;
                 setModule(newModule);
-                window.myModule = newModule;
                 
                 myModule._evaluationCache = {};
                 myModule._dirtyNotes.clear();
@@ -4141,7 +4174,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                 viewport.translateTo(newPoint);
                 
                 evaluatedNotes = myModule.evaluateModule();
+                setEvaluatedNotes(evaluatedNotes);
                 updateVisualNotes(evaluatedNotes);
+                notify('Module reordered successfully', 'success');
                 
             }).catch(error => {
                 console.error('Error reordering module:', error);
@@ -4234,7 +4269,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     myModule = newModule;
                     setModule(newModule);
-                    window.myModule = newModule;
                     
                     myModule.markNoteDirty(0);
                     
@@ -4274,6 +4308,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     function initializeModule() {
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         newNotes = Object.keys(evaluatedNotes)
             .map(id => evaluatedNotes[id])
             .filter(note => note.startTime && note.duration && note.frequency);
@@ -4589,6 +4624,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         updateLockButton();
 
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
         
@@ -4644,12 +4680,12 @@ document.addEventListener('DOMContentLoaded', async function() {
       eventBus.on('player:importModuleAtTarget', ({ targetNoteId, moduleData }) => {
         try {
           if (targetNoteId == null) {
-            console.info('Import ignored: no valid target noteId provided');
+            console.warn('Import ignored: no valid target noteId provided');
             return;
           }
           const target = myModule?.getNoteById(Number(targetNoteId));
           if (!target) {
-            console.info('Import ignored: no valid target noteId provided');
+            console.warn('Import ignored: no valid target noteId provided');
             return;
           }
           importModuleAtTarget(target, moduleData);

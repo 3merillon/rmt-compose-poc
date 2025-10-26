@@ -123,7 +123,6 @@ export class Module {
 
     addNote(variables = {}) {
         const id = this.nextId++;
-        console.log(`Adding new note with ID ${id}, nextId is now ${this.nextId}`);
         const note = new Note(id, variables);
         note.module = this;
         this.notes[id] = note;
@@ -495,7 +494,5 @@ export class Module {
     }
     
     invalidateModuleEndTimeCache();
-    
-    console.log("Module reindexed. New mapping:", newMapping);
   }
 }

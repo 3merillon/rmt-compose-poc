@@ -33,8 +33,6 @@ export class AudioEngine {
   registerInstruments(SynthInstruments, SampleInstruments) {
     try {
       this.instrumentManager.registerBuiltInInstruments(SynthInstruments, SampleInstruments);
-      // eslint-disable-next-line no-console
-      console.log('Instruments registered:', this.instrumentManager.getAvailableInstruments());
     } catch (e) {
       // eslint-disable-next-line no-console
       console.error('Failed to register instruments in AudioEngine:', e);

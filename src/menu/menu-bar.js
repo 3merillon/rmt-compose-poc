@@ -1,5 +1,5 @@
 import { eventBus } from '../utils/event-bus.js';
-(function() {
+const menuAPI = (function() {
     const domCache = {
         secondTopBar: document.querySelector('.second-top-bar'),
         iconsWrapper: document.querySelector('.icons-wrapper'),
@@ -690,9 +690,7 @@ import { eventBus } from '../utils/event-bus.js';
                     icon.style.backgroundColor = '#ffa800';
                 });
 
-                if (typeof window.menuBar?.saveUIStateToLocalStorage === 'function') {
-                    window.menuBar.saveUIStateToLocalStorage();
-                }
+                saveUIStateToLocalStorage();
                 return;
             }
 
@@ -702,9 +700,7 @@ import { eventBus } from '../utils/event-bus.js';
                 targetParent.appendChild(draggedElement);
                 draggedElement.setAttribute('data-category', targetCategory);
                 if (typeof ensurePlaceholdersAtEnd === 'function') ensurePlaceholdersAtEnd();
-                if (typeof window.menuBar?.saveUIStateToLocalStorage === 'function') {
-                    window.menuBar.saveUIStateToLocalStorage();
-                }
+                saveUIStateToLocalStorage();
                 return;
             }
         });
@@ -830,11 +826,13 @@ import { eventBus } from '../utils/event-bus.js';
                             const noteTarget = elemBelow.closest('[data-note-id]');
                             if (noteTarget && moduleIcon.moduleData) {
                                 const noteId = noteTarget.getAttribute('data-note-id');
-                                if (noteId && window.eventBus && typeof eventBus.emit === 'function') {
-                                    eventBus.emit('player:importModuleAtTarget', {
-                                        targetNoteId: Number(noteId),
-                                        moduleData: moduleIcon.moduleData
-                                    });
+                                if (noteId != null) {
+                                    try {
+                                        eventBus.emit('player:importModuleAtTarget', {
+                                            targetNoteId: Number(noteId),
+                                            moduleData: moduleIcon.moduleData
+                                        });
+                                    } catch {}
                                 }
                             }
                         }
@@ -1196,7 +1194,7 @@ import { eventBus } from '../utils/event-bus.js';
         }, 3000);
     }
 
-    window.menuBar = {
+    return {
         init: init,
         resize: resize,
         updateMaxHeight: updateMaxHeight,
@@ -1207,22 +1205,19 @@ import { eventBus } from '../utils/event-bus.js';
         loadUIStateFromLocalStorage: loadUIStateFromLocalStorage,
         clearUIStateFromLocalStorage: clearUIStateFromLocalStorage
     };
-
 })();
 
 
-// ES module exports for incremental migration without breaking window.menuBar
-export const menuBar = (typeof window !== 'undefined') ? window.menuBar : undefined;
+// ES module exports (no window.menuBar)
+export const menuBar = menuAPI;
 
 /**
  * initMenuBar()
- * Safe wrapper to initialize the legacy menu bar from module code.
- * Calls through to window.menuBar.init() if available.
- * Avoid calling this if the legacy IIFE already auto-initializes on DOMContentLoaded
- * to prevent double-binding event listeners.
+ * Initialize the menu bar from module code.
+ * Kept for API stability; calls the pure module export.
  */
 export function initMenuBar() {
-  if (typeof window !== 'undefined' && window.menuBar && typeof window.menuBar.init === 'function') {
-    window.menuBar.init();
+  if (menuAPI && typeof menuAPI.init === 'function') {
+    menuAPI.init();
   }
 }

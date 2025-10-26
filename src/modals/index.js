@@ -157,7 +157,7 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     }
     
     // Add delete section
-    const deleteSection = createDeleteSection(note, effectiveNoteId, externalFunctions);
+    const deleteSection = createDeleteSection(note, effectiveNoteId, externalFunctions, modals);
     if (deleteSection) {
         widgetContent.appendChild(deleteSection);
     }

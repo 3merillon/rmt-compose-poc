@@ -64,12 +64,6 @@ async function initApp() {
     
     // Player is imported at top-level to ensure its DOMContentLoaded handler is registered before firing.
 
-    console.log('ES6 modules loaded successfully');
-    console.log('Core classes available:', { Module, Note, InstrumentManager, Fraction, tapspace });
-    console.log('Instruments registered:', {
-        SynthInstruments: Object.keys(SynthInstruments),
-        SampleInstruments: Object.keys(SampleInstruments)
-    });
 }
 
 // Start the app when DOM is ready
