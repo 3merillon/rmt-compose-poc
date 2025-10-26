@@ -124,7 +124,7 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
         highlightDependencies(effectiveNoteId);
     }
     
-    const variables = collectVariables(note, measureId);
+    const variables = collectVariables(note, measureId, moduleInstance);
     
     Object.entries(variables).forEach(([key, value]) => {
         const variableRow = createVariableControls(key, value, note, measureId, externalFunctions);
@@ -209,10 +209,14 @@ function highlightDependencies(selfNoteId) {
     });
 }
 
-function collectVariables(note, measureId) {
+function collectVariables(note, measureId, moduleInstance) {
     let variables = {};
+    const module = moduleInstance || (typeof getModule === 'function' ? getModule() : null);
+    if (!module || !module.baseNote) {
+        return variables;
+    }
     
-    if (note === getModule().baseNote) {
+    if (note === module.baseNote) {
         Object.keys(note.variables).forEach(key => {
             if (!key.endsWith('String') && key !== 'measureLength') {
                 variables[key] = {
@@ -230,7 +234,7 @@ function collectVariables(note, measureId) {
             };
         }
     } else if (measureId !== null) {
-        const noteInstance = getModule().getNoteById(parseInt(measureId, 10));
+        const noteInstance = module.getNoteById(parseInt(measureId, 10));
         if (noteInstance && typeof noteInstance.getVariable === 'function') {
             variables.startTime = {
                 evaluated: noteInstance.getVariable('startTime'),
@@ -256,7 +260,7 @@ function collectVariables(note, measureId) {
         });
         
         const hasOwnInstrument = note.variables.instrument !== undefined;
-        const inheritedInstrument = getModule().findInstrument(note);
+        const inheritedInstrument = module.findInstrument(note);
 
         variables.instrument = {
             evaluated: hasOwnInstrument ? note.getVariable('instrument') : inheritedInstrument,

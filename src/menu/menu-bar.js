@@ -9,7 +9,7 @@ const menuAPI = (function() {
     };
 
     const PULL_TAB_HEIGHT = 16, TOP_BAR_HEIGHT = 50, SAFETY_MARGIN = 10;
-    let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0;
+    let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0, hasAppliedInitialPadding = false, targetFitHeight = null;
 
     function saveUIStateToLocalStorage() {
         try {
@@ -193,8 +193,20 @@ const menuAPI = (function() {
     function setupAutoSave() {
         window.addEventListener('beforeunload', saveUIStateToLocalStorage);
         setInterval(saveUIStateToLocalStorage, 30000);
-        const observer = new MutationObserver(debounce(() => saveUIStateToLocalStorage(), 1000));
+        const onUIChanged = debounce(() => {
+            try { saveUIStateToLocalStorage(); } catch (e) {}
+            // If content got shorter (e.g., unwrapping on wider screens), shrink bar automatically.
+            adjustHeightToContent();
+        }, 200);
+        const observer = new MutationObserver(onUIChanged);
         observer.observe(domCache.iconsContainer, { childList: true, subtree: true, attributes: false, characterData: false });
+
+        // Also observe layout-driven size changes (wrapping/unwrapping) even without DOM mutations.
+        if (window.ResizeObserver) {
+            const ro = new ResizeObserver(() => adjustHeightToContent());
+            ro.observe(domCache.iconsContainer);
+            ro.observe(domCache.iconsWrapper);
+        }
     }
     
     function debounce(func, wait) {
@@ -205,13 +217,70 @@ const menuAPI = (function() {
         };
     }
 
+    // Keep the first row centered between the top-bar bottom border and the menu separator on initial load only.
+    // When content wraps to multiple rows, revert to fixed padding for predictable spacing.
+    function updateInitialRowPadding() {
+        try {
+            const wrapper = domCache.iconsWrapper;
+            const container = domCache.iconsContainer;
+            if (!wrapper || !container) return;
+
+            const available = wrapper.clientHeight; // space between top and separator inside second-top-bar
+            if (available <= 0) return;
+
+            // Collect relevant items that form the first line
+            const items = Array.from(container.children).filter(el => {
+                if (!el.classList) return false;
+                return el.classList.contains('icon') || el.classList.contains('category-label');
+            });
+            if (items.length === 0) return;
+
+            // Determine number of visual rows by unique offsetTop
+            const uniqueTops = Array.from(new Set(items.map(el => el.offsetTop)));
+            const isSingleRow = uniqueTops.length === 1;
+
+            if (!isSingleRow) {
+                // Multi-line: stable fixed spacing
+                container.style.paddingTop = '4px';
+                container.style.paddingBottom = '0px';
+                return;
+            }
+
+            // Single row: center precisely within available height
+            const rowHeight = Math.max(...items.map(el => el.offsetHeight)) || 42;
+            const topPad = Math.max(0, Math.round((available - rowHeight) / 2));
+            const bottomPad = Math.max(0, available - rowHeight - topPad);
+
+            container.style.paddingTop = topPad + 'px';
+            container.style.paddingBottom = bottomPad + 'px';
+            hasAppliedInitialPadding = true;
+        } catch (e) {
+            // no-op: do not break UX if measurements fail during early boot
+        }
+    }
+
     function updateMaxHeight() {
         const windowHeight = window.innerHeight;
         const topBarHeight = domCache.topBar ? domCache.topBar.offsetHeight : TOP_BAR_HEIGHT;
         maxMenuBarHeight = windowHeight - topBarHeight - PULL_TAB_HEIGHT - SAFETY_MARGIN;
         const currentHeight = parseInt(domCache.secondTopBar.style.height || '50', 10);
         if (currentHeight > maxMenuBarHeight) domCache.secondTopBar.style.height = maxMenuBarHeight + 'px';
-        domCache.iconsWrapper.style.maxHeight = maxMenuBarHeight + 'px';
+
+        // Subtract the separator (including margins) so the wrapper can fully fit content without tiny scrollbars.
+        const sepH = getSeparatorHeight();
+        domCache.iconsWrapper.style.maxHeight = Math.max(0, (maxMenuBarHeight - sepH)) + 'px';
+
+        // After height constraints are applied, set initial row padding precisely.
+        if (!hasAppliedInitialPadding) updateInitialRowPadding();
+
+        // Auto-shrink to fit current content if window got wider and content unwrapped
+        adjustHeightToContent();
+        // Run again after reflow to ensure measurements reflect the new wrap state
+        if (window.requestAnimationFrame) {
+            requestAnimationFrame(() => adjustHeightToContent());
+        } else {
+            setTimeout(() => adjustHeightToContent(), 0);
+        }
     }
 
     function setupResizeEvents() {
@@ -227,6 +296,8 @@ const menuAPI = (function() {
         isDragging = true;
         startY = e.clientY || e.touches[0].clientY;
         startHeight = parseInt(document.defaultView.getComputedStyle(domCache.secondTopBar).height, 10);
+        // Lock the target fit height at drag start so we don't chase layout while dragging
+        targetFitHeight = Math.min(maxMenuBarHeight, getContentFitHeight());
         e.preventDefault();
     }
 
@@ -234,15 +305,68 @@ const menuAPI = (function() {
         if (!isDragging) return;
         const clientY = e.clientY || e.touches[0].clientY;
         const deltaY = clientY - startY;
-        const newHeight = Math.max(0, Math.min(startHeight + deltaY, maxMenuBarHeight, getContentHeight()));
+
+        // Clamp to the precomputed fit height so growth stops exactly when all content is visible (with 1px underflow).
+        const fitHeight = Math.min(maxMenuBarHeight, targetFitHeight != null ? targetFitHeight : getContentFitHeight());
+        const newHeight = Math.max(0, Math.min(startHeight + deltaY, fitHeight));
         domCache.secondTopBar.style.height = newHeight + 'px';
+
         e.preventDefault();
     }
 
-    function stopResize() { isDragging = false; }
+    function stopResize() {
+        if (!isDragging) return;
+        isDragging = false;
+        // Snap to exact fit height to avoid tiny scrollbars due to rounding.
+        const snapHeight = Math.min(maxMenuBarHeight, targetFitHeight != null ? targetFitHeight : getContentFitHeight());
+        const currentHeight = parseInt(domCache.secondTopBar.style.height || '0', 10);
+        if (currentHeight > snapHeight) {
+            domCache.secondTopBar.style.height = snapHeight + 'px';
+        }
+        // Reset for next interaction
+        targetFitHeight = null;
+    }
     function getContentHeight() { return domCache.iconsWrapper.scrollHeight; }
     function getMaxHeight() { return Math.min(maxMenuBarHeight, getContentHeight()); }
 
+    // Compute the separator height inside the second top bar, including its vertical margins.
+    function getSeparatorHeight() {
+        const sep = domCache.secondTopBar ? domCache.secondTopBar.querySelector('.separator') : null;
+        if (!sep) return 0;
+        const h = sep.offsetHeight || 0;
+        const cs = window.getComputedStyle(sep);
+        const mb = parseFloat(cs.marginBottom) || 0;
+        const mt = parseFloat(cs.marginTop) || 0;
+        return h + mt + mb;
+    }
+    // Compute total height required to show all icons (icons-container content) plus separator.
+    function getIconsContentHeight() {
+        const container = domCache.iconsContainer;
+        return container ? (container.scrollHeight || 0) : 0;
+    }
+    function getContentFitHeight() {
+        // 1px under exact content height to keep a tiny overflow so the vertical scrollbar remains visible.
+        const exact = getIconsContentHeight() + getSeparatorHeight();
+        return Math.max(0, exact - 1);
+    }
+    // Auto-shrink the second bar when content height becomes smaller (e.g., screen widens and icons unwrap).
+    // Never auto-grow automatically; user expands via the pull tab. Enforce a minimum initial open height.
+    function adjustHeightToContent() {
+        try {
+            const second = domCache.secondTopBar;
+            if (!second) return;
+            const MIN_OPEN = 50; // px minimum visible height on initial load
+            const fit = Math.min(maxMenuBarHeight, getContentFitHeight());
+            const clampedFit = Math.max(MIN_OPEN, fit);
+            const current = parseInt(document.defaultView.getComputedStyle(second).height, 10) || 0;
+            if (current > clampedFit) {
+                second.style.height = clampedFit + 'px';
+            }
+        } catch (e) {
+            // no-op: guard against early layout timing
+        }
+    }
+ 
     function createLabelIcon(text, category) {
         const labelIcon = document.createElement('div');
         labelIcon.classList.add('category-label');
@@ -383,7 +507,8 @@ const menuAPI = (function() {
             
             function onPointerUp(ev) {
                 try { labelIcon.releasePointerCapture(e.pointerId); } catch (err) {}
-                if (scrollContainer) scrollContainer.style.overflow = 'auto';
+                // Restore to stylesheet-controlled overflow so we consistently keep the vertical scrollbar.
+                if (scrollContainer) scrollContainer.style.overflow = '';
                 if (ghost && ghost.parentNode) { ghost.parentNode.removeChild(ghost); ghost = null; }
                 const indicator = document.getElementById('drag-indicator');
                 if (indicator) indicator.parentNode.removeChild(indicator);
@@ -445,7 +570,7 @@ const menuAPI = (function() {
         placeholder.setAttribute('data-category', category);
         Object.assign(placeholder.style, {
             width: '42px', height: '42px', border: '2px dashed #ffffff', borderRadius: '4px',
-            boxSizing: 'border-box', background: 'transparent', cursor: 'pointer', margin: '2px',
+            boxSizing: 'border-box', background: 'transparent', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center'
         });
         const plusSign = document.createElement('div');
