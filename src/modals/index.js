@@ -438,9 +438,7 @@ export function showDeleteConfirmation(noteId) {
     yesButton.textContent = 'Yes';
     yesButton.addEventListener('click', function(e) {
         e.stopPropagation();
-        if (window.playerState?.isPlaying && !window.playerState.isPaused && window.playerControls?.pause) {
-            window.playerControls.pause();
-        }
+        try { eventBus.emit('player:requestPause'); } catch {}
         externalFunctions.deleteNoteAndDependencies(noteId);
         document.body.removeChild(overlay);
     });
@@ -486,9 +484,7 @@ export function showDeleteConfirmationKeepDependencies(noteId) {
     yesButton.textContent = 'Yes';
     yesButton.addEventListener('click', function(e) {
         e.stopPropagation();
-        if (window.playerState?.isPlaying && !window.playerState.isPaused && window.playerControls?.pause) {
-            window.playerControls.pause();
-        }
+        try { eventBus.emit('player:requestPause'); } catch {}
         externalFunctions.deleteNoteKeepDependencies(noteId);
         document.body.removeChild(overlay);
     });
@@ -533,9 +529,7 @@ export function showCleanSlateConfirmation() {
     yesButton.textContent = 'Yes, Clean Slate';
     yesButton.addEventListener('click', function(e) {
         e.stopPropagation();
-        if (window.playerState?.isPlaying && !window.playerState.isPaused && window.playerControls?.pause) {
-            window.playerControls.pause();
-        }
+        try { eventBus.emit('player:requestPause'); } catch {}
         externalFunctions.cleanSlate();
         document.body.removeChild(overlay);
     });
@@ -1210,9 +1204,7 @@ export function showLiberateConfirmation(noteId) {
     yesButton.style.color = '#151525';
     yesButton.addEventListener('click', function(e) {
         e.stopPropagation();
-        if (window.playerState?.isPlaying && !window.playerState.isPaused && window.playerControls?.pause) {
-            window.playerControls.pause();
-        }
+        try { eventBus.emit('player:requestPause'); } catch {}
         liberateDependencies(noteId);
         document.body.removeChild(overlay);
     });
@@ -1262,9 +1254,7 @@ export function showEvaluateConfirmation(noteId) {
     yesButton.style.color = '#151525';
     yesButton.addEventListener('click', function(e) {
         e.stopPropagation();
-        if (window.playerState?.isPlaying && !window.playerState.isPaused && window.playerControls?.pause) {
-            window.playerControls.pause();
-        }
+        try { eventBus.emit('player:requestPause'); } catch {}
         evaluateNoteToBaseNote(noteId);
         document.body.removeChild(overlay);
     });
@@ -1313,9 +1303,7 @@ export function showEvaluateModuleConfirmation() {
     yesButton.style.color = '#151525';
     yesButton.addEventListener('click', function(e) {
         e.stopPropagation();
-        if (window.playerState?.isPlaying && !window.playerState.isPaused && window.playerControls?.pause) {
-            window.playerControls.pause();
-        }
+        try { eventBus.emit('player:requestPause'); } catch {}
         evaluateEntireModule();
         document.body.removeChild(overlay);
     });
@@ -1357,6 +1345,12 @@ export function init() {
     addDraggableNoteWidget();
     updateNoteWidgetHeight();
     try { eventBus.emit('modals:init'); } catch (e) {}
+    // Accept refresh requests from other modules (to avoid window.modals usage)
+    try {
+        eventBus.on('modals:requestRefresh', ({ note, measureId, clickedElement }) => {
+            showNoteVariables(note, clickedElement, measureId ?? null);
+        });
+    } catch {}
 }
 
 export const modals = {

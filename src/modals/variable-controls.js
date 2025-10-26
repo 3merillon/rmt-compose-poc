@@ -2,13 +2,12 @@
 // Creates a single "variable row" for a given key/value pair
 // API: createVariableControls(key, value, note, measureId, externalFunctions)
 import { validateExpression } from './validation.js';
+import { eventBus } from '../utils/event-bus.js';
 
 // Helpers
 function pauseIfPlaying() {
   try {
-    if (window.playerState?.isPlaying && !window.playerState.isPaused && window.playerControls?.pause) {
-      window.playerControls.pause();
-    }
+    eventBus?.emit?.('player:requestPause');
   } catch {}
 }
 
@@ -365,9 +364,7 @@ function refreshModals(note, measureId) {
     if (effectiveNoteId != null) {
       clickedEl = document.querySelector(`.note-content[data-note-id="${effectiveNoteId}"], .measure-bar-triangle[data-note-id="${effectiveNoteId}"]`);
     }
-    if (window?.modals?.showNoteVariables) {
-      window.modals.showNoteVariables(note, clickedEl, measureId ?? null);
-    }
+    eventBus?.emit?.('modals:requestRefresh', { note, measureId: measureId ?? null, clickedElement: clickedEl });
   } catch (e) {
     console.warn('Could not refresh modals view:', e);
   }
@@ -586,9 +583,9 @@ function addFrequencyOctaveButtons(parent, note) {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      if (typeof window.handleOctaveChange === 'function') {
-        window.handleOctaveChange(note.id, dir);
-      }
+      try {
+        eventBus?.emit?.('player:octaveChange', { noteId: note.id, direction: dir });
+      } catch {}
     });
     return btn;
   };

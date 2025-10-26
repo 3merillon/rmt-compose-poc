@@ -1,4 +1,6 @@
 import { modals } from './modals/index.js';
+import { updateStackClickSelectedNote } from './stack-click.js';
+import { eventBus } from './utils/event-bus.js';
 
 document.addEventListener('DOMContentLoaded', async function() {
     const INITIAL_VOLUME = 0.2, ATTACK_TIME_RATIO = 0.1, DECAY_TIME_RATIO = 0.1, SUSTAIN_LEVEL = 0.7, RELEASE_TIME_RATIO = 0.2, GENERAL_VOLUME_RAMP_TIME = 0.2, OSCILLATOR_POOL_SIZE = 64, DRAG_THRESHOLD = 5;
@@ -8,16 +10,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     let stackClickState = { lastClickPosition: null, stackedNotes: [], currentIndex: -1 };
     let xScaleFactor = 1.0, yScaleFactor = 1.0;
     
-    window.playerState = {
-        get isPlaying() { return isPlaying; },
-        get isPaused() { return isPaused; }
-    };
-    
-    window.playerControls = {
-        pause: function() {
-            if (isPlaying && !isPaused) pause();
-        }
-    };
     
     if (modals) {
         modals.setExternalFunctions({
@@ -983,7 +975,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             console.error("Error importing module at target note:", error);
         }
     }
-    window.importModuleAtTarget = importModuleAtTarget;
     
     function animationLoop() {
         updateOctaveIndicators();
@@ -996,8 +987,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     function bringSelectedNoteToFront(note, clickedElement) {
         if (!note || !clickedElement) return;
         
-        if (window.updateStackClickSelectedNote) {
-            window.updateStackClickSelectedNote(note.id);
+        if (typeof updateStackClickSelectedNote === 'function') {
+            updateStackClickSelectedNote(note.id);
         }
         
         const noteId = note.id;
@@ -1582,6 +1573,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         };
 
         noteRect.element.addEventListener('pointerdown', (e) => {
+            // If the pointer is on the resize handle, let the resize handler manage it
+            if (e.target && (e.target.closest('.resize-handle-icon') || e.target.closest('[style*="cursor: ew-resize"]'))) {
+                return;
+            }
             if (isLocked) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -2799,18 +2794,14 @@ document.addEventListener('DOMContentLoaded', async function() {
                 e.stopPropagation();
                 return;
             }
-            if (!e.target.closest('.resize-handle-icon') && !e.target.closest('[style*="cursor: ew-resize"]')) {
-                return;
-            }
-            if (isLocked) return;
+            // Accept pointerdown anywhere within the resize handle item to improve hit-testing
+            // across tapspace wrapper elements and browser differences.
             
             e.stopPropagation();
             e.preventDefault();
             
-            if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused) {
-                if (window.playerControls && window.playerControls.pause) {
-                    window.playerControls.pause();
-                }
+            if (isPlaying && !isPaused) {
+                pause();
             }
             
             const transform = viewport.getBasis().getRaw();
@@ -2822,11 +2813,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             resizeOriginalWidth = width;
             resizeOriginalDuration = note.getVariable('duration').valueOf();
             
-            resizeOriginalScale = scale;
-            
             noteRect.element.classList.add('resizing');
             
-            resizeHandle.element.setPointerCapture(e.pointerId);
+            try { resizeHandle.element.setPointerCapture(e.pointerId); } catch {}
             
             const existingOverlay = document.getElementById('resize-dependent-overlay');
             if (existingOverlay) {
@@ -3385,10 +3374,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             return;
         }
         
-        if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused) {
-            if (window.playerControls && window.playerControls.pause) {
-                window.playerControls.pause();
-            }
+        if (isPlaying && !isPaused) {
+            pause();
         }
         
         const currentFrequency = note.getVariable('frequency');
@@ -3594,8 +3581,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
-    window.handleOctaveChange = handleOctaveChange;
-
     function findGCD(a, b) {
         a = Math.abs(a);
         b = Math.abs(b);
@@ -3607,37 +3592,33 @@ document.addEventListener('DOMContentLoaded', async function() {
         return a;
     }
 
-    (function() {
-        window.createMeasureBarTriangle = function(measureBar, measurePoint, id) {
-            if (!measurePoint) return null;
-            const triangle = document.createElement('div');
-            triangle.className = 'measure-bar-triangle';
-            triangle.setAttribute("data-note-id", id);
-            triangle.innerHTML = `<span class="measure-id">[${id}]</span>`;
-            triangle.addEventListener('click', (event) => {
-                if (isLocked) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    return;
-                }
-                event.stopPropagation();
-                document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected').forEach(el => {
-                    el.classList.remove('selected');
-                });
-                triangle.classList.add('selected');
-                showNoteVariables(measurePoint, triangle, id);
-            });
-            
+    function createMeasureBarTriangle(measureBar, measurePoint, id) {
+        if (!measurePoint) return null;
+        const triangle = document.createElement('div');
+        triangle.className = 'measure-bar-triangle';
+        triangle.setAttribute("data-note-id", id);
+        triangle.innerHTML = `<span class="measure-id">[${id}]</span>`;
+        triangle.addEventListener('click', (event) => {
             if (isLocked) {
-                triangle.style.pointerEvents = 'none';
-                triangle.style.opacity = '0.7';
+                event.preventDefault();
+                event.stopPropagation();
+                return;
             }
-            
-            return triangle;
-        };
-
-        window.createMeasureBarTriangle = createMeasureBarTriangle;
-    })();
+            event.stopPropagation();
+            document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected').forEach(el => {
+                el.classList.remove('selected');
+            });
+            triangle.classList.add('selected');
+            showNoteVariables(measurePoint, triangle, id);
+        });
+        
+        if (isLocked) {
+            triangle.style.pointerEvents = 'none';
+            triangle.style.opacity = '0.7';
+        }
+        
+        return triangle;
+    }
     
     function createMeasureBars() {
         const selectedMeasureBars = document.querySelectorAll('.measure-bar-triangle.selected');
@@ -4645,18 +4626,48 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 // Event bus subscriptions for incremental modularization
   // Hooks allow future decoupling without breaking legacy globals.
-  if (window.eventBus && typeof window.eventBus.on === 'function') {
+  if (eventBus && typeof eventBus.on === 'function') {
     try {
-      // When modals show a note, forward selection to legacy stack click helper
-      window.eventBus.on('modals:show', ({ noteId }) => {
-        if (typeof window.updateStackClickSelectedNote === 'function' && noteId != null) {
-          window.updateStackClickSelectedNote(noteId);
+      // When modals show a note, forward selection to stack-click helper
+      eventBus.on('modals:show', ({ noteId }) => {
+        if (typeof updateStackClickSelectedNote === 'function' && noteId != null) {
+          updateStackClickSelectedNote(noteId);
         }
       });
 
       // When modals are cleared, ensure selection state remains coherent
-      window.eventBus.on('modals:cleared', () => {
-        // Legacy clearSelection already syncs UI; placeholder for future player reactions
+      eventBus.on('modals:cleared', () => {
+        // Placeholder for future player reactions
+      });
+
+      // Global pause request from other modules (no state leak)
+      eventBus.on('player:requestPause', () => {
+        if (isPlaying && !isPaused) {
+          pause();
+        }
+      });
+
+      // Octave change requests from UI modules (e.g., modals)
+      eventBus.on('player:octaveChange', ({ noteId, direction }) => {
+        try {
+          if (noteId != null) {
+            handleOctaveChange(parseInt(noteId, 10), direction);
+          }
+        } catch (e) {
+          console.warn('octaveChange handler failed', e);
+        }
+      });
+
+      // Import module drop request from menu or other UIs
+      eventBus.on('player:importModuleAtTarget', ({ targetNoteId, moduleData }) => {
+        try {
+          const target = window.myModule?.getNoteById(Number(targetNoteId)) || window.myModule?.baseNote;
+          if (target) {
+            importModuleAtTarget(target, moduleData);
+          }
+        } catch (e) {
+          console.warn('importModuleAtTarget via eventBus failed', e);
+        }
       });
     } catch (e) {
       console.warn('eventBus subscription failed', e);

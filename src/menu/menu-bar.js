@@ -829,9 +829,11 @@
                             const noteTarget = elemBelow.closest('[data-note-id]');
                             if (noteTarget && moduleIcon.moduleData) {
                                 const noteId = noteTarget.getAttribute('data-note-id');
-                                if (noteId) {
-                                    const targetNote = window.myModule.getNoteById(Number(noteId));
-                                    if (targetNote) window.importModuleAtTarget(targetNote, moduleIcon.moduleData);
+                                if (noteId && window.eventBus && typeof window.eventBus.emit === 'function') {
+                                    window.eventBus.emit('player:importModuleAtTarget', {
+                                        targetNoteId: Number(noteId),
+                                        moduleData: moduleIcon.moduleData
+                                    });
                                 }
                             }
                         }
