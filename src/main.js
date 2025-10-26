@@ -56,11 +56,17 @@ async function initApp() {
         console.error('Failed to initialize modals', e);
     }
 
-    // Load legacy menu bar via dynamic import (ensures globals are set first)
+    // Load and initialize menu bar via dynamic import (ensures globals are set first)
     try {
-        await import('./menu-bar.js');
+        const { initMenuBar } = await import('./menu/index.js');
+        if (typeof initMenuBar === 'function') {
+            initMenuBar();
+        } else if (window.menuBar && typeof window.menuBar.init === 'function') {
+            // Fallback for legacy global if export is missing
+            window.menuBar.init();
+        }
     } catch (e) {
-        console.error('Failed to load menu-bar.js', e);
+        console.error('Failed to load or initialize ./menu/index.js', e);
     }
     
     // The player script will be loaded via script tag

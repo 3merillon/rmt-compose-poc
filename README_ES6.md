@@ -19,9 +19,10 @@ This is the modernized ES6 version of the RMT Compose Proof of Concept applicati
   - `src/main.js` - Application entry point
 
 ### Legacy Compatibility
-- Large files (`player.js`, `modals.js`, `menu-bar.js`) remain as-is in `src/`
-- They work seamlessly with the new ES6 modules via global window exposure
-- All functionality preserved exactly as before
+- Player remains legacy in `src/player.js` and relies on window globals provided via the compat facade.
+- Modals are fully ES modules under `src/modals/` and initialized from `src/main.js`.
+- Menu bar has moved to `src/menu/` and is initialized via ES module import; the legacy `window.menuBar` is preserved for compatibility.
+- A lightweight `eventBus` and `compat` shim remain temporarily to bridge the legacy player with new modules.
 
 ## Getting Started
 
@@ -57,8 +58,9 @@ rmt-compose-poc/
 │   ├── module.js               # Module class (ES6)
 │   ├── stack-click.js          # Stack click (ES6)
 │   ├── player.js               # Player logic (legacy)
-│   ├── modals.js               # Modal system (legacy)
-│   ├── menu-bar.js             # Menu bar (legacy)
+│   ├── menu/                   # Menu (ES module)
+│   │   ├── menu-bar.js         # Menu implementation (module-initialized)
+│   │   └── index.js            # Menu public API
 │   ├── instruments/
 │   │   ├── instrument-manager.js  # ES6
 │   │   ├── synth-instruments.js   # ES6
