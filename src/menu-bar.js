@@ -1211,3 +1211,20 @@
         init();
     }
 })();
+
+
+// ES module exports for incremental migration without breaking window.menuBar
+export const menuBar = (typeof window !== 'undefined') ? window.menuBar : undefined;
+
+/**
+ * initMenuBar()
+ * Safe wrapper to initialize the legacy menu bar from module code.
+ * Calls through to window.menuBar.init() if available.
+ * Avoid calling this if the legacy IIFE already auto-initializes on DOMContentLoaded
+ * to prevent double-binding event listeners.
+ */
+export function initMenuBar() {
+  if (typeof window !== 'undefined' && window.menuBar && typeof window.menuBar.init === 'function') {
+    window.menuBar.init();
+  }
+}

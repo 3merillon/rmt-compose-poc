@@ -1,0 +1,723 @@
+// Modularized variable controls for the Modals panel
+// Creates a single "variable row" for a given key/value pair
+// API: createVariableControls(key, value, note, measureId, externalFunctions)
+import { validateExpression } from './validation.js';
+
+// Helpers
+function pauseIfPlaying() {
+  try {
+    if (window.playerState?.isPlaying && !window.playerState.isPaused && window.playerControls?.pause) {
+      window.playerControls.pause();
+    }
+  } catch {}
+}
+
+function isMeasureNote(note) {
+  try {
+    return !!(note?.getVariable?.('startTime') && !note?.getVariable?.('duration') && !note?.getVariable?.('frequency'));
+  } catch {
+    return false;
+  }
+}
+
+function recompileNoteAndDependents(noteId, visited = new Set()) {
+  if (!window?.myModule) return;
+  if (visited.has(noteId)) return;
+  visited.add(noteId);
+  const note = window.myModule.getNoteById(noteId);
+  if (!note) return;
+
+  Object.keys(note.variables).forEach((varKey) => {
+    if (varKey.endsWith('String')) {
+      const baseKey = varKey.slice(0, -6);
+      try {
+        const rawExpr = note.variables[varKey];
+        const newFunc = new Function('module', 'Fraction', 'return ' + rawExpr + ';');
+        note.setVariable(baseKey, function () {
+          return newFunc(window.myModule, window.Fraction || window.Fraction || window.Fraction);
+        });
+      } catch (err) {
+        console.error('Error recompiling note', noteId, 'variable', baseKey, ':', err);
+      }
+    }
+  });
+
+  const dependents = window.myModule.getDependentNotes(noteId);
+  dependents.forEach((depId) => recompileNoteAndDependents(depId, visited));
+}
+
+function buildEvaluatedDiv(value) {
+  const evaluatedDiv = document.createElement('div');
+  evaluatedDiv.className = 'evaluated-value';
+  evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${value?.evaluated !== null && value?.evaluated !== undefined ? String(value.evaluated) : 'null'}`;
+  return evaluatedDiv;
+}
+
+function buildRawEditor(initialRaw) {
+  const rawDiv = document.createElement('div');
+  rawDiv.className = 'raw-value';
+
+  const label = document.createElement('span');
+  label.className = 'value-label';
+  label.textContent = 'Raw:';
+
+  const rawInput = document.createElement('input');
+  rawInput.type = 'text';
+  rawInput.className = 'raw-value-input';
+  rawInput.value = initialRaw ?? '';
+
+  const saveButton = document.createElement('button');
+  saveButton.className = 'raw-value-save';
+  saveButton.textContent = 'Save';
+  saveButton.style.display = 'none';
+
+  rawInput.addEventListener('input', () => {
+    saveButton.style.display = 'inline-block';
+  });
+
+  rawDiv.appendChild(label);
+  rawDiv.appendChild(rawInput);
+  rawDiv.appendChild(saveButton);
+  return { rawDiv, rawInput, saveButton };
+}
+/* removed duplicate ensureModalsStyleInjected definition */
+
+// Helper to build canonical duration expression: beatUnit * (n/d)
+function computeDurationExpr(multiplierNum, multiplierDen = 1) {
+  return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${multiplierNum}, ${multiplierDen}))`;
+}
+
+// Multiply two rational values and reduce (n1/d1) * (n2/d2)
+function mulFrac(n1, d1, n2, d2) {
+  let n = n1 * n2;
+  let d = d1 * d2;
+  const gcd = (a, b) => { a = Math.abs(a); b = Math.abs(b); while (b) { const t = b; b = a % b; a = t; } return a; };
+  const g = gcd(n, d);
+  return [n / g, d / g];
+}
+
+/* Ensure dark theming and selector styles injected once */
+let __modalsStyleInjected = false;
+function ensureModalsStyleInjected() {
+  if (__modalsStyleInjected) return;
+  const style = document.createElement('style');
+  style.setAttribute('data-modals-style', 'injected');
+  style.textContent = `
+    .instrument-select {
+      appearance: none !important;
+      -webkit-appearance: none !important;
+      background-color: #222 !important;
+      color: #ffa800 !important;
+      border: 1px solid #ffa800 !important;
+      border-radius: 4px !important;
+      color-scheme: dark !important;
+    }
+    .instrument-select:focus {
+      background-color: #222 !important;
+      color: #ffa800 !important;
+      outline: none !important;
+    }
+    .instrument-select option {
+      background-color: #222 !important;
+      color: #ffa800 !important;
+    }
+    .duration-note-lengths .note-btn,
+    .duration-note-lengths .dot-btn {
+      transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+    .duration-note-lengths .note-btn.selected {
+      background-color: #ff0000 !important;
+      border-color: #ffa800 !important;
+    }
+    .duration-note-lengths .note-btn:hover {
+      border-color: #ffa800 !important;
+      box-shadow: 0 0 5px #ffa800;
+    }
+    .duration-note-lengths .dot-btn {
+      color: #fff;
+      border: 1px solid rgba(255,168,0,0.4);
+      background: #444;
+      border-radius: 4px;
+      width: 26px; height: 26px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer;
+    }
+    .duration-note-lengths .dot-btn.selected {
+      background-color: #ff0000 !important;
+      border-color: #ffa800 !important;
+    }
+    .duration-note-lengths .dot-btn:hover {
+      border-color: #ffa800 !important;
+      box-shadow: 0 0 5px #ffa800;
+    }
+    .duration-note-lengths .dot-btn.selected:hover {
+      box-shadow: none !important;
+    }
+  `;
+  document.head.appendChild(style);
+  __modalsStyleInjected = true;
+}
+
+function createDurationSelector(rawInput, saveButton) {
+  ensureModalsStyleInjected();
+  ensureModalsStyleInjected();
+
+  const container = document.createElement('div');
+  container.className = 'duration-note-lengths';
+  Object.assign(container.style, {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    marginTop: '6px',
+    marginBottom: '2px',
+    flexWrap: 'wrap'
+  });
+
+  // Base note lengths (as rational)
+  const basePicks = [
+    { title: 'Whole',   img: '/images/whole.png',    n: 4,   d: 1 },
+    { title: 'Half',    img: '/images/half.png',     n: 2,   d: 1 },
+    { title: 'Quarter', img: '/images/quarter.png',  n: 1,   d: 1 },
+    { title: 'Eighth',  img: '/images/eighth.png',   n: 1,   d: 2 },
+    { title: 'Sixteenth',img: '/images/sixteenth.png', n: 1, d: 4 }
+  ];
+
+  // Dot modifiers (as rational factors)
+  const dotPicks = [
+    { label: '.',  n: 3, d: 2 },   // 1.5x
+    { label: '..', n: 7, d: 4 }    // 1.75x
+  ];
+
+  let selectedBaseIdx = -1;
+  let selectedDotIdx  = -1;
+
+  const baseButtons = [];
+  const dotButtons = [];
+
+  // Calculate and set expression based on selection
+  function commitSelection() {
+    if (selectedBaseIdx < 0) return;
+    const base = basePicks[selectedBaseIdx];
+    let n = base.n, d = base.d;
+    if (selectedDotIdx >= 0) {
+      const mod = dotPicks[selectedDotIdx];
+      [n, d] = mulFrac(n, d, mod.n, mod.d);
+    }
+    const expr = computeDurationExpr(n, d);
+    rawInput.value = expr;
+    try {
+      saveButton.style.display = 'inline-block';
+      const ev = new Event('input', { bubbles: true });
+      rawInput.dispatchEvent(ev);
+    } catch {}
+  }
+
+  function renderSelection() {
+    baseButtons.forEach((btn, idx) => {
+      if (idx === selectedBaseIdx) btn.classList.add('selected');
+      else btn.classList.remove('selected');
+      // reset dynamic hover styles
+      btn.style.borderColor = btn.classList.contains('selected') ? '#ffa800' : 'rgba(255,168,0,0.4)';
+      btn.style.boxShadow = 'none';
+    });
+    dotButtons.forEach((btn, idx) => {
+      if (idx === selectedDotIdx) btn.classList.add('selected');
+      else btn.classList.remove('selected');
+    });
+  }
+
+  // Base icons group
+  const baseGroup = document.createElement('div');
+  Object.assign(baseGroup.style, { display: 'flex', gap: '6px', alignItems: 'center' });
+
+  basePicks.forEach((p, idx) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.title = `${p.title} note`;
+    btn.setAttribute('aria-label', `${p.title} note`);
+    btn.className = 'note-btn';
+    Object.assign(btn.style, {
+      background: '#444',
+      border: '1px solid #ffa800',
+      borderRadius: '4px',
+      padding: '0',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '26px',
+      height: '26px'
+    });
+
+    const img = document.createElement('img');
+    img.src = p.img;
+    img.alt = `${p.title} note icon`;
+    Object.assign(img.style, { display: 'block', width: '18px', height: '18px', pointerEvents: 'none' });
+    btn.appendChild(img);
+
+    btn.addEventListener('mouseenter', () => {
+      if (!btn.classList.contains('selected')) {
+        btn.style.borderColor = '#ffa800';
+        btn.style.boxShadow = '0 0 5px #ffa800';
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (!btn.classList.contains('selected')) {
+        btn.style.borderColor = '#ffa800';
+        btn.style.boxShadow = 'none';
+      }
+    });
+
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      selectedBaseIdx = idx;
+      renderSelection();
+      commitSelection();
+    });
+
+    baseGroup.appendChild(btn);
+    baseButtons.push(btn);
+  });
+
+  // Dot modifiers group
+  const dotsGroup = document.createElement('div');
+  Object.assign(dotsGroup.style, { display: 'flex', gap: '6px', alignItems: 'center', marginLeft: '6px' });
+
+  dotPicks.forEach((p, idx) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.title = `${p.label} dotted`;
+    btn.setAttribute('aria-label', `${p.label} dotted`);
+    btn.className = 'dot-btn';
+    btn.textContent = p.label;
+
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      // Toggle selection: clicking again removes dot
+      if (selectedDotIdx === idx) selectedDotIdx = -1;
+      else selectedDotIdx = idx;
+      renderSelection();
+      commitSelection();
+    });
+
+    dotsGroup.appendChild(btn);
+    dotButtons.push(btn);
+  });
+
+  container.appendChild(baseGroup);
+  container.appendChild(dotsGroup);
+
+  // Pre-select based on current raw input if it matches a known base or dotted value
+  (function preselectFromRaw() {
+    const raw = (rawInput && typeof rawInput.value === 'string') ? rawInput.value : '';
+    // Try to extract multiplier from raw expression
+    // Support: mul(new Fraction(n,d)) or mul(NUMBER)
+    let mNum = 1, mDen = 1, found = false;
+    let m = null;
+    const fracMatch = raw.match(/\.mul\s*\(\s*new\s+Fraction\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)\s*\)/);
+    if (fracMatch) {
+      mNum = parseFloat(fracMatch[1]); mDen = parseFloat(fracMatch[2]); found = true;
+    } else {
+      const numMatch = raw.match(/\.mul\s*\(\s*([0-9.]+)\s*\)/);
+      if (numMatch) {
+        const f = parseFloat(numMatch[1]);
+        if (!isNaN(f)) {
+          // Approximate fraction with denominator up to 1024
+          const denom = 1024;
+          mNum = Math.round(f * denom);
+          mDen = denom;
+          found = true;
+        }
+      }
+    }
+    if (!found) return;
+
+    m = mNum / mDen;
+    // Try to match base or base*dots within small tolerance
+    const tol = 1e-3;
+    let best = { base: -1, dot: -1, diff: Infinity };
+    basePicks.forEach((b, bi) => {
+      const baseVal = b.n / b.d;
+      // no dot
+      let diff = Math.abs(m - baseVal);
+      if (diff < best.diff && diff <= tol) best = { base: bi, dot: -1, diff };
+      // with dots
+      dotPicks.forEach((d, di) => {
+        const val = (b.n * d.n) / (b.d * d.d);
+        const dd = Math.abs(m - val);
+        if (dd < best.diff && dd <= tol) best = { base: bi, dot: di, diff: dd };
+      });
+    });
+    if (best.base >= 0) {
+      selectedBaseIdx = best.base;
+      selectedDotIdx = best.dot;
+      renderSelection();
+    }
+  })();
+
+  return container;
+}
+
+function refreshModals(note, measureId) {
+  try {
+    const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
+    let clickedEl = null;
+    if (effectiveNoteId != null) {
+      clickedEl = document.querySelector(`.note-content[data-note-id="${effectiveNoteId}"], .measure-bar-triangle[data-note-id="${effectiveNoteId}"]`);
+    }
+    if (window?.modals?.showNoteVariables) {
+      window.modals.showNoteVariables(note, clickedEl, measureId ?? null);
+    }
+  } catch (e) {
+    console.warn('Could not refresh modals view:', e);
+  }
+}
+
+function instrumentsFromManager() {
+  const list = [];
+  try {
+    if (window.instrumentManager?.getAvailableInstruments) {
+      const all = window.instrumentManager.getAvailableInstruments();
+      all.forEach((name) => list.push(name));
+      return list.sort();
+    }
+  } catch {}
+  // Fallbacks
+  return ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone'];
+}
+
+function buildInstrumentControl(value, note, externalFunctions) {
+  const container = document.createElement('div');
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  container.style.gap = '8px';
+
+  const evaluatedText = document.createElement('div');
+  if (value?.isInherited) {
+    evaluatedText.innerHTML = `<span class="value-label">Inherited:</span> <span style="color: #aaa;">${value?.evaluated ?? 'sine-wave'}</span>`;
+  } else {
+    evaluatedText.innerHTML = `<span class="value-label">Current:</span> ${value?.evaluated ?? 'sine-wave'}`;
+  }
+  container.appendChild(evaluatedText);
+
+  const select = document.createElement('select');
+  select.className = 'instrument-select';
+  ensureModalsStyleInjected();
+  Object.assign(select.style, {
+    padding: '4px',
+    backgroundColor: '#222',
+    color: '#ffa800',
+    border: '1px solid #ffa800',
+    borderRadius: '4px',
+    width: '100%',
+    marginTop: '5px',
+  });
+  try { select.style.colorScheme = 'dark'; } catch {}
+
+  const instruments = instrumentsFromManager();
+  instruments.forEach((inst) => {
+    const opt = document.createElement('option');
+    opt.value = inst;
+    opt.textContent = inst;
+    if (value?.evaluated === inst) {
+      opt.selected = true;
+    }
+    select.appendChild(opt);
+  });
+
+  // Build a custom dark dropdown and hide native select to prevent white flash
+  const wrapper = document.createElement('div');
+  Object.assign(wrapper.style, { position: 'relative', width: '100%' });
+
+  // Hide native select but keep it in DOM for value + events
+  // keep native select visible
+  wrapper.appendChild(select);
+
+  const dropdownBtn = document.createElement('div');
+  Object.assign(dropdownBtn.style, {
+    padding: '6px 8px',
+    backgroundColor: '#222',
+    color: '#ffa800',
+    border: '1px solid #ffa800',
+    borderRadius: '4px',
+    width: '100%',
+    marginTop: '5px',
+    cursor: 'pointer',
+    userSelect: 'none'
+  });
+  dropdownBtn.textContent = String(select.value || (value?.evaluated ?? '') || '');
+
+  const menu = document.createElement('div');
+  Object.assign(menu.style, {
+    position: 'absolute',
+    top: '100%',
+    left: '0',
+    right: '0',
+    backgroundColor: '#222',
+    color: '#ffa800',
+    border: '1px solid #ffa800',
+    borderRadius: '4px',
+    marginTop: '4px',
+    zIndex: '99999',
+    display: 'none',
+    maxHeight: '180px',
+    overflowY: 'auto',
+    boxShadow: '0 0 6px rgba(255,168,0,0.3)'
+  });
+
+  Array.from(select.options).forEach((opt) => {
+    const item = document.createElement('div');
+    item.textContent = opt.textContent || opt.value;
+    Object.assign(item.style, {
+      padding: '6px 8px',
+      cursor: 'pointer',
+      borderBottom: '1px solid rgba(255,168,0,0.2)'
+    });
+    item.addEventListener('mouseenter', () => { item.style.backgroundColor = '#333'; });
+    item.addEventListener('mouseleave', () => { item.style.backgroundColor = 'transparent'; });
+    item.addEventListener('click', (e) => {
+      e.stopPropagation();
+      select.value = opt.value;
+      dropdownBtn.textContent = String(opt.value);
+      // propagate change via existing listeners
+      const ev = new Event('input', { bubbles: true });
+      select.dispatchEvent(ev);
+      menu.style.display = 'none';
+    });
+    menu.appendChild(item);
+  });
+
+  dropdownBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
+  });
+  document.addEventListener('click', () => { menu.style.display = 'none'; }, { capture: true });
+
+  wrapper.appendChild(dropdownBtn);
+  wrapper.appendChild(menu);
+
+  const saveButton = document.createElement('button');
+  saveButton.className = 'raw-value-save';
+  saveButton.textContent = 'Save';
+  saveButton.style.display = 'none';
+  saveButton.style.marginTop = '5px';
+
+  select.addEventListener('input', () => (saveButton.style.display = 'block'));
+
+  saveButton.addEventListener('click', () => {
+    try {
+      pauseIfPlaying();
+      const newValue = select.value;
+      note.setVariable('instrument', newValue);
+      window.evaluatedNotes = window.myModule.evaluateModule();
+      if (typeof externalFunctions.updateVisualNotes === 'function') {
+        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+      }
+      refreshModals(note, null);
+    } catch (err) {
+      console.error('Error updating instrument:', err);
+    }
+  });
+
+  if (!value?.isInherited && note?.id !== 0) {
+    const resetButton = document.createElement('button');
+    resetButton.className = 'raw-value-save';
+    resetButton.textContent = 'Use Inherited';
+    resetButton.style.backgroundColor = '#555';
+    resetButton.style.marginTop = '5px';
+    resetButton.addEventListener('click', () => {
+      try {
+        pauseIfPlaying();
+        delete note.variables.instrument;
+        if (window.myModule?.markNoteDirty) window.myModule.markNoteDirty(note.id);
+        window.evaluatedNotes = window.myModule.evaluateModule();
+        if (typeof externalFunctions.updateVisualNotes === 'function') {
+          externalFunctions.updateVisualNotes(window.evaluatedNotes);
+        }
+        refreshModals(note, null);
+      } catch (err) {
+        console.error('Error resetting instrument:', err);
+      }
+    });
+    container.appendChild(resetButton);
+  }
+
+  container.appendChild(select);
+  container.appendChild(saveButton);
+  return container;
+}
+
+function addFrequencyOctaveButtons(parent, note) {
+  const container = document.createElement('div');
+  container.style.display = 'flex';
+  container.style.flexDirection = 'column';
+  container.style.marginLeft = 'auto';
+
+  const mkBtn = (cls, text, dir) => {
+    const btn = document.createElement('button');
+    btn.className = `octave-button ${cls}`;
+    Object.assign(btn.style, {
+      width: '26px',
+      height: '26px',
+      padding: '0',
+      backgroundColor: '#444',
+      border: '1px solid rgba(255,168,0,0.4)',
+      borderRadius: '4px',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '14px',
+      color: '#fff',
+      marginBottom: cls.includes('up') ? '4px' : '0',
+    });
+    btn.textContent = text;
+
+    // Harmonized hover effect: orange border + glow like duration icons
+    btn.addEventListener('mouseenter', () => {
+      btn.style.borderColor = '#ffa800';
+      btn.style.boxShadow = '0 0 5px #ffa800';
+    });
+    btn.addEventListener('mouseleave', () => {
+      btn.style.borderColor = 'rgba(255,168,0,0.4)';
+      btn.style.boxShadow = 'none';
+    });
+
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (typeof window.handleOctaveChange === 'function') {
+        window.handleOctaveChange(note.id, dir);
+      }
+    });
+    return btn;
+  };
+
+  const up = mkBtn('octave-up-widget', '▲', 'up');
+  const down = mkBtn('octave-down-widget', '▼', 'down');
+
+  container.appendChild(up);
+  container.appendChild(down);
+  parent.appendChild(container);
+}
+
+// Public API
+export function createVariableControls(key, value, note, measureId, externalFunctions) {
+  const variableRow = document.createElement('div');
+  variableRow.className = 'variable-row';
+
+  const variableNameDiv = document.createElement('div');
+  variableNameDiv.className = 'variable-name';
+  variableNameDiv.textContent = key;
+
+  const variableValueDiv = document.createElement('div');
+  variableValueDiv.className = 'variable-value';
+
+  // Special case: instrument selector
+  if (key === 'instrument') {
+    const instrumentUI = buildInstrumentControl(value, note, externalFunctions);
+    const evaluatedDiv = document.createElement('div');
+    evaluatedDiv.className = 'evaluated-value';
+    evaluatedDiv.appendChild(instrumentUI);
+    variableValueDiv.appendChild(evaluatedDiv);
+  } else {
+    // Evaluated display
+    const evaluatedDiv = buildEvaluatedDiv(value);
+    variableValueDiv.appendChild(evaluatedDiv);
+
+    // Raw editor
+    const { rawDiv, rawInput, saveButton } = buildRawEditor(value?.raw ?? '');
+    saveButton.addEventListener('click', () => {
+      try {
+        pauseIfPlaying();
+        const moduleInstance = window.myModule;
+        const currentNoteId = measureId !== null && measureId !== undefined ? measureId : note.id;
+        if (key === 'color') {
+          const newColor = rawInput.value;
+          // accept CSS color string as-is (e.g., '#ff00aa', 'rgba(255,0,0,0.5)')
+          note.setVariable('color', newColor);
+          window.evaluatedNotes = window.myModule.evaluateModule();
+          if (typeof externalFunctions.updateVisualNotes === 'function') {
+            externalFunctions.updateVisualNotes(window.evaluatedNotes);
+          }
+          refreshModals(note, null);
+          return;
+        }
+        const validatedExpression = validateExpression(moduleInstance, currentNoteId, rawInput.value, key);
+
+        // optional originalDuration to trigger dependent updates
+        let originalDuration;
+        if (key === 'duration') {
+          try {
+            originalDuration = note.getVariable('duration')?.valueOf();
+          } catch {}
+        }
+
+        if (measureId !== null && measureId !== undefined) {
+          // Write to measure note
+          const measureNote = window.myModule.getNoteById(parseInt(measureId, 10));
+          if (measureNote) {
+            measureNote.setVariable(key, function () {
+              return new Function('module', 'Fraction', 'return ' + validatedExpression + ';')(window.myModule, window.Fraction);
+            });
+            measureNote.setVariable(key + 'String', rawInput.value);
+          }
+        } else {
+          // Write to regular note
+          note.setVariable(key, function () {
+            return new Function('module', 'Fraction', 'return ' + validatedExpression + ';')(window.myModule, window.Fraction);
+          });
+          note.setVariable(key + 'String', rawInput.value);
+        }
+
+        // Recompile updated note + dependents to ensure functions are in sync
+        recompileNoteAndDependents(currentNoteId);
+
+        // Trigger dependent duration updates if provided by external functions
+        if (key === 'duration' && typeof externalFunctions.checkAndUpdateDependentNotes === 'function' && originalDuration !== undefined) {
+          const updatedDuration = note.getVariable('duration')?.valueOf();
+          if (Math.abs((updatedDuration ?? 0) - (originalDuration ?? 0)) > 0.001) {
+            externalFunctions.checkAndUpdateDependentNotes(currentNoteId, originalDuration, updatedDuration);
+          }
+        }
+
+        // Re-evaluate and refresh
+        window.evaluatedNotes = window.myModule.evaluateModule();
+        if (typeof externalFunctions.updateVisualNotes === 'function') {
+          externalFunctions.updateVisualNotes(window.evaluatedNotes);
+        }
+        if (typeof externalFunctions.createMeasureBars === 'function') {
+          externalFunctions.createMeasureBars();
+        }
+
+        // Keep widget open and refreshed
+        refreshModals(note, measureId);
+      } catch (err) {
+        console.error('Error saving variable', key, 'for note', note?.id, ':', err);
+      }
+    });
+
+    // Frequency octave helpers (place arrows at the right end)
+    if (key === 'frequency' && note && !isMeasureNote(note)) {
+      const evaluatedRow = evaluatedDiv || variableValueDiv.querySelector('.evaluated-value');
+      if (evaluatedRow) {
+        evaluatedRow.style.display = 'flex';
+        evaluatedRow.style.alignItems = 'center';
+        evaluatedRow.style.justifyContent = 'space-between';
+        addFrequencyOctaveButtons(evaluatedRow, note);
+      }
+    }
+
+    // Duration note-length preset selector (icons)
+    if (key === 'duration') {
+      const selector = createDurationSelector(rawInput, saveButton);
+      variableValueDiv.appendChild(selector);
+    }
+
+    variableValueDiv.appendChild(rawDiv);
+  }
+
+  variableRow.appendChild(variableNameDiv);
+  variableRow.appendChild(variableValueDiv);
+  return variableRow;
+}

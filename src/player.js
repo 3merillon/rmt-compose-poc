@@ -4832,4 +4832,24 @@ document.addEventListener('DOMContentLoaded', async function() {
         moduleLastModifiedTime = Date.now();
     }
 
+// Event bus subscriptions for incremental modularization
+  // Hooks allow future decoupling without breaking legacy globals.
+  if (window.eventBus && typeof window.eventBus.on === 'function') {
+    try {
+      // When modals show a note, forward selection to legacy stack click helper
+      window.eventBus.on('modals:show', ({ noteId }) => {
+        if (typeof window.updateStackClickSelectedNote === 'function' && noteId != null) {
+          window.updateStackClickSelectedNote(noteId);
+        }
+      });
+
+      // When modals are cleared, ensure selection state remains coherent
+      window.eventBus.on('modals:cleared', () => {
+        // Legacy clearSelection already syncs UI; placeholder for future player reactions
+      });
+    } catch (e) {
+      console.warn('eventBus subscription failed', e);
+    }
+  }
+
 });

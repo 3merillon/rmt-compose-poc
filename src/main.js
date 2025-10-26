@@ -6,20 +6,14 @@ import { InstrumentManager, SynthInstrument, SampleInstrument } from './instrume
 import * as SynthInstrumentsModule from './instruments/synth-instruments.js';
 import * as SampleInstrumentsModule from './instruments/sample-instruments.js';
 import { initStackClick } from './stack-click.js';
+import { registerGlobals } from './utils/compat.js';
+import { eventBus } from './utils/event-bus.js';
+import { modals } from './modals/index.js';
 
-// Make Fraction and tapspace globally available for the legacy code
-window.Fraction = Fraction;
-window.tapspace = tapspace;
-
-// Expose core classes globally
-window.Module = Module;
-window.Note = Note;
-window.InstrumentManager = InstrumentManager;
-window.SynthInstrument = SynthInstrument;
-window.SampleInstrument = SampleInstrument;
+// Globals are exposed via registerGlobals below to centralize window.* writes
 
 // Create the SynthInstruments object with all instrument classes
-window.SynthInstruments = {
+const SynthInstruments = {
     SineInstrument: SynthInstrumentsModule.SineInstrument,
     SquareInstrument: SynthInstrumentsModule.SquareInstrument,
     SawtoothInstrument: SynthInstrumentsModule.SawtoothInstrument,
@@ -29,20 +23,47 @@ window.SynthInstruments = {
 };
 
 // Create the SampleInstruments object
-window.SampleInstruments = {
+const SampleInstruments = {
     PianoInstrument: SampleInstrumentsModule.PianoInstrument,
     ViolinInstrument: SampleInstrumentsModule.ViolinInstrument
 };
 
-window.invalidateModuleEndTimeCache = invalidateModuleEndTimeCache;
+registerGlobals({
+    Fraction,
+    tapspace,
+    Module,
+    Note,
+    InstrumentManager,
+    SynthInstrument,
+    SampleInstrument,
+    SynthInstruments,
+    SampleInstruments,
+    invalidateModuleEndTimeCache,
+    eventBus,
+    modals
+});
 
 // Import and initialize the legacy modules
 // These will be loaded as regular scripts since they're too complex to fully convert immediately
 async function initApp() {
     // Initialize stack click functionality
     initStackClick();
+
+    // Initialize ES module modals (and keep window.modals for legacy callers)
+    try {
+        modals.init();
+    } catch (e) {
+        console.error('Failed to initialize modals', e);
+    }
+
+    // Load legacy menu bar via dynamic import (ensures globals are set first)
+    try {
+        await import('./menu-bar.js');
+    } catch (e) {
+        console.error('Failed to load menu-bar.js', e);
+    }
     
-    // The modals, menu-bar, and player scripts will be loaded via script tags
+    // The player script will be loaded via script tag
     // but we ensure the core ES6 modules are available first
     console.log('ES6 modules loaded successfully');
     console.log('Core classes available:', { Module, Note, InstrumentManager, Fraction, tapspace });
