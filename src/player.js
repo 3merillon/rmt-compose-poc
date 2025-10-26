@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', async function() {
     const INITIAL_VOLUME = 0.2, ATTACK_TIME_RATIO = 0.1, DECAY_TIME_RATIO = 0.1, SUSTAIN_LEVEL = 0.7, RELEASE_TIME_RATIO = 0.2, GENERAL_VOLUME_RAMP_TIME = 0.2, OSCILLATOR_POOL_SIZE = 64, DRAG_THRESHOLD = 5;
     
-    let oscillatorPool = [], gainNodePool = [], activeOscillators = new Map(), scheduledTimeouts = [], currentTime = 0, playheadTime = 0, isPlaying = false, isPaused = false, isFadingOut = false, totalPausedTime = 0, isTrackingEnabled = false, isDragging = false, dragStartX = 0, dragStartY = 0, isLocked = false, lastSelectedNote = null, originalNoteOrder = new Map();
+    let currentTime = 0, playheadTime = 0, isPlaying = false, isPaused = false, isFadingOut = false, totalPausedTime = 0, isTrackingEnabled = false, isDragging = false, dragStartX = 0, dragStartY = 0, isLocked = false, lastSelectedNote = null, originalNoteOrder = new Map();
     
     let stackClickState = { lastClickPosition: null, stackedNotes: [], currentIndex: -1 };
     let xScaleFactor = 1.0, yScaleFactor = 1.0;
@@ -1338,39 +1338,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     let playhead = null;
     let playheadContainer = null;
     
-    function cleanupAudio() {
-        scheduledTimeouts.forEach(timeout => clearTimeout(timeout));
-        scheduledTimeouts = [];
-        
-        for (const [id, oscObj] of activeOscillators.entries()) {
-            try {
-                oscObj.gainNode.gain.cancelScheduledValues(audioContext.currentTime);
-                oscObj.gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.1);
-                
-                if (oscObj.started && !oscObj.stopped) {
-                    oscObj.stopped = true;
-                    try {
-                        oscObj.oscillator.stop();
-                    } catch (e) {
-                        console.log('Oscillator already stopped or never started');
-                    }
-                }
-                
-                setTimeout(() => {
-                    try {
-                        oscObj.oscillator.disconnect();
-                        oscObj.gainNode.disconnect();
-                    } catch (e) {
-                        console.log('Error disconnecting oscillator:', e);
-                    }
-                }, 100);
-            } catch (e) {
-                console.log('Oscillator cleanup error:', e);
-            }
-        }
-        
-        activeOscillators.clear();
-    }
     
     function getFrequencyMultiplier(note) {
         if (note.variables && note.variables.color) {
@@ -3943,173 +3910,29 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
-    let audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    let generalVolumeGainNode = audioContext.createGain();
-    let compressor = audioContext.createDynamicsCompressor();
-    generalVolumeGainNode.connect(compressor);
-    compressor.connect(audioContext.destination);
-    let instrumentManager = new InstrumentManager(audioContext);
+    // Use shared AudioEngine nodes; legacy fallbacks removed
+    const { audioContext, generalVolumeGainNode, compressor, instrumentManager } = window.audioEngine.nodes();
     
-    // Register built-in instruments
-    if (window.SynthInstruments && window.SampleInstruments) {
-        instrumentManager.registerBuiltInInstruments(window.SynthInstruments, window.SampleInstruments);
-        console.log('Instruments registered:', instrumentManager.getAvailableInstruments());
-    } else {
-        console.error('SynthInstruments or SampleInstruments not available');
+    async function initAudioContext() {
+        await window.audioEngine.ensureResumed();
     }
     
-    window.instrumentManager = instrumentManager;
+    document.addEventListener('DOMContentLoaded', () => { initAudioContext(); });
 
-    function initAudioContext() {
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        if (audioContext.state === 'suspended') {
-            audioContext.resume();
-        }
-    }
-
-    document.addEventListener('DOMContentLoaded', initAudioContext);
-
+    // Do not close/recreate AudioContext here; AudioEngine manages lifecycle
     function cleanupAudio() {
-        scheduledTimeouts.forEach(timeout => clearTimeout(timeout));
-        scheduledTimeouts = [];
-        
-        for (const [id, oscObj] of activeOscillators.entries()) {
-            try {
-                oscObj.gainNode.gain.cancelScheduledValues(audioContext.currentTime);
-                oscObj.oscillator.stop();
-                
-                if (oscillatorPool.length < OSCILLATOR_POOL_SIZE) {
-                    oscObj.oscillator.onended = null;
-                    oscillatorPool.push(oscObj.oscillator);
-                    gainNodePool.push(oscObj.gainNode);
-                } else {
-                    oscObj.oscillator.disconnect();
-                    oscObj.gainNode.disconnect();
-                }
-            } catch (e) {
-                console.log('Oscillator already stopped');
-            }
-        }
-        
-        activeOscillators.clear();
-        
-        if (audioContext.state !== 'running') {
-            audioContext.close().then(() => {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                generalVolumeGainNode = audioContext.createGain();
-                compressor = audioContext.createDynamicsCompressor();
-                generalVolumeGainNode.connect(compressor);
-                compressor.connect(audioContext.destination);
-                setVolume(domCache.volumeSlider.value);
-                
-                oscillatorPool = [];
-                gainNodePool = [];
-            });
+        if (window.audioEngine && typeof window.audioEngine.stopAll === 'function') {
+            try { window.audioEngine.stopAll(); } catch {}
         }
     }
 
-    function generateOscillatorId() {
-        return Math.random().toString(36).substr(2, 9);
-    }
 
     function preparePlayback(fromTime) {
-        return new Promise((resolve) => {
-            const resumePromise = audioContext.state === 'suspended' 
-                ? audioContext.resume() 
-                : Promise.resolve();
-                
-            resumePromise.then(() => {
-                cleanupAudio();
-                
-                const evaluatedNotes = myModule.evaluateModule();
-                const moduleEndTime = getModuleEndTime();
-                
-                const activeNotes = [];
-                for (const id in myModule.notes) {
-                    const note = myModule.notes[id];
-                    if (!note.getVariable('startTime') || !note.getVariable('duration')) {
-                        continue;
-                    }
-                    
-                    const noteStart = note.getVariable('startTime').valueOf();
-                    const noteDuration = note.getVariable('duration').valueOf();
-                    const noteEnd = noteStart + noteDuration;
-                    
-                    if (noteEnd > fromTime && noteStart < moduleEndTime) {
-                        activeNotes.push({
-                            noteInstance: note,
-                            id: note.id,
-                            startTime: note.getVariable('startTime'),
-                            duration: note.getVariable('duration'),
-                            frequency: note.getVariable('frequency')
-                        });
-                    }
-                }
-                
-                const uniqueInstruments = new Set();
-                activeNotes.forEach(note => {
-                    if (!note.frequency) return;
-                    
-                    const instrumentName = myModule.findInstrument(note.noteInstance).toLowerCase();
-                    uniqueInstruments.add(instrumentName);
-                });
-                
-                const loadPromises = Array.from(uniqueInstruments).map(instrumentName => {
-                    const instrument = instrumentManager.getInstrument(instrumentName);
-                    if (instrument && instrument.type === 'sample' && typeof instrument.waitForLoad === 'function') {
-                        return instrument.waitForLoad();
-                    }
-                    return Promise.resolve();
-                });
-                
-                Promise.all(loadPromises).then(() => {
-                    const preparedNotes = activeNotes.map(activeNote => {
-                        const noteStart = activeNote.startTime.valueOf();
-                        const noteDuration = activeNote.duration.valueOf();
-                        const noteEnd = noteStart + noteDuration;
-                        
-                        const adjustedStart = Math.max(0, noteStart - fromTime);
-                        const adjustedDuration = noteEnd - Math.max(noteStart, fromTime);
-                        
-                        if (!activeNote.frequency) {
-                            return {
-                                note: {
-                                    ...activeNote,
-                                    startTime: new Fraction(adjustedStart),
-                                    duration: new Fraction(adjustedDuration)
-                                },
-                                oscillator: null,
-                                gainNode: null
-                            };
-                        }
-                        
-                        const instrumentName = myModule.findInstrument(activeNote.noteInstance).toLowerCase();
-                        
-                        const oscillator = instrumentManager.createOscillator(instrumentName, activeNote.frequency.valueOf());
-                        
-                        const gainNode = audioContext.createGain();
-                        
-                        return {
-                            note: {
-                                ...activeNote,
-                                startTime: new Fraction(adjustedStart),
-                                duration: new Fraction(adjustedDuration),
-                                instrument: instrumentName
-                            },
-                            oscillator: oscillator,
-                            gainNode: gainNode
-                        };
-                    });
-                    
-                    resolve(preparedNotes);
-                }).catch(error => {
-                    console.error("Error loading samples:", error);
-                    resolve([]);
-                });
-            });
-        });
+        if (window.audioEngine && typeof window.audioEngine.preparePlayback === 'function') {
+            return window.audioEngine.preparePlayback(myModule, fromTime);
+        }
+        // Fallback should never happen since audioEngine is registered in main.js
+        return Promise.resolve([]);
     }
 
     function play(fromTime = null) {
@@ -4123,47 +3946,24 @@ document.addEventListener('DOMContentLoaded', async function() {
             fromTime = 0;
         }
 
-        preparePlayback(fromTime).then((preparedNotes) => {
-            isPlaying = true;
-            isPaused = false;
-            const startTime = audioContext.currentTime + 0.1;
-            currentTime = startTime - fromTime;
-            playheadTime = fromTime;
-            totalPausedTime = 0;
-            
-            preparedNotes.forEach(prep => {
-                const noteStart = startTime + prep.note.startTime.valueOf();
-                const noteDuration = prep.note.duration.valueOf();
-                const instrumentName = prep.note.instrument;
-                
-                if (!prep.note.frequency) {
-                    return;
-                }
-                
-                instrumentManager.applyEnvelope(instrumentName, prep.gainNode, noteStart, noteDuration, INITIAL_VOLUME);
-                
-                prep.oscillator.connect(prep.gainNode);
-                prep.gainNode.connect(generalVolumeGainNode);
-                
-                prep.oscillator.start(noteStart);
-                prep.oscillator.stop(noteStart + noteDuration);
-                
-                const oscId = generateOscillatorId();
-                activeOscillators.set(oscId, {
-                    oscillator: prep.oscillator,
-                    gainNode: prep.gainNode,
-                    started: true,
-                    stopped: false
-                });
-                
-                prep.oscillator.onended = () => {
-                    if (activeOscillators.has(oscId)) {
-                        activeOscillators.delete(oscId);
-                    }
-                };
-            });
-            domCache.ppElement.classList.remove('loading');
-            domCache.ppElement.classList.add('open');
+        preparePlayback(fromTime).then(async (preparedNotes) => {
+            try {
+                const baseStartTime = (window.audioEngine && typeof window.audioEngine.play === 'function')
+                    ? window.audioEngine.play(preparedNotes, { initialVolume: INITIAL_VOLUME })
+                    : (audioContext.currentTime + 0.1);
+
+                isPlaying = true;
+                isPaused = false;
+
+                currentTime = baseStartTime - fromTime;
+                playheadTime = fromTime;
+                totalPausedTime = 0;
+
+                domCache.ppElement.classList.remove('loading');
+                domCache.ppElement.classList.add('open');
+            } catch (e) {
+                console.error('Playback failed', e);
+            }
         });
     }
 
@@ -4171,26 +3971,28 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (!isPlaying || isPaused) return;
         isPaused = true;
         isFadingOut = true;
+
         const currentPauseTime = audioContext.currentTime - currentTime;
         playheadTime = currentPauseTime + totalPausedTime;
         pausedAtTime = currentPauseTime;
         totalPausedTime += currentPauseTime;
-        
-        for (const [id, oscObj] of activeOscillators.entries()) {
-            try {
-                oscObj.gainNode.gain.cancelScheduledValues(audioContext.currentTime);
-                oscObj.gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + GENERAL_VOLUME_RAMP_TIME);
-            } catch (e) {
-                console.log('Error fading out oscillator:', e);
-            }
+
+        if (window.audioEngine && typeof window.audioEngine.pauseFade === 'function') {
+            window.audioEngine.pauseFade(GENERAL_VOLUME_RAMP_TIME).then(() => {
+                isPlaying = false;
+                isFadingOut = false;
+            }).catch(() => {
+                isPlaying = false;
+                isFadingOut = false;
+            });
+        } else {
+            setTimeout(() => {
+                cleanupAudio();
+                isPlaying = false;
+                isFadingOut = false;
+            }, GENERAL_VOLUME_RAMP_TIME * 1000);
         }
-        
-        setTimeout(() => {
-            cleanupAudio();
-            isPlaying = false;
-            isFadingOut = false;
-        }, GENERAL_VOLUME_RAMP_TIME * 1000);
-        
+
         domCache.ppElement.classList.remove('open');
     }
 
@@ -4208,12 +4010,20 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         domCache.ppElement.classList.remove('open');
         
+        if (window.audioEngine && typeof window.audioEngine.stopAll === 'function') {
+            try { window.audioEngine.stopAll(); } catch {}
+        }
         cleanupAudio();
         
         updatePlayhead();
     }
 
     function setVolume(value) {
+        if (window.audioEngine && typeof window.audioEngine.setVolume === 'function') {
+            window.audioEngine.setVolume(value);
+            return;
+        }
+        // Legacy fallback
         if (isPlaying) {
             generalVolumeGainNode.gain.linearRampToValueAtTime(value, audioContext.currentTime + GENERAL_VOLUME_RAMP_TIME);
         } else {

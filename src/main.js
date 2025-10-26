@@ -9,6 +9,7 @@ import { initStackClick } from './stack-click.js';
 import { registerGlobals } from './utils/compat.js';
 import { eventBus } from './utils/event-bus.js';
 import { modals } from './modals/index.js';
+import { audioEngine } from './player/audio-engine.js';
 
 // Globals are exposed via registerGlobals below to centralize window.* writes
 
@@ -40,10 +41,21 @@ registerGlobals({
     SampleInstruments,
     invalidateModuleEndTimeCache,
     eventBus,
-    modals
+    modals,
+    audioEngine
 });
 
-// Import and initialize the legacy modules
+// Register built-in instruments in the shared audio engine
+try {
+    audioEngine.registerInstruments(SynthInstruments, SampleInstruments);
+} catch (e) {
+    console.error('Failed to register instruments in audioEngine', e);
+}
+
+ // Ensure legacy player registers its DOMContentLoaded handler before it fires
+ import './player.js';
+ 
+ // Import and initialize the legacy modules
 // These will be loaded as regular scripts since they're too complex to fully convert immediately
 async function initApp() {
     // Initialize stack click functionality
@@ -69,8 +81,8 @@ async function initApp() {
         console.error('Failed to load or initialize ./menu/index.js', e);
     }
     
-    // The player script will be loaded via script tag
-    // but we ensure the core ES6 modules are available first
+    // Player is imported at top-level to ensure its DOMContentLoaded handler is registered before firing.
+
     console.log('ES6 modules loaded successfully');
     console.log('Core classes available:', { Module, Note, InstrumentManager, Fraction, tapspace });
     console.log('Instruments registered:', {
