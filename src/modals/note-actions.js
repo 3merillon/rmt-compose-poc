@@ -1,7 +1,8 @@
 // Modularized "actions" sections for the Modals panel
 // Exports:
-//   - createEvaluateSection(note, measureId, effectiveNoteId) => HTMLElement
-//   - createDeleteSection(note, effectiveNoteId, externalFunctions) => HTMLElement
+//   - createEvaluateSection(note, measureId, effectiveNoteId, modalsApi) => HTMLElement
+//   - createDeleteSection(note, effectiveNoteId, externalFunctions, modalsApi) => HTMLElement
+import { getModule } from '../store/app-state.js';
 
 function rowContainer(cls = 'variable-row') {
   const row = document.createElement('div');
@@ -28,7 +29,7 @@ function actionButton(text, className, onClick) {
   return btn;
 }
 
-export function createEvaluateSection(note, measureId, effectiveNoteId) {
+export function createEvaluateSection(note, measureId, effectiveNoteId, modalsApi) {
   // Container
   const wrap = rowContainer('evaluate-note-row');
   const hdr = header('EVALUATE', 'evaluate-note-header');
@@ -39,43 +40,43 @@ export function createEvaluateSection(note, measureId, effectiveNoteId) {
 
   if (!isMeasureBar && effectiveNoteId !== undefined && effectiveNoteId !== null) {
     // Prefer confirmation dialog if available
-    if (window?.modals?.showLiberateConfirmation) {
+    if (modalsApi?.showLiberateConfirmation) {
       const liberateBtn = actionButton('Liberate Dependencies', 'evaluate-note-btn liberate-dependencies', () => {
-        window.modals.showLiberateConfirmation(effectiveNoteId);
+        modalsApi.showLiberateConfirmation(effectiveNoteId);
       });
       wrap.appendChild(liberateBtn);
-    } else if (window?.modals?.liberateDependencies) {
+    } else if (modalsApi?.liberateDependencies) {
       // Fallback direct call
       const liberateBtn = actionButton('Liberate Dependencies', 'evaluate-note-btn liberate-dependencies', () => {
-        window.modals.liberateDependencies(effectiveNoteId);
+        modalsApi.liberateDependencies(effectiveNoteId);
       });
       wrap.appendChild(liberateBtn);
     }
   }
 
   // Evaluate to BaseNote
-  if (window?.modals?.showEvaluateConfirmation && effectiveNoteId !== undefined && effectiveNoteId !== null) {
+  if (modalsApi?.showEvaluateConfirmation && effectiveNoteId !== undefined && effectiveNoteId !== null) {
     const evalBtn = actionButton('Evaluate to BaseNote', 'evaluate-note-btn', () => {
-      window.modals.showEvaluateConfirmation(effectiveNoteId);
+      modalsApi.showEvaluateConfirmation(effectiveNoteId);
     });
     wrap.appendChild(evalBtn);
-  } else if (window?.modals?.evaluateNoteToBaseNote && effectiveNoteId !== undefined && effectiveNoteId !== null) {
+  } else if (modalsApi?.evaluateNoteToBaseNote && effectiveNoteId !== undefined && effectiveNoteId !== null) {
     const evalBtn = actionButton('Evaluate to BaseNote', 'evaluate-note-btn', () => {
-      window.modals.evaluateNoteToBaseNote(effectiveNoteId);
+      modalsApi.evaluateNoteToBaseNote(effectiveNoteId);
     });
     wrap.appendChild(evalBtn);
   }
 
   // BaseNote evaluate entire module
-  if (note === window.myModule?.baseNote) {
-    if (window?.modals?.showEvaluateModuleConfirmation) {
+  if (note === getModule()?.baseNote) {
+    if (modalsApi?.showEvaluateModuleConfirmation) {
       const evalModuleBtn = actionButton('Evaluate Module', 'evaluate-note-btn', () => {
-        window.modals.showEvaluateModuleConfirmation();
+        modalsApi.showEvaluateModuleConfirmation();
       });
       wrap.appendChild(evalModuleBtn);
-    } else if (window?.modals?.evaluateEntireModule) {
+    } else if (modalsApi?.evaluateEntireModule) {
       const evalModuleBtn = actionButton('Evaluate Module', 'evaluate-note-btn', () => {
-        window.modals.evaluateEntireModule();
+        modalsApi.evaluateEntireModule();
       });
       wrap.appendChild(evalModuleBtn);
     }
@@ -84,16 +85,16 @@ export function createEvaluateSection(note, measureId, effectiveNoteId) {
   return wrap;
 }
 
-export function createDeleteSection(note, effectiveNoteId, externalFunctions) {
+export function createDeleteSection(note, effectiveNoteId, externalFunctions, modalsApi) {
   // BaseNote special: Clean Slate
-  if (note === window.myModule?.baseNote) {
+  if (note === getModule()?.baseNote) {
     const wrap = rowContainer('delete-note-row');
     const hdr = header('DELETE ALL NOTES', 'delete-note-header');
     wrap.appendChild(hdr);
 
     const cleanBtn = actionButton('Clean Slate', 'delete-note-btn delete-dependencies', () => {
-      if (window?.modals?.showCleanSlateConfirmation) {
-        window.modals.showCleanSlateConfirmation();
+      if (modalsApi?.showCleanSlateConfirmation) {
+        modalsApi.showCleanSlateConfirmation();
       } else if (typeof externalFunctions?.cleanSlate === 'function') {
         externalFunctions.cleanSlate();
       }
@@ -108,8 +109,8 @@ export function createDeleteSection(note, effectiveNoteId, externalFunctions) {
   wrap.appendChild(hdr);
 
   const keepBtn = actionButton('Keep Dependencies', 'delete-note-btn keep-dependencies', () => {
-    if (window?.modals?.showDeleteConfirmationKeepDependencies) {
-      window.modals.showDeleteConfirmationKeepDependencies(effectiveNoteId);
+    if (modalsApi?.showDeleteConfirmationKeepDependencies) {
+      modalsApi.showDeleteConfirmationKeepDependencies(effectiveNoteId);
     } else if (typeof externalFunctions?.deleteNoteKeepDependencies === 'function') {
       externalFunctions.deleteNoteKeepDependencies(effectiveNoteId);
     }
@@ -117,8 +118,8 @@ export function createDeleteSection(note, effectiveNoteId, externalFunctions) {
   wrap.appendChild(keepBtn);
 
   const delBtn = actionButton('Delete Dependencies', 'delete-note-btn delete-dependencies', () => {
-    if (window?.modals?.showDeleteConfirmation) {
-      window.modals.showDeleteConfirmation(effectiveNoteId);
+    if (modalsApi?.showDeleteConfirmation) {
+      modalsApi.showDeleteConfirmation(effectiveNoteId);
     } else if (typeof externalFunctions?.deleteNoteAndDependencies === 'function') {
       externalFunctions.deleteNoteAndDependencies(effectiveNoteId);
     }

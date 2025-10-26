@@ -3,6 +3,8 @@
 // API: createVariableControls(key, value, note, measureId, externalFunctions)
 import { validateExpression } from './validation.js';
 import { eventBus } from '../utils/event-bus.js';
+import Fraction from 'fraction.js';
+import { getModule, setEvaluatedNotes, getInstrumentManager } from '../store/app-state.js';
 
 // Helpers
 function pauseIfPlaying() {
@@ -20,10 +22,11 @@ function isMeasureNote(note) {
 }
 
 function recompileNoteAndDependents(noteId, visited = new Set()) {
-  if (!window?.myModule) return;
+  const moduleInstance = getModule();
+  if (!moduleInstance) return;
   if (visited.has(noteId)) return;
   visited.add(noteId);
-  const note = window.myModule.getNoteById(noteId);
+  const note = moduleInstance.getNoteById(noteId);
   if (!note) return;
 
   Object.keys(note.variables).forEach((varKey) => {
@@ -31,9 +34,10 @@ function recompileNoteAndDependents(noteId, visited = new Set()) {
       const baseKey = varKey.slice(0, -6);
       try {
         const rawExpr = note.variables[varKey];
+        // eslint-disable-next-line no-new-func
         const newFunc = new Function('module', 'Fraction', 'return ' + rawExpr + ';');
         note.setVariable(baseKey, function () {
-          return newFunc(window.myModule, window.Fraction || window.Fraction || window.Fraction);
+          return newFunc(moduleInstance, Fraction);
         });
       } catch (err) {
         console.error('Error recompiling note', noteId, 'variable', baseKey, ':', err);
@@ -41,7 +45,7 @@ function recompileNoteAndDependents(noteId, visited = new Set()) {
     }
   });
 
-  const dependents = window.myModule.getDependentNotes(noteId);
+  const dependents = moduleInstance.getDependentNotes(noteId);
   dependents.forEach((depId) => recompileNoteAndDependents(depId, visited));
 }
 
@@ -373,8 +377,9 @@ function refreshModals(note, measureId) {
 function instrumentsFromManager() {
   const list = [];
   try {
-    if (window.instrumentManager?.getAvailableInstruments) {
-      const all = window.instrumentManager.getAvailableInstruments();
+    const im = getInstrumentManager();
+    if (im?.getAvailableInstruments) {
+      const all = im.getAvailableInstruments();
       all.forEach((name) => list.push(name));
       return list.sort();
     }
@@ -504,11 +509,13 @@ function buildInstrumentControl(value, note, externalFunctions) {
   saveButton.addEventListener('click', () => {
     try {
       pauseIfPlaying();
+      const moduleInstance = getModule();
       const newValue = select.value;
       note.setVariable('instrument', newValue);
-      window.evaluatedNotes = window.myModule.evaluateModule();
+      const evaluated = moduleInstance.evaluateModule();
+      setEvaluatedNotes(evaluated);
       if (typeof externalFunctions.updateVisualNotes === 'function') {
-        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+        externalFunctions.updateVisualNotes(evaluated);
       }
       refreshModals(note, null);
     } catch (err) {
@@ -525,11 +532,13 @@ function buildInstrumentControl(value, note, externalFunctions) {
     resetButton.addEventListener('click', () => {
       try {
         pauseIfPlaying();
+        const moduleInstance = getModule();
         delete note.variables.instrument;
-        if (window.myModule?.markNoteDirty) window.myModule.markNoteDirty(note.id);
-        window.evaluatedNotes = window.myModule.evaluateModule();
+        if (moduleInstance?.markNoteDirty) moduleInstance.markNoteDirty(note.id);
+        const evaluated = moduleInstance.evaluateModule();
+        setEvaluatedNotes(evaluated);
         if (typeof externalFunctions.updateVisualNotes === 'function') {
-          externalFunctions.updateVisualNotes(window.evaluatedNotes);
+          externalFunctions.updateVisualNotes(evaluated);
         }
         refreshModals(note, null);
       } catch (err) {
@@ -627,15 +636,16 @@ export function createVariableControls(key, value, note, measureId, externalFunc
     saveButton.addEventListener('click', () => {
       try {
         pauseIfPlaying();
-        const moduleInstance = window.myModule;
+        const moduleInstance = getModule();
         const currentNoteId = measureId !== null && measureId !== undefined ? measureId : note.id;
         if (key === 'color') {
           const newColor = rawInput.value;
           // accept CSS color string as-is (e.g., '#ff00aa', 'rgba(255,0,0,0.5)')
           note.setVariable('color', newColor);
-          window.evaluatedNotes = window.myModule.evaluateModule();
+          const evaluated = moduleInstance.evaluateModule();
+          setEvaluatedNotes(evaluated);
           if (typeof externalFunctions.updateVisualNotes === 'function') {
-            externalFunctions.updateVisualNotes(window.evaluatedNotes);
+            externalFunctions.updateVisualNotes(evaluated);
           }
           refreshModals(note, null);
           return;
@@ -652,17 +662,19 @@ export function createVariableControls(key, value, note, measureId, externalFunc
 
         if (measureId !== null && measureId !== undefined) {
           // Write to measure note
-          const measureNote = window.myModule.getNoteById(parseInt(measureId, 10));
+          const measureNote = moduleInstance.getNoteById(parseInt(measureId, 10));
           if (measureNote) {
             measureNote.setVariable(key, function () {
-              return new Function('module', 'Fraction', 'return ' + validatedExpression + ';')(window.myModule, window.Fraction);
+              // eslint-disable-next-line no-new-func
+              return new Function('module', 'Fraction', 'return ' + validatedExpression + ';')(moduleInstance, Fraction);
             });
             measureNote.setVariable(key + 'String', rawInput.value);
           }
         } else {
           // Write to regular note
           note.setVariable(key, function () {
-            return new Function('module', 'Fraction', 'return ' + validatedExpression + ';')(window.myModule, window.Fraction);
+            // eslint-disable-next-line no-new-func
+            return new Function('module', 'Fraction', 'return ' + validatedExpression + ';')(moduleInstance, Fraction);
           });
           note.setVariable(key + 'String', rawInput.value);
         }
@@ -679,9 +691,10 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         }
 
         // Re-evaluate and refresh
-        window.evaluatedNotes = window.myModule.evaluateModule();
+        const evaluated = moduleInstance.evaluateModule();
+        setEvaluatedNotes(evaluated);
         if (typeof externalFunctions.updateVisualNotes === 'function') {
-          externalFunctions.updateVisualNotes(window.evaluatedNotes);
+          externalFunctions.updateVisualNotes(evaluated);
         }
         if (typeof externalFunctions.createMeasureBars === 'function') {
           externalFunctions.createMeasureBars();

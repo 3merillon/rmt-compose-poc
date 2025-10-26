@@ -1,3 +1,4 @@
+import { eventBus } from '../utils/event-bus.js';
 (function() {
     const domCache = {
         secondTopBar: document.querySelector('.second-top-bar'),
@@ -829,8 +830,8 @@
                             const noteTarget = elemBelow.closest('[data-note-id]');
                             if (noteTarget && moduleIcon.moduleData) {
                                 const noteId = noteTarget.getAttribute('data-note-id');
-                                if (noteId && window.eventBus && typeof window.eventBus.emit === 'function') {
-                                    window.eventBus.emit('player:importModuleAtTarget', {
+                                if (noteId && window.eventBus && typeof eventBus.emit === 'function') {
+                                    eventBus.emit('player:importModuleAtTarget', {
                                         targetNoteId: Number(noteId),
                                         moduleData: moduleIcon.moduleData
                                     });

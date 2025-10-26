@@ -1,6 +1,11 @@
+import Fraction from 'fraction.js';
+import tapspace from 'tapspace';
+import { Module } from './module.js';
 import { modals } from './modals/index.js';
 import { updateStackClickSelectedNote } from './stack-click.js';
 import { eventBus } from './utils/event-bus.js';
+import { audioEngine } from './player/audio-engine.js';
+import { setModule } from './store/app-state.js';
 
 document.addEventListener('DOMContentLoaded', async function() {
     const INITIAL_VOLUME = 0.2, ATTACK_TIME_RATIO = 0.1, DECAY_TIME_RATIO = 0.1, SUSTAIN_LEVEL = 0.7, RELEASE_TIME_RATIO = 0.2, GENERAL_VOLUME_RAMP_TIME = 0.2, OSCILLATOR_POOL_SIZE = 64, DRAG_THRESHOLD = 5;
@@ -762,6 +767,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   
     let myModule = await Module.loadFromJSON('moduleSetup.json');
+    setModule(myModule);
     window.myModule = myModule;
     updateNotesPointerEvents();
     let evaluatedNotes = myModule.evaluateModule();
@@ -817,8 +823,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         if (targetNoteId === null) {
-            targetNoteId = 0;
-            isBaseNote = true;
+            console.info('Drop ignored: no note under cursor');
+            return;
         }
 
         let data;
@@ -3894,28 +3900,22 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     // Use shared AudioEngine nodes; legacy fallbacks removed
-    const { audioContext, generalVolumeGainNode, compressor, instrumentManager } = window.audioEngine.nodes();
+    const { audioContext, generalVolumeGainNode, compressor, instrumentManager } = audioEngine.nodes();
     
     async function initAudioContext() {
-        await window.audioEngine.ensureResumed();
+        await audioEngine.ensureResumed();
     }
     
     document.addEventListener('DOMContentLoaded', () => { initAudioContext(); });
 
     // Do not close/recreate AudioContext here; AudioEngine manages lifecycle
     function cleanupAudio() {
-        if (window.audioEngine && typeof window.audioEngine.stopAll === 'function') {
-            try { window.audioEngine.stopAll(); } catch {}
-        }
+        try { audioEngine.stopAll(); } catch {}
     }
 
 
     function preparePlayback(fromTime) {
-        if (window.audioEngine && typeof window.audioEngine.preparePlayback === 'function') {
-            return window.audioEngine.preparePlayback(myModule, fromTime);
-        }
-        // Fallback should never happen since audioEngine is registered in main.js
-        return Promise.resolve([]);
+        return audioEngine.preparePlayback(myModule, fromTime);
     }
 
     function play(fromTime = null) {
@@ -3931,9 +3931,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         preparePlayback(fromTime).then(async (preparedNotes) => {
             try {
-                const baseStartTime = (window.audioEngine && typeof window.audioEngine.play === 'function')
-                    ? window.audioEngine.play(preparedNotes, { initialVolume: INITIAL_VOLUME })
-                    : (audioContext.currentTime + 0.1);
+                const baseStartTime = audioEngine.play(preparedNotes, { initialVolume: INITIAL_VOLUME });
 
                 isPlaying = true;
                 isPaused = false;
@@ -3959,21 +3957,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         playheadTime = currentPauseTime + totalPausedTime;
         totalPausedTime += currentPauseTime;
 
-        if (window.audioEngine && typeof window.audioEngine.pauseFade === 'function') {
-            window.audioEngine.pauseFade(GENERAL_VOLUME_RAMP_TIME).then(() => {
-                isPlaying = false;
-                isFadingOut = false;
-            }).catch(() => {
-                isPlaying = false;
-                isFadingOut = false;
-            });
-        } else {
-            setTimeout(() => {
-                cleanupAudio();
-                isPlaying = false;
-                isFadingOut = false;
-            }, GENERAL_VOLUME_RAMP_TIME * 1000);
-        }
+        audioEngine.pauseFade(GENERAL_VOLUME_RAMP_TIME).then(() => {
+            isPlaying = false;
+            isFadingOut = false;
+        }).catch(() => {
+            isPlaying = false;
+            isFadingOut = false;
+        });
 
         domCache.ppElement.classList.remove('open');
     }
@@ -3992,25 +3982,15 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         domCache.ppElement.classList.remove('open');
         
-        if (window.audioEngine && typeof window.audioEngine.stopAll === 'function') {
-            try { window.audioEngine.stopAll(); } catch {}
-        }
+        try { audioEngine.stopAll(); } catch {}
         cleanupAudio();
         
         updatePlayhead();
     }
 
     function setVolume(value) {
-        if (window.audioEngine && typeof window.audioEngine.setVolume === 'function') {
-            window.audioEngine.setVolume(value);
-            return;
-        }
-        // Legacy fallback
-        if (isPlaying) {
-            generalVolumeGainNode.gain.linearRampToValueAtTime(value, audioContext.currentTime + GENERAL_VOLUME_RAMP_TIME);
-        } else {
-            generalVolumeGainNode.gain.value = value;
-        }
+        audioEngine.setVolume(value);
+        return;
     }
 
     document.addEventListener('mousedown', (event) => {
@@ -4143,6 +4123,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             
             Module.loadFromJSON(data).then(newModule => {
                 myModule = newModule;
+                setModule(newModule);
                 window.myModule = newModule;
                 
                 myModule._evaluationCache = {};
@@ -4252,6 +4233,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                     
                     myModule = newModule;
+                    setModule(newModule);
                     window.myModule = newModule;
                     
                     myModule.markNoteDirty(0);
@@ -4661,10 +4643,16 @@ document.addEventListener('DOMContentLoaded', async function() {
       // Import module drop request from menu or other UIs
       eventBus.on('player:importModuleAtTarget', ({ targetNoteId, moduleData }) => {
         try {
-          const target = window.myModule?.getNoteById(Number(targetNoteId)) || window.myModule?.baseNote;
-          if (target) {
-            importModuleAtTarget(target, moduleData);
+          if (targetNoteId == null) {
+            console.info('Import ignored: no valid target noteId provided');
+            return;
           }
+          const target = myModule?.getNoteById(Number(targetNoteId));
+          if (!target) {
+            console.info('Import ignored: no valid target noteId provided');
+            return;
+          }
+          importModuleAtTarget(target, moduleData);
         } catch (e) {
           console.warn('importModuleAtTarget via eventBus failed', e);
         }

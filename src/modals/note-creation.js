@@ -2,12 +2,13 @@
 // Exports:
 //   - createAddNoteSection(note, isBase, externalFunctions) => HTMLElement
 //   - createAddMeasureSection(note, measureId, externalFunctions) => HTMLElement
+import { eventBus } from '../utils/event-bus.js';
+import { getModule, setEvaluatedNotes } from '../store/app-state.js';
+import Fraction from 'fraction.js';
 
 function pauseIfPlaying() {
   try {
-    if (window.playerState?.isPlaying && !window.playerState.isPaused && window.playerControls?.pause) {
-      window.playerControls.pause();
-    }
+    eventBus?.emit?.('player:requestPause');
   } catch {}
 }
 
@@ -18,9 +19,7 @@ function refreshModals(note, measureId = null) {
     if (id != null) {
       clickedEl = document.querySelector(`.note-content[data-note-id="${id}"], .measure-bar-triangle[data-note-id="${id}"]`);
     }
-    if (window?.modals?.showNoteVariables) {
-      window.modals.showNoteVariables(note, clickedEl, measureId ?? null);
-    }
+    eventBus?.emit?.('modals:requestRefresh', { note, measureId: measureId ?? null, clickedElement: clickedEl });
   } catch (e) {
     console.warn('Could not refresh modals view:', e);
   }
@@ -83,7 +82,7 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
   wrap.className = 'variable-row';
   const name = document.createElement('div');
   name.className = 'variable-name';
-  name.textContent = (note === window.myModule.baseNote) ? 'Add New Measure Chain' : 'Add Measure';
+  name.textContent = (note === getModule().baseNote) ? 'Add New Measure Chain' : 'Add Measure';
   const val = document.createElement('div');
   val.className = 'variable-value';
 
@@ -93,7 +92,7 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
   btn.addEventListener('click', () => {
     try {
       pauseIfPlaying();
-      const module = window.myModule;
+      const module = getModule();
       if (!module) return;
 
       const currentIDs = Object.keys(module.notes).map((id) => parseInt(id, 10));
@@ -125,7 +124,8 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
       if (typeof externalFunctions.createMeasureBars === 'function') {
         externalFunctions.createMeasureBars();
       }
-      window.evaluatedNotes = module.evaluateModule();
+      const evaluated = module.evaluateModule();
+      setEvaluatedNotes(evaluated);
 
       // Focus on last measure added
       const last = newMeasures[newMeasures.length - 1];
@@ -306,7 +306,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
     try {
       // eslint-disable-next-line no-new-func
       const fn = new Function('module', 'Fraction', `return ${expr};`);
-      const res = fn(window.myModule, window.Fraction);
+      const res = fn(getModule(), Fraction);
       return (res && typeof res.toFraction === 'function') ? res.toFraction() : String(res);
     } catch {
       return 'Invalid';
@@ -356,7 +356,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
     try {
       pauseIfPlaying();
 
-      const module = window.myModule;
+      const module = getModule();
       if (!module?.addNote) throw new Error('Module not initialized');
 
       const isSilence = silenceRadio.checked;
@@ -367,20 +367,20 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       const vars = {};
       vars.startTime = function () {
         // eslint-disable-next-line no-new-func
-        return new Function('module', 'Fraction', `return ${sFormula};`)(module, window.Fraction);
+        return new Function('module', 'Fraction', `return ${sFormula};`)(module, Fraction);
       };
       vars.startTimeString = sFormula;
 
       vars.duration = function () {
         // eslint-disable-next-line no-new-func
-        return new Function('module', 'Fraction', `return ${dFormula};`)(module, window.Fraction);
+        return new Function('module', 'Fraction', `return ${dFormula};`)(module, Fraction);
       };
       vars.durationString = dFormula;
 
       if (!isSilence) {
         vars.frequency = function () {
           // eslint-disable-next-line no-new-func
-          return new Function('module', 'Fraction', `return ${fFormula};`)(module, window.Fraction);
+          return new Function('module', 'Fraction', `return ${fFormula};`)(module, Fraction);
         };
         vars.frequencyString = fFormula;
       }
@@ -401,20 +401,19 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       }
 
       // Re-evaluate and redraw
-      window.evaluatedNotes = module.evaluateModule();
+      const evaluated = module.evaluateModule();
+      setEvaluatedNotes(evaluated);
       if (typeof externalFunctions.updateVisualNotes === 'function') {
-        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+        externalFunctions.updateVisualNotes(evaluated);
       }
       if (typeof externalFunctions.createMeasureBars === 'function') {
         externalFunctions.createMeasureBars();
       }
-      if (typeof window.invalidateModuleEndTimeCache === 'function') {
-        window.invalidateModuleEndTimeCache();
-      }
+      try { eventBus?.emit?.('player:invalidateModuleEndTimeCache'); } catch {}
 
       const newElem = document.querySelector(`.note-content[data-note-id="${newNote.id}"]`);
-      if (newElem && window.modals?.showNoteVariables) {
-        window.modals.showNoteVariables(newNote, newElem);
+      if (newElem) {
+        refreshModals(newNote, null);
       }
     } catch (err) {
       console.error('Error creating note:', err);

@@ -8,6 +8,7 @@ import {
     invalidateDependencyGraphCache 
 } from './validation.js';
 import { eventBus } from '../utils/event-bus.js';
+import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 
 const domCache = {
     noteWidget: null,
@@ -72,6 +73,13 @@ function batchClassOperation(elements, classesToAdd = [], classesToRemove = []) 
 }
 
 export function showNoteVariables(note, clickedElement, measureId = null) {
+    // Guard against early calls before the module is registered
+    const moduleInstance = (typeof getModule === 'function') ? getModule() : null;
+    if (!moduleInstance || !moduleInstance.baseNote) {
+        console.warn('modals.showNoteVariables called before module is ready');
+        return;
+    }
+
     const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
     if (effectiveNoteId === undefined) {
         console.error("No valid note id found for dependency highlighting.");
@@ -81,11 +89,11 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     const widgetContent = domCache.widgetContent;
     const widgetTitle = domCache.widgetTitle;
     
-    const isSilence = note && note.getVariable('startTime') && 
-                     note.getVariable('duration') && 
+    const isSilence = note && note.getVariable('startTime') &&
+                     note.getVariable('duration') &&
                      !note.getVariable('frequency');
     
-    if (note === window.myModule.baseNote) {
+    if (note === moduleInstance.baseNote) {
         widgetTitle.textContent = 'BaseNote Variables';
     } else if (measureId !== null) {
         widgetTitle.textContent = `Measure [${measureId}] Variables`;
@@ -112,7 +120,7 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
         clickedElement.classList.add('selected');
     }
     
-    if (note !== window.myModule.baseNote && effectiveNoteId !== undefined) {
+    if (note !== moduleInstance.baseNote && effectiveNoteId !== undefined) {
         highlightDependencies(effectiveNoteId);
     }
     
@@ -124,7 +132,7 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     });
     
     // Add creation sections
-    const shouldShowAddMeasure = note === window.myModule.baseNote || 
+    const shouldShowAddMeasure = note === moduleInstance.baseNote ||
         (measureId !== null && externalFunctions.isLastMeasureInChain(measureId));
     
     if (shouldShowAddMeasure) {
@@ -132,18 +140,18 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
         widgetContent.appendChild(measureSection);
     }
 
-    if (note !== window.myModule.baseNote && !(measureId !== null)) {
+    if (note !== moduleInstance.baseNote && !(measureId !== null)) {
         const noteSection = createAddNoteSection(note, false, externalFunctions);
         widgetContent.appendChild(noteSection);
     }
 
-    if (note === window.myModule.baseNote) {
+    if (note === moduleInstance.baseNote) {
         const noteSection = createAddNoteSection(note, true, externalFunctions);
         widgetContent.appendChild(noteSection);
     }
     
     // Add evaluate section
-    const evaluateSection = createEvaluateSection(note, measureId, effectiveNoteId);
+    const evaluateSection = createEvaluateSection(note, measureId, effectiveNoteId, modals);
     if (evaluateSection) {
         widgetContent.appendChild(evaluateSection);
     }
@@ -183,8 +191,8 @@ function highlightDependencies(selfNoteId) {
         }
     });
     
-    const directDeps = window.myModule.getDirectDependencies(selfNoteId).filter(depId => depId !== selfNoteId);
-    const dependents = window.myModule.getDependentNotes(selfNoteId).filter(depId => depId !== selfNoteId);
+    const directDeps = getModule().getDirectDependencies(selfNoteId).filter(depId => depId !== selfNoteId);
+    const dependents = getModule().getDependentNotes(selfNoteId).filter(depId => depId !== selfNoteId);
     
     directDeps.forEach(depId => {
         const elements = elementMap.get(String(depId));
@@ -204,7 +212,7 @@ function highlightDependencies(selfNoteId) {
 function collectVariables(note, measureId) {
     let variables = {};
     
-    if (note === window.myModule.baseNote) {
+    if (note === getModule().baseNote) {
         Object.keys(note.variables).forEach(key => {
             if (!key.endsWith('String') && key !== 'measureLength') {
                 variables[key] = {
@@ -222,7 +230,7 @@ function collectVariables(note, measureId) {
             };
         }
     } else if (measureId !== null) {
-        const noteInstance = window.myModule.getNoteById(parseInt(measureId, 10));
+        const noteInstance = getModule().getNoteById(parseInt(measureId, 10));
         if (noteInstance && typeof noteInstance.getVariable === 'function') {
             variables.startTime = {
                 evaluated: noteInstance.getVariable('startTime'),
@@ -248,7 +256,7 @@ function collectVariables(note, measureId) {
         });
         
         const hasOwnInstrument = note.variables.instrument !== undefined;
-        const inheritedInstrument = window.myModule.findInstrument(note);
+        const inheritedInstrument = getModule().findInstrument(note);
 
         variables.instrument = {
             evaluated: hasOwnInstrument ? note.getVariable('instrument') : inheritedInstrument,
@@ -283,7 +291,7 @@ export function clearSelection() {
     
     if (externalFunctions.originalNoteOrder) {
       externalFunctions.originalNoteOrder.forEach((noteData, noteId) => {
-        const note = window.myModule.getNoteById(parseInt(noteId, 10));
+        const note = getModule().getNoteById(parseInt(noteId, 10));
         if (note && externalFunctions.restoreNotePosition) {
           externalFunctions.restoreNotePosition(note);
         }
@@ -753,8 +761,8 @@ function parseAndSimplifyExpression(expr) {
             try {
                 const originalFunc = new Function("module", "Fraction", "return " + expr + ";");
                 const newFunc = new Function("module", "Fraction", "return " + newExpr + ";");
-                const originalValue = originalFunc(window.myModule, Fraction).valueOf();
-                const newValue = newFunc(window.myModule, Fraction).valueOf();
+                const originalValue = originalFunc(getModule(), Fraction).valueOf();
+                const newValue = newFunc(getModule(), Fraction).valueOf();
                 if (Math.abs(originalValue - newValue) < 0.0001) return newExpr;
             } catch (evalError) {
                 console.error("Error evaluating expressions in tree-based approach:", evalError);
@@ -820,8 +828,8 @@ function simplifyStartTimeExpressionWithRegex(expr) {
             try {
                 const originalFunc = new Function("module", "Fraction", "return " + expr + ";");
                 const newFunc = new Function("module", "Fraction", "return " + newExpr + ";");
-                const originalValue = originalFunc(window.myModule, Fraction).valueOf();
-                const newValue = newFunc(window.myModule, Fraction).valueOf();
+                const originalValue = originalFunc(getModule(), Fraction).valueOf();
+                const newValue = newFunc(getModule(), Fraction).valueOf();
                 if (Math.abs(originalValue - newValue) < 0.0001) return newExpr;
             } catch (evalError) {
                 console.error("Error evaluating expressions:", evalError);
@@ -941,7 +949,7 @@ function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
 
 // ===== Feature: Evaluate to BaseNote =====
 export function evaluateNoteToBaseNote(noteId) {
-    const note = window.myModule.getNoteById(parseInt(noteId, 10));
+    const note = getModule().getNoteById(parseInt(noteId, 10));
     if (!note) {
         console.error("Note not found:", noteId);
         return;
@@ -961,7 +969,7 @@ export function evaluateNoteToBaseNote(noteId) {
         do {
             currentRawExpr = newRawExpr;
             if (currentRawExpr.indexOf("module.getNoteById(") === -1) break;
-            newRawExpr = replaceNoteReferencesWithBaseNoteOnly(currentRawExpr, window.myModule);
+            newRawExpr = replaceNoteReferencesWithBaseNoteOnly(currentRawExpr, getModule());
             iterations++;
         } while (currentRawExpr !== newRawExpr && iterations < MAX_ITERATIONS);
 
@@ -977,7 +985,7 @@ export function evaluateNoteToBaseNote(noteId) {
                 } else if (varName === 'duration') {
                     newRawExpr = `new Fraction(${originalValue})`;
                 } else if (varName === 'frequency') {
-                    const baseFreq = window.myModule.baseNote.getVariable('frequency').valueOf();
+                    const baseFreq = getModule().baseNote.getVariable('frequency').valueOf();
                     const ratio = originalValue / baseFreq;
                     newRawExpr = `new Fraction(${ratio}).mul(module.baseNote.getVariable('frequency'))`;
                 }
@@ -989,14 +997,14 @@ export function evaluateNoteToBaseNote(noteId) {
 
         try {
             const testFunc = new Function("module", "Fraction", "return " + newRawExpr + ";");
-            const testResult = testFunc(window.myModule, Fraction);
+            const testResult = testFunc(getModule(), Fraction);
             const originalValue = note.getVariable(varName).valueOf();
             const newValue = testResult.valueOf();
 
             if (Math.abs(originalValue - newValue) > 0.0001) return;
 
             note.setVariable(varName, function() {
-                return new Function("module", "Fraction", "return " + newRawExpr + ";")(window.myModule, Fraction);
+                return new Function("module", "Fraction", "return " + newRawExpr + ";")(getModule(), Fraction);
             });
             note.setVariable(varName + 'String', newRawExpr);
         } catch (error) {
@@ -1006,10 +1014,11 @@ export function evaluateNoteToBaseNote(noteId) {
     });
 
     // re-evaluate and update UI
-    window.myModule.markNoteDirty(note.id);
-    window.evaluatedNotes = window.myModule.evaluateModule();
+    getModule().markNoteDirty(note.id);
+    const evaluated = getModule().evaluateModule();
+    setEvaluatedNotes(evaluated);
     if (typeof externalFunctions.updateVisualNotes === 'function') {
-        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+        externalFunctions.updateVisualNotes(evaluated);
     }
 
     const newElem = document.querySelector(`.note-content[data-note-id="${noteId}"]`);
@@ -1025,7 +1034,7 @@ export function evaluateNoteToBaseNote(noteId) {
 
 // ===== Feature: Evaluate entire module =====
 export function evaluateEntireModule() {
-    const moduleInstance = window.myModule;
+    const moduleInstance = getModule();
     const noteIds = Object.keys(moduleInstance.notes).map(id => parseInt(id, 10)).filter(id => id !== 0);
     noteIds.sort((a, b) => a - b);
 
@@ -1120,9 +1129,10 @@ export function evaluateEntireModule() {
         }
     }
 
-    window.evaluatedNotes = moduleInstance.evaluateModule();
+    const evaluated = moduleInstance.evaluateModule();
+    setEvaluatedNotes(evaluated);
     if (typeof externalFunctions.updateVisualNotes === 'function') {
-        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+        externalFunctions.updateVisualNotes(evaluated);
     }
 
     showNotification(`Module evaluation complete: ${successCount} notes processed, ${skippedCount} notes skipped`, 'success');
@@ -1130,7 +1140,7 @@ export function evaluateEntireModule() {
 
 // ===== Feature: Liberate dependencies (replace references with raw values) =====
 export function liberateDependencies(noteId) {
-    const selectedNote = window.myModule.getNoteById(noteId);
+    const selectedNote = getModule().getNoteById(noteId);
     if (!selectedNote) return;
 
     const currentSelected = selectedNote;
@@ -1164,12 +1174,13 @@ export function liberateDependencies(noteId) {
         externalFunctions.updateDependentRawExpressions(noteId, selectedRaw);
     }
 
-    const dependents = window.myModule.getDependentNotes(noteId);
-    dependents.forEach(depId => { window.myModule.markNoteDirty(depId); });
+    const dependents = getModule().getDependentNotes(noteId);
+    dependents.forEach(depId => { getModule().markNoteDirty(depId); });
 
-    window.evaluatedNotes = window.myModule.evaluateModule();
+    const evaluated = getModule().evaluateModule();
+    setEvaluatedNotes(evaluated);
     if (typeof externalFunctions.updateVisualNotes === 'function') {
-        externalFunctions.updateVisualNotes(window.evaluatedNotes);
+        externalFunctions.updateVisualNotes(evaluated);
     }
 
     const newElem = document.querySelector(`.note-content[data-note-id="${noteId}"]`);

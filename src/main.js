@@ -1,12 +1,11 @@
 import Fraction from 'fraction.js';
 import tapspace from 'tapspace';
-import { Module, invalidateModuleEndTimeCache } from './module.js';
+import { Module } from './module.js';
 import { Note } from './note.js';
 import { InstrumentManager, SynthInstrument, SampleInstrument } from './instruments/instrument-manager.js';
 import * as SynthInstrumentsModule from './instruments/synth-instruments.js';
 import * as SampleInstrumentsModule from './instruments/sample-instruments.js';
 import { initStackClick } from './stack-click.js';
-import { registerGlobals } from './utils/compat.js';
 import { eventBus } from './utils/event-bus.js';
 import { modals } from './modals/index.js';
 import { audioEngine } from './player/audio-engine.js';
@@ -29,21 +28,6 @@ const SampleInstruments = {
     ViolinInstrument: SampleInstrumentsModule.ViolinInstrument
 };
 
-registerGlobals({
-    Fraction,
-    tapspace,
-    Module,
-    Note,
-    InstrumentManager,
-    SynthInstrument,
-    SampleInstrument,
-    SynthInstruments,
-    SampleInstruments,
-    invalidateModuleEndTimeCache,
-    eventBus,
-    modals,
-    audioEngine
-});
 
 // Register built-in instruments in the shared audio engine
 try {
@@ -73,9 +57,6 @@ async function initApp() {
         const { initMenuBar } = await import('./menu/index.js');
         if (typeof initMenuBar === 'function') {
             initMenuBar();
-        } else if (window.menuBar && typeof window.menuBar.init === 'function') {
-            // Fallback for legacy global if export is missing
-            window.menuBar.init();
         }
     } catch (e) {
         console.error('Failed to load or initialize ./menu/index.js', e);
@@ -86,8 +67,8 @@ async function initApp() {
     console.log('ES6 modules loaded successfully');
     console.log('Core classes available:', { Module, Note, InstrumentManager, Fraction, tapspace });
     console.log('Instruments registered:', {
-        SynthInstruments: Object.keys(window.SynthInstruments),
-        SampleInstruments: Object.keys(window.SampleInstruments)
+        SynthInstruments: Object.keys(SynthInstruments),
+        SampleInstruments: Object.keys(SampleInstruments)
     });
 }
 

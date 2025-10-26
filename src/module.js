@@ -9,10 +9,6 @@ export function invalidateModuleEndTimeCache() {
     moduleLastModifiedTime = Date.now();
 }
 
-// Make it available globally for backward compatibility during transition
-if (typeof window !== 'undefined') {
-    window.invalidateModuleEndTimeCache = invalidateModuleEndTimeCache;
-}
 
 export class Module {
     constructor(baseNoteVariables = {}) {
