@@ -1,3 +1,5 @@
+import { modals } from './modals/index.js';
+
 document.addEventListener('DOMContentLoaded', async function() {
     const INITIAL_VOLUME = 0.2, ATTACK_TIME_RATIO = 0.1, DECAY_TIME_RATIO = 0.1, SUSTAIN_LEVEL = 0.7, RELEASE_TIME_RATIO = 0.2, GENERAL_VOLUME_RAMP_TIME = 0.2, OSCILLATOR_POOL_SIZE = 64, DRAG_THRESHOLD = 5;
     
@@ -17,8 +19,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     };
     
-    if (window.modals) {
-        window.modals.setExternalFunctions({
+    if (modals) {
+        modals.setExternalFunctions({
             updateVisualNotes, updateBaseNoteFraction, updateBaseNotePosition, hasMeasurePoints, getLastMeasureId, isLastMeasureInChain, updateTimingBoundaries, createMeasureBars, deleteNoteAndDependencies, deleteNoteKeepDependencies, updateDependentRawExpressions, checkAndUpdateDependentNotes, cleanSlate, bringSelectedNoteToFront, restoreNotePosition, clearLastSelectedNote, originalNoteOrder
         });
     }
@@ -401,7 +403,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   
     function showDeleteConfirmation(noteId) {
-        window.modals.showDeleteConfirmation(noteId);
+        modals.showDeleteConfirmation(noteId);
     }
   
     function deleteNoteAndDependencies(noteId) {
@@ -428,7 +430,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     function showCleanSlateConfirmation() {
-        window.modals.showCleanSlateConfirmation();
+        modals.showCleanSlateConfirmation();
     }
 
     function cleanSlate() {
@@ -452,7 +454,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   
     function showDeleteConfirmationKeepDependencies(noteId) {
-        window.modals.showDeleteConfirmationKeepDependencies(noteId);
+        modals.showDeleteConfirmationKeepDependencies(noteId);
     }
   
     function updateDependentRawExpressions(selectedNoteId, selectedRaw) {
@@ -967,8 +969,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             
             invalidateModuleEndTimeCache();
             
-            if (window.modals && window.modals.invalidateDependencyGraphCache) {
-                window.modals.invalidateDependencyGraphCache();
+            if (modals && modals.invalidateDependencyGraphCache) {
+                modals.invalidateDependencyGraphCache();
             }
             
             window.evaluatedNotes = myModule.evaluateModule();
@@ -1102,19 +1104,19 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     function showNoteVariables(note, clickedElement, measureId = null) {
-        if (window.modals) {
+        if (modals) {
             if (note !== window.myModule.baseNote && measureId === null) {
                 bringSelectedNoteToFront(note, clickedElement);
             }
             
-            window.modals.showNoteVariables(note, clickedElement, measureId);
+            modals.showNoteVariables(note, clickedElement, measureId);
         } else {
-            console.error("window.modals is not available");
+            console.error("modals is not available");
         }
     }
       
     function clearSelection() {
-        window.modals.clearSelection();
+        modals.clearSelection();
         currentSelectedNote = null;
     }
       
@@ -3580,9 +3582,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                 
                 if (newSelectedElement) {
                     if (newSelectedElement.classList.contains('measure-bar-triangle')) {
-                        window.modals.showNoteVariables(selectedNote, newSelectedElement, selectedNote.id);
+                        modals.showNoteVariables(selectedNote, newSelectedElement, selectedNote.id);
                     } else {
-                        window.modals.showNoteVariables(selectedNote, newSelectedElement);
+                        modals.showNoteVariables(selectedNote, newSelectedElement);
                     }
                 }
             }
@@ -3974,7 +3976,6 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         const currentPauseTime = audioContext.currentTime - currentTime;
         playheadTime = currentPauseTime + totalPausedTime;
-        pausedAtTime = currentPauseTime;
         totalPausedTime += currentPauseTime;
 
         if (window.audioEngine && typeof window.audioEngine.pauseFade === 'function') {
@@ -4155,8 +4156,8 @@ document.addEventListener('DOMContentLoaded', async function() {
             memoizedModuleEndTime = null;
             moduleLastModifiedTime = Date.now();
             
-            if (window.modals && window.modals.invalidateDependencyGraphCache) {
-                window.modals.invalidateDependencyGraphCache();
+            if (modals && modals.invalidateDependencyGraphCache) {
+                modals.invalidateDependencyGraphCache();
             }
             
             Module.loadFromJSON(data).then(newModule => {
@@ -4379,7 +4380,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     function validateExpression(moduleInstance, noteId, expression, variableType) {
-        return window.modals.validateExpression(moduleInstance, noteId, expression, variableType);
+        return modals.validateExpression(moduleInstance, noteId, expression, variableType);
     }
 
     let dependencyGraphCache = null;
@@ -4492,7 +4493,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     function invalidateDependencyGraphCache() {
-        window.modals.invalidateDependencyGraphCache();
+        modals.invalidateDependencyGraphCache();
     }
 
     const TOP_HEADER_HEIGHT = 50;
@@ -4500,7 +4501,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     let widgetInitiallyOpened = false;
 
     function updateNoteWidgetHeight() {
-        window.modals.updateNoteWidgetHeight();
+        modals.updateNoteWidgetHeight();
     }
       
     updateNoteWidgetHeight();
