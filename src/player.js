@@ -2439,6 +2439,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 overlayElem.style.pointerEvents = 'none';
                 overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
                 overlayElem.style.overflow = 'hidden';
+                overlayElem.style.boxSizing = 'border-box';
                 overlayElem.setAttribute('data-type', isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : (isSilence ? 'silence' : 'note')));
                 
                 const textElem = document.createElement('div');
@@ -2544,10 +2545,13 @@ document.addEventListener('DOMContentLoaded', async function() {
                 overlayElem.style.alignItems = 'center';
                 overlayElem.style.justifyContent = 'center';
                 
-                overlayElem.style.left = `${screenPos.x - 0.5}px`;
-                overlayElem.style.top = `${yPos}px`;
+                const _baseEl = document.querySelector(`.note-content[data-note-id="${noteObj.id}"]`);
+                const _baseRect = _baseEl ? _baseEl.getBoundingClientRect() : null;
+                const _bw = _baseEl ? (parseFloat(getComputedStyle(_baseEl).borderTopWidth) || 1) : 1;
+                overlayElem.style.left = `${screenPos.x}px`;
+                overlayElem.style.top = `${_baseRect ? (_baseRect.top - _bw) : (yPos - _bw)}px`;
                 overlayElem.style.width = `${screenWidth}px`;
-                overlayElem.style.height = `${screenHeight}px`;
+                overlayElem.style.height = `${_baseRect ? (_baseRect.height + 2 * _bw) : (screenHeight + 2 * _bw)}px`;
                 
                 if (isSilence) {
                     overlayElem.style.borderStyle = 'dashed';
@@ -3310,9 +3314,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                 ghostNote.className = 'resize-ghost-note';
                 ghostNote.style.position = 'absolute';
                 ghostNote.style.left = `${screenPos.x}px`;
-                ghostNote.style.top = `${screenPos.y}px`;
+                const depBaseEl = document.querySelector(`.note-content[data-note-id="${posInfo.noteId}"]`);
+                const depBaseRect = depBaseEl ? depBaseEl.getBoundingClientRect() : null;
+                const depBW = depBaseEl ? (parseFloat(getComputedStyle(depBaseEl).borderTopWidth) || 1) : 1;
+                ghostNote.style.top = `${depBaseRect ? (depBaseRect.top - depBW) : (screenPos.y - depBW)}px`;
                 ghostNote.style.width = `${screenWidth}px`;
-                ghostNote.style.height = `${screenHeight}px`;
+                ghostNote.style.height = `${depBaseRect ? (depBaseRect.height + 2 * depBW) : (screenHeight + 2 * depBW)}px`;
                 ghostNote.style.backgroundColor = noteColor;
                 ghostNote.style.opacity = '0.6';
                 ghostNote.style.borderRadius = '6px';
