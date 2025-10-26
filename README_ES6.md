@@ -12,17 +12,22 @@ This is the modernized ES6 version of the RMT Compose Proof of Concept applicati
 
 ### Modular Architecture
 - Core modules converted to ES6:
-  - `src/note.js` - Note class
-  - `src/module.js` - Module class with dependency management
-  - `src/instruments/` - Instrument system (synth & samples)
-  - `src/stack-click.js` - Stack click functionality
-  - `src/main.js` - Application entry point
+  - [src/note.js](src/note.js) - Note class
+  - [src/module.js](src/module.js) - Module class with dependency management
+  - [src/instruments/](src/instruments/instrument-manager.js) - Instrument system (synth & samples)
+  - [src/stack-click.js](src/stack-click.js) - Stack click functionality
+  - [src/player/audio-engine.js](src/player/audio-engine.js) - Central audio engine (WebAudio graph, scheduling, transport)
+  - [src/utils/event-bus.js](src/utils/event-bus.js) - Lightweight pub/sub for cross-module messages
+  - [src/utils/compat.js](src/utils/compat.js) - Transitional facade for minimal globals
+  - [src/menu/menu-bar.js](src/menu/menu-bar.js) - Menu (drag/drop, actions)
+  - [src/modals/index.js](src/modals/index.js) - Modals (note variables widget)
+  - [src/main.js](src/main.js) - Application entry point
 
 ### Legacy Compatibility
-- Player remains legacy in `src/player.js` and relies on window globals provided via the compat facade.
-- Modals are fully ES modules under `src/modals/` and initialized from `src/main.js`.
-- Menu bar has moved to `src/menu/` and is initialized via ES module import; the legacy `window.menuBar` is preserved for compatibility.
-- A lightweight `eventBus` and `compat` shim remain temporarily to bridge the legacy player with new modules.
+- Player is an ES module in [src/player.js](src/player.js); audio is delegated to [AudioEngine](src/player/audio-engine.js) and cross-module communication uses [eventBus](src/utils/event-bus.js). Transitional globals are isolated behind [compat](src/utils/compat.js) only where necessary.
+- Modals are fully ES modules under [src/modals/](src/modals/index.js) and initialized from [src/main.js](src/main.js).
+- Menu bar is an ES module under [src/menu/](src/menu/menu-bar.js) and communicates via [eventBus](src/utils/event-bus.js); no `window.menuBar` is exposed.
+- A lightweight event bus and compat facade remain temporarily to bridge remaining seams; current intentional globals: audioEngine instance and a module graph accessor (window.myModule).
 
 ## Getting Started
 
@@ -53,30 +58,33 @@ npm run preview
 ```
 rmt-compose-poc/
 ├── src/
-│   ├── main.js                 # ES6 entry point
-│   ├── note.js                 # Note class (ES6)
-│   ├── module.js               # Module class (ES6)
-│   ├── stack-click.js          # Stack click (ES6)
-│   ├── player.js               # Player logic (legacy)
-│   ├── menu/                   # Menu (ES module)
-│   │   ├── menu-bar.js         # Menu implementation (module-initialized)
+│   ├── main.js                 # ES module entry point
+│   ├── note.js                 # Note class
+│   ├── module.js               # Module class with dependencies
+│   ├── stack-click.js          # Stack click helpers
+│   ├── player.js               # Player UI/state (ES module; delegates to audio engine)
+│   ├── player/
+│   │   └── audio-engine.js     # WebAudio engine: routing, scheduling, transport
+│   ├── menu/
+│   │   ├── menu-bar.js         # Menu implementation
 │   │   └── index.js            # Menu public API
-│   ├── instruments/
-│   │   ├── instrument-manager.js  # ES6
-│   │   ├── synth-instruments.js   # ES6
-│   │   └── sample-instruments.js  # ES6
 │   ├── modals/
-│   │   ├── index.js            # Modals ES6 wrapper
+│   │   ├── index.js            # Modals (note variables widget)
 │   │   └── validation.js       # Validation utilities
+│   ├── instruments/
+│   │   ├── instrument-manager.js
+│   │   ├── synth-instruments.js
+│   │   └── sample-instruments.js
 │   └── utils/
-│       └── compat.js           # Compatibility helpers
+│       ├── event-bus.js        # Lightweight pub/sub
+│       └── compat.js           # Transitional globals facade
 ├── public/
 │   ├── images/                 # Note duration images
 │   ├── instruments/samples/    # Audio samples
 │   ├── modules/                # JSON module definitions
-│   ├── styles.css              # Styles
+│   ├── styles.css              # Styles (linked as /styles.css)
 │   └── moduleSetup.json        # Initial module setup
-├── index.html                  # Main HTML (updated for ES6)
+├── index.html                  # Single module script; loads src/main.js
 ├── package.json                # Dependencies
 ├── vite.config.js              # Vite configuration
 └── .gitignore                  # Git ignore rules
@@ -95,11 +103,11 @@ rmt-compose-poc/
 
 ## Technical Notes
 
-- **Fraction.js** is now imported as an npm package instead of a CDN script
-- **Tapspace** is imported as an npm package
-- Core classes are exposed to `window` for backward compatibility
-- All file paths updated to work with Vite's dev server
-- No behavioral changes - everything works exactly as before
+- **Fraction.js** is imported from npm
+- **Tapspace** is imported from npm
+- Most APIs are imported as ES modules; only minimal transitional globals are exposed via the compat facade (e.g., audioEngine instance, module graph accessor) while migration completes
+- All file paths are Vite-friendly and resolve from public/ at dev and build time
+- No behavioral changes; migration preserved existing UX
 
 ## Migration Benefits
 
@@ -110,6 +118,6 @@ rmt-compose-poc/
 5. **Optimized Builds**: Vite handles bundling and optimization
 6. **No Breaking Changes**: 100% functionality preserved
 
-## Original Files
+## Legacy Root Cleanup
 
-Original files are preserved in the root directory for reference.
+Legacy duplicates at the repository root were removed after migration (menu-bar.js, modals.js, player.js, module.js, note.js, instruments/, modules/, images/, fraction.min.js, moduleSetup.json, styles.css). The sources of truth are under [src/](src/main.js) and [public/](public/styles.css).
