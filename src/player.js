@@ -7,6 +7,26 @@ import { eventBus } from './utils/event-bus.js';
 import { audioEngine } from './player/audio-engine.js';
 import { setModule, setEvaluatedNotes } from './store/app-state.js';
 
+// Compiled expression cache (kept for performance; flags and perf logs removed)
+const __exprCompileCache = new Map();
+function __evalExpr(expr, moduleInstance) {
+  let fn = __exprCompileCache.get(expr);
+  if (!fn) {
+    fn = new Function("module", "Fraction", "return " + expr + ";");
+    __exprCompileCache.set(expr, fn);
+  }
+  return fn(moduleInstance, Fraction);
+}
+
+// Defer heavy UI sync without feature flags or polyfills
+function scheduleDeferred(cb) {
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    window.requestIdleCallback(cb);
+  } else {
+    setTimeout(cb, 0);
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
     const INITIAL_VOLUME = 0.2, ATTACK_TIME_RATIO = 0.1, DECAY_TIME_RATIO = 0.1, SUSTAIN_LEVEL = 0.7, RELEASE_TIME_RATIO = 0.2, GENERAL_VOLUME_RAMP_TIME = 0.2, OSCILLATOR_POOL_SIZE = 64, DRAG_THRESHOLD = 5;
     
@@ -541,9 +561,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                         depNote.variables[key] = newRawExp;
                         const baseKey = key.slice(0, -6);
                         try {
-                            const newFunc = new Function("module", "Fraction", "return " + newRawExp + ";");
                             depNote.setVariable(baseKey, function() {
-                                return newFunc(myModule, Fraction);
+                                return __evalExpr(newRawExp, myModule);
                             });
                         } catch (err) {
                             console.error("Error compiling new expression for note", depId, "variable", baseKey, ":", err);
@@ -941,43 +960,62 @@ document.addEventListener('DOMContentLoaded', async function() {
                 mapping[id] = newId;
                 newId++;
             }
-            
             myModule.nextId = newId;
-        
+
+            // Per-import cache to avoid repeating the same string remapping across many notes
+            const exprRemapCache = new Map();
+
+            // Ensure imported expressions anchor to the actual drop target (requirement)
             function updateExpression(expr) {
-                if (targetNote.id !== 0) {
-                    let relativeId = (typeof targetNote.parentId !== 'undefined' && targetNote.parentId !== null)
-                        ? targetNote.parentId
-                        : 0;
-                        
-                    expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(match, varName) {
-                        return "module.getNoteById(" + relativeId + ").getVariable('" + varName + "')";
+                if (typeof expr !== 'string') return expr;
+                const cached = exprRemapCache.get(expr);
+                if (cached) return cached;
+
+                const originalExpr = expr;
+
+                const hasBase = expr.indexOf('module.baseNote') !== -1;
+                const hasIds  = expr.indexOf('getNoteById(') !== -1;
+
+                // Remap base-note anchored constructs to the selected target when dropping onto a non-base note.
+                if (targetNote.id !== 0 && hasBase) {
+                    const anchorId = targetNote.id;
+
+                    // Remap baseNote variable access
+                    expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
+                        return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
                     });
-                } else {
-                    expr = expr.replace(/module\.baseNote/g, "module.baseNote");
+
+                    // Remap common helpers that take baseNote as argument
+                    expr = expr.replace(/module\.findTempo\(\s*module\.baseNote\s*\)/g, "module.findTempo(module.getNoteById(" + anchorId + "))");
+                    expr = expr.replace(/module\.findMeasureLength\(\s*module\.baseNote\s*\)/g, "module.findMeasureLength(module.getNoteById(" + anchorId + "))");
                 }
-            
-                expr = expr.replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, function(match, p1) {
-                    const oldRef = parseInt(p1, 10);
-                    if (mapping.hasOwnProperty(oldRef)) {
-                        return "module.getNoteById(" + mapping[oldRef] + ")";
-                    }
-                    return match;
-                });
-            
+
+                // Remap explicit id references using the mapping table (includes 0 -> target id)
+                if (hasIds) {
+                    expr = expr.replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, function(match, p1) {
+                        const oldRef = parseInt(p1, 10);
+                        if (mapping.hasOwnProperty(oldRef)) {
+                            return "module.getNoteById(" + mapping[oldRef] + ")";
+                        }
+                        return match;
+                    });
+                }
+
+                exprRemapCache.set(originalExpr, expr);
                 return expr;
             }
         
-            for (const id in importedModule.notes) {
-                if (Number(id) === 0) continue;
+            // Non-chunked import: map and insert all notes in a single pass
+            const allIds = Object.keys(importedModule.notes).filter(k => Number(k) !== 0);
+            for (const id of allIds) {
                 const impNote = importedModule.notes[id];
                 const oldId = impNote.id;
                 impNote.id = mapping[oldId];
-                
+
                 if (filename) {
                     impNote.originalFilename = filename;
                 }
-                
+
                 if (typeof impNote.parentId !== 'undefined') {
                     const oldParent = impNote.parentId;
                     if (mapping.hasOwnProperty(oldParent)) {
@@ -986,14 +1024,19 @@ document.addEventListener('DOMContentLoaded', async function() {
                         impNote.parentId = targetNote.id;
                     }
                 }
+
                 for (const key in impNote.variables) {
-                    if (typeof impNote.variables[key] === 'string' && key.endsWith("String")) {
-                        let originalString = impNote.variables[key];
-                        impNote.variables[key] = updateExpression(originalString);
+                    const val = impNote.variables[key];
+                    if (typeof val === 'string' && key.endsWith("String")) {
+                        // Remap only when needed; avoid regex if not necessary
+                        let originalString = val;
+                        const needsRemap = (originalString.indexOf('module.baseNote') !== -1) || (originalString.indexOf('getNoteById(') !== -1);
+                        impNote.variables[key] = needsRemap ? updateExpression(originalString) : originalString;
                         const baseKey = key.slice(0, -6);
-                        impNote.setVariable(baseKey, function() {
-                            return new Function("module", "Fraction", "return " + impNote.variables[key] + ";")(myModule, Fraction);
-                        });
+                        // Assign function directly (no setVariable) to avoid emitting events per variable
+                        impNote.variables[baseKey] = function() {
+                            return __evalExpr(impNote.variables[key], myModule);
+                        };
                     } else if (key === 'color') {
                         impNote.variables.color = impNote.variables.color;
                     }
@@ -1002,28 +1045,40 @@ document.addEventListener('DOMContentLoaded', async function() {
                 myModule.notes[impNote.id] = impNote;
             }
         
-            myModule._evaluationCache = {};
-            myModule._lastEvaluationTime = 0;
-            myModule._dependenciesCache.clear();
-            myModule._dependentsCache.clear();
-            
-            for (const id in myModule.notes) {
-                myModule.markNoteDirty(Number(id));
-            }
-            
+
+            // Incremental import path with targeted dirty marking and timings
+            const importedIds = Object.keys(mapping).filter(k => Number(k) !== 0).map(k => mapping[k]);
+
+            // Avoid global cache flush; only mark affected notes dirty
+            try {
+                myModule.markNoteDirty(0);
+                if (targetNote && typeof targetNote.id === 'number') myModule.markNoteDirty(targetNote.id);
+                importedIds.forEach(id => myModule.markNoteDirty(Number(id)));
+            } catch {}
+
             invalidateModuleEndTimeCache();
-            
-            if (modals && modals.invalidateDependencyGraphCache) {
-                modals.invalidateDependencyGraphCache();
-            }
-            
+
             evaluatedNotes = myModule.evaluateModule();
             setEvaluatedNotes(evaluatedNotes);
-            updateVisualNotes(evaluatedNotes);
-            createMeasureBars();
-            try { captureSnapshot(`Import Module at ${targetNote.id}`); } catch {}
-            
-            
+
+            // Immediate incremental render of new notes for fast feedback
+            try { renderNotesIncrementally(importedIds); } catch (e) { console.warn('incremental render error', e); }
+
+            // Defer heavy UI sync to idle
+            scheduleDeferred(() => {
+                try {
+                    if (modals && modals.invalidateDependencyGraphCache) {
+                        modals.invalidateDependencyGraphCache();
+                    }
+                    updateVisualNotes(evaluatedNotes);
+                    createMeasureBars();
+                    try { captureSnapshot(`Import Module at ${targetNote.id}`); } catch {}
+                } catch (e) {
+                    console.warn('deferred import sync failed', e);
+                }
+            });
+
+
         } catch (error) {
             console.error("Error importing module at target note:", error);
         }
@@ -2060,7 +2115,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                         }
                         
                         note.setVariable('startTime', function() {
-                            return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                            return __evalExpr(newRaw, myModule);
                         });
                         note.setVariable('startTimeString', newRaw);
                         
@@ -2109,7 +2164,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                         
                         if (dragData.reference !== dragData.originalReference) {
                             note.setVariable('startTime', function() {
-                                return new Function("module", "Fraction", "return " + originalRawString + ";")(myModule, Fraction);
+                                return __evalExpr(originalRawString, myModule);
                             });
                             note.setVariable('startTimeString', originalRawString);
                             
@@ -2164,7 +2219,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                         }
                         
                         note.setVariable('startTime', function() {
-                            return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                            return __evalExpr(newRaw, myModule);
                         });
                         note.setVariable('startTimeString', newRaw);
                         
@@ -3109,7 +3164,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 
                 const durationFunc = function() {
                     try {
-                        return new Function("module", "Fraction", "return " + newDurationString + ";")(myModule, Fraction);
+                        return __evalExpr(newDurationString, myModule);
                     } catch (error) {
                         console.error("Error in duration function:", error);
                         return new Fraction(60).div(myModule.baseNote.getVariable('tempo')).mul(1);
@@ -3480,6 +3535,28 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         return noteContainer;
+    }
+
+    // Fast incremental renderer to append only specified notes after import.
+    function renderNotesIncrementally(noteIds) {
+        if (!Array.isArray(noteIds) || noteIds.length === 0) return 0;
+        let count = 0;
+        try {
+            noteIds.forEach(id => {
+                const note = myModule.getNoteById(Number(id));
+                if (!note) return;
+                const hasStart = !!note.getVariable('startTime');
+                const hasDur = !!note.getVariable('duration');
+                // Render both frequency and silence rectangles (no frequency) when duration exists
+                if (hasStart && hasDur) {
+                    try {
+                        createNoteElement(note);
+                        count++;
+                    } catch {}
+                }
+            });
+        } catch (e) { console.warn('renderNotesIncrementally failed', e); }
+        return count;
     }
 
     function handleOctaveChange(noteId, direction) {
@@ -3869,7 +3946,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         return newColor;
     }
     
-    function updateVisualNotes(evaluatedNotes) {
+    function updateVisualNotes(nextEvaluated) {
+        // Sync module-scoped evaluatedNotes so helpers like frequencyToY() use fresh base/frequencies
+        evaluatedNotes = nextEvaluated;
+
         const selectedElements = document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected');
         const selectedIds = Array.from(selectedElements).map(el => el.getAttribute('data-note-id'));
         
@@ -3924,6 +4004,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
         
         invalidateModuleEndTimeCache();
+        // Ensure BaseNote visuals react to frequency changes (fraction text and Y position)
+        try { updateBaseNoteFraction(); } catch {}
+        try { updateBaseNotePosition(); } catch {}
         if (isLocked) {
             updateNotesPointerEvents();
         }
@@ -4196,72 +4279,13 @@ document.addEventListener('DOMContentLoaded', async function() {
                     stop(true);
                 }
                 
-                const currentBaseNote = {
-                    id: 0,
-                    frequency: myModule.baseNote.getVariable('frequency'),
-                    frequencyString: myModule.baseNote.variables.frequencyString,
-                    startTime: myModule.baseNote.getVariable('startTime'),
-                    startTimeString: myModule.baseNote.variables.startTimeString,
-                    tempo: myModule.baseNote.getVariable('tempo'),
-                    tempoString: myModule.baseNote.variables.tempoString,
-                    beatsPerMeasure: myModule.baseNote.getVariable('beatsPerMeasure'),
-                    beatsPerMeasureString: myModule.baseNote.variables.beatsPerMeasureString,
-                    color: myModule.baseNote.variables.color
-                };
                 
                 cleanupCurrentModule();
                 
                 Module.loadFromJSON(moduleData).then(newModule => {
                     if (newModule.baseNote) {
+                        // Ensure canonical id for base note; otherwise use module-defined base note values as-is
                         newModule.baseNote.id = 0;
-                        
-                        if (currentBaseNote.frequencyString) {
-                            newModule.baseNote.variables.frequencyString = currentBaseNote.frequencyString;
-                            newModule.baseNote.setVariable('frequency', function() {
-                                return new Function("module", "Fraction", "return " + currentBaseNote.frequencyString + ";")(newModule, Fraction);
-                            });
-                        } else if (currentBaseNote.frequency) {
-                            newModule.baseNote.setVariable('frequency', function() {
-                                return currentBaseNote.frequency;
-                            });
-                        }
-                        
-                        if (currentBaseNote.startTimeString) {
-                            newModule.baseNote.variables.startTimeString = currentBaseNote.startTimeString;
-                            newModule.baseNote.setVariable('startTime', function() {
-                                return new Function("module", "Fraction", "return " + currentBaseNote.startTimeString + ";")(newModule, Fraction);
-                            });
-                        } else if (currentBaseNote.startTime) {
-                            newModule.baseNote.setVariable('startTime', function() {
-                                return currentBaseNote.startTime;
-                            });
-                        }
-                        
-                        if (currentBaseNote.tempoString) {
-                            newModule.baseNote.variables.tempoString = currentBaseNote.tempoString;
-                            newModule.baseNote.setVariable('tempo', function() {
-                                return new Function("module", "Fraction", "return " + currentBaseNote.tempoString + ";")(newModule, Fraction);
-                            });
-                        } else if (currentBaseNote.tempo) {
-                            newModule.baseNote.setVariable('tempo', function() {
-                                return currentBaseNote.tempo;
-                            });
-                        }
-                        
-                        if (currentBaseNote.beatsPerMeasureString) {
-                            newModule.baseNote.variables.beatsPerMeasureString = currentBaseNote.beatsPerMeasureString;
-                            newModule.baseNote.setVariable('beatsPerMeasure', function() {
-                                return new Function("module", "Fraction", "return " + currentBaseNote.beatsPerMeasureString + ";")(newModule, Fraction);
-                            });
-                        } else if (currentBaseNote.beatsPerMeasure) {
-                            newModule.baseNote.setVariable('beatsPerMeasure', function() {
-                                return currentBaseNote.beatsPerMeasure;
-                            });
-                        }
-                        
-                        if (currentBaseNote.color) {
-                            newModule.baseNote.variables.color = currentBaseNote.color;
-                        }
                     }
                     
                     myModule = newModule;
