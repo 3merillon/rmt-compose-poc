@@ -1415,31 +1415,44 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     function getFrequencyRatio(note) {
-        if (note && note.variables && note.variables.frequencyString) {
-            let raw = note.variables.frequencyString;
-            let m = raw.match(/new Fraction\(\s*([^,]+)\s*,\s*([^)]+)\s*\)\.mul\([^)]*getVariable\('frequency'\)[^)]*\)/);
-            if (m) {
-                let num = m[1].trim();
-                let den = m[2].trim();
-                if (!den.includes("/")) {
-                    den = den + "/1";
+        // Prefer computing from evaluated values to be robust against extra multipliers
+        // and arbitrary expression shapes in frequencyString.
+        try {
+            if (!note || typeof note.getVariable !== 'function') return "1/1";
+
+            const freqVal = note.getVariable('frequency');
+            if (!freqVal) return "1/1";
+
+            const baseVal = myModule?.baseNote?.getVariable?.('frequency');
+            if (!baseVal) return "1/1";
+
+            const f = (freqVal instanceof Fraction) ? freqVal
+                : new Fraction(typeof freqVal.valueOf === 'function' ? freqVal.valueOf() : Number(freqVal));
+            const b = (baseVal instanceof Fraction) ? baseVal
+                : new Fraction(typeof baseVal.valueOf === 'function' ? baseVal.valueOf() : Number(baseVal));
+
+            const ratio = (typeof f.div === 'function') ? f.div(b) : new Fraction(f).div(b);
+            let fracStr = (typeof ratio.toFraction === 'function') ? ratio.toFraction() : String(ratio);
+            if (!fracStr.includes('/')) fracStr = fracStr + '/1';
+            return fracStr;
+        } catch (e) {
+            // Fallback: keep previous best-effort regex for legacy strings
+            try {
+                if (note && note.variables && note.variables.frequencyString) {
+                    let raw = note.variables.frequencyString;
+                    let m = raw.match(/new Fraction\(\s*([^,]+)\s*,\s*([^)]+)\s*\)\.mul\([^)]*getVariable\('frequency'\)[^)]*\)/);
+                    if (m) {
+                        let num = m[1].trim();
+                        let den = m[2].trim();
+                        if (!den.includes("/")) {
+                            den = den + "/1";
+                        }
+                        return num + "/" + den;
+                    }
                 }
-                return num + "/" + den;
-            }
+            } catch {}
+            return "1/1";
         }
-        if (note && note.getVariable && note.variables.frequency) {
-            let freq = note.getVariable('frequency');
-            let base = myModule.baseNote.getVariable('frequency');
-            if (freq && base && typeof freq.div === "function") {
-                let ratio = freq.div(base);
-                let fracStr = (typeof ratio.toFraction === "function") ? ratio.toFraction() : ratio.toString();
-                if (!fracStr.includes("/")) {
-                    fracStr = fracStr + "/1";
-                }
-                return fracStr;
-            }
-        }
-        return "1/1";
     }
 
     function getMovedNotes(draggedNote, newDraggedStart, originalDraggedStart) {
