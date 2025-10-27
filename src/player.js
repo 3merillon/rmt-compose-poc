@@ -1220,7 +1220,18 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
       
     function frequencyToY(freq) {
-        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        // Use evaluated cache when available to avoid recomputing base frequency repeatedly
+        let baseNoteFreq;
+        try {
+            const baseEv = evaluatedNotes && evaluatedNotes[0] && evaluatedNotes[0].frequency;
+            if (baseEv != null) {
+                baseNoteFreq = (typeof baseEv.valueOf === 'function') ? baseEv.valueOf() : baseEv;
+            } else {
+                baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+            }
+        } catch {
+            baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        }
         const logRatio = Math.log2(baseNoteFreq / freq);
         return logRatio * 100 * yScaleFactor;
     }
@@ -1403,20 +1414,55 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     
     function getFrequencyFraction(note) {
-        if (note && note.getVariable && note.variables.frequency) {
-            let freq = note.getVariable('frequency');
-            if (freq instanceof Fraction && typeof freq.toFraction === "function") {
-                return freq.toFraction();
-            } else {
-                return freq.toString();
+        try {
+            if (!note) return "1/1";
+
+            // Fast path: use evaluated cache to avoid executing getters for every note
+            const ev = evaluatedNotes && evaluatedNotes[note.id];
+            if (ev && ev.frequency) {
+                const fv = ev.frequency;
+                if (fv instanceof Fraction && typeof fv.toFraction === 'function') {
+                    return fv.toFraction();
+                }
+                const val = (typeof fv?.valueOf === 'function') ? fv.valueOf() : fv;
+                return String(val);
             }
-        }
+
+            // Fallback to runtime getter
+            if (note && note.getVariable && note.variables.frequency) {
+                let freq = note.getVariable('frequency');
+                if (freq instanceof Fraction && typeof freq.toFraction === "function") {
+                    return freq.toFraction();
+                } else {
+                    return freq.toString();
+                }
+            }
+        } catch {}
         return "1/1";
     }
 
     function getFrequencyRatio(note) {
-        // Prefer computing from evaluated values to be robust against extra multipliers
-        // and arbitrary expression shapes in frequencyString.
+        // Fast path: use evaluated cache to avoid executing getters for every note
+        try {
+            if (!note) return "1/1";
+            const ev = evaluatedNotes && evaluatedNotes[note.id];
+            const baseEv = evaluatedNotes && evaluatedNotes[0];
+            if (ev && baseEv && ev.frequency && baseEv.frequency) {
+                const f = ev.frequency instanceof Fraction
+                    ? ev.frequency
+                    : new Fraction(typeof ev.frequency?.valueOf === 'function' ? ev.frequency.valueOf() : ev.frequency);
+                const b = baseEv.frequency instanceof Fraction
+                    ? baseEv.frequency
+                    : new Fraction(typeof baseEv.frequency?.valueOf === 'function' ? baseEv.frequency.valueOf() : baseEv.frequency);
+
+                const ratio = (typeof f.div === 'function') ? f.div(b) : new Fraction(f).div(b);
+                let fracStr = (typeof ratio.toFraction === 'function') ? ratio.toFraction() : String(ratio);
+                if (!fracStr.includes('/')) fracStr += '/1';
+                return fracStr;
+            }
+        } catch {}
+
+        // Robust value-based fallback using runtime getters
         try {
             if (!note || typeof note.getVariable !== 'function') return "1/1";
 
@@ -1436,7 +1482,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (!fracStr.includes('/')) fracStr = fracStr + '/1';
             return fracStr;
         } catch (e) {
-            // Fallback: keep previous best-effort regex for legacy strings
+            // Legacy regex fallback (best-effort), in case of malformed closures
             try {
                 if (note && note.variables && note.variables.frequencyString) {
                     let raw = note.variables.frequencyString;
@@ -1500,20 +1546,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         const noteColor = getColorForNote(note);
 
-        const measureDiv = document.createElement('div');
-        measureDiv.style.position = 'absolute';
-        measureDiv.style.visibility = 'hidden';
-        measureDiv.style.fontSize = '6px';
-        measureDiv.style.fontFamily = "'Roboto Mono', 'IBM Plex Mono', monospace";
-        measureDiv.style.fontWeight = '400';
-        measureDiv.style.whiteSpace = 'nowrap';
-        document.body.appendChild(measureDiv);
-        measureDiv.textContent = numerator;
-        const numWidth = measureDiv.offsetWidth;
-        measureDiv.textContent = denominator;
-        const denWidth = measureDiv.offsetWidth;
-        document.body.removeChild(measureDiv);
-        const maxWidth = Math.max(numWidth, denWidth);
+        // No text measurement needed; the fraction bar will stretch to the container width via CSS (width: 100%)
 
         const noteRect = tapspace.createItem(`
             <div class="note-rect" style="
@@ -1587,7 +1620,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     ">
                         <span>${numerator}</span>
                         <div style="
-                        width: ${maxWidth}px;
+                        width: 100%;
                         height: 1px;
                         background: white;
                         margin: 0;
@@ -3519,7 +3552,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             } else {
                 const rawExpression = note.variables.frequencyString;
                 let newRaw;
-                
+
                 if (!rawExpression) {
                     let newFrequency;
                     if (direction === 'up') {
@@ -3530,99 +3563,20 @@ document.addEventListener('DOMContentLoaded', async function() {
                         console.error(`Invalid direction: ${direction}`);
                         return;
                     }
-                    
                     newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
-                } 
-                else if (rawExpression.match(/^new\s+Fraction\(\d+,\s*\d+\)$/)) {
-                    const fractionMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)/);
-                    if (fractionMatch) {
-                        const oldNum = parseInt(fractionMatch[1], 10);
-                        const oldDenom = parseInt(fractionMatch[2], 10);
-                        
-                        let newNum, newDenom;
-                        if (direction === 'up') {
-                            newNum = oldNum * 2;
-                            newDenom = oldDenom;
-                        } else {
-                            newNum = oldNum;
-                            newDenom = oldDenom * 2;
-                        }
-                        
-                        const gcd = findGCD(newNum, newDenom);
-                        newNum /= gcd;
-                        newDenom /= gcd;
-                        
-                        newRaw = `new Fraction(${newNum}, ${newDenom})`;
-                    } else {
-                        newRaw = rawExpression;
-                    }
-                }
-                else if (rawExpression.includes("module.baseNote.getVariable('frequency')")) {
-                    const ratioMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)\.mul\(module\.baseNote\.getVariable\('frequency'\)\)/);
-                    if (ratioMatch) {
-                        const oldNum = parseInt(ratioMatch[1], 10);
-                        const oldDenom = parseInt(ratioMatch[2], 10);
-                        
-                        let newNum, newDenom;
-                        if (direction === 'up') {
-                            newNum = oldNum * 2;
-                            newDenom = oldDenom;
-                        } else {
-                            newNum = oldNum;
-                            newDenom = oldDenom * 2;
-                        }
-                        
-                        const gcd = findGCD(newNum, newDenom);
-                        newNum /= gcd;
-                        newDenom /= gcd;
-                        
-                        newRaw = `new Fraction(${newNum}, ${newDenom}).mul(module.baseNote.getVariable('frequency'))`;
-                    } else {
-                        if (direction === 'up') {
-                            newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
-                        } else {
-                            newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
-                        }
-                    }
-                }
-                else if (rawExpression.includes("getNoteById") && rawExpression.includes("getVariable('frequency')")) {
-                    const ratioMultiplierMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)\.mul\((.*?)\.getVariable\('frequency'\)\)/);
-                    
-                    if (ratioMultiplierMatch) {
-                        const oldNum = parseInt(ratioMultiplierMatch[1], 10);
-                        const oldDenom = parseInt(ratioMultiplierMatch[2], 10);
-                        const dependency = ratioMultiplierMatch[3];
-                        
-                        let newNum, newDenom;
-                        if (direction === 'up') {
-                            newNum = oldNum * 2;
-                            newDenom = oldDenom;
-                        } else {
-                            newNum = oldNum;
-                            newDenom = oldDenom * 2;
-                        }
-                        
-                        const gcd = findGCD(newNum, newDenom);
-                        newNum /= gcd;
-                        newDenom /= gcd;
-                        
-                        newRaw = `new Fraction(${newNum}, ${newDenom}).mul(${dependency}.getVariable('frequency'))`;
-                    } else {
-                        if (direction === 'up') {
-                            newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
-                        } else {
-                            newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
-                        }
-                    }
-                }
-                else {
+                } else {
+                    // Robust: don't parse rawExpression. Just wrap the entire expression with the octave multiplier.
+                    // This preserves dependency chains and avoids malformed strings when nested .mul(...) exist.
                     if (direction === 'up') {
                         newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
-                    } else {
+                    } else if (direction === 'down') {
                         newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
+                    } else {
+                        console.error(`Invalid direction: ${direction}`);
+                        return;
                     }
                 }
-                
+
                 note.setVariable('frequency', function() {
                     return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
                 });
