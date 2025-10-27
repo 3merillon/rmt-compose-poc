@@ -800,7 +800,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         }, 0);
     }
   
-    let myModule = await Module.loadFromJSON('modules/defaultModule.json');
+    // Load last session from localStorage if available; otherwise load default module
+    let savedSnapshot = null;
+    try { savedSnapshot = JSON.parse(localStorage.getItem('rmt:moduleSnapshot:v1') || 'null'); } catch {}
+    let myModule = await Module.loadFromJSON(savedSnapshot || 'modules/defaultModule.json');
     setModule(myModule);
     updateNotesPointerEvents();
     let evaluatedNotes = myModule.evaluateModule();
@@ -4724,6 +4727,10 @@ document.addEventListener('DOMContentLoaded', async function() {
       eventBus.on('player:invalidateModuleEndTimeCache', () => {
         try { invalidateModuleEndTimeCache(); updateMeasureBarPositions(); } catch {}
       });
+      // Persist latest module snapshot on every history capture
+      eventBus.on('history:capture', ({ snapshot }) => {
+        try { localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snapshot)); } catch {}
+      });
     } catch (e) {
       console.warn('eventBus subscription failed', e);
     }
@@ -4809,6 +4816,16 @@ try {
       updateVisualNotes(evaluatedNotes);
       createMeasureBars();
       if (typeof updateNotesPointerEvents === 'function') updateNotesPointerEvents();
+
+      // Persist restored state so reloads resume exactly where the user left
+      try {
+        const snap = (myModule && typeof myModule.createModuleJSON === 'function')
+          ? myModule.createModuleJSON()
+          : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+        if (snap) {
+          localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
+        }
+      } catch {}
 
       if (source === 'undo') notify(`Undid: ${label}`, 'success');
       else if (source === 'redo') notify(`Redid: ${label}`, 'success');
