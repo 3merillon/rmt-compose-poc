@@ -9,8 +9,9 @@ import { initStackClick } from './stack-click.js';
 import { eventBus } from './utils/event-bus.js';
 import { modals } from './modals/index.js';
 import { audioEngine } from './player/audio-engine.js';
+import './store/history.js';
 
-// Globals are exposed via registerGlobals below to centralize window.* writes
+ // Globals are exposed via registerGlobals below to centralize window.* writes
 
 // Create the SynthInstruments object with all instrument classes
 const SynthInstruments = {

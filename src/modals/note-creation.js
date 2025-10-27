@@ -134,6 +134,12 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
         refreshModals(module.getNoteById(parseInt(last.id, 10)), last.id);
         if (tri) tri.classList.add('selected');
       }
+
+      // History snapshot
+      try {
+        const snap = module.createModuleJSON ? module.createModuleJSON() : null;
+        if (snap) eventBus.emit('history:capture', { label: 'Add Measure', snapshot: snap });
+      } catch {}
     } catch (e) {
       console.error('Error adding measure:', e);
     }
@@ -415,6 +421,15 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       if (newElem) {
         refreshModals(newNote, null);
       }
+
+      // History snapshot
+      try {
+        const snap = module.createModuleJSON ? module.createModuleJSON() : null;
+        if (snap) {
+          const lbl = `Add ${isSilence ? 'Silence' : 'Note'} ${newNote.id}`;
+          eventBus.emit('history:capture', { label: lbl, snapshot: snap });
+        }
+      } catch {}
     } catch (err) {
       console.error('Error creating note:', err);
       alert('Error creating note: ' + err.message);

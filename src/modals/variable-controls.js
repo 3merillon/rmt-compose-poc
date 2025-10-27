@@ -518,6 +518,13 @@ function buildInstrumentControl(value, note, externalFunctions) {
         externalFunctions.updateVisualNotes(evaluated);
       }
       refreshModals(note, null);
+      // History snapshot: instrument change
+      try {
+        const snap = getModule().createModuleJSON();
+        // Ensure baseline exists so first action can be undone independently
+        try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+        eventBus.emit('history:capture', { label: `Edit instrument Note ${note.id}`, snapshot: snap });
+      } catch {}
     } catch (err) {
       console.error('Error updating instrument:', err);
     }
@@ -541,6 +548,13 @@ function buildInstrumentControl(value, note, externalFunctions) {
           externalFunctions.updateVisualNotes(evaluated);
         }
         refreshModals(note, null);
+        // History snapshot: instrument reset to inherited
+        try {
+          const snap = getModule().createModuleJSON();
+          // Ensure baseline exists so first action can be undone independently
+          try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+          eventBus.emit('history:capture', { label: `Reset instrument Note ${note.id}`, snapshot: snap });
+        } catch {}
       } catch (err) {
         console.error('Error resetting instrument:', err);
       }
@@ -647,6 +661,13 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           if (typeof externalFunctions.updateVisualNotes === 'function') {
             externalFunctions.updateVisualNotes(evaluated);
           }
+          // History snapshot: color edit
+          try {
+            const snap = getModule().createModuleJSON();
+            // Ensure baseline exists so first color change (first action) can be undone
+            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+            eventBus.emit('history:capture', { label: `Edit color Note ${note.id}`, snapshot: snap });
+          } catch {}
           refreshModals(note, null);
           return;
         }
@@ -702,6 +723,15 @@ export function createVariableControls(key, value, note, measureId, externalFunc
 
         // Keep widget open and refreshed
         refreshModals(note, measureId);
+
+        // History snapshot: generic variable edit
+        try {
+          const idLabel = (measureId !== null && measureId !== undefined) ? `Measure ${measureId}` : `Note ${note?.id}`;
+          const snap = getModule().createModuleJSON();
+          // Ensure baseline exists so first action can be undone independently
+          try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+          eventBus.emit('history:capture', { label: `Edit ${key} ${idLabel}`, snapshot: snap });
+        } catch {}
       } catch (err) {
         console.error('Error saving variable', key, 'for note', note?.id, ':', err);
       }

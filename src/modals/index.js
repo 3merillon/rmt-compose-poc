@@ -1033,6 +1033,11 @@ export function evaluateNoteToBaseNote(noteId) {
     }
     showNoteVariables(currentSelectedNote, newElem);
 
+    try {
+        const snap = getModule().createModuleJSON();
+        eventBus.emit('history:capture', { label: `Evaluate Note ${noteId} to BaseNote`, snapshot: snap });
+    } catch {}
+
     if (success) showNotification('Note evaluated successfully!', 'success');
 }
 
@@ -1139,6 +1144,10 @@ export function evaluateEntireModule() {
         externalFunctions.updateVisualNotes(evaluated);
     }
 
+    try {
+        const snap = getModule().createModuleJSON();
+        eventBus.emit('history:capture', { label: 'Evaluate Module', snapshot: snap });
+    } catch {}
     showNotification(`Module evaluation complete: ${successCount} notes processed, ${skippedCount} notes skipped`, 'success');
 }
 
@@ -1194,6 +1203,10 @@ export function liberateDependencies(noteId) {
         }
     }
     showNoteVariables(currentSelected, newElem);
+    try {
+        const snap = getModule().createModuleJSON();
+        eventBus.emit('history:capture', { label: `Liberate Dependencies ${noteId}`, snapshot: snap });
+    } catch {}
     showNotification('Dependencies liberated successfully!', 'success');
 }
 

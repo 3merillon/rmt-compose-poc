@@ -455,6 +455,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         createMeasureBars();
         clearSelection();
         invalidateModuleEndTimeCache();
+        try { captureSnapshot(`Delete Note ${noteId} + deps`); } catch {}
     }
 
     function showCleanSlateConfirmation() {
@@ -480,6 +481,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         clearSelection();
         
         domCache.noteWidget.classList.remove('visible');
+        try { captureSnapshot('Clean Slate'); } catch {}
     }
   
     function showDeleteConfirmationKeepDependencies(noteId) {
@@ -605,6 +607,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         createMeasureBars();
         clearSelection();
         invalidateModuleEndTimeCache();
+        try { captureSnapshot(`Delete Note ${noteId} (keep deps)`); } catch {}
     }
 
     function checkAndUpdateDependentNotes(noteId, oldDuration, newDuration) {
@@ -802,6 +805,16 @@ document.addEventListener('DOMContentLoaded', async function() {
     updateNotesPointerEvents();
     let evaluatedNotes = myModule.evaluateModule();
     setEvaluatedNotes(evaluatedNotes);
+    // Ensure a true baseline exists before any first user action (color edit, drag, etc.)
+    try {
+      const snap =
+        (myModule && typeof myModule.createModuleJSON === 'function')
+          ? myModule.createModuleJSON()
+          : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+      if (snap) {
+        eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap });
+      }
+    } catch {}
     let newNotes = Object.keys(evaluatedNotes).map(id => evaluatedNotes[id]).filter(note =>
         note.startTime && note.duration && note.frequency
     );
@@ -1005,6 +1018,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             setEvaluatedNotes(evaluatedNotes);
             updateVisualNotes(evaluatedNotes);
             createMeasureBars();
+            try { captureSnapshot(`Import Module at ${targetNote.id}`); } catch {}
             
             
         } catch (error) {
@@ -2005,6 +2019,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                         setEvaluatedNotes(evaluatedNotes);
                         updateVisualNotes(evaluatedNotes);
                         
+                        // History: ensure moves anchored to a dependency get their own snapshot
+                        try { captureSnapshot(`Move Note ${note.id}`); } catch {}
+                        
                         e.stopPropagation();
                         cleanupDragState();
                         
@@ -2132,6 +2149,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
                 
                 e.stopPropagation();
+                if (dragData.hasDragged) { try { captureSnapshot(`Move Note ${note.id}`); } catch {} }
             }
             
             cleanupDragState();
@@ -3096,6 +3114,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
             }
             
+            try { captureSnapshot(`Resize Note ${note.id}`); } catch {}
             const feedbackElement = document.getElementById('resize-feedback');
             if (feedbackElement) {
                 feedbackElement.remove();
@@ -3598,9 +3617,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 updateBaseNoteFraction();
                 updateBaseNotePosition();
             }
-            
             evaluatedNotes = myModule.evaluateModule();
             updateVisualNotes(evaluatedNotes);
+            try { captureSnapshot(`Octave ${direction} Note ${noteId}`); } catch {}
+            
             
             if (selectedNote && noteWidgetVisible) {
                 let newSelectedElement;
@@ -3862,7 +3882,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     createMeasureBars();
     updateVisualNotes(evaluatedNotes);
-    
     function getColorForNote(note) {
         if (note.variables && note.variables.color) {
             if (typeof note.variables.color === 'function') {
@@ -4183,6 +4202,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 evaluatedNotes = myModule.evaluateModule();
                 setEvaluatedNotes(evaluatedNotes);
                 updateVisualNotes(evaluatedNotes);
+                try { captureSnapshot('Reorder Module'); } catch {}
                 notify('Module reordered successfully', 'success');
                 
             }).catch(error => {
@@ -4278,12 +4298,13 @@ document.addEventListener('DOMContentLoaded', async function() {
                     setModule(newModule);
                     
                     myModule.markNoteDirty(0);
-                    
                     initializeModule();
                     invalidateModuleEndTimeCache();
                     
                     updateBaseNoteFraction();
                     updateBaseNotePosition();
+                    try { captureSnapshot('Load Module'); } catch {}
+                    
                     
                 }).catch((error) => {
                     console.error('Error loading module:', error);
@@ -4700,9 +4721,102 @@ document.addEventListener('DOMContentLoaded', async function() {
           console.warn('importModuleAtTarget via eventBus failed', e);
         }
       });
+      eventBus.on('player:invalidateModuleEndTimeCache', () => {
+        try { invalidateModuleEndTimeCache(); updateMeasureBarPositions(); } catch {}
+      });
     } catch (e) {
       console.warn('eventBus subscription failed', e);
     }
   }
+
+/* ===== History Integration (Undo/Redo) ===== */
+
+function captureSnapshot(label = 'Change') {
+  try {
+    const snap = myModule && typeof myModule.createModuleJSON === 'function'
+      ? myModule.createModuleJSON()
+      : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+    if (snap) {
+      // Ensure a baseline exists so the very first user action (color edit, drag) can be undone independently
+      try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+      eventBus.emit('history:capture', { label, snapshot: snap });
+    }
+  } catch (e) {}
+}
+
+// Wire Undo/Redo buttons
+const undoBtn = document.getElementById('undoBtn');
+const redoBtn = document.getElementById('redoBtn');
+if (undoBtn) undoBtn.addEventListener('click', () => { try { eventBus.emit('history:undo'); } catch {} });
+if (redoBtn) redoBtn.addEventListener('click', () => { try { eventBus.emit('history:redo'); } catch {} });
+
+// Keyboard shortcuts: Ctrl/Cmd+Z (Undo), Ctrl/Cmd+Y (Redo)
+document.addEventListener('keydown', (e) => {
+  const el = e.target;
+  const tag = (el && el.tagName) ? el.tagName.toLowerCase() : '';
+  const isEditable = tag === 'input' || tag === 'textarea' || (el && el.isContentEditable);
+  if (isEditable) return;
+  const isMeta = e.ctrlKey || e.metaKey;
+  if (!isMeta) return;
+  const key = (e.key || '').toLowerCase();
+  if (key === 'z') {
+    e.preventDefault();
+    try { eventBus.emit('history:undo'); } catch {}
+  } else if (key === 'y') {
+    e.preventDefault();
+    try { eventBus.emit('history:redo'); } catch {}
+  }
+});
+
+// Update buttons when stacks change
+try {
+  eventBus.on('history:stackChanged', ({ canUndo, canRedo }) => {
+    if (undoBtn) undoBtn.disabled = !canUndo;
+    if (redoBtn) redoBtn.disabled = !canRedo;
+  });
+} catch {}
+
+// Handle restores from HistoryManager
+try {
+  eventBus.on('history:requestRestore', async ({ snapshot, source, label }) => {
+    try { eventBus.emit('player:requestPause'); } catch {}
+    let center = null;
+    try {
+      const viewCenter = viewport.atCenter();
+      center = viewCenter.transitRaw(space);
+    } catch {}
+
+    try { cleanupCurrentModule(); } catch {}
+
+    try {
+      const newModule = await Module.loadFromJSON(snapshot);
+      myModule = newModule;
+      setModule(newModule);
+
+      for (const id in myModule.notes) {
+        myModule.markNoteDirty(Number(id));
+      }
+
+      initializeModule();
+
+      if (center) {
+        const pt = space.at(center.x, center.y);
+        viewport.translateTo(pt);
+      }
+
+      evaluatedNotes = myModule.evaluateModule();
+      setEvaluatedNotes(evaluatedNotes);
+      updateVisualNotes(evaluatedNotes);
+      createMeasureBars();
+      if (typeof updateNotesPointerEvents === 'function') updateNotesPointerEvents();
+
+      if (source === 'undo') notify(`Undid: ${label}`, 'success');
+      else if (source === 'redo') notify(`Redid: ${label}`, 'success');
+    } catch (e) {
+      console.error('History restore failed', e);
+    }
+  });
+} catch {}
+
 
 });
