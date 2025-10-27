@@ -3907,7 +3907,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             });
 
         updateTimingBoundaries();
-        createMeasureBars();
+        
 
         selectedIds.forEach(id => {
             const newElement = document.querySelector(`.note-content[data-note-id="${id}"], .base-note-circle[data-note-id="${id}"], .measure-bar-triangle[data-note-id="${id}"]`);
