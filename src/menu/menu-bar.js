@@ -185,6 +185,7 @@ const menuAPI = (function() {
         updateMaxHeight();
         domCache.secondTopBar.style.height = '50px';
         setupResizeEvents();
+        setupTouchEdgeAutoscroll();
         const loaded = loadUIStateFromLocalStorage();
         if (!loaded) loadModuleIcons();
         window.addEventListener('resize', updateMaxHeight);
@@ -367,7 +368,69 @@ const menuAPI = (function() {
             // no-op: guard against early layout timing
         }
     }
- 
+
+    // Touch edge auto-scroll for menu wrapper: delayed scroll when pointer hovers near edges (mobile)
+    function createEdgeScroller(container, { zone = 28, delay = 250, speed = 16 } = {}) {
+        let raf = null, active = false, dir = 0, timer = null, pendingDir = 0;
+
+        function step() {
+            if (!active || dir === 0) { raf = null; return; }
+            if (!container) return;
+            const canScroll = (container.scrollHeight || 0) > (container.clientHeight || 0);
+            if (!canScroll) { stop(); return; }
+            container.scrollTop += dir * speed;
+            raf = requestAnimationFrame(step);
+        }
+        function start(d) {
+            if (active && dir === d) return;
+            active = true; dir = d;
+            if (!raf) raf = requestAnimationFrame(step);
+        }
+        function stop() {
+            active = false; dir = 0;
+            if (raf) { cancelAnimationFrame(raf); raf = null; }
+            if (timer) { clearTimeout(timer); timer = null; }
+            pendingDir = 0;
+        }
+        function update(clientX, clientY) {
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            if (clientX < rect.left || clientX > rect.right || clientY < rect.top - zone || clientY > rect.bottom + zone) {
+                stop(); return;
+            }
+            const atTop = clientY <= rect.top + zone;
+            const atBottom = clientY >= rect.bottom - zone;
+            const desired = atTop ? -1 : (atBottom ? 1 : 0);
+            if (desired === 0) { stop(); return; }
+            if (dir === desired) return;
+            if (pendingDir === desired && timer) return;
+            if (timer) clearTimeout(timer);
+            pendingDir = desired;
+            timer = setTimeout(() => { pendingDir = 0; start(desired); }, delay);
+        }
+        return { update, stop };
+    }
+
+    function setupTouchEdgeAutoscroll() {
+        try {
+            const container = domCache.iconsWrapper;
+            if (!container) return;
+            const scroller = createEdgeScroller(container, { zone: 28, delay: 250, speed: 16 });
+            const onMove = (e) => {
+                if (e.pointerType !== 'touch') return;
+                if (draggedElementType === 'module' || draggedElementType === 'category') {
+                    scroller.update(e.clientX, e.clientY);
+                } else {
+                    scroller.stop();
+                }
+            };
+            const onEnd = () => scroller.stop();
+            document.addEventListener('pointermove', onMove, { passive: true });
+            document.addEventListener('pointerup', onEnd);
+            document.addEventListener('pointercancel', onEnd);
+        } catch (e) {}
+    }
+
     function createLabelIcon(text, category) {
         const labelIcon = document.createElement('div');
         labelIcon.classList.add('category-label');
@@ -459,7 +522,6 @@ const menuAPI = (function() {
                     ev.preventDefault();
                     scrollPrevented = true;
                     dragStarted = true;
-                    if (scrollContainer) scrollContainer.style.overflow = 'hidden';
                     ghost = document.createElement('div');
                     ghost.textContent = category + ' +';
                     Object.assign(ghost.style, {
@@ -1304,7 +1366,7 @@ const menuAPI = (function() {
         separator.classList.add('separator');
         // Rely on CSS (.separator { height: 1px; border-bottom: 1px dotted #ffa800; })
         // to draw a single line. Do not add a top border here to avoid double lines.
-        Object.assign(separator.style, { width: '100%', opacity: '0.3', marginTop: '0px', marginBottom: '4px' });
+        Object.assign(separator.style, { width: '100%', opacity: '0.3', marginTop: '0px', marginBottom: '0px' });
         return separator;
     }
 
@@ -1375,7 +1437,7 @@ const menuAPI = (function() {
             .icon > div:first-child { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0; }
             .icon.dragging, .category-label.dragging { opacity: 0.5; }
             .icon.drag-over, .category-label.drag-over, .empty-placeholder.drag-over { border: 2px dashed #ff0000 !important; background-color: rgba(255, 0, 0, 0.1); }
-            .icons-wrapper { overflow-y: auto; overflow-x: hidden; }
+            .icons-wrapper { overflow-y: scroll; overflow-x: hidden; scrollbar-gutter: stable both-edges; }
             .empty-placeholder { display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
             .empty-placeholder:hover { opacity: 1; border-color: #ffa800; background-color: rgba(255, 168, 0, 0.1); }
             .module-delete-btn { position: absolute; top: 1px; right: 1px; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: #ff0000; background: transparent !important; border-radius: 0; cursor: pointer; z-index: 10; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }

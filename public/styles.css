@@ -48,9 +48,10 @@ html, body {
 
 .icons-wrapper {
     flex-grow: 1;
-    overflow-y: auto;
+    overflow-y: scroll;
     overflow-x: hidden;
     min-height: 0;
+    scrollbar-gutter: stable both-edges;
 }
   
 .icons-wrapper.collapsed {

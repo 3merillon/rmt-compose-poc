@@ -84,7 +84,6 @@ function buildRawEditor(initialRaw) {
   rawDiv.appendChild(saveButton);
   return { rawDiv, rawInput, saveButton };
 }
-/* removed duplicate ensureModalsStyleInjected definition */
 
 // Helper to build canonical duration expression: beatUnit * (n/d)
 function computeDurationExpr(multiplierNum, multiplierDen = 1) {
