@@ -62,7 +62,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         ppElement: document.querySelector('.pp'),
         dropdownButton: document.querySelector('.dropdown-button'),
         plusminus: document.querySelector('.plusminus'),
-        generalWidget: document.getElementById('general-widget')
+        generalWidget: document.getElementById('general-widget'),
+        loadModuleDropdown: document.getElementById('loadModuleDropdown'),
+        loadFromFileItem: document.getElementById('loadFromFileItem'),
+        resetDefaultModuleItem: document.getElementById('resetDefaultModuleItem')
     };
 
     function createOctaveIndicators() {
@@ -4124,8 +4127,8 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     document.addEventListener('mouseup', (event) => {
         if (!isDragging) {
-            if (!domCache.noteWidget.contains(event.target) && 
-                !event.target.closest('.note-rect') && 
+            if (!domCache.noteWidget.contains(event.target) &&
+                !event.target.closest('.note-rect') &&
                 !event.target.closest('#baseNoteCircle') &&
                 !event.target.closest('.measure-bar-triangle') &&
                 !event.target.closest('.delete-confirm-overlay') &&
@@ -4135,6 +4138,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (!domCache.generalWidget.contains(event.target) && !domCache.dropdownButton.contains(event.target)) {
                 domCache.plusminus.classList.remove('open');
                 domCache.generalWidget.classList.remove('open');
+            }
+            // Close Load Module dropdown when clicking outside
+            const dd = document.getElementById('loadModuleDropdown');
+            const lb = domCache.loadModuleBtn;
+            if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
+                dd.style.display = 'none';
             }
         }
         isDragging = false;
@@ -4194,9 +4203,36 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
 
     if (domCache.loadModuleBtn && domCache.loadModuleInput) {
-        domCache.loadModuleBtn.addEventListener('click', () => {
-            domCache.loadModuleInput.click();
+        const toggleLoadDropdown = () => {
+            const dd = document.getElementById('loadModuleDropdown');
+            if (!dd) return;
+            dd.style.display = (dd.style.display === 'none' || dd.style.display === '') ? 'block' : 'none';
+        };
+        const hideLoadDropdown = () => {
+            const dd = document.getElementById('loadModuleDropdown');
+            if (dd) dd.style.display = 'none';
+        };
+
+        domCache.loadModuleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleLoadDropdown();
         });
+
+        if (domCache.loadFromFileItem) {
+            domCache.loadFromFileItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                domCache.loadModuleInput.click();
+                hideLoadDropdown();
+            });
+        }
+        if (domCache.resetDefaultModuleItem) {
+            domCache.resetDefaultModuleItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                hideLoadDropdown();
+                showResetDefaultModuleConfirmation();
+            });
+        }
+
         domCache.loadModuleInput.addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (file) {
@@ -4210,10 +4246,80 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     if (domCache.reorderModuleBtn) {
         domCache.reorderModuleBtn.addEventListener('click', function() {
-            reorderCurrentModule();
+            showConfirm('Reorder the current module? This will reindex notes. Proceed?', 'Yes, Reorder', () => reorderCurrentModule());
         });
     } else {
         console.error('Reorder Module button not found!');
+    }
+
+    // Generic confirm overlay using existing modal styles
+    function showConfirm(message, yesLabel, onYes) {
+        try {
+            const overlay = document.createElement('div');
+            overlay.className = 'delete-confirm-overlay';
+            const modal = document.createElement('div');
+            modal.className = 'delete-confirm-modal';
+            const p = document.createElement('p');
+            p.textContent = message || 'Are you sure?';
+            const btns = document.createElement('div');
+            btns.className = 'modal-btn-container';
+            const yes = document.createElement('button');
+            yes.textContent = yesLabel || 'Yes';
+            const cancel = document.createElement('button');
+            cancel.textContent = 'Cancel';
+            yes.addEventListener('click', () => {
+                try { if (typeof onYes === 'function') onYes(); } catch {}
+                if (overlay.parentNode) document.body.removeChild(overlay);
+            });
+            cancel.addEventListener('click', () => { if (overlay.parentNode) document.body.removeChild(overlay); });
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) { if (overlay.parentNode) document.body.removeChild(overlay); } });
+            btns.appendChild(yes);
+            btns.appendChild(cancel);
+            modal.appendChild(p);
+            modal.appendChild(btns);
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+        } catch (e) {}
+    }
+
+    function showResetDefaultModuleConfirmation() {
+        showConfirm(
+            'This will reset the workspace to the default module. This action can be undone/redone via History. Proceed?',
+            'Yes, Reset',
+            () => resetDefaultModule()
+        );
+    }
+
+    async function resetDefaultModule() {
+        try {
+            if (isPlaying || isPaused) {
+                stop(true);
+            }
+            cleanupCurrentModule();
+            const newModule = await Module.loadFromJSON('modules/defaultModule.json');
+            if (newModule && newModule.baseNote) {
+                newModule.baseNote.id = 0;
+            }
+            myModule = newModule;
+            setModule(newModule);
+
+            myModule.markNoteDirty(0);
+            initializeModule();
+            invalidateModuleEndTimeCache();
+
+            updateBaseNoteFraction();
+            updateBaseNotePosition();
+
+            try { captureSnapshot('Reset Default Module'); } catch {}
+            notify('Default module reset', 'success');
+        } catch (error) {
+            console.error('Error resetting default module:', error);
+            const errorMsg = document.createElement('div');
+            errorMsg.className = 'error-message';
+            errorMsg.textContent = `Error resetting default module: ${error.message}`;
+            document.body.appendChild(errorMsg);
+            setTimeout(() => errorMsg.remove(), 3000);
+        }
     }
 
     function reorderCurrentModule() {
@@ -4298,7 +4404,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     updateBaseNoteFraction();
                     updateBaseNotePosition();
                     try { captureSnapshot('Load Module'); } catch {}
-                    
+                    notify('Module loaded successfully', 'success');
                     
                 }).catch((error) => {
                     console.error('Error loading module:', error);

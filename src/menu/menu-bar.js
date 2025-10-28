@@ -78,7 +78,7 @@ const menuAPI = (function() {
                 } catch (error) {}
             };
             
-            const defaultCategories = ['intervals', 'chords', 'melodies'];
+            const defaultCategories = ['intervals', 'chords', 'melodies', 'custom'];
             const cachePromises = defaultCategories.map(category => loadCategoryModules(category));
             uiState.categories.forEach(categoryObj => {
                 if (!defaultCategories.includes(categoryObj.name)) {
@@ -161,8 +161,9 @@ const menuAPI = (function() {
                     const actionButtons = createActionButtons();
                     domCache.iconsContainer.appendChild(createSectionSeparator());
                     domCache.iconsContainer.appendChild(actionButtons);
-                    updateMaxHeight();
                     ensurePlaceholdersAtEnd();
+                    normalizeLayoutSeparators();
+                    updateMaxHeight();
                     return true;
                 });
             });
@@ -375,7 +376,7 @@ const menuAPI = (function() {
             touchAction: 'none', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center',
             border: '1px solid #ffa800', borderRadius: '4px', padding: '0 8px', textTransform: 'uppercase',
             fontFamily: "'Roboto Mono', monospace", color: '#ffa800', boxSizing: 'border-box',
-            background: 'transparent', cursor: 'pointer'
+            background: 'transparent', cursor: 'pointer', position: 'relative'
         });
         labelIcon.textContent = text;
         labelIcon.setAttribute('draggable', 'true');
@@ -561,8 +562,32 @@ const menuAPI = (function() {
             document.addEventListener('pointerup', onPointerUp);
             document.addEventListener('pointercancel', onPointerUp);
         });
+        // Add category delete button (red ×)
+        const catDelete = document.createElement('div');
+        catDelete.className = 'category-delete-btn';
+        catDelete.innerHTML = '×';
+        Object.assign(catDelete.style, {
+            position: 'absolute', top: '0px', right: '0px', width: '14px', height: '14px',
+            lineHeight: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center',
+            color: '#ff0000', background: 'transparent', cursor: 'pointer',
+            zIndex: '12', pointerEvents: 'auto', transition: 'transform 0.2s, color 0.2s'
+        });
+        catDelete.title = 'Delete category';
+        catDelete.addEventListener('click', function(e) {
+            e.stopPropagation();
+            e.preventDefault();
+            try {
+                const sectionContainer = labelIcon.parentNode;
+                const categoryName = labelIcon.getAttribute('data-category');
+                if (typeof showRemoveCategoryConfirmation === 'function') {
+                    showRemoveCategoryConfirmation(sectionContainer, categoryName);
+                }
+            } catch {}
+        });
+        labelIcon.appendChild(catDelete);
+
         return labelIcon;
-    }
+        }
 
     function createEmptyPlaceholder(category) {
         const placeholder = document.createElement('div');
@@ -1049,6 +1074,55 @@ const menuAPI = (function() {
         document.body.appendChild(overlay);
     }
 
+    function showRemoveCategoryConfirmation(sectionContainer, categoryName) {
+        const overlay = document.createElement('div');
+        overlay.className = 'delete-confirm-overlay';
+        const modal = document.createElement('div');
+        modal.className = 'delete-confirm-modal';
+        const message = document.createElement('p');
+        message.innerHTML = `Are you sure you want to <span style='color: #ff0000;'>remove</span> the category "<span style='color: #ffa800;'>${(categoryName || '').toUpperCase()}</span>" and all its icons from the menu?`;
+        const btnContainer = document.createElement('div');
+        btnContainer.className = 'modal-btn-container';
+        const yesButton = document.createElement('button');
+        yesButton.textContent = 'Yes, Remove Category';
+        Object.assign(yesButton.style, { backgroundColor: '#ff0000', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = 'Cancel';
+        Object.assign(cancelButton.style, { backgroundColor: '#add8e6', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer' });
+
+        yesButton.addEventListener('click', function() {
+            try {
+                if (sectionContainer && sectionContainer.parentNode) {
+                    const container = sectionContainer.parentNode;
+                    const breaker = sectionContainer.nextElementSibling;
+                    const maybeSeparator = breaker && breaker.nextElementSibling && breaker.nextElementSibling.classList && breaker.nextElementSibling.classList.contains('separator') ? breaker.nextElementSibling : null;
+
+                    container.removeChild(sectionContainer);
+                    if (breaker && breaker.parentNode === container) container.removeChild(breaker);
+                    if (maybeSeparator && maybeSeparator.parentNode === container) container.removeChild(maybeSeparator);
+
+                    const idx = categoryContainers.indexOf(sectionContainer);
+                    if (idx !== -1) categoryContainers.splice(idx, 1);
+
+                    ensurePlaceholdersAtEnd();
+                    normalizeLayoutSeparators();
+                    updateMaxHeight();
+                    saveUIStateToLocalStorage();
+                }
+            } catch (e) {}
+            document.body.removeChild(overlay);
+        });
+        cancelButton.addEventListener('click', function() { document.body.removeChild(overlay); });
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) document.body.removeChild(overlay); });
+
+        btnContainer.appendChild(yesButton);
+        btnContainer.appendChild(cancelButton);
+        modal.appendChild(message);
+        modal.appendChild(btnContainer);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+    }
+
     function reloadModuleIcons() {
         domCache.iconsContainer.innerHTML = '';
         categoryContainers = [];
@@ -1084,6 +1158,56 @@ const menuAPI = (function() {
         });
     }
 
+    // Remove duplicate separators and leading extras after dynamic changes (delete/add categories)
+    function normalizeLayoutSeparators() {
+        const container = domCache.iconsContainer;
+        if (!container) return;
+
+        // Remove leading separators, and collapse consecutive separators
+        const children = Array.from(container.children);
+        let lastWasSeparator = false;
+        for (let i = 0; i < children.length; i++) {
+            const el = children[i];
+            const isSeparator = !!(el.classList && el.classList.contains('separator'));
+            if (isSeparator) {
+                if (lastWasSeparator) {
+                    container.removeChild(el);
+                    // Adjust index because NodeList changed
+                    i--;
+                    continue;
+                }
+                lastWasSeparator = true;
+            } else {
+                lastWasSeparator = false;
+            }
+        }
+
+        // Remove a separator if it's the very first element
+        const first = container.firstElementChild;
+        if (first && first.classList && first.classList.contains('separator')) {
+            container.removeChild(first);
+        }
+
+        // Remove a separator if it's directly before another separator (robustness if DOM changed since first pass)
+        let found = true;
+        while (found) {
+            found = false;
+            const kids = Array.from(container.children);
+            for (let i = 1; i < kids.length; i++) {
+                const prev = kids[i - 1];
+                const curr = kids[i];
+                if (
+                    prev.classList && prev.classList.contains('separator') &&
+                    curr.classList && curr.classList.contains('separator')
+                ) {
+                    container.removeChild(curr);
+                    found = true;
+                    break;
+                }
+            }
+        }
+    }
+
     function createActionButtons() {
         const buttonsContainer = document.createElement('div');
         Object.assign(buttonsContainer.style, { display: 'flex', justifyContent: 'space-between', padding: '10px 4px', marginTop: '10px', gap: '10px' });
@@ -1111,13 +1235,76 @@ const menuAPI = (function() {
         
         buttonsContainer.appendChild(createButton('Save UI', '#ffa800', saveUIState));
         buttonsContainer.appendChild(createButton('Load UI', '#ffa800', loadUIState));
+
+        const onAddCategory = () => {
+            try {
+                const name = (prompt('Enter category name') || '').trim();
+                if (!name) return;
+                const displayName = name.toUpperCase();
+                const slug = name.toLowerCase().trim()
+                    .replace(/\s+/g, '-')
+                    .replace(/[^a-z0-9\-_]/g, '');
+                if (!slug) {
+                    showNotification('Invalid category name', 'error');
+                    return;
+                }
+
+                const iconsContainer = domCache.iconsContainer;
+                if (!iconsContainer) return;
+
+                const sectionContainer = document.createElement('div');
+                Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+                categoryContainers.push(sectionContainer);
+
+                const labelIcon = createLabelIcon(displayName, slug);
+                sectionContainer.appendChild(labelIcon);
+
+                const emptyPlaceholder = createEmptyPlaceholder(slug);
+                sectionContainer.appendChild(emptyPlaceholder);
+
+                // Insert before the final separator + action buttons
+                const actionButtons = iconsContainer.lastElementChild;
+                const sep = actionButtons && actionButtons.previousElementSibling && actionButtons.previousElementSibling.classList && actionButtons.previousElementSibling.classList.contains('separator')
+                    ? actionButtons.previousElementSibling
+                    : null;
+
+                if (sep) {
+                    iconsContainer.insertBefore(sectionContainer, sep);
+                    const breaker = document.createElement('div');
+                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
+                    iconsContainer.insertBefore(breaker, sep);
+                } else if (actionButtons) {
+                    iconsContainer.insertBefore(sectionContainer, actionButtons);
+                    const breaker = document.createElement('div');
+                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
+                    iconsContainer.insertBefore(breaker, actionButtons);
+                } else {
+                    // Fallback: append at end
+                    iconsContainer.appendChild(sectionContainer);
+                    const breaker = document.createElement('div');
+                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
+                    iconsContainer.appendChild(breaker);
+                }
+
+                ensurePlaceholdersAtEnd();
+                normalizeLayoutSeparators();
+                saveUIStateToLocalStorage();
+                updateMaxHeight();
+                showNotification(`Category "${displayName}" added`, 'success');
+            } catch (e) {}
+        };
+
+        buttonsContainer.appendChild(createButton('Add Category', '#ffa800', onAddCategory));
         buttonsContainer.appendChild(createButton('Reload Defaults', '#ff0000', showReloadDefaultsConfirmation));
         return buttonsContainer;
     }
 
     function createSectionSeparator() {
         const separator = document.createElement('div');
-        Object.assign(separator.style, { width: '100%', borderTop: '1px dotted #ffa800', opacity: '0.3', marginTop: '0px', marginBottom: '4px' });
+        separator.classList.add('separator');
+        // Rely on CSS (.separator { height: 1px; border-bottom: 1px dotted #ffa800; })
+        // to draw a single line. Do not add a top border here to avoid double lines.
+        Object.assign(separator.style, { width: '100%', opacity: '0.3', marginTop: '0px', marginBottom: '4px' });
         return separator;
     }
 
@@ -1138,7 +1325,7 @@ const menuAPI = (function() {
             newMeta.content = 'width=device-width, initial-scale=1.0, user-scalable=no, touch-action=none';
             document.head.appendChild(newMeta);
         }
-        const categories = ['intervals', 'chords', 'melodies'];
+        const categories = ['intervals', 'chords', 'melodies', 'custom'];
         categories.forEach((category, index) => {
             const sectionContainer = document.createElement('div');
             Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
@@ -1180,7 +1367,8 @@ const menuAPI = (function() {
         const actionButtons = createActionButtons();
         iconsContainer.appendChild(createSectionSeparator());
         iconsContainer.appendChild(actionButtons);
-
+        normalizeLayoutSeparators();
+ 
         const style = document.createElement('style');
         style.textContent = `
             .icon { position: relative; }
@@ -1192,6 +1380,8 @@ const menuAPI = (function() {
             .empty-placeholder:hover { opacity: 1; border-color: #ffa800; background-color: rgba(255, 168, 0, 0.1); }
             .module-delete-btn { position: absolute; top: 1px; right: 1px; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: #ff0000; background: transparent !important; border-radius: 0; cursor: pointer; z-index: 10; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
             .module-delete-btn:hover { transform: scale(1.2); color: #ff0000; text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); background-color: transparent !important; }
+            .category-delete-btn { position: absolute; top: 0; right: 0; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: #ff0000; background: transparent !important; cursor: pointer; z-index: 12; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
+            .category-delete-btn:hover { transform: scale(1.2); color: #ff0000; text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); }
             .empty-placeholder { width: 42px; height: 42px; border: 2px dashed #ffffff; border-radius: 4px; box-sizing: border-box; background: transparent; cursor: pointer; margin: 2px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
             .category-label { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
             .icons-wrapper { -webkit-overflow-scrolling: touch; }
@@ -1278,6 +1468,7 @@ const menuAPI = (function() {
                         const actionButtons = createActionButtons();
                         domCache.iconsContainer.appendChild(createSectionSeparator());
                         domCache.iconsContainer.appendChild(actionButtons);
+                        normalizeLayoutSeparators();
                         updateMaxHeight();
                         showNotification('UI state loaded successfully!', 'success');
                     } catch (error) {
