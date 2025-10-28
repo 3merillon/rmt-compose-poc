@@ -9,6 +9,7 @@ import {
 } from './validation.js';
 import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
+import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
 
 const domCache = {
     noteWidget: null,
@@ -591,16 +592,6 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-function findGCD(a, b) {
-    a = Math.abs(a);
-    b = Math.abs(b);
-    while (b) {
-        const temp = b;
-        b = a % b;
-        a = temp;
-    }
-    return a;
-}
 
 function balanceParentheses(expr) {
     let openCount = 0;
@@ -628,249 +619,35 @@ function removeExcessParentheses(expr) {
     return result;
 }
 
-function simplifyFrequencyExpression(expr) {
-    try {
-        if (!expr.includes("module.baseNote.getVariable('frequency')") || !expr.includes("new Fraction")) {
-            return expr;
-        }
-        const fractions = [];
-        const fractionRegex = /new\s+Fraction\((\d+),\s*(\d+)\)/g;
-        let match;
-        while ((match = fractionRegex.exec(expr)) !== null) {
-            fractions.push({ n: parseInt(match[1], 10), d: parseInt(match[2], 10) });
-        }
-        if (fractions.length > 1) {
-            let resultN = 1, resultD = 1;
-            fractions.forEach(frac => { resultN *= frac.n; resultD *= frac.d; });
-            const gcd = findGCD(resultN, resultD);
-            resultN /= gcd; resultD /= gcd;
-            return `new Fraction(${resultN}, ${resultD}).mul(module.baseNote.getVariable('frequency'))`;
-        }
-    } catch (error) {
-        console.error("Error simplifying frequency expression:", error);
-    }
-    return expr;
-}
 
-function simplifyDurationExpression(expr) {
-    try {
-        const simpleDurationPattern = /^new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\(([^)]+)\)$/;
-        const match = expr.match(simpleDurationPattern);
-        if (match) return expr;
 
-        const tempoTerms = [];
-        const tempoRegex = /new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\(([^)]+)\)/g;
-        let tempMatch;
-        while ((tempMatch = tempoRegex.exec(expr)) !== null) {
-            const multiplier = parseFloat(tempMatch[1]);
-            if (!isNaN(multiplier)) tempoTerms.push({ term: tempMatch[0], multiplier });
-        }
-        if (tempoTerms.length > 1) {
-            const totalMultiplier = tempoTerms.reduce((sum, t) => sum + t.multiplier, 0);
-            const isSimpleAddition = expr
-                .replace(/new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\([^)]+\)/g, '')
-                .replace(/\.\s*add\s*\(/g, '')
-                .replace(/\)/g, '')
-                .trim() === '';
-            if (isSimpleAddition) {
-                return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${totalMultiplier})`;
-            }
-        }
-    } catch (error) {
-        console.error("Error simplifying duration expression:", error);
-    }
-    return expr;
-}
 
-function parseAndSimplifyExpression(expr) {
-    try {
-        let normalizedExpr = expr.replace(/\(\(/g, '(').replace(/\)\)/g, ')');
-        while (normalizedExpr !== expr) {
-            expr = normalizedExpr;
-            normalizedExpr = expr.replace(/\(\(/g, '(').replace(/\)\)/g, ')');
-        }
-        function parseExpr(e) {
-            if (!e.includes('.add(')) return { type: 'term', value: e };
-            let depth = 0, addIndex = -1;
-            for (let i = 0; i < e.length - 4; i++) {
-                if (e[i] === '(') depth++;
-                else if (e[i] === ')') depth--;
-                if (depth === 0 && e.substring(i, i + 5) === '.add(') { addIndex = i; break; }
-            }
-            if (addIndex === -1) return { type: 'term', value: e };
-            const left = e.substring(0, addIndex);
-            depth = 1; let closeIndex = -1;
-            for (let i = addIndex + 5; i < e.length; i++) {
-                if (e[i] === '(') depth++;
-                else if (e[i] === ')') {
-                    depth--;
-                    if (depth === 0) { closeIndex = i; break; }
-                }
-            }
-            if (closeIndex === -1) return { type: 'term', value: e };
-            const right = e.substring(addIndex + 5, closeIndex);
-            return { type: 'add', left: parseExpr(left), right: parseExpr(right) };
-        }
-        function analyzeTree(node) {
-            const result = { baseStartTime: false, measureTerms: [], tempoTerms: [] };
-            if (node.type === 'term') {
-                const term = node.value;
-                if (term.includes("module.baseNote.getVariable('startTime')") && !term.includes('.add(')) {
-                    result.baseStartTime = true;
-                }
-                const complexMeasureMatch = term.match(/new\s+Fraction\((\d+)\)\.mul\(module\.findMeasureLength\(module\.baseNote\)\)/);
-                if (complexMeasureMatch) {
-                    const multiplier = parseInt(complexMeasureMatch[1], 10);
-                    if (!isNaN(multiplier)) result.measureTerms.push(multiplier);
-                } else if (term === 'module.findMeasureLength(module.baseNote)') {
-                    result.measureTerms.push(1);
-                }
-                const complexTempoMatch = term.match(/new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\(([^)]+)\)/);
-                if (complexTempoMatch) {
-                    const multiplier = parseFloat(complexTempoMatch[1]);
-                    if (!isNaN(multiplier)) result.tempoTerms.push(multiplier);
-                } else if (term === 'new Fraction(60).div(module.findTempo(module.baseNote))') {
-                    result.tempoTerms.push(1);
-                }
-                return result;
-            }
-            if (node.type === 'add') {
-                const leftResult = analyzeTree(node.left);
-                const rightResult = analyzeTree(node.right);
-                return {
-                    baseStartTime: leftResult.baseStartTime || rightResult.baseStartTime,
-                    measureTerms: [...leftResult.measureTerms, ...rightResult.measureTerms],
-                    tempoTerms: [...leftResult.tempoTerms, ...rightResult.tempoTerms]
-                };
-            }
-            return result;
-        }
-        const parsedExpr = parseExpr(normalizedExpr);
-        const analysis = analyzeTree(parsedExpr);
-        if (analysis.baseStartTime && (analysis.measureTerms.length > 0 || analysis.tempoTerms.length > 0)) {
-            let newExpr = "module.baseNote.getVariable('startTime')";
-            if (analysis.measureTerms.length > 0) {
-                const totalMeasures = analysis.measureTerms.reduce((s, v) => s + v, 0);
-                if (totalMeasures === 1) newExpr += ".add(module.findMeasureLength(module.baseNote))";
-                else newExpr += `.add(new Fraction(${totalMeasures}).mul(module.findMeasureLength(module.baseNote)))`;
-            }
-            if (analysis.tempoTerms.length > 0) {
-                const totalMultiplier = analysis.tempoTerms.reduce((s, v) => s + v, 0);
-                if (totalMultiplier === 1) newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)))`;
-                else {
-                    const fracObj = new Fraction(totalMultiplier);
-                    newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${fracObj.n}, ${fracObj.d})))`;
-                }
-            }
-            try {
-                const originalFunc = new Function("module", "Fraction", "return " + expr + ";");
-                const newFunc = new Function("module", "Fraction", "return " + newExpr + ";");
-                const originalValue = originalFunc(getModule(), Fraction).valueOf();
-                const newValue = newFunc(getModule(), Fraction).valueOf();
-                if (Math.abs(originalValue - newValue) < 0.0001) return newExpr;
-            } catch (evalError) {
-                console.error("Error evaluating expressions in tree-based approach:", evalError);
-            }
-        }
-    } catch (error) {
-        console.error("Error in tree-based simplification:", error);
-    }
-    return expr;
-}
 
-function simplifyStartTimeExpressionWithRegex(expr) {
-    try {
-        if (!expr.includes("module.baseNote.getVariable('startTime')")) return expr;
-        const measureTerms = [];
-        const complexMeasureRegex = /new\s+Fraction\((\d+)\)\.mul\(module\.findMeasureLength\(module\.baseNote\)\)/g;
-        let complexMeasureMatch, tempExpr = expr;
-        while ((complexMeasureMatch = complexMeasureRegex.exec(tempExpr)) !== null) {
-            const multiplier = parseInt(complexMeasureMatch[1], 10);
-            if (!isNaN(multiplier)) measureTerms.push(multiplier);
-        }
-        const simpleMeasureRegex = /module\.findMeasureLength\(module\.baseNote\)/g;
-        let simpleMeasureMatch;
-        tempExpr = expr;
-        while ((simpleMeasureMatch = simpleMeasureRegex.exec(tempExpr)) !== null) {
-            const beforeMatch = tempExpr.substring(0, simpleMeasureMatch.index);
-            const lastMulIndex = beforeMatch.lastIndexOf(".mul(");
-            if (lastMulIndex === -1 || simpleMeasureMatch.index - lastMulIndex > 50) measureTerms.push(1);
-        }
-        const tempoTerms = [];
-        const simpleTempoRegex = /new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)(?!\.mul)/g;
-        let simpleTempoMatch;
-        while ((simpleTempoMatch = simpleTempoRegex.exec(expr)) !== null) tempoTerms.push(1);
-        const complexTempoRegex = /new\s+Fraction\(60\)\.div\(module\.findTempo\(module\.baseNote\)\)\.mul\((?:new\s+Fraction\((\d+),\s*(\d+)\)|([^)]+))\)/g;
-        let complexTempoMatch;
-        while ((complexTempoMatch = complexTempoRegex.exec(expr)) !== null) {
-            if (complexTempoMatch[1] !== undefined && complexTempoMatch[2] !== undefined) {
-                const numerator = parseInt(complexTempoMatch[1], 10);
-                const denominator = parseInt(complexTempoMatch[2], 10);
-                if (!isNaN(numerator) && !isNaN(denominator) && denominator !== 0) {
-                    tempoTerms.push(numerator / denominator);
-                }
-            } else if (complexTempoMatch[3] !== undefined) {
-                const multiplier = parseFloat(complexTempoMatch[3]);
-                if (!isNaN(multiplier)) tempoTerms.push(multiplier);
-            }
-        }
-        if (measureTerms.length > 0 || tempoTerms.length > 0) {
-            let newExpr = "module.baseNote.getVariable('startTime')";
-            if (measureTerms.length > 0) {
-                const totalMeasures = measureTerms.reduce((s, v) => s + v, 0);
-                if (totalMeasures === 1) newExpr += ".add(module.findMeasureLength(module.baseNote))";
-                else newExpr += `.add(new Fraction(${totalMeasures}).mul(module.findMeasureLength(module.baseNote)))`;
-            }
-            if (tempoTerms.length > 0) {
-                const totalMultiplier = tempoTerms.reduce((s, v) => s + v, 0);
-                if (totalMultiplier === 1) newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)))`;
-                else {
-                    const fracObj = new Fraction(totalMultiplier);
-                    newExpr += `.add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${fracObj.n}, ${fracObj.d})))`;
-                }
-            }
-            try {
-                const originalFunc = new Function("module", "Fraction", "return " + expr + ";");
-                const newFunc = new Function("module", "Fraction", "return " + newExpr + ";");
-                const originalValue = originalFunc(getModule(), Fraction).valueOf();
-                const newValue = newFunc(getModule(), Fraction).valueOf();
-                if (Math.abs(originalValue - newValue) < 0.0001) return newExpr;
-            } catch (evalError) {
-                console.error("Error evaluating expressions:", evalError);
-            }
-        }
-    } catch (error) {
-        console.error("Error simplifying startTime expression:", error);
-    }
-    return expr;
-}
-
-function simplifyStartTimeExpression(expr) {
-    try {
-        const regexResult = simplifyStartTimeExpressionWithRegex(expr);
-        if (regexResult === expr) return parseAndSimplifyExpression(expr);
-        return regexResult;
-    } catch (error) {
-        console.error("Error in simplifyStartTimeExpression:", error);
-        return expr;
-    }
-}
 
 function simplifyExpressions(expr) {
     try {
-        let simplified = removeExcessParentheses(expr);
-        if (simplified.includes("module.baseNote.getVariable('frequency')")) {
-            simplified = simplifyFrequencyExpression(simplified);
+        // Use centralized simplifier with heuristics to determine kind.
+        const moduleInstance = getModule();
+        const cleaned = removeExcessParentheses(expr);
+        const m = cleaned;
+
+        const hasStart = /getVariable\(\s*'startTime'\s*\)/.test(m);
+        const hasTempo = /findTempo\(/.test(m);
+        const hasDurRef = /getVariable\(\s*'duration'\s*\)/.test(m);
+        const hasFreqRef = /getVariable\(\s*'frequency'\s*\)/.test(m);
+
+        let out = cleaned;
+        if (hasStart) {
+            out = simplifyStartTime(cleaned, moduleInstance);
+        } else if (hasTempo || hasDurRef) {
+            out = simplifyDuration(cleaned, moduleInstance);
+        } else if (hasFreqRef) {
+            out = simplifyFrequency(cleaned, moduleInstance);
+        } else {
+            // Fallback: keep as-is (or run generic if desired)
+            try { out = simplifyGeneric(cleaned, 'generic', moduleInstance); } catch {}
         }
-        if (simplified.includes("new Fraction(60).div(module.findTempo") && 
-            !simplified.includes("module.baseNote.getVariable('startTime')")) {
-            simplified = simplifyDurationExpression(simplified);
-        }
-        if (simplified.includes("module.baseNote.getVariable('startTime')")) {
-            simplified = simplifyStartTimeExpression(simplified);
-        }
-        simplified = removeExcessParentheses(simplified);
-        return simplified;
+        return removeExcessParentheses(out);
     } catch (error) {
         console.error("Error in simplifyExpressions:", error);
         return expr;
@@ -1000,7 +777,21 @@ export function evaluateNoteToBaseNote(noteId) {
         }
 
         try {
-            const testFunc = new Function("module", "Fraction", "return " + newRawExpr + ";");
+            // Final canonicalization by type before testing and saving
+            let simplifiedByType = newRawExpr;
+            try {
+                if (varName === 'startTime') {
+                    simplifiedByType = simplifyStartTime(newRawExpr, getModule());
+                } else if (varName === 'duration') {
+                    simplifiedByType = simplifyDuration(newRawExpr, getModule());
+                } else if (varName === 'frequency') {
+                    simplifiedByType = simplifyFrequency(newRawExpr, getModule());
+                } else {
+                    simplifiedByType = simplifyGeneric(newRawExpr, varName, getModule());
+                }
+            } catch {}
+
+            const testFunc = new Function("module", "Fraction", "return " + simplifiedByType + ";");
             const testResult = testFunc(getModule(), Fraction);
             const originalValue = note.getVariable(varName).valueOf();
             const newValue = testResult.valueOf();
@@ -1008,9 +799,9 @@ export function evaluateNoteToBaseNote(noteId) {
             if (Math.abs(originalValue - newValue) > 0.0001) return;
 
             note.setVariable(varName, function() {
-                return new Function("module", "Fraction", "return " + newRawExpr + ";")(getModule(), Fraction);
+                return new Function("module", "Fraction", "return " + simplifiedByType + ";")(getModule(), Fraction);
             });
-            note.setVariable(varName + 'String', newRawExpr);
+            note.setVariable(varName + 'String', simplifiedByType);
         } catch (error) {
             console.error(`Error evaluating ${varName} for note ${noteId}:`, error);
             success = false;

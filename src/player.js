@@ -6,6 +6,7 @@ import { updateStackClickSelectedNote } from './stack-click.js';
 import { eventBus } from './utils/event-bus.js';
 import { audioEngine } from './player/audio-engine.js';
 import { setModule, setEvaluatedNotes } from './store/app-state.js';
+import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpressionByFraction } from './utils/simplify.js';
 
 // Compiled expression cache (kept for performance; flags and perf logs removed)
 const __exprCompileCache = new Map();
@@ -561,11 +562,21 @@ document.addEventListener('DOMContentLoaded', async function() {
                         const directRefRegex = new RegExp("module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)", "g");
                         newRawExp = newRawExp.replace(directRefRegex, "module.baseNote");
                         
-                        depNote.variables[key] = newRawExp;
                         const baseKey = key.slice(0, -6);
+                        let simplifiedExp = newRawExp;
+                        try {
+                            if (baseKey === 'startTime') {
+                                simplifiedExp = simplifyStartTime(newRawExp, myModule);
+                            } else if (baseKey === 'duration') {
+                                simplifiedExp = simplifyDuration(newRawExp, myModule);
+                            } else if (baseKey === 'frequency') {
+                                simplifiedExp = simplifyFrequency(newRawExp, myModule);
+                            }
+                        } catch {}
+                        depNote.variables[key] = simplifiedExp;
                         try {
                             depNote.setVariable(baseKey, function() {
-                                return __evalExpr(newRawExp, myModule);
+                                return __evalExpr(simplifiedExp, myModule);
                             });
                         } catch (err) {
                             console.error("Error compiling new expression for note", depId, "variable", baseKey, ":", err);
@@ -696,14 +707,14 @@ document.addEventListener('DOMContentLoaded', async function() {
                         const beatOffset = offset / beatLength;
                         const offsetFraction = new Fraction(beatOffset);
                         
-                        newRaw = `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`;
+                        newRaw = simplifyStartTime(`module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
                     } else {
                         const parentStartTime = suitableParent.getVariable('startTime').valueOf();
                         const parentDuration = suitableParent.getVariable('duration')?.valueOf() || 0;
                         const parentEndTime = parentStartTime + parentDuration;
                         
                         if (Math.abs(depStartTime - parentEndTime) < 0.01) {
-                            newRaw = `module.getNoteById(${suitableParent.id}).getVariable('startTime').add(module.getNoteById(${suitableParent.id}).getVariable('duration'))`;
+                            newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(module.getNoteById(${suitableParent.id}).getVariable('duration'))`, myModule);
                         } else {
                             const offset = Math.max(depStartTime, parentStartTime) - parentStartTime;
                             const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
@@ -711,7 +722,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                             const beatOffset = offset / beatLength;
                             const offsetFraction = new Fraction(beatOffset);
                             
-                            newRaw = `module.getNoteById(${suitableParent.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${suitableParent.id}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`;
+                            newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${suitableParent.id}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
                         }
                     }
                     
@@ -1004,8 +1015,25 @@ document.addEventListener('DOMContentLoaded', async function() {
                     });
                 }
 
-                exprRemapCache.set(originalExpr, expr);
-                return expr;
+                // Canonicalize expression via central simplifier after remapping
+                let simplified = expr;
+                try {
+                    const hasStart = /getVariable\(\s*'startTime'\s*\)/.test(expr);
+                    const hasTempo = /findTempo\(/.test(expr);
+                    const hasDurRef = /getVariable\(\s*'duration'\s*\)/.test(expr);
+                    const hasFreqRef = /getVariable\(\s*'frequency'\s*\)/.test(expr);
+                    if (hasStart) {
+                        simplified = simplifyStartTime(expr, myModule);
+                    } else if (hasTempo || hasDurRef) {
+                        simplified = simplifyDuration(expr, myModule);
+                    } else if (hasFreqRef) {
+                        simplified = simplifyFrequency(expr, myModule);
+                    }
+                } catch (e) {
+                    simplified = expr;
+                }
+                exprRemapCache.set(originalExpr, simplified);
+                return simplified;
             }
         
             // Non-chunked import: map and insert all notes in a single pass
@@ -1034,11 +1062,24 @@ document.addEventListener('DOMContentLoaded', async function() {
                         // Remap only when needed; avoid regex if not necessary
                         let originalString = val;
                         const needsRemap = (originalString.indexOf('module.baseNote') !== -1) || (originalString.indexOf('getNoteById(') !== -1);
-                        impNote.variables[key] = needsRemap ? updateExpression(originalString) : originalString;
                         const baseKey = key.slice(0, -6);
+
+                        // Always canonicalize by type to ensure predictable UI (e.g., duration selector preselect)
+                        let expr = needsRemap ? updateExpression(originalString) : originalString;
+                        try {
+                            if (baseKey === 'duration') {
+                                expr = simplifyDuration(expr, myModule);
+                            } else if (baseKey === 'startTime') {
+                                expr = simplifyStartTime(expr, myModule);
+                            } else if (baseKey === 'frequency') {
+                                expr = simplifyFrequency(expr, myModule);
+                            }
+                        } catch {}
+
+                        impNote.variables[key] = expr;
                         // Assign function directly (no setVariable) to avoid emitting events per variable
                         impNote.variables[baseKey] = function() {
-                            return __evalExpr(impNote.variables[key], myModule);
+                            return __evalExpr(expr, myModule);
                         };
                     } else if (key === 'color') {
                         impNote.variables.color = impNote.variables.color;
@@ -2110,10 +2151,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                             const offsetFraction = new Fraction(beatOffset);
                             
                             if (beatOffset >= 0) {
-                                newRaw = `module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).add(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`;
+                                newRaw = simplifyStartTime(`module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).add(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
                             } else {
                                 const absOffsetFraction = new Fraction(Math.abs(offsetFraction.valueOf()));
-                                newRaw = `module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).sub(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${absOffsetFraction.n}, ${absOffsetFraction.d})))`;
+                                newRaw = simplifyStartTime(`module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).sub(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${absOffsetFraction.n}, ${absOffsetFraction.d})))`, myModule);
                             }
                         }
                         
@@ -2221,10 +2262,11 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
                         }
                         
+                        const simplifiedRaw = simplifyStartTime(newRaw, myModule);
                         note.setVariable('startTime', function() {
-                            return __evalExpr(newRaw, myModule);
+                            return __evalExpr(simplifiedRaw, myModule);
                         });
-                        note.setVariable('startTimeString', newRaw);
+                        note.setVariable('startTimeString', simplifiedRaw);
                         
                         evaluatedNotes = myModule.evaluateModule();
                         setEvaluatedNotes(evaluatedNotes);
@@ -3160,14 +3202,15 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
                 
                 const newDurationString = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFraction.n}, ${beatsFraction.d}))`;
+                const simplifiedDurationString = simplifyDuration(newDurationString, myModule);
                 
                 const originalDuration = note.getVariable('duration').valueOf();
                 
-                note.setVariable('durationString', newDurationString);
+                note.setVariable('durationString', simplifiedDurationString);
                 
                 const durationFunc = function() {
                     try {
-                        return __evalExpr(newDurationString, myModule);
+                        return __evalExpr(simplifiedDurationString, myModule);
                     } catch (error) {
                         console.error("Error in duration function:", error);
                         return new Fraction(60).div(myModule.baseNote.getVariable('tempo')).mul(1);
@@ -3568,101 +3611,48 @@ document.addEventListener('DOMContentLoaded', async function() {
             console.error(`Note with ID ${noteId} not found`);
             return;
         }
-        
+
         if (isPlaying && !isPaused) {
             pause();
         }
-        
-        const currentFrequency = note.getVariable('frequency');
-        if (!currentFrequency) {
-            console.error(`Note ${noteId} has no frequency`);
+
+        const selectedNote = currentSelectedNote;
+        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+
+        const factor = direction === 'up' ? { n: 2, d: 1 } :
+                       direction === 'down' ? { n: 1, d: 2 } : null;
+        if (!factor) {
+            console.error(`Invalid direction: ${direction}`);
             return;
         }
-        
-        const selectedNote = currentSelectedNote;
-        const selectedElement = selectedNote ? 
-            document.querySelector(`.note-content[data-note-id="${selectedNote.id}"].selected, .base-note-circle[data-note-id="${selectedNote.id}"].selected, .measure-bar-triangle[data-note-id="${selectedNote.id}"].selected`) : 
-            null;
-        
-        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
-        
+
         try {
-            if (note === myModule.baseNote) {
-                const rawExpression = note.variables.frequencyString || '';
-                
-                let newRaw;
-                
-                const fractionMatch = rawExpression.match(/new\s+Fraction\((\d+)(?:,\s*(\d+))?\)/);
-                if (fractionMatch) {
-                    let numerator = parseInt(fractionMatch[1], 10);
-                    let denominator = fractionMatch[2] ? parseInt(fractionMatch[2], 10) : 1;
-                    
-                    if (direction === 'up') {
-                        numerator *= 2;
-                    } else if (direction === 'down') {
-                        denominator *= 2;
-                    }
-                    
-                    const gcd = findGCD(numerator, denominator);
-                    numerator /= gcd;
-                    denominator /= gcd;
-                    
-                    newRaw = `new Fraction(${numerator}, ${denominator})`;
-                } else {
-                    const currentValue = currentFrequency.valueOf();
-                    let newValue;
-                    
-                    if (direction === 'up') {
-                        newValue = currentValue * 2;
-                    } else if (direction === 'down') {
-                        newValue = currentValue / 2;
-                    } else {
-                        console.error(`Invalid direction: ${direction}`);
-                        return;
-                    }
-                    
-                    const newFraction = new Fraction(newValue);
-                    newRaw = `new Fraction(${newFraction.n}, ${newFraction.d})`;
-                }
-                
+            const currentFrequency = note.getVariable('frequency');
+            if (!currentFrequency) {
+                console.error(`Note ${noteId} has no frequency`);
+                return;
+            }
+
+            const rawExpression = note.variables.frequencyString;
+
+            if (!rawExpression) {
+                // No raw expression to preserve; fallback to numeric exact fraction.
+                const newFrequency = currentFrequency.mul(new Fraction(factor.n, factor.d));
+                const newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
                 note.setVariable('frequency', function() {
-                    return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                    return __evalExpr(newRaw, myModule);
                 });
                 note.setVariable('frequencyString', newRaw);
             } else {
-                const rawExpression = note.variables.frequencyString;
-                let newRaw;
-
-                if (!rawExpression) {
-                    let newFrequency;
-                    if (direction === 'up') {
-                        newFrequency = currentFrequency.mul(new Fraction(2, 1));
-                    } else if (direction === 'down') {
-                        newFrequency = currentFrequency.mul(new Fraction(1, 2));
-                    } else {
-                        console.error(`Invalid direction: ${direction}`);
-                        return;
-                    }
-                    newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
-                } else {
-                    // Robust: don't parse rawExpression. Just wrap the entire expression with the octave multiplier.
-                    // This preserves dependency chains and avoids malformed strings when nested .mul(...) exist.
-                    if (direction === 'up') {
-                        newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
-                    } else if (direction === 'down') {
-                        newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
-                    } else {
-                        console.error(`Invalid direction: ${direction}`);
-                        return;
-                    }
-                }
-
+                // Multiply and simplify robustly while preserving anchors
+                const multiplied = multiplyExpressionByFraction(rawExpression, factor.n, factor.d, 'frequency', myModule);
+                const simplified = simplifyFrequency(multiplied, myModule);
                 note.setVariable('frequency', function() {
-                    return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                    return __evalExpr(simplified, myModule);
                 });
-                note.setVariable('frequencyString', newRaw);
+                note.setVariable('frequencyString', simplified);
             }
-            
+
             if (note === myModule.baseNote) {
                 updateBaseNoteFraction();
                 updateBaseNotePosition();
@@ -3670,11 +3660,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             evaluatedNotes = myModule.evaluateModule();
             updateVisualNotes(evaluatedNotes);
             try { captureSnapshot(`Octave ${direction} Note ${noteId}`); } catch {}
-            
-            
+
             if (selectedNote && noteWidgetVisible) {
                 let newSelectedElement;
-                
                 if (selectedNote === myModule.baseNote) {
                     newSelectedElement = document.querySelector('.base-note-circle');
                 } else {
@@ -3683,7 +3671,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                         `.measure-bar-triangle[data-note-id="${selectedNote.id}"]`
                     );
                 }
-                
                 if (newSelectedElement) {
                     if (newSelectedElement.classList.contains('measure-bar-triangle')) {
                         modals.showNoteVariables(selectedNote, newSelectedElement, selectedNote.id);
@@ -3692,22 +3679,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                 }
             }
-            
+
         } catch (error) {
             console.error(`Error updating frequency for note ${noteId}:`, error);
         }
     }
 
-    function findGCD(a, b) {
-        a = Math.abs(a);
-        b = Math.abs(b);
-        while (b) {
-            const temp = b;
-            b = a % b;
-            a = temp;
-        }
-        return a;
-    }
 
     function createMeasureBarTriangle(measureBar, measurePoint, id) {
         if (!measurePoint) return null;

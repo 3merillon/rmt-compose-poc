@@ -5,6 +5,7 @@ import { validateExpression } from './validation.js';
 import { eventBus } from '../utils/event-bus.js';
 import Fraction from 'fraction.js';
 import { getModule, setEvaluatedNotes, getInstrumentManager } from '../store/app-state.js';
+import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
 
 // Helpers
 function pauseIfPlaying() {
@@ -161,8 +162,7 @@ function ensureModalsStyleInjected() {
   __modalsStyleInjected = true;
 }
 
-function createDurationSelector(rawInput, saveButton) {
-  ensureModalsStyleInjected();
+function createDurationSelector(rawInput, saveButton, note, value) {
   ensureModalsStyleInjected();
 
   const container = document.createElement('div');
@@ -311,52 +311,128 @@ function createDurationSelector(rawInput, saveButton) {
   container.appendChild(dotsGroup);
 
   // Pre-select based on current raw input if it matches a known base or dotted value
-  (function preselectFromRaw() {
-    const raw = (rawInput && typeof rawInput.value === 'string') ? rawInput.value : '';
-    // Try to extract multiplier from raw expression
-    // Support: mul(new Fraction(n,d)) or mul(NUMBER)
-    let mNum = 1, mDen = 1, found = false;
-    let m = null;
-    const fracMatch = raw.match(/\.mul\s*\(\s*new\s+Fraction\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)\s*\)/);
-    if (fracMatch) {
-      mNum = parseFloat(fracMatch[1]); mDen = parseFloat(fracMatch[2]); found = true;
-    } else {
-      const numMatch = raw.match(/\.mul\s*\(\s*([0-9.]+)\s*\)/);
-      if (numMatch) {
-        const f = parseFloat(numMatch[1]);
-        if (!isNaN(f)) {
-          // Approximate fraction with denominator up to 1024
-          const denom = 1024;
-          mNum = Math.round(f * denom);
-          mDen = denom;
+  // Expose a preselect method so caller can invoke it after appending to DOM
+  function __preselectDurationButtons() {
+    let attempts = 0;
+    const maxAttempts = 3;
+
+    const computeAndSelect = () => {
+      const raw = (rawInput && typeof rawInput.value === 'string') ? rawInput.value : '';
+
+      // Prefer evaluated beats for robustness (handles newly dropped modules and any formatting)
+      let mNum = 1, mDen = 1, found = false;
+
+      // 1) Use evaluated duration + tempo to compute beats exactly
+      try {
+        const moduleInstance = getModule();
+        const durationVal = (value && value.evaluated && typeof value.evaluated.valueOf === 'function')
+          ? value.evaluated.valueOf()
+          : (note && typeof note.getVariable === 'function' ? note.getVariable('duration')?.valueOf?.() : undefined);
+
+        const tempoVal = moduleInstance?.findTempo?.(note)?.valueOf?.();
+
+        if (isFinite(durationVal) && isFinite(tempoVal) && tempoVal > 0) {
+          const beatLen = 60 / tempoVal;
+          const beats = durationVal / beatLen;
+          const frac = new Fraction(beats);
+          mNum = frac.n;
+          mDen = frac.d;
           found = true;
         }
-      }
-    }
-    if (!found) return;
+      } catch {}
 
-    m = mNum / mDen;
-    // Try to match base or base*dots within small tolerance
-    const tol = 1e-3;
-    let best = { base: -1, dot: -1, diff: Infinity };
-    basePicks.forEach((b, bi) => {
-      const baseVal = b.n / b.d;
-      // no dot
-      let diff = Math.abs(m - baseVal);
-      if (diff < best.diff && diff <= tol) best = { base: bi, dot: -1, diff };
-      // with dots
-      dotPicks.forEach((d, di) => {
-        const val = (b.n * d.n) / (b.d * d.d);
-        const dd = Math.abs(m - val);
-        if (dd < best.diff && dd <= tol) best = { base: bi, dot: di, diff: dd };
+      // 2) Fall back to raw string parsing if evaluation path wasn't available yet
+      if (!found) {
+        const fracMatch = raw.match(/\.mul\s*\(\s*new\s+Fraction\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)\s*\)/);
+        if (fracMatch) {
+          mNum = parseFloat(fracMatch[1]); mDen = parseFloat(fracMatch[2]); found = true;
+        } else {
+          const numMatch = raw.match(/\.mul\s*\(\s*([0-9.]+)\s*\)/);
+          if (numMatch) {
+            const f = parseFloat(numMatch[1]);
+            if (!isNaN(f)) {
+              // Approximate fraction with denominator up to 1024
+              const denom = 1024;
+              mNum = Math.round(f * denom);
+              mDen = denom;
+              found = true;
+            }
+          } else {
+            // Bare beat unit without .mul() -> multiplier = 1
+            const beatOnly = raw.match(/^new\s*Fraction\s*\(\s*60\s*\)\s*\.div\s*\(\s*module\.findTempo\s*\(\s*[^)]+\)\s*\)\s*$/);
+            if (beatOnly) {
+              mNum = 1; mDen = 1; found = true;
+            }
+          }
+        }
+      }
+
+      // 3) Final fallback: evaluate raw string directly to seconds and convert to beats
+      if (!found && raw) {
+        try {
+          const moduleInstance = getModule();
+          // eslint-disable-next-line no-new-func
+          const fn = new Function('module', 'Fraction', `return (${raw});`);
+          const val = fn(moduleInstance, Fraction);
+          const durationSec = (val && typeof val.valueOf === 'function') ? val.valueOf() : Number(val);
+          const tempoVal = moduleInstance?.findTempo?.(note)?.valueOf?.();
+          if (isFinite(durationSec) && isFinite(tempoVal) && tempoVal > 0) {
+            const beatLen = 60 / tempoVal;
+            const beats = durationSec / beatLen;
+            const frac = new Fraction(beats);
+            mNum = frac.n;
+            mDen = frac.d;
+            found = true;
+          }
+        } catch {}
+      }
+
+      if (!found) {
+        // Retry after evaluation/paint if data might still be settling
+        if (attempts < maxAttempts) {
+          attempts++;
+          if (attempts === 1) {
+            requestAnimationFrame(computeAndSelect);
+          } else {
+            setTimeout(computeAndSelect, 50);
+          }
+        }
+        return;
+      }
+
+      const m = mNum / mDen;
+
+      // Try to match base or base*dots within small tolerance
+      const tol = 1e-2; // slightly relaxed tolerance to account for rounding and float beats
+      let best = { base: -1, dot: -1, diff: Infinity };
+      basePicks.forEach((b, bi) => {
+        const baseVal = b.n / b.d;
+        // no dot
+        let diff = Math.abs(m - baseVal);
+        if (diff < best.diff && diff <= tol) best = { base: bi, dot: -1, diff };
+        // with dots
+        dotPicks.forEach((d, di) => {
+          const val = (b.n * d.n) / (b.d * d.d);
+          const dd = Math.abs(m - val);
+          if (dd < best.diff && dd <= tol) best = { base: bi, dot: di, diff: dd };
+        });
       });
-    });
-    if (best.base >= 0) {
+
+      // If not an exact icon-representable value within tolerance, leave unselected
+      if (best.base < 0) {
+        return;
+      }
+
       selectedBaseIdx = best.base;
       selectedDotIdx = best.dot;
       renderSelection();
-    }
-  })();
+    };
+
+    // Kick off with a next-frame to allow UI/render/evaluation to settle after module drop
+    requestAnimationFrame(computeAndSelect);
+  }
+  // attach to container so caller can trigger after append
+  container.__preselect = __preselectDurationButtons;
 
   return container;
 }
@@ -681,23 +757,40 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           } catch {}
         }
 
+        // Central simplification by type to maintain single-fraction canonical form
+        let simplifiedExpression = validatedExpression;
+        try {
+          if (key === 'frequency') {
+            simplifiedExpression = simplifyFrequency(validatedExpression, moduleInstance);
+          } else if (key === 'duration') {
+            simplifiedExpression = simplifyDuration(validatedExpression, moduleInstance);
+          } else if (key === 'startTime') {
+            simplifiedExpression = simplifyStartTime(validatedExpression, moduleInstance);
+          } else {
+            // Fallback for other variable types (e.g., tempo, beatsPerMeasure) if provided
+            simplifiedExpression = simplifyGeneric ? simplifyGeneric(validatedExpression, key, moduleInstance) : validatedExpression;
+          }
+        } catch (e) {
+          simplifiedExpression = validatedExpression;
+        }
+
         if (measureId !== null && measureId !== undefined) {
           // Write to measure note
           const measureNote = moduleInstance.getNoteById(parseInt(measureId, 10));
           if (measureNote) {
             measureNote.setVariable(key, function () {
               // eslint-disable-next-line no-new-func
-              return new Function('module', 'Fraction', 'return ' + validatedExpression + ';')(moduleInstance, Fraction);
+              return new Function('module', 'Fraction', 'return ' + simplifiedExpression + ';')(moduleInstance, Fraction);
             });
-            measureNote.setVariable(key + 'String', rawInput.value);
+            measureNote.setVariable(key + 'String', simplifiedExpression);
           }
         } else {
           // Write to regular note
           note.setVariable(key, function () {
             // eslint-disable-next-line no-new-func
-            return new Function('module', 'Fraction', 'return ' + validatedExpression + ';')(moduleInstance, Fraction);
+            return new Function('module', 'Fraction', 'return ' + simplifiedExpression + ';')(moduleInstance, Fraction);
           });
-          note.setVariable(key + 'String', rawInput.value);
+          note.setVariable(key + 'String', simplifiedExpression);
         }
 
         // Recompile updated note + dependents to ensure functions are in sync
@@ -750,8 +843,15 @@ export function createVariableControls(key, value, note, measureId, externalFunc
 
     // Duration note-length preset selector (icons)
     if (key === 'duration') {
-      const selector = createDurationSelector(rawInput, saveButton);
+      const selector = createDurationSelector(rawInput, saveButton, note, value);
       variableValueDiv.appendChild(selector);
+      // Proactively preselect after append to avoid timing issues after module drops
+      try {
+        if (selector && typeof selector.__preselect === 'function') {
+          requestAnimationFrame(() => selector.__preselect());
+          setTimeout(() => selector.__preselect(), 50);
+        }
+      } catch {}
     }
 
     variableValueDiv.appendChild(rawDiv);
