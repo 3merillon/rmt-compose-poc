@@ -1,4 +1,5 @@
-(function() {
+import { eventBus } from '../utils/event-bus.js';
+const menuAPI = (function() {
     const domCache = {
         secondTopBar: document.querySelector('.second-top-bar'),
         iconsWrapper: document.querySelector('.icons-wrapper'),
@@ -8,7 +9,7 @@
     };
 
     const PULL_TAB_HEIGHT = 16, TOP_BAR_HEIGHT = 50, SAFETY_MARGIN = 10;
-    let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0;
+    let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0, hasAppliedInitialPadding = false, targetFitHeight = null;
 
     function saveUIStateToLocalStorage() {
         try {
@@ -77,7 +78,7 @@
                 } catch (error) {}
             };
             
-            const defaultCategories = ['intervals', 'chords', 'melodies'];
+            const defaultCategories = ['intervals', 'chords', 'melodies', 'custom'];
             const cachePromises = defaultCategories.map(category => loadCategoryModules(category));
             uiState.categories.forEach(categoryObj => {
                 if (!defaultCategories.includes(categoryObj.name)) {
@@ -160,8 +161,9 @@
                     const actionButtons = createActionButtons();
                     domCache.iconsContainer.appendChild(createSectionSeparator());
                     domCache.iconsContainer.appendChild(actionButtons);
-                    updateMaxHeight();
                     ensurePlaceholdersAtEnd();
+                    normalizeLayoutSeparators();
+                    updateMaxHeight();
                     return true;
                 });
             });
@@ -183,6 +185,7 @@
         updateMaxHeight();
         domCache.secondTopBar.style.height = '50px';
         setupResizeEvents();
+        setupTouchEdgeAutoscroll();
         const loaded = loadUIStateFromLocalStorage();
         if (!loaded) loadModuleIcons();
         window.addEventListener('resize', updateMaxHeight);
@@ -192,8 +195,20 @@
     function setupAutoSave() {
         window.addEventListener('beforeunload', saveUIStateToLocalStorage);
         setInterval(saveUIStateToLocalStorage, 30000);
-        const observer = new MutationObserver(debounce(() => saveUIStateToLocalStorage(), 1000));
+        const onUIChanged = debounce(() => {
+            try { saveUIStateToLocalStorage(); } catch (e) {}
+            // If content got shorter (e.g., unwrapping on wider screens), shrink bar automatically.
+            adjustHeightToContent();
+        }, 200);
+        const observer = new MutationObserver(onUIChanged);
         observer.observe(domCache.iconsContainer, { childList: true, subtree: true, attributes: false, characterData: false });
+
+        // Also observe layout-driven size changes (wrapping/unwrapping) even without DOM mutations.
+        if (window.ResizeObserver) {
+            const ro = new ResizeObserver(() => adjustHeightToContent());
+            ro.observe(domCache.iconsContainer);
+            ro.observe(domCache.iconsWrapper);
+        }
     }
     
     function debounce(func, wait) {
@@ -204,13 +219,70 @@
         };
     }
 
+    // Keep the first row centered between the top-bar bottom border and the menu separator on initial load only.
+    // When content wraps to multiple rows, revert to fixed padding for predictable spacing.
+    function updateInitialRowPadding() {
+        try {
+            const wrapper = domCache.iconsWrapper;
+            const container = domCache.iconsContainer;
+            if (!wrapper || !container) return;
+
+            const available = wrapper.clientHeight; // space between top and separator inside second-top-bar
+            if (available <= 0) return;
+
+            // Collect relevant items that form the first line
+            const items = Array.from(container.children).filter(el => {
+                if (!el.classList) return false;
+                return el.classList.contains('icon') || el.classList.contains('category-label');
+            });
+            if (items.length === 0) return;
+
+            // Determine number of visual rows by unique offsetTop
+            const uniqueTops = Array.from(new Set(items.map(el => el.offsetTop)));
+            const isSingleRow = uniqueTops.length === 1;
+
+            if (!isSingleRow) {
+                // Multi-line: stable fixed spacing
+                container.style.paddingTop = '4px';
+                container.style.paddingBottom = '0px';
+                return;
+            }
+
+            // Single row: center precisely within available height
+            const rowHeight = Math.max(...items.map(el => el.offsetHeight)) || 42;
+            const topPad = Math.max(0, Math.round((available - rowHeight) / 2));
+            const bottomPad = Math.max(0, available - rowHeight - topPad);
+
+            container.style.paddingTop = topPad + 'px';
+            container.style.paddingBottom = bottomPad + 'px';
+            hasAppliedInitialPadding = true;
+        } catch (e) {
+            // no-op: do not break UX if measurements fail during early boot
+        }
+    }
+
     function updateMaxHeight() {
         const windowHeight = window.innerHeight;
         const topBarHeight = domCache.topBar ? domCache.topBar.offsetHeight : TOP_BAR_HEIGHT;
         maxMenuBarHeight = windowHeight - topBarHeight - PULL_TAB_HEIGHT - SAFETY_MARGIN;
         const currentHeight = parseInt(domCache.secondTopBar.style.height || '50', 10);
         if (currentHeight > maxMenuBarHeight) domCache.secondTopBar.style.height = maxMenuBarHeight + 'px';
-        domCache.iconsWrapper.style.maxHeight = maxMenuBarHeight + 'px';
+
+        // Subtract the separator (including margins) so the wrapper can fully fit content without tiny scrollbars.
+        const sepH = getSeparatorHeight();
+        domCache.iconsWrapper.style.maxHeight = Math.max(0, (maxMenuBarHeight - sepH)) + 'px';
+
+        // After height constraints are applied, set initial row padding precisely.
+        if (!hasAppliedInitialPadding) updateInitialRowPadding();
+
+        // Auto-shrink to fit current content if window got wider and content unwrapped
+        adjustHeightToContent();
+        // Run again after reflow to ensure measurements reflect the new wrap state
+        if (window.requestAnimationFrame) {
+            requestAnimationFrame(() => adjustHeightToContent());
+        } else {
+            setTimeout(() => adjustHeightToContent(), 0);
+        }
     }
 
     function setupResizeEvents() {
@@ -226,6 +298,8 @@
         isDragging = true;
         startY = e.clientY || e.touches[0].clientY;
         startHeight = parseInt(document.defaultView.getComputedStyle(domCache.secondTopBar).height, 10);
+        // Lock the target fit height at drag start so we don't chase layout while dragging
+        targetFitHeight = Math.min(maxMenuBarHeight, getContentFitHeight());
         e.preventDefault();
     }
 
@@ -233,14 +307,129 @@
         if (!isDragging) return;
         const clientY = e.clientY || e.touches[0].clientY;
         const deltaY = clientY - startY;
-        const newHeight = Math.max(0, Math.min(startHeight + deltaY, maxMenuBarHeight, getContentHeight()));
+
+        // Clamp to the precomputed fit height so growth stops exactly when all content is visible (with 1px underflow).
+        const fitHeight = Math.min(maxMenuBarHeight, targetFitHeight != null ? targetFitHeight : getContentFitHeight());
+        const newHeight = Math.max(0, Math.min(startHeight + deltaY, fitHeight));
         domCache.secondTopBar.style.height = newHeight + 'px';
+
         e.preventDefault();
     }
 
-    function stopResize() { isDragging = false; }
+    function stopResize() {
+        if (!isDragging) return;
+        isDragging = false;
+        // Snap to exact fit height to avoid tiny scrollbars due to rounding.
+        const snapHeight = Math.min(maxMenuBarHeight, targetFitHeight != null ? targetFitHeight : getContentFitHeight());
+        const currentHeight = parseInt(domCache.secondTopBar.style.height || '0', 10);
+        if (currentHeight > snapHeight) {
+            domCache.secondTopBar.style.height = snapHeight + 'px';
+        }
+        // Reset for next interaction
+        targetFitHeight = null;
+    }
     function getContentHeight() { return domCache.iconsWrapper.scrollHeight; }
     function getMaxHeight() { return Math.min(maxMenuBarHeight, getContentHeight()); }
+
+    // Compute the separator height inside the second top bar, including its vertical margins.
+    function getSeparatorHeight() {
+        const sep = domCache.secondTopBar ? domCache.secondTopBar.querySelector('.separator') : null;
+        if (!sep) return 0;
+        const h = sep.offsetHeight || 0;
+        const cs = window.getComputedStyle(sep);
+        const mb = parseFloat(cs.marginBottom) || 0;
+        const mt = parseFloat(cs.marginTop) || 0;
+        return h + mt + mb;
+    }
+    // Compute total height required to show all icons (icons-container content) plus separator.
+    function getIconsContentHeight() {
+        const container = domCache.iconsContainer;
+        return container ? (container.scrollHeight || 0) : 0;
+    }
+    function getContentFitHeight() {
+        // 1px under exact content height to keep a tiny overflow so the vertical scrollbar remains visible.
+        const exact = getIconsContentHeight() + getSeparatorHeight();
+        return Math.max(0, exact - 1);
+    }
+    // Auto-shrink the second bar when content height becomes smaller (e.g., screen widens and icons unwrap).
+    // Never auto-grow automatically; user expands via the pull tab. Enforce a minimum initial open height.
+    function adjustHeightToContent() {
+        try {
+            const second = domCache.secondTopBar;
+            if (!second) return;
+            const MIN_OPEN = 50; // px minimum visible height on initial load
+            const fit = Math.min(maxMenuBarHeight, getContentFitHeight());
+            const clampedFit = Math.max(MIN_OPEN, fit);
+            const current = parseInt(document.defaultView.getComputedStyle(second).height, 10) || 0;
+            if (current > clampedFit) {
+                second.style.height = clampedFit + 'px';
+            }
+        } catch (e) {
+            // no-op: guard against early layout timing
+        }
+    }
+
+    // Touch edge auto-scroll for menu wrapper: delayed scroll when pointer hovers near edges (mobile)
+    function createEdgeScroller(container, { zone = 28, delay = 250, speed = 16 } = {}) {
+        let raf = null, active = false, dir = 0, timer = null, pendingDir = 0;
+
+        function step() {
+            if (!active || dir === 0) { raf = null; return; }
+            if (!container) return;
+            const canScroll = (container.scrollHeight || 0) > (container.clientHeight || 0);
+            if (!canScroll) { stop(); return; }
+            container.scrollTop += dir * speed;
+            raf = requestAnimationFrame(step);
+        }
+        function start(d) {
+            if (active && dir === d) return;
+            active = true; dir = d;
+            if (!raf) raf = requestAnimationFrame(step);
+        }
+        function stop() {
+            active = false; dir = 0;
+            if (raf) { cancelAnimationFrame(raf); raf = null; }
+            if (timer) { clearTimeout(timer); timer = null; }
+            pendingDir = 0;
+        }
+        function update(clientX, clientY) {
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
+            if (clientX < rect.left || clientX > rect.right || clientY < rect.top - zone || clientY > rect.bottom + zone) {
+                stop(); return;
+            }
+            const atTop = clientY <= rect.top + zone;
+            const atBottom = clientY >= rect.bottom - zone;
+            const desired = atTop ? -1 : (atBottom ? 1 : 0);
+            if (desired === 0) { stop(); return; }
+            if (dir === desired) return;
+            if (pendingDir === desired && timer) return;
+            if (timer) clearTimeout(timer);
+            pendingDir = desired;
+            timer = setTimeout(() => { pendingDir = 0; start(desired); }, delay);
+        }
+        return { update, stop };
+    }
+
+    function setupTouchEdgeAutoscroll() {
+        try {
+            const container = domCache.iconsWrapper;
+            if (!container) return;
+            const scroller = createEdgeScroller(container, { zone: 28, delay: 250, speed: 16 });
+            const onMove = (e) => {
+                if (e.pointerType !== 'touch') return;
+                if (draggedElementType === 'module' || draggedElementType === 'category') {
+                    scroller.update(e.clientX, e.clientY);
+                } else {
+                    scroller.stop();
+                }
+            };
+            const onEnd = () => scroller.stop();
+            document.addEventListener('pointermove', onMove, { passive: true });
+            document.addEventListener('pointerup', onEnd);
+            document.addEventListener('pointercancel', onEnd);
+        } catch (e) {}
+    }
 
     function createLabelIcon(text, category) {
         const labelIcon = document.createElement('div');
@@ -250,7 +439,7 @@
             touchAction: 'none', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center',
             border: '1px solid #ffa800', borderRadius: '4px', padding: '0 8px', textTransform: 'uppercase',
             fontFamily: "'Roboto Mono', monospace", color: '#ffa800', boxSizing: 'border-box',
-            background: 'transparent', cursor: 'pointer'
+            background: 'transparent', cursor: 'pointer', position: 'relative'
         });
         labelIcon.textContent = text;
         labelIcon.setAttribute('draggable', 'true');
@@ -333,7 +522,6 @@
                     ev.preventDefault();
                     scrollPrevented = true;
                     dragStarted = true;
-                    if (scrollContainer) scrollContainer.style.overflow = 'hidden';
                     ghost = document.createElement('div');
                     ghost.textContent = category + ' +';
                     Object.assign(ghost.style, {
@@ -382,7 +570,8 @@
             
             function onPointerUp(ev) {
                 try { labelIcon.releasePointerCapture(e.pointerId); } catch (err) {}
-                if (scrollContainer) scrollContainer.style.overflow = 'auto';
+                // Restore to stylesheet-controlled overflow so we consistently keep the vertical scrollbar.
+                if (scrollContainer) scrollContainer.style.overflow = '';
                 if (ghost && ghost.parentNode) { ghost.parentNode.removeChild(ghost); ghost = null; }
                 const indicator = document.getElementById('drag-indicator');
                 if (indicator) indicator.parentNode.removeChild(indicator);
@@ -435,8 +624,32 @@
             document.addEventListener('pointerup', onPointerUp);
             document.addEventListener('pointercancel', onPointerUp);
         });
+        // Add category delete button (red ×)
+        const catDelete = document.createElement('div');
+        catDelete.className = 'category-delete-btn';
+        catDelete.innerHTML = '×';
+        Object.assign(catDelete.style, {
+            position: 'absolute', top: '0px', right: '0px', width: '14px', height: '14px',
+            lineHeight: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center',
+            color: '#ff0000', background: 'transparent', cursor: 'pointer',
+            zIndex: '12', pointerEvents: 'auto', transition: 'transform 0.2s, color 0.2s'
+        });
+        catDelete.title = 'Delete category';
+        catDelete.addEventListener('click', function(e) {
+            e.stopPropagation();
+            e.preventDefault();
+            try {
+                const sectionContainer = labelIcon.parentNode;
+                const categoryName = labelIcon.getAttribute('data-category');
+                if (typeof showRemoveCategoryConfirmation === 'function') {
+                    showRemoveCategoryConfirmation(sectionContainer, categoryName);
+                }
+            } catch {}
+        });
+        labelIcon.appendChild(catDelete);
+
         return labelIcon;
-    }
+        }
 
     function createEmptyPlaceholder(category) {
         const placeholder = document.createElement('div');
@@ -444,7 +657,7 @@
         placeholder.setAttribute('data-category', category);
         Object.assign(placeholder.style, {
             width: '42px', height: '42px', border: '2px dashed #ffffff', borderRadius: '4px',
-            boxSizing: 'border-box', background: 'transparent', cursor: 'pointer', margin: '2px',
+            boxSizing: 'border-box', background: 'transparent', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center'
         });
         const plusSign = document.createElement('div');
@@ -689,9 +902,7 @@
                     icon.style.backgroundColor = '#ffa800';
                 });
 
-                if (typeof window.menuBar?.saveUIStateToLocalStorage === 'function') {
-                    window.menuBar.saveUIStateToLocalStorage();
-                }
+                saveUIStateToLocalStorage();
                 return;
             }
 
@@ -701,9 +912,7 @@
                 targetParent.appendChild(draggedElement);
                 draggedElement.setAttribute('data-category', targetCategory);
                 if (typeof ensurePlaceholdersAtEnd === 'function') ensurePlaceholdersAtEnd();
-                if (typeof window.menuBar?.saveUIStateToLocalStorage === 'function') {
-                    window.menuBar.saveUIStateToLocalStorage();
-                }
+                saveUIStateToLocalStorage();
                 return;
             }
         });
@@ -826,15 +1035,25 @@
                                 saveUIStateToLocalStorage();
                             }
                         } else {
-                            const noteTarget = elemBelow.closest('[data-note-id]');
-                            if (noteTarget && moduleIcon.moduleData) {
-                                const noteId = noteTarget.getAttribute('data-note-id');
-                                if (noteId) {
-                                    const targetNote = window.myModule.getNoteById(Number(noteId));
-                                    if (targetNote) window.importModuleAtTarget(targetNote, moduleIcon.moduleData);
-                                }
-                            }
-                        }
+    if (moduleIcon.moduleData) {
+        let noteId = null;
+        try {
+            const noteTarget = elemBelow && elemBelow.closest ? elemBelow.closest('[data-note-id]') : null;
+            if (noteTarget) {
+                const raw = noteTarget.getAttribute('data-note-id');
+                if (raw != null) noteId = Number(raw);
+            }
+        } catch {}
+        try {
+            eventBus.emit('player:importModuleAtTarget', {
+                targetNoteId: noteId,
+                moduleData: moduleIcon.moduleData,
+                clientX: ev.clientX,
+                clientY: ev.clientY
+            });
+        } catch {}
+    }
+}
                     }
                 }
                 moduleIcon.classList.remove('dragging');
@@ -923,6 +1142,55 @@
         document.body.appendChild(overlay);
     }
 
+    function showRemoveCategoryConfirmation(sectionContainer, categoryName) {
+        const overlay = document.createElement('div');
+        overlay.className = 'delete-confirm-overlay';
+        const modal = document.createElement('div');
+        modal.className = 'delete-confirm-modal';
+        const message = document.createElement('p');
+        message.innerHTML = `Are you sure you want to <span style='color: #ff0000;'>remove</span> the category "<span style='color: #ffa800;'>${(categoryName || '').toUpperCase()}</span>" and all its icons from the menu?`;
+        const btnContainer = document.createElement('div');
+        btnContainer.className = 'modal-btn-container';
+        const yesButton = document.createElement('button');
+        yesButton.textContent = 'Yes, Remove Category';
+        Object.assign(yesButton.style, { backgroundColor: '#ff0000', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
+        const cancelButton = document.createElement('button');
+        cancelButton.textContent = 'Cancel';
+        Object.assign(cancelButton.style, { backgroundColor: '#add8e6', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer' });
+
+        yesButton.addEventListener('click', function() {
+            try {
+                if (sectionContainer && sectionContainer.parentNode) {
+                    const container = sectionContainer.parentNode;
+                    const breaker = sectionContainer.nextElementSibling;
+                    const maybeSeparator = breaker && breaker.nextElementSibling && breaker.nextElementSibling.classList && breaker.nextElementSibling.classList.contains('separator') ? breaker.nextElementSibling : null;
+
+                    container.removeChild(sectionContainer);
+                    if (breaker && breaker.parentNode === container) container.removeChild(breaker);
+                    if (maybeSeparator && maybeSeparator.parentNode === container) container.removeChild(maybeSeparator);
+
+                    const idx = categoryContainers.indexOf(sectionContainer);
+                    if (idx !== -1) categoryContainers.splice(idx, 1);
+
+                    ensurePlaceholdersAtEnd();
+                    normalizeLayoutSeparators();
+                    updateMaxHeight();
+                    saveUIStateToLocalStorage();
+                }
+            } catch (e) {}
+            document.body.removeChild(overlay);
+        });
+        cancelButton.addEventListener('click', function() { document.body.removeChild(overlay); });
+        overlay.addEventListener('click', function(e) { if (e.target === overlay) document.body.removeChild(overlay); });
+
+        btnContainer.appendChild(yesButton);
+        btnContainer.appendChild(cancelButton);
+        modal.appendChild(message);
+        modal.appendChild(btnContainer);
+        overlay.appendChild(modal);
+        document.body.appendChild(overlay);
+    }
+
     function reloadModuleIcons() {
         domCache.iconsContainer.innerHTML = '';
         categoryContainers = [];
@@ -958,6 +1226,56 @@
         });
     }
 
+    // Remove duplicate separators and leading extras after dynamic changes (delete/add categories)
+    function normalizeLayoutSeparators() {
+        const container = domCache.iconsContainer;
+        if (!container) return;
+
+        // Remove leading separators, and collapse consecutive separators
+        const children = Array.from(container.children);
+        let lastWasSeparator = false;
+        for (let i = 0; i < children.length; i++) {
+            const el = children[i];
+            const isSeparator = !!(el.classList && el.classList.contains('separator'));
+            if (isSeparator) {
+                if (lastWasSeparator) {
+                    container.removeChild(el);
+                    // Adjust index because NodeList changed
+                    i--;
+                    continue;
+                }
+                lastWasSeparator = true;
+            } else {
+                lastWasSeparator = false;
+            }
+        }
+
+        // Remove a separator if it's the very first element
+        const first = container.firstElementChild;
+        if (first && first.classList && first.classList.contains('separator')) {
+            container.removeChild(first);
+        }
+
+        // Remove a separator if it's directly before another separator (robustness if DOM changed since first pass)
+        let found = true;
+        while (found) {
+            found = false;
+            const kids = Array.from(container.children);
+            for (let i = 1; i < kids.length; i++) {
+                const prev = kids[i - 1];
+                const curr = kids[i];
+                if (
+                    prev.classList && prev.classList.contains('separator') &&
+                    curr.classList && curr.classList.contains('separator')
+                ) {
+                    container.removeChild(curr);
+                    found = true;
+                    break;
+                }
+            }
+        }
+    }
+
     function createActionButtons() {
         const buttonsContainer = document.createElement('div');
         Object.assign(buttonsContainer.style, { display: 'flex', justifyContent: 'space-between', padding: '10px 4px', marginTop: '10px', gap: '10px' });
@@ -985,13 +1303,76 @@
         
         buttonsContainer.appendChild(createButton('Save UI', '#ffa800', saveUIState));
         buttonsContainer.appendChild(createButton('Load UI', '#ffa800', loadUIState));
+
+        const onAddCategory = () => {
+            try {
+                const name = (prompt('Enter category name') || '').trim();
+                if (!name) return;
+                const displayName = name.toUpperCase();
+                const slug = name.toLowerCase().trim()
+                    .replace(/\s+/g, '-')
+                    .replace(/[^a-z0-9\-_]/g, '');
+                if (!slug) {
+                    showNotification('Invalid category name', 'error');
+                    return;
+                }
+
+                const iconsContainer = domCache.iconsContainer;
+                if (!iconsContainer) return;
+
+                const sectionContainer = document.createElement('div');
+                Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+                categoryContainers.push(sectionContainer);
+
+                const labelIcon = createLabelIcon(displayName, slug);
+                sectionContainer.appendChild(labelIcon);
+
+                const emptyPlaceholder = createEmptyPlaceholder(slug);
+                sectionContainer.appendChild(emptyPlaceholder);
+
+                // Insert before the final separator + action buttons
+                const actionButtons = iconsContainer.lastElementChild;
+                const sep = actionButtons && actionButtons.previousElementSibling && actionButtons.previousElementSibling.classList && actionButtons.previousElementSibling.classList.contains('separator')
+                    ? actionButtons.previousElementSibling
+                    : null;
+
+                if (sep) {
+                    iconsContainer.insertBefore(sectionContainer, sep);
+                    const breaker = document.createElement('div');
+                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
+                    iconsContainer.insertBefore(breaker, sep);
+                } else if (actionButtons) {
+                    iconsContainer.insertBefore(sectionContainer, actionButtons);
+                    const breaker = document.createElement('div');
+                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
+                    iconsContainer.insertBefore(breaker, actionButtons);
+                } else {
+                    // Fallback: append at end
+                    iconsContainer.appendChild(sectionContainer);
+                    const breaker = document.createElement('div');
+                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
+                    iconsContainer.appendChild(breaker);
+                }
+
+                ensurePlaceholdersAtEnd();
+                normalizeLayoutSeparators();
+                saveUIStateToLocalStorage();
+                updateMaxHeight();
+                showNotification(`Category "${displayName}" added`, 'success');
+            } catch (e) {}
+        };
+
+        buttonsContainer.appendChild(createButton('Add Category', '#ffa800', onAddCategory));
         buttonsContainer.appendChild(createButton('Reload Defaults', '#ff0000', showReloadDefaultsConfirmation));
         return buttonsContainer;
     }
 
     function createSectionSeparator() {
         const separator = document.createElement('div');
-        Object.assign(separator.style, { width: '100%', borderTop: '1px dotted #ffa800', opacity: '0.3', marginTop: '0px', marginBottom: '4px' });
+        separator.classList.add('separator');
+        // Rely on CSS (.separator { height: 1px; border-bottom: 1px dotted #ffa800; })
+        // to draw a single line. Do not add a top border here to avoid double lines.
+        Object.assign(separator.style, { width: '100%', opacity: '0.3', marginTop: '0px', marginBottom: '0px' });
         return separator;
     }
 
@@ -1012,7 +1393,7 @@
             newMeta.content = 'width=device-width, initial-scale=1.0, user-scalable=no, touch-action=none';
             document.head.appendChild(newMeta);
         }
-        const categories = ['intervals', 'chords', 'melodies'];
+        const categories = ['intervals', 'chords', 'melodies', 'custom'];
         categories.forEach((category, index) => {
             const sectionContainer = document.createElement('div');
             Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
@@ -1054,18 +1435,21 @@
         const actionButtons = createActionButtons();
         iconsContainer.appendChild(createSectionSeparator());
         iconsContainer.appendChild(actionButtons);
-
+        normalizeLayoutSeparators();
+ 
         const style = document.createElement('style');
         style.textContent = `
             .icon { position: relative; }
             .icon > div:first-child { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0; }
             .icon.dragging, .category-label.dragging { opacity: 0.5; }
             .icon.drag-over, .category-label.drag-over, .empty-placeholder.drag-over { border: 2px dashed #ff0000 !important; background-color: rgba(255, 0, 0, 0.1); }
-            .icons-wrapper { overflow-y: auto; overflow-x: hidden; }
+            .icons-wrapper { overflow-y: scroll; overflow-x: hidden; scrollbar-gutter: stable both-edges; }
             .empty-placeholder { display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
             .empty-placeholder:hover { opacity: 1; border-color: #ffa800; background-color: rgba(255, 168, 0, 0.1); }
             .module-delete-btn { position: absolute; top: 1px; right: 1px; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: #ff0000; background: transparent !important; border-radius: 0; cursor: pointer; z-index: 10; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
             .module-delete-btn:hover { transform: scale(1.2); color: #ff0000; text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); background-color: transparent !important; }
+            .category-delete-btn { position: absolute; top: 0; right: 0; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: #ff0000; background: transparent !important; cursor: pointer; z-index: 12; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
+            .category-delete-btn:hover { transform: scale(1.2); color: #ff0000; text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); }
             .empty-placeholder { width: 42px; height: 42px; border: 2px dashed #ffffff; border-radius: 4px; box-sizing: border-box; background: transparent; cursor: pointer; margin: 2px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
             .category-label { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
             .icons-wrapper { -webkit-overflow-scrolling: touch; }
@@ -1152,6 +1536,7 @@
                         const actionButtons = createActionButtons();
                         domCache.iconsContainer.appendChild(createSectionSeparator());
                         domCache.iconsContainer.appendChild(actionButtons);
+                        normalizeLayoutSeparators();
                         updateMaxHeight();
                         showNotification('UI state loaded successfully!', 'success');
                     } catch (error) {
@@ -1193,7 +1578,7 @@
         }, 3000);
     }
 
-    window.menuBar = {
+    return {
         init: init,
         resize: resize,
         updateMaxHeight: updateMaxHeight,
@@ -1204,10 +1589,19 @@
         loadUIStateFromLocalStorage: loadUIStateFromLocalStorage,
         clearUIStateFromLocalStorage: clearUIStateFromLocalStorage
     };
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
 })();
+
+
+// ES module exports (no window.menuBar)
+export const menuBar = menuAPI;
+
+/**
+ * initMenuBar()
+ * Initialize the menu bar from module code.
+ * Kept for API stability; calls the pure module export.
+ */
+export function initMenuBar() {
+  if (menuAPI && typeof menuAPI.init === 'function') {
+    menuAPI.init();
+  }
+}

@@ -1,4 +1,5 @@
-(function() {
+export let updateStackClickSelectedNote = function(noteId) { };
+export function initStackClick() {
   let stackClickState = {
     stackedNotes: [],
     currentIndex: -1,
@@ -12,6 +13,10 @@
   function log(...args) {
     if (DEBUG) console.log("[Stack-Click]", ...args);
   }
+  // Provide a module-exported hook for external updates instead of window.*
+  updateStackClickSelectedNote = function(noteId) {
+    log("External update of selected note ID to:", noteId);
+  };
 
   window.addEventListener('click', function(event) {
     const clickedItem = event.target.closest('.note-rect, .note-content');
@@ -359,7 +364,5 @@
     }
   }, true);
   
-  window.updateStackClickSelectedNote = function(noteId) {
-    log("External update of selected note ID to:", noteId);
-  };
-})();
+  // External update hook is provided via exported updateStackClickSelectedNote (set above)
+}

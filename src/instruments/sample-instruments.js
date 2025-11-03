@@ -1,10 +1,10 @@
-const SampleInstruments = {};
+import { SampleInstrument } from './instrument-manager.js';
 
-SampleInstruments.PianoInstrument = class PianoInstrument extends SampleInstrument {
+export class PianoInstrument extends SampleInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'piano';
-        this.loadSample('instruments/samples/piano.wav', 440);
+        this.loadSample('/instruments/samples/piano.wav', 440);
     }
     
     getEnvelopeSettings() {
@@ -15,13 +15,13 @@ SampleInstruments.PianoInstrument = class PianoInstrument extends SampleInstrume
             releaseTimeRatio: 0.05
         };
     }
-};
+}
 
-SampleInstruments.ViolinInstrument = class ViolinInstrument extends SampleInstrument {
+export class ViolinInstrument extends SampleInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'violin';
-        this.loadSample('instruments/samples/violin.wav', 523.25);
+        this.loadSample('/instruments/samples/violin.wav', 523.25);
     }
     
     getEnvelopeSettings() {
@@ -124,4 +124,7 @@ SampleInstruments.ViolinInstrument = class ViolinInstrument extends SampleInstru
     }
 }
 
-window.SampleInstruments = SampleInstruments;
+export const SampleInstruments = {
+    PianoInstrument,
+    ViolinInstrument
+};

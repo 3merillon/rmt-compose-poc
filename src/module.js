@@ -1,11 +1,16 @@
-let memoizedModuleEndTime = null, moduleLastModifiedTime = 0;
+import Fraction from 'fraction.js';
+import { Note } from './note.js';
 
-function invalidateModuleEndTimeCache() {
+let memoizedModuleEndTime = null;
+let moduleLastModifiedTime = 0;
+
+export function invalidateModuleEndTimeCache() {
     memoizedModuleEndTime = null;
     moduleLastModifiedTime = Date.now();
 }
 
-class Module {
+
+export class Module {
     constructor(baseNoteVariables = {}) {
         this.notes = {};
         this.nextId = 1;
@@ -118,7 +123,6 @@ class Module {
 
     addNote(variables = {}) {
         const id = this.nextId++;
-        console.log(`Adding new note with ID ${id}, nextId is now ${this.nextId}`);
         const note = new Note(id, variables);
         note.module = this;
         this.notes[id] = note;
@@ -171,7 +175,39 @@ class Module {
     findMeasureLength(note) {
         this._trackDependency(note.id, 0);
         const tempo = this.findTempo(note);
-        const beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
+
+        // Prefer per-note beatsPerMeasure. Otherwise, inherit only from non-measure ancestors; fallback to BaseNote.
+        let beatsPerMeasure = null;
+        try {
+            const isMeasure = (n) => {
+                try { return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency); }
+                catch { return false; }
+            };
+
+            // Direct per-note override
+            if (note && note.variables && (note.variables.beatsPerMeasure || note.variables.beatsPerMeasureString)) {
+                beatsPerMeasure = note.getVariable('beatsPerMeasure');
+            } else {
+                // Walk up ancestry but skip measure ancestors to avoid cross-measure inheritance
+                let cur = note;
+                while (cur && cur.id !== 0) {
+                    cur = this.getNoteById(cur.parentId);
+                    if (!cur) break;
+                    if (cur.variables && (cur.variables.beatsPerMeasure || cur.variables.beatsPerMeasureString)) {
+                        if (!isMeasure(cur)) {
+                            beatsPerMeasure = cur.getVariable('beatsPerMeasure');
+                            break;
+                        }
+                    }
+                }
+                if (!beatsPerMeasure) {
+                    beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
+                }
+            }
+        } catch {
+            beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
+        }
+
         return beatsPerMeasure.div(tempo).mul(60);
     }
 
@@ -489,10 +525,6 @@ class Module {
         this._dirtyNotes.add(Number(id));
     }
     
-    if (typeof invalidateModuleEndTimeCache === 'function') {
-        invalidateModuleEndTimeCache();
-    }
-    
-    console.log("Module reindexed. New mapping:", newMapping);
+    invalidateModuleEndTimeCache();
   }
 }

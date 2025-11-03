@@ -1,4 +1,6 @@
-class Note {
+import { eventBus } from './utils/event-bus.js';
+
+export class Note {
     constructor(id, variables = {}) {
         this.id = id;
         this.variables = {};
@@ -30,9 +32,7 @@ class Note {
             this.module.markNoteDirty(this.id);
         }
         
-        if (typeof invalidateModuleEndTimeCache === 'function') {
-            invalidateModuleEndTimeCache();
-        }
+        try { eventBus.emit('player:invalidateModuleEndTimeCache'); } catch {}
     }
 
     getVariable(name) {

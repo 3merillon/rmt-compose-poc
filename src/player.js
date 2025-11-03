@@ -1,24 +1,126 @@
+import Fraction from 'fraction.js';
+import tapspace from 'tapspace';
+import { Module } from './module.js';
+import { modals } from './modals/index.js';
+import { updateStackClickSelectedNote } from './stack-click.js';
+import { eventBus } from './utils/event-bus.js';
+import { audioEngine } from './player/audio-engine.js';
+import { setModule, setEvaluatedNotes } from './store/app-state.js';
+import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpressionByFraction } from './utils/simplify.js';
+import { RendererAdapter } from './renderer/webgl2/renderer-adapter.js';
+import { Workspace } from './renderer/webgl2/workspace.js';
+
+// Compiled expression cache (kept for performance; flags and perf logs removed)
+const __exprCompileCache = new Map();
+function __evalExpr(expr, moduleInstance) {
+  let fn = __exprCompileCache.get(expr);
+  if (!fn) {
+    fn = new Function("module", "Fraction", "return " + expr + ";");
+    __exprCompileCache.set(expr, fn);
+  }
+  return fn(moduleInstance, Fraction);
+}
+
+// Defer heavy UI sync without feature flags or polyfills
+// Use requestAnimationFrame to guarantee next-frame execution even when idle callbacks are throttled.
+function scheduleDeferred(cb) {
+  try {
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => { try { cb(); } catch {} });
+    } else {
+      setTimeout(cb, 0);
+    }
+  } catch {
+    try { setTimeout(cb, 0); } catch {}
+  }
+}
+
 document.addEventListener('DOMContentLoaded', async function() {
     const INITIAL_VOLUME = 0.2, ATTACK_TIME_RATIO = 0.1, DECAY_TIME_RATIO = 0.1, SUSTAIN_LEVEL = 0.7, RELEASE_TIME_RATIO = 0.2, GENERAL_VOLUME_RAMP_TIME = 0.2, OSCILLATOR_POOL_SIZE = 64, DRAG_THRESHOLD = 5;
     
-    let oscillatorPool = [], gainNodePool = [], activeOscillators = new Map(), scheduledTimeouts = [], currentTime = 0, playheadTime = 0, isPlaying = false, isPaused = false, isFadingOut = false, totalPausedTime = 0, isTrackingEnabled = false, isDragging = false, dragStartX = 0, dragStartY = 0, isLocked = false, lastSelectedNote = null, originalNoteOrder = new Map();
+    let currentTime = 0, playheadTime = 0, isPlaying = false, isPaused = false, isFadingOut = false, totalPausedTime = 0, isTrackingEnabled = false, isDragging = false, dragStartX = 0, dragStartY = 0, isLocked = false, lastSelectedNote = null, originalNoteOrder = new Map();
     
     let stackClickState = { lastClickPosition: null, stackedNotes: [], currentIndex: -1 };
     let xScaleFactor = 1.0, yScaleFactor = 1.0;
-    
-    window.playerState = {
-        get isPlaying() { return isPlaying; },
-        get isPaused() { return isPaused; }
-    };
-    
-    window.playerControls = {
-        pause: function() {
-            if (isPlaying && !isPaused) pause();
+    let glRenderer = null;
+    let glWorkspace = null;
+    // Suppress playhead recentering during X-scale adjustments to avoid 1-frame pop
+    let __rmtScalingXActive = false;
+    // While dragging/resizing, feed temp overrides each frame so animation loop does not overwrite preview
+    let glTempOverrides = null;
+
+    function isWebGL2RendererEnabled() {
+        try {
+            // Cache the probe result to avoid repeatedly creating GL contexts (prevents "Too many active WebGL contexts").
+            if (typeof isWebGL2RendererEnabled.__cached !== 'undefined') return isWebGL2RendererEnabled.__cached;
+
+            let supported = false;
+
+            if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+                try {
+                    const c = document.createElement('canvas');
+                    const gl = c && c.getContext && c.getContext('webgl2', {
+                        alpha: true,
+                        antialias: true,
+                        preserveDrawingBuffer: false,
+                        stencil: false,
+                        depth: false
+                    });
+                    supported = !!gl;
+                    // Immediately release the probe context if any
+                    try {
+                        if (gl && gl.getExtension) {
+                            const ext = gl.getExtension('WEBGL_lose_context');
+                            if (ext && typeof ext.loseContext === 'function') ext.loseContext();
+                        }
+                    } catch {}
+                } catch {}
+            }
+
+            // Fallback probe via OffscreenCanvas when available
+            if (!supported && typeof OffscreenCanvas !== 'undefined') {
+                try {
+                    const oc = new OffscreenCanvas(1, 1);
+                    const gl2 = oc.getContext('webgl2');
+                    supported = !!gl2;
+                    try {
+                        if (gl2 && gl2.getExtension) {
+                            const ext2 = gl2.getExtension('WEBGL_lose_context');
+                            if (ext2 && typeof ext2.loseContext === 'function') ext2.loseContext();
+                        }
+                    } catch {}
+                } catch {}
+            }
+
+            isWebGL2RendererEnabled.__cached = !!supported;
+            return isWebGL2RendererEnabled.__cached;
+        } catch (e) {
+            try { console.warn('RMT: isWebGL2RendererEnabled probe failed', e); } catch {}
+            isWebGL2RendererEnabled.__cached = false;
+            return false;
         }
-    };
+    }
+
+    // GL-only mode: disable Tapspace DOM notes/triangles/playhead while keeping GL overlay
+    function isWebGL2GLOutputOnlyEnabled() {
+        try {
+            return isWebGL2RendererEnabled();
+        } catch {
+            return false;
+        }
+    }
+
+    // Workspace mode: full GL interactive workspace (replaces Tapspace)
+    function isWebGL2WorkspaceEnabled() {
+        try {
+            return isWebGL2RendererEnabled();
+        } catch {
+            return false;
+        }
+    }
     
-    if (window.modals) {
-        window.modals.setExternalFunctions({
+    if (modals) {
+        modals.setExternalFunctions({
             updateVisualNotes, updateBaseNoteFraction, updateBaseNotePosition, hasMeasurePoints, getLastMeasureId, isLastMeasureInChain, updateTimingBoundaries, createMeasureBars, deleteNoteAndDependencies, deleteNoteKeepDependencies, updateDependentRawExpressions, checkAndUpdateDependentNotes, cleanSlate, bringSelectedNoteToFront, restoreNotePosition, clearLastSelectedNote, originalNoteOrder
         });
     }
@@ -43,7 +145,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         ppElement: document.querySelector('.pp'),
         dropdownButton: document.querySelector('.dropdown-button'),
         plusminus: document.querySelector('.plusminus'),
-        generalWidget: document.getElementById('general-widget')
+        generalWidget: document.getElementById('general-widget'),
+        loadModuleDropdown: document.getElementById('loadModuleDropdown'),
+        loadFromFileItem: document.getElementById('loadFromFileItem'),
+        resetDefaultModuleItem: document.getElementById('resetDefaultModuleItem')
     };
 
     function createOctaveIndicators() {
@@ -130,50 +235,51 @@ document.addEventListener('DOMContentLoaded', async function() {
         updateOctaveIndicators();
     }
 
-    const octaveIndicatorStyles = document.createElement('style');
-    octaveIndicatorStyles.textContent = `
-        .octave-indicators-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 3;
-        }
-        
-        .octave-indicator {
-            position: absolute;
-            left: 0;
-            width: 100%;
-            height: 1px;
-            border-top: 1px dotted rgba(255, 168, 0, 0.3);
-            pointer-events: none;
-        }
-        
-        .octave-indicator.reference-octave {
-            border-top: 1px dotted rgba(255, 168, 0, 0.7);
-        }
-        
-        .octave-label {
-            position: absolute;
-            left: 10px;
-            top: -10px;
-            color: rgba(255, 168, 0, 0.7);
-            font-family: 'Roboto Mono', monospace;
-            font-size: 10px;
-            background-color: rgba(21, 21, 37, 0.7);
-            padding: 2px 5px;
-            border-radius: 3px;
-        }
-        
-        .octave-indicator.reference-octave .octave-label {
-            color: rgba(255, 168, 0, 1);
-            font-weight: bold;
-        }
-    `;
-    document.head.appendChild(octaveIndicatorStyles);
-
+    if (!isWebGL2RendererEnabled()) {
+        const octaveIndicatorStyles = document.createElement('style');
+        octaveIndicatorStyles.textContent = `
+            .octave-indicators-container {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                z-index: 3;
+            }
+            
+            .octave-indicator {
+                position: absolute;
+                left: 0;
+                width: 100%;
+                height: 1px;
+                border-top: 1px dotted rgba(255, 168, 0, 0.3);
+                pointer-events: none;
+            }
+            
+            .octave-indicator.reference-octave {
+                border-top: 1px dotted rgba(255, 168, 0, 0.7);
+            }
+            
+            .octave-label {
+                position: absolute;
+                left: 10px;
+                top: -10px;
+                color: rgba(255, 168, 0, 0.7);
+                font-family: 'Roboto Mono', monospace;
+                font-size: 10px;
+                background-color: rgba(21, 21, 37, 0.7);
+                padding: 2px 5px;
+                border-radius: 3px;
+            }
+            
+            .octave-indicator.reference-octave .octave-label {
+                color: rgba(255, 168, 0, 1);
+                font-weight: bold;
+            }
+        `;
+        document.head.appendChild(octaveIndicatorStyles);
+    }
     const lockStyles = document.createElement('style');
     lockStyles.textContent = `
         .note-content[style*="pointer-events: none"],
@@ -239,47 +345,259 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
       
         handlers.xInput = (e) => {
+            __rmtScalingXActive = true;
+            // Ensure playhead draws at viewport center during scaling when tracking is enabled
+            try {
+                if (isTrackingEnabled) {
+                    if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
+                        glWorkspace.renderer.setTrackingMode(true);
+                    } else if (glRenderer && typeof glRenderer.setTrackingMode === 'function') {
+                        glRenderer.setTrackingMode(true);
+                    }
+                }
+            } catch {}
+
             const viewCenter = viewport.atCenter();
             const centerInSpace = viewCenter.transitRaw(space);
             
             const oldScale = xScaleFactor;
             xScaleFactor = parseFloat(e.target.value);
-            
+            // Immediately update renderer scale factors to keep playhead world-x in sync this frame
+            try {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
+                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                }
+            } catch {}
+            // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
+            try {
+                if (isTrackingEnabled) {
+                    const neu = xScaleFactor;
+                    if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                        const rect = glWorkspace.containerEl.getBoundingClientRect();
+                        const centerX = rect.width * 0.5;
+                        const s = glWorkspace.camera.scale || 1;
+                        const x = playheadTime * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * x;
+                        if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                            glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                        }
+                    } else {
+                        const viewCenter = viewport.atCenter();
+                        const y = viewCenter.transitRaw(space).y;
+                        const x = playheadTime * (200 * neu);
+                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
+                        viewport.translateTo(targetPoint);
+                    }
+                }
+            } catch {}
             updateVisualNotes(evaluatedNotes);
             createMeasureBars();
+            // Ensure GL overlays/text/regions refresh immediately on scale change by bumping view epoch
+            try {
+                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
+                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                }
+            } catch {}
             
-            const scaleRatio = xScaleFactor / oldScale;
-            const newCenterX = centerInSpace.x * scaleRatio;
-            const newCenterPoint = space.at(newCenterX, centerInSpace.y);
-            viewport.translateTo(newCenterPoint);
+            // Keep the same time (sec) under the screen center after x-scale changes
+            try {
+                const old = oldScale;
+                const neu = xScaleFactor;
+                if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                    const rect = glWorkspace.containerEl.getBoundingClientRect();
+                    const centerX = rect.width * 0.5;
+                    const s = glWorkspace.camera.scale || 1;
+                    if (isTrackingEnabled) {
+                        // When tracking, keep playhead centered to avoid any pop
+                        const x = playheadTime * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * x;
+                    } else {
+                        // Preserve the same world time under the screen center
+                        const worldXCenter = (centerX - glWorkspace.camera.tx) / s;
+                        const secCenter = worldXCenter / (200 * old);
+                        const newWorldX = secCenter * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * newWorldX;
+                    }
+                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                } else {
+                    if (isTrackingEnabled) {
+                        // Tapspace path: keep playhead at screen center
+                        const viewCenter = viewport.atCenter();
+                        const y = viewCenter.transitRaw(space).y;
+                        const x = playheadTime * (200 * neu);
+                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
+                        viewport.translateTo(targetPoint);
+                    } else {
+                        // Preserve current screen-center world x after scaling
+                        const scaleRatio = neu / old;
+                        const newCenterX = centerInSpace.x * scaleRatio;
+                        const newCenterPoint = space.at(newCenterX, centerInSpace.y);
+                        viewport.translateTo(newCenterPoint);
+                    }
+                }
+            } catch {}
+
+            // Clear scaling flag on next frame to suppress one recenter in updatePlayhead
+            try {
+                requestAnimationFrame(() => { __rmtScalingXActive = false; });
+            } catch {
+                setTimeout(() => { __rmtScalingXActive = false; }, 0);
+            }
+            try { updatePlayhead(); } catch {}
         };
       
         handlers.yInput = (e) => {
             yScaleFactor = parseFloat(e.target.value);
+            // Immediately update renderer scale factors so Y-dependent overlays stay consistent
+            try {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
+                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                }
+            } catch {}
             updateVisualNotes(evaluatedNotes);
             updateBaseNotePosition();
+            // Bump view epoch so GL overlays that depend on viewport epoch refresh on Y-scale changes
+            try {
+                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
+                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                }
+            } catch {}
         };
       
         handlers.xChange = (e) => {
+            __rmtScalingXActive = true;
+            // Ensure playhead draws at viewport center during scaling when tracking is enabled
+            try {
+                if (isTrackingEnabled) {
+                    if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
+                        glWorkspace.renderer.setTrackingMode(true);
+                    } else if (glRenderer && typeof glRenderer.setTrackingMode === 'function') {
+                        glRenderer.setTrackingMode(true);
+                    }
+                }
+            } catch {}
+
             const viewCenter = viewport.atCenter();
             const centerInSpace = viewCenter.transitRaw(space);
             
             const oldScale = xScaleFactor;
             xScaleFactor = parseFloat(e.target.value);
-            
+            // Immediately update renderer scale factors to keep playhead world-x in sync this frame
+            try {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
+                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                }
+            } catch {}
+            // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
+            try {
+                if (isTrackingEnabled) {
+                    const neu = xScaleFactor;
+                    if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                        const rect = glWorkspace.containerEl.getBoundingClientRect();
+                        const centerX = rect.width * 0.5;
+                        const s = glWorkspace.camera.scale || 1;
+                        const x = playheadTime * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * x;
+                        if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                            glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                        }
+                    } else {
+                        const viewCenter = viewport.atCenter();
+                        const y = viewCenter.transitRaw(space).y;
+                        const x = playheadTime * (200 * neu);
+                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
+                        viewport.translateTo(targetPoint);
+                    }
+                }
+            } catch {}
             updateVisualNotes(evaluatedNotes);
             createMeasureBars();
+            // Ensure GL overlays/text/regions refresh immediately on scale change by bumping view epoch
+            try {
+                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
+                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                }
+            } catch {}
             
-            const scaleRatio = xScaleFactor / oldScale;
-            const newCenterX = centerInSpace.x * scaleRatio;
-            const newCenterPoint = space.at(newCenterX, centerInSpace.y);
-            viewport.translateTo(newCenterPoint);
+            // Keep the same time (sec) under the screen center after x-scale changes
+            try {
+                const old = oldScale;
+                const neu = xScaleFactor;
+                if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                    const rect = glWorkspace.containerEl.getBoundingClientRect();
+                    const centerX = rect.width * 0.5;
+                    const s = glWorkspace.camera.scale || 1;
+                    if (isTrackingEnabled) {
+                        // When tracking, keep playhead centered to avoid any pop
+                        const x = playheadTime * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * x;
+                    } else {
+                        // Preserve the same world time under the screen center
+                        const worldXCenter = (centerX - glWorkspace.camera.tx) / s;
+                        const secCenter = worldXCenter / (200 * old);
+                        const newWorldX = secCenter * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * newWorldX;
+                    }
+                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                } else {
+                    if (isTrackingEnabled) {
+                        // Tapspace path: keep playhead at screen center
+                        const viewCenter = viewport.atCenter();
+                        const y = viewCenter.transitRaw(space).y;
+                        const x = playheadTime * (200 * neu);
+                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
+                        viewport.translateTo(targetPoint);
+                    } else {
+                        // Preserve current screen-center world x after scaling
+                        const scaleRatio = neu / old;
+                        const newCenterX = centerInSpace.x * scaleRatio;
+                        const newCenterPoint = space.at(newCenterX, centerInSpace.y);
+                        viewport.translateTo(newCenterPoint);
+                    }
+                }
+            } catch {}
+
+            // Clear scaling flag on next frame to suppress one recenter in updatePlayhead
+            try {
+                requestAnimationFrame(() => { __rmtScalingXActive = false; });
+            } catch {
+                setTimeout(() => { __rmtScalingXActive = false; }, 0);
+            }
+            try { updatePlayhead(); } catch {}
         };
       
         handlers.yChange = (e) => {
             yScaleFactor = parseFloat(e.target.value);
+            // Immediately update renderer scale factors so Y-dependent overlays stay consistent
+            try {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
+                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                }
+            } catch {}
             updateVisualNotes(evaluatedNotes);
             updateBaseNotePosition();
+            // Bump view epoch so GL overlays that depend on viewport epoch refresh on Y-scale changes
+            try {
+                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
+                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                }
+            } catch {}
         };
         
         handlers.toggle = () => {
@@ -325,9 +643,33 @@ document.addEventListener('DOMContentLoaded', async function() {
             toggle.classList.add('active');
         }
     }
+    // Auto-close scale controls when clicking (not dragging/zooming) outside
+    (function setupScaleControlsAutoClose(){
+        try {
+            if (document.__rmtScaleAutoCloseAttached) return;
+            document.__rmtScaleAutoCloseAttached = true;
+            const handler = (e) => {
+                try {
+                    // Ignore if a drag/zoom gesture is in progress; only close on genuine clicks
+                    if (typeof isDragging !== 'undefined' && isDragging) return;
+                    const cont = document.getElementById('scale-controls');
+                    const togg = document.getElementById('scale-controls-toggle');
+                    if (!cont || !togg) return;
+                    if (!cont.classList.contains('visible')) return;
+                    const t = e.target;
+                    if (cont.contains(t) || togg.contains(t)) return;
+                    cont.classList.remove('visible');
+                    togg.classList.remove('active');
+                } catch {}
+            };
+            // Use click so zoom/drag gestures (mousedown/mousemove) do not close the panel
+            document.addEventListener('click', handler, true);
+        } catch {}
+    })();
     
     const scaleControls = createScaleControls();
-  
+   
+   
     function batchClassOperation(elements, classesToAdd = [], classesToRemove = []) {
         if (!elements || elements.length === 0) return;
         
@@ -366,7 +708,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             if ('wakeLock' in navigator) {
                 wakeLock = await navigator.wakeLock.request('screen');
                 wakeLock.addEventListener('release', () => {
-                    console.log('Wake Lock was released');
                 });
             } else {
                 console.warn('Wake Lock API not available in this browser.');
@@ -383,12 +724,52 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (wakeLock !== null) {
                 await wakeLock.release();
                 wakeLock = null;
-                console.log('Wake Lock released due to page visibility change');
             }
+            // Persist current module snapshot when tab becomes hidden to ensure reliability
+            try {
+              const snap = (myModule && typeof myModule.createModuleJSON === 'function')
+                ? myModule.createModuleJSON()
+                : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+              if (snap) {
+                localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
+              }
+            } catch {}
         }
     });
   
     requestWakeLock();
+
+    function notify(message, type = 'info') {
+        try {
+            const notification = document.createElement('div');
+            notification.textContent = message;
+            Object.assign(notification.style, {
+                position: 'fixed',
+                bottom: '20px',
+                right: '20px',
+                padding: '10px 20px',
+                borderRadius: '4px',
+                zIndex: '9999',
+                fontFamily: "'Roboto Mono', monospace",
+                fontSize: '14px',
+                transition: 'opacity 0.3s ease-in-out'
+            });
+            if (type === 'success') {
+                Object.assign(notification.style, { backgroundColor: 'rgba(0, 255, 255, 0.8)', color: '#151525' });
+            } else if (type === 'error') {
+                Object.assign(notification.style, { backgroundColor: 'rgba(255, 0, 0, 0.8)', color: '#fff' });
+            } else {
+                Object.assign(notification.style, { backgroundColor: 'rgba(255, 168, 0, 0.8)', color: '#000' });
+            }
+            document.body.appendChild(notification);
+            setTimeout(() => {
+                notification.style.opacity = '0';
+                setTimeout(() => { if (notification.parentNode) document.body.removeChild(notification); }, 300);
+            }, 3000);
+        } catch (e) {
+            console.warn('notify failed', e);
+        }
+    }
   
     if (domCache.resetViewBtn) {
         domCache.resetViewBtn.innerHTML = `
@@ -401,7 +782,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   
     function showDeleteConfirmation(noteId) {
-        window.modals.showDeleteConfirmation(noteId);
+        modals.showDeleteConfirmation(noteId);
     }
   
     function deleteNoteAndDependencies(noteId) {
@@ -421,14 +802,16 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
 
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
         clearSelection();
         invalidateModuleEndTimeCache();
+        try { captureSnapshot(`Delete Note ${noteId} + deps`); } catch {}
     }
 
     function showCleanSlateConfirmation() {
-        window.modals.showCleanSlateConfirmation();
+        modals.showCleanSlateConfirmation();
     }
 
     function cleanSlate() {
@@ -444,15 +827,17 @@ document.addEventListener('DOMContentLoaded', async function() {
         myModule.markNoteDirty(0);
         
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
         clearSelection();
         
         domCache.noteWidget.classList.remove('visible');
+        try { captureSnapshot('Clean Slate'); } catch {}
     }
   
     function showDeleteConfirmationKeepDependencies(noteId) {
-        window.modals.showDeleteConfirmationKeepDependencies(noteId);
+        modals.showDeleteConfirmationKeepDependencies(noteId);
     }
   
     function updateDependentRawExpressions(selectedNoteId, selectedRaw) {
@@ -505,12 +890,21 @@ document.addEventListener('DOMContentLoaded', async function() {
                         const directRefRegex = new RegExp("module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)", "g");
                         newRawExp = newRawExp.replace(directRefRegex, "module.baseNote");
                         
-                        depNote.variables[key] = newRawExp;
                         const baseKey = key.slice(0, -6);
+                        let simplifiedExp = newRawExp;
                         try {
-                            const newFunc = new Function("module", "Fraction", "return " + newRawExp + ";");
+                            if (baseKey === 'startTime') {
+                                simplifiedExp = simplifyStartTime(newRawExp, myModule);
+                            } else if (baseKey === 'duration') {
+                                simplifiedExp = simplifyDuration(newRawExp, myModule);
+                            } else if (baseKey === 'frequency') {
+                                simplifiedExp = simplifyFrequency(newRawExp, myModule);
+                            }
+                        } catch {}
+                        depNote.variables[key] = simplifiedExp;
+                        try {
                             depNote.setVariable(baseKey, function() {
-                                return newFunc(myModule, Fraction);
+                                return __evalExpr(simplifiedExp, myModule);
                             });
                         } catch (err) {
                             console.error("Error compiling new expression for note", depId, "variable", baseKey, ":", err);
@@ -553,7 +947,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             const depNote = myModule.getNoteById(depId);
             if (depNote && !depNote.variables.instrument) {
                 depNote.setVariable('instrument', selectedNoteInstrument);
-                console.log(`Assigned instrument "${selectedNoteInstrument}" to dependent note ${depId}`);
             }
         });
         
@@ -570,10 +963,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
         
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
         clearSelection();
         invalidateModuleEndTimeCache();
+        try { captureSnapshot(`Delete Note ${noteId} (keep deps)`); } catch {}
     }
 
     function checkAndUpdateDependentNotes(noteId, oldDuration, newDuration) {
@@ -595,7 +990,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                 const depStartTime = depNote.getVariable('startTime').valueOf();
                 
                 if (depStartTime < noteStartTime) {
-                    console.log(`Dependent note ${depId} now starts before its parent ${noteId}. Adjusting...`);
                     
                     let currentParent = note;
                     let suitableParent = null;
@@ -641,14 +1035,14 @@ document.addEventListener('DOMContentLoaded', async function() {
                         const beatOffset = offset / beatLength;
                         const offsetFraction = new Fraction(beatOffset);
                         
-                        newRaw = `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`;
+                        newRaw = simplifyStartTime(`module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
                     } else {
                         const parentStartTime = suitableParent.getVariable('startTime').valueOf();
                         const parentDuration = suitableParent.getVariable('duration')?.valueOf() || 0;
                         const parentEndTime = parentStartTime + parentDuration;
                         
                         if (Math.abs(depStartTime - parentEndTime) < 0.01) {
-                            newRaw = `module.getNoteById(${suitableParent.id}).getVariable('startTime').add(module.getNoteById(${suitableParent.id}).getVariable('duration'))`;
+                            newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(module.getNoteById(${suitableParent.id}).getVariable('duration'))`, myModule);
                         } else {
                             const offset = Math.max(depStartTime, parentStartTime) - parentStartTime;
                             const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
@@ -656,11 +1050,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                             const beatOffset = offset / beatLength;
                             const offsetFraction = new Fraction(beatOffset);
                             
-                            newRaw = `module.getNoteById(${suitableParent.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${suitableParent.id}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`;
+                            newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${suitableParent.id}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
                         }
                     }
                     
-                    console.log(`Rewriting dependency for note ${depId} from "${startTimeString}" to "${newRaw}"`);
                     
                     depNote.setVariable('startTime', function() {
                         return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
@@ -673,6 +1066,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
         
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
     }
   
@@ -767,11 +1161,25 @@ document.addEventListener('DOMContentLoaded', async function() {
         }, 0);
     }
   
-    let myModule = await Module.loadFromJSON('moduleSetup.json');
-    window.myModule = myModule;
+    // Load last session from localStorage if available; otherwise load default module
+    let savedSnapshot = null;
+    try { savedSnapshot = JSON.parse(localStorage.getItem('rmt:moduleSnapshot:v1') || 'null'); } catch {}
+    let myModule = await Module.loadFromJSON(savedSnapshot || 'modules/defaultModule.json');
+    setModule(myModule);
     updateNotesPointerEvents();
     let evaluatedNotes = myModule.evaluateModule();
-    let newNotes = Object.keys(evaluatedNotes).map(id => evaluatedNotes[id]).filter(note => 
+    setEvaluatedNotes(evaluatedNotes);
+    // Ensure a true baseline exists before any first user action (color edit, drag, etc.)
+    try {
+      const snap =
+        (myModule && typeof myModule.createModuleJSON === 'function')
+          ? myModule.createModuleJSON()
+          : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+      if (snap) {
+        eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap });
+      }
+    } catch {}
+    let newNotes = Object.keys(evaluatedNotes).map(id => evaluatedNotes[id]).filter(note =>
         note.startTime && note.duration && note.frequency
     );
   
@@ -792,63 +1200,601 @@ document.addEventListener('DOMContentLoaded', async function() {
     const space = tapspace.createSpace();
     viewport.addChild(space);
 
+    // Derive world(space)->screen(viewport) affine from Tapspace point samples
+    function computeWorldToScreenAffine() {
+        try {
+            const p0 = new tapspace.geometry.Point(space, { x: 0, y: 0 });
+            const p1 = new tapspace.geometry.Point(space, { x: 1, y: 0 });
+            const p2 = new tapspace.geometry.Point(space, { x: 0, y: 1 });
+            const s0 = p0.transitRaw(viewport);
+            const s1 = p1.transitRaw(viewport);
+            const s2 = p2.transitRaw(viewport);
+            const a = s1.x - s0.x; // column 1
+            const b = s1.y - s0.y;
+            const c = s2.x - s0.x; // column 2
+            const d = s2.y - s0.y;
+            const e = s0.x;        // translation
+            const f = s0.y;
+            return { a, b, c, d, e, f };
+        } catch (e) {
+            // Fallback to identity if sampling fails
+            return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+        }
+    }
+
+    // Initialize WebGL2 renderer overlay if enabled (Phase 1)
+    try {
+        const containerEl = document.querySelector('.myspaceapp');
+        let __rmtDidInitGL = false;
+
+        // Workspace mode: initialize interactive GL workspace with native camera
+        if (isWebGL2WorkspaceEnabled() && containerEl) {
+            glWorkspace = new Workspace();
+            const okW = glWorkspace.init(containerEl);
+            if (!okW) {
+                glWorkspace = null;
+                try { console.warn('RMT: WebGL2 workspace init returned false (context unavailable)'); } catch {}
+            } else {
+                try {
+                    glWorkspace.setPlayhead(playheadTime);
+                    glWorkspace.sync({
+                        evaluatedNotes,
+                        module: myModule,
+                        xScaleFactor,
+                        yScaleFactor,
+                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
+                    });
+                } catch {}
+
+                // Disable Tapspace zoom/pan to avoid handler conflicts while workspace controls camera
+                try { viewport.zoomable(false); } catch {}
+
+                // In GL-only mode, hide Tapspace DOM notes/triangles/base circle so only GL is visible
+                try {
+                  const shouldHide = isWebGL2GLOutputOnlyEnabled();
+                  let hideStyle = document.getElementById('rmt-hide-dom-notes');
+                  if (shouldHide) {
+                    if (!hideStyle) {
+                      hideStyle = document.createElement('style');
+                      hideStyle.id = 'rmt-hide-dom-notes';
+                      hideStyle.textContent = `
+                        .note-rect, .note-content, #baseNoteCircle, .measure-bar-triangle {
+                          display: none !important;
+                        }
+                      `;
+                      document.head.appendChild(hideStyle);
+                    }
+                  } else {
+                    if (hideStyle && hideStyle.parentNode) {
+                      hideStyle.parentNode.removeChild(hideStyle);
+                    }
+                  }
+                } catch {}
+
+                // Initial center via camera: align BaseNote (x=0, y=freq->worldY) to viewport center
+                try {
+                  const rect = containerEl.getBoundingClientRect();
+                  const cx = rect.left + rect.width * 0.5;
+                  const cy = rect.top  + rect.height * 0.5;
+                  const offX = rect.left;
+                  const offY = rect.top;
+                  const baseNoteFreqInit = myModule.baseNote?.getVariable?.('frequency')?.valueOf?.() ?? 440;
+                  const baseYInit = frequencyToY(baseNoteFreqInit);
+                  const s = 1.0;
+                  // Camera uses container-local translation; Tapspace-like basis is produced by getBasis()
+                  // pageCSS = s*world + (tx + off). For world (0, baseYInit) -> (cx, cy):
+                  const tx = cx - offX - (0 * s);
+                  const ty = cy - offY - (baseYInit * s);
+                  if (glWorkspace && glWorkspace.camera) {
+                    glWorkspace.camera.scale = s;
+                    glWorkspace.camera.tx = tx;
+                    glWorkspace.camera.ty = ty;
+                    // Honor current tracking mode on init (lock X panning when tracking)
+                    glWorkspace.camera.lockX = !!isTrackingEnabled;
+                  }
+                  if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                  }
+                  // Initialize renderer tracking mode based on current tracking state
+                  try {
+                    if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
+                      glWorkspace.renderer.setTrackingMode(!!isTrackingEnabled);
+                    }
+                  } catch {}
+                } catch {}
+
+                // Workspace input wiring: click-to-open/select, background click sets playhead,
+                // hover cursor feedback, and touch/pen picking.
+                try {
+                  // Click: pick note or set playhead on background
+                  if (!containerEl.__rmtWsClickHandler) {
+                    containerEl.__rmtWsClickHandler = (event) => {
+                      try {
+                        const nowTs = (performance && performance.now) ? performance.now() : Date.now();
+                        if (containerEl.__rmtSuppressClickUntil && nowTs < containerEl.__rmtSuppressClickUntil) {
+                          event.stopPropagation();
+                          event.preventDefault();
+                          return;
+                        }
+
+                        // GL stack pick: gather all hits top-most first and cycle on repeated clicks (note/measure/base)
+                        let targetEntry = null;
+                        try {
+                          const stack = (glWorkspace && typeof glWorkspace.pickStackAt === 'function')
+                            ? glWorkspace.pickStackAt(event.clientX, event.clientY, 3)
+                            : [];
+                          const entries = Array.isArray(stack)
+                            ? stack.filter(h => h && (h.type === 'note' || h.type === 'measure' || h.type === 'base'))
+                                    .map(h => ({ type: String(h.type), id: Number(h.id) }))
+                            : [];
+                          if (entries.length > 0 && !isLocked) {
+                            const prev = containerEl.__rmtWsStack || { entries: [], index: -1, lastX: 0, lastY: 0 };
+                            let index = 0;
+
+                            // Determine previous selected entry (type-aware)
+                            const prevSel = (() => {
+                              if (prev.entries && prev.index != null && prev.index >= 0 && prev.index < prev.entries.length) {
+                                return prev.entries[prev.index];
+                              }
+                              if (currentSelectedNote) {
+                                return { type: (currentSelectedNote.id === 0 ? 'base' : (currentSelectedNote.variables && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency ? 'measure' : 'note')), id: Number(currentSelectedNote.id) };
+                              }
+                              return null;
+                            })();
+
+                            // Shallow equality check for stacks
+                            const sameOrder = prev.entries
+                              && prev.entries.length === entries.length
+                              && prev.entries.every((v, i) => v.type === entries[i].type && v.id === entries[i].id);
+
+                            if (sameOrder) {
+                              index = ((prev.index || 0) + 1) % entries.length;
+                            } else if (prevSel) {
+                              const pos = entries.findIndex(e => e.type === prevSel.type && e.id === prevSel.id);
+                              if (pos >= 0) index = (pos + 1) % entries.length;
+                            }
+
+                            targetEntry = entries[index];
+                            containerEl.__rmtWsStack = { entries, index, lastX: event.clientX, lastY: event.clientY };
+                          }
+                        } catch {}
+
+                        if (targetEntry) {
+                          const t = targetEntry.type;
+                          const tid = Number(targetEntry.id);
+
+                          if (t === 'note') {
+                            const note = myModule.getNoteById(tid);
+                            if (note) {
+                              currentSelectedNote = note;
+                              try { syncRendererSelection(); } catch {}
+                              const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+                              if (el) {
+                                showNoteVariables(note, el);
+                              } else {
+                                const baseEl = document.querySelector('.base-note-circle');
+                                showNoteVariables(note, baseEl || document.body);
+                              }
+                              event.stopPropagation();
+                              event.preventDefault();
+                              return;
+                            }
+                          } else if (t === 'measure') {
+                            const measureNote = myModule.getNoteById(tid);
+                            if (measureNote) {
+                              currentSelectedNote = measureNote;
+                              try { syncRendererSelection(); } catch {}
+                              // Anchor: prefer DOM triangle if present; else body
+                              let anchor = document.querySelector(`.measure-bar-triangle[data-note-id="${tid}"]`);
+                              if (!anchor) anchor = document.body;
+                              showNoteVariables(measureNote, anchor, tid);
+                              event.stopPropagation();
+                              event.preventDefault();
+                              return;
+                            }
+                          } else if (t === 'base') {
+                            currentSelectedNote = myModule.baseNote;
+                            try { syncRendererSelection(); } catch {}
+                            let anchor = document.querySelector('.base-note-circle') || document.body;
+                            showNoteVariables(myModule.baseNote, anchor);
+                            event.stopPropagation();
+                            event.preventDefault();
+                            return;
+                          }
+                        }
+
+                        // Background: set playhead using workspace camera mapping
+                        if (!glWorkspace || typeof glWorkspace.screenToWorld !== 'function') return;
+                        const p = glWorkspace.screenToWorld(event.clientX, event.clientY);
+                        let t = p.x / (200 * xScaleFactor);
+                        const moduleEnd = getModuleEndTime();
+                        if (!isFinite(t)) t = 0;
+                        t = Math.max(0, Math.min(moduleEnd, t));
+                        playheadTime = t;
+                        updatePlayhead();
+                        if (isPlaying) { stop(false); }
+                        event.stopPropagation();
+                        event.preventDefault();
+
+                        // Treat background tap like desktop background click: close menus and clear selection
+                        try {
+                            clearSelection();
+                            if (domCache && domCache.plusminus && domCache.generalWidget) {
+                                domCache.plusminus.classList.remove('open');
+                                domCache.generalWidget.classList.remove('open');
+                            }
+                            const dd = document.getElementById('loadModuleDropdown');
+                            const lb = domCache && domCache.loadModuleBtn;
+                            if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
+                                dd.style.display = 'none';
+                            }
+                        } catch {}
+                      } catch {}
+                    };
+                    // Capture so this runs before Tapspace handlers
+                    containerEl.addEventListener('click', containerEl.__rmtWsClickHandler, true);
+                  }
+
+                  // Suppress click after pan/zoom gestures by distance heuristic
+                  if (!containerEl.__rmtWsPointerSuppressionHandlers) {
+                    containerEl.__rmtWsPointerSuppressionHandlers = true;
+                    containerEl.addEventListener('pointerdown', (ev) => {
+                      try {
+                        containerEl.__rmtDownX = ev.clientX;
+                        containerEl.__rmtDownY = ev.clientY;
+                      } catch {}
+                    }, true);
+                    containerEl.addEventListener('pointerup', (ev) => {
+                      try {
+                        const dx = ev.clientX - (containerEl.__rmtDownX || ev.clientX);
+                        const dy = ev.clientY - (containerEl.__rmtDownY || ev.clientY);
+                        const dist = Math.hypot(dx, dy);
+                        if (dist > 5) {
+                          const now = (performance && performance.now) ? performance.now() : Date.now();
+                          containerEl.__rmtSuppressClickUntil = now + 250;
+                        }
+                      } catch {}
+                    }, true);
+                  }
+
+                  // Hover cursor feedback (pointer when hovering a note)
+                  // In GL Workspace mode, Workspace manages hover and cursor mapping; skip legacy cursor handler.
+                  if (!containerEl.__rmtWsMoveHandler && !glWorkspace) {
+                    containerEl.__rmtWsMoveHandler = (event) => {
+                      try {
+                        const hit = (glWorkspace && typeof glWorkspace.pickAt === 'function')
+                          ? glWorkspace.pickAt(event.clientX, event.clientY, 2)
+                          : null;
+                        if (hit && hit.type === 'note' && !isLocked) {
+                          containerEl.style.cursor = 'pointer';
+                        } else {
+                          containerEl.style.cursor = '';
+                        }
+                      } catch {}
+                    };
+                    containerEl.addEventListener('mousemove', containerEl.__rmtWsMoveHandler, true);
+                    containerEl.addEventListener('mouseleave', () => { try { containerEl.style.cursor = ''; } catch {} }, true);
+                  }
+
+                  // Touch/pen: pick on pointerdown to mirror click-to-open
+                  if (!containerEl.__rmtWsPointerDownPickHandler) {
+                    containerEl.__rmtWsPointerDownPickHandler = (event) => {
+                      try {
+                        // Touch/pen: do NOT select on pointerdown. Selection is handled on click/tap only.
+                        if (event.pointerType === 'mouse') return;
+
+                        // Track active pointers to distinguish pinch from tap
+                        containerEl.__rmtActivePointers = (containerEl.__rmtActivePointers || 0) + 1;
+                        const dec = (ev) => {
+                          try { containerEl.__rmtActivePointers = Math.max(0, (containerEl.__rmtActivePointers || 1) - 1); } catch {}
+                          try { containerEl.removeEventListener('pointerup', dec, true); } catch {}
+                          try { containerEl.removeEventListener('pointercancel', dec, true); } catch {}
+                        };
+                        containerEl.addEventListener('pointerup', dec, true);
+                        containerEl.addEventListener('pointercancel', dec, true);
+
+                        // Ignore starting on legacy DOM overlays; their own handlers will manage interactions
+                        const t = event.target;
+                        if (t && t.closest && (t.closest('.note-rect') || t.closest('.measure-bar-triangle') || t.closest('#baseNoteCircle'))) {
+                          return;
+                        }
+
+                        // Record tap candidate; click handler will decide if it's a tap (no move/pinch) or drag/zoom
+                        containerEl.__rmtTouchTapCandidate = {
+                          x: event.clientX,
+                          y: event.clientY,
+                          time: (performance && performance.now) ? performance.now() : Date.now(),
+                          id: event.pointerId
+                        };
+                        // Do not stop propagation: allow workspace camera/drag gestures to proceed
+                      } catch {}
+                    };
+                    containerEl.addEventListener('pointerdown', containerEl.__rmtWsPointerDownPickHandler, true);
+                  }
+                } catch {}
+
+                __rmtDidInitGL = true;
+            }
+        }
+
+        // Phase 1 overlay fallback when workspace is not active
+        if (false && !__rmtDidInitGL && isWebGL2RendererEnabled() && containerEl) {
+            glRenderer = new RendererAdapter();
+            const ok = glRenderer.init(containerEl);
+            if (!ok) {
+                glRenderer = null;
+                try { console.warn('RMT: WebGL2 overlay init returned false (context unavailable)'); } catch {}
+            } else {
+                try {
+                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                    glRenderer.setPlayhead(playheadTime);
+                    glRenderer.sync({ evaluatedNotes, module: myModule, xScaleFactor, yScaleFactor, selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null });
+                    try { console.info('RMT: WebGL2 overlay initialized'); } catch {}
+
+                    // Visible badge retained for overlay mode only (workspace mode shows no badge)
+                    let badge = document.getElementById('rmt-webgl2-badge');
+                    if (!badge) {
+                        badge = document.createElement('div');
+                        badge.id = 'rmt-webgl2-badge';
+                        Object.assign(badge.style, {
+                            position: 'fixed',
+                            top: '6px',
+                            left: '6px',
+                            padding: '4px 8px',
+                            background: 'rgba(255,168,0,0.9)',
+                            color: '#151525',
+                            fontFamily: "'Roboto Mono', monospace",
+                            fontSize: '12px',
+                            borderRadius: '4px',
+                            zIndex: '10000',
+                            pointerEvents: 'none',
+                            boxShadow: '0 0 6px rgba(0,0,0,0.35)'
+                        });
+                        badge.textContent = isWebGL2GLOutputOnlyEnabled() ? 'WebGL2 Renderer (GL-only)' : 'WebGL2 Renderer (overlay)';
+                        document.body.appendChild(badge);
+                    }
+
+                    // In GL-only mode, hide Tapspace DOM notes/triangles/base circle so only GL is visible
+                    try {
+                      const shouldHide = isWebGL2GLOutputOnlyEnabled();
+                      let hideStyle = document.getElementById('rmt-hide-dom-notes');
+                      if (shouldHide) {
+                        if (!hideStyle) {
+                          hideStyle = document.createElement('style');
+                          hideStyle.id = 'rmt-hide-dom-notes';
+                          hideStyle.textContent = `
+                            .note-rect, .note-content, #baseNoteCircle, .measure-bar-triangle {
+                              display: none !important;
+                            }
+                          `;
+                          document.head.appendChild(hideStyle);
+                        }
+                      } else {
+                        if (hideStyle && hideStyle.parentNode) {
+                          hideStyle.parentNode.removeChild(hideStyle);
+                        }
+                      }
+                    } catch {}
+// GPU picking: container-level click-to-open modal when overlay is active
+try {
+  if (!containerEl.__rmtGlClickHandler) {
+    containerEl.__rmtGlClickHandler = (event) => {
+      try {
+        if (!glRenderer) return;
+
+        const t = event.target;
+        // Let DOM note/base/measure clicks be handled by existing handlers
+        if (t && t.closest && (t.closest('.note-rect') || t.closest('.measure-bar-triangle') || t.closest('#baseNoteCircle'))) {
+          return;
+        }
+
+        const hit = glRenderer.pickAt(event.clientX, event.clientY, 3);
+        if (hit && hit.type === 'note') {
+          const note = myModule.getNoteById(Number(hit.id));
+          if (!note) return;
+
+          currentSelectedNote = note;
+          try { syncRendererSelection(); } catch {}
+
+          // Use existing DOM element for modal anchoring while Tapspace DOM still exists
+          const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+          if (el) {
+            showNoteVariables(note, el);
+          } else {
+            const baseEl = document.querySelector('.base-note-circle');
+            showNoteVariables(note, baseEl || document.body);
+          }
+
+          event.stopPropagation();
+          event.preventDefault();
+        }
+      } catch (e) {
+        try { console.warn('GPU pick handler error', e); } catch {}
+      }
+    };
+    // Capture to run before Tapspace handlers
+    containerEl.addEventListener('click', containerEl.__rmtGlClickHandler, true);
+  }
+// GPU picking: hover cursor feedback when overlay is active
+try {
+  if (!containerEl.__rmtGlMoveHandler) {
+    containerEl.__rmtGlMoveHandler = (event) => {
+      try {
+        if (!glRenderer) return;
+        const hit = glRenderer.pickAt(event.clientX, event.clientY, 2);
+        // Show pointer only when hovering a note and not in locked mode
+        if (hit && hit.type === 'note' && !isLocked) {
+          containerEl.style.cursor = 'pointer';
+        } else {
+          containerEl.style.cursor = '';
+        }
+      } catch {}
+    };
+    containerEl.addEventListener('mousemove', containerEl.__rmtGlMoveHandler, true);
+    containerEl.addEventListener('mouseleave', () => { try { containerEl.style.cursor = ''; } catch {} }, true);
+  }
+} catch {}
+// GPU picking: pointerdown handler for touch/pen to mirror click-to-open modal
+try {
+  if (!containerEl.__rmtGlPointerDownHandler) {
+    containerEl.__rmtGlPointerDownHandler = (event) => {
+      try {
+        if (!glRenderer) return;
+        // Only handle non-mouse pointers here; mouse is handled by 'click'
+        if (event.pointerType === 'mouse') return;
+
+        const t = event.target;
+        // Defer to existing DOM handlers if interacting with legacy elements
+        if (t && t.closest && (t.closest('.note-rect') || t.closest('.measure-bar-triangle') || t.closest('#baseNoteCircle'))) {
+          return;
+        }
+
+        const hit = glRenderer.pickAt(event.clientX, event.clientY, 4);
+        if (hit && hit.type === 'note') {
+          const note = myModule.getNoteById(Number(hit.id));
+          if (!note) return;
+
+          currentSelectedNote = note;
+          try { syncRendererSelection(); } catch {}
+
+          const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+          if (el) {
+            showNoteVariables(note, el);
+          } else {
+            const baseEl = document.querySelector('.base-note-circle');
+            showNoteVariables(note, baseEl || document.body);
+          }
+
+          event.stopPropagation();
+          event.preventDefault();
+        }
+      } catch (e) {
+        try { console.warn('GPU pointerdown pick handler error', e); } catch {}
+      }
+    };
+    containerEl.addEventListener('pointerdown', containerEl.__rmtGlPointerDownHandler, true);
+  }
+} catch {}
+} catch {}
+                } catch {}
+            }
+        } else if (!__rmtDidInitGL) {
+            try {
+                console.info('RMT: WebGL2 unavailable or failed to initialize; running Tapspace DOM mode');
+            } catch {}
+        }
+    } catch (e) {
+        console.warn('WebGL2 renderer initialization failed', e);
+    }
+
     const canvasEl = document.querySelector('.myspaceapp');
     canvasEl.addEventListener('dragover', (event) => {
-        if (event.dataTransfer.types.includes('application/json')) {
+        try {
+            const types = Array.from(event.dataTransfer?.types || []);
+            if (types.includes('application/json') || types.includes('text/plain')) {
+                event.preventDefault();
+                // Hint a copy action for better UX
+                try { event.dataTransfer.dropEffect = 'copy'; } catch {}
+            }
+        } catch {
+            // Be permissive if probing types fails
             event.preventDefault();
         }
     }, false);
     canvasEl.addEventListener('drop', (event) => {
-        if (!event.dataTransfer.types.includes('application/json')) return;
-
+        // Always prevent default when we intend to accept drops
         event.preventDefault();
-
+    
         const dropX = event.clientX;
         const dropY = event.clientY;
-
+    
+        // Try to resolve a DOM target first (legacy/Tapspace path)
         const elements = document.elementsFromPoint(dropX, dropY);
-
         let targetNoteId = null;
-        let isBaseNote = false;
+        let targetContainer = null;
         for (const el of elements) {
-            if (el.classList.contains('note-content') && el.hasAttribute('data-note-id')) {
-            targetNoteId = Number(el.getAttribute('data-note-id'));
-            break;
-            }
-            if (el.classList.contains('base-note-circle') && el.hasAttribute('data-note-id')) {
-            targetNoteId = Number(el.getAttribute('data-note-id'));
-            isBaseNote = true;
-            break;
+            const container = el.closest ? el.closest('[data-note-id]') : null;
+            if (container) {
+                targetContainer = container;
+                break;
             }
         }
-
-        if (targetNoteId === null) {
-            targetNoteId = 0;
-            isBaseNote = true;
+        if (targetContainer) {
+            targetNoteId = Number(targetContainer.getAttribute('data-note-id'));
         }
-
+    
+        // If no DOM target and GL workspace is active, use GPU picking at drop point
+        if (targetNoteId == null) {
+            try {
+                if (glWorkspace && typeof glWorkspace.pickAt === 'function') {
+                    const hit = glWorkspace.pickAt(dropX, dropY, 4);
+                    if (hit && hit.type === 'note') {
+                        targetNoteId = Number(hit.id);
+                    }
+                }
+            } catch {}
+        }
+    
+        // Fallback: current selection, otherwise BaseNote
+        if (targetNoteId == null) {
+            targetNoteId = (currentSelectedNote && currentSelectedNote.id != null)
+              ? Number(currentSelectedNote.id)
+              : 0;
+        }
+    
+        // Read the transferred data (support both application/json and text/plain)
+        let raw = null;
+        try {
+            raw = event.dataTransfer.getData('application/json');
+            if (!raw) raw = event.dataTransfer.getData('text/plain');
+        } catch {}
+        if (!raw) {
+            console.warn('Drop ignored: no transferable data payload found');
+            return;
+        }
+    
         let data;
         try {
-            data = event.dataTransfer.getData('application/json');
-            if (!data) data = event.dataTransfer.getData('text/plain');
-            if (!data) return;
-            data = JSON.parse(data);
+            data = JSON.parse(raw);
         } catch (err) {
             console.error('Could not parse dropped module data', err);
             return;
         }
-
-        let targetNote = window.myModule.getNoteById(targetNoteId);
-        if (!targetNote) targetNote = window.myModule.baseNote;
-
+    
+        let targetNote = myModule.getNoteById(Number(targetNoteId));
+        if (!targetNote) targetNote = myModule.baseNote;
+    
         importModuleAtTarget(targetNote, data);
     }, false);
 
+// Mobile fallback: import module JSON from clipboard paste (supports long-press copy + paste on mobile)
+document.addEventListener('paste', (event) => {
+    try {
+        const cd = event.clipboardData;
+        if (!cd) return;
+        let raw = '';
+        try { raw = cd.getData('application/json'); } catch {}
+        if (!raw) { try { raw = cd.getData('text/plain'); } catch {} }
+        if (!raw) return;
+
+        let data = null;
+        try { data = JSON.parse(raw); } catch { return; }
+
+        // Choose a sensible target: selected note if any, otherwise BaseNote
+        let targetNote = currentSelectedNote || myModule.baseNote;
+        if (!targetNote) targetNote = myModule.baseNote;
+
+        importModuleAtTarget(targetNote, data);
+        try { notify('Module imported from clipboard', 'success'); } catch {}
+    } catch {}
+}, false);
     let centerPoint = null;
   
     let currentSelectedNote = null;
 
-    initializeOctaveIndicators();
+    if (!isWebGL2RendererEnabled()) {
+        initializeOctaveIndicators();
+    }
   
     if (domCache.saveModuleBtn) {
         domCache.saveModuleBtn.addEventListener('click', saveModule);
@@ -857,11 +1803,33 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   
     if (domCache.resetViewBtn) {
-        domCache.resetViewBtn.addEventListener('click', () => {
+        domCache.resetViewBtn.addEventListener('click', (e) => {
+            // When tracking is active during playback, ignore reset without causing any side effects.
+            if (isTrackingEnabled) {
+                try {
+                    if (e) { e.preventDefault(); if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation(); e.stopPropagation(); }
+                } catch {}
+                return;
+            }
+
             const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
             const baseNoteY = frequencyToY(baseNoteFreq);
-            const origin = space.at(0, baseNoteY);
-            viewport.translateTo(origin);
+            if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+// Reset view in Workspace: center world (0, baseY) to container center, keep current zoom
+                try {
+                    const rect = glWorkspace.containerEl.getBoundingClientRect();
+                    const s = glWorkspace.camera.scale || 1;
+                    const centerX = rect.width * 0.5;
+                    const centerY = rect.height * 0.5;
+                    glWorkspace.camera.tx = centerX - s * 0;
+                    glWorkspace.camera.ty = centerY - s * baseNoteY;
+                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                } catch {}
+            } else {
+                // Legacy Tapspace path
+                const origin = space.at(0, baseNoteY);
+                viewport.translateTo(origin);
+            }
         });
     }
   
@@ -871,6 +1839,16 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         try {
+            // Reject drop on silences (notes with startTime+duration and no frequency)
+            try {
+              const __isSilence = (n) => {
+                try { return !!(n && n.getVariable('startTime') && n.getVariable('duration') && !n.getVariable('frequency')); } catch { return false; }
+              };
+              if (__isSilence(targetNote)) {
+                try { notify('Cannot drop onto a silence. Drop on a note or the BaseNote instead.', 'error'); } catch {}
+                return;
+              }
+            } catch {}
             let importedModule;
             let filename = null;
             
@@ -895,43 +1873,79 @@ document.addEventListener('DOMContentLoaded', async function() {
                 mapping[id] = newId;
                 newId++;
             }
-            
             myModule.nextId = newId;
-        
+
+            // Per-import cache to avoid repeating the same string remapping across many notes
+            const exprRemapCache = new Map();
+
+            // Ensure imported expressions anchor to the actual drop target (requirement)
             function updateExpression(expr) {
-                if (targetNote.id !== 0) {
-                    let relativeId = (typeof targetNote.parentId !== 'undefined' && targetNote.parentId !== null)
-                        ? targetNote.parentId
-                        : 0;
-                        
-                    expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(match, varName) {
-                        return "module.getNoteById(" + relativeId + ").getVariable('" + varName + "')";
+                if (typeof expr !== 'string') return expr;
+                const cached = exprRemapCache.get(expr);
+                if (cached) return cached;
+
+                const originalExpr = expr;
+
+                const hasBase = expr.indexOf('module.baseNote') !== -1;
+                const hasIds  = expr.indexOf('getNoteById(') !== -1;
+
+                // Remap base-note anchored constructs to the selected target when dropping onto a non-base note.
+                if (targetNote.id !== 0 && hasBase) {
+                    const anchorId = targetNote.id;
+
+                    // Remap baseNote variable access
+                    expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
+                        return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
                     });
-                } else {
-                    expr = expr.replace(/module\.baseNote/g, "module.baseNote");
+
+                    // Remap common helpers that take baseNote as argument
+                    expr = expr.replace(/module\.findTempo\(\s*module\.baseNote\s*\)/g, "module.findTempo(module.getNoteById(" + anchorId + "))");
+                    expr = expr.replace(/module\.findMeasureLength\(\s*module\.baseNote\s*\)/g, "module.findMeasureLength(module.getNoteById(" + anchorId + "))");
                 }
-            
-                expr = expr.replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, function(match, p1) {
-                    const oldRef = parseInt(p1, 10);
-                    if (mapping.hasOwnProperty(oldRef)) {
-                        return "module.getNoteById(" + mapping[oldRef] + ")";
+
+                // Remap explicit id references using the mapping table (includes 0 -> target id)
+                if (hasIds) {
+                    expr = expr.replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, function(match, p1) {
+                        const oldRef = parseInt(p1, 10);
+                        if (mapping.hasOwnProperty(oldRef)) {
+                            return "module.getNoteById(" + mapping[oldRef] + ")";
+                        }
+                        return match;
+                    });
+                }
+
+                // Canonicalize expression via central simplifier after remapping
+                let simplified = expr;
+                try {
+                    const hasStart = /getVariable\(\s*'startTime'\s*\)/.test(expr);
+                    const hasTempo = /findTempo\(/.test(expr);
+                    const hasDurRef = /getVariable\(\s*'duration'\s*\)/.test(expr);
+                    const hasFreqRef = /getVariable\(\s*'frequency'\s*\)/.test(expr);
+                    if (hasStart) {
+                        simplified = simplifyStartTime(expr, myModule);
+                    } else if (hasTempo || hasDurRef) {
+                        simplified = simplifyDuration(expr, myModule);
+                    } else if (hasFreqRef) {
+                        simplified = simplifyFrequency(expr, myModule);
                     }
-                    return match;
-                });
-            
-                return expr;
+                } catch (e) {
+                    simplified = expr;
+                }
+                exprRemapCache.set(originalExpr, simplified);
+                return simplified;
             }
         
-            for (const id in importedModule.notes) {
-                if (Number(id) === 0) continue;
+            // Non-chunked import: map and insert all notes in a single pass
+            const allIds = Object.keys(importedModule.notes).filter(k => Number(k) !== 0);
+            for (const id of allIds) {
                 const impNote = importedModule.notes[id];
                 const oldId = impNote.id;
                 impNote.id = mapping[oldId];
-                
+
                 if (filename) {
                     impNote.originalFilename = filename;
                 }
-                
+
                 if (typeof impNote.parentId !== 'undefined') {
                     const oldParent = impNote.parentId;
                     if (mapping.hasOwnProperty(oldParent)) {
@@ -940,14 +1954,32 @@ document.addEventListener('DOMContentLoaded', async function() {
                         impNote.parentId = targetNote.id;
                     }
                 }
+
                 for (const key in impNote.variables) {
-                    if (typeof impNote.variables[key] === 'string' && key.endsWith("String")) {
-                        let originalString = impNote.variables[key];
-                        impNote.variables[key] = updateExpression(originalString);
+                    const val = impNote.variables[key];
+                    if (typeof val === 'string' && key.endsWith("String")) {
+                        // Remap only when needed; avoid regex if not necessary
+                        let originalString = val;
+                        const needsRemap = (originalString.indexOf('module.baseNote') !== -1) || (originalString.indexOf('getNoteById(') !== -1);
                         const baseKey = key.slice(0, -6);
-                        impNote.setVariable(baseKey, function() {
-                            return new Function("module", "Fraction", "return " + impNote.variables[key] + ";")(myModule, Fraction);
-                        });
+
+                        // Always canonicalize by type to ensure predictable UI (e.g., duration selector preselect)
+                        let expr = needsRemap ? updateExpression(originalString) : originalString;
+                        try {
+                            if (baseKey === 'duration') {
+                                expr = simplifyDuration(expr, myModule);
+                            } else if (baseKey === 'startTime') {
+                                expr = simplifyStartTime(expr, myModule);
+                            } else if (baseKey === 'frequency') {
+                                expr = simplifyFrequency(expr, myModule);
+                            }
+                        } catch {}
+
+                        impNote.variables[key] = expr;
+                        // Assign function directly (no setVariable) to avoid emitting events per variable
+                        impNote.variables[baseKey] = function() {
+                            return __evalExpr(expr, myModule);
+                        };
                     } else if (key === 'color') {
                         impNote.variables.color = impNote.variables.color;
                     }
@@ -956,37 +1988,205 @@ document.addEventListener('DOMContentLoaded', async function() {
                 myModule.notes[impNote.id] = impNote;
             }
         
-            myModule._evaluationCache = {};
-            myModule._lastEvaluationTime = 0;
-            myModule._dependenciesCache.clear();
-            myModule._dependentsCache.clear();
-            
-            for (const id in myModule.notes) {
-                myModule.markNoteDirty(Number(id));
-            }
-            
+
+            // Incremental import path with targeted dirty marking and timings
+            const importedIds = Object.keys(mapping).filter(k => Number(k) !== 0).map(k => mapping[k]);
+
+            // Normalize imported measure chains to ensure correct parentage and chaining after a module drop.
+            // This prevents cross-chain contamination where dragging a dropped measure would affect unrelated measures.
+            (function __normalizeImportedMeasureChains(){
+              try {
+                const importedSet = new Set(importedIds.map(Number));
+                const isMeasure = (n) => {
+                  try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); } catch { return false; }
+                };
+                // Collect imported measures
+                const measures = importedIds
+                  .map(id => myModule.getNoteById(Number(id)))
+                  .filter(n => isMeasure(n));
+                if (!measures.length) return;
+
+                // Build graph within the imported set: measure -> dependent measures (by startTimeString reference)
+                const depMap = new Map(); // id -> dependent ids[]
+                const indeg = new Map();  // id -> incoming count
+                measures.forEach(n => { depMap.set(n.id, []); indeg.set(n.id, 0); });
+
+                const refsMeasure = (raw, id) => {
+                  try { return new RegExp(`getNoteById\\(\\s*${id}\\s*\\)`).test(raw || ''); } catch { return false; }
+                };
+
+                measures.forEach(m => {
+                  const raw = (m.variables && m.variables.startTimeString) ? m.variables.startTimeString : '';
+                  for (const other of measures) {
+                    if (other.id === m.id) continue;
+                    if (refsMeasure(raw, other.id)) {
+                      depMap.get(other.id).push(m.id);
+                      indeg.set(m.id, (indeg.get(m.id) || 0) + 1);
+                    }
+                  }
+                });
+
+                // Roots = imported measures that do NOT reference another imported measure in their startTime
+                const roots = measures.filter(m => (indeg.get(m.id) || 0) === 0);
+
+                // Linearize each root’s chain forward by earliest evaluated start
+                const visitChain = (root) => {
+                  const chain = [root.id];
+                  let cur = root.id;
+                  const pickNext = () => {
+                    const list = depMap.get(cur) || [];
+                    if (!list.length) return null;
+                    let best = null, bestStart = Infinity;
+                    list.forEach(cid => {
+                      try {
+                        const n = myModule.getNoteById(Number(cid));
+                        const s = Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
+                        if (s < bestStart) { bestStart = s; best = cid; }
+                      } catch {}
+                    });
+                    return best;
+                  };
+                  let next = pickNext();
+                  while (next != null) {
+                    chain.push(Number(next));
+                    cur = Number(next);
+                    next = pickNext();
+                  }
+                  return chain;
+                };
+
+                const chains = [];
+                roots.forEach(r => { chains.push(visitChain(r)); });
+
+                // Canonicalize each imported chain:
+                // - First element keeps its existing parent anchor (non-measure note or BaseNote).
+                //   We only fix parentId to match that anchor if possible.
+                // - Subsequent measures are anchored to previous measure END via findMeasureLength(prev).
+                chains.forEach(chain => {
+                  if (!Array.isArray(chain) || chain.length === 0) return;
+
+                  // First measure in the imported chain: fix parentId to match anchor in startTimeString
+                  const first = myModule.getNoteById(Number(chain[0]));
+                  const raw0 = (first && first.variables && first.variables.startTimeString) ? first.variables.startTimeString : '';
+                  const m0 = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
+                  let parentIdForPID = 0;
+                  if (m0) {
+                    const pid = parseInt(m0[1], 10);
+                    const pn = myModule.getNoteById(pid);
+                    if (pn && !isMeasure(pn)) {
+                      parentIdForPID = pid;
+                    } else {
+                      parentIdForPID = 0;
+                    }
+                  } else if ((raw0 || '').includes('module.baseNote')) {
+                    parentIdForPID = 0;
+                  } else if (targetNote && typeof targetNote.id === 'number') {
+                    parentIdForPID = targetNote.id;
+                  }
+                  try { first.parentId = parentIdForPID; } catch {}
+
+                  // Subsequent measures: start = prev.startTime + findMeasureLength(prev), and parentId = prev.id
+                  for (let i = 1; i < chain.length; i++) {
+                    const prevId = Number(chain[i - 1]);
+                    const curId  = Number(chain[i]);
+                    const curNote = myModule.getNoteById(curId);
+                    if (!curNote) continue;
+                    const rawStart = `module.getNoteById(${prevId}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevId})))`;
+                    const simplifiedStart = simplifyStartTime(rawStart, myModule);
+                    curNote.setVariable('startTime', function () { return __evalExpr(simplifiedStart, myModule); });
+                    curNote.setVariable('startTimeString', simplifiedStart);
+                    try { curNote.parentId = prevId; } catch {}
+                    try { myModule.markNoteDirty(curId); } catch {}
+                  }
+                });
+              } catch (e) {
+                console.warn('normalizeImportedMeasureChains failed', e);
+              }
+            })();
+
+            // Avoid global cache flush; only mark affected notes dirty
+            try {
+                myModule.markNoteDirty(0);
+                if (targetNote && typeof targetNote.id === 'number') myModule.markNoteDirty(targetNote.id);
+                importedIds.forEach(id => myModule.markNoteDirty(Number(id)));
+            } catch {}
+
             invalidateModuleEndTimeCache();
-            
-            if (window.modals && window.modals.invalidateDependencyGraphCache) {
-                window.modals.invalidateDependencyGraphCache();
+
+            evaluatedNotes = myModule.evaluateModule();
+            setEvaluatedNotes(evaluatedNotes);
+
+            // Immediate incremental render of new notes for fast feedback
+            try { renderNotesIncrementally(importedIds); } catch (e) { console.warn('incremental render error', e); }
+
+            // Also refresh GL renderer immediately so user sees result without panning
+            try {
+                if (glRenderer) {
+                    glRenderer.sync({
+                        evaluatedNotes,
+                        module: myModule,
+                        xScaleFactor,
+                        yScaleFactor,
+                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
+                    });
+                }
+            } catch (e) { console.warn('glRenderer immediate sync after import failed', e); }
+
+            // Immediate UI + history updates to avoid relying on throttled idle callbacks
+            try {
+                if (modals && modals.invalidateDependencyGraphCache) {
+                    modals.invalidateDependencyGraphCache();
+                }
+                updateVisualNotes(evaluatedNotes);
+                createMeasureBars();
+                try { captureSnapshot(`Import Module at ${targetNote.id}`); } catch {}
+            } catch (e) {
+                console.warn('import sync failed', e);
             }
-            
-            window.evaluatedNotes = myModule.evaluateModule();
-            updateVisualNotes(window.evaluatedNotes);
-            createMeasureBars();
-            
-            console.log("Module import complete with full cache reset");
-            
+
+
         } catch (error) {
             console.error("Error importing module at target note:", error);
         }
     }
-    window.importModuleAtTarget = importModuleAtTarget;
     
     function animationLoop() {
-        updateOctaveIndicators();
+        if (!glRenderer && !glWorkspace) { updateOctaveIndicators(); }
         updatePlayhead();
         updateMeasureBarPositions();
+        if (glWorkspace) {
+            try {
+                glWorkspace.setPlayhead(playheadTime);
+                // Event-driven sync: only push scene buffers during interactions (e.g., drag/resize)
+                if (glTempOverrides) {
+                    glWorkspace.sync({
+                        evaluatedNotes,
+                        module: myModule,
+                        xScaleFactor,
+                        yScaleFactor,
+                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
+                        tempOverrides: glTempOverrides
+                    });
+                }
+            } catch {}
+        }
+        if (glRenderer) {
+            try {
+                glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                glRenderer.setPlayhead(playheadTime);
+                // Event-driven sync: only push scene buffers during interactions (e.g., drag/resize)
+                if (glTempOverrides) {
+                    glRenderer.sync({
+                        evaluatedNotes,
+                        module: myModule,
+                        xScaleFactor,
+                        yScaleFactor,
+                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
+                        tempOverrides: glTempOverrides
+                    });
+                }
+            } catch {}
+        }
         requestAnimationFrame(animationLoop);
     }
     requestAnimationFrame(animationLoop);
@@ -994,8 +2194,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     function bringSelectedNoteToFront(note, clickedElement) {
         if (!note || !clickedElement) return;
         
-        if (window.updateStackClickSelectedNote) {
-            window.updateStackClickSelectedNote(note.id);
+        if (typeof updateStackClickSelectedNote === 'function') {
+            updateStackClickSelectedNote(note.id);
         }
         
         const noteId = note.id;
@@ -1102,20 +2302,22 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     function showNoteVariables(note, clickedElement, measureId = null) {
-        if (window.modals) {
-            if (note !== window.myModule.baseNote && measureId === null) {
+        if (modals) {
+            if (note !== myModule.baseNote && measureId === null) {
                 bringSelectedNoteToFront(note, clickedElement);
             }
             
-            window.modals.showNoteVariables(note, clickedElement, measureId);
+            modals.showNoteVariables(note, clickedElement, measureId);
         } else {
-            console.error("window.modals is not available");
+            console.error("modals is not available");
         }
     }
       
     function clearSelection() {
-        window.modals.clearSelection();
+        modals.clearSelection();
         currentSelectedNote = null;
+        // Update WebGL renderer selection ordering
+        try { syncRendererSelection(); } catch {}
     }
       
     domCache.closeWidgetBtn.addEventListener('click', () => {
@@ -1128,6 +2330,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (noteRect && noteContent) {
             const debouncedShowNoteVariables = debounce((note, noteContent) => {
                 currentSelectedNote = note;
+                // Ensure WebGL renderer draws selection on top
+                try { syncRendererSelection(); } catch {}
                 showNoteVariables(note, noteContent);
             }, 50);
             
@@ -1137,6 +2341,15 @@ document.addEventListener('DOMContentLoaded', async function() {
                     event.stopPropagation();
                     return;
                 }
+                // Suppress click immediately after a drag/resize gesture
+                try {
+                    if (noteRect.element && noteRect.element.__rmtSuppressClickOnce) {
+                        noteRect.element.__rmtSuppressClickOnce = false;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        return;
+                    }
+                } catch {}
                 event.stopPropagation();
                 debouncedShowNoteVariables(note, noteContent);
             });
@@ -1155,12 +2368,19 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
                 event.stopPropagation();
                 currentSelectedNote = myModule.baseNote;
+                // Ensure WebGL renderer draws selection on top
+                try { syncRendererSelection(); } catch {}
                 showNoteVariables(myModule.baseNote, baseNoteElement);
             });
         }
     }
       
     function updateZoomableBehavior() {
+        // In Workspace mode, always disable Tapspace zoom/pan to avoid input conflicts
+        if (glWorkspace) {
+            try { viewport.zoomable(false); } catch {}
+            return;
+        }
         if (isTrackingEnabled) {
             viewport.zoomable(false);
         } else {
@@ -1174,12 +2394,27 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
       
     function frequencyToY(freq) {
-        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        // Use evaluated cache when available to avoid recomputing base frequency repeatedly
+        let baseNoteFreq;
+        try {
+            const baseEv = evaluatedNotes && evaluatedNotes[0] && evaluatedNotes[0].frequency;
+            if (baseEv != null) {
+                baseNoteFreq = (typeof baseEv.valueOf === 'function') ? baseEv.valueOf() : baseEv;
+            } else {
+                baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+            }
+        } catch {
+            baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        }
         const logRatio = Math.log2(baseNoteFreq / freq);
         return logRatio * 100 * yScaleFactor;
     }
       
     function createBaseNoteDisplay() {
+        if (isWebGL2GLOutputOnlyEnabled()) {
+            // In GL-only mode we do not create the DOM BaseNote circle; GL draws it.
+            return null;
+        }
         const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
         const baseNoteY = frequencyToY(baseNoteFreq);
         const x = -50;
@@ -1338,39 +2573,6 @@ document.addEventListener('DOMContentLoaded', async function() {
     let playhead = null;
     let playheadContainer = null;
     
-    function cleanupAudio() {
-        scheduledTimeouts.forEach(timeout => clearTimeout(timeout));
-        scheduledTimeouts = [];
-        
-        for (const [id, oscObj] of activeOscillators.entries()) {
-            try {
-                oscObj.gainNode.gain.cancelScheduledValues(audioContext.currentTime);
-                oscObj.gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + 0.1);
-                
-                if (oscObj.started && !oscObj.stopped) {
-                    oscObj.stopped = true;
-                    try {
-                        oscObj.oscillator.stop();
-                    } catch (e) {
-                        console.log('Oscillator already stopped or never started');
-                    }
-                }
-                
-                setTimeout(() => {
-                    try {
-                        oscObj.oscillator.disconnect();
-                        oscObj.gainNode.disconnect();
-                    } catch (e) {
-                        console.log('Error disconnecting oscillator:', e);
-                    }
-                }, 100);
-            } catch (e) {
-                console.log('Oscillator cleanup error:', e);
-            }
-        }
-        
-        activeOscillators.clear();
-    }
     
     function getFrequencyMultiplier(note) {
         if (note.variables && note.variables.color) {
@@ -1390,43 +2592,91 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     
     function getFrequencyFraction(note) {
-        if (note && note.getVariable && note.variables.frequency) {
-            let freq = note.getVariable('frequency');
-            if (freq instanceof Fraction && typeof freq.toFraction === "function") {
-                return freq.toFraction();
-            } else {
-                return freq.toString();
+        try {
+            if (!note) return "1/1";
+
+            // Fast path: use evaluated cache to avoid executing getters for every note
+            const ev = evaluatedNotes && evaluatedNotes[note.id];
+            if (ev && ev.frequency) {
+                const fv = ev.frequency;
+                if (fv instanceof Fraction && typeof fv.toFraction === 'function') {
+                    return fv.toFraction();
+                }
+                const val = (typeof fv?.valueOf === 'function') ? fv.valueOf() : fv;
+                return String(val);
             }
-        }
+
+            // Fallback to runtime getter
+            if (note && note.getVariable && note.variables.frequency) {
+                let freq = note.getVariable('frequency');
+                if (freq instanceof Fraction && typeof freq.toFraction === "function") {
+                    return freq.toFraction();
+                } else {
+                    return freq.toString();
+                }
+            }
+        } catch {}
         return "1/1";
     }
 
     function getFrequencyRatio(note) {
-        if (note && note.variables && note.variables.frequencyString) {
-            let raw = note.variables.frequencyString;
-            let m = raw.match(/new Fraction\(\s*([^,]+)\s*,\s*([^)]+)\s*\)\.mul\([^)]*getVariable\('frequency'\)[^)]*\)/);
-            if (m) {
-                let num = m[1].trim();
-                let den = m[2].trim();
-                if (!den.includes("/")) {
-                    den = den + "/1";
-                }
-                return num + "/" + den;
-            }
-        }
-        if (note && note.getVariable && note.variables.frequency) {
-            let freq = note.getVariable('frequency');
-            let base = myModule.baseNote.getVariable('frequency');
-            if (freq && base && typeof freq.div === "function") {
-                let ratio = freq.div(base);
-                let fracStr = (typeof ratio.toFraction === "function") ? ratio.toFraction() : ratio.toString();
-                if (!fracStr.includes("/")) {
-                    fracStr = fracStr + "/1";
-                }
+        // Fast path: use evaluated cache to avoid executing getters for every note
+        try {
+            if (!note) return "1/1";
+            const ev = evaluatedNotes && evaluatedNotes[note.id];
+            const baseEv = evaluatedNotes && evaluatedNotes[0];
+            if (ev && baseEv && ev.frequency && baseEv.frequency) {
+                const f = ev.frequency instanceof Fraction
+                    ? ev.frequency
+                    : new Fraction(typeof ev.frequency?.valueOf === 'function' ? ev.frequency.valueOf() : ev.frequency);
+                const b = baseEv.frequency instanceof Fraction
+                    ? baseEv.frequency
+                    : new Fraction(typeof baseEv.frequency?.valueOf === 'function' ? baseEv.frequency.valueOf() : baseEv.frequency);
+
+                const ratio = (typeof f.div === 'function') ? f.div(b) : new Fraction(f).div(b);
+                let fracStr = (typeof ratio.toFraction === 'function') ? ratio.toFraction() : String(ratio);
+                if (!fracStr.includes('/')) fracStr += '/1';
                 return fracStr;
             }
+        } catch {}
+
+        // Robust value-based fallback using runtime getters
+        try {
+            if (!note || typeof note.getVariable !== 'function') return "1/1";
+
+            const freqVal = note.getVariable('frequency');
+            if (!freqVal) return "1/1";
+
+            const baseVal = myModule?.baseNote?.getVariable?.('frequency');
+            if (!baseVal) return "1/1";
+
+            const f = (freqVal instanceof Fraction) ? freqVal
+                : new Fraction(typeof freqVal.valueOf === 'function' ? freqVal.valueOf() : Number(freqVal));
+            const b = (baseVal instanceof Fraction) ? baseVal
+                : new Fraction(typeof baseVal.valueOf === 'function' ? baseVal.valueOf() : Number(baseVal));
+
+            const ratio = (typeof f.div === 'function') ? f.div(b) : new Fraction(f).div(b);
+            let fracStr = (typeof ratio.toFraction === 'function') ? ratio.toFraction() : String(ratio);
+            if (!fracStr.includes('/')) fracStr = fracStr + '/1';
+            return fracStr;
+        } catch (e) {
+            // Legacy regex fallback (best-effort), in case of malformed closures
+            try {
+                if (note && note.variables && note.variables.frequencyString) {
+                    let raw = note.variables.frequencyString;
+                    let m = raw.match(/new Fraction\(\s*([^,]+)\s*,\s*([^)]+)\s*\)\.mul\([^)]*getVariable\('frequency'\)[^)]*\)/);
+                    if (m) {
+                        let num = m[1].trim();
+                        let den = m[2].trim();
+                        if (!den.includes("/")) {
+                            den = den + "/1";
+                        }
+                        return num + "/" + den;
+                    }
+                }
+            } catch {}
+            return "1/1";
         }
-        return "1/1";
     }
 
     function getMovedNotes(draggedNote, newDraggedStart, originalDraggedStart) {
@@ -1456,6 +2706,349 @@ document.addEventListener('DOMContentLoaded', async function() {
         draggedNote.variables.startTime = savedStartFunc;
         return moved;
     }
+// === GL move helpers: parent selection, expression emission, and frequency retargeting ===
+function __isMeasureNoteGL(note) {
+  try {
+    return !!(note && note.getVariable('startTime') && !note.getVariable('duration') && !note.getVariable('frequency'));
+  } catch { return false; }
+}
+
+function __parseParentFromStartTimeStringGL(note) {
+  try {
+    const raw = note?.variables?.startTimeString || '';
+    const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
+    if (m) {
+      const pid = parseInt(m[1], 10);
+      const p = myModule.getNoteById(pid);
+      return p || myModule.baseNote;
+    }
+    if (raw.includes('module.baseNote')) return myModule.baseNote;
+    if (typeof note.parentId === 'number') {
+      const p2 = myModule.getNoteById(note.parentId);
+      return p2 || myModule.baseNote;
+    }
+  } catch {}
+  return myModule.baseNote;
+}
+
+function __findNextMeasureInChainGL(measure) {
+  try {
+    if (!__isMeasureNoteGL(measure)) return null;
+    const dependents = [];
+    for (const id in myModule.notes) {
+      const n = myModule.getNoteById(parseInt(id, 10));
+      if (!n || !__isMeasureNoteGL(n)) continue;
+      const startTimeString = n.variables.startTimeString || '';
+      const regex = new RegExp(`getNoteById\\(\\s*${measure.id}\\s*\\)`);
+      if (regex.test(startTimeString)) dependents.push(n);
+    }
+    if (dependents.length === 0) return null;
+    dependents.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
+    return dependents[0];
+  } catch { return null; }
+}
+
+function selectSuitableParentForStartGL(note, newStartSec) {
+  try {
+    const tol = 1e-2;
+    let parent = __parseParentFromStartTimeStringGL(note);
+    let parentStart = Number(parent.getVariable('startTime').valueOf() || 0);
+    const baseStart = Number(myModule.baseNote.getVariable('startTime').valueOf() || 0);
+
+    // Keep original parent when effectively no movement
+    if (Math.abs(newStartSec - Number(note.getVariable('startTime').valueOf() || 0)) < tol) {
+      return parent;
+    }
+
+    if (newStartSec > parentStart + tol) {
+      // Dragging forward: if parent is a measure, walk forward across measure chain as needed
+      if (__isMeasureNoteGL(parent)) {
+        let cur = parent;
+        let curStart = parentStart;
+        let advanced = true;
+        while (advanced) {
+          advanced = false;
+          // measure end = start + measureLength(cur)
+          const mlVal = myModule.findMeasureLength(cur);
+          const ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal);
+          const end = curStart + ml;
+          if (newStartSec >= end - tol) {
+            const next = __findNextMeasureInChainGL(cur);
+            if (next) {
+              cur = next;
+              curStart = Number(next.getVariable('startTime').valueOf() || 0);
+              parent = cur;
+              parentStart = curStart;
+              advanced = true;
+            }
+          }
+        }
+      }
+    } else if (newStartSec < parentStart - tol) {
+      // Dragging backward: climb ancestor chain until an ancestor starts before newStartSec
+      let chain = [];
+      let cur = parent;
+      while (cur && cur.id !== 0) {
+        const raw = cur.variables.startTimeString || '';
+        const m = raw.match(/getNoteById\((\d+)\)/);
+        if (m) {
+          const pid = parseInt(m[1], 10);
+          cur = myModule.getNoteById(pid);
+          if (cur) chain.push(cur);
+          else break;
+        } else if ((raw || '').includes('module.baseNote')) {
+          chain.push(myModule.baseNote);
+          break;
+        } else {
+          break;
+        }
+      }
+      if (chain.length === 0 || chain[chain.length - 1].id !== 0) chain.push(myModule.baseNote);
+
+      for (let i = 0; i < chain.length; i++) {
+        const anc = chain[i];
+        const ancStart = Number(anc.getVariable('startTime').valueOf() || 0);
+        if (newStartSec >= ancStart - tol) {
+          parent = anc;
+          parentStart = ancStart;
+          break;
+        }
+      }
+    }
+
+    // Clamp to BaseNote when earlier than base
+    if (newStartSec < baseStart) {
+      parent = myModule.baseNote;
+    }
+    return parent;
+  } catch {
+    return myModule.baseNote;
+  }
+}
+
+function emitStartTimeExprForParentGL(parent, newStartSec) {
+  try {
+    const parentStart = Number(parent.getVariable('startTime').valueOf() || 0);
+    let delta = newStartSec - parentStart;
+    const parentRef = (parent.id === 0) ? "module.baseNote" : `module.getNoteById(${parent.id})`;
+
+    // Check alignment to parent end (duration)
+    let hasDur = false, durSec = 0;
+    try {
+      const d = parent.getVariable('duration');
+      if (d) { hasDur = true; durSec = Number(d.valueOf ? d.valueOf() : d); }
+    } catch {}
+
+    const tempoVal = myModule.findTempo(parent);
+    const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+    const beatLen = 60 / tempo;
+    const offsetBeats = delta / beatLen;
+
+    let frac;
+    try {
+      frac = new Fraction(Math.abs(offsetBeats));
+    } catch {
+      frac = new Fraction(Math.round(Math.abs(offsetBeats) * 4), 4);
+    }
+
+    let raw;
+    if (hasDur && Math.abs(delta - durSec) < 0.01) {
+      raw = `${parentRef}.getVariable('startTime').add(${parentRef}.getVariable('duration'))`;
+    } else if (delta >= 0) {
+      raw = `${parentRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.n}, ${frac.d})))`;
+    } else {
+      raw = `${parentRef}.getVariable('startTime').sub(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.n}, ${frac.d})))`;
+    }
+
+    const simplified = simplifyStartTime(raw, myModule);
+    return simplified;
+  } catch {
+    return `module.baseNote.getVariable('startTime')`;
+  }
+}
+
+function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
+  try {
+    // Resolve an ancestor of "note" whose startTime is at or before cutoffSec.
+    // Falls back to BaseNote when none qualifies. Local to avoid global pollution.
+    function __resolveAncestorAtOrBefore(note, cutoffSec) {
+      try {
+        let anc = __parseParentFromStartTimeStringGL(note);
+        const tol = 1e-6;
+        while (anc && anc.id !== 0) {
+          const st = Number(anc.getVariable('startTime').valueOf() || 0);
+          if (st <= cutoffSec + tol) return anc;
+          const raw = (anc.variables && anc.variables.startTimeString) || '';
+          const m = raw.match(/getNoteById\((\d+)\)/);
+          if (m) {
+            const pid = parseInt(m[1], 10);
+            anc = myModule.getNoteById(pid);
+          } else if ((raw || '').includes('module.baseNote')) {
+            anc = myModule.baseNote;
+            break;
+          } else {
+            // Unknown chain edge; clamp to base
+            anc = myModule.baseNote;
+            break;
+          }
+        }
+        if (!anc) anc = myModule.baseNote;
+        const st2 = Number(anc.getVariable('startTime').valueOf() || 0);
+        return (st2 <= cutoffSec + tol) ? anc : myModule.baseNote;
+      } catch { return myModule.baseNote; }
+    }
+
+    const movedId = movedNote.id;
+    const movedStart = Number(movedNote.getVariable('startTime').valueOf() || 0);
+    const dependents = myModule.getDependentNotes(movedId) || [];
+
+    dependents.forEach(depId => {
+      const dep = myModule.getNoteById(Number(depId));
+      if (!dep) return;
+      const fRaw = dep.variables && dep.variables.frequencyString;
+      if (!fRaw || typeof fRaw !== 'string') return;
+
+      // Only retarget when the dependent references moved note's frequency
+      if (!new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)\\.getVariable\\('frequency'\\)`).test(fRaw)) return;
+
+      const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
+      // If dependent starts earlier than referenced (moved) note, swap to a valid ancestor at/before depStart
+      if (depStart < movedStart - 1e-6) {
+        const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart);
+        const parentRef = (replacementTarget && replacementTarget.id === 0) ? "module.baseNote"
+                         : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
+
+        const replaced = fRaw.replace(new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g'), parentRef);
+
+        let simplified;
+        try { simplified = simplifyFrequency(replaced, myModule); } catch { simplified = replaced; }
+
+        // Minimal guarded trace for frequency retargets
+        try {
+          if (typeof window !== 'undefined' && window.__RMT_DEBUG_GL_MOVE) {
+            console.debug('[GLMove] frequency retarget', {
+              movedId,
+              depId: dep.id,
+              movedStart,
+              depStart,
+              parentRef,
+              from: fRaw,
+              to: simplified
+            });
+          }
+        } catch {}
+
+        dep.setVariable('frequency', function() { return __evalExpr(simplified, myModule); });
+        dep.setVariable('frequencyString', simplified);
+        try { myModule.markNoteDirty(dep.id); } catch {}
+      }
+    });
+  } catch {}
+}
+function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
+  try {
+    function __resolveAncestorAtOrBefore(note, cutoffSec) {
+      try {
+        let anc = __parseParentFromStartTimeStringGL(note);
+        const tol = 1e-6;
+        while (anc && anc.id !== 0) {
+          const st = Number(anc.getVariable('startTime').valueOf() || 0);
+          if (st <= cutoffSec + tol) return anc;
+          const raw = (anc.variables && anc.variables.startTimeString) || '';
+          const m = raw.match(/getNoteById\((\d+)\)/);
+          if (m) {
+            const pid = parseInt(m[1], 10);
+            anc = myModule.getNoteById(pid);
+          } else if ((raw || '').includes('module.baseNote')) {
+            anc = myModule.baseNote;
+            break;
+          } else {
+            anc = myModule.baseNote;
+            break;
+          }
+        }
+        if (!anc) anc = myModule.baseNote;
+        const st2 = Number(anc.getVariable('startTime').valueOf() || 0);
+        return (st2 <= cutoffSec + 1e-6) ? anc : myModule.baseNote;
+      } catch { return myModule.baseNote; }
+    }
+
+    const movedId = movedNote.id;
+    const movedStart = Number(movedNote.getVariable('startTime').valueOf() || 0);
+    const dependents = myModule.getDependentNotes(movedId) || [];
+
+    dependents.forEach(depId => {
+      const dep = myModule.getNoteById(Number(depId));
+      if (!dep) return;
+
+      const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
+      if (!(depStart < movedStart - 1e-6)) return;
+
+      const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart);
+      const parentRef = (replacementTarget && replacementTarget.id === 0)
+        ? "module.baseNote"
+        : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
+
+      const noteRefRegex = new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g');
+
+      let changed = false;
+
+      // startTimeString
+      try {
+        const sRaw = dep.variables && dep.variables.startTimeString;
+        if (typeof sRaw === 'string' && noteRefRegex.test(sRaw)) {
+          const replacedS = sRaw.replace(noteRefRegex, parentRef);
+          let simplifiedS;
+          try { simplifiedS = simplifyStartTime(replacedS, myModule); } catch { simplifiedS = replacedS; }
+          dep.setVariable('startTime', function() { return __evalExpr(simplifiedS, myModule); });
+          dep.setVariable('startTimeString', simplifiedS);
+          changed = true;
+        }
+      } catch {}
+
+      // durationString
+      try {
+        const dRaw = dep.variables && dep.variables.durationString;
+        if (typeof dRaw === 'string' && noteRefRegex.test(dRaw)) {
+          const replacedD = dRaw.replace(noteRefRegex, parentRef);
+          let simplifiedD;
+          try { simplifiedD = simplifyDuration(replacedD, myModule); } catch { simplifiedD = replacedD; }
+          dep.setVariable('duration', function() { return __evalExpr(simplifiedD, myModule); });
+          dep.setVariable('durationString', simplifiedD);
+          changed = true;
+        }
+      } catch {}
+
+      // frequencyString (generic path; frequency-specific pass may already handle this)
+      try {
+        const fRaw = dep.variables && dep.variables.frequencyString;
+        if (typeof fRaw === 'string' && noteRefRegex.test(fRaw)) {
+          const replacedF = fRaw.replace(noteRefRegex, parentRef);
+          let simplifiedF;
+          try { simplifiedF = simplifyFrequency(replacedF, myModule); } catch { simplifiedF = replacedF; }
+          dep.setVariable('frequency', function() { return __evalExpr(simplifiedF, myModule); });
+          dep.setVariable('frequencyString', simplifiedF);
+          changed = true;
+        }
+      } catch {}
+
+      if (changed) { try { myModule.markNoteDirty(dep.id); } catch {} }
+
+      try {
+        if (typeof window !== 'undefined' && window.__RMT_DEBUG_GL_MOVE && changed) {
+          console.debug('[GLMove] start/duration retarget', {
+            movedId,
+            depId: dep.id,
+            movedStart,
+            depStart,
+            parentRef
+          });
+        }
+      } catch {}
+    });
+  } catch {}
+}
+ // === End GL move helpers ===
 
     function createNoteElement(note, index) {
         const isSilence = note.getVariable('startTime') && note.getVariable('duration') && !note.getVariable('frequency');
@@ -1474,20 +3067,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         const noteColor = getColorForNote(note);
 
-        const measureDiv = document.createElement('div');
-        measureDiv.style.position = 'absolute';
-        measureDiv.style.visibility = 'hidden';
-        measureDiv.style.fontSize = '6px';
-        measureDiv.style.fontFamily = "'Roboto Mono', 'IBM Plex Mono', monospace";
-        measureDiv.style.fontWeight = '400';
-        measureDiv.style.whiteSpace = 'nowrap';
-        document.body.appendChild(measureDiv);
-        measureDiv.textContent = numerator;
-        const numWidth = measureDiv.offsetWidth;
-        measureDiv.textContent = denominator;
-        const denWidth = measureDiv.offsetWidth;
-        document.body.removeChild(measureDiv);
-        const maxWidth = Math.max(numWidth, denWidth);
+        // No text measurement needed; the fraction bar will stretch to the container width via CSS (width: 100%)
 
         const noteRect = tapspace.createItem(`
             <div class="note-rect" style="
@@ -1561,7 +3141,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     ">
                         <span>${numerator}</span>
                         <div style="
-                        width: ${maxWidth}px;
+                        width: 100%;
                         height: 1px;
                         background: white;
                         margin: 0;
@@ -1613,6 +3193,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         };
 
         noteRect.element.addEventListener('pointerdown', (e) => {
+            // If the pointer is on the resize handle, let the resize handler manage it
+            if (e.target && (e.target.closest('.resize-handle-icon') || e.target.closest('[style*="cursor: ew-resize"]'))) {
+                return;
+            }
             if (isLocked) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -1683,7 +3267,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 try {
                     noteRect.element.releasePointerCapture(dragData.pointerId);
                 } catch (err) {
-                    console.log('Error releasing pointer capture:', err);
+                    console.warn('Error releasing pointer capture:', err);
                 }
             }
             
@@ -1696,6 +3280,13 @@ document.addEventListener('DOMContentLoaded', async function() {
             dragData.hasCaptured = false;
             dragData.pointerIsDown = false;
             dragData.pointerId = null;
+
+            // Ensure any GPU preview is cleared when drag state resets
+            try {
+                if (glRenderer && typeof glRenderer.clearTempOverridesPreview === 'function') {
+                    glRenderer.clearTempOverridesPreview(note.id);
+                }
+            } catch {}
         }
         
         function handlePointerMove(note, e) {
@@ -1711,7 +3302,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     noteRect.element.setPointerCapture(dragData.pointerId);
                     dragData.hasCaptured = true;
                 } catch (err) {
-                    console.log('Error setting pointer capture:', err);
+                    console.warn('Error setting pointer capture:', err);
                 }
                 
                 if (isPlaying) {
@@ -1905,6 +3496,29 @@ document.addEventListener('DOMContentLoaded', async function() {
                 const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
                 const screenPos = point.transitRaw(viewport);
                 
+                // Live GL preview while dragging note position (duration unchanged)
+                try {
+                    if (glRenderer) {
+                        const durSec = Number(note.getVariable('duration').valueOf() || 0);
+                        const ok = (typeof glRenderer.setTempOverridesPreview === 'function') &&
+                                   glRenderer.setTempOverridesPreview(note.id, newStartTimeNum, durSec);
+                        if (!ok) {
+                            // Fallback: use tempOverrides + sync for preview
+                            glTempOverrides = {
+                                [note.id]: { startSec: newStartTimeNum, durationSec: durSec }
+                            };
+                            glRenderer.sync({
+                                evaluatedNotes,
+                                module: myModule,
+                                xScaleFactor,
+                                yScaleFactor,
+                                selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
+                                tempOverrides: glTempOverrides
+                            });
+                        }
+                    }
+                } catch {}
+                 
                 updateDragOverlay(note, newStartTimeNum, null, 'dragged');
                 
                 const parentStartTime = actualParent.getVariable('startTime').valueOf();
@@ -1989,20 +3603,24 @@ document.addEventListener('DOMContentLoaded', async function() {
                             const offsetFraction = new Fraction(beatOffset);
                             
                             if (beatOffset >= 0) {
-                                newRaw = `module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).add(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`;
+                                newRaw = simplifyStartTime(`module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).add(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
                             } else {
                                 const absOffsetFraction = new Fraction(Math.abs(offsetFraction.valueOf()));
-                                newRaw = `module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).sub(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${absOffsetFraction.n}, ${absOffsetFraction.d})))`;
+                                newRaw = simplifyStartTime(`module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).sub(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${absOffsetFraction.n}, ${absOffsetFraction.d})))`, myModule);
                             }
                         }
                         
                         note.setVariable('startTime', function() {
-                            return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                            return __evalExpr(newRaw, myModule);
                         });
                         note.setVariable('startTimeString', newRaw);
                         
                         evaluatedNotes = myModule.evaluateModule();
+                        setEvaluatedNotes(evaluatedNotes);
                         updateVisualNotes(evaluatedNotes);
+                        
+                        // History: ensure moves anchored to a dependency get their own snapshot
+                        try { captureSnapshot(`Move Note ${note.id}`); } catch {}
                         
                         e.stopPropagation();
                         cleanupDragState();
@@ -2042,11 +3660,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                         
                         if (dragData.reference !== dragData.originalReference) {
                             note.setVariable('startTime', function() {
-                                return new Function("module", "Fraction", "return " + originalRawString + ";")(myModule, Fraction);
+                                return __evalExpr(originalRawString, myModule);
                             });
                             note.setVariable('startTimeString', originalRawString);
                             
                             evaluatedNotes = myModule.evaluateModule();
+                            setEvaluatedNotes(evaluatedNotes);
                             updateVisualNotes(evaluatedNotes);
                         }
                     }
@@ -2095,12 +3714,14 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
                         }
                         
+                        const simplifiedRaw = simplifyStartTime(newRaw, myModule);
                         note.setVariable('startTime', function() {
-                            return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                            return __evalExpr(simplifiedRaw, myModule);
                         });
-                        note.setVariable('startTimeString', newRaw);
+                        note.setVariable('startTimeString', simplifiedRaw);
                         
                         evaluatedNotes = myModule.evaluateModule();
+                        setEvaluatedNotes(evaluatedNotes);
                         updateVisualNotes(evaluatedNotes);
                     }
                 }
@@ -2128,7 +3749,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                 }
                 
+                if (dragData.hasDragged) {
+                    try { noteRect.element.__rmtSuppressClickOnce = true; } catch {}
+                    try { e.preventDefault(); } catch {}
+                }
                 e.stopPropagation();
+                if (dragData.hasDragged) { try { captureSnapshot(`Move Note ${note.id}`); } catch {} }
             }
             
             cleanupDragState();
@@ -2436,6 +4062,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 overlayElem.style.pointerEvents = 'none';
                 overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
                 overlayElem.style.overflow = 'hidden';
+                overlayElem.style.boxSizing = 'border-box';
                 overlayElem.setAttribute('data-type', isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : (isSilence ? 'silence' : 'note')));
                 
                 const textElem = document.createElement('div');
@@ -2541,10 +4168,13 @@ document.addEventListener('DOMContentLoaded', async function() {
                 overlayElem.style.alignItems = 'center';
                 overlayElem.style.justifyContent = 'center';
                 
-                overlayElem.style.left = `${screenPos.x - 0.5}px`;
-                overlayElem.style.top = `${yPos}px`;
+                const _baseEl = document.querySelector(`.note-content[data-note-id="${noteObj.id}"]`);
+                const _baseRect = _baseEl ? _baseEl.getBoundingClientRect() : null;
+                const _bw = _baseEl ? (parseFloat(getComputedStyle(_baseEl).borderTopWidth) || 1) : 1;
+                overlayElem.style.left = `${screenPos.x}px`;
+                overlayElem.style.top = `${_baseRect ? (_baseRect.top - _bw) : (yPos - _bw)}px`;
                 overlayElem.style.width = `${screenWidth}px`;
-                overlayElem.style.height = `${screenHeight}px`;
+                overlayElem.style.height = `${_baseRect ? (_baseRect.height + 2 * _bw) : (screenHeight + 2 * _bw)}px`;
                 
                 if (isSilence) {
                     overlayElem.style.borderStyle = 'dashed';
@@ -2830,18 +4460,14 @@ document.addEventListener('DOMContentLoaded', async function() {
                 e.stopPropagation();
                 return;
             }
-            if (!e.target.closest('.resize-handle-icon') && !e.target.closest('[style*="cursor: ew-resize"]')) {
-                return;
-            }
-            if (isLocked) return;
+            // Accept pointerdown anywhere within the resize handle item to improve hit-testing
+            // across tapspace wrapper elements and browser differences.
             
             e.stopPropagation();
             e.preventDefault();
             
-            if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused) {
-                if (window.playerControls && window.playerControls.pause) {
-                    window.playerControls.pause();
-                }
+            if (isPlaying && !isPaused) {
+                pause();
             }
             
             const transform = viewport.getBasis().getRaw();
@@ -2853,11 +4479,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             resizeOriginalWidth = width;
             resizeOriginalDuration = note.getVariable('duration').valueOf();
             
-            resizeOriginalScale = scale;
-            
             noteRect.element.classList.add('resizing');
             
-            resizeHandle.element.setPointerCapture(e.pointerId);
+            try { resizeHandle.element.setPointerCapture(e.pointerId); } catch {}
             
             const existingOverlay = document.getElementById('resize-dependent-overlay');
             if (existingOverlay) {
@@ -2957,7 +4581,32 @@ document.addEventListener('DOMContentLoaded', async function() {
                 resizeHandle.translateTo(noteContainer.at(snappedWidth - 10, 0));
                 
                 updateResizeFeedback(snappedDuration, snappedBeats);
-                
+
+                // Live GL preview via GPU bufferSubData; fallback to full sync when unavailable
+                try {
+                    if (glRenderer) {
+                        const startSec = note.getVariable('startTime').valueOf();
+                        const ok = (typeof glRenderer.setTempOverridesPreview === 'function') &&
+                                   glRenderer.setTempOverridesPreview(note.id, startSec, snappedDuration);
+                        if (!ok) {
+                            // Fallback: use tempOverrides + sync for preview
+                            glTempOverrides = {
+                                [note.id]: { startSec, durationSec: snappedDuration }
+                            };
+                            glRenderer.sync({
+                                evaluatedNotes,
+                                module: myModule,
+                                xScaleFactor,
+                                yScaleFactor,
+                                selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
+                                tempOverrides: glTempOverrides
+                            });
+                        } else {
+                            // No full sync required; renderer will redraw from updated buffer
+                        }
+                    }
+                } catch {}
+
                 updateDependentNotesVisualization(note, resizeOriginalDuration, snappedDuration, scale);
             } catch (error) {
                 console.error("Error in handleResizeMove:", error);
@@ -2970,7 +4619,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 resizeHandle.element.releasePointerCapture(ev.pointerId);
             } catch (err) {
-                console.log('Error releasing pointer capture:', err);
+                console.warn('Error releasing pointer capture:', err);
             }
             
             isResizing = false;
@@ -2985,6 +4634,13 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (dependentOverlay) {
                 dependentOverlay.remove();
             }
+            // Clear temporary GL overrides now that resize is committed
+            glTempOverrides = null;
+            try {
+                if (glRenderer && typeof glRenderer.clearTempOverridesPreview === 'function') {
+                    glRenderer.clearTempOverridesPreview(note.id);
+                }
+            } catch {}
             
             try {
                 const transform = viewport.getBasis().getRaw();
@@ -3034,14 +4690,15 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
                 
                 const newDurationString = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFraction.n}, ${beatsFraction.d}))`;
+                const simplifiedDurationString = simplifyDuration(newDurationString, myModule);
                 
                 const originalDuration = note.getVariable('duration').valueOf();
                 
-                note.setVariable('durationString', newDurationString);
+                note.setVariable('durationString', simplifiedDurationString);
                 
                 const durationFunc = function() {
                     try {
-                        return new Function("module", "Fraction", "return " + newDurationString + ";")(myModule, Fraction);
+                        return __evalExpr(simplifiedDurationString, myModule);
                     } catch (error) {
                         console.error("Error in duration function:", error);
                         return new Fraction(60).div(myModule.baseNote.getVariable('tempo')).mul(1);
@@ -3056,8 +4713,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                     checkAndUpdateDependentNotes(note.id, originalDuration, updatedDuration);
                 }
                 
-                window.evaluatedNotes = myModule.evaluateModule();
-                updateVisualNotes(window.evaluatedNotes);
+                evaluatedNotes = myModule.evaluateModule();
+                setEvaluatedNotes(evaluatedNotes);
+                updateVisualNotes(evaluatedNotes);
                 
                 const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
                 if (noteWidgetVisible && currentSelectedNote) {
@@ -3094,6 +4752,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
             }
             
+            try { captureSnapshot(`Resize Note ${note.id}`); } catch {}
             const feedbackElement = document.getElementById('resize-feedback');
             if (feedbackElement) {
                 feedbackElement.remove();
@@ -3312,9 +4971,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                 ghostNote.className = 'resize-ghost-note';
                 ghostNote.style.position = 'absolute';
                 ghostNote.style.left = `${screenPos.x}px`;
-                ghostNote.style.top = `${screenPos.y}px`;
+                const depBaseEl = document.querySelector(`.note-content[data-note-id="${posInfo.noteId}"]`);
+                const depBaseRect = depBaseEl ? depBaseEl.getBoundingClientRect() : null;
+                const depBW = depBaseEl ? (parseFloat(getComputedStyle(depBaseEl).borderTopWidth) || 1) : 1;
+                ghostNote.style.top = `${depBaseRect ? (depBaseRect.top - depBW) : (screenPos.y - depBW)}px`;
                 ghostNote.style.width = `${screenWidth}px`;
-                ghostNote.style.height = `${screenHeight}px`;
+                ghostNote.style.height = `${depBaseRect ? (depBaseRect.height + 2 * depBW) : (screenHeight + 2 * depBW)}px`;
                 ghostNote.style.backgroundColor = noteColor;
                 ghostNote.style.opacity = '0.6';
                 ghostNote.style.borderRadius = '6px';
@@ -3409,343 +5071,198 @@ document.addEventListener('DOMContentLoaded', async function() {
         return noteContainer;
     }
 
+    // Fast incremental renderer to append only specified notes after import.
+    function renderNotesIncrementally(noteIds) {
+        if ((glRenderer || glWorkspace) && isWebGL2GLOutputOnlyEnabled()) return 0;
+        if (!Array.isArray(noteIds) || noteIds.length === 0) return 0;
+        let count = 0;
+        try {
+            noteIds.forEach(id => {
+                const note = myModule.getNoteById(Number(id));
+                if (!note) return;
+                const hasStart = !!note.getVariable('startTime');
+                const hasDur = !!note.getVariable('duration');
+                // Render both frequency and silence rectangles (no frequency) when duration exists
+                if (hasStart && hasDur) {
+                    try {
+                        createNoteElement(note);
+                        count++;
+                    } catch {}
+                }
+            });
+        } catch (e) { console.warn('renderNotesIncrementally failed', e); }
+        return count;
+    }
+
     function handleOctaveChange(noteId, direction) {
         const note = myModule.getNoteById(parseInt(noteId, 10));
         if (!note) {
             console.error(`Note with ID ${noteId} not found`);
             return;
         }
-        
-        if (window.playerState && window.playerState.isPlaying && !window.playerState.isPaused) {
-            if (window.playerControls && window.playerControls.pause) {
-                window.playerControls.pause();
-            }
+
+        if (isPlaying && !isPaused) {
+            pause();
         }
-        
-        const currentFrequency = note.getVariable('frequency');
-        if (!currentFrequency) {
-            console.error(`Note ${noteId} has no frequency`);
+
+        const selectedNote = currentSelectedNote;
+        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+
+        const factor = direction === 'up' ? { n: 2, d: 1 } :
+                       direction === 'down' ? { n: 1, d: 2 } : null;
+        if (!factor) {
+            console.error(`Invalid direction: ${direction}`);
             return;
         }
-        
-        const selectedNote = currentSelectedNote;
-        const selectedElement = selectedNote ? 
-            document.querySelector(`.note-content[data-note-id="${selectedNote.id}"].selected, .base-note-circle[data-note-id="${selectedNote.id}"].selected, .measure-bar-triangle[data-note-id="${selectedNote.id}"].selected`) : 
-            null;
-        
-        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
-        
+
         try {
-            if (note === myModule.baseNote) {
-                const rawExpression = note.variables.frequencyString || '';
-                
-                let newRaw;
-                
-                const fractionMatch = rawExpression.match(/new\s+Fraction\((\d+)(?:,\s*(\d+))?\)/);
-                if (fractionMatch) {
-                    let numerator = parseInt(fractionMatch[1], 10);
-                    let denominator = fractionMatch[2] ? parseInt(fractionMatch[2], 10) : 1;
-                    
-                    if (direction === 'up') {
-                        numerator *= 2;
-                    } else if (direction === 'down') {
-                        denominator *= 2;
-                    }
-                    
-                    const gcd = findGCD(numerator, denominator);
-                    numerator /= gcd;
-                    denominator /= gcd;
-                    
-                    newRaw = `new Fraction(${numerator}, ${denominator})`;
-                } else {
-                    const currentValue = currentFrequency.valueOf();
-                    let newValue;
-                    
-                    if (direction === 'up') {
-                        newValue = currentValue * 2;
-                    } else if (direction === 'down') {
-                        newValue = currentValue / 2;
-                    } else {
-                        console.error(`Invalid direction: ${direction}`);
-                        return;
-                    }
-                    
-                    const newFraction = new Fraction(newValue);
-                    newRaw = `new Fraction(${newFraction.n}, ${newFraction.d})`;
-                }
-                
+            const currentFrequency = note.getVariable('frequency');
+            if (!currentFrequency) {
+                console.error(`Note ${noteId} has no frequency`);
+                return;
+            }
+
+            const rawExpression = note.variables.frequencyString;
+
+            if (!rawExpression) {
+                // No raw expression to preserve; fallback to numeric exact fraction.
+                const newFrequency = currentFrequency.mul(new Fraction(factor.n, factor.d));
+                const newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
                 note.setVariable('frequency', function() {
-                    return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                    return __evalExpr(newRaw, myModule);
                 });
                 note.setVariable('frequencyString', newRaw);
             } else {
-                const rawExpression = note.variables.frequencyString;
-                let newRaw;
-                
-                if (!rawExpression) {
-                    let newFrequency;
-                    if (direction === 'up') {
-                        newFrequency = currentFrequency.mul(new Fraction(2, 1));
-                    } else if (direction === 'down') {
-                        newFrequency = currentFrequency.mul(new Fraction(1, 2));
-                    } else {
-                        console.error(`Invalid direction: ${direction}`);
-                        return;
-                    }
-                    
-                    newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
-                } 
-                else if (rawExpression.match(/^new\s+Fraction\(\d+,\s*\d+\)$/)) {
-                    const fractionMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)/);
-                    if (fractionMatch) {
-                        const oldNum = parseInt(fractionMatch[1], 10);
-                        const oldDenom = parseInt(fractionMatch[2], 10);
-                        
-                        let newNum, newDenom;
-                        if (direction === 'up') {
-                            newNum = oldNum * 2;
-                            newDenom = oldDenom;
-                        } else {
-                            newNum = oldNum;
-                            newDenom = oldDenom * 2;
-                        }
-                        
-                        const gcd = findGCD(newNum, newDenom);
-                        newNum /= gcd;
-                        newDenom /= gcd;
-                        
-                        newRaw = `new Fraction(${newNum}, ${newDenom})`;
-                    } else {
-                        newRaw = rawExpression;
-                    }
-                }
-                else if (rawExpression.includes("module.baseNote.getVariable('frequency')")) {
-                    const ratioMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)\.mul\(module\.baseNote\.getVariable\('frequency'\)\)/);
-                    if (ratioMatch) {
-                        const oldNum = parseInt(ratioMatch[1], 10);
-                        const oldDenom = parseInt(ratioMatch[2], 10);
-                        
-                        let newNum, newDenom;
-                        if (direction === 'up') {
-                            newNum = oldNum * 2;
-                            newDenom = oldDenom;
-                        } else {
-                            newNum = oldNum;
-                            newDenom = oldDenom * 2;
-                        }
-                        
-                        const gcd = findGCD(newNum, newDenom);
-                        newNum /= gcd;
-                        newDenom /= gcd;
-                        
-                        newRaw = `new Fraction(${newNum}, ${newDenom}).mul(module.baseNote.getVariable('frequency'))`;
-                    } else {
-                        if (direction === 'up') {
-                            newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
-                        } else {
-                            newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
-                        }
-                    }
-                }
-                else if (rawExpression.includes("getNoteById") && rawExpression.includes("getVariable('frequency')")) {
-                    const ratioMultiplierMatch = rawExpression.match(/new\s+Fraction\((\d+),\s*(\d+)\)\.mul\((.*?)\.getVariable\('frequency'\)\)/);
-                    
-                    if (ratioMultiplierMatch) {
-                        const oldNum = parseInt(ratioMultiplierMatch[1], 10);
-                        const oldDenom = parseInt(ratioMultiplierMatch[2], 10);
-                        const dependency = ratioMultiplierMatch[3];
-                        
-                        let newNum, newDenom;
-                        if (direction === 'up') {
-                            newNum = oldNum * 2;
-                            newDenom = oldDenom;
-                        } else {
-                            newNum = oldNum;
-                            newDenom = oldDenom * 2;
-                        }
-                        
-                        const gcd = findGCD(newNum, newDenom);
-                        newNum /= gcd;
-                        newDenom /= gcd;
-                        
-                        newRaw = `new Fraction(${newNum}, ${newDenom}).mul(${dependency}.getVariable('frequency'))`;
-                    } else {
-                        if (direction === 'up') {
-                            newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
-                        } else {
-                            newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
-                        }
-                    }
-                }
-                else {
-                    if (direction === 'up') {
-                        newRaw = `new Fraction(2, 1).mul(${rawExpression})`;
-                    } else {
-                        newRaw = `new Fraction(1, 2).mul(${rawExpression})`;
-                    }
-                }
-                
+                // Multiply and simplify robustly while preserving anchors
+                const multiplied = multiplyExpressionByFraction(rawExpression, factor.n, factor.d, 'frequency', myModule);
+                const simplified = simplifyFrequency(multiplied, myModule);
                 note.setVariable('frequency', function() {
-                    return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
+                    return __evalExpr(simplified, myModule);
                 });
-                note.setVariable('frequencyString', newRaw);
+                note.setVariable('frequencyString', simplified);
             }
-            
+
             if (note === myModule.baseNote) {
                 updateBaseNoteFraction();
                 updateBaseNotePosition();
             }
-            
+            // Ensure evaluation cache sees the edited note
+            try { myModule.markNoteDirty(note.id); } catch {}
             evaluatedNotes = myModule.evaluateModule();
+            setEvaluatedNotes(evaluatedNotes);
             updateVisualNotes(evaluatedNotes);
-            
-            if (selectedNote && noteWidgetVisible) {
-                let newSelectedElement;
-                
-                if (selectedNote === myModule.baseNote) {
-                    newSelectedElement = document.querySelector('.base-note-circle');
+            try { captureSnapshot(`Octave ${direction} Note ${noteId}`); } catch {}
+
+            // Do not change selection on octave click. Refresh modal only if the edited note is currently selected.
+            try {
+              const widgetEl = document.getElementById('note-widget');
+              const isVisible = !!(widgetEl && widgetEl.classList && widgetEl.classList.contains('visible'));
+              if (isVisible && currentSelectedNote && ((currentSelectedNote === note) || (currentSelectedNote.id === note.id))) {
+                let anchor = null;
+                if (currentSelectedNote === myModule.baseNote) {
+                  anchor = document.querySelector('.base-note-circle');
                 } else {
-                    newSelectedElement = document.querySelector(
-                        `.note-content[data-note-id="${selectedNote.id}"], ` +
-                        `.measure-bar-triangle[data-note-id="${selectedNote.id}"]`
-                    );
+                  anchor = document.querySelector(
+                    `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                    `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+                  );
                 }
-                
-                if (newSelectedElement) {
-                    if (newSelectedElement.classList.contains('measure-bar-triangle')) {
-                        window.modals.showNoteVariables(selectedNote, newSelectedElement, selectedNote.id);
-                    } else {
-                        window.modals.showNoteVariables(selectedNote, newSelectedElement);
-                    }
+                if (!anchor) anchor = document.body;
+                try {
+                  const __isSelectedMeasure = currentSelectedNote && currentSelectedNote.variables && currentSelectedNote.variables.startTime && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency;
+                  const __mid = __isSelectedMeasure ? currentSelectedNote.id : null;
+                  eventBus.emit('modals:requestRefresh', { note: currentSelectedNote, measureId: __mid, clickedElement: anchor });
+                } catch {
+                  if (anchor.classList && anchor.classList.contains('measure-bar-triangle')) {
+                    modals.showNoteVariables(currentSelectedNote, anchor, currentSelectedNote.id);
+                  } else {
+                    modals.showNoteVariables(currentSelectedNote, anchor);
+                  }
                 }
-            }
-            
+              }
+            } catch {}
+
         } catch (error) {
             console.error(`Error updating frequency for note ${noteId}:`, error);
         }
     }
 
-    window.handleOctaveChange = handleOctaveChange;
 
-    function findGCD(a, b) {
-        a = Math.abs(a);
-        b = Math.abs(b);
-        while (b) {
-            const temp = b;
-            b = a % b;
-            a = temp;
-        }
-        return a;
-    }
-
-    (function() {
-        window.createMeasureBarTriangle = function(measureBar, measurePoint, id) {
-            if (!measurePoint) return null;
-            const triangle = document.createElement('div');
-            triangle.className = 'measure-bar-triangle';
-            triangle.setAttribute("data-note-id", id);
-            triangle.innerHTML = `<span class="measure-id">[${id}]</span>`;
-            triangle.addEventListener('click', (event) => {
-                if (isLocked) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    return;
-                }
-                event.stopPropagation();
-                document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected').forEach(el => {
-                    el.classList.remove('selected');
-                });
-                triangle.classList.add('selected');
-                showNoteVariables(measurePoint, triangle, id);
-            });
-            
+    function createMeasureBarTriangle(measureBar, measurePoint, id) {
+        if (!measurePoint) return null;
+        const triangle = document.createElement('div');
+        triangle.className = 'measure-bar-triangle';
+        triangle.setAttribute("data-note-id", id);
+        triangle.innerHTML = `<span class="measure-id">[${id}]</span>`;
+        triangle.addEventListener('click', (event) => {
             if (isLocked) {
-                triangle.style.pointerEvents = 'none';
-                triangle.style.opacity = '0.7';
+                event.preventDefault();
+                event.stopPropagation();
+                return;
             }
-            
-            return triangle;
-        };
-
-        window.createMeasureBarTriangle = createMeasureBarTriangle;
-    })();
+            event.stopPropagation();
+            document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected').forEach(el => {
+                el.classList.remove('selected');
+            });
+            triangle.classList.add('selected');
+            // Keep GL selection/highlights in sync when clicking a measure triangle
+            try { currentSelectedNote = measurePoint; syncRendererSelection(); } catch {}
+            showNoteVariables(measurePoint, triangle, id);
+        });
+        
+        if (isLocked) {
+            triangle.style.pointerEvents = 'none';
+            triangle.style.opacity = '0.7';
+        }
+        
+        return triangle;
+    }
     
     function createMeasureBars() {
+        // When WebGL overlay is enabled, suppress DOM bars and playhead; keep triangles for interactions.
+        const usingGL = !!glRenderer;
+    
+        // Preserve currently selected triangles
         const selectedMeasureBars = document.querySelectorAll('.measure-bar-triangle.selected');
         const selectedMeasureBarIds = Array.from(selectedMeasureBars).map(el => el.getAttribute('data-note-id'));
-
+    
+        // Clear previous DOM artifacts
         measureBars.forEach(bar => bar.remove());
         measureBars = [];
-        if (playhead) playhead.remove();
-
+    
         const barsContainer = domCache.measureBarsContainer;
-        playheadContainer = domCache.playheadContainer;
         const trianglesContainer = domCache.trianglesContainer;
+        playheadContainer = domCache.playheadContainer;
+    
+        if (barsContainer) barsContainer.innerHTML = '';
+        if (playheadContainer) playheadContainer.innerHTML = '';
+        if (trianglesContainer) trianglesContainer.innerHTML = '';
+    
+        // Create triangles only when not in GL-only mode
+        if (!((glRenderer || glWorkspace) && isWebGL2GLOutputOnlyEnabled())) {
+            const measurePoints = Object.entries(myModule.notes)
+                .filter(([id, note]) => note.getVariable('startTime') && !note.getVariable('duration') && !note.getVariable('frequency'))
+                .map(([id, note]) => ({ id: parseInt(id, 10), note }));
 
-        barsContainer.innerHTML = '';
-        playheadContainer.innerHTML = '';
-        trianglesContainer.innerHTML = '';
-
-        playhead = document.createElement('div');
-        playhead.className = 'playhead';
-        playheadContainer.appendChild(playhead);
-
-        const measurePoints = Object.entries(myModule.notes)
-            .filter(([id, note]) => note.getVariable('startTime') && !note.getVariable('duration') && !note.getVariable('frequency'))
-            .map(([id, note]) => ({ id: parseInt(id, 10), note }));
-
-        const hasZeroTimeMeasureBar = measurePoints.some(mp => mp.note.getVariable('startTime').valueOf() === 0);
-
-        if (!hasZeroTimeMeasureBar) {
-            const originBar = document.createElement('div');
-            originBar.className = 'measure-bar';
-            originBar.id = 'measure-bar-origin';
-            originBar.setAttribute("data-x", 0);
-            barsContainer.appendChild(originBar);
-            measureBars.push(originBar);
-        }
-
-        const startSecondaryBar = document.createElement('div');
-        startSecondaryBar.className = 'measure-bar secondary-bar start-bar';
-        startSecondaryBar.id = 'secondary-start-bar';
-        barsContainer.appendChild(startSecondaryBar);
-        measureBars.push(startSecondaryBar);
-
-        measurePoints.forEach(({ id, note }) => {
-            const bar = document.createElement('div');
-            bar.className = 'measure-bar';
-            bar.id = `measure-bar-${id}`;
-            const x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
-            bar.setAttribute("data-x", x);
-            bar.setAttribute("data-note-id", id);
-            barsContainer.appendChild(bar);
-            measureBars.push(bar);
-            const triangle = createMeasureBarTriangle(bar, note, id);
-            if (triangle) {
-                trianglesContainer.appendChild(triangle);
-                if (selectedMeasureBarIds.includes(id.toString())) {
-                    triangle.classList.add('selected');
+            measurePoints.forEach(({ id, note }) => {
+                const triangle = createMeasureBarTriangle(null, note, id);
+                if (triangle && trianglesContainer) {
+                    trianglesContainer.appendChild(triangle);
+                    if (selectedMeasureBarIds.includes(id.toString())) {
+                        triangle.classList.add('selected');
+                    }
                 }
-            }
-        });
-
-        const finalBar = document.createElement('div');
-        finalBar.className = 'measure-bar';
-        finalBar.id = `measure-bar-final`;
-        barsContainer.appendChild(finalBar);
-        measureBars.push(finalBar);
-
-        const endSecondaryBar = document.createElement('div');
-        endSecondaryBar.className = 'measure-bar secondary-bar end-bar';
-        endSecondaryBar.id = 'secondary-end-bar';
-        barsContainer.appendChild(endSecondaryBar);
-        measureBars.push(endSecondaryBar);
-
+            });
+        }
+    
+        // No DOM bars or playhead — replaced by WebGL overlay
         invalidateModuleEndTimeCache();
         updateMeasureBarPositions();
     }
     
     function updateMeasureBarPositions() {
+        // Always update DOM measure bars/triangles positions (even when WebGL overlay is active)
+
         const transform = viewport.getBasis().getRaw();
         const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
 
@@ -3817,20 +5334,59 @@ document.addEventListener('DOMContentLoaded', async function() {
             
             const x = playheadTime * 200 * xScaleFactor;
             if (isTrackingEnabled) {
-                const viewCenter = viewport.atCenter();
-                const targetPoint = space.at(x, viewCenter.transitRaw(space).y);
-                viewport.match({
-                    source: viewCenter,
-                    target: targetPoint,
-                    estimator: 'X'
-                });
+                if (__rmtScalingXActive) {
+                    // During active X scaling, keep lockX but skip recenter to avoid a 1-frame pop.
+                    if (glWorkspace && glWorkspace.camera) {
+                        try {
+                            glWorkspace.camera.lockX = true;
+                            if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                        } catch {}
+                    }
+                    // Tapspace path: handlers already positioned the viewport; do nothing here.
+                } else if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                    try {
+                        const rect = glWorkspace.containerEl.getBoundingClientRect();
+                        const localCenterX = rect.width * 0.5;
+                        const s = glWorkspace.camera.scale || 1;
+                        // Prevent user X panning during tracking
+                        glWorkspace.camera.lockX = true;
+                        // world x -> container-local: local = s * world + tx
+                        // set tx so that playhead x maps to center
+                        glWorkspace.camera.tx = localCenterX - s * x;
+                        if (typeof glWorkspace.camera.onChange === 'function') {
+                            glWorkspace.camera.onChange();
+                        }
+                    } catch {}
+                } else {
+                    const viewCenter = viewport.atCenter();
+                    const targetPoint = space.at(x, viewCenter.transitRaw(space).y);
+                    viewport.match({
+                        source: viewCenter,
+                        target: targetPoint,
+                        estimator: 'X'
+                    });
+                }
+            } else {
+                // When tracking is disabled, release X-lock for workspace camera
+                if (glWorkspace && glWorkspace.camera) {
+                    try {
+                        glWorkspace.camera.lockX = false;
+                        if (typeof glWorkspace.camera.onChange === 'function') {
+                            glWorkspace.camera.onChange();
+                        }
+                    } catch {}
+                }
             }
             
-            const transform = viewport.getBasis().getRaw();
-            const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-            const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
-            const screenPos = point.transitRaw(viewport);
-            playhead.style.transform = `translate(${screenPos.x}px, 0) scale(${1/scale}, 1)`;
+            // If GPU overlay is active or DOM playhead is not present, skip DOM transform
+            // Also skip during active X scaling to avoid a 1-frame pop before camera recenter completes
+            if (playhead && !__rmtScalingXActive) {
+                const transform = viewport.getBasis().getRaw();
+                const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+                const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
+                const screenPos = point.transitRaw(viewport);
+                playhead.style.transform = `translate(${screenPos.x}px, 0) scale(${1/scale}, 1)`;
+            }
             
             playheadAnimationId = requestAnimationFrame(update);
         };
@@ -3839,6 +5395,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     
     function handleBackgroundGesture(gestureEvent) {
+        // In GL workspace mode, disable Tapspace gesture-based click-to-set-playhead to avoid conflicts
+        if (glWorkspace) { return; }
         if (gestureEvent.travel <= 5) {
             const clickedElement = gestureEvent.target;
             const isClickOnNote = clickedElement.element.closest('.note-rect') !== null;
@@ -3859,13 +5417,22 @@ document.addEventListener('DOMContentLoaded', async function() {
                     stop(false);
                     play(playheadTime);
                 }
+                // Background tap parity with desktop: clear selection and close menus/dropdowns
+                try {
+                    clearSelection();
+                    if (domCache && domCache.plusminus && domCache.generalWidget) {
+                        domCache.plusminus.classList.remove('open');
+                        domCache.generalWidget.classList.remove('open');
+                    }
+                    const dd = document.getElementById('loadModuleDropdown');
+                    if (dd) dd.style.display = 'none';
+                } catch {}
             }
         }
     }
     
     createMeasureBars();
     updateVisualNotes(evaluatedNotes);
-    
     function getColorForNote(note) {
         if (note.variables && note.variables.color) {
             if (typeof note.variables.color === 'function') {
@@ -3883,7 +5450,32 @@ document.addEventListener('DOMContentLoaded', async function() {
         return newColor;
     }
     
-    function updateVisualNotes(evaluatedNotes) {
+    function updateVisualNotes(nextEvaluated) {
+        // Sync module-scoped evaluatedNotes so helpers like frequencyToY() use fresh base/frequencies
+        evaluatedNotes = nextEvaluated;
+
+        // Phase 1/2: mirror scene into GL renderers
+        if (glRenderer) {
+            try {
+                glRenderer.sync({ evaluatedNotes, module: myModule, xScaleFactor, yScaleFactor, selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null });
+            } catch (e) {
+                console.warn('glRenderer.sync failed', e);
+            }
+        }
+        if (glWorkspace) {
+            try {
+                glWorkspace.sync({ evaluatedNotes, module: myModule, xScaleFactor, yScaleFactor, selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null });
+            } catch (e) {
+                console.warn('glWorkspace.sync failed', e);
+            }
+        }
+
+        // GL-only: skip creating/updating Tapspace DOM items entirely for performance testing
+        if ((glRenderer || glWorkspace) && isWebGL2GLOutputOnlyEnabled()) {
+            try { invalidateModuleEndTimeCache(); updateTimingBoundaries(); } catch {}
+            return;
+        }
+
         const selectedElements = document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected');
         const selectedIds = Array.from(selectedElements).map(el => el.getAttribute('data-note-id'));
         
@@ -3911,7 +5503,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     newNotes.push({
                         ...note,
-                        id: parseInt(id),
+                        id: parseInt(id, 10),
                         element: noteContainer,
                         getBoundingBox: () => noteContainer.getBoundingClientRect()
                     });
@@ -3921,7 +5513,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             });
 
         updateTimingBoundaries();
-        createMeasureBars();
+        
 
         selectedIds.forEach(id => {
             const newElement = document.querySelector(`.note-content[data-note-id="${id}"], .base-note-circle[data-note-id="${id}"], .measure-bar-triangle[data-note-id="${id}"]`);
@@ -3938,169 +5530,64 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
         
         invalidateModuleEndTimeCache();
+        // Ensure BaseNote visuals react to frequency changes (fraction text and Y position)
+        if (!isWebGL2GLOutputOnlyEnabled()) {
+            try { updateBaseNoteFraction(); } catch {}
+            try { updateBaseNotePosition(); } catch {}
+        }
         if (isLocked) {
             updateNotesPointerEvents();
         }
+        if (isTrackingEnabled) { try { updatePlayhead(); } catch {} }
     }
 
-    let audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    let generalVolumeGainNode = audioContext.createGain();
-    let compressor = audioContext.createDynamicsCompressor();
-    generalVolumeGainNode.connect(compressor);
-    compressor.connect(audioContext.destination);
-    let instrumentManager = new InstrumentManager(audioContext);
-    window.instrumentManager = instrumentManager;
-
-    function initAudioContext() {
-        if (!audioContext) {
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
-        if (audioContext.state === 'suspended') {
-            audioContext.resume();
-        }
-    }
-
-    document.addEventListener('DOMContentLoaded', initAudioContext);
-
-    function cleanupAudio() {
-        scheduledTimeouts.forEach(timeout => clearTimeout(timeout));
-        scheduledTimeouts = [];
-        
-        for (const [id, oscObj] of activeOscillators.entries()) {
+    // Lightweight helper to re-sync GL renderer selection ordering without rebuilding DOM
+    function syncRendererSelection() {
+        if (glRenderer) {
             try {
-                oscObj.gainNode.gain.cancelScheduledValues(audioContext.currentTime);
-                oscObj.oscillator.stop();
-                
-                if (oscillatorPool.length < OSCILLATOR_POOL_SIZE) {
-                    oscObj.oscillator.onended = null;
-                    oscillatorPool.push(oscObj.oscillator);
-                    gainNodePool.push(oscObj.gainNode);
-                } else {
-                    oscObj.oscillator.disconnect();
-                    oscObj.gainNode.disconnect();
-                }
+                glRenderer.sync({
+                    evaluatedNotes,
+                    module: myModule,
+                    xScaleFactor,
+                    yScaleFactor,
+                    selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
+                });
             } catch (e) {
-                console.log('Oscillator already stopped');
+                try { console.warn('glRenderer.sync selection update failed', e); } catch {}
             }
         }
-        
-        activeOscillators.clear();
-        
-        if (audioContext.state !== 'running') {
-            audioContext.close().then(() => {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                generalVolumeGainNode = audioContext.createGain();
-                compressor = audioContext.createDynamicsCompressor();
-                generalVolumeGainNode.connect(compressor);
-                compressor.connect(audioContext.destination);
-                setVolume(domCache.volumeSlider.value);
-                
-                oscillatorPool = [];
-                gainNodePool = [];
-            });
+        if (glWorkspace) {
+            try {
+                glWorkspace.sync({
+                    evaluatedNotes,
+                    module: myModule,
+                    xScaleFactor,
+                    yScaleFactor,
+                    selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
+                });
+            } catch (e) {
+                try { console.warn('glWorkspace.sync selection update failed', e); } catch {}
+            }
         }
     }
 
-    function generateOscillatorId() {
-        return Math.random().toString(36).substr(2, 9);
+    // Use shared AudioEngine nodes; legacy fallbacks removed
+    const { audioContext, generalVolumeGainNode, compressor, instrumentManager } = audioEngine.nodes();
+    
+    async function initAudioContext() {
+        await audioEngine.ensureResumed();
+    }
+    
+    document.addEventListener('DOMContentLoaded', () => { initAudioContext(); });
+
+    // Do not close/recreate AudioContext here; AudioEngine manages lifecycle
+    function cleanupAudio() {
+        try { audioEngine.stopAll(); } catch {}
     }
 
+
     function preparePlayback(fromTime) {
-        return new Promise((resolve) => {
-            const resumePromise = audioContext.state === 'suspended' 
-                ? audioContext.resume() 
-                : Promise.resolve();
-                
-            resumePromise.then(() => {
-                cleanupAudio();
-                
-                const evaluatedNotes = myModule.evaluateModule();
-                const moduleEndTime = getModuleEndTime();
-                
-                const activeNotes = [];
-                for (const id in myModule.notes) {
-                    const note = myModule.notes[id];
-                    if (!note.getVariable('startTime') || !note.getVariable('duration')) {
-                        continue;
-                    }
-                    
-                    const noteStart = note.getVariable('startTime').valueOf();
-                    const noteDuration = note.getVariable('duration').valueOf();
-                    const noteEnd = noteStart + noteDuration;
-                    
-                    if (noteEnd > fromTime && noteStart < moduleEndTime) {
-                        activeNotes.push({
-                            noteInstance: note,
-                            id: note.id,
-                            startTime: note.getVariable('startTime'),
-                            duration: note.getVariable('duration'),
-                            frequency: note.getVariable('frequency')
-                        });
-                    }
-                }
-                
-                const uniqueInstruments = new Set();
-                activeNotes.forEach(note => {
-                    if (!note.frequency) return;
-                    
-                    const instrumentName = myModule.findInstrument(note.noteInstance).toLowerCase();
-                    uniqueInstruments.add(instrumentName);
-                });
-                
-                const loadPromises = Array.from(uniqueInstruments).map(instrumentName => {
-                    const instrument = instrumentManager.getInstrument(instrumentName);
-                    if (instrument && instrument.type === 'sample' && typeof instrument.waitForLoad === 'function') {
-                        return instrument.waitForLoad();
-                    }
-                    return Promise.resolve();
-                });
-                
-                Promise.all(loadPromises).then(() => {
-                    const preparedNotes = activeNotes.map(activeNote => {
-                        const noteStart = activeNote.startTime.valueOf();
-                        const noteDuration = activeNote.duration.valueOf();
-                        const noteEnd = noteStart + noteDuration;
-                        
-                        const adjustedStart = Math.max(0, noteStart - fromTime);
-                        const adjustedDuration = noteEnd - Math.max(noteStart, fromTime);
-                        
-                        if (!activeNote.frequency) {
-                            return {
-                                note: {
-                                    ...activeNote,
-                                    startTime: new Fraction(adjustedStart),
-                                    duration: new Fraction(adjustedDuration)
-                                },
-                                oscillator: null,
-                                gainNode: null
-                            };
-                        }
-                        
-                        const instrumentName = myModule.findInstrument(activeNote.noteInstance).toLowerCase();
-                        
-                        const oscillator = instrumentManager.createOscillator(instrumentName, activeNote.frequency.valueOf());
-                        
-                        const gainNode = audioContext.createGain();
-                        
-                        return {
-                            note: {
-                                ...activeNote,
-                                startTime: new Fraction(adjustedStart),
-                                duration: new Fraction(adjustedDuration),
-                                instrument: instrumentName
-                            },
-                            oscillator: oscillator,
-                            gainNode: gainNode
-                        };
-                    });
-                    
-                    resolve(preparedNotes);
-                }).catch(error => {
-                    console.error("Error loading samples:", error);
-                    resolve([]);
-                });
-            });
-        });
+        return audioEngine.preparePlayback(myModule, fromTime);
     }
 
     function play(fromTime = null) {
@@ -4114,47 +5601,22 @@ document.addEventListener('DOMContentLoaded', async function() {
             fromTime = 0;
         }
 
-        preparePlayback(fromTime).then((preparedNotes) => {
-            isPlaying = true;
-            isPaused = false;
-            const startTime = audioContext.currentTime + 0.1;
-            currentTime = startTime - fromTime;
-            playheadTime = fromTime;
-            totalPausedTime = 0;
-            
-            preparedNotes.forEach(prep => {
-                const noteStart = startTime + prep.note.startTime.valueOf();
-                const noteDuration = prep.note.duration.valueOf();
-                const instrumentName = prep.note.instrument;
-                
-                if (!prep.note.frequency) {
-                    return;
-                }
-                
-                instrumentManager.applyEnvelope(instrumentName, prep.gainNode, noteStart, noteDuration, INITIAL_VOLUME);
-                
-                prep.oscillator.connect(prep.gainNode);
-                prep.gainNode.connect(generalVolumeGainNode);
-                
-                prep.oscillator.start(noteStart);
-                prep.oscillator.stop(noteStart + noteDuration);
-                
-                const oscId = generateOscillatorId();
-                activeOscillators.set(oscId, {
-                    oscillator: prep.oscillator,
-                    gainNode: prep.gainNode,
-                    started: true,
-                    stopped: false
-                });
-                
-                prep.oscillator.onended = () => {
-                    if (activeOscillators.has(oscId)) {
-                        activeOscillators.delete(oscId);
-                    }
-                };
-            });
-            domCache.ppElement.classList.remove('loading');
-            domCache.ppElement.classList.add('open');
+        preparePlayback(fromTime).then(async (preparedNotes) => {
+            try {
+                const baseStartTime = audioEngine.play(preparedNotes, { initialVolume: INITIAL_VOLUME });
+
+                isPlaying = true;
+                isPaused = false;
+
+                currentTime = baseStartTime - fromTime;
+                playheadTime = fromTime;
+                totalPausedTime = 0;
+
+                domCache.ppElement.classList.remove('loading');
+                domCache.ppElement.classList.add('open');
+            } catch (e) {
+                console.error('Playback failed', e);
+            }
         });
     }
 
@@ -4162,26 +5624,19 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (!isPlaying || isPaused) return;
         isPaused = true;
         isFadingOut = true;
+
         const currentPauseTime = audioContext.currentTime - currentTime;
         playheadTime = currentPauseTime + totalPausedTime;
-        pausedAtTime = currentPauseTime;
         totalPausedTime += currentPauseTime;
-        
-        for (const [id, oscObj] of activeOscillators.entries()) {
-            try {
-                oscObj.gainNode.gain.cancelScheduledValues(audioContext.currentTime);
-                oscObj.gainNode.gain.linearRampToValueAtTime(0, audioContext.currentTime + GENERAL_VOLUME_RAMP_TIME);
-            } catch (e) {
-                console.log('Error fading out oscillator:', e);
-            }
-        }
-        
-        setTimeout(() => {
-            cleanupAudio();
+
+        audioEngine.pauseFade(GENERAL_VOLUME_RAMP_TIME).then(() => {
             isPlaying = false;
             isFadingOut = false;
-        }, GENERAL_VOLUME_RAMP_TIME * 1000);
-        
+        }).catch(() => {
+            isPlaying = false;
+            isFadingOut = false;
+        });
+
         domCache.ppElement.classList.remove('open');
     }
 
@@ -4199,17 +5654,15 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         domCache.ppElement.classList.remove('open');
         
+        try { audioEngine.stopAll(); } catch {}
         cleanupAudio();
         
         updatePlayhead();
     }
 
     function setVolume(value) {
-        if (isPlaying) {
-            generalVolumeGainNode.gain.linearRampToValueAtTime(value, audioContext.currentTime + GENERAL_VOLUME_RAMP_TIME);
-        } else {
-            generalVolumeGainNode.gain.value = value;
-        }
+        audioEngine.setVolume(value);
+        return;
     }
 
     document.addEventListener('mousedown', (event) => {
@@ -4230,8 +5683,16 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     document.addEventListener('mouseup', (event) => {
         if (!isDragging) {
-            if (!domCache.noteWidget.contains(event.target) && 
-                !event.target.closest('.note-rect') && 
+            // Suppress global clearSelection if a GL octave action just occurred
+            let suppressClear = false;
+            try {
+                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+                const nowTs = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
+                suppressClear = !!(cont && cont.__rmtSuppressClickUntil && Math.sign(cont.__rmtSuppressClickUntil - nowTs) === 1);
+            } catch {}
+            if (!suppressClear &&
+                !domCache.noteWidget.contains(event.target) &&
+                !event.target.closest('.note-rect') &&
                 !event.target.closest('#baseNoteCircle') &&
                 !event.target.closest('.measure-bar-triangle') &&
                 !event.target.closest('.delete-confirm-overlay') &&
@@ -4241,6 +5702,62 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (!domCache.generalWidget.contains(event.target) && !domCache.dropdownButton.contains(event.target)) {
                 domCache.plusminus.classList.remove('open');
                 domCache.generalWidget.classList.remove('open');
+            }
+            // Close Load Module dropdown when clicking outside
+            const dd = document.getElementById('loadModuleDropdown');
+            const lb = domCache.loadModuleBtn;
+            if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
+                dd.style.display = 'none';
+            }
+        }
+        isDragging = false;
+    });
+
+    // Pointer-based background tap handling for touch/pen (mirrors mouseup logic)
+    document.addEventListener('pointerdown', (event) => {
+        if (event.pointerType === 'mouse') return;
+        isDragging = false;
+        dragStartX = event.clientX;
+        dragStartY = event.clientY;
+    }, { passive: true });
+
+    document.addEventListener('pointermove', (event) => {
+        if (event.pointerType === 'mouse') return;
+        if (!isDragging) {
+            const deltaX = Math.abs(event.clientX - dragStartX);
+            const deltaY = Math.abs(event.clientY - dragStartY);
+            if (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD) {
+                isDragging = true;
+            }
+        }
+    }, { passive: true });
+
+    document.addEventListener('pointerup', (event) => {
+        if (event.pointerType === 'mouse') return;
+        if (!isDragging) {
+            let suppressClear = false;
+            try {
+                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+                const nowTs = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
+                suppressClear = !!(cont && cont.__rmtSuppressClickUntil && Math.sign(cont.__rmtSuppressClickUntil - nowTs) === 1);
+            } catch {}
+            if (!suppressClear &&
+                !domCache.noteWidget.contains(event.target) &&
+                !event.target.closest('.note-rect') &&
+                !event.target.closest('#baseNoteCircle') &&
+                !event.target.closest('.measure-bar-triangle') &&
+                !event.target.closest('.delete-confirm-overlay') &&
+                !event.target.closest('.octave-button')) {
+                clearSelection();
+            }
+            if (!domCache.generalWidget.contains(event.target) && !domCache.dropdownButton.contains(event.target)) {
+                domCache.plusminus.classList.remove('open');
+                domCache.generalWidget.classList.remove('open');
+            }
+            const dd = document.getElementById('loadModuleDropdown');
+            const lb = domCache.loadModuleBtn;
+            if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
+                dd.style.display = 'none';
             }
         }
         isDragging = false;
@@ -4270,18 +5787,92 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     domCache.trackingToggle.addEventListener('change', (event) => {
         isTrackingEnabled = event.target.checked;
+        // Keep renderer tracking mode in sync with tracking toggle
+        try {
+            if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
+                glWorkspace.renderer.setTrackingMode(!!isTrackingEnabled);
+            } else if (glRenderer && typeof glRenderer.setTrackingMode === 'function') {
+                glRenderer.setTrackingMode(!!isTrackingEnabled);
+            }
+        } catch {}
+
+                // Update Reset View interactivity state as tracking changes
+                try {
+                    const btn = domCache.resetViewBtn;
+                    if (btn) {
+                        if (isTrackingEnabled) {
+                            btn.setAttribute('aria-disabled', 'true');
+                            btn.setAttribute('tabindex', '-1');
+                            btn.style.pointerEvents = 'none';
+                            btn.style.cursor = 'not-allowed';
+                            btn.style.opacity = '0.5';
+                            btn.title = 'Reset disabled while tracking';
+                        } else {
+                            btn.removeAttribute('aria-disabled');
+                            btn.removeAttribute('tabindex');
+                            btn.style.pointerEvents = '';
+                            btn.style.cursor = '';
+                            btn.style.opacity = '';
+                            btn.title = 'Reset View';
+                        }
+                    }
+                } catch {}
+
         if (isTrackingEnabled) {
-            const x = playheadTime * 200;
-            const viewCenter = viewport.atCenter();
-            const targetPoint = new tapspace.geometry.Point(space, { 
-                x: x, 
-                y: viewCenter.transitRaw(space).y, 
-                z: 0 
-            });
-            viewport.translateTo(targetPoint);
+            const x = playheadTime * 200 * xScaleFactor;
+            if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                try {
+                    const rect = glWorkspace.containerEl.getBoundingClientRect();
+                    const s = glWorkspace.camera.scale || 1;
+                    const centerX = rect.width * 0.5;
+                    // Engage X-lock and center playhead in workspace
+                    glWorkspace.camera.lockX = true;
+                    glWorkspace.camera.tx = centerX - s * x;
+                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                    try { updatePlayhead(); } catch {}
+                } catch {}
+            } else {
+                const viewCenter = viewport.atCenter();
+                const targetPoint = new tapspace.geometry.Point(space, {
+                    x: x,
+                    y: viewCenter.transitRaw(space).y,
+                    z: 0
+                });
+                viewport.translateTo(targetPoint);
+            }
+        } else {
+            // Release X-lock immediately when tracking is disabled
+            if (glWorkspace && glWorkspace.camera) {
+                try {
+                    glWorkspace.camera.lockX = false;
+                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                } catch {}
+            }
         }
         updateZoomableBehavior();
     });
+
+        // Initialize Reset View interactivity based on initial tracking state
+        try {
+            const btn = domCache.resetViewBtn;
+            if (btn) {
+                if (isTrackingEnabled) {
+                    btn.setAttribute('aria-disabled', 'true');
+                    btn.setAttribute('tabindex', '-1');
+                    btn.style.pointerEvents = 'none';
+                    btn.style.cursor = 'not-allowed';
+                    btn.style.opacity = '0.5';
+                    btn.title = 'Reset disabled while tracking';
+                } else {
+                    btn.removeAttribute('aria-disabled');
+                    btn.removeAttribute('tabindex');
+                    btn.style.pointerEvents = '';
+                    btn.style.cursor = '';
+                    btn.style.opacity = '';
+                    btn.title = 'Reset View';
+                }
+            }
+        } catch {}
 
     domCache.playPauseBtn.addEventListener('click', () => {
         if (isPlaying) {
@@ -4300,9 +5891,36 @@ document.addEventListener('DOMContentLoaded', async function() {
     });
 
     if (domCache.loadModuleBtn && domCache.loadModuleInput) {
-        domCache.loadModuleBtn.addEventListener('click', () => {
-            domCache.loadModuleInput.click();
+        const toggleLoadDropdown = () => {
+            const dd = document.getElementById('loadModuleDropdown');
+            if (!dd) return;
+            dd.style.display = (dd.style.display === 'none' || dd.style.display === '') ? 'block' : 'none';
+        };
+        const hideLoadDropdown = () => {
+            const dd = document.getElementById('loadModuleDropdown');
+            if (dd) dd.style.display = 'none';
+        };
+
+        domCache.loadModuleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleLoadDropdown();
         });
+
+        if (domCache.loadFromFileItem) {
+            domCache.loadFromFileItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                domCache.loadModuleInput.click();
+                hideLoadDropdown();
+            });
+        }
+        if (domCache.resetDefaultModuleItem) {
+            domCache.resetDefaultModuleItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                hideLoadDropdown();
+                showResetDefaultModuleConfirmation();
+            });
+        }
+
         domCache.loadModuleInput.addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (file) {
@@ -4316,10 +5934,80 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     if (domCache.reorderModuleBtn) {
         domCache.reorderModuleBtn.addEventListener('click', function() {
-            reorderCurrentModule();
+            showConfirm('Reorder the current module? This will reindex notes. Proceed?', 'Yes, Reorder', () => reorderCurrentModule());
         });
     } else {
         console.error('Reorder Module button not found!');
+    }
+
+    // Generic confirm overlay using existing modal styles
+    function showConfirm(message, yesLabel, onYes) {
+        try {
+            const overlay = document.createElement('div');
+            overlay.className = 'delete-confirm-overlay';
+            const modal = document.createElement('div');
+            modal.className = 'delete-confirm-modal';
+            const p = document.createElement('p');
+            p.textContent = message || 'Are you sure?';
+            const btns = document.createElement('div');
+            btns.className = 'modal-btn-container';
+            const yes = document.createElement('button');
+            yes.textContent = yesLabel || 'Yes';
+            const cancel = document.createElement('button');
+            cancel.textContent = 'Cancel';
+            yes.addEventListener('click', () => {
+                try { if (typeof onYes === 'function') onYes(); } catch {}
+                if (overlay.parentNode) document.body.removeChild(overlay);
+            });
+            cancel.addEventListener('click', () => { if (overlay.parentNode) document.body.removeChild(overlay); });
+            overlay.addEventListener('click', (e) => { if (e.target === overlay) { if (overlay.parentNode) document.body.removeChild(overlay); } });
+            btns.appendChild(yes);
+            btns.appendChild(cancel);
+            modal.appendChild(p);
+            modal.appendChild(btns);
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+        } catch (e) {}
+    }
+
+    function showResetDefaultModuleConfirmation() {
+        showConfirm(
+            'This will reset the workspace to the default module. This action can be undone/redone via History. Proceed?',
+            'Yes, Reset',
+            () => resetDefaultModule()
+        );
+    }
+
+    async function resetDefaultModule() {
+        try {
+            if (isPlaying || isPaused) {
+                stop(true);
+            }
+            cleanupCurrentModule();
+            const newModule = await Module.loadFromJSON('modules/defaultModule.json');
+            if (newModule && newModule.baseNote) {
+                newModule.baseNote.id = 0;
+            }
+            myModule = newModule;
+            setModule(newModule);
+
+            myModule.markNoteDirty(0);
+            initializeModule();
+            invalidateModuleEndTimeCache();
+
+            updateBaseNoteFraction();
+            updateBaseNotePosition();
+
+            try { captureSnapshot('Reset Default Module'); } catch {}
+            notify('Default module reset', 'success');
+        } catch (error) {
+            console.error('Error resetting default module:', error);
+            const errorMsg = document.createElement('div');
+            errorMsg.className = 'error-message';
+            errorMsg.textContent = `Error resetting default module: ${error.message}`;
+            document.body.appendChild(errorMsg);
+            setTimeout(() => errorMsg.remove(), 3000);
+        }
     }
 
     function reorderCurrentModule() {
@@ -4336,13 +6024,13 @@ document.addEventListener('DOMContentLoaded', async function() {
             memoizedModuleEndTime = null;
             moduleLastModifiedTime = Date.now();
             
-            if (window.modals && window.modals.invalidateDependencyGraphCache) {
-                window.modals.invalidateDependencyGraphCache();
+            if (modals && modals.invalidateDependencyGraphCache) {
+                modals.invalidateDependencyGraphCache();
             }
             
             Module.loadFromJSON(data).then(newModule => {
                 myModule = newModule;
-                window.myModule = newModule;
+                setModule(newModule);
                 
                 myModule._evaluationCache = {};
                 myModule._dirtyNotes.clear();
@@ -4359,7 +6047,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 viewport.translateTo(newPoint);
                 
                 evaluatedNotes = myModule.evaluateModule();
+                setEvaluatedNotes(evaluatedNotes);
                 updateVisualNotes(evaluatedNotes);
+                try { captureSnapshot('Reorder Module'); } catch {}
+                notify('Module reordered successfully', 'success');
                 
             }).catch(error => {
                 console.error('Error reordering module:', error);
@@ -4382,84 +6073,26 @@ document.addEventListener('DOMContentLoaded', async function() {
                     stop(true);
                 }
                 
-                const currentBaseNote = {
-                    id: 0,
-                    frequency: myModule.baseNote.getVariable('frequency'),
-                    frequencyString: myModule.baseNote.variables.frequencyString,
-                    startTime: myModule.baseNote.getVariable('startTime'),
-                    startTimeString: myModule.baseNote.variables.startTimeString,
-                    tempo: myModule.baseNote.getVariable('tempo'),
-                    tempoString: myModule.baseNote.variables.tempoString,
-                    beatsPerMeasure: myModule.baseNote.getVariable('beatsPerMeasure'),
-                    beatsPerMeasureString: myModule.baseNote.variables.beatsPerMeasureString,
-                    color: myModule.baseNote.variables.color
-                };
                 
                 cleanupCurrentModule();
                 
                 Module.loadFromJSON(moduleData).then(newModule => {
                     if (newModule.baseNote) {
+                        // Ensure canonical id for base note; otherwise use module-defined base note values as-is
                         newModule.baseNote.id = 0;
-                        
-                        if (currentBaseNote.frequencyString) {
-                            newModule.baseNote.variables.frequencyString = currentBaseNote.frequencyString;
-                            newModule.baseNote.setVariable('frequency', function() {
-                                return new Function("module", "Fraction", "return " + currentBaseNote.frequencyString + ";")(newModule, Fraction);
-                            });
-                        } else if (currentBaseNote.frequency) {
-                            newModule.baseNote.setVariable('frequency', function() {
-                                return currentBaseNote.frequency;
-                            });
-                        }
-                        
-                        if (currentBaseNote.startTimeString) {
-                            newModule.baseNote.variables.startTimeString = currentBaseNote.startTimeString;
-                            newModule.baseNote.setVariable('startTime', function() {
-                                return new Function("module", "Fraction", "return " + currentBaseNote.startTimeString + ";")(newModule, Fraction);
-                            });
-                        } else if (currentBaseNote.startTime) {
-                            newModule.baseNote.setVariable('startTime', function() {
-                                return currentBaseNote.startTime;
-                            });
-                        }
-                        
-                        if (currentBaseNote.tempoString) {
-                            newModule.baseNote.variables.tempoString = currentBaseNote.tempoString;
-                            newModule.baseNote.setVariable('tempo', function() {
-                                return new Function("module", "Fraction", "return " + currentBaseNote.tempoString + ";")(newModule, Fraction);
-                            });
-                        } else if (currentBaseNote.tempo) {
-                            newModule.baseNote.setVariable('tempo', function() {
-                                return currentBaseNote.tempo;
-                            });
-                        }
-                        
-                        if (currentBaseNote.beatsPerMeasureString) {
-                            newModule.baseNote.variables.beatsPerMeasureString = currentBaseNote.beatsPerMeasureString;
-                            newModule.baseNote.setVariable('beatsPerMeasure', function() {
-                                return new Function("module", "Fraction", "return " + currentBaseNote.beatsPerMeasureString + ";")(newModule, Fraction);
-                            });
-                        } else if (currentBaseNote.beatsPerMeasure) {
-                            newModule.baseNote.setVariable('beatsPerMeasure', function() {
-                                return currentBaseNote.beatsPerMeasure;
-                            });
-                        }
-                        
-                        if (currentBaseNote.color) {
-                            newModule.baseNote.variables.color = currentBaseNote.color;
-                        }
                     }
                     
                     myModule = newModule;
-                    window.myModule = newModule;
+                    setModule(newModule);
                     
                     myModule.markNoteDirty(0);
-                    
                     initializeModule();
                     invalidateModuleEndTimeCache();
                     
                     updateBaseNoteFraction();
                     updateBaseNotePosition();
+                    try { captureSnapshot('Load Module'); } catch {}
+                    notify('Module loaded successfully', 'success');
                     
                 }).catch((error) => {
                     console.error('Error loading module:', error);
@@ -4491,6 +6124,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     function initializeModule() {
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         newNotes = Object.keys(evaluatedNotes)
             .map(id => evaluatedNotes[id])
             .filter(note => note.startTime && note.duration && note.frequency);
@@ -4560,7 +6194,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     function validateExpression(moduleInstance, noteId, expression, variableType) {
-        return window.modals.validateExpression(moduleInstance, noteId, expression, variableType);
+        return modals.validateExpression(moduleInstance, noteId, expression, variableType);
     }
 
     let dependencyGraphCache = null;
@@ -4673,7 +6307,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     function invalidateDependencyGraphCache() {
-        window.modals.invalidateDependencyGraphCache();
+        modals.invalidateDependencyGraphCache();
     }
 
     const TOP_HEADER_HEIGHT = 50;
@@ -4681,7 +6315,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     let widgetInitiallyOpened = false;
 
     function updateNoteWidgetHeight() {
-        window.modals.updateNoteWidgetHeight();
+        modals.updateNoteWidgetHeight();
     }
       
     updateNoteWidgetHeight();
@@ -4752,10 +6386,27 @@ document.addEventListener('DOMContentLoaded', async function() {
             lockButton.classList.add('locked');
             lockButton.setAttribute('aria-pressed', 'true');
             updateNotesPointerEvents();
+
+            // Clear any GL hover highlight and reset cursor when locking
+            try {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setHoverNoteId === 'function') {
+                    glWorkspace.renderer.setHoverNoteId(null);
+                }
+            } catch {}
+            try {
+                if (glRenderer && typeof glRenderer.setHoverNoteId === 'function') {
+                    glRenderer.setHoverNoteId(null);
+                }
+            } catch {}
+            try {
+                const cont = document.querySelector('.myspaceapp');
+                if (cont) cont.style.cursor = '';
+            } catch {}
         } else {
             lockButton.classList.remove('locked');
             lockButton.setAttribute('aria-pressed', 'false');
             updateNotesPointerEvents();
+            // On unlock, hover will repopulate on next pointermove
         }
     }
 
@@ -4806,6 +6457,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         updateLockButton();
 
         evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
         createMeasureBars();
         
@@ -4822,5 +6474,615 @@ document.addEventListener('DOMContentLoaded', async function() {
         memoizedModuleEndTime = null;
         moduleLastModifiedTime = Date.now();
     }
+
+// Event bus subscriptions for incremental modularization
+  // Hooks allow future decoupling without breaking legacy globals.
+  if (eventBus && typeof eventBus.on === 'function') {
+    try {
+      // When modals show a note, forward selection to stack-click helper
+      eventBus.on('modals:show', ({ noteId }) => {
+        if (typeof updateStackClickSelectedNote === 'function' && noteId != null) {
+          updateStackClickSelectedNote(noteId);
+        }
+      });
+
+      // When modals are cleared, ensure selection state remains coherent
+      eventBus.on('modals:cleared', () => {
+        // Placeholder for future player reactions
+      });
+
+      // Global pause request from other modules (no state leak)
+      eventBus.on('player:requestPause', () => {
+        if (isPlaying && !isPaused) {
+          pause();
+        }
+      });
+
+      // Octave change requests from UI modules (e.g., modals)
+      eventBus.on('player:octaveChange', ({ noteId, direction }) => {
+        try {
+          // Suppress container click selection right after octave actions so stack-click does not run
+          try {
+            const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+            if (cont) {
+              const nowTs = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
+              cont.__rmtSuppressClickUntil = nowTs + 300; try { window.__rmtLastOctaveChangeTs = nowTs; } catch {}
+            }
+          } catch {}
+          if (noteId != null) {
+            handleOctaveChange(parseInt(noteId, 10), direction);
+          }
+        } catch (e) {
+          console.warn('octaveChange handler failed', e);
+        }
+      });
+
+      // Import module drop request from menu or other UIs
+      eventBus.on('player:importModuleAtTarget', ({ targetNoteId, moduleData, clientX, clientY }) => {
+  try {
+    let target = null;
+
+    // 1) Direct id if provided
+    if (targetNoteId != null) {
+      target = myModule?.getNoteById(Number(targetNoteId));
+    }
+
+    // 2) If not, try GPU picking with provided screen coords (works with GL-only, no DOM target needed)
+    if (!target) {
+      if (typeof clientX === 'number' && typeof clientY === 'number' && glWorkspace && typeof glWorkspace.pickAt === 'function') {
+        try {
+          const hit = glWorkspace.pickAt(clientX, clientY, 4);
+          if (hit) {
+            if (hit.type === 'base') {
+              target = myModule.baseNote;
+            } else if (hit.type === 'note' || hit.type === 'measure') {
+              target = myModule.getNoteById(Number(hit.id));
+            }
+          }
+        } catch {}
+      }
+    }
+
+    // 3) Fallback to current selection or BaseNote
+    if (!target) {
+      target = currentSelectedNote || myModule.baseNote;
+    }
+
+    importModuleAtTarget(target, moduleData);
+  } catch (e) {
+    console.warn('importModuleAtTarget via eventBus failed', e);
+  }
+});
+      eventBus.on('player:invalidateModuleEndTimeCache', () => {
+        try { invalidateModuleEndTimeCache(); updateMeasureBarPositions(); } catch {}
+      });
+
+      // External selection request: update selection state so GL highlights/ordering refresh immediately
+      eventBus.on('player:selectNote', ({ noteId }) => {
+        try {
+          if (noteId == null) return;
+          const n = myModule.getNoteById(Number(noteId));
+          if (!n) return;
+          currentSelectedNote = n;
+          try { syncRendererSelection(); } catch {}
+        } catch {}
+      });
+      // Persist latest module snapshot on every history capture
+      eventBus.on('history:capture', ({ snapshot }) => {
+        try { localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snapshot)); } catch {}
+      });
+    } catch (e) {
+      console.warn('eventBus subscription failed', e);
+    }
+      // GL Workspace: commit handlers for move/resize coming from webgl2/workspace.js
+      eventBus.on('workspace:noteMoveCommit', ({ noteId, newStartSec }) => {
+        try {
+          if (noteId == null || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
+          const n = myModule.getNoteById(Number(noteId));
+          if (!n) return;
+
+          // Pause playback during edit if needed
+          try { eventBus.emit('player:requestPause'); } catch {}
+
+          // Capture original before remap for debug/validation
+          const oldRaw = n.variables.startTimeString || '';
+          const oldStart = Number(n.getVariable('startTime').valueOf() || 0);
+
+          // Legacy-like remapping: select suitable parent and emit relative startTime expression
+          const parent = selectSuitableParentForStartGL(n, newStartSec);
+          const raw = emitStartTimeExprForParentGL(parent, newStartSec);
+
+          // Minimal guarded trace: enable via window.__RMT_DEBUG_GL_MOVE = true in console
+          try {
+            if (typeof window !== 'undefined' && window.__RMT_DEBUG_GL_MOVE) {
+              console.debug('[GLMove] noteMoveCommit', {
+                noteId,
+                newStartSec,
+                oldStart,
+                oldRaw,
+                chosenParentId: parent ? parent.id : null,
+                raw
+              });
+            }
+          } catch {}
+
+          n.setVariable('startTime', function() { return __evalExpr(raw, myModule); });
+          n.setVariable('startTimeString', raw);
+
+          // Ensure evaluation cache sees the edited note
+          try { myModule.markNoteDirty(n.id); } catch {}
+
+          // Retarget dependents that would reference a future-starting note
+          try { retargetDependentStartAndDurationOnTemporalViolationGL(n); } catch {}
+          try { retargetDependentFrequencyOnTemporalViolationGL(n); } catch {}
+
+          evaluatedNotes = myModule.evaluateModule();
+          setEvaluatedNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          invalidateModuleEndTimeCache();
+          try { captureSnapshot("Move Note " + noteId); } catch {}
+          // Keep existing selection; sync renderer selection ordering without changing it
+          try { syncRendererSelection(); } catch {}
+          // Refresh variable modal if visible and selection exists (fallback to document.body when DOM anchor hidden in GL-only mode)
+          try {
+            const widget = document.getElementById('note-widget');
+            const isVisible = !!(widget && widget.classList && widget.classList.contains('visible'));
+            if (isVisible && currentSelectedNote) {
+              let anchor = document.querySelector(
+                `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+              );
+              if (!anchor) anchor = document.body;
+              try {
+                const __isSelectedMeasure = currentSelectedNote && currentSelectedNote.variables && currentSelectedNote.variables.startTime && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency;
+                const __mid = __isSelectedMeasure ? currentSelectedNote.id : null;
+                eventBus.emit('modals:requestRefresh', { note: currentSelectedNote, measureId: __mid, clickedElement: anchor });
+              } catch {
+                if (anchor.classList && anchor.classList.contains('measure-bar-triangle')) {
+                  showNoteVariables(currentSelectedNote, anchor, currentSelectedNote.id);
+                } else {
+                  showNoteVariables(currentSelectedNote, anchor);
+                }
+              }
+            }
+          } catch {}
+        } catch (e) {
+          console.warn('workspace:noteMoveCommit failed', e);
+        }
+      });
+
+      eventBus.on('workspace:noteResizeCommit', ({ noteId, newDurationSec }) => {
+        try {
+          if (noteId == null || typeof newDurationSec !== 'number' || !isFinite(newDurationSec)) return;
+          const n = myModule.getNoteById(Number(noteId));
+          if (!n) return;
+
+          try { eventBus.emit('player:requestPause'); } catch {}
+
+          const tempo = myModule.baseNote?.getVariable?.('tempo')?.valueOf?.() ?? 120;
+          const beatLen = 60 / tempo;
+
+          const oldDuration = n.getVariable('duration')?.valueOf?.() ?? 0;
+
+          const beats = newDurationSec / beatLen;
+          const sixteenth = 0.25;
+          const snappedBeats = Math.max(sixteenth, Math.round(beats / sixteenth) * sixteenth);
+
+          let beatsFrac;
+          try {
+            beatsFrac = new Fraction(snappedBeats);
+          } catch {
+            beatsFrac = new Fraction(Math.round(snappedBeats * 4), 4);
+          }
+
+          const raw = "new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(" + beatsFrac.n + ", " + beatsFrac.d + "))";
+          const simplified = simplifyDuration(raw, myModule);
+
+          n.setVariable('durationString', simplified);
+          n.setVariable('duration', function() { return __evalExpr(simplified, myModule); });
+
+          const updatedDuration = n.getVariable('duration')?.valueOf?.() ?? newDurationSec;
+
+          // Propagate to dependents when appropriate
+          try { checkAndUpdateDependentNotes(n.id, oldDuration, updatedDuration); } catch {}
+          // Also ensure temporal integrity across all anchors after resize
+          try { retargetDependentStartAndDurationOnTemporalViolationGL(n); } catch {}
+          try { retargetDependentFrequencyOnTemporalViolationGL(n); } catch {}
+
+          evaluatedNotes = myModule.evaluateModule();
+          setEvaluatedNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          invalidateModuleEndTimeCache();
+          try { captureSnapshot("Resize Note " + noteId); } catch {}
+          // Keep existing selection; sync renderer selection ordering without changing it
+          try { syncRendererSelection(); } catch {}
+          // Refresh variable modal if visible and selection exists (fallback to document.body when DOM anchor hidden in GL-only mode)
+          try {
+            const widget = document.getElementById('note-widget');
+            const isVisible = !!(widget && widget.classList && widget.classList.contains('visible'));
+            if (isVisible && currentSelectedNote) {
+              let anchor = document.querySelector(
+                `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+              );
+              if (!anchor) anchor = document.body;
+              try {
+                const __isSelectedMeasure = currentSelectedNote && currentSelectedNote.variables && currentSelectedNote.variables.startTime && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency;
+                const __mid = __isSelectedMeasure ? currentSelectedNote.id : null;
+                eventBus.emit('modals:requestRefresh', { note: currentSelectedNote, measureId: __mid, clickedElement: anchor });
+              } catch {
+                if (anchor.classList && anchor.classList.contains('measure-bar-triangle')) {
+                  showNoteVariables(currentSelectedNote, anchor, currentSelectedNote.id);
+                } else {
+                  showNoteVariables(currentSelectedNote, anchor);
+                }
+              }
+            }
+          } catch {}
+        } catch (e) {
+          console.warn('workspace:noteResizeCommit failed', e);
+        }
+      });
+     eventBus.on('workspace:measureResizeCommit', ({ measureId, newStartSec }) => {
+       try {
+         if (measureId == null || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
+         const mId = Number(measureId);
+ 
+         // Pause playback during edit if needed
+         try { eventBus.emit('player:requestPause'); } catch {}
+ 
+         // Helper: identify "measure" notes (startTime set, no duration/frequency)
+         const __isMeasure = (n) => {
+           try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
+           catch { return false; }
+         };
+ 
+         const note = myModule.getNoteById(mId);
+         if (!note || !__isMeasure(note)) return;
+ 
+         // Helper: parse parent from startTimeString and tell if it is a measure
+         const getParentMeasureId = (n) => {
+           try {
+             const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
+             const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+             if (m) {
+               const pid = parseInt(m[1], 10);
+               const pn = myModule.getNoteById(pid);
+               return __isMeasure(pn) ? pid : (pid || null);
+             }
+             if ((raw || '').includes('module.baseNote')) return 0;
+           } catch {}
+           return null;
+         };
+ 
+         // Collect the linear chain for this measure only (do not mix with other chains)
+         const chain = (() => {
+           const out = [];
+           // Walk backward to earliest measure in this chain
+           let cur = note;
+           let guard = 0;
+           while (guard++ < 1024) {
+             const raw = (cur && cur.variables && cur.variables.startTimeString) ? cur.variables.startTimeString : '';
+             const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+             if (m) {
+               const pid = parseInt(m[1], 10);
+               const pn = myModule.getNoteById(pid);
+               if (pn && __isMeasure(pn)) { cur = pn; continue; }
+             }
+             break;
+           }
+           const pushWithStart = (n) => {
+             try { out.push({ id: Number(n.id), startSec: Number(n.getVariable('startTime')?.valueOf?.() ?? 0) }); }
+             catch { out.push({ id: Number(n.id), startSec: 0 }); }
+           };
+           pushWithStart(cur);
+           // Forward: at each step pick earliest dependent measure
+           const findDependents = (m) => {
+             const arr = [];
+             try {
+               for (const id in myModule.notes) {
+                 const nn = myModule.getNoteById(Number(id));
+                 if (!__isMeasure(nn)) continue;
+                 const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
+                 const re = new RegExp('getNoteById\\(\\s*' + m.id + '\\s*\\)');
+                 if (re.test(sts)) arr.push(nn);
+               }
+             } catch {}
+             arr.sort((a, b) => {
+               try { return a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf(); } catch { return 0; }
+             });
+             return arr;
+           };
+           guard = 0;
+           let curN = cur;
+           while (guard++ < 2048) {
+             const deps = findDependents(curN);
+             if (!deps.length) break;
+             const next = deps[0];
+             pushWithStart(next);
+             curN = next;
+           }
+           return out;
+         })();
+ 
+         const idx = chain.findIndex(e => Number(e.id) === mId);
+         if (idx < 0) return;
+ 
+         const tol = 1e-6;
+ 
+         if (idx === 0) {
+          // First in chain: NEVER adjust an unrelated previous measure from another chain.
+          // Decide behavior from the anchor encoded in startTimeString.
+          try {
+            const raw = (note && note.variables && note.variables.startTimeString) ? note.variables.startTimeString : '';
+            const baseAnchored = !!(raw && raw.indexOf('module.baseNote') !== -1);
+
+            const isMeasure = (n) => {
+              try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
+              catch { return false; }
+            };
+
+            let parentNote = null;
+            if (!baseAnchored) {
+              const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
+              if (m) {
+                const pid = parseInt(m[1], 10);
+                parentNote = myModule.getNoteById(pid) || null;
+              } else if (typeof note.parentId === 'number') {
+                parentNote = myModule.getNoteById(note.parentId) || null;
+              }
+            }
+
+            if (baseAnchored) {
+              // Do NOT modify BaseNote beats. Anchor this measure directly to BaseNote with an explicit offset.
+              const base = myModule.baseNote;
+              const baseStart = Number(base.getVariable('startTime')?.valueOf?.() || 0);
+              const tempoVal = myModule.findTempo(base);
+              const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+              const beatLen = 60 / tempo;
+
+              let gapSec = Math.max(0, Number(newStartSec) - baseStart);
+              let beats = gapSec / beatLen;
+              const sixteenth = 0.25;
+              // Allow exact origin: round to nearest 1/16th without enforcing a minimum > 0
+              beats = Math.max(0, Math.round(beats / sixteenth) * sixteenth);
+
+              let bf; try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(Math.max(0, beats) * 4), 4); }
+              const baseRef = "module.baseNote";
+              // If at origin, emit exactly base start to avoid add(... * 0) jitter
+              const newRaw = (beats === 0)
+                ? `${baseRef}.getVariable('startTime')`
+                : `${baseRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${baseRef})).mul(new Fraction(${bf.n}, ${bf.d})))`;
+              const simplifiedStart = simplifyStartTime(newRaw, myModule);
+              note.setVariable('startTime', function () { return __evalExpr(simplifiedStart, myModule); });
+              note.setVariable('startTimeString', simplifiedStart);
+              try { myModule.markNoteDirty(note.id); } catch {}
+            } else if (parentNote && !isMeasure(parentNote)) {
+              // Parent was a normal note originally. Resolve the candidate at drop time (matches preview)
+              // instead of forcing the original parent. This makes dependency remapping functional.
+              const cand = selectSuitableParentForStartGL(note, Number(newStartSec));
+
+              // Prefer exact base-start reference when dropping exactly at BaseNote start to avoid +0 artifacts.
+              let raw2;
+              try {
+                if (cand && cand.id === 0) {
+                  const base = myModule.baseNote;
+                  const baseStart = Number(base.getVariable('startTime')?.valueOf?.() || 0);
+                  if (Math.abs(Number(newStartSec) - baseStart) < 1e-6) {
+                    raw2 = "module.baseNote.getVariable('startTime')";
+                  }
+                }
+              } catch {}
+
+              if (!raw2) {
+                raw2 = emitStartTimeExprForParentGL(cand || myModule.baseNote, Number(newStartSec));
+              }
+
+              note.setVariable('startTime', function () { return __evalExpr(raw2, myModule); });
+              note.setVariable('startTimeString', raw2);
+              try { myModule.markNoteDirty(note.id); } catch {}
+            } else {
+              // Fallback heuristics: choose a suitable parent and express relative start.
+              const parent = selectSuitableParentForStartGL(note, Number(newStartSec));
+              const raw3 = emitStartTimeExprForParentGL(parent, Number(newStartSec));
+              note.setVariable('startTime', function () { return __evalExpr(raw3, myModule); });
+              note.setVariable('startTimeString', raw3);
+              try { myModule.markNoteDirty(note.id); } catch {}
+            }
+          } catch (e) {
+            const parent = selectSuitableParentForStartGL(note, Number(newStartSec));
+            const raw = emitStartTimeExprForParentGL(parent, Number(newStartSec));
+            note.setVariable('startTime', function () { return __evalExpr(raw, myModule); });
+            note.setVariable('startTimeString', raw);
+            try { myModule.markNoteDirty(note.id); } catch {}
+          }
+        } else {
+           // Subsequent measure: adjust previous measure's beats so its END equals newStartSec, then anchor current to prev END
+           const prevMeta = chain[idx - 1];
+           const prev = myModule.getNoteById(Number(prevMeta.id));
+           const prevStart = Number(prevMeta.startSec || prev.getVariable('startTime')?.valueOf?.() || 0);
+           const tempoVal = myModule.findTempo(prev);
+           const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+           const beatLen = 60 / tempo;
+ 
+           let gapSec = Math.max(0, Number(newStartSec) - prevStart);
+           // snap to sixteenth
+           let beats = gapSec / beatLen;
+           const sixteenth = 0.25;
+           beats = Math.max(sixteenth, Math.round(beats / sixteenth) * sixteenth);
+ 
+           let bf; try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
+           const rawBeats = `new Fraction(${bf.n}, ${bf.d})`;
+           try {
+             prev.setVariable('beatsPerMeasure', function () { return __evalExpr(rawBeats, myModule); });
+             prev.setVariable('beatsPerMeasureString', rawBeats);
+             try { myModule.markNoteDirty(prev.id); } catch {}
+           } catch {}
+ 
+           try {
+             const rawStart = `module.getNoteById(${prev.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prev.id})))`;
+             const simplifiedStart = simplifyStartTime(rawStart, myModule);
+             note.setVariable('startTime', function () { return __evalExpr(simplifiedStart, myModule); });
+             note.setVariable('startTimeString', simplifiedStart);
+             try { myModule.markNoteDirty(note.id); } catch {}
+           } catch {}
+         }
+ 
+         // Re-evaluate and refresh visuals
+         evaluatedNotes = myModule.evaluateModule();
+         setEvaluatedNotes(evaluatedNotes);
+         updateVisualNotes(evaluatedNotes);
+         createMeasureBars();
+         invalidateModuleEndTimeCache();
+         try { captureSnapshot("Resize Measure " + measureId); } catch {}
+ 
+         // Keep selection ordering in GL in sync
+         try { syncRendererSelection(); } catch {}
+ 
+         // Refresh variable modal; prefer the resized Measure context explicitly
+         try {
+           const widget = document.getElementById('note-widget');
+           const isVisible = !!(widget && widget.classList && widget.classList.contains('visible'));
+           if (isVisible) {
+             const mNote = myModule.getNoteById(mId);
+             // Prefer the triangle of the resized measure as anchor
+             let anchor = document.querySelector(`.measure-bar-triangle[data-note-id="${mId}"]`);
+             if (!anchor) {
+               // Fallback to current selection anchor or body
+               anchor =
+                 document.querySelector(
+                   `.note-content[data-note-id="${currentSelectedNote ? currentSelectedNote.id : -1}"], ` +
+                   `.measure-bar-triangle[data-note-id="${currentSelectedNote ? currentSelectedNote.id : -1}"]`
+                 ) || document.body;
+             }
+             try {
+               eventBus.emit('modals:requestRefresh', { note: mNote, measureId: mId, clickedElement: anchor });
+             } catch {
+               // Fallback to direct call; still pass measureId to ensure Measure modal stays selected
+               showNoteVariables(mNote, anchor, mId);
+             }
+           }
+         } catch {}
+       } catch (e) {
+         console.warn('workspace:measureResizeCommit failed', e);
+       }
+     });
+  }
+
+/* ===== History Integration (Undo/Redo) ===== */
+
+function captureSnapshot(label = 'Change') {
+  try {
+    const snap = myModule && typeof myModule.createModuleJSON === 'function'
+      ? myModule.createModuleJSON()
+      : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+    if (snap) {
+      // Ensure a baseline exists so the very first user action (color edit, drag) can be undone independently
+      try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+      eventBus.emit('history:capture', { label, snapshot: snap });
+    }
+  } catch (e) {}
+}
+
+// Persist snapshot on page unload to guarantee persistence without tab switching
+try {
+  window.addEventListener('beforeunload', () => {
+    try {
+      const snap = (myModule && typeof myModule.createModuleJSON === 'function')
+        ? myModule.createModuleJSON()
+        : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+      if (snap) {
+        localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
+      }
+    } catch {}
+  });
+} catch {}
+
+// Wire Undo/Redo buttons
+const undoBtn = document.getElementById('undoBtn');
+const redoBtn = document.getElementById('redoBtn');
+if (undoBtn) undoBtn.addEventListener('click', () => { try { eventBus.emit('history:undo'); } catch {} });
+if (redoBtn) redoBtn.addEventListener('click', () => { try { eventBus.emit('history:redo'); } catch {} });
+
+// Keyboard shortcuts: Ctrl/Cmd+Z (Undo), Ctrl/Cmd+Y (Redo)
+document.addEventListener('keydown', (e) => {
+  const el = e.target;
+  const tag = (el && el.tagName) ? el.tagName.toLowerCase() : '';
+  const isEditable = tag === 'input' || tag === 'textarea' || (el && el.isContentEditable);
+  if (isEditable) return;
+  const isMeta = e.ctrlKey || e.metaKey;
+  if (!isMeta) return;
+  const key = (e.key || '').toLowerCase();
+  if (key === 'z') {
+    e.preventDefault();
+    try { eventBus.emit('history:undo'); } catch {}
+  } else if (key === 'y') {
+    e.preventDefault();
+    try { eventBus.emit('history:redo'); } catch {}
+  }
+});
+
+// Update buttons when stacks change
+try {
+  eventBus.on('history:stackChanged', ({ canUndo, canRedo }) => {
+    if (undoBtn) undoBtn.disabled = !canUndo;
+    if (redoBtn) redoBtn.disabled = !canRedo;
+  });
+} catch {}
+
+// Handle restores from HistoryManager
+try {
+  eventBus.on('history:requestRestore', async ({ snapshot, source, label }) => {
+    try { eventBus.emit('player:requestPause'); } catch {}
+    let center = null;
+    try {
+      const viewCenter = viewport.atCenter();
+      center = viewCenter.transitRaw(space);
+    } catch {}
+
+    try { cleanupCurrentModule(); } catch {}
+
+    try {
+      const newModule = await Module.loadFromJSON(snapshot);
+      myModule = newModule;
+      setModule(newModule);
+
+      for (const id in myModule.notes) {
+        myModule.markNoteDirty(Number(id));
+      }
+
+      initializeModule();
+
+      if (center) {
+        const pt = space.at(center.x, center.y);
+        viewport.translateTo(pt);
+      }
+
+      evaluatedNotes = myModule.evaluateModule();
+      setEvaluatedNotes(evaluatedNotes);
+      updateVisualNotes(evaluatedNotes);
+      createMeasureBars();
+      if (typeof updateNotesPointerEvents === 'function') updateNotesPointerEvents();
+
+      // Persist restored state so reloads resume exactly where the user left
+      try {
+        const snap = (myModule && typeof myModule.createModuleJSON === 'function')
+          ? myModule.createModuleJSON()
+          : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+        if (snap) {
+          localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
+        }
+      } catch {}
+
+      if (source === 'undo') notify(`Undid: ${label}`, 'success');
+      else if (source === 'redo') notify(`Redid: ${label}`, 'success');
+    } catch (e) {
+      console.error('History restore failed', e);
+    }
+  });
+} catch {}
+
 
 });

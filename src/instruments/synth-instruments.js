@@ -1,6 +1,6 @@
-const SynthInstruments = {};
+import { SynthInstrument } from './instrument-manager.js';
 
-SynthInstruments.SineInstrument = class SineInstrument extends SynthInstrument {
+export class SineInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'sine-wave';
@@ -21,9 +21,9 @@ SynthInstruments.SineInstrument = class SineInstrument extends SynthInstrument {
             releaseTimeRatio: 0.2
         };
     }
-};
+}
 
-SynthInstruments.SquareInstrument = class SquareInstrument extends SynthInstrument {
+export class SquareInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'square-wave';
@@ -44,9 +44,9 @@ SynthInstruments.SquareInstrument = class SquareInstrument extends SynthInstrume
             releaseTimeRatio: 0.2
         };
     }
-};
+}
 
-SynthInstruments.SawtoothInstrument = class SawtoothInstrument extends SynthInstrument {
+export class SawtoothInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'sawtooth-wave';
@@ -67,9 +67,9 @@ SynthInstruments.SawtoothInstrument = class SawtoothInstrument extends SynthInst
             releaseTimeRatio: 0.2
         };
     }
-};
+}
 
-SynthInstruments.TriangleInstrument = class TriangleInstrument extends SynthInstrument {
+export class TriangleInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'triangle-wave';
@@ -90,9 +90,9 @@ SynthInstruments.TriangleInstrument = class TriangleInstrument extends SynthInst
             releaseTimeRatio: 0.25
         };
     }
-};
+}
 
-SynthInstruments.OrganInstrument = class OrganInstrument extends SynthInstrument {
+export class OrganInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'organ';
@@ -137,9 +137,9 @@ SynthInstruments.OrganInstrument = class OrganInstrument extends SynthInstrument
             releaseTimeRatio: 0.1
         };
     }
-};
+}
 
-SynthInstruments.VibraphoneInstrument = class VibraphoneInstrument extends SynthInstrument {
+export class VibraphoneInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'vibraphone';
@@ -190,10 +190,13 @@ SynthInstruments.VibraphoneInstrument = class VibraphoneInstrument extends Synth
             releaseTimeRatio: 0.5
         };
     }
-};
-
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = SynthInstruments;
-} else {
-    window.SynthInstruments = SynthInstruments;
 }
+
+export const SynthInstruments = {
+    SineInstrument,
+    SquareInstrument,
+    SawtoothInstrument,
+    TriangleInstrument,
+    OrganInstrument,
+    VibraphoneInstrument
+};

@@ -1,4 +1,4 @@
-class SynthInstrument {
+export class SynthInstrument {
     constructor(audioContext) {
         this.audioContext = audioContext;
         this.name = 'base';
@@ -37,7 +37,7 @@ class SynthInstrument {
     }
 }
 
-class SampleInstrument {
+export class SampleInstrument {
     constructor(audioContext) {
         this.audioContext = audioContext;
         this.name = 'base-sample';
@@ -152,34 +152,29 @@ class SampleInstrument {
     }
 }
 
-class InstrumentManager {
+export class InstrumentManager {
     constructor(audioContext) {
         this.audioContext = audioContext;
         this.instruments = new Map();
         this.defaultInstrument = 'sine-wave';
-        this.registerBuiltInInstruments();
     }
 
-    registerBuiltInInstruments() {
-        if (typeof SynthInstruments !== 'undefined') {
+    registerBuiltInInstruments(SynthInstruments, SampleInstruments) {
+        if (SynthInstruments) {
             Object.values(SynthInstruments).forEach(InstrumentClass => {
                 if (typeof InstrumentClass === 'function') {
                     this.registerInstrument(new InstrumentClass(this.audioContext));
                 }
             });
-        } else {
-            console.warn('SynthInstruments not loaded yet.');
         }
         
-        if (typeof SampleInstruments !== 'undefined') {
+        if (SampleInstruments) {
             Object.values(SampleInstruments).forEach(InstrumentClass => {
                 if (typeof InstrumentClass === 'function' && 
                     InstrumentClass.name !== 'SampleInstrument') {
                     this.registerInstrument(new InstrumentClass(this.audioContext));
                 }
             });
-        } else {
-            console.warn('SampleInstruments not loaded yet.');
         }
     }
 
@@ -218,7 +213,3 @@ class InstrumentManager {
         instrument.applyEnvelope(gainNode, startTime, duration, initialVolume);
     }
 }
-
-window.SynthInstrument = SynthInstrument;
-window.SampleInstrument = SampleInstrument;
-window.InstrumentManager = InstrumentManager;
