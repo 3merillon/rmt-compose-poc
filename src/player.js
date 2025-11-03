@@ -51,15 +51,29 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     function isWebGL2RendererEnabled() {
         try {
-            // Default ON when WebGL2 is available; no flags or persistence required.
-            // Lightweight capability probe using a throwaway canvas.
+            // Cache the probe result to avoid repeatedly creating GL contexts (prevents "Too many active WebGL contexts").
+            if (typeof isWebGL2RendererEnabled.__cached !== 'undefined') return isWebGL2RendererEnabled.__cached;
+
             let supported = false;
 
             if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
                 try {
                     const c = document.createElement('canvas');
-                    const gl = c && c.getContext && c.getContext('webgl2', { alpha: true, antialias: true });
+                    const gl = c && c.getContext && c.getContext('webgl2', {
+                        alpha: true,
+                        antialias: true,
+                        preserveDrawingBuffer: false,
+                        stencil: false,
+                        depth: false
+                    });
                     supported = !!gl;
+                    // Immediately release the probe context if any
+                    try {
+                        if (gl && gl.getExtension) {
+                            const ext = gl.getExtension('WEBGL_lose_context');
+                            if (ext && typeof ext.loseContext === 'function') ext.loseContext();
+                        }
+                    } catch {}
                 } catch {}
             }
 
@@ -69,12 +83,20 @@ document.addEventListener('DOMContentLoaded', async function() {
                     const oc = new OffscreenCanvas(1, 1);
                     const gl2 = oc.getContext('webgl2');
                     supported = !!gl2;
+                    try {
+                        if (gl2 && gl2.getExtension) {
+                            const ext2 = gl2.getExtension('WEBGL_lose_context');
+                            if (ext2 && typeof ext2.loseContext === 'function') ext2.loseContext();
+                        }
+                    } catch {}
                 } catch {}
             }
 
-            return !!supported;
+            isWebGL2RendererEnabled.__cached = !!supported;
+            return isWebGL2RendererEnabled.__cached;
         } catch (e) {
             try { console.warn('RMT: isWebGL2RendererEnabled probe failed', e); } catch {}
+            isWebGL2RendererEnabled.__cached = false;
             return false;
         }
     }
@@ -1393,6 +1415,20 @@ document.addEventListener('DOMContentLoaded', async function() {
                         if (isPlaying) { stop(false); }
                         event.stopPropagation();
                         event.preventDefault();
+
+                        // Treat background tap like desktop background click: close menus and clear selection
+                        try {
+                            clearSelection();
+                            if (domCache && domCache.plusminus && domCache.generalWidget) {
+                                domCache.plusminus.classList.remove('open');
+                                domCache.generalWidget.classList.remove('open');
+                            }
+                            const dd = document.getElementById('loadModuleDropdown');
+                            const lb = domCache && domCache.loadModuleBtn;
+                            if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
+                                dd.style.display = 'none';
+                            }
+                        } catch {}
                       } catch {}
                     };
                     // Capture so this runs before Tapspace handlers
@@ -1444,51 +1480,33 @@ document.addEventListener('DOMContentLoaded', async function() {
                   if (!containerEl.__rmtWsPointerDownPickHandler) {
                     containerEl.__rmtWsPointerDownPickHandler = (event) => {
                       try {
+                        // Touch/pen: do NOT select on pointerdown. Selection is handled on click/tap only.
                         if (event.pointerType === 'mouse') return;
 
+                        // Track active pointers to distinguish pinch from tap
+                        containerEl.__rmtActivePointers = (containerEl.__rmtActivePointers || 0) + 1;
+                        const dec = (ev) => {
+                          try { containerEl.__rmtActivePointers = Math.max(0, (containerEl.__rmtActivePointers || 1) - 1); } catch {}
+                          try { containerEl.removeEventListener('pointerup', dec, true); } catch {}
+                          try { containerEl.removeEventListener('pointercancel', dec, true); } catch {}
+                        };
+                        containerEl.addEventListener('pointerup', dec, true);
+                        containerEl.addEventListener('pointercancel', dec, true);
+
+                        // Ignore starting on legacy DOM overlays; their own handlers will manage interactions
                         const t = event.target;
                         if (t && t.closest && (t.closest('.note-rect') || t.closest('.measure-bar-triangle') || t.closest('#baseNoteCircle'))) {
                           return;
                         }
 
-                        const hit = (glWorkspace && typeof glWorkspace.pickAt === 'function')
-                          ? glWorkspace.pickAt(event.clientX, event.clientY, 4)
-                          : null;
-                        if (hit && !isLocked) {
-                          const t = String(hit.type);
-                          const hid = Number(hit.id);
-                          if (t === 'note') {
-                            const note = myModule.getNoteById(hid);
-                            if (!note) return;
-                            currentSelectedNote = note;
-                            try { syncRendererSelection(); } catch {}
-                            const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
-                            if (el) {
-                              showNoteVariables(note, el);
-                            } else {
-                              const baseEl = document.querySelector('.base-note-circle');
-                              showNoteVariables(note, baseEl || document.body);
-                            }
-                            event.stopPropagation();
-                            event.preventDefault();
-                          } else if (t === 'measure') {
-                            const measureNote = myModule.getNoteById(hid);
-                            if (!measureNote) return;
-                            currentSelectedNote = measureNote;
-                            try { syncRendererSelection(); } catch {}
-                            let anchor = document.querySelector(`.measure-bar-triangle[data-note-id="${hid}"]`) || document.body;
-                            showNoteVariables(measureNote, anchor, hid);
-                            event.stopPropagation();
-                            event.preventDefault();
-                          } else if (t === 'base') {
-                            currentSelectedNote = myModule.baseNote;
-                            try { syncRendererSelection(); } catch {}
-                            let anchor = document.querySelector('.base-note-circle') || document.body;
-                            showNoteVariables(myModule.baseNote, anchor);
-                            event.stopPropagation();
-                            event.preventDefault();
-                          }
-                        }
+                        // Record tap candidate; click handler will decide if it's a tap (no move/pinch) or drag/zoom
+                        containerEl.__rmtTouchTapCandidate = {
+                          x: event.clientX,
+                          y: event.clientY,
+                          time: (performance && performance.now) ? performance.now() : Date.now(),
+                          id: event.pointerId
+                        };
+                        // Do not stop propagation: allow workspace camera/drag gestures to proceed
                       } catch {}
                     };
                     containerEl.addEventListener('pointerdown', containerEl.__rmtWsPointerDownPickHandler, true);
@@ -2323,6 +2341,15 @@ document.addEventListener('paste', (event) => {
                     event.stopPropagation();
                     return;
                 }
+                // Suppress click immediately after a drag/resize gesture
+                try {
+                    if (noteRect.element && noteRect.element.__rmtSuppressClickOnce) {
+                        noteRect.element.__rmtSuppressClickOnce = false;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        return;
+                    }
+                } catch {}
                 event.stopPropagation();
                 debouncedShowNoteVariables(note, noteContent);
             });
@@ -3722,6 +3749,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     }
                 }
                 
+                if (dragData.hasDragged) {
+                    try { noteRect.element.__rmtSuppressClickOnce = true; } catch {}
+                    try { e.preventDefault(); } catch {}
+                }
                 e.stopPropagation();
                 if (dragData.hasDragged) { try { captureSnapshot(`Move Note ${note.id}`); } catch {} }
             }
@@ -5386,6 +5417,16 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     stop(false);
                     play(playheadTime);
                 }
+                // Background tap parity with desktop: clear selection and close menus/dropdowns
+                try {
+                    clearSelection();
+                    if (domCache && domCache.plusminus && domCache.generalWidget) {
+                        domCache.plusminus.classList.remove('open');
+                        domCache.generalWidget.classList.remove('open');
+                    }
+                    const dd = document.getElementById('loadModuleDropdown');
+                    if (dd) dd.style.display = 'none';
+                } catch {}
             }
         }
     }
@@ -5663,6 +5704,56 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 domCache.generalWidget.classList.remove('open');
             }
             // Close Load Module dropdown when clicking outside
+            const dd = document.getElementById('loadModuleDropdown');
+            const lb = domCache.loadModuleBtn;
+            if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
+                dd.style.display = 'none';
+            }
+        }
+        isDragging = false;
+    });
+
+    // Pointer-based background tap handling for touch/pen (mirrors mouseup logic)
+    document.addEventListener('pointerdown', (event) => {
+        if (event.pointerType === 'mouse') return;
+        isDragging = false;
+        dragStartX = event.clientX;
+        dragStartY = event.clientY;
+    }, { passive: true });
+
+    document.addEventListener('pointermove', (event) => {
+        if (event.pointerType === 'mouse') return;
+        if (!isDragging) {
+            const deltaX = Math.abs(event.clientX - dragStartX);
+            const deltaY = Math.abs(event.clientY - dragStartY);
+            if (deltaX > DRAG_THRESHOLD || deltaY > DRAG_THRESHOLD) {
+                isDragging = true;
+            }
+        }
+    }, { passive: true });
+
+    document.addEventListener('pointerup', (event) => {
+        if (event.pointerType === 'mouse') return;
+        if (!isDragging) {
+            let suppressClear = false;
+            try {
+                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+                const nowTs = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
+                suppressClear = !!(cont && cont.__rmtSuppressClickUntil && Math.sign(cont.__rmtSuppressClickUntil - nowTs) === 1);
+            } catch {}
+            if (!suppressClear &&
+                !domCache.noteWidget.contains(event.target) &&
+                !event.target.closest('.note-rect') &&
+                !event.target.closest('#baseNoteCircle') &&
+                !event.target.closest('.measure-bar-triangle') &&
+                !event.target.closest('.delete-confirm-overlay') &&
+                !event.target.closest('.octave-button')) {
+                clearSelection();
+            }
+            if (!domCache.generalWidget.contains(event.target) && !domCache.dropdownButton.contains(event.target)) {
+                domCache.plusminus.classList.remove('open');
+                domCache.generalWidget.classList.remove('open');
+            }
             const dd = document.getElementById('loadModuleDropdown');
             const lb = domCache.loadModuleBtn;
             if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
