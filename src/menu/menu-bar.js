@@ -1035,19 +1035,25 @@ const menuAPI = (function() {
                                 saveUIStateToLocalStorage();
                             }
                         } else {
-                            const noteTarget = elemBelow.closest('[data-note-id]');
-                            if (noteTarget && moduleIcon.moduleData) {
-                                const noteId = noteTarget.getAttribute('data-note-id');
-                                if (noteId != null) {
-                                    try {
-                                        eventBus.emit('player:importModuleAtTarget', {
-                                            targetNoteId: Number(noteId),
-                                            moduleData: moduleIcon.moduleData
-                                        });
-                                    } catch {}
-                                }
-                            }
-                        }
+    if (moduleIcon.moduleData) {
+        let noteId = null;
+        try {
+            const noteTarget = elemBelow && elemBelow.closest ? elemBelow.closest('[data-note-id]') : null;
+            if (noteTarget) {
+                const raw = noteTarget.getAttribute('data-note-id');
+                if (raw != null) noteId = Number(raw);
+            }
+        } catch {}
+        try {
+            eventBus.emit('player:importModuleAtTarget', {
+                targetNoteId: noteId,
+                moduleData: moduleIcon.moduleData,
+                clientX: ev.clientX,
+                clientY: ev.clientY
+            });
+        } catch {}
+    }
+}
                     }
                 }
                 moduleIcon.classList.remove('dragging');

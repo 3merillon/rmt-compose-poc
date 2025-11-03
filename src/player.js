@@ -1749,6 +1749,27 @@ try {
         importModuleAtTarget(targetNote, data);
     }, false);
 
+// Mobile fallback: import module JSON from clipboard paste (supports long-press copy + paste on mobile)
+document.addEventListener('paste', (event) => {
+    try {
+        const cd = event.clipboardData;
+        if (!cd) return;
+        let raw = '';
+        try { raw = cd.getData('application/json'); } catch {}
+        if (!raw) { try { raw = cd.getData('text/plain'); } catch {} }
+        if (!raw) return;
+
+        let data = null;
+        try { data = JSON.parse(raw); } catch { return; }
+
+        // Choose a sensible target: selected note if any, otherwise BaseNote
+        let targetNote = currentSelectedNote || myModule.baseNote;
+        if (!targetNote) targetNote = myModule.baseNote;
+
+        importModuleAtTarget(targetNote, data);
+        try { notify('Module imported from clipboard', 'success'); } catch {}
+    } catch {}
+}, false);
     let centerPoint = null;
   
     let currentSelectedNote = null;
@@ -1776,7 +1797,7 @@ try {
             const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
             const baseNoteY = frequencyToY(baseNoteFreq);
             if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
-                // Reset view in Workspace: center world (0, baseY) to container center, keep current zoom
+// Reset view in Workspace: center world (0, baseY) to container center, keep current zoom
                 try {
                     const rect = glWorkspace.containerEl.getBoundingClientRect();
                     const s = glWorkspace.camera.scale || 1;
@@ -6406,22 +6427,41 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       });
 
       // Import module drop request from menu or other UIs
-      eventBus.on('player:importModuleAtTarget', ({ targetNoteId, moduleData }) => {
+      eventBus.on('player:importModuleAtTarget', ({ targetNoteId, moduleData, clientX, clientY }) => {
+  try {
+    let target = null;
+
+    // 1) Direct id if provided
+    if (targetNoteId != null) {
+      target = myModule?.getNoteById(Number(targetNoteId));
+    }
+
+    // 2) If not, try GPU picking with provided screen coords (works with GL-only, no DOM target needed)
+    if (!target) {
+      if (typeof clientX === 'number' && typeof clientY === 'number' && glWorkspace && typeof glWorkspace.pickAt === 'function') {
         try {
-          if (targetNoteId == null) {
-            console.warn('Import ignored: no valid target noteId provided');
-            return;
+          const hit = glWorkspace.pickAt(clientX, clientY, 4);
+          if (hit) {
+            if (hit.type === 'base') {
+              target = myModule.baseNote;
+            } else if (hit.type === 'note' || hit.type === 'measure') {
+              target = myModule.getNoteById(Number(hit.id));
+            }
           }
-          const target = myModule?.getNoteById(Number(targetNoteId));
-          if (!target) {
-            console.warn('Import ignored: no valid target noteId provided');
-            return;
-          }
-          importModuleAtTarget(target, moduleData);
-        } catch (e) {
-          console.warn('importModuleAtTarget via eventBus failed', e);
-        }
-      });
+        } catch {}
+      }
+    }
+
+    // 3) Fallback to current selection or BaseNote
+    if (!target) {
+      target = currentSelectedNote || myModule.baseNote;
+    }
+
+    importModuleAtTarget(target, moduleData);
+  } catch (e) {
+    console.warn('importModuleAtTarget via eventBus failed', e);
+  }
+});
       eventBus.on('player:invalidateModuleEndTimeCache', () => {
         try { invalidateModuleEndTimeCache(); updateMeasureBarPositions(); } catch {}
       });

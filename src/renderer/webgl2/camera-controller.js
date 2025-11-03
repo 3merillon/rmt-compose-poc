@@ -48,6 +48,9 @@ export class CameraController {
     this._onPointerCancel = null;
     this._onResize = null;
 
+    // Track whether document-level listeners are attached
+    this._hasDocListeners = false;
+
     this._initEvents();
   }
 
@@ -167,9 +170,12 @@ export class CameraController {
           this._lastY = e.clientY;
         }
         // Capture further events at document level
-        document.addEventListener('pointermove', this._onPointerMove, true);
-        document.addEventListener('pointerup', this._onPointerUp, true);
-        document.addEventListener('pointercancel', this._onPointerCancel, true);
+        if (!this._hasDocListeners) {
+          document.addEventListener('pointermove', this._onPointerMove, true);
+          document.addEventListener('pointerup', this._onPointerUp, true);
+          document.addEventListener('pointercancel', this._onPointerCancel, true);
+          this._hasDocListeners = true;
+        }
       } catch {}
     };
 
@@ -194,6 +200,15 @@ export class CameraController {
             const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
             if (this._pinchLastDist > 0 && dist > 0) {
               const oldScale = this.scale;
+
+              // Also pan by movement of pinch center to support pinch+pan
+              const dxCenter = center.x - (this._pinchCenter?.x ?? center.x);
+              const dyCenter = center.y - (this._pinchCenter?.y ?? center.y);
+              if (!this.lockX) {
+                this.tx += dxCenter;
+              }
+              this.ty += dyCenter;
+
               const rawScale = oldScale * (dist / this._pinchLastDist);
               const newScale = Math.max(this.minScale, Math.min(this.maxScale, rawScale));
               const k = newScale / oldScale;
@@ -208,8 +223,13 @@ export class CameraController {
               if (typeof this.onChange === 'function') this.onChange();
               e.preventDefault();
             }
-          } else if (!this._pinching && this._touches.size === 1 && this._dragging) {
-            // One-finger pan
+          } else if (!this._pinching && this._touches.size === 1) {
+            // One-finger pan (initialize drag if coming from pinch)
+            if (!this._dragging) {
+              this._dragging = true;
+              this._lastX = e.clientX;
+              this._lastY = e.clientY;
+            }
             const dx = e.clientX - this._lastX;
             const dy = e.clientY - this._lastY;
             this._lastX = e.clientX;
@@ -243,19 +263,32 @@ export class CameraController {
       try {
         if (e.pointerType === 'touch') {
           this._touches.delete(e.pointerId);
-          if (this._touches.size < 2) {
+          if (this._touches.size >= 2) {
+            // still pinching with remaining fingers; keep listeners
+          } else if (this._touches.size === 1) {
+            // Transition from pinch to single-finger pan seamlessly
             this._pinching = false;
             this._pinchLastDist = 0;
-          }
-          if (this._touches.size === 0) {
+            const rem = Array.from(this._touches.values())[0];
+            this._dragging = true;
+            this._lastX = rem.x;
+            this._lastY = rem.y;
+          } else {
+            // No touches remain
+            this._pinching = false;
+            this._pinchLastDist = 0;
             this._dragging = false;
           }
         } else if (e.button === 0) {
           this._dragging = false;
         }
-        document.removeEventListener('pointermove', this._onPointerMove, true);
-        document.removeEventListener('pointerup', this._onPointerUp, true);
-        document.removeEventListener('pointercancel', this._onPointerCancel, true);
+        // Remove document listeners only when no gesture is active
+        if (!this._dragging && !this._pinching && this._touches.size === 0 && this._hasDocListeners) {
+          document.removeEventListener('pointermove', this._onPointerMove, true);
+          document.removeEventListener('pointerup', this._onPointerUp, true);
+          document.removeEventListener('pointercancel', this._onPointerCancel, true);
+          this._hasDocListeners = false;
+        }
       } catch {}
     };
 
@@ -263,13 +296,16 @@ export class CameraController {
       try {
         if (e.pointerType === 'touch') {
           this._touches.delete(e.pointerId);
-          this._pinching = false;
-          this._pinchLastDist = 0;
         }
+        this._pinching = false;
+        this._pinchLastDist = 0;
         this._dragging = false;
-        document.removeEventListener('pointermove', this._onPointerMove, true);
-        document.removeEventListener('pointerup', this._onPointerUp, true);
-        document.removeEventListener('pointercancel', this._onPointerCancel, true);
+        if (this._hasDocListeners && this._touches.size === 0) {
+          document.removeEventListener('pointermove', this._onPointerMove, true);
+          document.removeEventListener('pointerup', this._onPointerUp, true);
+          document.removeEventListener('pointercancel', this._onPointerCancel, true);
+          this._hasDocListeners = false;
+        }
       } catch {}
     };
 
