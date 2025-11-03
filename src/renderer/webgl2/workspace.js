@@ -47,6 +47,7 @@ export class Workspace {
       noteId: null,
       region: null,          // 'body' | 'tab' | 'octaveUp' | 'octaveDown'
       direction: null,       // 'up' | 'down' (for octave)
+      pointerId: null,       // initiating pointer id (for touch/mouse)
       startClient: { x: 0, y: 0 },
       lastClient: { x: 0, y: 0 }, // updated on pointermove for drag distance checks
       startWorldX: 0,        // world X at pointerdown (left edge)
@@ -74,6 +75,11 @@ export class Workspace {
     this._onDocPointerMove = null;
     this._onDocPointerUp = null;
     this._onDocPointerCancel = null;
+
+    // Global touch tracking for gesture arbitration
+    this._touchActiveCount = 0;
+    this._onGlobalTouchDown = null;
+    this._onGlobalTouchUp = null;
   }
 
   init(containerEl) {
@@ -122,6 +128,15 @@ export class Workspace {
         } catch {}
         if (locked) return;
 
+        // Disable multi-touch while dragging/resizing to avoid erratic placement
+        if (e.pointerType === 'touch') {
+          if (this._interaction && this._interaction.active) {
+            // Ignore additional touch contacts during an active interaction
+            try { e.preventDefault(); } catch {}
+            return;
+          }
+        }
+
         if (!this.renderer || typeof this.renderer.hitTestSubRegion !== 'function') return;
         const subHit = this.renderer.hitTestSubRegion(e.clientX, e.clientY);
 
@@ -145,6 +160,7 @@ export class Workspace {
                 noteId: measureId,
                 region: 'triangle',
                 direction: null,
+                pointerId: e.pointerId,
                 startClient: { x: e.clientX, y: e.clientY },
                 lastClient:  { x: e.clientX, y: e.clientY },
                 startWorldX,
@@ -167,10 +183,20 @@ export class Workspace {
                 this._onDocPointerMove = (ev) => { try { this._updateInteraction(ev); } catch {} };
               }
               if (!this._onDocPointerUp) {
-                this._onDocPointerUp = (ev) => { try { this._endInteraction(true); } catch {} };
+                this._onDocPointerUp = (ev) => {
+                  try {
+                    if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+                    this._endInteraction(true);
+                  } catch {}
+                };
               }
               if (!this._onDocPointerCancel) {
-                this._onDocPointerCancel = (ev) => { try { this._endInteraction(false); } catch {} };
+                this._onDocPointerCancel = (ev) => {
+                  try {
+                    if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+                    this._endInteraction(false);
+                  } catch {}
+                };
               }
               document.addEventListener('pointermove', this._onDocPointerMove, true);
               document.addEventListener('pointerup', this._onDocPointerUp, true);
@@ -224,6 +250,58 @@ export class Workspace {
         else if (region === 'octaveUp') { type = 'octave'; direction = 'up'; }
         else if (region === 'octaveDown') { type = 'octave'; direction = 'down'; }
         else type = 'move';
+
+        // Mobile: prefer pinch-zoom over starting a move immediately.
+        // For touch + body drag, enter a movePending state. Promote to real move after small travel,
+        // or cancel if a second touch arrives (pinch).
+        if (e.pointerType === 'touch' && type === 'move') {
+          // Initialize minimal pending state
+          this._interaction = {
+            active: true,
+            type: 'movePending',
+            noteId: id,
+            region,
+            direction,
+            pointerId: e.pointerId,
+            startClient: { x: e.clientX, y: e.clientY },
+            lastClient:  { x: e.clientX, y: e.clientY },
+            startWorldX: 0,
+            startWorldRightX: 0,
+            pointerOffsetWorld: 0,
+            origStartSec: 0,
+            origDurationSec: 0,
+            baselineStartSec: null,
+            lastPreview: { startSec: 0, durationSec: 0 }
+          };
+
+          // Do NOT gate camera yet; allow pinch if a second touch appears.
+          // Attach doc-level listeners to track pointer moves for promotion/cancel.
+          if (!this._onDocPointerMove) {
+            this._onDocPointerMove = (ev) => { try { this._updateInteraction(ev); } catch {} };
+          }
+          if (!this._onDocPointerUp) {
+            this._onDocPointerUp = (ev) => {
+              try {
+                if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+                this._endInteraction(true);
+              } catch {}
+            };
+          }
+          if (!this._onDocPointerCancel) {
+            this._onDocPointerCancel = (ev) => {
+              try {
+                if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+                this._endInteraction(false);
+              } catch {}
+            };
+          }
+          document.addEventListener('pointermove', this._onDocPointerMove, true);
+          document.addEventListener('pointerup', this._onDocPointerUp, true);
+          document.addEventListener('pointercancel', this._onDocPointerCancel, true);
+
+          // Defer full interaction start until movement threshold is met.
+          return;
+        }
 
         // Initialize state
         // Compute edge-aligned drag baseline and pointer offset so the preview starts without a jump.
@@ -334,6 +412,7 @@ export class Workspace {
           noteId: id,
           region,
           direction,
+          pointerId: e.pointerId,
           startClient: { x: e.clientX, y: e.clientY },
           lastClient:  { x: e.clientX, y: e.clientY },
           startWorldX,
@@ -362,10 +441,20 @@ export class Workspace {
           this._onDocPointerMove = (ev) => { try { this._updateInteraction(ev); } catch {} };
         }
         if (!this._onDocPointerUp) {
-          this._onDocPointerUp = (ev) => { try { this._endInteraction(true); } catch {} };
+          this._onDocPointerUp = (ev) => {
+            try {
+              if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+              this._endInteraction(true);
+            } catch {}
+          };
         }
         if (!this._onDocPointerCancel) {
-          this._onDocPointerCancel = (ev) => { try { this._endInteraction(false); } catch {} };
+          this._onDocPointerCancel = (ev) => {
+            try {
+              if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+              this._endInteraction(false);
+            } catch {}
+          };
         }
         document.addEventListener('pointermove', this._onDocPointerMove, true);
         document.addEventListener('pointerup', this._onDocPointerUp, true);
@@ -522,8 +611,128 @@ export class Workspace {
     this._updateInteraction = (e) => {
       if (!this._interaction || !this._interaction.active) return;
       try {
+        // Only honor moves from the initiating pointer to avoid multi-touch interference
+        try {
+          if (this._interaction.pointerId != null && e && e.pointerId != null && e.pointerId !== this._interaction.pointerId) {
+            return;
+          }
+        } catch {}
+
         const { type, noteId } = this._interaction;
         const xScale = this.renderer?.currentXScaleFactor || 1.0;
+
+        // Promotion logic for pending move on touch: prefer pinch (two touches) over dragging.
+        if (this._interaction.type === 'movePending') {
+          // Cancel pending if a second touch is active (let camera pinch-zoom)
+          if ((this._touchActiveCount || 0) >= 2) {
+            this._endInteraction(false);
+            return;
+          }
+          // Promote to full move after small travel
+          const dx = (e.clientX - (this._interaction.startClient?.x || e.clientX));
+          const dy = (e.clientY - (this._interaction.startClient?.y || e.clientY));
+          const dist = Math.hypot(dx, dy);
+          if (dist <= 6) {
+            return; // keep waiting
+          }
+
+          // Resolve original start/duration and edge caches now that we're truly dragging
+          let origStartSec = 0, origDurationSec = 0, startWorldX = 0, startWorldRightX = 0;
+          try {
+            const idx = this.renderer._noteIdToIndex && this.renderer._noteIdToIndex.get
+              ? this.renderer._noteIdToIndex.get(Number(noteId))
+              : null;
+            if (idx != null && idx >= 0 && this.renderer.posSize) {
+              const base = idx * 4;
+              const xwLocal = this.renderer.posSize[base + 0];
+              const wwLocal = this.renderer.posSize[base + 2];
+              origStartSec = xwLocal / (200 * xScale);
+              origDurationSec = wwLocal / (200 * xScale);
+              startWorldX = xwLocal;
+              startWorldRightX = xwLocal + wwLocal;
+              this._interactionEdgeCache = { xw: xwLocal, ww: wwLocal };
+            } else {
+              this._interactionEdgeCache = { xw: 0, ww: 0 };
+            }
+          } catch {}
+
+          // Pointer offset relative to left edge
+          const ptr0 = this.screenToWorld(e.clientX, e.clientY);
+          const pointerWX0 = (ptr0 && typeof ptr0.x === 'number') ? ptr0.x : startWorldX;
+          const pointerOffsetWorld = pointerWX0 - startWorldX;
+
+          // Build baseline set for dependents (same as normal move)
+          const baseline = new Map();
+          baseline.set(Number(noteId), origStartSec);
+          try {
+            const mod = this._module;
+            const notesObj = mod && mod.notes ? mod.notes : {};
+            const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
+            const anchorId = Number(noteId);
+            const getStartTimeStr = (nid) => {
+              try {
+                const n = mod.getNoteById(Number(nid));
+                return n && n.variables && typeof n.variables.startTimeString === 'string'
+                  ? n.variables.startTimeString
+                  : null;
+              } catch { return null; }
+            };
+            const refersStartOf = (nid, refId) => {
+              const s = getStartTimeStr(nid);
+              return !!(s && s.includes(`getNoteById(${refId})`) && (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`)));
+            };
+            const closureStartRefs = (seedSet) => {
+              const affected = new Set(seedSet);
+              let changed = true;
+              while (changed) {
+                changed = false;
+                for (const nid of allIds) {
+                  if (affected.has(nid)) continue;
+                  for (const refId of affected) {
+                    if (refersStartOf(nid, refId)) {
+                      affected.add(nid);
+                      changed = true;
+                      break;
+                    }
+                  }
+                }
+              }
+              return affected;
+            };
+            const affectedIds = closureStartRefs(new Set([anchorId]));
+            affectedIds.delete(anchorId);
+            for (const did of affectedIds) {
+              let s0 = 0;
+              try {
+                const n = mod.getNoteById(Number(did));
+                s0 = n && n.getVariable ? n.getVariable('startTime').valueOf() : 0;
+              } catch {
+                try {
+                  const idx = this.renderer._noteIdToIndex && this.renderer._noteIdToIndex.get
+                    ? this.renderer._noteIdToIndex.get(Number(did))
+                    : null;
+                  if (idx != null && idx >= 0 && this.renderer.posSize) {
+                    const base = idx * 4;
+                    const xwLocal = this.renderer.posSize[base + 0];
+                    s0 = xwLocal / (200 * xScale);
+                  }
+                } catch {}
+              }
+              baseline.set(Number(did), Math.max(0, s0 || 0));
+            }
+          } catch {}
+
+          // Switch to a real move interaction and gate camera input
+          this._interaction.type = 'move';
+          this._interaction.startWorldX = startWorldX;
+          this._interaction.startWorldRightX = startWorldRightX;
+          this._interaction.pointerOffsetWorld = pointerOffsetWorld;
+          this._interaction.origStartSec = origStartSec;
+          this._interaction.origDurationSec = origDurationSec;
+          this._interaction.baselineStartSec = baseline;
+          try { if (this.camera) this.camera.setInputEnabled(false); } catch {}
+          // Fall through to normal move-preview path below
+        }
 
         // Convert screen to world X
         const p = this.screenToWorld(e.clientX, e.clientY);
@@ -1220,6 +1429,30 @@ export class Workspace {
       this.containerEl.addEventListener('pointerdown', this._onPointerDown, { passive: true, capture: true });
     } catch {}
 
+    // Global touch counters for pinch arbitration (capture phase to lead local handlers)
+    try {
+      this._onGlobalTouchDown = (ev) => {
+        if (ev && ev.pointerType === 'touch') {
+          this._touchActiveCount = (this._touchActiveCount || 0) + 1;
+          // If a second touch arrives while a move is pending, cancel the pending move
+          // so the user can pinch-zoom instead of starting a drag.
+          try {
+            if (this._touchActiveCount >= 2 && this._interaction && this._interaction.active && this._interaction.type === 'movePending') {
+              this._endInteraction(false);
+            }
+          } catch {}
+        }
+      };
+      this._onGlobalTouchUp = (ev) => {
+        if (ev && ev.pointerType === 'touch') {
+          this._touchActiveCount = Math.max(0, (this._touchActiveCount || 0) - 1);
+        }
+      };
+      document.addEventListener('pointerdown', this._onGlobalTouchDown, true);
+      document.addEventListener('pointerup', this._onGlobalTouchUp, true);
+      document.addEventListener('pointercancel', this._onGlobalTouchUp, true);
+    } catch {}
+
     return true;
   }
 
@@ -1239,6 +1472,10 @@ export class Workspace {
       if (this._onDocPointerMove) document.removeEventListener('pointermove', this._onDocPointerMove, true);
       if (this._onDocPointerUp) document.removeEventListener('pointerup', this._onDocPointerUp, true);
       if (this._onDocPointerCancel) document.removeEventListener('pointercancel', this._onDocPointerCancel, true);
+      // Detach global touch counters
+      if (this._onGlobalTouchDown) document.removeEventListener('pointerdown', this._onGlobalTouchDown, true);
+      if (this._onGlobalTouchUp) document.removeEventListener('pointerup', this._onGlobalTouchUp, true);
+      if (this._onGlobalTouchUp) document.removeEventListener('pointercancel', this._onGlobalTouchUp, true);
     } catch {}
     this._onPointerMove = null;
     this._onPointerLeave = null;
@@ -1246,19 +1483,21 @@ export class Workspace {
     this._onDocPointerMove = null;
     this._onDocPointerUp = null;
     this._onDocPointerCancel = null;
+    this._onGlobalTouchDown = null;
+    this._onGlobalTouchUp = null;
     this._hoveredId = null;
     try { if (this.containerEl) this.containerEl.style.cursor = 'default'; } catch {}
     this._currentCursor = '';
-
+ 
     try { if (this.picking) this.picking.destroy(); } catch {}
     this.picking = null;
-
+ 
     try { if (this.renderer) this.renderer.destroy(); } catch {}
     this.renderer = null;
-
+ 
     try { if (this.camera) this.camera.destroy(); } catch {}
     this.camera = null;
-
+ 
     this.containerEl = null;
   }
 
