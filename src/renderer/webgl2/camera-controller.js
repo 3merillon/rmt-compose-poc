@@ -79,6 +79,17 @@ export class CameraController {
     } catch {}
     this._onResize();
 
+    // Ensure mobile touch gestures do not trigger browser scroll/zoom
+    try {
+      if (this.containerEl && this.containerEl.style) {
+        this.containerEl.style.touchAction = 'none';
+        // Safari/iOS polish
+        this.containerEl.style.webkitTapHighlightColor = 'transparent';
+        // Legacy/MS prefix (no-op in modern engines, harmless)
+        this.containerEl.style.msTouchAction = 'none';
+      }
+    } catch {}
+
     // Wheel zoom (zoom at pointer position)
     this._onWheel = (e) => {
       try {
@@ -124,23 +135,29 @@ export class CameraController {
         // Suppress camera input when disabled (e.g., during GL note drags)
         if (!this.inputEnabled) return;
 
-        // Track touches for pinch
+        // Track touches for pinch / single-finger pan
         if (e.pointerType === 'touch') {
           this._touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
           if (this._touches.size === 2) {
-            // Begin pinch
+            // Begin pinch; cancel any single-finger drag
             const pts = Array.from(this._touches.values());
             const rect = this.containerEl.getBoundingClientRect();
             this._pinchCenter = {
               x: ((pts[0].x + pts[1].x) * 0.5) - rect.left,
               y: ((pts[0].y + pts[1].y) * 0.5) - rect.top
             };
-            // When X is locked (playhead tracking), clamp pinch center X to container mid-X
             if (this.lockX) {
               this._pinchCenter.x = rect.width * 0.5;
             }
             this._pinchLastDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
             this._pinching = true;
+            this._dragging = false;
+            e.preventDefault();
+          } else if (this._touches.size === 1) {
+            // One-finger pan (when not over active GL interaction)
+            this._dragging = true;
+            this._lastX = e.clientX;
+            this._lastY = e.clientY;
             e.preventDefault();
           }
         } else if (e.button === 0) {
@@ -171,7 +188,6 @@ export class CameraController {
               x: ((pts[0].x + pts[1].x) * 0.5) - rect.left,
               y: ((pts[0].y + pts[1].y) * 0.5) - rect.top
             };
-            // When X is locked (playhead tracking), clamp pinch center X to container mid-X
             if (this.lockX) {
               center.x = rect.width * 0.5;
             }
@@ -192,6 +208,18 @@ export class CameraController {
               if (typeof this.onChange === 'function') this.onChange();
               e.preventDefault();
             }
+          } else if (!this._pinching && this._touches.size === 1 && this._dragging) {
+            // One-finger pan
+            const dx = e.clientX - this._lastX;
+            const dy = e.clientY - this._lastY;
+            this._lastX = e.clientX;
+            this._lastY = e.clientY;
+            if (!this.lockX) {
+              this.tx += dx;
+            }
+            this.ty += dy;
+            if (typeof this.onChange === 'function') this.onChange();
+            e.preventDefault();
           }
           return;
         }
@@ -218,6 +246,9 @@ export class CameraController {
           if (this._touches.size < 2) {
             this._pinching = false;
             this._pinchLastDist = 0;
+          }
+          if (this._touches.size === 0) {
+            this._dragging = false;
           }
         } else if (e.button === 0) {
           this._dragging = false;
