@@ -1,5 +1,5 @@
 import Fraction from 'fraction.js';
-import { createVariableControls } from './variable-controls.js';
+import { createVariableControls, createMeasureDurationRow } from './variable-controls.js';
 import { createAddNoteSection, createAddMeasureSection } from './note-creation.js';
 import { createEvaluateSection, createDeleteSection } from './note-actions.js';
 import { 
@@ -131,6 +131,12 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
         const variableRow = createVariableControls(key, value, note, measureId, externalFunctions);
         widgetContent.appendChild(variableRow);
     });
+
+    // Separate section for Measure Duration (beatsPerMeasure), not inside StartTime
+    if (measureId !== null) {
+        const measureDurationRow = createMeasureDurationRow(note, measureId, externalFunctions);
+        if (measureDurationRow) widgetContent.appendChild(measureDurationRow);
+    }
     
     // Add creation sections
     const shouldShowAddMeasure = note === moduleInstance.baseNote ||

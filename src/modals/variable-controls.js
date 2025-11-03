@@ -436,6 +436,414 @@ function createDurationSelector(rawInput, saveButton, note, value) {
   return container;
 }
 
+/**
+ * Measure duration editor for measure notes (edits beatsPerMeasure on the measure)
+ * - Shows evaluated length in beats and seconds
+ * - Provides note-length preset buttons (whole/half/quarter/eighth/sixteenth) with dotted modifiers
+ * - Commits by writing beatsPerMeasure / beatsPerMeasureString on the selected measure note
+ */
+function createMeasureBeatsSelector(note, measureId, externalFunctions) {
+  ensureModalsStyleInjected();
+
+  const moduleInstance = getModule();
+  if (!moduleInstance) return document.createElement('div');
+
+  const measureNote = (() => {
+    try { return moduleInstance.getNoteById(Number(measureId)); } catch { return null; }
+  })();
+
+  const container = document.createElement('div');
+  container.className = 'measure-duration-editor';
+  Object.assign(container.style, {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+    marginTop: '6px',
+    marginBottom: '2px'
+  });
+
+  // Evaluated readout
+  const evalRow = document.createElement('div');
+  evalRow.className = 'evaluated-value';
+  try {
+    const mlVal = moduleInstance.findMeasureLength(measureNote);
+    const seconds = (mlVal && typeof mlVal.valueOf === 'function') ? Number(mlVal.valueOf()) : Number(mlVal);
+    const tempoVal = moduleInstance.findTempo(measureNote || moduleInstance.baseNote);
+    const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+    const beatLen = 60 / tempo;
+    const beats = seconds / beatLen;
+    const beatsFrac = new Fraction(beats);
+    evalRow.innerHTML = `<span class="value-label">Measure Duration:</span> ${seconds.toFixed(4)}s (${beatsFrac.n}/${beatsFrac.d} beats)`;
+  } catch {
+    evalRow.innerHTML = `<span class="value-label">Measure Duration:</span> —`;
+  }
+  container.appendChild(evalRow);
+
+  // Presets
+  const presetsRow = document.createElement('div');
+  presetsRow.className = 'duration-note-lengths';
+  Object.assign(presetsRow.style, {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    flexWrap: 'wrap'
+  });
+
+  const basePicks = [
+    { title: 'Whole',   img: '/images/whole.png',    n: 4,   d: 1 },
+    { title: 'Half',    img: '/images/half.png',     n: 2,   d: 1 },
+    { title: 'Quarter', img: '/images/quarter.png',  n: 1,   d: 1 },
+    { title: 'Eighth',  img: '/images/eighth.png',   n: 1,   d: 2 },
+    { title: 'Sixteenth',img: '/images/sixteenth.png', n: 1, d: 4 }
+  ];
+
+  const dotPicks = [
+    { label: '.',  n: 3, d: 2 },   // 1.5x
+    { label: '..', n: 7, d: 4 }    // 1.75x
+  ];
+
+  let selectedBaseIdx = -1;
+  let selectedDotIdx  = -1;
+
+  const baseButtons = [];
+  const dotButtons = [];
+
+  function mulFrac(n1, d1, n2, d2) {
+    let n = n1 * n2;
+    let d = d1 * d2;
+    const gcd = (a, b) => { a = Math.abs(a); b = Math.abs(b); while (b) { const t = b; b = a % b; a = t; } return a; };
+    const g = gcd(n, d);
+    return [n / g, d / g];
+  }
+
+  function renderSelection() {
+    baseButtons.forEach((btn, idx) => {
+      if (idx === selectedBaseIdx) btn.classList.add('selected');
+      else btn.classList.remove('selected');
+      btn.style.borderColor = btn.classList.contains('selected') ? '#ffa800' : 'rgba(255,168,0,0.4)';
+      btn.style.boxShadow = 'none';
+    });
+    dotButtons.forEach((btn, idx) => {
+      if (idx === selectedDotIdx) btn.classList.add('selected');
+      else btn.classList.remove('selected');
+    });
+  }
+
+  function commitBeats(n, d) {
+    try {
+      pauseIfPlaying();
+      if (!measureNote) return;
+      const raw = `new Fraction(${n}, ${d})`;
+      measureNote.setVariable('beatsPerMeasure', function () {
+        // eslint-disable-next-line no-new-func
+        return new Function('module', 'Fraction', 'return ' + raw + ';')(moduleInstance, Fraction);
+      });
+      measureNote.setVariable('beatsPerMeasureString', raw);
+
+      // Recompile updated note and dependents so functions are in sync
+      recompileNoteAndDependents(measureNote.id);
+
+      // Evaluate and refresh visuals
+      const evaluated = moduleInstance.evaluateModule();
+      setEvaluatedNotes(evaluated);
+      if (typeof externalFunctions.updateVisualNotes === 'function') {
+        externalFunctions.updateVisualNotes(evaluated);
+      }
+      if (typeof externalFunctions.createMeasureBars === 'function') {
+        externalFunctions.createMeasureBars();
+      }
+
+      // Refresh variables panel
+      refreshModals(null, measureNote.id);
+
+      // History snapshot
+      try {
+        const snap = getModule().createModuleJSON();
+        try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+        eventBus.emit('history:capture', { label: `Edit measure duration Measure ${measureNote.id}`, snapshot: snap });
+      } catch {}
+    } catch (err) {
+      console.error('Error updating beatsPerMeasure for measure', measureId, err);
+    }
+  }
+
+  // Base buttons
+  const baseGroup = document.createElement('div');
+  Object.assign(baseGroup.style, { display: 'flex', gap: '6px', alignItems: 'center' });
+
+  basePicks.forEach((p, idx) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.title = `${p.title} (beats)`;
+    btn.setAttribute('aria-label', `${p.title} beats`);
+    btn.className = 'note-btn';
+    Object.assign(btn.style, {
+      background: '#444',
+      border: '1px solid #ffa800',
+      borderRadius: '4px',
+      padding: '0',
+      cursor: 'pointer',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      width: '26px',
+      height: '26px'
+    });
+
+    const img = document.createElement('img');
+    img.src = p.img;
+    img.alt = `${p.title} icon`;
+    Object.assign(img.style, { display: 'block', width: '18px', height: '18px', pointerEvents: 'none' });
+    btn.appendChild(img);
+
+    btn.addEventListener('mouseenter', () => {
+      if (!btn.classList.contains('selected')) {
+        btn.style.borderColor = '#ffa800';
+        btn.style.boxShadow = '0 0 5px #ffa800';
+      }
+    });
+    btn.addEventListener('mouseleave', () => {
+      if (!btn.classList.contains('selected')) {
+        btn.style.borderColor = '#ffa800';
+        btn.style.boxShadow = 'none';
+      }
+    });
+
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      selectedBaseIdx = idx;
+      renderSelection();
+      let n = p.n, d = p.d;
+      if (selectedDotIdx >= 0) {
+        const mod = dotPicks[selectedDotIdx];
+        [n, d] = mulFrac(n, d, mod.n, mod.d);
+      }
+      commitBeats(n, d);
+    });
+
+    baseGroup.appendChild(btn);
+    baseButtons.push(btn);
+  });
+
+  // Dot buttons
+  const dotsGroup = document.createElement('div');
+  Object.assign(dotsGroup.style, { display: 'flex', gap: '6px', alignItems: 'center', marginLeft: '6px' });
+
+  dotPicks.forEach((p, idx) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.title = `${p.label} dotted`;
+    btn.setAttribute('aria-label', `${p.label} dotted`);
+    btn.className = 'dot-btn';
+    btn.textContent = p.label;
+
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      // Toggle dot
+      if (selectedDotIdx === idx) selectedDotIdx = -1;
+      else selectedDotIdx = idx;
+      renderSelection();
+      // If a base is already selected, immediately commit new beats
+      if (selectedBaseIdx >= 0) {
+        let n = basePicks[selectedBaseIdx].n, d = basePicks[selectedBaseIdx].d;
+        if (selectedDotIdx >= 0) {
+          const mod = dotPicks[selectedDotIdx];
+          [n, d] = mulFrac(n, d, mod.n, mod.d);
+        }
+        commitBeats(n, d);
+      }
+    });
+
+    dotsGroup.appendChild(btn);
+    dotButtons.push(btn);
+  });
+
+  // Small input to enter arbitrary beats (e.g., 5/4, 7/8)
+  const customRow = document.createElement('div');
+  Object.assign(customRow.style, { display: 'flex', alignItems: 'center', gap: '6px' });
+  const lbl = document.createElement('span');
+  lbl.textContent = 'Beats per measure:';
+  Object.assign(lbl.style, { color: '#ffa800' });
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.placeholder = 'e.g. 3/2, 5/4, 7/8';
+  Object.assign(inp.style, {
+    background: '#222',
+    color: '#fff',
+    border: '1px solid #ffa800',
+    borderRadius: '4px',
+    padding: '4px 6px'
+  });
+  const btnSave = document.createElement('button');
+  btnSave.className = 'raw-value-save';
+  btnSave.textContent = 'Save';
+  btnSave.style.display = 'inline-block';
+  btnSave.addEventListener('click', () => {
+    const val = (inp.value || '').trim();
+    if (!val) return;
+    let n = 0, d = 1;
+    if (val.includes('/')) {
+      const parts = val.split('/');
+      n = parseFloat(parts[0]);
+      d = parseFloat(parts[1]);
+    } else {
+      const f = parseFloat(val);
+      if (!isNaN(f)) {
+        const frac = new Fraction(f);
+        n = frac.n; d = frac.d;
+      }
+    }
+    if (!isFinite(n) || !isFinite(d) || d === 0) return;
+    const frac = new Fraction(n, d);
+    commitBeats(frac.n, frac.d);
+  });
+
+  customRow.appendChild(lbl);
+  customRow.appendChild(inp);
+  customRow.appendChild(btnSave);
+
+  presetsRow.appendChild(baseGroup);
+  presetsRow.appendChild(dotsGroup);
+
+  container.appendChild(presetsRow);
+  container.appendChild(customRow);
+
+  // Preselect current beats if possible
+  try {
+    const currentBeats = (() => {
+      const own = measureNote?.variables?.beatsPerMeasureString;
+      if (own && typeof own === 'string') {
+        const m = own.match(/new\s+Fraction\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)/);
+        if (m) return new Fraction(parseFloat(m[1]), parseFloat(m[2]));
+      }
+      // Inherit from base if not set:  module.baseNote.beatsPerMeasure
+      const b = moduleInstance?.baseNote?.variables?.beatsPerMeasureString;
+      if (b && typeof b === 'string') {
+        const m = b.match(/new\s+Fraction\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)/);
+        if (m) return new Fraction(parseFloat(m[1]), parseFloat(m[2]));
+      }
+      // Fallback from evaluated length + tempo
+      const mlVal = moduleInstance.findMeasureLength(measureNote);
+      const seconds = (mlVal && typeof mlVal.valueOf === 'function') ? Number(mlVal.valueOf()) : Number(mlVal);
+      const tempoVal = moduleInstance.findTempo(measureNote || moduleInstance.baseNote);
+      const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+      const beatLen = 60 / tempo;
+      return new Fraction(seconds / beatLen);
+    })();
+
+    // Try match presets
+    const m = currentBeats.n / currentBeats.d;
+    const tol = 1e-2;
+    let best = { base: -1, dot: -1, diff: Infinity };
+    basePicks.forEach((b, bi) => {
+      const baseVal = b.n / b.d;
+      let diff = Math.abs(m - baseVal);
+      if (diff < best.diff && diff <= tol) best = { base: bi, dot: -1, diff };
+      dotPicks.forEach((d, di) => {
+        const val = (b.n * d.n) / (b.d * d.d);
+        const dd = Math.abs(m - val);
+        if (dd < best.diff && dd <= tol) best = { base: bi, dot: di, diff: dd };
+      });
+    });
+    if (best.base >= 0) {
+      selectedBaseIdx = best.base;
+      selectedDotIdx = best.dot;
+      renderSelection();
+    }
+  } catch {}
+
+  return container;
+}
+
+export function createMeasureDurationRow(note, measureId, externalFunctions) {
+  ensureModalsStyleInjected();
+
+  const moduleInstance = getModule();
+  if (!moduleInstance) {
+    const empty = document.createElement('div');
+    return empty;
+  }
+
+  const measureNote = (() => {
+    try { return moduleInstance.getNoteById(Number(measureId)); } catch { return null; }
+  })();
+
+  const variableRow = document.createElement('div');
+  variableRow.className = 'variable-row';
+
+  const variableNameDiv = document.createElement('div');
+  variableNameDiv.className = 'variable-name';
+  variableNameDiv.textContent = 'Measure Duration';
+
+  const variableValueDiv = document.createElement('div');
+  variableValueDiv.className = 'variable-value';
+
+  // Initial RAW expression (prefer measure override, fallback to base)
+  let initialRaw = 'new Fraction(4)';
+  try {
+    if (measureNote?.variables?.beatsPerMeasureString) {
+      initialRaw = measureNote.variables.beatsPerMeasureString;
+    } else if (moduleInstance?.baseNote?.variables?.beatsPerMeasureString) {
+      initialRaw = moduleInstance.baseNote.variables.beatsPerMeasureString;
+    }
+  } catch {}
+
+  const { rawDiv, rawInput, saveButton } = buildRawEditor(initialRaw);
+
+  // Layout: show Save underneath input for this section only
+  try {
+    rawDiv.style.display = 'flex';
+    rawDiv.style.flexDirection = 'column';
+    saveButton.style.display = 'none';
+  } catch {}
+
+  saveButton.addEventListener('click', () => {
+    try {
+      pauseIfPlaying();
+      if (!measureNote) return;
+
+      const raw = (rawInput.value || '').trim() || 'new Fraction(4)';
+
+      measureNote.setVariable('beatsPerMeasure', function () {
+        // eslint-disable-next-line no-new-func
+        return new Function('module', 'Fraction', 'return ' + raw + ';')(moduleInstance, Fraction);
+      });
+      measureNote.setVariable('beatsPerMeasureString', raw);
+
+      // Recompile note and its dependents so functions stay in sync
+      recompileNoteAndDependents(measureNote.id);
+
+      // Re-evaluate and refresh visuals
+      const evaluated = moduleInstance.evaluateModule();
+      setEvaluatedNotes(evaluated);
+      if (typeof externalFunctions.updateVisualNotes === 'function') {
+        externalFunctions.updateVisualNotes(evaluated);
+      }
+      if (typeof externalFunctions.createMeasureBars === 'function') {
+        externalFunctions.createMeasureBars();
+      }
+
+      // Refresh modals so the UI reflects the new value
+      refreshModals(null, measureNote.id);
+
+      // History snapshot
+      try {
+        const snap = getModule().createModuleJSON();
+        try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+        eventBus.emit('history:capture', { label: `Edit measure duration Measure ${measureNote.id}`, snapshot: snap });
+      } catch {}
+    } catch (err) {
+      console.error('Error saving measure duration (beatsPerMeasure) for measure', measureId, err);
+    }
+  });
+
+  variableRow.appendChild(variableNameDiv);
+  variableValueDiv.appendChild(rawDiv);
+  variableRow.appendChild(variableValueDiv);
+
+  return variableRow;
+}
+
 function refreshModals(note, measureId) {
   try {
     const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
@@ -853,6 +1261,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
       } catch {}
     }
 
+ 
     variableValueDiv.appendChild(rawDiv);
   }
 

@@ -127,6 +127,21 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
       const evaluated = module.evaluateModule();
       setEvaluatedNotes(evaluated);
 
+      // Preselect the last created measure so dependency highlights and GL selection are correct immediately
+      try {
+        const __lastMeasure = newMeasures && newMeasures.length > 0 ? newMeasures[newMeasures.length - 1] : null;
+        if (__lastMeasure && __lastMeasure.id != null) {
+          eventBus?.emit?.('player:selectNote', { noteId: __lastMeasure.id });
+        }
+      } catch {}
+
+      // Immediately refresh the WebGL workspace so measure triangles/end bar appear without extra clicks
+      if (typeof externalFunctions.updateVisualNotes === 'function') {
+        externalFunctions.updateVisualNotes(evaluated);
+      }
+      // Ensure timing-dependent visuals (e.g., final/end bar) recompute right away
+      try { eventBus?.emit?.('player:invalidateModuleEndTimeCache'); } catch {}
+
       // Focus on last measure added
       const last = newMeasures[newMeasures.length - 1];
       if (last) {
@@ -409,6 +424,10 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       // Re-evaluate and redraw
       const evaluated = module.evaluateModule();
       setEvaluatedNotes(evaluated);
+
+      // Select the newly created note so dependency highlights and GL selection are correct immediately
+      try { eventBus?.emit?.('player:selectNote', { noteId: newNote.id }); } catch {}
+
       if (typeof externalFunctions.updateVisualNotes === 'function') {
         externalFunctions.updateVisualNotes(evaluated);
       }

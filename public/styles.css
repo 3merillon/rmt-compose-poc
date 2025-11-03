@@ -23,7 +23,8 @@ html, body {
   justify-content: space-between;
   align-items: center;
   padding: 0 20px;
-  z-index: 4;
+  /* Ensure menu bar stays above GL overlay (z-index ~1004) but below modals (2000) */
+  z-index: 1100;
   border-bottom: 1px dotted #ffa800;
 }
 
@@ -36,7 +37,8 @@ html, body {
     background: rgba(21, 21, 37, 0.88);
     backdrop-filter: blur(5px);
     -webkit-backdrop-filter: blur(5px);
-    z-index: 3;
+    /* Keep second bar just under main top bar but above GL overlay */
+    z-index: 1099;
     display: flex;
     flex-direction: column;
 }
@@ -982,7 +984,8 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     width: 300px;
     overflow: hidden;
     box-sizing: border-box;
-    z-index: 1003;
+    /* Above menu bars (1100/1099) and GL, but below global modals (2000) */
+    z-index: 1200;
     display: none;
     color: #ffa800;
     font-family: 'Roboto Mono', monospace;
@@ -1058,7 +1061,8 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 
 .variable-value {
     font-family: 'Roboto Mono', monospace;
-    word-break: break-all;
+    word-break: break-word;
+    overflow-wrap: anywhere;
     color: rgba(255, 168, 0, 0.8);
     padding-left: 10px;
 }
@@ -1493,7 +1497,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     position: fixed;
     bottom: 11px;
     left: 10px;
-    z-index: 1000;
+    z-index: 1150;
     display: flex;
     flex-direction: column;
     pointer-events: none;
@@ -1659,7 +1663,7 @@ input[type="range"]:active::-moz-range-thumb {
     height: 12px;
     background-color: #ffa800;
     border-radius: 50%;
-    z-index: 1002;
+    z-index: 1150;
     cursor: pointer;
     transition: background-color 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
 }
@@ -1746,7 +1750,7 @@ input[type="range"]:active::-moz-range-thumb {
     background: transparent;
     border: none;
     pointer-events: none;
-    z-index: 1002;
+    z-index: 1150;
     padding: 0;
     display: flex;
     align-items: center;

@@ -7,6 +7,8 @@ import { eventBus } from './utils/event-bus.js';
 import { audioEngine } from './player/audio-engine.js';
 import { setModule, setEvaluatedNotes } from './store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpressionByFraction } from './utils/simplify.js';
+import { RendererAdapter } from './renderer/webgl2/renderer-adapter.js';
+import { Workspace } from './renderer/webgl2/workspace.js';
 
 // Compiled expression cache (kept for performance; flags and perf logs removed)
 const __exprCompileCache = new Map();
@@ -20,11 +22,16 @@ function __evalExpr(expr, moduleInstance) {
 }
 
 // Defer heavy UI sync without feature flags or polyfills
+// Use requestAnimationFrame to guarantee next-frame execution even when idle callbacks are throttled.
 function scheduleDeferred(cb) {
-  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-    window.requestIdleCallback(cb);
-  } else {
-    setTimeout(cb, 0);
+  try {
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => { try { cb(); } catch {} });
+    } else {
+      setTimeout(cb, 0);
+    }
+  } catch {
+    try { setTimeout(cb, 0); } catch {}
   }
 }
 
@@ -35,7 +42,50 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     let stackClickState = { lastClickPosition: null, stackedNotes: [], currentIndex: -1 };
     let xScaleFactor = 1.0, yScaleFactor = 1.0;
-    
+    let glRenderer = null;
+    let glWorkspace = null;
+    // Suppress playhead recentering during X-scale adjustments to avoid 1-frame pop
+    let __rmtScalingXActive = false;
+    // While dragging/resizing, feed temp overrides each frame so animation loop does not overwrite preview
+    let glTempOverrides = null;
+
+    function isWebGL2RendererEnabled() {
+        try {
+            // Robustly read from search, hash, and localStorage
+            const search = typeof window !== 'undefined' ? window.location.search : '';
+            const params = new URLSearchParams(search || '');
+            const viaSearch = (params.get('renderer') || '').toLowerCase() === 'webgl2';
+
+            const hash = (typeof window !== 'undefined' ? window.location.hash : '' ) || '';
+            const viaHash = hash.toLowerCase().includes('renderer=webgl2');
+
+            const ls = (typeof localStorage !== 'undefined' ? (localStorage.getItem('rmt:renderer') || '') : '');
+            const viaLS = ls.toLowerCase() === 'webgl2';
+
+            return !!(viaSearch || viaHash || viaLS);
+        } catch (e) {
+            try { console.warn('RMT: isWebGL2RendererEnabled check failed', e); } catch {}
+            return false;
+        }
+    }
+
+    // GL-only mode: disable Tapspace DOM notes/triangles/playhead while keeping GL overlay
+    function isWebGL2GLOutputOnlyEnabled() {
+        try {
+            return isWebGL2RendererEnabled();
+        } catch {
+            return false;
+        }
+    }
+
+    // Workspace mode: full GL interactive workspace (replaces Tapspace)
+    function isWebGL2WorkspaceEnabled() {
+        try {
+            return isWebGL2RendererEnabled();
+        } catch {
+            return false;
+        }
+    }
     
     if (modals) {
         modals.setExternalFunctions({
@@ -153,50 +203,51 @@ document.addEventListener('DOMContentLoaded', async function() {
         updateOctaveIndicators();
     }
 
-    const octaveIndicatorStyles = document.createElement('style');
-    octaveIndicatorStyles.textContent = `
-        .octave-indicators-container {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            pointer-events: none;
-            z-index: 3;
-        }
-        
-        .octave-indicator {
-            position: absolute;
-            left: 0;
-            width: 100%;
-            height: 1px;
-            border-top: 1px dotted rgba(255, 168, 0, 0.3);
-            pointer-events: none;
-        }
-        
-        .octave-indicator.reference-octave {
-            border-top: 1px dotted rgba(255, 168, 0, 0.7);
-        }
-        
-        .octave-label {
-            position: absolute;
-            left: 10px;
-            top: -10px;
-            color: rgba(255, 168, 0, 0.7);
-            font-family: 'Roboto Mono', monospace;
-            font-size: 10px;
-            background-color: rgba(21, 21, 37, 0.7);
-            padding: 2px 5px;
-            border-radius: 3px;
-        }
-        
-        .octave-indicator.reference-octave .octave-label {
-            color: rgba(255, 168, 0, 1);
-            font-weight: bold;
-        }
-    `;
-    document.head.appendChild(octaveIndicatorStyles);
-
+    if (!isWebGL2RendererEnabled()) {
+        const octaveIndicatorStyles = document.createElement('style');
+        octaveIndicatorStyles.textContent = `
+            .octave-indicators-container {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                pointer-events: none;
+                z-index: 3;
+            }
+            
+            .octave-indicator {
+                position: absolute;
+                left: 0;
+                width: 100%;
+                height: 1px;
+                border-top: 1px dotted rgba(255, 168, 0, 0.3);
+                pointer-events: none;
+            }
+            
+            .octave-indicator.reference-octave {
+                border-top: 1px dotted rgba(255, 168, 0, 0.7);
+            }
+            
+            .octave-label {
+                position: absolute;
+                left: 10px;
+                top: -10px;
+                color: rgba(255, 168, 0, 0.7);
+                font-family: 'Roboto Mono', monospace;
+                font-size: 10px;
+                background-color: rgba(21, 21, 37, 0.7);
+                padding: 2px 5px;
+                border-radius: 3px;
+            }
+            
+            .octave-indicator.reference-octave .octave-label {
+                color: rgba(255, 168, 0, 1);
+                font-weight: bold;
+            }
+        `;
+        document.head.appendChild(octaveIndicatorStyles);
+    }
     const lockStyles = document.createElement('style');
     lockStyles.textContent = `
         .note-content[style*="pointer-events: none"],
@@ -262,47 +313,259 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
       
         handlers.xInput = (e) => {
+            __rmtScalingXActive = true;
+            // Ensure playhead draws at viewport center during scaling when tracking is enabled
+            try {
+                if (isTrackingEnabled) {
+                    if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
+                        glWorkspace.renderer.setTrackingMode(true);
+                    } else if (glRenderer && typeof glRenderer.setTrackingMode === 'function') {
+                        glRenderer.setTrackingMode(true);
+                    }
+                }
+            } catch {}
+
             const viewCenter = viewport.atCenter();
             const centerInSpace = viewCenter.transitRaw(space);
             
             const oldScale = xScaleFactor;
             xScaleFactor = parseFloat(e.target.value);
-            
+            // Immediately update renderer scale factors to keep playhead world-x in sync this frame
+            try {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
+                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                }
+            } catch {}
+            // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
+            try {
+                if (isTrackingEnabled) {
+                    const neu = xScaleFactor;
+                    if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                        const rect = glWorkspace.containerEl.getBoundingClientRect();
+                        const centerX = rect.width * 0.5;
+                        const s = glWorkspace.camera.scale || 1;
+                        const x = playheadTime * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * x;
+                        if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                            glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                        }
+                    } else {
+                        const viewCenter = viewport.atCenter();
+                        const y = viewCenter.transitRaw(space).y;
+                        const x = playheadTime * (200 * neu);
+                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
+                        viewport.translateTo(targetPoint);
+                    }
+                }
+            } catch {}
             updateVisualNotes(evaluatedNotes);
             createMeasureBars();
+            // Ensure GL overlays/text/regions refresh immediately on scale change by bumping view epoch
+            try {
+                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
+                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                }
+            } catch {}
             
-            const scaleRatio = xScaleFactor / oldScale;
-            const newCenterX = centerInSpace.x * scaleRatio;
-            const newCenterPoint = space.at(newCenterX, centerInSpace.y);
-            viewport.translateTo(newCenterPoint);
+            // Keep the same time (sec) under the screen center after x-scale changes
+            try {
+                const old = oldScale;
+                const neu = xScaleFactor;
+                if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                    const rect = glWorkspace.containerEl.getBoundingClientRect();
+                    const centerX = rect.width * 0.5;
+                    const s = glWorkspace.camera.scale || 1;
+                    if (isTrackingEnabled) {
+                        // When tracking, keep playhead centered to avoid any pop
+                        const x = playheadTime * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * x;
+                    } else {
+                        // Preserve the same world time under the screen center
+                        const worldXCenter = (centerX - glWorkspace.camera.tx) / s;
+                        const secCenter = worldXCenter / (200 * old);
+                        const newWorldX = secCenter * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * newWorldX;
+                    }
+                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                } else {
+                    if (isTrackingEnabled) {
+                        // Tapspace path: keep playhead at screen center
+                        const viewCenter = viewport.atCenter();
+                        const y = viewCenter.transitRaw(space).y;
+                        const x = playheadTime * (200 * neu);
+                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
+                        viewport.translateTo(targetPoint);
+                    } else {
+                        // Preserve current screen-center world x after scaling
+                        const scaleRatio = neu / old;
+                        const newCenterX = centerInSpace.x * scaleRatio;
+                        const newCenterPoint = space.at(newCenterX, centerInSpace.y);
+                        viewport.translateTo(newCenterPoint);
+                    }
+                }
+            } catch {}
+
+            // Clear scaling flag on next frame to suppress one recenter in updatePlayhead
+            try {
+                requestAnimationFrame(() => { __rmtScalingXActive = false; });
+            } catch {
+                setTimeout(() => { __rmtScalingXActive = false; }, 0);
+            }
+            try { updatePlayhead(); } catch {}
         };
       
         handlers.yInput = (e) => {
             yScaleFactor = parseFloat(e.target.value);
+            // Immediately update renderer scale factors so Y-dependent overlays stay consistent
+            try {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
+                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                }
+            } catch {}
             updateVisualNotes(evaluatedNotes);
             updateBaseNotePosition();
+            // Bump view epoch so GL overlays that depend on viewport epoch refresh on Y-scale changes
+            try {
+                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
+                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                }
+            } catch {}
         };
       
         handlers.xChange = (e) => {
+            __rmtScalingXActive = true;
+            // Ensure playhead draws at viewport center during scaling when tracking is enabled
+            try {
+                if (isTrackingEnabled) {
+                    if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
+                        glWorkspace.renderer.setTrackingMode(true);
+                    } else if (glRenderer && typeof glRenderer.setTrackingMode === 'function') {
+                        glRenderer.setTrackingMode(true);
+                    }
+                }
+            } catch {}
+
             const viewCenter = viewport.atCenter();
             const centerInSpace = viewCenter.transitRaw(space);
             
             const oldScale = xScaleFactor;
             xScaleFactor = parseFloat(e.target.value);
-            
+            // Immediately update renderer scale factors to keep playhead world-x in sync this frame
+            try {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
+                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                }
+            } catch {}
+            // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
+            try {
+                if (isTrackingEnabled) {
+                    const neu = xScaleFactor;
+                    if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                        const rect = glWorkspace.containerEl.getBoundingClientRect();
+                        const centerX = rect.width * 0.5;
+                        const s = glWorkspace.camera.scale || 1;
+                        const x = playheadTime * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * x;
+                        if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                            glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                        }
+                    } else {
+                        const viewCenter = viewport.atCenter();
+                        const y = viewCenter.transitRaw(space).y;
+                        const x = playheadTime * (200 * neu);
+                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
+                        viewport.translateTo(targetPoint);
+                    }
+                }
+            } catch {}
             updateVisualNotes(evaluatedNotes);
             createMeasureBars();
+            // Ensure GL overlays/text/regions refresh immediately on scale change by bumping view epoch
+            try {
+                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
+                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                }
+            } catch {}
             
-            const scaleRatio = xScaleFactor / oldScale;
-            const newCenterX = centerInSpace.x * scaleRatio;
-            const newCenterPoint = space.at(newCenterX, centerInSpace.y);
-            viewport.translateTo(newCenterPoint);
+            // Keep the same time (sec) under the screen center after x-scale changes
+            try {
+                const old = oldScale;
+                const neu = xScaleFactor;
+                if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                    const rect = glWorkspace.containerEl.getBoundingClientRect();
+                    const centerX = rect.width * 0.5;
+                    const s = glWorkspace.camera.scale || 1;
+                    if (isTrackingEnabled) {
+                        // When tracking, keep playhead centered to avoid any pop
+                        const x = playheadTime * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * x;
+                    } else {
+                        // Preserve the same world time under the screen center
+                        const worldXCenter = (centerX - glWorkspace.camera.tx) / s;
+                        const secCenter = worldXCenter / (200 * old);
+                        const newWorldX = secCenter * (200 * neu);
+                        glWorkspace.camera.tx = centerX - s * newWorldX;
+                    }
+                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                } else {
+                    if (isTrackingEnabled) {
+                        // Tapspace path: keep playhead at screen center
+                        const viewCenter = viewport.atCenter();
+                        const y = viewCenter.transitRaw(space).y;
+                        const x = playheadTime * (200 * neu);
+                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
+                        viewport.translateTo(targetPoint);
+                    } else {
+                        // Preserve current screen-center world x after scaling
+                        const scaleRatio = neu / old;
+                        const newCenterX = centerInSpace.x * scaleRatio;
+                        const newCenterPoint = space.at(newCenterX, centerInSpace.y);
+                        viewport.translateTo(newCenterPoint);
+                    }
+                }
+            } catch {}
+
+            // Clear scaling flag on next frame to suppress one recenter in updatePlayhead
+            try {
+                requestAnimationFrame(() => { __rmtScalingXActive = false; });
+            } catch {
+                setTimeout(() => { __rmtScalingXActive = false; }, 0);
+            }
+            try { updatePlayhead(); } catch {}
         };
       
         handlers.yChange = (e) => {
             yScaleFactor = parseFloat(e.target.value);
+            // Immediately update renderer scale factors so Y-dependent overlays stay consistent
+            try {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
+                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
+                }
+            } catch {}
             updateVisualNotes(evaluatedNotes);
             updateBaseNotePosition();
+            // Bump view epoch so GL overlays that depend on viewport epoch refresh on Y-scale changes
+            try {
+                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
+                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                }
+            } catch {}
         };
         
         handlers.toggle = () => {
@@ -348,9 +611,33 @@ document.addEventListener('DOMContentLoaded', async function() {
             toggle.classList.add('active');
         }
     }
+    // Auto-close scale controls when clicking (not dragging/zooming) outside
+    (function setupScaleControlsAutoClose(){
+        try {
+            if (document.__rmtScaleAutoCloseAttached) return;
+            document.__rmtScaleAutoCloseAttached = true;
+            const handler = (e) => {
+                try {
+                    // Ignore if a drag/zoom gesture is in progress; only close on genuine clicks
+                    if (typeof isDragging !== 'undefined' && isDragging) return;
+                    const cont = document.getElementById('scale-controls');
+                    const togg = document.getElementById('scale-controls-toggle');
+                    if (!cont || !togg) return;
+                    if (!cont.classList.contains('visible')) return;
+                    const t = e.target;
+                    if (cont.contains(t) || togg.contains(t)) return;
+                    cont.classList.remove('visible');
+                    togg.classList.remove('active');
+                } catch {}
+            };
+            // Use click so zoom/drag gestures (mousedown/mousemove) do not close the panel
+            document.addEventListener('click', handler, true);
+        } catch {}
+    })();
     
     const scaleControls = createScaleControls();
-  
+   
+   
     function batchClassOperation(elements, classesToAdd = [], classesToRemove = []) {
         if (!elements || elements.length === 0) return;
         
@@ -406,6 +693,15 @@ document.addEventListener('DOMContentLoaded', async function() {
                 await wakeLock.release();
                 wakeLock = null;
             }
+            // Persist current module snapshot when tab becomes hidden to ensure reliability
+            try {
+              const snap = (myModule && typeof myModule.createModuleJSON === 'function')
+                ? myModule.createModuleJSON()
+                : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+              if (snap) {
+                localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
+              }
+            } catch {}
         }
     });
   
@@ -872,24 +1168,521 @@ document.addEventListener('DOMContentLoaded', async function() {
     const space = tapspace.createSpace();
     viewport.addChild(space);
 
+    // Derive world(space)->screen(viewport) affine from Tapspace point samples
+    function computeWorldToScreenAffine() {
+        try {
+            const p0 = new tapspace.geometry.Point(space, { x: 0, y: 0 });
+            const p1 = new tapspace.geometry.Point(space, { x: 1, y: 0 });
+            const p2 = new tapspace.geometry.Point(space, { x: 0, y: 1 });
+            const s0 = p0.transitRaw(viewport);
+            const s1 = p1.transitRaw(viewport);
+            const s2 = p2.transitRaw(viewport);
+            const a = s1.x - s0.x; // column 1
+            const b = s1.y - s0.y;
+            const c = s2.x - s0.x; // column 2
+            const d = s2.y - s0.y;
+            const e = s0.x;        // translation
+            const f = s0.y;
+            return { a, b, c, d, e, f };
+        } catch (e) {
+            // Fallback to identity if sampling fails
+            return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+        }
+    }
+
+    // Initialize WebGL2 renderer overlay if enabled (Phase 1)
+    try {
+        const containerEl = document.querySelector('.myspaceapp');
+        let __rmtDidInitGL = false;
+
+        // Workspace mode: initialize interactive GL workspace with native camera
+        if (isWebGL2WorkspaceEnabled() && containerEl) {
+            glWorkspace = new Workspace();
+            const okW = glWorkspace.init(containerEl);
+            if (!okW) {
+                glWorkspace = null;
+                try { console.warn('RMT: WebGL2 workspace init returned false (context unavailable)'); } catch {}
+            } else {
+                try {
+                    glWorkspace.setPlayhead(playheadTime);
+                    glWorkspace.sync({
+                        evaluatedNotes,
+                        module: myModule,
+                        xScaleFactor,
+                        yScaleFactor,
+                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
+                    });
+                } catch {}
+
+                // Disable Tapspace zoom/pan to avoid handler conflicts while workspace controls camera
+                try { viewport.zoomable(false); } catch {}
+
+                // In GL-only mode, hide Tapspace DOM notes/triangles/base circle so only GL is visible
+                try {
+                  const shouldHide = isWebGL2GLOutputOnlyEnabled();
+                  let hideStyle = document.getElementById('rmt-hide-dom-notes');
+                  if (shouldHide) {
+                    if (!hideStyle) {
+                      hideStyle = document.createElement('style');
+                      hideStyle.id = 'rmt-hide-dom-notes';
+                      hideStyle.textContent = `
+                        .note-rect, .note-content, #baseNoteCircle, .measure-bar-triangle {
+                          display: none !important;
+                        }
+                      `;
+                      document.head.appendChild(hideStyle);
+                    }
+                  } else {
+                    if (hideStyle && hideStyle.parentNode) {
+                      hideStyle.parentNode.removeChild(hideStyle);
+                    }
+                  }
+                } catch {}
+
+                // Initial center via camera: align BaseNote (x=0, y=freq->worldY) to viewport center
+                try {
+                  const rect = containerEl.getBoundingClientRect();
+                  const cx = rect.left + rect.width * 0.5;
+                  const cy = rect.top  + rect.height * 0.5;
+                  const offX = rect.left;
+                  const offY = rect.top;
+                  const baseNoteFreqInit = myModule.baseNote?.getVariable?.('frequency')?.valueOf?.() ?? 440;
+                  const baseYInit = frequencyToY(baseNoteFreqInit);
+                  const s = 1.0;
+                  // Camera uses container-local translation; Tapspace-like basis is produced by getBasis()
+                  // pageCSS = s*world + (tx + off). For world (0, baseYInit) -> (cx, cy):
+                  const tx = cx - offX - (0 * s);
+                  const ty = cy - offY - (baseYInit * s);
+                  if (glWorkspace && glWorkspace.camera) {
+                    glWorkspace.camera.scale = s;
+                    glWorkspace.camera.tx = tx;
+                    glWorkspace.camera.ty = ty;
+                    // Honor current tracking mode on init (lock X panning when tracking)
+                    glWorkspace.camera.lockX = !!isTrackingEnabled;
+                  }
+                  if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                  }
+                  // Initialize renderer tracking mode based on current tracking state
+                  try {
+                    if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
+                      glWorkspace.renderer.setTrackingMode(!!isTrackingEnabled);
+                    }
+                  } catch {}
+                } catch {}
+
+                // Workspace input wiring: click-to-open/select, background click sets playhead,
+                // hover cursor feedback, and touch/pen picking.
+                try {
+                  // Click: pick note or set playhead on background
+                  if (!containerEl.__rmtWsClickHandler) {
+                    containerEl.__rmtWsClickHandler = (event) => {
+                      try {
+                        const nowTs = (performance && performance.now) ? performance.now() : Date.now();
+                        if (containerEl.__rmtSuppressClickUntil && nowTs < containerEl.__rmtSuppressClickUntil) {
+                          event.stopPropagation();
+                          event.preventDefault();
+                          return;
+                        }
+
+                        // GL stack pick: gather all hits top-most first and cycle on repeated clicks (note/measure/base)
+                        let targetEntry = null;
+                        try {
+                          const stack = (glWorkspace && typeof glWorkspace.pickStackAt === 'function')
+                            ? glWorkspace.pickStackAt(event.clientX, event.clientY, 3)
+                            : [];
+                          const entries = Array.isArray(stack)
+                            ? stack.filter(h => h && (h.type === 'note' || h.type === 'measure' || h.type === 'base'))
+                                    .map(h => ({ type: String(h.type), id: Number(h.id) }))
+                            : [];
+                          if (entries.length > 0 && !isLocked) {
+                            const prev = containerEl.__rmtWsStack || { entries: [], index: -1, lastX: 0, lastY: 0 };
+                            let index = 0;
+
+                            // Determine previous selected entry (type-aware)
+                            const prevSel = (() => {
+                              if (prev.entries && prev.index != null && prev.index >= 0 && prev.index < prev.entries.length) {
+                                return prev.entries[prev.index];
+                              }
+                              if (currentSelectedNote) {
+                                return { type: (currentSelectedNote.id === 0 ? 'base' : (currentSelectedNote.variables && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency ? 'measure' : 'note')), id: Number(currentSelectedNote.id) };
+                              }
+                              return null;
+                            })();
+
+                            // Shallow equality check for stacks
+                            const sameOrder = prev.entries
+                              && prev.entries.length === entries.length
+                              && prev.entries.every((v, i) => v.type === entries[i].type && v.id === entries[i].id);
+
+                            if (sameOrder) {
+                              index = ((prev.index || 0) + 1) % entries.length;
+                            } else if (prevSel) {
+                              const pos = entries.findIndex(e => e.type === prevSel.type && e.id === prevSel.id);
+                              if (pos >= 0) index = (pos + 1) % entries.length;
+                            }
+
+                            targetEntry = entries[index];
+                            containerEl.__rmtWsStack = { entries, index, lastX: event.clientX, lastY: event.clientY };
+                          }
+                        } catch {}
+
+                        if (targetEntry) {
+                          const t = targetEntry.type;
+                          const tid = Number(targetEntry.id);
+
+                          if (t === 'note') {
+                            const note = myModule.getNoteById(tid);
+                            if (note) {
+                              currentSelectedNote = note;
+                              try { syncRendererSelection(); } catch {}
+                              const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+                              if (el) {
+                                showNoteVariables(note, el);
+                              } else {
+                                const baseEl = document.querySelector('.base-note-circle');
+                                showNoteVariables(note, baseEl || document.body);
+                              }
+                              event.stopPropagation();
+                              event.preventDefault();
+                              return;
+                            }
+                          } else if (t === 'measure') {
+                            const measureNote = myModule.getNoteById(tid);
+                            if (measureNote) {
+                              currentSelectedNote = measureNote;
+                              try { syncRendererSelection(); } catch {}
+                              // Anchor: prefer DOM triangle if present; else body
+                              let anchor = document.querySelector(`.measure-bar-triangle[data-note-id="${tid}"]`);
+                              if (!anchor) anchor = document.body;
+                              showNoteVariables(measureNote, anchor, tid);
+                              event.stopPropagation();
+                              event.preventDefault();
+                              return;
+                            }
+                          } else if (t === 'base') {
+                            currentSelectedNote = myModule.baseNote;
+                            try { syncRendererSelection(); } catch {}
+                            let anchor = document.querySelector('.base-note-circle') || document.body;
+                            showNoteVariables(myModule.baseNote, anchor);
+                            event.stopPropagation();
+                            event.preventDefault();
+                            return;
+                          }
+                        }
+
+                        // Background: set playhead using workspace camera mapping
+                        if (!glWorkspace || typeof glWorkspace.screenToWorld !== 'function') return;
+                        const p = glWorkspace.screenToWorld(event.clientX, event.clientY);
+                        let t = p.x / (200 * xScaleFactor);
+                        const moduleEnd = getModuleEndTime();
+                        if (!isFinite(t)) t = 0;
+                        t = Math.max(0, Math.min(moduleEnd, t));
+                        playheadTime = t;
+                        updatePlayhead();
+                        if (isPlaying) { stop(false); }
+                        event.stopPropagation();
+                        event.preventDefault();
+                      } catch {}
+                    };
+                    // Capture so this runs before Tapspace handlers
+                    containerEl.addEventListener('click', containerEl.__rmtWsClickHandler, true);
+                  }
+
+                  // Suppress click after pan/zoom gestures by distance heuristic
+                  if (!containerEl.__rmtWsPointerSuppressionHandlers) {
+                    containerEl.__rmtWsPointerSuppressionHandlers = true;
+                    containerEl.addEventListener('pointerdown', (ev) => {
+                      try {
+                        containerEl.__rmtDownX = ev.clientX;
+                        containerEl.__rmtDownY = ev.clientY;
+                      } catch {}
+                    }, true);
+                    containerEl.addEventListener('pointerup', (ev) => {
+                      try {
+                        const dx = ev.clientX - (containerEl.__rmtDownX || ev.clientX);
+                        const dy = ev.clientY - (containerEl.__rmtDownY || ev.clientY);
+                        const dist = Math.hypot(dx, dy);
+                        if (dist > 5) {
+                          const now = (performance && performance.now) ? performance.now() : Date.now();
+                          containerEl.__rmtSuppressClickUntil = now + 250;
+                        }
+                      } catch {}
+                    }, true);
+                  }
+
+                  // Hover cursor feedback (pointer when hovering a note)
+                  // In GL Workspace mode, Workspace manages hover and cursor mapping; skip legacy cursor handler.
+                  if (!containerEl.__rmtWsMoveHandler && !glWorkspace) {
+                    containerEl.__rmtWsMoveHandler = (event) => {
+                      try {
+                        const hit = (glWorkspace && typeof glWorkspace.pickAt === 'function')
+                          ? glWorkspace.pickAt(event.clientX, event.clientY, 2)
+                          : null;
+                        if (hit && hit.type === 'note' && !isLocked) {
+                          containerEl.style.cursor = 'pointer';
+                        } else {
+                          containerEl.style.cursor = '';
+                        }
+                      } catch {}
+                    };
+                    containerEl.addEventListener('mousemove', containerEl.__rmtWsMoveHandler, true);
+                    containerEl.addEventListener('mouseleave', () => { try { containerEl.style.cursor = ''; } catch {} }, true);
+                  }
+
+                  // Touch/pen: pick on pointerdown to mirror click-to-open
+                  if (!containerEl.__rmtWsPointerDownPickHandler) {
+                    containerEl.__rmtWsPointerDownPickHandler = (event) => {
+                      try {
+                        if (event.pointerType === 'mouse') return;
+
+                        const t = event.target;
+                        if (t && t.closest && (t.closest('.note-rect') || t.closest('.measure-bar-triangle') || t.closest('#baseNoteCircle'))) {
+                          return;
+                        }
+
+                        const hit = (glWorkspace && typeof glWorkspace.pickAt === 'function')
+                          ? glWorkspace.pickAt(event.clientX, event.clientY, 4)
+                          : null;
+                        if (hit && !isLocked) {
+                          const t = String(hit.type);
+                          const hid = Number(hit.id);
+                          if (t === 'note') {
+                            const note = myModule.getNoteById(hid);
+                            if (!note) return;
+                            currentSelectedNote = note;
+                            try { syncRendererSelection(); } catch {}
+                            const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+                            if (el) {
+                              showNoteVariables(note, el);
+                            } else {
+                              const baseEl = document.querySelector('.base-note-circle');
+                              showNoteVariables(note, baseEl || document.body);
+                            }
+                            event.stopPropagation();
+                            event.preventDefault();
+                          } else if (t === 'measure') {
+                            const measureNote = myModule.getNoteById(hid);
+                            if (!measureNote) return;
+                            currentSelectedNote = measureNote;
+                            try { syncRendererSelection(); } catch {}
+                            let anchor = document.querySelector(`.measure-bar-triangle[data-note-id="${hid}"]`) || document.body;
+                            showNoteVariables(measureNote, anchor, hid);
+                            event.stopPropagation();
+                            event.preventDefault();
+                          } else if (t === 'base') {
+                            currentSelectedNote = myModule.baseNote;
+                            try { syncRendererSelection(); } catch {}
+                            let anchor = document.querySelector('.base-note-circle') || document.body;
+                            showNoteVariables(myModule.baseNote, anchor);
+                            event.stopPropagation();
+                            event.preventDefault();
+                          }
+                        }
+                      } catch {}
+                    };
+                    containerEl.addEventListener('pointerdown', containerEl.__rmtWsPointerDownPickHandler, true);
+                  }
+                } catch {}
+
+                __rmtDidInitGL = true;
+            }
+        }
+
+        // Phase 1 overlay fallback when workspace is not active
+        if (false && !__rmtDidInitGL && isWebGL2RendererEnabled() && containerEl) {
+            glRenderer = new RendererAdapter();
+            const ok = glRenderer.init(containerEl);
+            if (!ok) {
+                glRenderer = null;
+                try { console.warn('RMT: WebGL2 overlay init returned false (context unavailable)'); } catch {}
+            } else {
+                try {
+                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                    glRenderer.setPlayhead(playheadTime);
+                    glRenderer.sync({ evaluatedNotes, module: myModule, xScaleFactor, yScaleFactor, selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null });
+                    try { console.info('RMT: WebGL2 overlay initialized'); } catch {}
+
+                    // Visible badge retained for overlay mode only (workspace mode shows no badge)
+                    let badge = document.getElementById('rmt-webgl2-badge');
+                    if (!badge) {
+                        badge = document.createElement('div');
+                        badge.id = 'rmt-webgl2-badge';
+                        Object.assign(badge.style, {
+                            position: 'fixed',
+                            top: '6px',
+                            left: '6px',
+                            padding: '4px 8px',
+                            background: 'rgba(255,168,0,0.9)',
+                            color: '#151525',
+                            fontFamily: "'Roboto Mono', monospace",
+                            fontSize: '12px',
+                            borderRadius: '4px',
+                            zIndex: '10000',
+                            pointerEvents: 'none',
+                            boxShadow: '0 0 6px rgba(0,0,0,0.35)'
+                        });
+                        badge.textContent = isWebGL2GLOutputOnlyEnabled() ? 'WebGL2 Renderer (GL-only)' : 'WebGL2 Renderer (overlay)';
+                        document.body.appendChild(badge);
+                    }
+
+                    // In GL-only mode, hide Tapspace DOM notes/triangles/base circle so only GL is visible
+                    try {
+                      const shouldHide = isWebGL2GLOutputOnlyEnabled();
+                      let hideStyle = document.getElementById('rmt-hide-dom-notes');
+                      if (shouldHide) {
+                        if (!hideStyle) {
+                          hideStyle = document.createElement('style');
+                          hideStyle.id = 'rmt-hide-dom-notes';
+                          hideStyle.textContent = `
+                            .note-rect, .note-content, #baseNoteCircle, .measure-bar-triangle {
+                              display: none !important;
+                            }
+                          `;
+                          document.head.appendChild(hideStyle);
+                        }
+                      } else {
+                        if (hideStyle && hideStyle.parentNode) {
+                          hideStyle.parentNode.removeChild(hideStyle);
+                        }
+                      }
+                    } catch {}
+// GPU picking: container-level click-to-open modal when overlay is active
+try {
+  if (!containerEl.__rmtGlClickHandler) {
+    containerEl.__rmtGlClickHandler = (event) => {
+      try {
+        if (!glRenderer) return;
+
+        const t = event.target;
+        // Let DOM note/base/measure clicks be handled by existing handlers
+        if (t && t.closest && (t.closest('.note-rect') || t.closest('.measure-bar-triangle') || t.closest('#baseNoteCircle'))) {
+          return;
+        }
+
+        const hit = glRenderer.pickAt(event.clientX, event.clientY, 3);
+        if (hit && hit.type === 'note') {
+          const note = myModule.getNoteById(Number(hit.id));
+          if (!note) return;
+
+          currentSelectedNote = note;
+          try { syncRendererSelection(); } catch {}
+
+          // Use existing DOM element for modal anchoring while Tapspace DOM still exists
+          const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+          if (el) {
+            showNoteVariables(note, el);
+          } else {
+            const baseEl = document.querySelector('.base-note-circle');
+            showNoteVariables(note, baseEl || document.body);
+          }
+
+          event.stopPropagation();
+          event.preventDefault();
+        }
+      } catch (e) {
+        try { console.warn('GPU pick handler error', e); } catch {}
+      }
+    };
+    // Capture to run before Tapspace handlers
+    containerEl.addEventListener('click', containerEl.__rmtGlClickHandler, true);
+  }
+// GPU picking: hover cursor feedback when overlay is active
+try {
+  if (!containerEl.__rmtGlMoveHandler) {
+    containerEl.__rmtGlMoveHandler = (event) => {
+      try {
+        if (!glRenderer) return;
+        const hit = glRenderer.pickAt(event.clientX, event.clientY, 2);
+        // Show pointer only when hovering a note and not in locked mode
+        if (hit && hit.type === 'note' && !isLocked) {
+          containerEl.style.cursor = 'pointer';
+        } else {
+          containerEl.style.cursor = '';
+        }
+      } catch {}
+    };
+    containerEl.addEventListener('mousemove', containerEl.__rmtGlMoveHandler, true);
+    containerEl.addEventListener('mouseleave', () => { try { containerEl.style.cursor = ''; } catch {} }, true);
+  }
+} catch {}
+// GPU picking: pointerdown handler for touch/pen to mirror click-to-open modal
+try {
+  if (!containerEl.__rmtGlPointerDownHandler) {
+    containerEl.__rmtGlPointerDownHandler = (event) => {
+      try {
+        if (!glRenderer) return;
+        // Only handle non-mouse pointers here; mouse is handled by 'click'
+        if (event.pointerType === 'mouse') return;
+
+        const t = event.target;
+        // Defer to existing DOM handlers if interacting with legacy elements
+        if (t && t.closest && (t.closest('.note-rect') || t.closest('.measure-bar-triangle') || t.closest('#baseNoteCircle'))) {
+          return;
+        }
+
+        const hit = glRenderer.pickAt(event.clientX, event.clientY, 4);
+        if (hit && hit.type === 'note') {
+          const note = myModule.getNoteById(Number(hit.id));
+          if (!note) return;
+
+          currentSelectedNote = note;
+          try { syncRendererSelection(); } catch {}
+
+          const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+          if (el) {
+            showNoteVariables(note, el);
+          } else {
+            const baseEl = document.querySelector('.base-note-circle');
+            showNoteVariables(note, baseEl || document.body);
+          }
+
+          event.stopPropagation();
+          event.preventDefault();
+        }
+      } catch (e) {
+        try { console.warn('GPU pointerdown pick handler error', e); } catch {}
+      }
+    };
+    containerEl.addEventListener('pointerdown', containerEl.__rmtGlPointerDownHandler, true);
+  }
+} catch {}
+} catch {}
+                } catch {}
+            }
+        } else if (!__rmtDidInitGL) {
+            try {
+                console.info('RMT: WebGL2 overlay not enabled - use ?renderer=webgl2 or localStorage rmt:renderer=webgl2');
+            } catch {}
+        }
+    } catch (e) {
+        console.warn('WebGL2 renderer initialization failed', e);
+    }
+
     const canvasEl = document.querySelector('.myspaceapp');
     canvasEl.addEventListener('dragover', (event) => {
-        if (event.dataTransfer.types.includes('application/json')) {
+        try {
+            const types = Array.from(event.dataTransfer?.types || []);
+            if (types.includes('application/json') || types.includes('text/plain')) {
+                event.preventDefault();
+                // Hint a copy action for better UX
+                try { event.dataTransfer.dropEffect = 'copy'; } catch {}
+            }
+        } catch {
+            // Be permissive if probing types fails
             event.preventDefault();
         }
     }, false);
     canvasEl.addEventListener('drop', (event) => {
-        if (!event.dataTransfer.types.includes('application/json')) return;
-
+        // Always prevent default when we intend to accept drops
         event.preventDefault();
-
+    
         const dropX = event.clientX;
         const dropY = event.clientY;
-
+    
+        // Try to resolve a DOM target first (legacy/Tapspace path)
         const elements = document.elementsFromPoint(dropX, dropY);
-
         let targetNoteId = null;
-        // Robustly detect the nearest container that carries data-note-id, so base note drops work too
         let targetContainer = null;
         for (const el of elements) {
             const container = el.closest ? el.closest('[data-note-id]') : null;
@@ -901,25 +1694,48 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (targetContainer) {
             targetNoteId = Number(targetContainer.getAttribute('data-note-id'));
         }
-
-        if (targetNoteId === null) {
+    
+        // If no DOM target and GL workspace is active, use GPU picking at drop point
+        if (targetNoteId == null) {
+            try {
+                if (glWorkspace && typeof glWorkspace.pickAt === 'function') {
+                    const hit = glWorkspace.pickAt(dropX, dropY, 4);
+                    if (hit && hit.type === 'note') {
+                        targetNoteId = Number(hit.id);
+                    }
+                }
+            } catch {}
+        }
+    
+        // Fallback: current selection, otherwise BaseNote
+        if (targetNoteId == null) {
+            targetNoteId = (currentSelectedNote && currentSelectedNote.id != null)
+              ? Number(currentSelectedNote.id)
+              : 0;
+        }
+    
+        // Read the transferred data (support both application/json and text/plain)
+        let raw = null;
+        try {
+            raw = event.dataTransfer.getData('application/json');
+            if (!raw) raw = event.dataTransfer.getData('text/plain');
+        } catch {}
+        if (!raw) {
+            console.warn('Drop ignored: no transferable data payload found');
             return;
         }
-
+    
         let data;
         try {
-            data = event.dataTransfer.getData('application/json');
-            if (!data) data = event.dataTransfer.getData('text/plain');
-            if (!data) return;
-            data = JSON.parse(data);
+            data = JSON.parse(raw);
         } catch (err) {
             console.error('Could not parse dropped module data', err);
             return;
         }
-
-        let targetNote = myModule.getNoteById(targetNoteId);
+    
+        let targetNote = myModule.getNoteById(Number(targetNoteId));
         if (!targetNote) targetNote = myModule.baseNote;
-
+    
         importModuleAtTarget(targetNote, data);
     }, false);
 
@@ -927,7 +1743,9 @@ document.addEventListener('DOMContentLoaded', async function() {
   
     let currentSelectedNote = null;
 
-    initializeOctaveIndicators();
+    if (!isWebGL2RendererEnabled()) {
+        initializeOctaveIndicators();
+    }
   
     if (domCache.saveModuleBtn) {
         domCache.saveModuleBtn.addEventListener('click', saveModule);
@@ -936,11 +1754,33 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   
     if (domCache.resetViewBtn) {
-        domCache.resetViewBtn.addEventListener('click', () => {
+        domCache.resetViewBtn.addEventListener('click', (e) => {
+            // When tracking is active during playback, ignore reset without causing any side effects.
+            if (isTrackingEnabled) {
+                try {
+                    if (e) { e.preventDefault(); if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation(); e.stopPropagation(); }
+                } catch {}
+                return;
+            }
+
             const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
             const baseNoteY = frequencyToY(baseNoteFreq);
-            const origin = space.at(0, baseNoteY);
-            viewport.translateTo(origin);
+            if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                // Reset view in Workspace: center world (0, baseY) to container center, keep current zoom
+                try {
+                    const rect = glWorkspace.containerEl.getBoundingClientRect();
+                    const s = glWorkspace.camera.scale || 1;
+                    const centerX = rect.width * 0.5;
+                    const centerY = rect.height * 0.5;
+                    glWorkspace.camera.tx = centerX - s * 0;
+                    glWorkspace.camera.ty = centerY - s * baseNoteY;
+                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                } catch {}
+            } else {
+                // Legacy Tapspace path
+                const origin = space.at(0, baseNoteY);
+                viewport.translateTo(origin);
+            }
         });
     }
   
@@ -950,6 +1790,16 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         try {
+            // Reject drop on silences (notes with startTime+duration and no frequency)
+            try {
+              const __isSilence = (n) => {
+                try { return !!(n && n.getVariable('startTime') && n.getVariable('duration') && !n.getVariable('frequency')); } catch { return false; }
+              };
+              if (__isSilence(targetNote)) {
+                try { notify('Cannot drop onto a silence. Drop on a note or the BaseNote instead.', 'error'); } catch {}
+                return;
+              }
+            } catch {}
             let importedModule;
             let filename = null;
             
@@ -1093,6 +1943,118 @@ document.addEventListener('DOMContentLoaded', async function() {
             // Incremental import path with targeted dirty marking and timings
             const importedIds = Object.keys(mapping).filter(k => Number(k) !== 0).map(k => mapping[k]);
 
+            // Normalize imported measure chains to ensure correct parentage and chaining after a module drop.
+            // This prevents cross-chain contamination where dragging a dropped measure would affect unrelated measures.
+            (function __normalizeImportedMeasureChains(){
+              try {
+                const importedSet = new Set(importedIds.map(Number));
+                const isMeasure = (n) => {
+                  try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); } catch { return false; }
+                };
+                // Collect imported measures
+                const measures = importedIds
+                  .map(id => myModule.getNoteById(Number(id)))
+                  .filter(n => isMeasure(n));
+                if (!measures.length) return;
+
+                // Build graph within the imported set: measure -> dependent measures (by startTimeString reference)
+                const depMap = new Map(); // id -> dependent ids[]
+                const indeg = new Map();  // id -> incoming count
+                measures.forEach(n => { depMap.set(n.id, []); indeg.set(n.id, 0); });
+
+                const refsMeasure = (raw, id) => {
+                  try { return new RegExp(`getNoteById\\(\\s*${id}\\s*\\)`).test(raw || ''); } catch { return false; }
+                };
+
+                measures.forEach(m => {
+                  const raw = (m.variables && m.variables.startTimeString) ? m.variables.startTimeString : '';
+                  for (const other of measures) {
+                    if (other.id === m.id) continue;
+                    if (refsMeasure(raw, other.id)) {
+                      depMap.get(other.id).push(m.id);
+                      indeg.set(m.id, (indeg.get(m.id) || 0) + 1);
+                    }
+                  }
+                });
+
+                // Roots = imported measures that do NOT reference another imported measure in their startTime
+                const roots = measures.filter(m => (indeg.get(m.id) || 0) === 0);
+
+                // Linearize each root’s chain forward by earliest evaluated start
+                const visitChain = (root) => {
+                  const chain = [root.id];
+                  let cur = root.id;
+                  const pickNext = () => {
+                    const list = depMap.get(cur) || [];
+                    if (!list.length) return null;
+                    let best = null, bestStart = Infinity;
+                    list.forEach(cid => {
+                      try {
+                        const n = myModule.getNoteById(Number(cid));
+                        const s = Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
+                        if (s < bestStart) { bestStart = s; best = cid; }
+                      } catch {}
+                    });
+                    return best;
+                  };
+                  let next = pickNext();
+                  while (next != null) {
+                    chain.push(Number(next));
+                    cur = Number(next);
+                    next = pickNext();
+                  }
+                  return chain;
+                };
+
+                const chains = [];
+                roots.forEach(r => { chains.push(visitChain(r)); });
+
+                // Canonicalize each imported chain:
+                // - First element keeps its existing parent anchor (non-measure note or BaseNote).
+                //   We only fix parentId to match that anchor if possible.
+                // - Subsequent measures are anchored to previous measure END via findMeasureLength(prev).
+                chains.forEach(chain => {
+                  if (!Array.isArray(chain) || chain.length === 0) return;
+
+                  // First measure in the imported chain: fix parentId to match anchor in startTimeString
+                  const first = myModule.getNoteById(Number(chain[0]));
+                  const raw0 = (first && first.variables && first.variables.startTimeString) ? first.variables.startTimeString : '';
+                  const m0 = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
+                  let parentIdForPID = 0;
+                  if (m0) {
+                    const pid = parseInt(m0[1], 10);
+                    const pn = myModule.getNoteById(pid);
+                    if (pn && !isMeasure(pn)) {
+                      parentIdForPID = pid;
+                    } else {
+                      parentIdForPID = 0;
+                    }
+                  } else if ((raw0 || '').includes('module.baseNote')) {
+                    parentIdForPID = 0;
+                  } else if (targetNote && typeof targetNote.id === 'number') {
+                    parentIdForPID = targetNote.id;
+                  }
+                  try { first.parentId = parentIdForPID; } catch {}
+
+                  // Subsequent measures: start = prev.startTime + findMeasureLength(prev), and parentId = prev.id
+                  for (let i = 1; i < chain.length; i++) {
+                    const prevId = Number(chain[i - 1]);
+                    const curId  = Number(chain[i]);
+                    const curNote = myModule.getNoteById(curId);
+                    if (!curNote) continue;
+                    const rawStart = `module.getNoteById(${prevId}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevId})))`;
+                    const simplifiedStart = simplifyStartTime(rawStart, myModule);
+                    curNote.setVariable('startTime', function () { return __evalExpr(simplifiedStart, myModule); });
+                    curNote.setVariable('startTimeString', simplifiedStart);
+                    try { curNote.parentId = prevId; } catch {}
+                    try { myModule.markNoteDirty(curId); } catch {}
+                  }
+                });
+              } catch (e) {
+                console.warn('normalizeImportedMeasureChains failed', e);
+              }
+            })();
+
             // Avoid global cache flush; only mark affected notes dirty
             try {
                 myModule.markNoteDirty(0);
@@ -1108,19 +2070,30 @@ document.addEventListener('DOMContentLoaded', async function() {
             // Immediate incremental render of new notes for fast feedback
             try { renderNotesIncrementally(importedIds); } catch (e) { console.warn('incremental render error', e); }
 
-            // Defer heavy UI sync to idle
-            scheduleDeferred(() => {
-                try {
-                    if (modals && modals.invalidateDependencyGraphCache) {
-                        modals.invalidateDependencyGraphCache();
-                    }
-                    updateVisualNotes(evaluatedNotes);
-                    createMeasureBars();
-                    try { captureSnapshot(`Import Module at ${targetNote.id}`); } catch {}
-                } catch (e) {
-                    console.warn('deferred import sync failed', e);
+            // Also refresh GL renderer immediately so user sees result without panning
+            try {
+                if (glRenderer) {
+                    glRenderer.sync({
+                        evaluatedNotes,
+                        module: myModule,
+                        xScaleFactor,
+                        yScaleFactor,
+                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
+                    });
                 }
-            });
+            } catch (e) { console.warn('glRenderer immediate sync after import failed', e); }
+
+            // Immediate UI + history updates to avoid relying on throttled idle callbacks
+            try {
+                if (modals && modals.invalidateDependencyGraphCache) {
+                    modals.invalidateDependencyGraphCache();
+                }
+                updateVisualNotes(evaluatedNotes);
+                createMeasureBars();
+                try { captureSnapshot(`Import Module at ${targetNote.id}`); } catch {}
+            } catch (e) {
+                console.warn('import sync failed', e);
+            }
 
 
         } catch (error) {
@@ -1129,9 +2102,42 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     
     function animationLoop() {
-        updateOctaveIndicators();
+        if (!glRenderer && !glWorkspace) { updateOctaveIndicators(); }
         updatePlayhead();
         updateMeasureBarPositions();
+        if (glWorkspace) {
+            try {
+                glWorkspace.setPlayhead(playheadTime);
+                // Event-driven sync: only push scene buffers during interactions (e.g., drag/resize)
+                if (glTempOverrides) {
+                    glWorkspace.sync({
+                        evaluatedNotes,
+                        module: myModule,
+                        xScaleFactor,
+                        yScaleFactor,
+                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
+                        tempOverrides: glTempOverrides
+                    });
+                }
+            } catch {}
+        }
+        if (glRenderer) {
+            try {
+                glRenderer.updateViewportBasis(computeWorldToScreenAffine());
+                glRenderer.setPlayhead(playheadTime);
+                // Event-driven sync: only push scene buffers during interactions (e.g., drag/resize)
+                if (glTempOverrides) {
+                    glRenderer.sync({
+                        evaluatedNotes,
+                        module: myModule,
+                        xScaleFactor,
+                        yScaleFactor,
+                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
+                        tempOverrides: glTempOverrides
+                    });
+                }
+            } catch {}
+        }
         requestAnimationFrame(animationLoop);
     }
     requestAnimationFrame(animationLoop);
@@ -1261,6 +2267,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     function clearSelection() {
         modals.clearSelection();
         currentSelectedNote = null;
+        // Update WebGL renderer selection ordering
+        try { syncRendererSelection(); } catch {}
     }
       
     domCache.closeWidgetBtn.addEventListener('click', () => {
@@ -1273,6 +2281,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (noteRect && noteContent) {
             const debouncedShowNoteVariables = debounce((note, noteContent) => {
                 currentSelectedNote = note;
+                // Ensure WebGL renderer draws selection on top
+                try { syncRendererSelection(); } catch {}
                 showNoteVariables(note, noteContent);
             }, 50);
             
@@ -1300,12 +2310,19 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
                 event.stopPropagation();
                 currentSelectedNote = myModule.baseNote;
+                // Ensure WebGL renderer draws selection on top
+                try { syncRendererSelection(); } catch {}
                 showNoteVariables(myModule.baseNote, baseNoteElement);
             });
         }
     }
       
     function updateZoomableBehavior() {
+        // In Workspace mode, always disable Tapspace zoom/pan to avoid input conflicts
+        if (glWorkspace) {
+            try { viewport.zoomable(false); } catch {}
+            return;
+        }
         if (isTrackingEnabled) {
             viewport.zoomable(false);
         } else {
@@ -1336,6 +2353,10 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
       
     function createBaseNoteDisplay() {
+        if (isWebGL2GLOutputOnlyEnabled()) {
+            // In GL-only mode we do not create the DOM BaseNote circle; GL draws it.
+            return null;
+        }
         const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
         const baseNoteY = frequencyToY(baseNoteFreq);
         const x = -50;
@@ -1627,6 +2648,349 @@ document.addEventListener('DOMContentLoaded', async function() {
         draggedNote.variables.startTime = savedStartFunc;
         return moved;
     }
+// === GL move helpers: parent selection, expression emission, and frequency retargeting ===
+function __isMeasureNoteGL(note) {
+  try {
+    return !!(note && note.getVariable('startTime') && !note.getVariable('duration') && !note.getVariable('frequency'));
+  } catch { return false; }
+}
+
+function __parseParentFromStartTimeStringGL(note) {
+  try {
+    const raw = note?.variables?.startTimeString || '';
+    const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
+    if (m) {
+      const pid = parseInt(m[1], 10);
+      const p = myModule.getNoteById(pid);
+      return p || myModule.baseNote;
+    }
+    if (raw.includes('module.baseNote')) return myModule.baseNote;
+    if (typeof note.parentId === 'number') {
+      const p2 = myModule.getNoteById(note.parentId);
+      return p2 || myModule.baseNote;
+    }
+  } catch {}
+  return myModule.baseNote;
+}
+
+function __findNextMeasureInChainGL(measure) {
+  try {
+    if (!__isMeasureNoteGL(measure)) return null;
+    const dependents = [];
+    for (const id in myModule.notes) {
+      const n = myModule.getNoteById(parseInt(id, 10));
+      if (!n || !__isMeasureNoteGL(n)) continue;
+      const startTimeString = n.variables.startTimeString || '';
+      const regex = new RegExp(`getNoteById\\(\\s*${measure.id}\\s*\\)`);
+      if (regex.test(startTimeString)) dependents.push(n);
+    }
+    if (dependents.length === 0) return null;
+    dependents.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
+    return dependents[0];
+  } catch { return null; }
+}
+
+function selectSuitableParentForStartGL(note, newStartSec) {
+  try {
+    const tol = 1e-2;
+    let parent = __parseParentFromStartTimeStringGL(note);
+    let parentStart = Number(parent.getVariable('startTime').valueOf() || 0);
+    const baseStart = Number(myModule.baseNote.getVariable('startTime').valueOf() || 0);
+
+    // Keep original parent when effectively no movement
+    if (Math.abs(newStartSec - Number(note.getVariable('startTime').valueOf() || 0)) < tol) {
+      return parent;
+    }
+
+    if (newStartSec > parentStart + tol) {
+      // Dragging forward: if parent is a measure, walk forward across measure chain as needed
+      if (__isMeasureNoteGL(parent)) {
+        let cur = parent;
+        let curStart = parentStart;
+        let advanced = true;
+        while (advanced) {
+          advanced = false;
+          // measure end = start + measureLength(cur)
+          const mlVal = myModule.findMeasureLength(cur);
+          const ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal);
+          const end = curStart + ml;
+          if (newStartSec >= end - tol) {
+            const next = __findNextMeasureInChainGL(cur);
+            if (next) {
+              cur = next;
+              curStart = Number(next.getVariable('startTime').valueOf() || 0);
+              parent = cur;
+              parentStart = curStart;
+              advanced = true;
+            }
+          }
+        }
+      }
+    } else if (newStartSec < parentStart - tol) {
+      // Dragging backward: climb ancestor chain until an ancestor starts before newStartSec
+      let chain = [];
+      let cur = parent;
+      while (cur && cur.id !== 0) {
+        const raw = cur.variables.startTimeString || '';
+        const m = raw.match(/getNoteById\((\d+)\)/);
+        if (m) {
+          const pid = parseInt(m[1], 10);
+          cur = myModule.getNoteById(pid);
+          if (cur) chain.push(cur);
+          else break;
+        } else if ((raw || '').includes('module.baseNote')) {
+          chain.push(myModule.baseNote);
+          break;
+        } else {
+          break;
+        }
+      }
+      if (chain.length === 0 || chain[chain.length - 1].id !== 0) chain.push(myModule.baseNote);
+
+      for (let i = 0; i < chain.length; i++) {
+        const anc = chain[i];
+        const ancStart = Number(anc.getVariable('startTime').valueOf() || 0);
+        if (newStartSec >= ancStart - tol) {
+          parent = anc;
+          parentStart = ancStart;
+          break;
+        }
+      }
+    }
+
+    // Clamp to BaseNote when earlier than base
+    if (newStartSec < baseStart) {
+      parent = myModule.baseNote;
+    }
+    return parent;
+  } catch {
+    return myModule.baseNote;
+  }
+}
+
+function emitStartTimeExprForParentGL(parent, newStartSec) {
+  try {
+    const parentStart = Number(parent.getVariable('startTime').valueOf() || 0);
+    let delta = newStartSec - parentStart;
+    const parentRef = (parent.id === 0) ? "module.baseNote" : `module.getNoteById(${parent.id})`;
+
+    // Check alignment to parent end (duration)
+    let hasDur = false, durSec = 0;
+    try {
+      const d = parent.getVariable('duration');
+      if (d) { hasDur = true; durSec = Number(d.valueOf ? d.valueOf() : d); }
+    } catch {}
+
+    const tempoVal = myModule.findTempo(parent);
+    const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+    const beatLen = 60 / tempo;
+    const offsetBeats = delta / beatLen;
+
+    let frac;
+    try {
+      frac = new Fraction(Math.abs(offsetBeats));
+    } catch {
+      frac = new Fraction(Math.round(Math.abs(offsetBeats) * 4), 4);
+    }
+
+    let raw;
+    if (hasDur && Math.abs(delta - durSec) < 0.01) {
+      raw = `${parentRef}.getVariable('startTime').add(${parentRef}.getVariable('duration'))`;
+    } else if (delta >= 0) {
+      raw = `${parentRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.n}, ${frac.d})))`;
+    } else {
+      raw = `${parentRef}.getVariable('startTime').sub(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.n}, ${frac.d})))`;
+    }
+
+    const simplified = simplifyStartTime(raw, myModule);
+    return simplified;
+  } catch {
+    return `module.baseNote.getVariable('startTime')`;
+  }
+}
+
+function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
+  try {
+    // Resolve an ancestor of "note" whose startTime is at or before cutoffSec.
+    // Falls back to BaseNote when none qualifies. Local to avoid global pollution.
+    function __resolveAncestorAtOrBefore(note, cutoffSec) {
+      try {
+        let anc = __parseParentFromStartTimeStringGL(note);
+        const tol = 1e-6;
+        while (anc && anc.id !== 0) {
+          const st = Number(anc.getVariable('startTime').valueOf() || 0);
+          if (st <= cutoffSec + tol) return anc;
+          const raw = (anc.variables && anc.variables.startTimeString) || '';
+          const m = raw.match(/getNoteById\((\d+)\)/);
+          if (m) {
+            const pid = parseInt(m[1], 10);
+            anc = myModule.getNoteById(pid);
+          } else if ((raw || '').includes('module.baseNote')) {
+            anc = myModule.baseNote;
+            break;
+          } else {
+            // Unknown chain edge; clamp to base
+            anc = myModule.baseNote;
+            break;
+          }
+        }
+        if (!anc) anc = myModule.baseNote;
+        const st2 = Number(anc.getVariable('startTime').valueOf() || 0);
+        return (st2 <= cutoffSec + tol) ? anc : myModule.baseNote;
+      } catch { return myModule.baseNote; }
+    }
+
+    const movedId = movedNote.id;
+    const movedStart = Number(movedNote.getVariable('startTime').valueOf() || 0);
+    const dependents = myModule.getDependentNotes(movedId) || [];
+
+    dependents.forEach(depId => {
+      const dep = myModule.getNoteById(Number(depId));
+      if (!dep) return;
+      const fRaw = dep.variables && dep.variables.frequencyString;
+      if (!fRaw || typeof fRaw !== 'string') return;
+
+      // Only retarget when the dependent references moved note's frequency
+      if (!new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)\\.getVariable\\('frequency'\\)`).test(fRaw)) return;
+
+      const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
+      // If dependent starts earlier than referenced (moved) note, swap to a valid ancestor at/before depStart
+      if (depStart < movedStart - 1e-6) {
+        const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart);
+        const parentRef = (replacementTarget && replacementTarget.id === 0) ? "module.baseNote"
+                         : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
+
+        const replaced = fRaw.replace(new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g'), parentRef);
+
+        let simplified;
+        try { simplified = simplifyFrequency(replaced, myModule); } catch { simplified = replaced; }
+
+        // Minimal guarded trace for frequency retargets
+        try {
+          if (typeof window !== 'undefined' && window.__RMT_DEBUG_GL_MOVE) {
+            console.debug('[GLMove] frequency retarget', {
+              movedId,
+              depId: dep.id,
+              movedStart,
+              depStart,
+              parentRef,
+              from: fRaw,
+              to: simplified
+            });
+          }
+        } catch {}
+
+        dep.setVariable('frequency', function() { return __evalExpr(simplified, myModule); });
+        dep.setVariable('frequencyString', simplified);
+        try { myModule.markNoteDirty(dep.id); } catch {}
+      }
+    });
+  } catch {}
+}
+function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
+  try {
+    function __resolveAncestorAtOrBefore(note, cutoffSec) {
+      try {
+        let anc = __parseParentFromStartTimeStringGL(note);
+        const tol = 1e-6;
+        while (anc && anc.id !== 0) {
+          const st = Number(anc.getVariable('startTime').valueOf() || 0);
+          if (st <= cutoffSec + tol) return anc;
+          const raw = (anc.variables && anc.variables.startTimeString) || '';
+          const m = raw.match(/getNoteById\((\d+)\)/);
+          if (m) {
+            const pid = parseInt(m[1], 10);
+            anc = myModule.getNoteById(pid);
+          } else if ((raw || '').includes('module.baseNote')) {
+            anc = myModule.baseNote;
+            break;
+          } else {
+            anc = myModule.baseNote;
+            break;
+          }
+        }
+        if (!anc) anc = myModule.baseNote;
+        const st2 = Number(anc.getVariable('startTime').valueOf() || 0);
+        return (st2 <= cutoffSec + 1e-6) ? anc : myModule.baseNote;
+      } catch { return myModule.baseNote; }
+    }
+
+    const movedId = movedNote.id;
+    const movedStart = Number(movedNote.getVariable('startTime').valueOf() || 0);
+    const dependents = myModule.getDependentNotes(movedId) || [];
+
+    dependents.forEach(depId => {
+      const dep = myModule.getNoteById(Number(depId));
+      if (!dep) return;
+
+      const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
+      if (!(depStart < movedStart - 1e-6)) return;
+
+      const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart);
+      const parentRef = (replacementTarget && replacementTarget.id === 0)
+        ? "module.baseNote"
+        : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
+
+      const noteRefRegex = new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g');
+
+      let changed = false;
+
+      // startTimeString
+      try {
+        const sRaw = dep.variables && dep.variables.startTimeString;
+        if (typeof sRaw === 'string' && noteRefRegex.test(sRaw)) {
+          const replacedS = sRaw.replace(noteRefRegex, parentRef);
+          let simplifiedS;
+          try { simplifiedS = simplifyStartTime(replacedS, myModule); } catch { simplifiedS = replacedS; }
+          dep.setVariable('startTime', function() { return __evalExpr(simplifiedS, myModule); });
+          dep.setVariable('startTimeString', simplifiedS);
+          changed = true;
+        }
+      } catch {}
+
+      // durationString
+      try {
+        const dRaw = dep.variables && dep.variables.durationString;
+        if (typeof dRaw === 'string' && noteRefRegex.test(dRaw)) {
+          const replacedD = dRaw.replace(noteRefRegex, parentRef);
+          let simplifiedD;
+          try { simplifiedD = simplifyDuration(replacedD, myModule); } catch { simplifiedD = replacedD; }
+          dep.setVariable('duration', function() { return __evalExpr(simplifiedD, myModule); });
+          dep.setVariable('durationString', simplifiedD);
+          changed = true;
+        }
+      } catch {}
+
+      // frequencyString (generic path; frequency-specific pass may already handle this)
+      try {
+        const fRaw = dep.variables && dep.variables.frequencyString;
+        if (typeof fRaw === 'string' && noteRefRegex.test(fRaw)) {
+          const replacedF = fRaw.replace(noteRefRegex, parentRef);
+          let simplifiedF;
+          try { simplifiedF = simplifyFrequency(replacedF, myModule); } catch { simplifiedF = replacedF; }
+          dep.setVariable('frequency', function() { return __evalExpr(simplifiedF, myModule); });
+          dep.setVariable('frequencyString', simplifiedF);
+          changed = true;
+        }
+      } catch {}
+
+      if (changed) { try { myModule.markNoteDirty(dep.id); } catch {} }
+
+      try {
+        if (typeof window !== 'undefined' && window.__RMT_DEBUG_GL_MOVE && changed) {
+          console.debug('[GLMove] start/duration retarget', {
+            movedId,
+            depId: dep.id,
+            movedStart,
+            depStart,
+            parentRef
+          });
+        }
+      } catch {}
+    });
+  } catch {}
+}
+ // === End GL move helpers ===
 
     function createNoteElement(note, index) {
         const isSilence = note.getVariable('startTime') && note.getVariable('duration') && !note.getVariable('frequency');
@@ -1858,6 +3222,13 @@ document.addEventListener('DOMContentLoaded', async function() {
             dragData.hasCaptured = false;
             dragData.pointerIsDown = false;
             dragData.pointerId = null;
+
+            // Ensure any GPU preview is cleared when drag state resets
+            try {
+                if (glRenderer && typeof glRenderer.clearTempOverridesPreview === 'function') {
+                    glRenderer.clearTempOverridesPreview(note.id);
+                }
+            } catch {}
         }
         
         function handlePointerMove(note, e) {
@@ -2067,6 +3438,29 @@ document.addEventListener('DOMContentLoaded', async function() {
                 const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
                 const screenPos = point.transitRaw(viewport);
                 
+                // Live GL preview while dragging note position (duration unchanged)
+                try {
+                    if (glRenderer) {
+                        const durSec = Number(note.getVariable('duration').valueOf() || 0);
+                        const ok = (typeof glRenderer.setTempOverridesPreview === 'function') &&
+                                   glRenderer.setTempOverridesPreview(note.id, newStartTimeNum, durSec);
+                        if (!ok) {
+                            // Fallback: use tempOverrides + sync for preview
+                            glTempOverrides = {
+                                [note.id]: { startSec: newStartTimeNum, durationSec: durSec }
+                            };
+                            glRenderer.sync({
+                                evaluatedNotes,
+                                module: myModule,
+                                xScaleFactor,
+                                yScaleFactor,
+                                selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
+                                tempOverrides: glTempOverrides
+                            });
+                        }
+                    }
+                } catch {}
+                 
                 updateDragOverlay(note, newStartTimeNum, null, 'dragged');
                 
                 const parentStartTime = actualParent.getVariable('startTime').valueOf();
@@ -3125,7 +4519,32 @@ document.addEventListener('DOMContentLoaded', async function() {
                 resizeHandle.translateTo(noteContainer.at(snappedWidth - 10, 0));
                 
                 updateResizeFeedback(snappedDuration, snappedBeats);
-                
+
+                // Live GL preview via GPU bufferSubData; fallback to full sync when unavailable
+                try {
+                    if (glRenderer) {
+                        const startSec = note.getVariable('startTime').valueOf();
+                        const ok = (typeof glRenderer.setTempOverridesPreview === 'function') &&
+                                   glRenderer.setTempOverridesPreview(note.id, startSec, snappedDuration);
+                        if (!ok) {
+                            // Fallback: use tempOverrides + sync for preview
+                            glTempOverrides = {
+                                [note.id]: { startSec, durationSec: snappedDuration }
+                            };
+                            glRenderer.sync({
+                                evaluatedNotes,
+                                module: myModule,
+                                xScaleFactor,
+                                yScaleFactor,
+                                selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
+                                tempOverrides: glTempOverrides
+                            });
+                        } else {
+                            // No full sync required; renderer will redraw from updated buffer
+                        }
+                    }
+                } catch {}
+
                 updateDependentNotesVisualization(note, resizeOriginalDuration, snappedDuration, scale);
             } catch (error) {
                 console.error("Error in handleResizeMove:", error);
@@ -3153,6 +4572,13 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (dependentOverlay) {
                 dependentOverlay.remove();
             }
+            // Clear temporary GL overrides now that resize is committed
+            glTempOverrides = null;
+            try {
+                if (glRenderer && typeof glRenderer.clearTempOverridesPreview === 'function') {
+                    glRenderer.clearTempOverridesPreview(note.id);
+                }
+            } catch {}
             
             try {
                 const transform = viewport.getBasis().getRaw();
@@ -3585,6 +5011,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Fast incremental renderer to append only specified notes after import.
     function renderNotesIncrementally(noteIds) {
+        if ((glRenderer || glWorkspace) && isWebGL2GLOutputOnlyEnabled()) return 0;
         if (!Array.isArray(noteIds) || noteIds.length === 0) return 0;
         let count = 0;
         try {
@@ -3657,28 +5084,41 @@ document.addEventListener('DOMContentLoaded', async function() {
                 updateBaseNoteFraction();
                 updateBaseNotePosition();
             }
+            // Ensure evaluation cache sees the edited note
+            try { myModule.markNoteDirty(note.id); } catch {}
             evaluatedNotes = myModule.evaluateModule();
+            setEvaluatedNotes(evaluatedNotes);
             updateVisualNotes(evaluatedNotes);
             try { captureSnapshot(`Octave ${direction} Note ${noteId}`); } catch {}
 
-            if (selectedNote && noteWidgetVisible) {
-                let newSelectedElement;
-                if (selectedNote === myModule.baseNote) {
-                    newSelectedElement = document.querySelector('.base-note-circle');
+            // Do not change selection on octave click. Refresh modal only if the edited note is currently selected.
+            try {
+              const widgetEl = document.getElementById('note-widget');
+              const isVisible = !!(widgetEl && widgetEl.classList && widgetEl.classList.contains('visible'));
+              if (isVisible && currentSelectedNote && ((currentSelectedNote === note) || (currentSelectedNote.id === note.id))) {
+                let anchor = null;
+                if (currentSelectedNote === myModule.baseNote) {
+                  anchor = document.querySelector('.base-note-circle');
                 } else {
-                    newSelectedElement = document.querySelector(
-                        `.note-content[data-note-id="${selectedNote.id}"], ` +
-                        `.measure-bar-triangle[data-note-id="${selectedNote.id}"]`
-                    );
+                  anchor = document.querySelector(
+                    `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                    `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+                  );
                 }
-                if (newSelectedElement) {
-                    if (newSelectedElement.classList.contains('measure-bar-triangle')) {
-                        modals.showNoteVariables(selectedNote, newSelectedElement, selectedNote.id);
-                    } else {
-                        modals.showNoteVariables(selectedNote, newSelectedElement);
-                    }
+                if (!anchor) anchor = document.body;
+                try {
+                  const __isSelectedMeasure = currentSelectedNote && currentSelectedNote.variables && currentSelectedNote.variables.startTime && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency;
+                  const __mid = __isSelectedMeasure ? currentSelectedNote.id : null;
+                  eventBus.emit('modals:requestRefresh', { note: currentSelectedNote, measureId: __mid, clickedElement: anchor });
+                } catch {
+                  if (anchor.classList && anchor.classList.contains('measure-bar-triangle')) {
+                    modals.showNoteVariables(currentSelectedNote, anchor, currentSelectedNote.id);
+                  } else {
+                    modals.showNoteVariables(currentSelectedNote, anchor);
+                  }
                 }
-            }
+              }
+            } catch {}
 
         } catch (error) {
             console.error(`Error updating frequency for note ${noteId}:`, error);
@@ -3703,6 +5143,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                 el.classList.remove('selected');
             });
             triangle.classList.add('selected');
+            // Keep GL selection/highlights in sync when clicking a measure triangle
+            try { currentSelectedNote = measurePoint; syncRendererSelection(); } catch {}
             showNoteVariables(measurePoint, triangle, id);
         });
         
@@ -3715,81 +5157,50 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     
     function createMeasureBars() {
+        // When WebGL overlay is enabled, suppress DOM bars and playhead; keep triangles for interactions.
+        const usingGL = !!glRenderer;
+    
+        // Preserve currently selected triangles
         const selectedMeasureBars = document.querySelectorAll('.measure-bar-triangle.selected');
         const selectedMeasureBarIds = Array.from(selectedMeasureBars).map(el => el.getAttribute('data-note-id'));
-
+    
+        // Clear previous DOM artifacts
         measureBars.forEach(bar => bar.remove());
         measureBars = [];
-        if (playhead) playhead.remove();
-
+    
         const barsContainer = domCache.measureBarsContainer;
-        playheadContainer = domCache.playheadContainer;
         const trianglesContainer = domCache.trianglesContainer;
+        playheadContainer = domCache.playheadContainer;
+    
+        if (barsContainer) barsContainer.innerHTML = '';
+        if (playheadContainer) playheadContainer.innerHTML = '';
+        if (trianglesContainer) trianglesContainer.innerHTML = '';
+    
+        // Create triangles only when not in GL-only mode
+        if (!((glRenderer || glWorkspace) && isWebGL2GLOutputOnlyEnabled())) {
+            const measurePoints = Object.entries(myModule.notes)
+                .filter(([id, note]) => note.getVariable('startTime') && !note.getVariable('duration') && !note.getVariable('frequency'))
+                .map(([id, note]) => ({ id: parseInt(id, 10), note }));
 
-        barsContainer.innerHTML = '';
-        playheadContainer.innerHTML = '';
-        trianglesContainer.innerHTML = '';
-
-        playhead = document.createElement('div');
-        playhead.className = 'playhead';
-        playheadContainer.appendChild(playhead);
-
-        const measurePoints = Object.entries(myModule.notes)
-            .filter(([id, note]) => note.getVariable('startTime') && !note.getVariable('duration') && !note.getVariable('frequency'))
-            .map(([id, note]) => ({ id: parseInt(id, 10), note }));
-
-        const hasZeroTimeMeasureBar = measurePoints.some(mp => mp.note.getVariable('startTime').valueOf() === 0);
-
-        if (!hasZeroTimeMeasureBar) {
-            const originBar = document.createElement('div');
-            originBar.className = 'measure-bar';
-            originBar.id = 'measure-bar-origin';
-            originBar.setAttribute("data-x", 0);
-            barsContainer.appendChild(originBar);
-            measureBars.push(originBar);
-        }
-
-        const startSecondaryBar = document.createElement('div');
-        startSecondaryBar.className = 'measure-bar secondary-bar start-bar';
-        startSecondaryBar.id = 'secondary-start-bar';
-        barsContainer.appendChild(startSecondaryBar);
-        measureBars.push(startSecondaryBar);
-
-        measurePoints.forEach(({ id, note }) => {
-            const bar = document.createElement('div');
-            bar.className = 'measure-bar';
-            bar.id = `measure-bar-${id}`;
-            const x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
-            bar.setAttribute("data-x", x);
-            bar.setAttribute("data-note-id", id);
-            barsContainer.appendChild(bar);
-            measureBars.push(bar);
-            const triangle = createMeasureBarTriangle(bar, note, id);
-            if (triangle) {
-                trianglesContainer.appendChild(triangle);
-                if (selectedMeasureBarIds.includes(id.toString())) {
-                    triangle.classList.add('selected');
+            measurePoints.forEach(({ id, note }) => {
+                const triangle = createMeasureBarTriangle(null, note, id);
+                if (triangle && trianglesContainer) {
+                    trianglesContainer.appendChild(triangle);
+                    if (selectedMeasureBarIds.includes(id.toString())) {
+                        triangle.classList.add('selected');
+                    }
                 }
-            }
-        });
-
-        const finalBar = document.createElement('div');
-        finalBar.className = 'measure-bar';
-        finalBar.id = `measure-bar-final`;
-        barsContainer.appendChild(finalBar);
-        measureBars.push(finalBar);
-
-        const endSecondaryBar = document.createElement('div');
-        endSecondaryBar.className = 'measure-bar secondary-bar end-bar';
-        endSecondaryBar.id = 'secondary-end-bar';
-        barsContainer.appendChild(endSecondaryBar);
-        measureBars.push(endSecondaryBar);
-
+            });
+        }
+    
+        // No DOM bars or playhead — replaced by WebGL overlay
         invalidateModuleEndTimeCache();
         updateMeasureBarPositions();
     }
     
     function updateMeasureBarPositions() {
+        // Always update DOM measure bars/triangles positions (even when WebGL overlay is active)
+
         const transform = viewport.getBasis().getRaw();
         const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
 
@@ -3861,20 +5272,59 @@ document.addEventListener('DOMContentLoaded', async function() {
             
             const x = playheadTime * 200 * xScaleFactor;
             if (isTrackingEnabled) {
-                const viewCenter = viewport.atCenter();
-                const targetPoint = space.at(x, viewCenter.transitRaw(space).y);
-                viewport.match({
-                    source: viewCenter,
-                    target: targetPoint,
-                    estimator: 'X'
-                });
+                if (__rmtScalingXActive) {
+                    // During active X scaling, keep lockX but skip recenter to avoid a 1-frame pop.
+                    if (glWorkspace && glWorkspace.camera) {
+                        try {
+                            glWorkspace.camera.lockX = true;
+                            if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                        } catch {}
+                    }
+                    // Tapspace path: handlers already positioned the viewport; do nothing here.
+                } else if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                    try {
+                        const rect = glWorkspace.containerEl.getBoundingClientRect();
+                        const localCenterX = rect.width * 0.5;
+                        const s = glWorkspace.camera.scale || 1;
+                        // Prevent user X panning during tracking
+                        glWorkspace.camera.lockX = true;
+                        // world x -> container-local: local = s * world + tx
+                        // set tx so that playhead x maps to center
+                        glWorkspace.camera.tx = localCenterX - s * x;
+                        if (typeof glWorkspace.camera.onChange === 'function') {
+                            glWorkspace.camera.onChange();
+                        }
+                    } catch {}
+                } else {
+                    const viewCenter = viewport.atCenter();
+                    const targetPoint = space.at(x, viewCenter.transitRaw(space).y);
+                    viewport.match({
+                        source: viewCenter,
+                        target: targetPoint,
+                        estimator: 'X'
+                    });
+                }
+            } else {
+                // When tracking is disabled, release X-lock for workspace camera
+                if (glWorkspace && glWorkspace.camera) {
+                    try {
+                        glWorkspace.camera.lockX = false;
+                        if (typeof glWorkspace.camera.onChange === 'function') {
+                            glWorkspace.camera.onChange();
+                        }
+                    } catch {}
+                }
             }
             
-            const transform = viewport.getBasis().getRaw();
-            const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-            const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
-            const screenPos = point.transitRaw(viewport);
-            playhead.style.transform = `translate(${screenPos.x}px, 0) scale(${1/scale}, 1)`;
+            // If GPU overlay is active or DOM playhead is not present, skip DOM transform
+            // Also skip during active X scaling to avoid a 1-frame pop before camera recenter completes
+            if (playhead && !__rmtScalingXActive) {
+                const transform = viewport.getBasis().getRaw();
+                const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
+                const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
+                const screenPos = point.transitRaw(viewport);
+                playhead.style.transform = `translate(${screenPos.x}px, 0) scale(${1/scale}, 1)`;
+            }
             
             playheadAnimationId = requestAnimationFrame(update);
         };
@@ -3883,6 +5333,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     
     function handleBackgroundGesture(gestureEvent) {
+        // In GL workspace mode, disable Tapspace gesture-based click-to-set-playhead to avoid conflicts
+        if (glWorkspace) { return; }
         if (gestureEvent.travel <= 5) {
             const clickedElement = gestureEvent.target;
             const isClickOnNote = clickedElement.element.closest('.note-rect') !== null;
@@ -3930,6 +5382,28 @@ document.addEventListener('DOMContentLoaded', async function() {
         // Sync module-scoped evaluatedNotes so helpers like frequencyToY() use fresh base/frequencies
         evaluatedNotes = nextEvaluated;
 
+        // Phase 1/2: mirror scene into GL renderers
+        if (glRenderer) {
+            try {
+                glRenderer.sync({ evaluatedNotes, module: myModule, xScaleFactor, yScaleFactor, selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null });
+            } catch (e) {
+                console.warn('glRenderer.sync failed', e);
+            }
+        }
+        if (glWorkspace) {
+            try {
+                glWorkspace.sync({ evaluatedNotes, module: myModule, xScaleFactor, yScaleFactor, selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null });
+            } catch (e) {
+                console.warn('glWorkspace.sync failed', e);
+            }
+        }
+
+        // GL-only: skip creating/updating Tapspace DOM items entirely for performance testing
+        if ((glRenderer || glWorkspace) && isWebGL2GLOutputOnlyEnabled()) {
+            try { invalidateModuleEndTimeCache(); updateTimingBoundaries(); } catch {}
+            return;
+        }
+
         const selectedElements = document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected');
         const selectedIds = Array.from(selectedElements).map(el => el.getAttribute('data-note-id'));
         
@@ -3957,7 +5431,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     newNotes.push({
                         ...note,
-                        id: parseInt(id),
+                        id: parseInt(id, 10),
                         element: noteContainer,
                         getBoundingBox: () => noteContainer.getBoundingClientRect()
                     });
@@ -3985,10 +5459,43 @@ document.addEventListener('DOMContentLoaded', async function() {
         
         invalidateModuleEndTimeCache();
         // Ensure BaseNote visuals react to frequency changes (fraction text and Y position)
-        try { updateBaseNoteFraction(); } catch {}
-        try { updateBaseNotePosition(); } catch {}
+        if (!isWebGL2GLOutputOnlyEnabled()) {
+            try { updateBaseNoteFraction(); } catch {}
+            try { updateBaseNotePosition(); } catch {}
+        }
         if (isLocked) {
             updateNotesPointerEvents();
+        }
+        if (isTrackingEnabled) { try { updatePlayhead(); } catch {} }
+    }
+
+    // Lightweight helper to re-sync GL renderer selection ordering without rebuilding DOM
+    function syncRendererSelection() {
+        if (glRenderer) {
+            try {
+                glRenderer.sync({
+                    evaluatedNotes,
+                    module: myModule,
+                    xScaleFactor,
+                    yScaleFactor,
+                    selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
+                });
+            } catch (e) {
+                try { console.warn('glRenderer.sync selection update failed', e); } catch {}
+            }
+        }
+        if (glWorkspace) {
+            try {
+                glWorkspace.sync({
+                    evaluatedNotes,
+                    module: myModule,
+                    xScaleFactor,
+                    yScaleFactor,
+                    selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
+                });
+            } catch (e) {
+                try { console.warn('glWorkspace.sync selection update failed', e); } catch {}
+            }
         }
     }
 
@@ -4104,7 +5611,15 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     document.addEventListener('mouseup', (event) => {
         if (!isDragging) {
-            if (!domCache.noteWidget.contains(event.target) &&
+            // Suppress global clearSelection if a GL octave action just occurred
+            let suppressClear = false;
+            try {
+                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+                const nowTs = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
+                suppressClear = !!(cont && cont.__rmtSuppressClickUntil && Math.sign(cont.__rmtSuppressClickUntil - nowTs) === 1);
+            } catch {}
+            if (!suppressClear &&
+                !domCache.noteWidget.contains(event.target) &&
                 !event.target.closest('.note-rect') &&
                 !event.target.closest('#baseNoteCircle') &&
                 !event.target.closest('.measure-bar-triangle') &&
@@ -4150,18 +5665,92 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     domCache.trackingToggle.addEventListener('change', (event) => {
         isTrackingEnabled = event.target.checked;
+        // Keep renderer tracking mode in sync with tracking toggle
+        try {
+            if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
+                glWorkspace.renderer.setTrackingMode(!!isTrackingEnabled);
+            } else if (glRenderer && typeof glRenderer.setTrackingMode === 'function') {
+                glRenderer.setTrackingMode(!!isTrackingEnabled);
+            }
+        } catch {}
+
+                // Update Reset View interactivity state as tracking changes
+                try {
+                    const btn = domCache.resetViewBtn;
+                    if (btn) {
+                        if (isTrackingEnabled) {
+                            btn.setAttribute('aria-disabled', 'true');
+                            btn.setAttribute('tabindex', '-1');
+                            btn.style.pointerEvents = 'none';
+                            btn.style.cursor = 'not-allowed';
+                            btn.style.opacity = '0.5';
+                            btn.title = 'Reset disabled while tracking';
+                        } else {
+                            btn.removeAttribute('aria-disabled');
+                            btn.removeAttribute('tabindex');
+                            btn.style.pointerEvents = '';
+                            btn.style.cursor = '';
+                            btn.style.opacity = '';
+                            btn.title = 'Reset View';
+                        }
+                    }
+                } catch {}
+
         if (isTrackingEnabled) {
-            const x = playheadTime * 200;
-            const viewCenter = viewport.atCenter();
-            const targetPoint = new tapspace.geometry.Point(space, { 
-                x: x, 
-                y: viewCenter.transitRaw(space).y, 
-                z: 0 
-            });
-            viewport.translateTo(targetPoint);
+            const x = playheadTime * 200 * xScaleFactor;
+            if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                try {
+                    const rect = glWorkspace.containerEl.getBoundingClientRect();
+                    const s = glWorkspace.camera.scale || 1;
+                    const centerX = rect.width * 0.5;
+                    // Engage X-lock and center playhead in workspace
+                    glWorkspace.camera.lockX = true;
+                    glWorkspace.camera.tx = centerX - s * x;
+                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                    try { updatePlayhead(); } catch {}
+                } catch {}
+            } else {
+                const viewCenter = viewport.atCenter();
+                const targetPoint = new tapspace.geometry.Point(space, {
+                    x: x,
+                    y: viewCenter.transitRaw(space).y,
+                    z: 0
+                });
+                viewport.translateTo(targetPoint);
+            }
+        } else {
+            // Release X-lock immediately when tracking is disabled
+            if (glWorkspace && glWorkspace.camera) {
+                try {
+                    glWorkspace.camera.lockX = false;
+                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                } catch {}
+            }
         }
         updateZoomableBehavior();
     });
+
+        // Initialize Reset View interactivity based on initial tracking state
+        try {
+            const btn = domCache.resetViewBtn;
+            if (btn) {
+                if (isTrackingEnabled) {
+                    btn.setAttribute('aria-disabled', 'true');
+                    btn.setAttribute('tabindex', '-1');
+                    btn.style.pointerEvents = 'none';
+                    btn.style.cursor = 'not-allowed';
+                    btn.style.opacity = '0.5';
+                    btn.title = 'Reset disabled while tracking';
+                } else {
+                    btn.removeAttribute('aria-disabled');
+                    btn.removeAttribute('tabindex');
+                    btn.style.pointerEvents = '';
+                    btn.style.cursor = '';
+                    btn.style.opacity = '';
+                    btn.title = 'Reset View';
+                }
+            }
+        } catch {}
 
     domCache.playPauseBtn.addEventListener('click', () => {
         if (isPlaying) {
@@ -4675,10 +6264,27 @@ document.addEventListener('DOMContentLoaded', async function() {
             lockButton.classList.add('locked');
             lockButton.setAttribute('aria-pressed', 'true');
             updateNotesPointerEvents();
+
+            // Clear any GL hover highlight and reset cursor when locking
+            try {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setHoverNoteId === 'function') {
+                    glWorkspace.renderer.setHoverNoteId(null);
+                }
+            } catch {}
+            try {
+                if (glRenderer && typeof glRenderer.setHoverNoteId === 'function') {
+                    glRenderer.setHoverNoteId(null);
+                }
+            } catch {}
+            try {
+                const cont = document.querySelector('.myspaceapp');
+                if (cont) cont.style.cursor = '';
+            } catch {}
         } else {
             lockButton.classList.remove('locked');
             lockButton.setAttribute('aria-pressed', 'false');
             updateNotesPointerEvents();
+            // On unlock, hover will repopulate on next pointermove
         }
     }
 
@@ -4773,6 +6379,14 @@ document.addEventListener('DOMContentLoaded', async function() {
       // Octave change requests from UI modules (e.g., modals)
       eventBus.on('player:octaveChange', ({ noteId, direction }) => {
         try {
+          // Suppress container click selection right after octave actions so stack-click does not run
+          try {
+            const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+            if (cont) {
+              const nowTs = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
+              cont.__rmtSuppressClickUntil = nowTs + 300; try { window.__rmtLastOctaveChangeTs = nowTs; } catch {}
+            }
+          } catch {}
           if (noteId != null) {
             handleOctaveChange(parseInt(noteId, 10), direction);
           }
@@ -4801,6 +6415,17 @@ document.addEventListener('DOMContentLoaded', async function() {
       eventBus.on('player:invalidateModuleEndTimeCache', () => {
         try { invalidateModuleEndTimeCache(); updateMeasureBarPositions(); } catch {}
       });
+
+      // External selection request: update selection state so GL highlights/ordering refresh immediately
+      eventBus.on('player:selectNote', ({ noteId }) => {
+        try {
+          if (noteId == null) return;
+          const n = myModule.getNoteById(Number(noteId));
+          if (!n) return;
+          currentSelectedNote = n;
+          try { syncRendererSelection(); } catch {}
+        } catch {}
+      });
       // Persist latest module snapshot on every history capture
       eventBus.on('history:capture', ({ snapshot }) => {
         try { localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snapshot)); } catch {}
@@ -4808,6 +6433,401 @@ document.addEventListener('DOMContentLoaded', async function() {
     } catch (e) {
       console.warn('eventBus subscription failed', e);
     }
+      // GL Workspace: commit handlers for move/resize coming from webgl2/workspace.js
+      eventBus.on('workspace:noteMoveCommit', ({ noteId, newStartSec }) => {
+        try {
+          if (noteId == null || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
+          const n = myModule.getNoteById(Number(noteId));
+          if (!n) return;
+
+          // Pause playback during edit if needed
+          try { eventBus.emit('player:requestPause'); } catch {}
+
+          // Capture original before remap for debug/validation
+          const oldRaw = n.variables.startTimeString || '';
+          const oldStart = Number(n.getVariable('startTime').valueOf() || 0);
+
+          // Legacy-like remapping: select suitable parent and emit relative startTime expression
+          const parent = selectSuitableParentForStartGL(n, newStartSec);
+          const raw = emitStartTimeExprForParentGL(parent, newStartSec);
+
+          // Minimal guarded trace: enable via window.__RMT_DEBUG_GL_MOVE = true in console
+          try {
+            if (typeof window !== 'undefined' && window.__RMT_DEBUG_GL_MOVE) {
+              console.debug('[GLMove] noteMoveCommit', {
+                noteId,
+                newStartSec,
+                oldStart,
+                oldRaw,
+                chosenParentId: parent ? parent.id : null,
+                raw
+              });
+            }
+          } catch {}
+
+          n.setVariable('startTime', function() { return __evalExpr(raw, myModule); });
+          n.setVariable('startTimeString', raw);
+
+          // Ensure evaluation cache sees the edited note
+          try { myModule.markNoteDirty(n.id); } catch {}
+
+          // Retarget dependents that would reference a future-starting note
+          try { retargetDependentStartAndDurationOnTemporalViolationGL(n); } catch {}
+          try { retargetDependentFrequencyOnTemporalViolationGL(n); } catch {}
+
+          evaluatedNotes = myModule.evaluateModule();
+          setEvaluatedNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          invalidateModuleEndTimeCache();
+          try { captureSnapshot("Move Note " + noteId); } catch {}
+          // Keep existing selection; sync renderer selection ordering without changing it
+          try { syncRendererSelection(); } catch {}
+          // Refresh variable modal if visible and selection exists (fallback to document.body when DOM anchor hidden in GL-only mode)
+          try {
+            const widget = document.getElementById('note-widget');
+            const isVisible = !!(widget && widget.classList && widget.classList.contains('visible'));
+            if (isVisible && currentSelectedNote) {
+              let anchor = document.querySelector(
+                `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+              );
+              if (!anchor) anchor = document.body;
+              try {
+                const __isSelectedMeasure = currentSelectedNote && currentSelectedNote.variables && currentSelectedNote.variables.startTime && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency;
+                const __mid = __isSelectedMeasure ? currentSelectedNote.id : null;
+                eventBus.emit('modals:requestRefresh', { note: currentSelectedNote, measureId: __mid, clickedElement: anchor });
+              } catch {
+                if (anchor.classList && anchor.classList.contains('measure-bar-triangle')) {
+                  showNoteVariables(currentSelectedNote, anchor, currentSelectedNote.id);
+                } else {
+                  showNoteVariables(currentSelectedNote, anchor);
+                }
+              }
+            }
+          } catch {}
+        } catch (e) {
+          console.warn('workspace:noteMoveCommit failed', e);
+        }
+      });
+
+      eventBus.on('workspace:noteResizeCommit', ({ noteId, newDurationSec }) => {
+        try {
+          if (noteId == null || typeof newDurationSec !== 'number' || !isFinite(newDurationSec)) return;
+          const n = myModule.getNoteById(Number(noteId));
+          if (!n) return;
+
+          try { eventBus.emit('player:requestPause'); } catch {}
+
+          const tempo = myModule.baseNote?.getVariable?.('tempo')?.valueOf?.() ?? 120;
+          const beatLen = 60 / tempo;
+
+          const oldDuration = n.getVariable('duration')?.valueOf?.() ?? 0;
+
+          const beats = newDurationSec / beatLen;
+          const sixteenth = 0.25;
+          const snappedBeats = Math.max(sixteenth, Math.round(beats / sixteenth) * sixteenth);
+
+          let beatsFrac;
+          try {
+            beatsFrac = new Fraction(snappedBeats);
+          } catch {
+            beatsFrac = new Fraction(Math.round(snappedBeats * 4), 4);
+          }
+
+          const raw = "new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(" + beatsFrac.n + ", " + beatsFrac.d + "))";
+          const simplified = simplifyDuration(raw, myModule);
+
+          n.setVariable('durationString', simplified);
+          n.setVariable('duration', function() { return __evalExpr(simplified, myModule); });
+
+          const updatedDuration = n.getVariable('duration')?.valueOf?.() ?? newDurationSec;
+
+          // Propagate to dependents when appropriate
+          try { checkAndUpdateDependentNotes(n.id, oldDuration, updatedDuration); } catch {}
+          // Also ensure temporal integrity across all anchors after resize
+          try { retargetDependentStartAndDurationOnTemporalViolationGL(n); } catch {}
+          try { retargetDependentFrequencyOnTemporalViolationGL(n); } catch {}
+
+          evaluatedNotes = myModule.evaluateModule();
+          setEvaluatedNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          invalidateModuleEndTimeCache();
+          try { captureSnapshot("Resize Note " + noteId); } catch {}
+          // Keep existing selection; sync renderer selection ordering without changing it
+          try { syncRendererSelection(); } catch {}
+          // Refresh variable modal if visible and selection exists (fallback to document.body when DOM anchor hidden in GL-only mode)
+          try {
+            const widget = document.getElementById('note-widget');
+            const isVisible = !!(widget && widget.classList && widget.classList.contains('visible'));
+            if (isVisible && currentSelectedNote) {
+              let anchor = document.querySelector(
+                `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
+                `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
+              );
+              if (!anchor) anchor = document.body;
+              try {
+                const __isSelectedMeasure = currentSelectedNote && currentSelectedNote.variables && currentSelectedNote.variables.startTime && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency;
+                const __mid = __isSelectedMeasure ? currentSelectedNote.id : null;
+                eventBus.emit('modals:requestRefresh', { note: currentSelectedNote, measureId: __mid, clickedElement: anchor });
+              } catch {
+                if (anchor.classList && anchor.classList.contains('measure-bar-triangle')) {
+                  showNoteVariables(currentSelectedNote, anchor, currentSelectedNote.id);
+                } else {
+                  showNoteVariables(currentSelectedNote, anchor);
+                }
+              }
+            }
+          } catch {}
+        } catch (e) {
+          console.warn('workspace:noteResizeCommit failed', e);
+        }
+      });
+     eventBus.on('workspace:measureResizeCommit', ({ measureId, newStartSec }) => {
+       try {
+         if (measureId == null || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
+         const mId = Number(measureId);
+ 
+         // Pause playback during edit if needed
+         try { eventBus.emit('player:requestPause'); } catch {}
+ 
+         // Helper: identify "measure" notes (startTime set, no duration/frequency)
+         const __isMeasure = (n) => {
+           try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
+           catch { return false; }
+         };
+ 
+         const note = myModule.getNoteById(mId);
+         if (!note || !__isMeasure(note)) return;
+ 
+         // Helper: parse parent from startTimeString and tell if it is a measure
+         const getParentMeasureId = (n) => {
+           try {
+             const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
+             const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+             if (m) {
+               const pid = parseInt(m[1], 10);
+               const pn = myModule.getNoteById(pid);
+               return __isMeasure(pn) ? pid : (pid || null);
+             }
+             if ((raw || '').includes('module.baseNote')) return 0;
+           } catch {}
+           return null;
+         };
+ 
+         // Collect the linear chain for this measure only (do not mix with other chains)
+         const chain = (() => {
+           const out = [];
+           // Walk backward to earliest measure in this chain
+           let cur = note;
+           let guard = 0;
+           while (guard++ < 1024) {
+             const raw = (cur && cur.variables && cur.variables.startTimeString) ? cur.variables.startTimeString : '';
+             const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+             if (m) {
+               const pid = parseInt(m[1], 10);
+               const pn = myModule.getNoteById(pid);
+               if (pn && __isMeasure(pn)) { cur = pn; continue; }
+             }
+             break;
+           }
+           const pushWithStart = (n) => {
+             try { out.push({ id: Number(n.id), startSec: Number(n.getVariable('startTime')?.valueOf?.() ?? 0) }); }
+             catch { out.push({ id: Number(n.id), startSec: 0 }); }
+           };
+           pushWithStart(cur);
+           // Forward: at each step pick earliest dependent measure
+           const findDependents = (m) => {
+             const arr = [];
+             try {
+               for (const id in myModule.notes) {
+                 const nn = myModule.getNoteById(Number(id));
+                 if (!__isMeasure(nn)) continue;
+                 const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
+                 const re = new RegExp('getNoteById\\(\\s*' + m.id + '\\s*\\)');
+                 if (re.test(sts)) arr.push(nn);
+               }
+             } catch {}
+             arr.sort((a, b) => {
+               try { return a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf(); } catch { return 0; }
+             });
+             return arr;
+           };
+           guard = 0;
+           let curN = cur;
+           while (guard++ < 2048) {
+             const deps = findDependents(curN);
+             if (!deps.length) break;
+             const next = deps[0];
+             pushWithStart(next);
+             curN = next;
+           }
+           return out;
+         })();
+ 
+         const idx = chain.findIndex(e => Number(e.id) === mId);
+         if (idx < 0) return;
+ 
+         const tol = 1e-6;
+ 
+         if (idx === 0) {
+          // First in chain: NEVER adjust an unrelated previous measure from another chain.
+          // Decide behavior from the anchor encoded in startTimeString.
+          try {
+            const raw = (note && note.variables && note.variables.startTimeString) ? note.variables.startTimeString : '';
+            const baseAnchored = !!(raw && raw.indexOf('module.baseNote') !== -1);
+
+            const isMeasure = (n) => {
+              try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
+              catch { return false; }
+            };
+
+            let parentNote = null;
+            if (!baseAnchored) {
+              const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
+              if (m) {
+                const pid = parseInt(m[1], 10);
+                parentNote = myModule.getNoteById(pid) || null;
+              } else if (typeof note.parentId === 'number') {
+                parentNote = myModule.getNoteById(note.parentId) || null;
+              }
+            }
+
+            if (baseAnchored) {
+              // Do NOT modify BaseNote beats. Anchor this measure directly to BaseNote with an explicit offset.
+              const base = myModule.baseNote;
+              const baseStart = Number(base.getVariable('startTime')?.valueOf?.() || 0);
+              const tempoVal = myModule.findTempo(base);
+              const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+              const beatLen = 60 / tempo;
+
+              let gapSec = Math.max(0, Number(newStartSec) - baseStart);
+              let beats = gapSec / beatLen;
+              const sixteenth = 0.25;
+              // Allow exact origin: round to nearest 1/16th without enforcing a minimum > 0
+              beats = Math.max(0, Math.round(beats / sixteenth) * sixteenth);
+
+              let bf; try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(Math.max(0, beats) * 4), 4); }
+              const baseRef = "module.baseNote";
+              // If at origin, emit exactly base start to avoid add(... * 0) jitter
+              const newRaw = (beats === 0)
+                ? `${baseRef}.getVariable('startTime')`
+                : `${baseRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${baseRef})).mul(new Fraction(${bf.n}, ${bf.d})))`;
+              const simplifiedStart = simplifyStartTime(newRaw, myModule);
+              note.setVariable('startTime', function () { return __evalExpr(simplifiedStart, myModule); });
+              note.setVariable('startTimeString', simplifiedStart);
+              try { myModule.markNoteDirty(note.id); } catch {}
+            } else if (parentNote && !isMeasure(parentNote)) {
+              // Parent was a normal note originally. Resolve the candidate at drop time (matches preview)
+              // instead of forcing the original parent. This makes dependency remapping functional.
+              const cand = selectSuitableParentForStartGL(note, Number(newStartSec));
+
+              // Prefer exact base-start reference when dropping exactly at BaseNote start to avoid +0 artifacts.
+              let raw2;
+              try {
+                if (cand && cand.id === 0) {
+                  const base = myModule.baseNote;
+                  const baseStart = Number(base.getVariable('startTime')?.valueOf?.() || 0);
+                  if (Math.abs(Number(newStartSec) - baseStart) < 1e-6) {
+                    raw2 = "module.baseNote.getVariable('startTime')";
+                  }
+                }
+              } catch {}
+
+              if (!raw2) {
+                raw2 = emitStartTimeExprForParentGL(cand || myModule.baseNote, Number(newStartSec));
+              }
+
+              note.setVariable('startTime', function () { return __evalExpr(raw2, myModule); });
+              note.setVariable('startTimeString', raw2);
+              try { myModule.markNoteDirty(note.id); } catch {}
+            } else {
+              // Fallback heuristics: choose a suitable parent and express relative start.
+              const parent = selectSuitableParentForStartGL(note, Number(newStartSec));
+              const raw3 = emitStartTimeExprForParentGL(parent, Number(newStartSec));
+              note.setVariable('startTime', function () { return __evalExpr(raw3, myModule); });
+              note.setVariable('startTimeString', raw3);
+              try { myModule.markNoteDirty(note.id); } catch {}
+            }
+          } catch (e) {
+            const parent = selectSuitableParentForStartGL(note, Number(newStartSec));
+            const raw = emitStartTimeExprForParentGL(parent, Number(newStartSec));
+            note.setVariable('startTime', function () { return __evalExpr(raw, myModule); });
+            note.setVariable('startTimeString', raw);
+            try { myModule.markNoteDirty(note.id); } catch {}
+          }
+        } else {
+           // Subsequent measure: adjust previous measure's beats so its END equals newStartSec, then anchor current to prev END
+           const prevMeta = chain[idx - 1];
+           const prev = myModule.getNoteById(Number(prevMeta.id));
+           const prevStart = Number(prevMeta.startSec || prev.getVariable('startTime')?.valueOf?.() || 0);
+           const tempoVal = myModule.findTempo(prev);
+           const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+           const beatLen = 60 / tempo;
+ 
+           let gapSec = Math.max(0, Number(newStartSec) - prevStart);
+           // snap to sixteenth
+           let beats = gapSec / beatLen;
+           const sixteenth = 0.25;
+           beats = Math.max(sixteenth, Math.round(beats / sixteenth) * sixteenth);
+ 
+           let bf; try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
+           const rawBeats = `new Fraction(${bf.n}, ${bf.d})`;
+           try {
+             prev.setVariable('beatsPerMeasure', function () { return __evalExpr(rawBeats, myModule); });
+             prev.setVariable('beatsPerMeasureString', rawBeats);
+             try { myModule.markNoteDirty(prev.id); } catch {}
+           } catch {}
+ 
+           try {
+             const rawStart = `module.getNoteById(${prev.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prev.id})))`;
+             const simplifiedStart = simplifyStartTime(rawStart, myModule);
+             note.setVariable('startTime', function () { return __evalExpr(simplifiedStart, myModule); });
+             note.setVariable('startTimeString', simplifiedStart);
+             try { myModule.markNoteDirty(note.id); } catch {}
+           } catch {}
+         }
+ 
+         // Re-evaluate and refresh visuals
+         evaluatedNotes = myModule.evaluateModule();
+         setEvaluatedNotes(evaluatedNotes);
+         updateVisualNotes(evaluatedNotes);
+         createMeasureBars();
+         invalidateModuleEndTimeCache();
+         try { captureSnapshot("Resize Measure " + measureId); } catch {}
+ 
+         // Keep selection ordering in GL in sync
+         try { syncRendererSelection(); } catch {}
+ 
+         // Refresh variable modal; prefer the resized Measure context explicitly
+         try {
+           const widget = document.getElementById('note-widget');
+           const isVisible = !!(widget && widget.classList && widget.classList.contains('visible'));
+           if (isVisible) {
+             const mNote = myModule.getNoteById(mId);
+             // Prefer the triangle of the resized measure as anchor
+             let anchor = document.querySelector(`.measure-bar-triangle[data-note-id="${mId}"]`);
+             if (!anchor) {
+               // Fallback to current selection anchor or body
+               anchor =
+                 document.querySelector(
+                   `.note-content[data-note-id="${currentSelectedNote ? currentSelectedNote.id : -1}"], ` +
+                   `.measure-bar-triangle[data-note-id="${currentSelectedNote ? currentSelectedNote.id : -1}"]`
+                 ) || document.body;
+             }
+             try {
+               eventBus.emit('modals:requestRefresh', { note: mNote, measureId: mId, clickedElement: anchor });
+             } catch {
+               // Fallback to direct call; still pass measureId to ensure Measure modal stays selected
+               showNoteVariables(mNote, anchor, mId);
+             }
+           }
+         } catch {}
+       } catch (e) {
+         console.warn('workspace:measureResizeCommit failed', e);
+       }
+     });
   }
 
 /* ===== History Integration (Undo/Redo) ===== */
@@ -4824,6 +6844,20 @@ function captureSnapshot(label = 'Change') {
     }
   } catch (e) {}
 }
+
+// Persist snapshot on page unload to guarantee persistence without tab switching
+try {
+  window.addEventListener('beforeunload', () => {
+    try {
+      const snap = (myModule && typeof myModule.createModuleJSON === 'function')
+        ? myModule.createModuleJSON()
+        : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+      if (snap) {
+        localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
+      }
+    } catch {}
+  });
+} catch {}
 
 // Wire Undo/Redo buttons
 const undoBtn = document.getElementById('undoBtn');

@@ -4,20 +4,21 @@ let dependencyGraphCache = null;
 let lastGraphUpdateTime = 0;
 
 export function validateExpression(moduleInstance, noteId, expression, variableType) {
-    if (!expression || expression.trim() === '') {
+    const expr = String(expression ?? '').trim();
+    if (!expr) {
         throw new Error('Expression cannot be empty or undefined');
     }
 
-    if (expression.includes(`getNoteById(${noteId})`)) {
+    if (expr.includes(`getNoteById(${noteId})`)) {
         throw new Error('Expression cannot reference itself directly');
     }
     
-    if (detectCircularDependency(moduleInstance, noteId, expression, variableType)) {
+    if (detectCircularDependency(moduleInstance, noteId, expr, variableType)) {
         throw new Error('Circular dependency detected in expression');
     }
     
     let openParens = 0;
-    for (const char of expression) {
+    for (const char of expr) {
         if (char === '(') openParens++;
         else if (char === ')') openParens--;
         if (openParens < 0) {
@@ -27,26 +28,27 @@ export function validateExpression(moduleInstance, noteId, expression, variableT
     if (openParens > 0) {
         throw new Error('Unbalanced parentheses: missing closing parentheses');
     }
-    
+
+    // Detect whether expression contains references; if so, we preserve user-authored structure
+    const hasRefs =
+        /\.getVariable\s*\(/.test(expr) ||
+        /module\.(?:baseNote|getNoteById|findTempo|findMeasureLength)\s*\(/.test(expr) ||
+        /module\.baseNote/.test(expr);
+
     try {
-        if (variableType === 'duration' && 
-            expression.startsWith('new Fraction(60).div(') && 
-            expression.includes(').mul(new Fraction(')) {
-            
-            const testFunc = new Function('module', 'Fraction', `
-                return ${expression};
-            `);
+        if (variableType === 'duration' &&
+            expr.startsWith('new Fraction(60).div(') &&
+            expr.includes(').mul(new Fraction(')) {
+            const testFunc = new Function('module', 'Fraction', `return (${expr});`);
             const result = testFunc(moduleInstance, Fraction);
-            
             if (!(result instanceof Fraction)) {
                 throw new Error('Duration expression must result in a Fraction');
             }
-            
-            return expression;
+            return expr;
         }
-        
+
         const testFunc = new Function('module', 'Fraction', `
-            let result = ${expression};
+            let result = (${expr});
             if (result === undefined || result === null) {
                 throw new Error('Expression resulted in undefined or null');
             }
@@ -59,7 +61,13 @@ export function validateExpression(moduleInstance, noteId, expression, variableT
             return result;
         `);
         const result = testFunc(moduleInstance, Fraction);
-        
+
+        if (hasRefs) {
+            // Keep dependency-carrying expressions intact
+            return expr;
+        }
+
+        // Numeric-only expression: canonicalize to reduced Fraction literal
         return `new Fraction(${result.n}, ${result.d})`;
     } catch (e) {
         console.error(`Error in expression execution for Note ${noteId}:`, e);

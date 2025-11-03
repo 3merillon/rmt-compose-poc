@@ -175,7 +175,39 @@ export class Module {
     findMeasureLength(note) {
         this._trackDependency(note.id, 0);
         const tempo = this.findTempo(note);
-        const beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
+
+        // Prefer per-note beatsPerMeasure. Otherwise, inherit only from non-measure ancestors; fallback to BaseNote.
+        let beatsPerMeasure = null;
+        try {
+            const isMeasure = (n) => {
+                try { return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency); }
+                catch { return false; }
+            };
+
+            // Direct per-note override
+            if (note && note.variables && (note.variables.beatsPerMeasure || note.variables.beatsPerMeasureString)) {
+                beatsPerMeasure = note.getVariable('beatsPerMeasure');
+            } else {
+                // Walk up ancestry but skip measure ancestors to avoid cross-measure inheritance
+                let cur = note;
+                while (cur && cur.id !== 0) {
+                    cur = this.getNoteById(cur.parentId);
+                    if (!cur) break;
+                    if (cur.variables && (cur.variables.beatsPerMeasure || cur.variables.beatsPerMeasureString)) {
+                        if (!isMeasure(cur)) {
+                            beatsPerMeasure = cur.getVariable('beatsPerMeasure');
+                            break;
+                        }
+                    }
+                }
+                if (!beatsPerMeasure) {
+                    beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
+                }
+            }
+        } catch {
+            beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
+        }
+
         return beatsPerMeasure.div(tempo).mul(60);
     }
 
