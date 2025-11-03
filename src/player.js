@@ -51,20 +51,30 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     function isWebGL2RendererEnabled() {
         try {
-            // Robustly read from search, hash, and localStorage
-            const search = typeof window !== 'undefined' ? window.location.search : '';
-            const params = new URLSearchParams(search || '');
-            const viaSearch = (params.get('renderer') || '').toLowerCase() === 'webgl2';
+            // Default ON when WebGL2 is available; no flags or persistence required.
+            // Lightweight capability probe using a throwaway canvas.
+            let supported = false;
 
-            const hash = (typeof window !== 'undefined' ? window.location.hash : '' ) || '';
-            const viaHash = hash.toLowerCase().includes('renderer=webgl2');
+            if (typeof document !== 'undefined' && typeof document.createElement === 'function') {
+                try {
+                    const c = document.createElement('canvas');
+                    const gl = c && c.getContext && c.getContext('webgl2', { alpha: true, antialias: true });
+                    supported = !!gl;
+                } catch {}
+            }
 
-            const ls = (typeof localStorage !== 'undefined' ? (localStorage.getItem('rmt:renderer') || '') : '');
-            const viaLS = ls.toLowerCase() === 'webgl2';
+            // Fallback probe via OffscreenCanvas when available
+            if (!supported && typeof OffscreenCanvas !== 'undefined') {
+                try {
+                    const oc = new OffscreenCanvas(1, 1);
+                    const gl2 = oc.getContext('webgl2');
+                    supported = !!gl2;
+                } catch {}
+            }
 
-            return !!(viaSearch || viaHash || viaLS);
+            return !!supported;
         } catch (e) {
-            try { console.warn('RMT: isWebGL2RendererEnabled check failed', e); } catch {}
+            try { console.warn('RMT: isWebGL2RendererEnabled probe failed', e); } catch {}
             return false;
         }
     }
@@ -1652,7 +1662,7 @@ try {
             }
         } else if (!__rmtDidInitGL) {
             try {
-                console.info('RMT: WebGL2 overlay not enabled - use ?renderer=webgl2 or localStorage rmt:renderer=webgl2');
+                console.info('RMT: WebGL2 unavailable or failed to initialize; running Tapspace DOM mode');
             } catch {}
         }
     } catch (e) {
