@@ -117,6 +117,27 @@ export class Workspace {
     // Default cursor
     try { this.containerEl.style.cursor = 'default'; } catch {}
 
+    // Advise camera whether a single-finger pan should be allowed at touch start.
+    // Return false when the initial contact is on a note (so we do not pan before drag starts).
+    try {
+      if (this.camera) {
+        this.camera.shouldAllowSingleFingerPanStart = (ev) => {
+          try {
+            // Prefer precise subregion hit (notes)
+            if (this.renderer && typeof this.renderer.hitTestSubRegion === 'function') {
+              const sub = this.renderer.hitTestSubRegion(ev.clientX, ev.clientY);
+              if (sub && sub.id) return false; // on a note: block pan
+            }
+            // Fallback: mixed pick
+            const hit = this.pickAt(ev.clientX, ev.clientY, 2);
+            if (hit && hit.type === 'note') return false; // on a note: block pan
+          } catch {}
+          // Background or anything else -> allow pan
+          return true;
+        };
+      }
+    } catch {}
+
     // Pointer down to start interactions (move/resize/octave)
     this._onPointerDown = (e) => {
       try {
@@ -298,6 +319,9 @@ export class Workspace {
           document.addEventListener('pointermove', this._onDocPointerMove, true);
           document.addEventListener('pointerup', this._onDocPointerUp, true);
           document.addEventListener('pointercancel', this._onDocPointerCancel, true);
+
+          // While pending a note drag, suppress single-finger panning to avoid initial workspace pan.
+          try { if (this.camera && this.camera.setSingleFingerPanEnabled) this.camera.setSingleFingerPanEnabled(false); } catch {}
 
           // Defer full interaction start until movement threshold is met.
           return;
@@ -1313,6 +1337,8 @@ export class Workspace {
 
       // Re-enable camera input
       try { if (this.camera) this.camera.setInputEnabled(true); } catch {}
+      // Re-enable single-finger panning after any interaction (including canceled pending drags)
+      try { if (this.camera && this.camera.setSingleFingerPanEnabled) this.camera.setSingleFingerPanEnabled(true); } catch {}
 
       // Clear cursor (hover handler will reapply)
       try { this.containerEl.style.cursor = this._currentCursor || 'default'; } catch {}

@@ -26,6 +26,9 @@ export class CameraController {
     // Input gating: when false, suppress pan/zoom gestures during GL interactions
     this.inputEnabled = true;
 
+    // When false, disable single-finger panning while still allowing pinch-zoom
+    this.singleFingerPanEnabled = true;
+ 
     // When true, suppress user-driven X panning (used for playhead tracking)
     this.lockX = false;
 
@@ -158,9 +161,16 @@ export class CameraController {
             e.preventDefault();
           } else if (this._touches.size === 1) {
             // One-finger pan (when not over active GL interaction)
-            this._dragging = true;
-            this._lastX = e.clientX;
-            this._lastY = e.clientY;
+            if (this.singleFingerPanEnabled) {
+              this._dragging = true;
+              this._lastX = e.clientX;
+              this._lastY = e.clientY;
+            } else {
+              // Suppress initial pan when disabled (e.g., note drag pending). Still track last position.
+              this._dragging = false;
+              this._lastX = e.clientX;
+              this._lastY = e.clientY;
+            }
             e.preventDefault();
           }
         } else if (e.button === 0) {
@@ -224,21 +234,27 @@ export class CameraController {
               e.preventDefault();
             }
           } else if (!this._pinching && this._touches.size === 1) {
-            // One-finger pan (initialize drag if coming from pinch)
-            if (!this._dragging) {
-              this._dragging = true;
+            // One-finger pan (initialize drag if coming from pinch), gated by singleFingerPanEnabled
+            if (this.singleFingerPanEnabled) {
+              if (!this._dragging) {
+                this._dragging = true;
+                this._lastX = e.clientX;
+                this._lastY = e.clientY;
+              }
+              const dx = e.clientX - this._lastX;
+              const dy = e.clientY - this._lastY;
+              this._lastX = e.clientX;
+              this._lastY = e.clientY;
+              if (!this.lockX) {
+                this.tx += dx;
+              }
+              this.ty += dy;
+              if (typeof this.onChange === 'function') this.onChange();
+            } else {
+              // Keep updating last coords without applying any pan
               this._lastX = e.clientX;
               this._lastY = e.clientY;
             }
-            const dx = e.clientX - this._lastX;
-            const dy = e.clientY - this._lastY;
-            this._lastX = e.clientX;
-            this._lastY = e.clientY;
-            if (!this.lockX) {
-              this.tx += dx;
-            }
-            this.ty += dy;
-            if (typeof this.onChange === 'function') this.onChange();
             e.preventDefault();
           }
           return;
@@ -328,6 +344,11 @@ export class CameraController {
   // Enable/disable camera input (pan/zoom) during GL interactions
   setInputEnabled(enabled) {
     this.inputEnabled = !!enabled;
+  }
+
+  // Enable/disable single-finger panning, while still allowing pinch-zoom
+  setSingleFingerPanEnabled(enabled) {
+    this.singleFingerPanEnabled = !!enabled;
   }
 
   // Inverse mapping (screen CSS px -> world)
