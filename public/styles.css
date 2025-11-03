@@ -912,6 +912,34 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     text-shadow: 0 0 5px rgba(255, 0, 0, 0.5);
 }
 
+.legal-section {
+    text-align: center;
+    margin-bottom: 15px;
+}
+
+.license-link {
+    display: inline-block;
+    padding: 6px 14px;
+    border-radius: 4px;
+    border: 1px dotted rgba(255, 168, 0, 0.8);
+    color: #ffa800;
+    text-decoration: none;
+    background: rgba(21, 21, 37, 0.2);
+    transition: all 0.3s ease;
+}
+
+.license-link:hover {
+    background: #ff0000;
+    border-color: #ff0000;
+    color: #fff;
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+}
+
+.license-link:focus-visible {
+    outline: 2px solid #ffa800;
+    outline-offset: 2px;
+}
+
 .widget-copyright {
     text-align: center;
     color: rgba(255, 168, 0, 0.5);

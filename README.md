@@ -120,6 +120,12 @@ For background on the theory: https://cybercyril.com
 
 ## License
 
-Custom Reference-Only License
+Relative Music Theory Personal Non‑Commercial License (RMT‑PNC) v1.0
 
-See [LICENSE.md](LICENSE.md) for details. This software is provided for reference and educational purposes only; commercial use, modification, distribution, sublicensing, and production use are not permitted.
+- Personal, non‑commercial use only
+- Private modifications allowed (no distribution or hosting)
+- No redistribution of the app or its assets
+- Outputs (music, audio, video, MIDI, scores) may be shared non‑commercially only
+- Public sharing requires attribution: “Made with Relative Music Theory (RMT) – https://cybercyril.com/”
+
+See full terms in [LICENSE.md](LICENSE.md). For commercial licensing, email cyril.monkewitz@gmail.com
