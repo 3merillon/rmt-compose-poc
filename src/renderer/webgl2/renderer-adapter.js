@@ -402,39 +402,50 @@ export class RendererAdapter {
     }
 
     // Resolve base fraction strings for GL fraction rendering
+    // Robust behavior on "clean slate": if we cannot derive a new fraction this frame,
+    // keep showing the previously known numerator/denominator instead of clearing it.
     try {
-      const baseEv = evaluatedNotes?.[0]?.frequency;
-      let numStr = '1', denStr = '1';
-      if (baseEv != null) {
-        if (typeof baseEv.n === 'number' && typeof baseEv.d === 'number') {
-          numStr = String(baseEv.n);
-          denStr = String(baseEv.d);
-        } else if (typeof baseEv.toFraction === 'function') {
-          const fs = String(baseEv.toFraction());
+      let assigned = false;
+      const assign = (n, d) => {
+        if (n != null && d != null) {
+          this._baseFracNum = String(n);
+          this._baseFracDen = String(d);
+          assigned = true;
+        }
+      };
+      const coerceFrom = (src) => {
+        if (!src) return;
+        if (typeof src.n === 'number' && typeof src.d === 'number') {
+          assign(src.n, src.d);
+        } else if (typeof src.toFraction === 'function') {
+          const fs = String(src.toFraction());
           const parts = fs.split('/');
-          numStr = parts[0] || fs;
-          denStr = parts[1] || '1';
+          assign(parts[0] || fs, parts[1] || '1');
         } else {
-          const val = (typeof baseEv.valueOf === 'function') ? baseEv.valueOf() : baseEv;
-          numStr = String(val);
-          denStr = '1';
+          const val = (typeof src.valueOf === 'function') ? src.valueOf() : src;
+          if (val != null && isFinite(Number(val))) assign(val, 1);
         }
-      } else {
-        const bf = module.baseNote.getVariable('frequency');
-        if (bf && typeof bf.n === 'number' && typeof bf.d === 'number') {
-          numStr = String(bf.n);
-          denStr = String(bf.d);
-        } else {
-          const val = (typeof bf?.valueOf === 'function') ? bf.valueOf() : bf;
-          numStr = String(val);
-          denStr = '1';
-        }
+      };
+
+      // Prefer evaluated base frequency, fall back to raw baseNote variable
+      const baseEv = evaluatedNotes?.[0]?.frequency;
+      coerceFrom(baseEv);
+      if (!assigned) {
+        const bf = module?.baseNote?.getVariable?.('frequency');
+        coerceFrom(bf);
       }
-      this._baseFracNum = numStr;
-      this._baseFracDen = denStr;
+
+      // If nothing was assigned and we have no previous cache yet, initialize to 1/1 once.
+      if (!assigned && (!this._baseFracNum || !this._baseFracDen)) {
+        this._baseFracNum = '1';
+        this._baseFracDen = '1';
+      }
     } catch {
-      this._baseFracNum = '1';
-      this._baseFracDen = '1';
+      // Preserve previous values on error; initialize once if missing.
+      if (!this._baseFracNum || !this._baseFracDen) {
+        this._baseFracNum = '1';
+        this._baseFracDen = '1';
+      }
     }
 
     // Build list of visible notes (those with startTime and duration)
@@ -4271,6 +4282,226 @@ try {
       gl.depthMask(true);
     };
 
+    // Draw BaseNote fraction/divider when there are no measure triangles (clean slate)
+    // This avoids the previous coupling where the fraction was rendered only from the triangle pass.
+    proto._renderBaseFractionIfMissing = function () {
+      const gl = this.gl;
+      const canvas = this.canvas;
+      if (!gl || !canvas) return;
+      if (!this.drawBaseFraction) return;
+
+      // If measure triangles exist, their pass already renders the fraction to maintain ordering.
+      if (this._measureTriTimes && this._measureTriTimes.length > 0) return;
+
+      const rectCss = canvas.getBoundingClientRect();
+      const vpW = Math.max(1, rectCss.width);
+      const vpH = Math.max(1, rectCss.height);
+
+      // BaseNote circle center in screen space (CSS px)
+      const baseFreq = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
+      const xCenterWorld = -30.0;
+      const yCenterWorld = this._frequencyToY(baseFreq) + 10.0;
+
+      // world -> page CSS px
+      const sxC = this.matrix[0] * xCenterWorld + this.matrix[3] * yCenterWorld + this.matrix[6];
+      const syC = this.matrix[1] * xCenterWorld + this.matrix[4] * yCenterWorld + this.matrix[7];
+
+      // page -> canvas-local CSS px
+      const localCX = (this.canvasOffset?.x != null) ? (sxC - this.canvasOffset.x) : sxC;
+      const localCY = (this.canvasOffset?.y != null) ? (syC - this.canvasOffset.y) : syC;
+
+      // Circle size in CSS px, scales with zoom
+      const circleW = 40.0 * (this.xScalePxPerWU || 1.0);
+      const circleH = 40.0 * (this.yScalePxPerWU || 1.0);
+      const minDim = Math.max(1.0, Math.min(circleW, circleH));
+
+      // Text metrics
+      const fontPx = this.useGlyphCache ? Math.max(4, Math.round(minDim * 0.34)) : this._clampFontPx(Math.max(4, Math.round(minDim * 0.34)));
+      const gapPx  = Math.max(1, Math.round(fontPx * 0.08));
+
+      // Content strings (persisted in sync())
+      const numStr = String(this._baseFracNum || '1');
+      const denStr = String(this._baseFracDen || '1');
+
+      let numW = 0, denW = 0, numEntry = null, denEntry = null;
+      if (this.useGlyphCache) {
+        numW = this._measureGlyphRunWidth(numStr, fontPx);
+        denW = this._measureGlyphRunWidth(denStr, fontPx);
+      } else {
+        numEntry = this._createTightDigitTexture(numStr, fontPx, 0, '#ffffff');
+        denEntry = this._createTightDigitTexture(denStr, fontPx, 0, '#ffffff');
+        numW = (numEntry && numEntry.wCss) ? numEntry.wCss : 0;
+        denW = (denEntry && denEntry.wCss) ? denEntry.wCss : 0;
+      }
+
+      // Divider geometry centered within the circle, sized to max of content widths
+      const contentMax = Math.max(numW, denW);
+      const dividerW = Math.max(6.0, contentMax + 2.0);
+      const leftDiv = localCX - dividerW * 0.5;
+
+      const thicknessPx = Math.max(1, Math.round(fontPx * 0.12));
+      const dividerY = Math.floor(localCY - thicknessPx * 0.5) + 0.5;
+
+      // Inner circular mask radius (inside the grey border)
+      const borderPxIn = (this.xScalePxPerWU || 1.0);
+      const innerR = 0.5 * minDim - borderPxIn;
+
+      // 1) Divider line, clipped to inner circle
+      if (this.solidCssCircMaskProgram && this.octaveLineVAO && this.octaveLinePosSizeBuffer) {
+        gl.useProgram(this.solidCssCircMaskProgram);
+        const U = (this._uniforms && this._uniforms.solidCssCircMask) ? this._uniforms.solidCssCircMask : null;
+        const uVP = U ? U.u_viewport : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_viewport');
+        const uZ  = U ? U.u_z        : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_z');
+        const uCol= U ? U.u_color    : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_color');
+        const uCtr= U ? U.u_circleCenter      : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_circleCenter');
+        const uRad= U ? U.u_circleRadiusInner : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_circleRadiusInner');
+        if (uVP) gl.uniform2f(uVP, vpW, vpH);
+        if (uZ)  gl.uniform1f(uZ, -0.00001);
+        if (uCol)gl.uniform4f(uCol, 1.0, 1.0, 1.0, 1.0);
+        if (uCtr)gl.uniform2f(uCtr, localCX, localCY);
+        if (uRad)gl.uniform1f(uRad, innerR);
+
+        gl.bindVertexArray(this.octaveLineVAO);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([leftDiv, dividerY, dividerW, thicknessPx]), gl.DYNAMIC_DRAW);
+        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+        gl.bindVertexArray(null);
+      }
+
+      // 2) Numerator/Denominator — masked to inner circle
+      if (this.useGlyphCache && this.textCircMaskProgram && this.textVAO && this.textPosSizeBuffer) {
+        // PMA for glyph textures; render above geometry
+        gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.disable(gl.DEPTH_TEST);
+
+        const sxNum = (numW > dividerW) ? (dividerW / Math.max(1, numW)) : 1.0;
+        const sxDen = (denW > dividerW) ? (dividerW / Math.max(1, denW)) : 1.0;
+        const usedNumW = numW * sxNum;
+        const usedDenW = denW * sxDen;
+        const nx = leftDiv + Math.max(0, Math.round((dividerW - usedNumW) * 0.5));
+        const dx = leftDiv + Math.max(0, Math.round((dividerW - usedDenW) * 0.5));
+
+        const ascNum = (this._measureRunMetricsCanvas && this._measureRunMetricsCanvas(numStr, fontPx).ascent) || this._getRunAscent(numStr, fontPx);
+        const ny = Math.round((dividerY - gapPx - ascNum) * 2.0) / 2.0;
+        const dy = Math.round((dividerY + thicknessPx + gapPx) * 2.0) / 2.0;
+
+        const prog = this.textCircMaskProgram;
+        gl.useProgram(prog);
+        const Utcm = (this._uniforms && this._uniforms.textCircMask) ? this._uniforms.textCircMask : null;
+        const uVPtm = Utcm ? Utcm.u_viewport : gl.getUniformLocation(prog, 'u_viewport');
+        const uTintm= Utcm ? Utcm.u_tint     : gl.getUniformLocation(prog, 'u_tint');
+        const uTexm = Utcm ? Utcm.u_tex      : gl.getUniformLocation(prog, 'u_tex');
+        const uZtm  = Utcm ? Utcm.u_z        : gl.getUniformLocation(prog, 'u_z');
+        const uCtrT = Utcm ? Utcm.u_circleCenter      : gl.getUniformLocation(prog, 'u_circleCenter');
+        const uRadT = Utcm ? Utcm.u_circleRadiusInner : gl.getUniformLocation(prog, 'u_circleRadiusInner');
+        if (uVPtm) gl.uniform2f(uVPtm, vpW, vpH);
+        if (uTintm)gl.uniform4f(uTintm, 1, 1, 1, 1);
+        if (uTexm) gl.uniform1i(uTexm, 0);
+        if (uZtm)  gl.uniform1f(uZtm, -0.00001);
+        if (uCtrT) gl.uniform2f(uCtrT, localCX, localCY);
+        if (uRadT) gl.uniform1f(uRadT, innerR);
+
+        // Draw numerator glyph-run
+        {
+          let penX = nx;
+          for (let i = 0; i < numStr.length; i++) {
+            const ch = numStr[i];
+            const g = this._getGlyph(ch);
+            if (!g || !g.tex) continue;
+            const scale = Math.max(1e-6, fontPx / (g.basePx || 64));
+            const w = g.wCss * scale * sxNum;
+            const h = g.hCss * scale;
+            const arr = new Float32Array([penX, ny, w, h]);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, g.tex);
+            gl.bindVertexArray(this.textVAO);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+            gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+            penX += w;
+          }
+        }
+
+        // Draw denominator glyph-run
+        {
+          let penX = dx;
+          for (let i = 0; i < denStr.length; i++) {
+            const ch = denStr[i];
+            const g = this._getGlyph(ch);
+            if (!g || !g.tex) continue;
+            const scale = Math.max(1e-6, fontPx / (g.basePx || 64));
+            const w = g.wCss * scale * sxDen;
+            const h = g.hCss * scale;
+            const arr = new Float32Array([penX, dy, w, h]);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, g.tex);
+            gl.bindVertexArray(this.textVAO);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+            gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+            gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+            penX += w;
+          }
+        }
+
+        // Restore defaults
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(true);
+        gl.bindVertexArray(null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+      } else if (this.textCircMaskProgram && numEntry && denEntry && this.textVAO && this.textPosSizeBuffer) {
+        // Fallback: canvas textures masked to circle
+        const numWfit = Math.min(numEntry.wCss || 0, dividerW);
+        const denWfit = Math.min(denEntry.wCss || 0, dividerW);
+        const nx = leftDiv + Math.max(0, Math.round((dividerW - numWfit) * 0.5));
+        const dx = leftDiv + Math.max(0, Math.round((dividerW - denWfit) * 0.5));
+        const ny = Math.round((dividerY - gapPx - (numEntry.ascent || fontPx)) * 2.0) / 2.0;
+        const dy = Math.round((dividerY + thicknessPx + gapPx) * 2.0) / 2.0;
+
+        gl.useProgram(this.textCircMaskProgram);
+        const Utcm = (this._uniforms && this._uniforms.textCircMask) ? this._uniforms.textCircMask : null;
+        const uVPtm = Utcm ? Utcm.u_viewport : gl.getUniformLocation(this.textCircMaskProgram, 'u_viewport');
+        const uTintm= Utcm ? Utcm.u_tint     : gl.getUniformLocation(this.textCircMaskProgram, 'u_tint');
+        const uTexm = Utcm ? Utcm.u_tex      : gl.getUniformLocation(this.textCircMaskProgram, 'u_tex');
+        const uZtm  = Utcm ? Utcm.u_z        : gl.getUniformLocation(this.textCircMaskProgram, 'u_z');
+        const uCtrT = Utcm ? Utcm.u_circleCenter      : gl.getUniformLocation(this.textCircMaskProgram, 'u_circleCenter');
+        const uRadT = Utcm ? Utcm.u_circleRadiusInner : gl.getUniformLocation(this.textCircMaskProgram, 'u_circleRadiusInner');
+        if (uVPtm) gl.uniform2f(uVPtm, vpW, vpH);
+        if (uTintm)gl.uniform4f(uTintm, 1, 1, 1, 1);
+        if (uTexm) gl.uniform1i(uTexm, 0);
+        if (uZtm)  gl.uniform1f(uZtm, -0.00001);
+        if (uCtrT) gl.uniform2f(uCtrT, localCX, localCY);
+        if (uRadT) gl.uniform1f(uRadT, innerR);
+
+        gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.disable(gl.DEPTH_TEST);
+
+        if (numEntry && numEntry.tex) {
+          const arrNum = new Float32Array([nx, ny, numWfit, numEntry.hCss || fontPx]);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, numEntry.tex);
+          gl.bindVertexArray(this.textVAO);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, arrNum, gl.DYNAMIC_DRAW);
+          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+        }
+        if (denEntry && denEntry.tex) {
+          const arrDen = new Float32Array([dx, dy, denWfit, denEntry.hCss || fontPx]);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, denEntry.tex);
+          gl.bindVertexArray(this.textVAO);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, arrDen, gl.DYNAMIC_DRAW);
+          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+        }
+
+        // Restore defaults
+        gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        gl.depthMask(true);
+        gl.bindVertexArray(null);
+        gl.bindTexture(gl.TEXTURE_2D, null);
+      }
+    };
+
     // Render per-note overlays: [id] label, fraction, octave arrows, right pull tab
     proto._renderNoteOverlays = function () {
       const gl = this.gl;
@@ -6595,6 +6826,8 @@ try {
       try { if (this.drawNoteOverlays) this._renderNoteOverlays(); } catch {}
       // Draw measure bars/triangles/octave guides
       try { this._renderMeasureBars(); } catch {}
+      // Ensure BaseNote fraction is visible even when there are no measure triangles (clean slate)
+      try { this._renderBaseFractionIfMissing(); } catch {}
       // Flush deferred text sprites last so they appear above everything
       try {
         // Atlas path in _flushGlyphRunsAtlas handles text; legacy sprite path disabled.
