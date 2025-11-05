@@ -4533,6 +4533,21 @@ try {
       let _silenceEraseRegions = this._silenceEraseRegions || null;
       let _anySilenceErase = this._anySilenceErase || false;
 
+      // Ensure region buffers match current instanceCount.
+      // Fixes intermittent missing fraction divider bars on add/drop when the cached arrays
+      // were smaller than the new instance count (writes past typed array length are ignored).
+      {
+        const neededLen = Math.max(0, (this.instanceCount | 0)) * 4;
+        if (!_dividerRegions || _dividerRegions.length !== neededLen) {
+          _dividerRegions = neededLen ? new Float32Array(neededLen) : null;
+          _anyDivider = false; // must rebuild flags for the new buffer
+        }
+        if (!_silenceEraseRegions || _silenceEraseRegions.length !== neededLen) {
+          _silenceEraseRegions = neededLen ? new Float32Array(neededLen) : null;
+          _anySilenceErase = false; // must rebuild flags for the new buffer
+        }
+      }
+
       // Batch draw right pull tabs with rounded interior clip (SDF), depth-layered
       try {
         if (this.tabMaskProgram && this.rectVAO && this.rectInstanceTabRegionBuffer && this.instanceCount > 0) {
