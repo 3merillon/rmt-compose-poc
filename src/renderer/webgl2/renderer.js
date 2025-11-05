@@ -7396,7 +7396,10 @@ try {
               noteId: Number(state.noteId),
               type: String(state.type || ''),
               dxSec: (state.dxSec != null ? Number(state.dxSec) : 0),
-              ddurSec: (state.ddurSec != null ? Number(state.ddurSec) : 0)
+              ddurSec: (state.ddurSec != null ? Number(state.ddurSec) : 0),
+              // Persist original start/duration (in seconds) for origin guide bars
+              origStartSec: (state.origStartSec != null ? Number(state.origStartSec) : null),
+              origDurationSec: (state.origDurationSec != null ? Number(state.origDurationSec) : null)
             }
           : null;
         // Track moving dependents (ids) when provided to filter link lines during preview
@@ -7874,9 +7877,11 @@ if (rebuild) {
       // Drag overlays: snap guides (vertical 1px lines) + ghost fill over preview rect
       try {
         const st = this._dragOverlay;
+        let __isNoteValid = false;
         if (this.drawDragOverlays && st && st.noteId != null && this._noteIdToIndex) {
           const idx = this._noteIdToIndex.get(Number(st.noteId));
-          if (idx != null && idx >= 0 && idx < this.instanceCount) {
+          __isNoteValid = (idx != null && idx >= 0 && idx < this.instanceCount);
+          if (__isNoteValid) {
             const base = idx * 4;
             const xw = this.posSize[base + 0], yw = this.posSize[base + 1];
             const ww = this.posSize[base + 2], hh = this.posSize[base + 3];
@@ -8044,13 +8049,74 @@ if (rebuild) {
                 gl.enable(gl.DEPTH_TEST);
               };
 
-              // Start guide
-              drawSnapAtWorldX(xw, [1.0, 1.0, 1.0, 1.0]);
-              // End guide for resize
+              // Origin guides (teal, semi-transparent) to show where drag/resize started
+              if (st.origStartSec != null) {
+                const scaleX = (this.currentXScaleFactor || 1.0);
+                const teal = [0.0, 0.0, 0.545098, 0.6];
+                if (st.type === 'move') {
+                  const oStart = Number(st.origStartSec || 0) * 200.0 * scaleX;
+                  drawSnapAtWorldX(oStart, teal);
+                } else if (st.type === 'resize') {
+                  // Start is an origin during right-edge resize; draw it in teal
+                  const oStart = Number(st.origStartSec || 0) * 200.0 * scaleX;
+                  drawSnapAtWorldX(oStart, teal);
+                  // Original end marks original size
+                  const oEnd = (Number(st.origStartSec || 0) + Number(st.origDurationSec || 0)) * 200.0 * scaleX;
+                  drawSnapAtWorldX(oEnd, teal);
+                }
+              }
+
+              // Current guides (white, slightly transparent to be less prominent)
               if (st.type === 'resize') {
-                drawSnapAtWorldX(xw + ww, [1.0, 1.0, 1.0, 1.0]);
+                // Only draw the moving end in white; start is shown as teal origin
+                drawSnapAtWorldX(xw + ww, [1.0, 1.0, 1.0, 0.6]);
+              } else {
+                drawSnapAtWorldX(xw, [1.0, 1.0, 1.0, 0.6]);
               }
             }
+          }
+        }
+        // Fallback: measure triangle drag (no note instance). Draw origin and current bars.
+        if (!__isNoteValid && st) {
+          if (this.solidCssProgram && this.octaveLineVAO && this.octaveLinePosSizeBuffer) {
+            const drawSnapAtWorldX = (xWorld, rgba) => {
+              const sx = this.matrix[0] * xWorld + this.matrix[6];
+              const localX = (this.canvasOffset?.x != null) ? (sx - this.canvasOffset.x) : sx;
+              const widthPx = 2.0;
+              const left = Math.round(localX) - 1.0;
+
+              gl.useProgram(this.solidCssProgram);
+              const Us = (this._uniforms && this._uniforms.solidCss) ? this._uniforms.solidCss : null;
+              const uVP  = Us ? Us.u_viewport : gl.getUniformLocation(this.solidCssProgram, 'u_viewport');
+              const uCol = Us ? Us.u_color    : gl.getUniformLocation(this.solidCssProgram, 'u_color');
+              const uZ   = Us ? Us.u_z        : gl.getUniformLocation(this.solidCssProgram, 'u_z');
+              if (uVP)  gl.uniform2f(uVP, vpW, vpH);
+              if (uCol) gl.uniform4f(uCol, rgba[0], rgba[1], rgba[2], rgba[3]);
+              if (uZ)   gl.uniform1f(uZ, -0.00003);
+
+              gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+              gl.disable(gl.DEPTH_TEST);
+              gl.depthMask(false);
+
+              gl.bindVertexArray(this.octaveLineVAO);
+              gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
+              gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([left, 0.0, widthPx, vpH]), gl.DYNAMIC_DRAW);
+              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+              gl.bindVertexArray(null);
+
+              gl.depthMask(true);
+              gl.enable(gl.DEPTH_TEST);
+            };
+
+            const scaleX = (this.currentXScaleFactor || 1.0);
+            // Origin bar at original measure position (teal)
+            if (st.origStartSec != null) {
+              const oStart = Number(st.origStartSec || 0) * 200.0 * scaleX;
+              drawSnapAtWorldX(oStart, [0.0, 0.0, 0.545098, 0.6]);
+            }
+            // Current bar at preview position (white, semi-transparent)
+            const curT = (Number(st.origStartSec || 0) + Number(st.dxSec || 0)) * 200.0 * scaleX;
+            drawSnapAtWorldX(curT, [1.0, 1.0, 1.0, 0.6]);
           }
         }
       } catch {}

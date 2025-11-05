@@ -75,6 +75,8 @@ export class Workspace {
     this._onDocPointerMove = null;
     this._onDocPointerUp = null;
     this._onDocPointerCancel = null;
+    // Suppress stray click events (e.g., DOM measure triangles) while dragging
+    this._onDocClickSuppress = null;
 
     // Global touch tracking for gesture arbitration
     this._touchActiveCount = 0;
@@ -222,6 +224,19 @@ export class Workspace {
               document.addEventListener('pointermove', this._onDocPointerMove, true);
               document.addEventListener('pointerup', this._onDocPointerUp, true);
               document.addEventListener('pointercancel', this._onDocPointerCancel, true);
+              // Suppress synthetic click while a drag is active (prevents opening modals)
+              if (!this._onDocClickSuppress) {
+                this._onDocClickSuppress = (ev) => {
+                  try {
+                    if (this._interaction && this._interaction.active) {
+                      ev.preventDefault();
+                      ev.stopPropagation();
+                      if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+                    }
+                  } catch {}
+                };
+              }
+              document.addEventListener('click', this._onDocClickSuppress, true);
 
               // Clear any hover visuals
               try {
@@ -447,8 +462,7 @@ export class Workspace {
           baselineStartSec: baseline,
           lastPreview: { startSec: origStartSec, durationSec: origDurationSec }
         };
-        // Begin drag overlay immediately so guides/ghost render on initial press
-        try { if (this.renderer?.setDragOverlay) this.renderer.setDragOverlay({ noteId: id, type, dxSec: 0, ddurSec: 0, movingIds: [] }); } catch {}
+        // Defer drag overlay until user actually drags (avoid bar pop on simple selection)
         // Precompute and set initial prospective parent at zero-delta so link line is correct immediately
         try {
           if (this.renderer?.setProspectiveParentId) {
@@ -483,6 +497,19 @@ export class Workspace {
         document.addEventListener('pointermove', this._onDocPointerMove, true);
         document.addEventListener('pointerup', this._onDocPointerUp, true);
         document.addEventListener('pointercancel', this._onDocPointerCancel, true);
+        // Suppress synthetic click while a drag is active (prevents opening modals)
+        if (!this._onDocClickSuppress) {
+          this._onDocClickSuppress = (ev) => {
+            try {
+              if (this._interaction && this._interaction.active) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+              }
+            } catch {}
+          };
+        }
+        document.addEventListener('click', this._onDocClickSuppress, true);
 
         // Clear any hover visuals immediately when an interaction begins
         try {
@@ -1218,7 +1245,22 @@ export class Workspace {
                 }
                 // Include the dragged measure itself so its 2px line is emphasized
                 if (!movingIds.includes(Number(noteId))) movingIds.push(Number(noteId));
-                this.renderer.setDragOverlay({ noteId, type: 'move', dxSec: startDelta, ddurSec: 0, movingIds });
+                // Only show overlay after actual drag starts (avoid pop on click)
+                const movedPx = Math.hypot(
+                  (this._interaction.lastClient?.x || 0) - (this._interaction.startClient?.x || 0),
+                  (this._interaction.lastClient?.y || 0) - (this._interaction.startClient?.y || 0)
+                );
+                if (movedPx > 2) {
+                  this.renderer.setDragOverlay({
+                    noteId,
+                    type: 'move',
+                    dxSec: startDelta,
+                    ddurSec: 0,
+                    movingIds,
+                    origStartSec: this._interaction.origStartSec,
+                    origDurationSec: this._interaction.origDurationSec
+                  });
+                }
               }
             } catch {}
           } catch {}
@@ -1308,7 +1350,22 @@ export class Workspace {
         // Keep drag overlay active during preview ticks, carry deltas and movingIds (for link-line filtering)
         try {
           if (this.renderer?.setDragOverlay && (type === 'move' || type === 'resize')) {
-            this.renderer.setDragOverlay({ noteId, type, dxSec: dxPreviewSec, ddurSec: ddurPreviewSec, movingIds });
+            // Only enable overlay once drag actually starts (avoid brief bar on selection)
+            const movedPx = Math.hypot(
+              (this._interaction.lastClient?.x || 0) - (this._interaction.startClient?.x || 0),
+              (this._interaction.lastClient?.y || 0) - (this._interaction.startClient?.y || 0)
+            );
+            if (movedPx > 2) {
+              this.renderer.setDragOverlay({
+                noteId,
+                type,
+                dxSec: dxPreviewSec,
+                ddurSec: ddurPreviewSec,
+                movingIds,
+                origStartSec: this._interaction.origStartSec,
+                origDurationSec: this._interaction.origDurationSec
+              });
+            }
           }
         } catch {}
         // Live parent remapping visualization: derive candidate that mirrors commit-time logic
@@ -1332,9 +1389,39 @@ export class Workspace {
         if (this._onDocPointerMove) document.removeEventListener('pointermove', this._onDocPointerMove, true);
         if (this._onDocPointerUp) document.removeEventListener('pointerup', this._onDocPointerUp, true);
         if (this._onDocPointerCancel) document.removeEventListener('pointercancel', this._onDocPointerCancel, true);
+        if (this._onDocClickSuppress) document.removeEventListener('click', this._onDocClickSuppress, true);
       } catch {}
       this._onDocPointerMove = this._onDocPointerUp = this._onDocPointerCancel = null;
+      this._onDocClickSuppress = null;
 
+      // One-shot post-drop click suppressor:
+      // Prevent the synthetic click that follows pointerup from selecting an underlying note/measure
+      // and changing the Variables modal after a drag/resize completes.
+      try {
+        // Only suppress when an actual drag occurred (ignore pure click selection) and not for octave taps
+        let movedOk = false;
+        try {
+          const lc = st && st.lastClient ? st.lastClient : (st && st.startClient ? st.startClient : { x: 0, y: 0 });
+          const dx = lc.x - (st && st.startClient ? st.startClient.x : 0);
+          const dy = lc.y - (st && st.startClient ? st.startClient.y : 0);
+          const dist = Math.hypot(dx, dy);
+          movedOk = (dist > 4) && st && st.type !== 'octave';
+        } catch {}
+        if (movedOk) {
+          const suppressOnce = (ev) => {
+            try {
+              ev.preventDefault();
+              ev.stopPropagation();
+              if (typeof ev.stopImmediatePropagation === 'function') ev.stopImmediatePropagation();
+            } catch {}
+            try { document.removeEventListener('click', suppressOnce, true); } catch {}
+          };
+          // Capture phase to intercept before app handlers
+          document.addEventListener('click', suppressOnce, true);
+          // Safety removal in case no click fires
+          setTimeout(() => { try { document.removeEventListener('click', suppressOnce, true); } catch {} }, 50);
+        }
+      } catch {}
       // Re-enable camera input
       try { if (this.camera) this.camera.setInputEnabled(true); } catch {}
       // Re-enable single-finger panning after any interaction (including canceled pending drags)
