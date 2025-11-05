@@ -1,5 +1,4 @@
 import Fraction from 'fraction.js';
-import tapspace from 'tapspace';
 import { Module } from './module.js';
 import { modals } from './modals/index.js';
 import { updateStackClickSelectedNote } from './stack-click.js';
@@ -7,7 +6,6 @@ import { eventBus } from './utils/event-bus.js';
 import { audioEngine } from './player/audio-engine.js';
 import { setModule, setEvaluatedNotes } from './store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpressionByFraction } from './utils/simplify.js';
-import { RendererAdapter } from './renderer/webgl2/renderer-adapter.js';
 import { Workspace } from './renderer/webgl2/workspace.js';
 
 // Compiled expression cache (kept for performance; flags and perf logs removed)
@@ -42,7 +40,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     let stackClickState = { lastClickPosition: null, stackedNotes: [], currentIndex: -1 };
     let xScaleFactor = 1.0, yScaleFactor = 1.0;
-    let glRenderer = null;
+    
     let glWorkspace = null;
     // Suppress playhead recentering during X-scale adjustments to avoid 1-frame pop
     let __rmtScalingXActive = false;
@@ -101,23 +99,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
 
-    // GL-only mode: disable Tapspace DOM notes/triangles/playhead while keeping GL overlay
-    function isWebGL2GLOutputOnlyEnabled() {
-        try {
-            return isWebGL2RendererEnabled();
-        } catch {
-            return false;
-        }
-    }
+    // GL-only mode: disable legacy DOM notes/triangles/playhead while keeping GL overlay
 
-    // Workspace mode: full GL interactive workspace (replaces Tapspace)
-    function isWebGL2WorkspaceEnabled() {
-        try {
-            return isWebGL2RendererEnabled();
-        } catch {
-            return false;
-        }
-    }
+    // Workspace mode: full GL interactive workspace
     
     if (modals) {
         modals.setExternalFunctions({
@@ -132,9 +116,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         saveModuleBtn: document.getElementById('saveModuleBtn'),
         widgetContent: document.querySelector('.note-widget-content'),
         widgetTitle: document.getElementById('note-widget-title'),
-        measureBarsContainer: document.getElementById('measureBarsContainer'),
-        playheadContainer: document.getElementById('playheadContainer'),
-        trianglesContainer: document.getElementById('measureBarTrianglesContainer'),
         volumeSlider: document.getElementById('volumeSlider'),
         loadModuleInput: document.getElementById('loadModuleInput'),
         loadModuleBtn: document.getElementById('loadModuleBtn'),
@@ -151,135 +132,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         resetDefaultModuleItem: document.getElementById('resetDefaultModuleItem')
     };
 
-    function createOctaveIndicators() {
-        const existingContainer = document.getElementById('octave-indicators-container');
-        if (existingContainer) existingContainer.remove();
-        
-        const octaveContainer = document.createElement('div');
-        octaveContainer.id = 'octave-indicators-container';
-        octaveContainer.className = 'octave-indicators-container';
-        document.body.insertBefore(octaveContainer, document.body.firstChild);
-        
-        for (let i = -8; i <= 8; i++) {
-            const indicator = document.createElement('div');
-            indicator.className = 'octave-indicator';
-            indicator.setAttribute('data-octave', i);
-            if (i === 0) indicator.classList.add('reference-octave');
-            
-            const label = document.createElement('div');
-            label.className = 'octave-label';
-            label.textContent = i === 0 ? 'Reference' : (i > 0 ? `+${i}` : i);
-            indicator.appendChild(label);
-            octaveContainer.appendChild(indicator);
-        }
-        
-        return octaveContainer;
-    }
     
-    function updateOctaveIndicators() {
-        const octaveContainer = document.getElementById('octave-indicators-container');
-        if (!octaveContainer) {
-            console.warn("Octave container not found, recreating...");
-            createOctaveIndicators();
-            return;
-        }
-        
-        let referenceNote = currentSelectedNote || myModule.baseNote;
-        if (referenceNote && !referenceNote.getVariable('frequency')) {
-            referenceNote = myModule.baseNote;
-        }
-        
-        let referenceFreq = referenceNote.getVariable('frequency').valueOf();
-        const indicators = octaveContainer.querySelectorAll('.octave-indicator');
-        
-        if (indicators.length === 0) {
-            console.warn("No octave indicators found in container, recreating...");
-            createOctaveIndicators();
-            return;
-        }
-        
-        const verticalOffset = 10;
-        
-        indicators.forEach(indicator => {
-            const octaveOffset = parseInt(indicator.getAttribute('data-octave'));
-            const octaveFreq = referenceFreq * Math.pow(2, octaveOffset);
-            const y = frequencyToY(octaveFreq);
-            
-            const transform = viewport.getBasis().getRaw();
-            const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-            
-            const point = new tapspace.geometry.Point(space, { x: 0, y: y + verticalOffset });
-            const screenPos = point.transitRaw(viewport);
-            
-            indicator.style.transform = `translateY(${screenPos.y}px)`;
-            
-            const label = indicator.querySelector('.octave-label');
-            if (label) {
-                if (octaveOffset === 0) {
-                    if (referenceNote === myModule.baseNote) {
-                        label.textContent = 'BaseNote';
-                    } else if (!referenceNote.getVariable('frequency')) {
-                        label.textContent = `Silence [${referenceNote.id}]`;
-                    } else {
-                        label.textContent = `Note [${referenceNote.id}]`;
-                    }
-                } else {
-                    label.textContent = octaveOffset > 0 ? `+${octaveOffset}` : octaveOffset;
-                }
-            }
-        });
-    }
     
-    function initializeOctaveIndicators() {
-        const octaveIndicators = createOctaveIndicators();
-        updateOctaveIndicators();
-    }
 
-    if (!isWebGL2RendererEnabled()) {
-        const octaveIndicatorStyles = document.createElement('style');
-        octaveIndicatorStyles.textContent = `
-            .octave-indicators-container {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                pointer-events: none;
-                z-index: 3;
-            }
-            
-            .octave-indicator {
-                position: absolute;
-                left: 0;
-                width: 100%;
-                height: 1px;
-                border-top: 1px dotted rgba(255, 168, 0, 0.3);
-                pointer-events: none;
-            }
-            
-            .octave-indicator.reference-octave {
-                border-top: 1px dotted rgba(255, 168, 0, 0.7);
-            }
-            
-            .octave-label {
-                position: absolute;
-                left: 10px;
-                top: -10px;
-                color: rgba(255, 168, 0, 0.7);
-                font-family: 'Roboto Mono', monospace;
-                font-size: 10px;
-                background-color: rgba(21, 21, 37, 0.7);
-                padding: 2px 5px;
-                border-radius: 3px;
-            }
-            
-            .octave-indicator.reference-octave .octave-label {
-                color: rgba(255, 168, 0, 1);
-                font-weight: bold;
-            }
-        `;
-        document.head.appendChild(octaveIndicatorStyles);
-    }
     const lockStyles = document.createElement('style');
     lockStyles.textContent = `
         .note-content[style*="pointer-events: none"],
@@ -351,14 +206,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 if (isTrackingEnabled) {
                     if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
                         glWorkspace.renderer.setTrackingMode(true);
-                    } else if (glRenderer && typeof glRenderer.setTrackingMode === 'function') {
-                        glRenderer.setTrackingMode(true);
                     }
                 }
             } catch {}
 
-            const viewCenter = viewport.atCenter();
-            const centerInSpace = viewCenter.transitRaw(space);
             
             const oldScale = xScaleFactor;
             xScaleFactor = parseFloat(e.target.value);
@@ -366,8 +217,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
                     glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
-                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
                 }
             } catch {}
             // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
@@ -384,11 +233,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                             glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
                         }
                     } else {
-                        const viewCenter = viewport.atCenter();
-                        const y = viewCenter.transitRaw(space).y;
-                        const x = playheadTime * (200 * neu);
-                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
-                        viewport.translateTo(targetPoint);
                     }
                 }
             } catch {}
@@ -398,9 +242,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
                     glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
-                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
-                }
+                } 
             } catch {}
             
             // Keep the same time (sec) under the screen center after x-scale changes
@@ -424,20 +266,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                     if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
                 } else {
-                    if (isTrackingEnabled) {
-                        // Tapspace path: keep playhead at screen center
-                        const viewCenter = viewport.atCenter();
-                        const y = viewCenter.transitRaw(space).y;
-                        const x = playheadTime * (200 * neu);
-                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
-                        viewport.translateTo(targetPoint);
-                    } else {
-                        // Preserve current screen-center world x after scaling
-                        const scaleRatio = neu / old;
-                        const newCenterX = centerInSpace.x * scaleRatio;
-                        const newCenterPoint = space.at(newCenterX, centerInSpace.y);
-                        viewport.translateTo(newCenterPoint);
-                    }
                 }
             } catch {}
 
@@ -456,8 +284,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
                     glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
-                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
                 }
             } catch {}
             updateVisualNotes(evaluatedNotes);
@@ -466,9 +292,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
                     glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
-                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
-                }
+                } 
             } catch {}
         };
       
@@ -479,14 +303,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 if (isTrackingEnabled) {
                     if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
                         glWorkspace.renderer.setTrackingMode(true);
-                    } else if (glRenderer && typeof glRenderer.setTrackingMode === 'function') {
-                        glRenderer.setTrackingMode(true);
                     }
                 }
             } catch {}
 
-            const viewCenter = viewport.atCenter();
-            const centerInSpace = viewCenter.transitRaw(space);
             
             const oldScale = xScaleFactor;
             xScaleFactor = parseFloat(e.target.value);
@@ -494,8 +314,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
                     glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
-                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
                 }
             } catch {}
             // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
@@ -512,11 +330,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                             glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
                         }
                     } else {
-                        const viewCenter = viewport.atCenter();
-                        const y = viewCenter.transitRaw(space).y;
-                        const x = playheadTime * (200 * neu);
-                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
-                        viewport.translateTo(targetPoint);
                     }
                 }
             } catch {}
@@ -526,9 +339,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
                     glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
-                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
-                }
+                } 
             } catch {}
             
             // Keep the same time (sec) under the screen center after x-scale changes
@@ -552,20 +363,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                     if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
                 } else {
-                    if (isTrackingEnabled) {
-                        // Tapspace path: keep playhead at screen center
-                        const viewCenter = viewport.atCenter();
-                        const y = viewCenter.transitRaw(space).y;
-                        const x = playheadTime * (200 * neu);
-                        const targetPoint = new tapspace.geometry.Point(space, { x, y });
-                        viewport.translateTo(targetPoint);
-                    } else {
-                        // Preserve current screen-center world x after scaling
-                        const scaleRatio = neu / old;
-                        const newCenterX = centerInSpace.x * scaleRatio;
-                        const newCenterPoint = space.at(newCenterX, centerInSpace.y);
-                        viewport.translateTo(newCenterPoint);
-                    }
                 }
             } catch {}
 
@@ -584,8 +381,6 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
                     glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                } else if (glRenderer && typeof glRenderer.setScaleFactors === 'function') {
-                    glRenderer.setScaleFactors(xScaleFactor, yScaleFactor);
                 }
             } catch {}
             updateVisualNotes(evaluatedNotes);
@@ -594,9 +389,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             try {
                 if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
                     glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } else if (glRenderer && typeof glRenderer.updateViewportBasis === 'function') {
-                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
-                }
+                } 
             } catch {}
         };
         
@@ -1183,52 +976,27 @@ document.addEventListener('DOMContentLoaded', async function() {
         note.startTime && note.duration && note.frequency
     );
   
-    const viewport = tapspace.createView('.myspaceapp');
-    viewport.zoomable({
-        keyboardPanArrows: true,
-        keyboardPanWasd: false,
-        keyboardZoomPlusMinus: true,
-        wheelZoomInvert: false
-    });
-  
-    const gestureCapturer = viewport.capturer('gesture', {
-        preventDefault: false,
-        stopPropagation: false
-    });    
-    gestureCapturer.on('gestureend', handleBackgroundGesture);
-  
-    const space = tapspace.createSpace();
-    viewport.addChild(space);
+    // Legacy DOM viewport/space removed; not used
+    const viewport = null;
+    const space = null;
 
-    // Derive world(space)->screen(viewport) affine from Tapspace point samples
+    // Derive world->screen affine from Workspace camera (GL-only)
     function computeWorldToScreenAffine() {
         try {
-            const p0 = new tapspace.geometry.Point(space, { x: 0, y: 0 });
-            const p1 = new tapspace.geometry.Point(space, { x: 1, y: 0 });
-            const p2 = new tapspace.geometry.Point(space, { x: 0, y: 1 });
-            const s0 = p0.transitRaw(viewport);
-            const s1 = p1.transitRaw(viewport);
-            const s2 = p2.transitRaw(viewport);
-            const a = s1.x - s0.x; // column 1
-            const b = s1.y - s0.y;
-            const c = s2.x - s0.x; // column 2
-            const d = s2.y - s0.y;
-            const e = s0.x;        // translation
-            const f = s0.y;
-            return { a, b, c, d, e, f };
-        } catch (e) {
-            // Fallback to identity if sampling fails
-            return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
-        }
+            if (glWorkspace && glWorkspace.camera && typeof glWorkspace.camera.getBasis === 'function') {
+                return glWorkspace.camera.getBasis();
+            }
+        } catch {}
+        return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
     }
 
-    // Initialize WebGL2 renderer overlay if enabled (Phase 1)
+    // Initialize WebGL2 renderer overlay if enabled
     try {
         const containerEl = document.querySelector('.myspaceapp');
         let __rmtDidInitGL = false;
 
         // Workspace mode: initialize interactive GL workspace with native camera
-        if (isWebGL2WorkspaceEnabled() && containerEl) {
+        if (isWebGL2RendererEnabled() && containerEl) {
             glWorkspace = new Workspace();
             const okW = glWorkspace.init(containerEl);
             if (!okW) {
@@ -1246,30 +1014,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                     });
                 } catch {}
 
-                // Disable Tapspace zoom/pan to avoid handler conflicts while workspace controls camera
-                try { viewport.zoomable(false); } catch {}
+                // No DOM viewport; Workspace camera owns zoom/pan
 
-                // In GL-only mode, hide Tapspace DOM notes/triangles/base circle so only GL is visible
-                try {
-                  const shouldHide = isWebGL2GLOutputOnlyEnabled();
-                  let hideStyle = document.getElementById('rmt-hide-dom-notes');
-                  if (shouldHide) {
-                    if (!hideStyle) {
-                      hideStyle = document.createElement('style');
-                      hideStyle.id = 'rmt-hide-dom-notes';
-                      hideStyle.textContent = `
-                        .note-rect, .note-content, #baseNoteCircle, .measure-bar-triangle {
-                          display: none !important;
-                        }
-                      `;
-                      document.head.appendChild(hideStyle);
-                    }
-                  } else {
-                    if (hideStyle && hideStyle.parentNode) {
-                      hideStyle.parentNode.removeChild(hideStyle);
-                    }
-                  }
-                } catch {}
 
                 // Initial center via camera: align BaseNote (x=0, y=freq->worldY) to viewport center
                 try {
@@ -1281,7 +1027,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                   const baseNoteFreqInit = myModule.baseNote?.getVariable?.('frequency')?.valueOf?.() ?? 440;
                   const baseYInit = frequencyToY(baseNoteFreqInit);
                   const s = 1.0;
-                  // Camera uses container-local translation; Tapspace-like basis is produced by getBasis()
+                  // Camera uses container-local translation; Workspace camera publishes an affine basis via getBasis()
                   // pageCSS = s*world + (tx + off). For world (0, baseYInit) -> (cx, cy):
                   const tx = cx - offX - (0 * s);
                   const ty = cy - offY - (baseYInit * s);
@@ -1431,7 +1177,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                         } catch {}
                       } catch {}
                     };
-                    // Capture so this runs before Tapspace handlers
+                    // Capture so this runs before legacy handlers
                     containerEl.addEventListener('click', containerEl.__rmtWsClickHandler, true);
                   }
 
@@ -1515,286 +1261,109 @@ document.addEventListener('DOMContentLoaded', async function() {
 
                 __rmtDidInitGL = true;
             }
-        }
-
-        // Phase 1 overlay fallback when workspace is not active
-        if (false && !__rmtDidInitGL && isWebGL2RendererEnabled() && containerEl) {
-            glRenderer = new RendererAdapter();
-            const ok = glRenderer.init(containerEl);
-            if (!ok) {
-                glRenderer = null;
-                try { console.warn('RMT: WebGL2 overlay init returned false (context unavailable)'); } catch {}
-            } else {
-                try {
-                    glRenderer.updateViewportBasis(computeWorldToScreenAffine());
-                    glRenderer.setPlayhead(playheadTime);
-                    glRenderer.sync({ evaluatedNotes, module: myModule, xScaleFactor, yScaleFactor, selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null });
-                    try { console.info('RMT: WebGL2 overlay initialized'); } catch {}
-
-                    // Visible badge retained for overlay mode only (workspace mode shows no badge)
-                    let badge = document.getElementById('rmt-webgl2-badge');
-                    if (!badge) {
-                        badge = document.createElement('div');
-                        badge.id = 'rmt-webgl2-badge';
-                        Object.assign(badge.style, {
-                            position: 'fixed',
-                            top: '6px',
-                            left: '6px',
-                            padding: '4px 8px',
-                            background: 'rgba(255,168,0,0.9)',
-                            color: '#151525',
-                            fontFamily: "'Roboto Mono', monospace",
-                            fontSize: '12px',
-                            borderRadius: '4px',
-                            zIndex: '10000',
-                            pointerEvents: 'none',
-                            boxShadow: '0 0 6px rgba(0,0,0,0.35)'
-                        });
-                        badge.textContent = isWebGL2GLOutputOnlyEnabled() ? 'WebGL2 Renderer (GL-only)' : 'WebGL2 Renderer (overlay)';
-                        document.body.appendChild(badge);
-                    }
-
-                    // In GL-only mode, hide Tapspace DOM notes/triangles/base circle so only GL is visible
-                    try {
-                      const shouldHide = isWebGL2GLOutputOnlyEnabled();
-                      let hideStyle = document.getElementById('rmt-hide-dom-notes');
-                      if (shouldHide) {
-                        if (!hideStyle) {
-                          hideStyle = document.createElement('style');
-                          hideStyle.id = 'rmt-hide-dom-notes';
-                          hideStyle.textContent = `
-                            .note-rect, .note-content, #baseNoteCircle, .measure-bar-triangle {
-                              display: none !important;
-                            }
-                          `;
-                          document.head.appendChild(hideStyle);
-                        }
-                      } else {
-                        if (hideStyle && hideStyle.parentNode) {
-                          hideStyle.parentNode.removeChild(hideStyle);
-                        }
-                      }
-                    } catch {}
-// GPU picking: container-level click-to-open modal when overlay is active
-try {
-  if (!containerEl.__rmtGlClickHandler) {
-    containerEl.__rmtGlClickHandler = (event) => {
-      try {
-        if (!glRenderer) return;
-
-        const t = event.target;
-        // Let DOM note/base/measure clicks be handled by existing handlers
-        if (t && t.closest && (t.closest('.note-rect') || t.closest('.measure-bar-triangle') || t.closest('#baseNoteCircle'))) {
-          return;
-        }
-
-        const hit = glRenderer.pickAt(event.clientX, event.clientY, 3);
-        if (hit && hit.type === 'note') {
-          const note = myModule.getNoteById(Number(hit.id));
-          if (!note) return;
-
-          currentSelectedNote = note;
-          try { syncRendererSelection(); } catch {}
-
-          // Use existing DOM element for modal anchoring while Tapspace DOM still exists
-          const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
-          if (el) {
-            showNoteVariables(note, el);
-          } else {
-            const baseEl = document.querySelector('.base-note-circle');
-            showNoteVariables(note, baseEl || document.body);
-          }
-
-          event.stopPropagation();
-          event.preventDefault();
-        }
-      } catch (e) {
-        try { console.warn('GPU pick handler error', e); } catch {}
-      }
-    };
-    // Capture to run before Tapspace handlers
-    containerEl.addEventListener('click', containerEl.__rmtGlClickHandler, true);
-  }
-// GPU picking: hover cursor feedback when overlay is active
-try {
-  if (!containerEl.__rmtGlMoveHandler) {
-    containerEl.__rmtGlMoveHandler = (event) => {
-      try {
-        if (!glRenderer) return;
-        const hit = glRenderer.pickAt(event.clientX, event.clientY, 2);
-        // Show pointer only when hovering a note and not in locked mode
-        if (hit && hit.type === 'note' && !isLocked) {
-          containerEl.style.cursor = 'pointer';
-        } else {
-          containerEl.style.cursor = '';
-        }
-      } catch {}
-    };
-    containerEl.addEventListener('mousemove', containerEl.__rmtGlMoveHandler, true);
-    containerEl.addEventListener('mouseleave', () => { try { containerEl.style.cursor = ''; } catch {} }, true);
-  }
-} catch {}
-// GPU picking: pointerdown handler for touch/pen to mirror click-to-open modal
-try {
-  if (!containerEl.__rmtGlPointerDownHandler) {
-    containerEl.__rmtGlPointerDownHandler = (event) => {
-      try {
-        if (!glRenderer) return;
-        // Only handle non-mouse pointers here; mouse is handled by 'click'
-        if (event.pointerType === 'mouse') return;
-
-        const t = event.target;
-        // Defer to existing DOM handlers if interacting with legacy elements
-        if (t && t.closest && (t.closest('.note-rect') || t.closest('.measure-bar-triangle') || t.closest('#baseNoteCircle'))) {
-          return;
-        }
-
-        const hit = glRenderer.pickAt(event.clientX, event.clientY, 4);
-        if (hit && hit.type === 'note') {
-          const note = myModule.getNoteById(Number(hit.id));
-          if (!note) return;
-
-          currentSelectedNote = note;
-          try { syncRendererSelection(); } catch {}
-
-          const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
-          if (el) {
-            showNoteVariables(note, el);
-          } else {
-            const baseEl = document.querySelector('.base-note-circle');
-            showNoteVariables(note, baseEl || document.body);
-          }
-
-          event.stopPropagation();
-          event.preventDefault();
-        }
-      } catch (e) {
-        try { console.warn('GPU pointerdown pick handler error', e); } catch {}
-      }
-    };
-    containerEl.addEventListener('pointerdown', containerEl.__rmtGlPointerDownHandler, true);
-  }
-} catch {}
-} catch {}
-                } catch {}
-            }
-        } else if (!__rmtDidInitGL) {
+        }if (!__rmtDidInitGL) {
             try {
-                console.info('RMT: WebGL2 unavailable or failed to initialize; running Tapspace DOM mode');
+                console.info('RMT: WebGL2 unavailable or failed to initialize; Workspace not initialized');
             } catch {}
         }
     } catch (e) {
         console.warn('WebGL2 renderer initialization failed', e);
     }
 
-    const canvasEl = document.querySelector('.myspaceapp');
-    canvasEl.addEventListener('dragover', (event) => {
-        try {
-            const types = Array.from(event.dataTransfer?.types || []);
-            if (types.includes('application/json') || types.includes('text/plain')) {
-                event.preventDefault();
-                // Hint a copy action for better UX
-                try { event.dataTransfer.dropEffect = 'copy'; } catch {}
-            }
-        } catch {
-            // Be permissive if probing types fails
-            event.preventDefault();
-        }
-    }, false);
-    canvasEl.addEventListener('drop', (event) => {
-        // Always prevent default when we intend to accept drops
-        event.preventDefault();
-    
-        const dropX = event.clientX;
-        const dropY = event.clientY;
-    
-        // Try to resolve a DOM target first (legacy/Tapspace path)
-        const elements = document.elementsFromPoint(dropX, dropY);
-        let targetNoteId = null;
-        let targetContainer = null;
-        for (const el of elements) {
-            const container = el.closest ? el.closest('[data-note-id]') : null;
-            if (container) {
-                targetContainer = container;
-                break;
-            }
-        }
-        if (targetContainer) {
-            targetNoteId = Number(targetContainer.getAttribute('data-note-id'));
-        }
-    
-        // If no DOM target and GL workspace is active, use GPU picking at drop point
-        if (targetNoteId == null) {
-            try {
-                if (glWorkspace && typeof glWorkspace.pickAt === 'function') {
-                    const hit = glWorkspace.pickAt(dropX, dropY, 4);
-                    if (hit && hit.type === 'note') {
-                        targetNoteId = Number(hit.id);
-                    }
-                }
-            } catch {}
-        }
-    
-        // Fallback: current selection, otherwise BaseNote
-        if (targetNoteId == null) {
-            targetNoteId = (currentSelectedNote && currentSelectedNote.id != null)
-              ? Number(currentSelectedNote.id)
-              : 0;
-        }
-    
-        // Read the transferred data (support both application/json and text/plain)
-        let raw = null;
-        try {
-            raw = event.dataTransfer.getData('application/json');
-            if (!raw) raw = event.dataTransfer.getData('text/plain');
-        } catch {}
-        if (!raw) {
-            console.warn('Drop ignored: no transferable data payload found');
-            return;
-        }
-    
-        let data;
-        try {
-            data = JSON.parse(raw);
-        } catch (err) {
-            console.error('Could not parse dropped module data', err);
-            return;
-        }
-    
-        let targetNote = myModule.getNoteById(Number(targetNoteId));
-        if (!targetNote) targetNote = myModule.baseNote;
-    
-        importModuleAtTarget(targetNote, data);
-    }, false);
 
-// Mobile fallback: import module JSON from clipboard paste (supports long-press copy + paste on mobile)
-document.addEventListener('paste', (event) => {
+// Accept module JSON drops from the Module Bar onto the workspace (GL-only)
+const canvasEl = document.querySelector('.myspaceapp');
+if (canvasEl) {
+  canvasEl.addEventListener('dragover', (event) => {
     try {
-        const cd = event.clipboardData;
-        if (!cd) return;
-        let raw = '';
-        try { raw = cd.getData('application/json'); } catch {}
-        if (!raw) { try { raw = cd.getData('text/plain'); } catch {} }
-        if (!raw) return;
+      const types = Array.from(event.dataTransfer?.types || []);
+      if (types.includes('application/json') || types.includes('text/plain')) {
+        event.preventDefault();
+        // Hint a copy action for better UX
+        try { event.dataTransfer.dropEffect = 'copy'; } catch {}
+      }
+    } catch {
+      // Be permissive if probing types fails
+      event.preventDefault();
+    }
+  }, false);
 
-        let data = null;
-        try { data = JSON.parse(raw); } catch { return; }
+  canvasEl.addEventListener('drop', (event) => {
+    // Always prevent default when we intend to accept drops
+    event.preventDefault();
 
-        // Choose a sensible target: selected note if any, otherwise BaseNote
-        let targetNote = currentSelectedNote || myModule.baseNote;
-        if (!targetNote) targetNote = myModule.baseNote;
+    const dropX = event.clientX;
+    const dropY = event.clientY;
 
-        importModuleAtTarget(targetNote, data);
-        try { notify('Module imported from clipboard', 'success'); } catch {}
+    // Try to resolve a DOM target first (legacy DOM path for triangles, etc.)
+    let targetNoteId = null;
+    try {
+      const elements = document.elementsFromPoint(dropX, dropY);
+      for (const el of elements) {
+        const container = el.closest ? el.closest('[data-note-id]') : null;
+        if (container) {
+          targetNoteId = Number(container.getAttribute('data-note-id'));
+          break;
+        }
+      }
     } catch {}
-}, false);
+
+    // If no DOM target and GL workspace is active, use GPU picking at drop point
+    if (targetNoteId == null) {
+      try {
+        if (glWorkspace && typeof glWorkspace.pickAt === 'function') {
+          const hit = glWorkspace.pickAt(dropX, dropY, 4);
+          if (hit) {
+            if (hit.type === 'base') {
+              targetNoteId = 0;
+            } else if (hit.type === 'note' || hit.type === 'measure') {
+              targetNoteId = Number(hit.id);
+            }
+          }
+        }
+      } catch {}
+    }
+
+    // Fallback: current selection, otherwise BaseNote
+    if (targetNoteId == null) {
+      targetNoteId = (currentSelectedNote && currentSelectedNote.id != null)
+        ? Number(currentSelectedNote.id)
+        : 0;
+    }
+
+    // Read the transferred data (Module Bar sets application/json and text/plain)
+    let raw = null;
+    try {
+      raw = event.dataTransfer.getData('application/json');
+      if (!raw) raw = event.dataTransfer.getData('text/plain');
+    } catch {}
+    if (!raw) {
+      // No transferable data payload found
+      return;
+    }
+
+    let data = null;
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      // Not valid JSON
+      return;
+    }
+
+    // Basic sanity check to avoid accepting arbitrary content
+    const looksLikeModule = !!(data && (data.baseNote || data.notes || data.filename));
+    if (!looksLikeModule) return;
+
+    let targetNote = myModule.getNoteById(Number(targetNoteId));
+    if (!targetNote) targetNote = myModule.baseNote;
+
+    importModuleAtTarget(targetNote, data);
+  }, false);
+}
     let centerPoint = null;
   
     let currentSelectedNote = null;
 
-    if (!isWebGL2RendererEnabled()) {
-        initializeOctaveIndicators();
-    }
   
     if (domCache.saveModuleBtn) {
         domCache.saveModuleBtn.addEventListener('click', saveModule);
@@ -1825,10 +1394,6 @@ document.addEventListener('paste', (event) => {
                     glWorkspace.camera.ty = centerY - s * baseNoteY;
                     if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
                 } catch {}
-            } else {
-                // Legacy Tapspace path
-                const origin = space.at(0, baseNoteY);
-                viewport.translateTo(origin);
             }
         });
     }
@@ -2119,10 +1684,10 @@ document.addEventListener('paste', (event) => {
             // Immediate incremental render of new notes for fast feedback
             try { renderNotesIncrementally(importedIds); } catch (e) { console.warn('incremental render error', e); }
 
-            // Also refresh GL renderer immediately so user sees result without panning
+            // Also refresh GL workspace immediately so user sees result without panning
             try {
-                if (glRenderer) {
-                    glRenderer.sync({
+                if (glWorkspace) {
+                    glWorkspace.sync({
                         evaluatedNotes,
                         module: myModule,
                         xScaleFactor,
@@ -2130,7 +1695,7 @@ document.addEventListener('paste', (event) => {
                         selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
                     });
                 }
-            } catch (e) { console.warn('glRenderer immediate sync after import failed', e); }
+            } catch (e) { console.warn('glWorkspace immediate sync after import failed', e); }
 
             // Immediate UI + history updates to avoid relying on throttled idle callbacks
             try {
@@ -2151,7 +1716,6 @@ document.addEventListener('paste', (event) => {
     }
     
     function animationLoop() {
-        if (!glRenderer && !glWorkspace) { updateOctaveIndicators(); }
         updatePlayhead();
         updateMeasureBarPositions();
         if (glWorkspace) {
@@ -2170,135 +1734,40 @@ document.addEventListener('paste', (event) => {
                 }
             } catch {}
         }
-        if (glRenderer) {
-            try {
-                glRenderer.updateViewportBasis(computeWorldToScreenAffine());
-                glRenderer.setPlayhead(playheadTime);
-                // Event-driven sync: only push scene buffers during interactions (e.g., drag/resize)
-                if (glTempOverrides) {
-                    glRenderer.sync({
-                        evaluatedNotes,
-                        module: myModule,
-                        xScaleFactor,
-                        yScaleFactor,
-                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
-                        tempOverrides: glTempOverrides
-                    });
-                }
-            } catch {}
-        }
         requestAnimationFrame(animationLoop);
     }
     requestAnimationFrame(animationLoop);
 
     function bringSelectedNoteToFront(note, clickedElement) {
-        if (!note || !clickedElement) return;
-        
-        if (typeof updateStackClickSelectedNote === 'function') {
-            updateStackClickSelectedNote(note.id);
-        }
-        
-        const noteId = note.id;
-        const allItems = space.getChildren();
-        
-        for (const item of allItems) {
-            if (item.element && 
-                item.element.querySelector && 
-                item.element.querySelector(`.note-content[data-note-id="${noteId}"]`)) {
-                
-                if (!originalNoteOrder.has(noteId)) {
-                    const parent = item.getParent();
-                    if (parent) {
-                        const siblings = parent.getChildren();
-                        const index = siblings.indexOf(item);
-                        originalNoteOrder.set(noteId, {
-                            parent: parent,
-                            index: index,
-                            originalPointerEvents: item.element.querySelector(`.note-content[data-note-id="${noteId}"]`).style.pointerEvents || 'auto'
-                        });
-                    }
-                }
-                
-                item.bringToFront();
-                lastSelectedNote = note;
-                return;
+        try {
+            if (!note) return;
+            if (typeof updateStackClickSelectedNote === 'function') {
+                updateStackClickSelectedNote(note.id);
             }
-        }
+            lastSelectedNote = note;
+            // Maintain GL selection ordering only; no legacy DOM operations
+            currentSelectedNote = note;
+            try { syncRendererSelection(); } catch {}
+        } catch {}
     }
     
     function restoreNotePointerEvents(note) {
-        if (!note || !originalNoteOrder.has(note.id)) return;
-        
-        const noteData = originalNoteOrder.get(note.id);
-        const allItems = space.getChildren();
-        
-        for (const item of allItems) {
-            if (item.element && 
-                item.element.querySelector && 
-                item.element.querySelector(`.note-content[data-note-id="${note.id}"]`)) {
-                
-                const noteContent = item.element.querySelector(`.note-content[data-note-id="${note.id}"]`);
-                if (noteContent) {
-                    noteContent.style.pointerEvents = noteData.originalPointerEvents || 'auto';
-                }
-                
-                break;
-            }
-        }
+        // No-op in GL-only mode; DOM note elements are not used
+        return;
     }
     
     function restoreNotePosition(note) {
-        if (!note || !originalNoteOrder.has(note.id)) return;
-        
-        const noteData = originalNoteOrder.get(note.id);
-        const allItems = space.getChildren();
-        let noteItem = null;
-        
-        for (const item of allItems) {
-            if (item.element && 
-                item.element.querySelector && 
-                item.element.querySelector(`.note-content[data-note-id="${note.id}"]`)) {
-                noteItem = item;
-                break;
+        // No-op in GL-only mode; selection/z-order handled by renderer
+        try {
+            if (note && originalNoteOrder.has(note.id)) {
+                originalNoteOrder.delete(note.id);
             }
-        }
-        
-        if (!noteItem || !noteData.parent) return;
-        
-        const currentChildren = noteData.parent.getChildren();
-        
-        if (noteData.index >= 0 && noteData.index < currentChildren.length) {
-            if (noteData.index > 0) {
-                const targetSibling = currentChildren[noteData.index];
-                if (targetSibling) {
-                    noteItem.sendBelow(targetSibling);
-                }
-            } else {
-                noteItem.sendToBack();
-            }
-        }
-        
-        const noteContent = noteItem.element.querySelector(`.note-content[data-note-id="${note.id}"]`);
-        if (noteContent) {
-            noteContent.style.pointerEvents = noteData.originalPointerEvents || 'auto';
-        }
-        
-        originalNoteOrder.delete(note.id);
+        } catch {}
     }
 
     function clearLastSelectedNote() {
-        if (lastSelectedNote) {
-            restoreNotePosition(lastSelectedNote);
-            lastSelectedNote = null;
-        }
-        
-        originalNoteOrder.forEach((noteData, noteId) => {
-            const note = myModule.getNoteById(parseInt(noteId, 10));
-            if (note) {
-                restoreNotePosition(note);
-            }
-        });
-        originalNoteOrder.clear();
+        lastSelectedNote = null;
+        try { originalNoteOrder.clear(); } catch {}
     }
 
     function showNoteVariables(note, clickedElement, measureId = null) {
@@ -2376,21 +1845,8 @@ document.addEventListener('paste', (event) => {
     }
       
     function updateZoomableBehavior() {
-        // In Workspace mode, always disable Tapspace zoom/pan to avoid input conflicts
-        if (glWorkspace) {
-            try { viewport.zoomable(false); } catch {}
-            return;
-        }
-        if (isTrackingEnabled) {
-            viewport.zoomable(false);
-        } else {
-            viewport.zoomable({
-                keyboardPanArrows: true,
-                keyboardPanWasd: false,
-                keyboardZoomPlusMinus: true,
-                wheelZoomInvert: false
-            });
-        }
+        // Zoom/pan is managed entirely by GL Workspace
+        return;
     }
       
     function frequencyToY(freq) {
@@ -2411,73 +1867,9 @@ document.addEventListener('paste', (event) => {
     }
       
     function createBaseNoteDisplay() {
-        if (isWebGL2GLOutputOnlyEnabled()) {
-            // In GL-only mode we do not create the DOM BaseNote circle; GL draws it.
-            return null;
-        }
-        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
-        const baseNoteY = frequencyToY(baseNoteFreq);
-        const x = -50;
-        const yOffset = -11;
-      
-        const baseNoteCircle = tapspace.createItem(`
-          <div class="base-note-circle" style="
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            background-color: #ffa800;
-            border: 1px solid #636363;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: border-color 0.3s ease, box-shadow 0.3s ease;
-          ">
-            <div class="base-note-fraction">
-              <div class="fraction-numerator"></div>
-              <div class="fraction-line"></div>
-              <div class="fraction-denominator"></div>
-            </div>
-          </div>
-        `);
-
-        if (isLocked) {
-            baseNoteCircle.element.style.pointerEvents = 'none';
-            const allChildren = baseNoteCircle.element.querySelectorAll('*');
-            allChildren.forEach(child => {
-                child.style.pointerEvents = 'none';
-            });
-        }
-      
-        baseNoteCircle.element.setAttribute('data-note-id', myModule.baseNote.id);
-      
-        const baseNoteContent = baseNoteCircle.element.querySelector('.base-note-circle');
-        baseNoteCircle.element.addEventListener('mouseenter', () => {
-            baseNoteContent.style.borderColor = 'white';
-            baseNoteContent.style.boxShadow =
-                '0 0 5px #ffa800, 0 0 10px #ffa800, 0 0 15px #ffa800';
-        });
-        baseNoteCircle.element.addEventListener('mouseleave', () => {
-            baseNoteContent.style.borderColor = '#636363';
-            baseNoteContent.style.boxShadow = 'none';
-        });
-      
-        baseNoteCircle.element.addEventListener('pointerup', function(e) {
-            if (e.pointerType === 'touch') {
-            }
-        }, true);
-      
-        baseNoteCircle.element.id = 'baseNoteCircle';
-        baseNoteCircle.setSize({ width: 40, height: 40 });
-        space.addChild(baseNoteCircle, { x: x, y: baseNoteY + yOffset });
-      
-        updateBaseNoteFraction();
-        setupBaseNoteClickHandler();
-      
-        centerPoint = space.at(0, baseNoteY);
-        viewport.translateTo(centerPoint);
-      
-        return baseNoteCircle;
+        // Legacy BaseNote DOM removed; GL Workspace renders the BaseNote.
+        // Stub maintained for legacy callers.
+        return null;
     }
     
     function updateBaseNoteFraction() {
@@ -2504,15 +1896,8 @@ document.addEventListener('paste', (event) => {
     }
     
     function updateBaseNotePosition() {
-        const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
-        const baseNoteY = frequencyToY(baseNoteFreq);
-        const x = -50;
-        const yOffset = -10;
-
-        const baseNoteCircle = space.getChildren().find(child => child.element.id === 'baseNoteCircle');
-        if (baseNoteCircle) {
-            baseNoteCircle.translateTo(space.at(x, baseNoteY + yOffset));
-        }
+        // GL-only mode: BaseNote DOM is not used; no-op.
+        return;
     }
     
     let baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
@@ -2520,8 +1905,17 @@ document.addEventListener('paste', (event) => {
     
     let baseNoteDisplay = createBaseNoteDisplay();
     
-    centerPoint = space.at(0, baseNoteY);
-    viewport.translateTo(centerPoint);
+    if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+        try {
+            const rect = glWorkspace.containerEl.getBoundingClientRect();
+            const s = glWorkspace.camera.scale || 1;
+            const cx = rect.width * 0.5;
+            const cy = rect.height * 0.5;
+            glWorkspace.camera.tx = cx - s * 0;
+            glWorkspace.camera.ty = cy - s * baseNoteY;
+            if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+        } catch {}
+    }
     
     let earliestStart = Infinity;
     let latestEnd = 0;
@@ -3051,2047 +2445,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
  // === End GL move helpers ===
 
     function createNoteElement(note, index) {
-        const isSilence = note.getVariable('startTime') && note.getVariable('duration') && !note.getVariable('frequency');
-        
-        let fractionStr, numerator, denominator;
-        
-        if (!isSilence) {
-            fractionStr = getFrequencyRatio(note);
-            const parts = fractionStr.split('/');
-            numerator = parts[0] || "undefined";
-            denominator = parts[1] || "undefined";
-        } else {
-            numerator = "silence";
-            denominator = "";
-        }
-        
-        const noteColor = getColorForNote(note);
-
-        // No text measurement needed; the fraction bar will stretch to the container width via CSS (width: 100%)
-
-        const noteRect = tapspace.createItem(`
-            <div class="note-rect" style="
-            overflow: visible;
-            width: 100%;
-            height: 100%;
-            position: relative;
-            pointer-events: auto;
-            display: flex;
-            align-items: center;
-            box-sizing: border-box;
-            ">
-            <div class="note-content" data-note-id="${note.id}" style="
-                overflow: hidden;
-                width: 100%;
-                height: 100%;
-                background-color: ${isSilence ? 'rgba(50, 50, 50, 0.7)' : noteColor};
-                border-radius: 6px;
-                border: ${isSilence ? '1px dashed #636363' : '1px solid #636363'};
-                transition: border-color 0.3s ease, box-shadow 0.3s ease;
-                display: flex;
-                align-items: center;
-                padding-left: 16px;
-                position: relative;
-            ">
-                <div class="note-id" style="
-                position: absolute;
-                top: 0;
-                left: 9px;
-                color: #ffa800;
-                font-size: 2px;
-                font-family: 'Roboto Mono', 'IBM Plex Mono', monospace;
-                line-height: 1;
-                padding: 1px;
-                ">[${note.id}]</div>
-                
-                <div style="
-                display: flex;
-                align-items: center;
-                font-size: 6px;
-                font-family: 'Roboto Mono', 'IBM Plex Mono', monospace;
-                font-weight: 400;
-                color: white;
-                text-shadow: 0 0 1px black;
-                pointer-events: none;
-                height: 100%;
-                ">
-                <div style="
-                    position: relative;
-                    display: flex;
-                    flex-direction: column;
-                    justify-content: center;
-                    height: 100%;
-                ">
-                    ${isSilence ? `
-                    <div style="
-                        position: relative;
-                        display: flex;
-                        flex-direction: column;
-                        align-items: flex-start;
-                    ">
-                        <span>silence</span>
-                    </div>
-                    ` : `
-                    <div style="
-                        position: relative;
-                        display: flex;
-                        flex-direction: column;
-                        align-items: flex-start;
-                        gap: 0px;
-                    ">
-                        <span>${numerator}</span>
-                        <div style="
-                        width: 100%;
-                        height: 1px;
-                        background: white;
-                        margin: 0;
-                        "></div>
-                        <span>${denominator}</span>
-                    </div>
-                    `}
-                </div>
-                </div>
-            </div>
-            </div>
-        `);
-
-        if (isLocked) {
-            noteRect.element.style.pointerEvents = 'none';
-            const allChildren = noteRect.element.querySelectorAll('*');
-            allChildren.forEach(child => {
-                child.style.pointerEvents = 'none';
-            });
-        }
-
-        noteRect.element.setAttribute('data-note-id', note.id);
-
-        const noteContentElem = noteRect.element.querySelector('.note-content');
-        noteRect.element.addEventListener('mouseenter', () => {
-            noteContentElem.style.borderColor = 'white';
-            noteContentElem.style.boxShadow = '0 0 5px #ffa800, 0 0 10px #ffa800, 0 0 15px #ffa800';
-        });
-        noteRect.element.addEventListener('mouseleave', () => {
-            noteContentElem.style.borderColor = '#636363';
-            noteContentElem.style.boxShadow = 'none';
-        });
-
-        addNoteClickHandler(noteRect, note);
-
-        let dragData = {
-            startX: 0,
-            hasDragged: false,
-            hasCaptured: false,
-            originalBeatOffset: 0,
-            originalStartTime: 0,
-            originalRaw: "",
-            reference: "module.baseNote",
-            pointerIsDown: false,
-            pointerId: null,
-            moveHandler: null,
-            upHandler: null,
-            cancelHandler: null
-        };
-
-        noteRect.element.addEventListener('pointerdown', (e) => {
-            // If the pointer is on the resize handle, let the resize handler manage it
-            if (e.target && (e.target.closest('.resize-handle-icon') || e.target.closest('[style*="cursor: ew-resize"]'))) {
-                return;
-            }
-            if (isLocked) {
-                e.preventDefault();
-                e.stopPropagation();
-                return;
-            }
-            cleanupDragState();
-            if (isLocked) return;
-            
-            dragData.startX = e.clientX;
-            dragData.hasDragged = false;
-            dragData.hasCaptured = false;
-            dragData.pointerIsDown = true;
-            dragData.pointerId = e.pointerId;
-            
-            let origStart = new Fraction(note.getVariable('startTime').valueOf());
-            dragData.originalStartTime = origStart;
-            dragData.originalRaw = note.variables.startTimeString || "";
-            
-            let referenceMatch = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.originalRaw);
-            
-            if (referenceMatch) {
-                dragData.reference = "module.getNoteById(" + referenceMatch[1] + ")";
-            } else {
-                dragData.reference = "module.baseNote";
-            }
-            
-            let depNote;
-            if (dragData.reference === "module.baseNote") {
-                depNote = myModule.baseNote;
-            } else {
-                let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
-                depNote = m ? myModule.getNoteById(parseInt(m[1], 10)) : myModule.baseNote;
-            }
-            dragData.refStart = new Fraction(depNote.getVariable('startTime').valueOf());
-            
-            let baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
-            let beatLength = new Fraction(60).div(baseTempo);
-            
-            dragData.originalBeatOffsetFraction = origStart.sub(dragData.refStart).div(beatLength);
-            dragData.originalBeatOffset = dragData.originalBeatOffsetFraction;
-            
-            dragData.baselineDependencies = getMovedNotes(note, origStart, origStart);
-            
-            dragData.moveHandler = handlePointerMove.bind(null, note);
-            dragData.upHandler = handlePointerUp.bind(null, note);
-            dragData.cancelHandler = handlePointerCancel.bind(null, note);
-            
-            document.addEventListener('pointermove', dragData.moveHandler);
-            document.addEventListener('pointerup', dragData.upHandler);
-            document.addEventListener('pointercancel', dragData.cancelHandler);
-        });
-        
-        function cleanupDragState() {
-            if (dragData.moveHandler) {
-                document.removeEventListener('pointermove', dragData.moveHandler);
-                dragData.moveHandler = null;
-            }
-            if (dragData.upHandler) {
-                document.removeEventListener('pointerup', dragData.upHandler);
-                dragData.upHandler = null;
-            }
-            if (dragData.cancelHandler) {
-                document.removeEventListener('pointercancel', dragData.cancelHandler);
-                dragData.cancelHandler = null;
-            }
-            
-            if (dragData.hasCaptured && dragData.pointerId !== null) {
-                try {
-                    noteRect.element.releasePointerCapture(dragData.pointerId);
-                } catch (err) {
-                    console.warn('Error releasing pointer capture:', err);
-                }
-            }
-            
-            const overlayContainer = document.getElementById('drag-overlay-container');
-            if (overlayContainer) {
-                overlayContainer.remove();
-            }
-            
-            dragData.hasDragged = false;
-            dragData.hasCaptured = false;
-            dragData.pointerIsDown = false;
-            dragData.pointerId = null;
-
-            // Ensure any GPU preview is cleared when drag state resets
-            try {
-                if (glRenderer && typeof glRenderer.clearTempOverridesPreview === 'function') {
-                    glRenderer.clearTempOverridesPreview(note.id);
-                }
-            } catch {}
-        }
-        
-        function handlePointerMove(note, e) {
-            if (!dragData.pointerIsDown || e.pointerId !== dragData.pointerId) return;
-            
-            if (!dragData.originalBeatOffsetFraction) return;
-            
-            const deltaX = e.clientX - dragData.startX;
-            if (!dragData.hasDragged && Math.abs(deltaX) > 5) {
-                dragData.hasDragged = true;
-                
-                try {
-                    noteRect.element.setPointerCapture(dragData.pointerId);
-                    dragData.hasCaptured = true;
-                } catch (err) {
-                    console.warn('Error setting pointer capture:', err);
-                }
-                
-                if (isPlaying) {
-                    pause();
-                }
-                
-                let overlayContainer = document.getElementById('drag-overlay-container');
-                if (!overlayContainer) {
-                    overlayContainer = document.createElement('div');
-                    overlayContainer.id = 'drag-overlay-container';
-                    overlayContainer.style.position = 'fixed';
-                    overlayContainer.style.top = '0';
-                    overlayContainer.style.left = '0';
-                    overlayContainer.style.width = '100%';
-                    overlayContainer.style.height = '100%';
-                    overlayContainer.style.pointerEvents = 'none';
-                    overlayContainer.style.zIndex = '1000';
-                    
-                    document.body.appendChild(overlayContainer);
-                } else {
-                    while (overlayContainer.firstChild) {
-                        overlayContainer.removeChild(overlayContainer.firstChild);
-                    }
-                }
-                
-                if (dragData.reference === "module.baseNote") {
-                    dragData.originalParent = myModule.baseNote;
-                } else {
-                    let m = /module\.getNoteById\(\s*(\d+)\s*\)/.exec(dragData.reference);
-                    dragData.originalParent = m ? myModule.getNoteById(parseInt(m[1], 10)) : myModule.baseNote;
-                }
-                dragData.originalReference = dragData.reference;
-                
-                dragData.originalStartTimeFraction = new Fraction(note.getVariable('startTime').valueOf());
-            }
-            
-            if (dragData.hasDragged) {
-                const spacePoint1 = space.at(0, 0);
-                const spacePoint2 = space.at(100, 0);
-                
-                const viewportPoint1 = spacePoint1.transitRaw(viewport);
-                const viewportPoint2 = spacePoint2.transitRaw(viewport);
-                
-                const viewportDistance = Math.sqrt(
-                    Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
-                    Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
-                );
-                const scale = viewportDistance / 100;
-                
-                let adjustedDeltaX = deltaX / (scale * xScaleFactor);
-                
-                const numerator = Math.round(adjustedDeltaX * 1000);
-                const denominator = 200 * 1000;
-                let deltaTime = new Fraction(numerator, denominator);
-                
-                let baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
-                let beatLength = new Fraction(60).div(baseTempo);
-                let step = beatLength.div(new Fraction(4));
-                let ratio = deltaTime.div(step);
-                let nearest = new Fraction(Math.round(Number(ratio)));
-                let snappedDelta = step.mul(nearest);
-                
-                let newBeatOffsetFraction = dragData.originalBeatOffsetFraction.add(snappedDelta.div(beatLength));
-                
-                let newStartTimeFraction = dragData.refStart.add(newBeatOffsetFraction.mul(beatLength));
-                
-                const tolerance = new Fraction(1, 100);
-                let actualParent;
-                let actualParentStartTime;
-                
-                if (newStartTimeFraction.sub(dragData.originalStartTimeFraction).abs().compare(tolerance) < 0) {
-                    actualParent = dragData.originalParent;
-                    actualParentStartTime = new Fraction(actualParent.getVariable('startTime').valueOf());
-                } else {
-                    const isDraggingForward = newStartTimeFraction.compare(dragData.originalStartTimeFraction) > 0;
-                    
-                    let currentParent = dragData.originalParent;
-                    let currentParentStartTime = new Fraction(currentParent.getVariable('startTime').valueOf());
-                    
-                    if (isDraggingForward) {
-                        const isMeasure = currentParent.id !== 0 && 
-                                       !currentParent.variables.duration && 
-                                       !currentParent.variables.frequency;
-                        
-                        if (isMeasure) {
-                            let foundNextMeasure = true;
-                            while (foundNextMeasure) {
-                                const measureLength = myModule.findMeasureLength(currentParent);
-                                const measureEndTime = currentParentStartTime.add(measureLength);
-                                
-                                if (newStartTimeFraction.compare(measureEndTime) >= 0) {
-                                    const dependentMeasures = [];
-                                    
-                                    for (const id in myModule.notes) {
-                                        const checkNote = myModule.getNoteById(parseInt(id, 10));
-                                        if (!checkNote || !checkNote.variables || !checkNote.variables.startTimeString) continue;
-                                        
-                                        const startTimeString = checkNote.variables.startTimeString;
-                                        const regex = new RegExp(`getNoteById\\(\\s*${currentParent.id}\\s*\\)`);
-                                        
-                                        if (regex.test(startTimeString) && 
-                                            checkNote.variables.startTime && 
-                                            !checkNote.variables.duration && 
-                                            !checkNote.variables.frequency) {
-                                            dependentMeasures.push(checkNote);
-                                        }
-                                    }
-                                    
-                                    if (dependentMeasures.length > 0) {
-                                        dependentMeasures.sort((a, b) => 
-                                            a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf()
-                                        );
-                                        
-                                        currentParent = dependentMeasures[0];
-                                        currentParentStartTime = new Fraction(currentParent.getVariable('startTime').valueOf());
-                                        foundNextMeasure = true;
-                                    } else {
-                                        foundNextMeasure = false;
-                                    }
-                                } else {
-                                    foundNextMeasure = false;
-                                }
-                            }
-                        }
-                    } else {
-                        if (newStartTimeFraction.compare(currentParentStartTime) < 0) {
-                            const ancestorChain = [];
-                            let ancestor = currentParent;
-                            
-                            while (ancestor && ancestor.id !== 0) {
-                                if (ancestor.variables && ancestor.variables.startTimeString) {
-                                    const parentMatch = /getNoteById\((\d+)\)/.exec(ancestor.variables.startTimeString);
-                                    if (parentMatch) {
-                                        const parentId = parseInt(parentMatch[1], 10);
-                                        ancestor = myModule.getNoteById(parentId);
-                                        if (ancestor) {
-                                            ancestorChain.push(ancestor);
-                                        }
-                                    } else if (ancestor.variables.startTimeString.includes("module.baseNote")) {
-                                        ancestorChain.push(myModule.baseNote);
-                                        break;
-                                    } else {
-                                        break;
-                                    }
-                                } else {
-                                    break;
-                                }
-                            }
-                            
-                            if (ancestorChain.length === 0 || ancestorChain[ancestorChain.length - 1].id !== 0) {
-                                ancestorChain.push(myModule.baseNote);
-                            }
-                            
-                            for (let i = 0; i < ancestorChain.length; i++) {
-                                const ancestor = ancestorChain[i];
-                                const ancestorStartTime = new Fraction(ancestor.getVariable('startTime').valueOf());
-                                
-                                if (newStartTimeFraction.compare(ancestorStartTime) >= 0) {
-                                    currentParent = ancestor;
-                                    currentParentStartTime = ancestorStartTime;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    const baseNoteStart = new Fraction(myModule.baseNote.getVariable('startTime').valueOf());
-                    if (newStartTimeFraction.compare(baseNoteStart) < 0) {
-                        newStartTimeFraction = baseNoteStart;
-                        currentParent = myModule.baseNote;
-                        currentParentStartTime = baseNoteStart;
-                    }
-
-                    actualParent = currentParent;
-                    actualParentStartTime = currentParentStartTime;
-                }
-                
-                if (newStartTimeFraction.compare(actualParentStartTime) < 0) {
-                    newStartTimeFraction = new Fraction(actualParentStartTime);
-                    
-                    const timeOffset = newStartTimeFraction.sub(dragData.refStart);
-                    newBeatOffsetFraction = timeOffset.div(beatLength);
-                }
-                
-                dragData.currentDepNote = actualParent;
-                dragData.newStartTimeFraction = newStartTimeFraction;
-                
-                let newStartTimeNum = Number(newStartTimeFraction.valueOf());
-                
-                const xCoord = newStartTimeNum * 200 * xScaleFactor;
-                const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
-                const screenPos = point.transitRaw(viewport);
-                
-                // Live GL preview while dragging note position (duration unchanged)
-                try {
-                    if (glRenderer) {
-                        const durSec = Number(note.getVariable('duration').valueOf() || 0);
-                        const ok = (typeof glRenderer.setTempOverridesPreview === 'function') &&
-                                   glRenderer.setTempOverridesPreview(note.id, newStartTimeNum, durSec);
-                        if (!ok) {
-                            // Fallback: use tempOverrides + sync for preview
-                            glTempOverrides = {
-                                [note.id]: { startSec: newStartTimeNum, durationSec: durSec }
-                            };
-                            glRenderer.sync({
-                                evaluatedNotes,
-                                module: myModule,
-                                xScaleFactor,
-                                yScaleFactor,
-                                selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
-                                tempOverrides: glTempOverrides
-                            });
-                        }
-                    }
-                } catch {}
-                 
-                updateDragOverlay(note, newStartTimeNum, null, 'dragged');
-                
-                const parentStartTime = actualParent.getVariable('startTime').valueOf();
-                updateDragOverlay(actualParent, parentStartTime, null, 'parent');
-                
-                let movedNotes = getMovedNotes(note, newStartTimeFraction, dragData.originalStartTime);
-                
-                if (movedNotes.length === 0) {
-                    movedNotes = dragData.baselineDependencies || [];
-                }
-                
-                let overlayContainer = document.getElementById('drag-overlay-container');
-                if (overlayContainer) {
-                    [...overlayContainer.children].forEach(overlayElem => {
-                        if (overlayElem.id && overlayElem.id.indexOf("drag-overlay-dep-") === 0) {
-                            const depId = parseInt(overlayElem.id.replace("drag-overlay-dep-", ""), 10);
-                            if (!movedNotes.some(item => item.note.id === depId)) {
-                                overlayElem.remove();
-                                
-                                const connectionLine = document.getElementById(`connection-line-${depId}`);
-                                if (connectionLine) {
-                                    connectionLine.remove();
-                                }
-                            }
-                        }
-                    });
-                }
-                
-                movedNotes.forEach(item => {
-                    updateDragOverlay(item.note, Number(item.newStart.valueOf()), item.note.id, 'dependency');
-                });
-                
-                dragData.currentDepNote = actualParent;
-                dragData.newStartTimeFraction = newStartTimeFraction;
-                dragData.newBeatOffsetFraction = newBeatOffsetFraction;
-                
-                dragData.reference = actualParent.id === 0 ? 
-                    "module.baseNote" : 
-                    `module.getNoteById(${actualParent.id})`;
-            }
-        }
-        
-        function handlePointerUp(note, e) {
-            if (e.pointerId !== dragData.pointerId) return;
-            
-            if (dragData.hasDragged) {
-                const newStartTimeFraction = dragData.newStartTimeFraction;
-                const originalStartTimeFraction = dragData.originalStartTimeFraction;
-                
-                const currentDepNote = dragData.currentDepNote || myModule.baseNote;
-                const originalParent = dragData.originalParent;
-                
-                const originalStartTimeString = note.variables.startTimeString || '';
-                const durationDependencyMatch = originalStartTimeString.match(/module\.getNoteById\((\d+)\)\.getVariable\('duration'\)/);
-                
-                const tolerance = new Fraction(1, 100);
-                
-                const keepingSameParent = (originalParent && currentDepNote && originalParent.id === currentDepNote.id) ||
-                                         (newStartTimeFraction && originalStartTimeFraction && 
-                                          newStartTimeFraction.sub(originalStartTimeFraction).abs().compare(tolerance) < 0);
-                
-                if (durationDependencyMatch && keepingSameParent) {
-                    const depId = durationDependencyMatch[1];
-                    const depNote = myModule.getNoteById(parseInt(depId, 10));
-                    
-                    if (depNote && depNote.id === currentDepNote.id) {
-                        const depStartTime = depNote.getVariable('startTime').valueOf();
-                        const depDuration = depNote.getVariable('duration').valueOf();
-                        const originalPosition = depStartTime + depDuration;
-                        
-                        const dragOffset = newStartTimeFraction.valueOf() - originalPosition;
-                        
-                        let newRaw;
-                        
-                        if (Math.abs(dragOffset) < 0.01) {
-                            newRaw = `module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration'))`;
-                        } else {
-                            const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-                            const beatLength = 60 / baseTempo;
-                            const beatOffset = dragOffset / beatLength;
-                            
-                            const offsetFraction = new Fraction(beatOffset);
-                            
-                            if (beatOffset >= 0) {
-                                newRaw = simplifyStartTime(`module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).add(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
-                            } else {
-                                const absOffsetFraction = new Fraction(Math.abs(offsetFraction.valueOf()));
-                                newRaw = simplifyStartTime(`module.getNoteById(${depId}).getVariable('startTime').add(module.getNoteById(${depId}).getVariable('duration')).sub(new Fraction(60).div(module.findTempo(module.getNoteById(${depId}))).mul(new Fraction(${absOffsetFraction.n}, ${absOffsetFraction.d})))`, myModule);
-                            }
-                        }
-                        
-                        note.setVariable('startTime', function() {
-                            return __evalExpr(newRaw, myModule);
-                        });
-                        note.setVariable('startTimeString', newRaw);
-                        
-                        evaluatedNotes = myModule.evaluateModule();
-                        setEvaluatedNotes(evaluatedNotes);
-                        updateVisualNotes(evaluatedNotes);
-                        
-                        // History: ensure moves anchored to a dependency get their own snapshot
-                        try { captureSnapshot(`Move Note ${note.id}`); } catch {}
-                        
-                        e.stopPropagation();
-                        cleanupDragState();
-                        
-                        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
-                        if (noteWidgetVisible && currentSelectedNote) {
-                            if (currentSelectedNote === myModule.baseNote) {
-                                const baseNoteElement = document.querySelector('.base-note-circle');
-                                if (baseNoteElement) {
-                                    showNoteVariables(myModule.baseNote, baseNoteElement);
-                                }
-                            } else {
-                                const selectedElement = document.querySelector(
-                                    `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
-                                    `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
-                                );
-                                
-                                if (selectedElement) {
-                                    if (selectedElement.classList.contains('measure-bar-triangle')) {
-                                        showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
-                                    } else {
-                                        showNoteVariables(currentSelectedNote, selectedElement);
-                                    }
-                                }
-                            }
-                        }
-                        
-                        return;
-                    }
-                }
-                
-                if (newStartTimeFraction && originalStartTimeFraction && 
-                    newStartTimeFraction.sub(originalStartTimeFraction).abs().compare(tolerance) < 0) {
-                    
-                    if (originalParent) {
-                        const originalRawString = note.variables.startTimeString;
-                        
-                        if (dragData.reference !== dragData.originalReference) {
-                            note.setVariable('startTime', function() {
-                                return __evalExpr(originalRawString, myModule);
-                            });
-                            note.setVariable('startTimeString', originalRawString);
-                            
-                            evaluatedNotes = myModule.evaluateModule();
-                            setEvaluatedNotes(evaluatedNotes);
-                            updateVisualNotes(evaluatedNotes);
-                        }
-                    }
-                }
-                else {
-                    if (currentDepNote && newStartTimeFraction) {
-                        const depStartTime = new Fraction(currentDepNote.getVariable('startTime').valueOf());
-                        
-                        const timeOffset = newStartTimeFraction.sub(depStartTime);
-                        
-                        const baseTempo = new Fraction(myModule.baseNote.getVariable('tempo').valueOf());
-                        const beatLength = new Fraction(60).div(baseTempo);
-                        const beatOffset = timeOffset.div(beatLength);
-                        
-                        let depReference = currentDepNote === myModule.baseNote ? 
-                            "module.baseNote" : 
-                            `module.getNoteById(${currentDepNote.id})`;
-                        
-                        const fractionStr = beatOffset.toFraction();
-                        let numerator, denominator;
-                        
-                        if (fractionStr.includes('/')) {
-                            [numerator, denominator] = fractionStr.split('/');
-                        } else {
-                            numerator = fractionStr;
-                            denominator = '1';
-                        }
-                        
-                        let newRaw;
-                        
-                        if (currentDepNote.getVariable('duration')) {
-                            const depDuration = currentDepNote.getVariable('duration').valueOf();
-                            const durationInBeats = depDuration / beatLength.valueOf();
-                            const offsetInBeats = beatOffset.valueOf();
-                            
-                            if (Math.abs(offsetInBeats - durationInBeats) < 0.1) {
-                                newRaw = `${depReference}.getVariable('startTime').add(${depReference}.getVariable('duration'))`;
-                            } else {
-                                newRaw = depReference +
-                                    ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
-                                    ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
-                            }
-                        } else {
-                            newRaw = depReference +
-                                ".getVariable('startTime').add(new Fraction(60).div(module.findTempo(" + depReference +
-                                ")).mul(new Fraction(" + numerator + ", " + denominator + ")))";
-                        }
-                        
-                        const simplifiedRaw = simplifyStartTime(newRaw, myModule);
-                        note.setVariable('startTime', function() {
-                            return __evalExpr(simplifiedRaw, myModule);
-                        });
-                        note.setVariable('startTimeString', simplifiedRaw);
-                        
-                        evaluatedNotes = myModule.evaluateModule();
-                        setEvaluatedNotes(evaluatedNotes);
-                        updateVisualNotes(evaluatedNotes);
-                    }
-                }
-                
-                const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
-                if (noteWidgetVisible && currentSelectedNote) {
-                    if (currentSelectedNote === myModule.baseNote) {
-                        const baseNoteElement = document.querySelector('.base-note-circle');
-                        if (baseNoteElement) {
-                            showNoteVariables(myModule.baseNote, baseNoteElement);
-                        }
-                    } else {
-                        const selectedElement = document.querySelector(
-                            `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
-                            `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
-                        );
-                        
-                        if (selectedElement) {
-                            if (selectedElement.classList.contains('measure-bar-triangle')) {
-                                showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
-                            } else {
-                                showNoteVariables(currentSelectedNote, selectedElement);
-                            }
-                        }
-                    }
-                }
-                
-                if (dragData.hasDragged) {
-                    try { noteRect.element.__rmtSuppressClickOnce = true; } catch {}
-                    try { e.preventDefault(); } catch {}
-                }
-                e.stopPropagation();
-                if (dragData.hasDragged) { try { captureSnapshot(`Move Note ${note.id}`); } catch {} }
-            }
-            
-            cleanupDragState();
-        }
-
-        function handlePointerCancel(note, e) {
-            if (e.pointerId !== dragData.pointerId) return;
-            cleanupDragState();
-        }
-
-        function updateDragOverlay(noteObj, newTime, depId, type) {
-            let overlayContainer = document.getElementById('drag-overlay-container');
-            if (!overlayContainer) {
-                overlayContainer = document.createElement('div');
-                overlayContainer.id = 'drag-overlay-container';
-                overlayContainer.style.position = 'fixed';
-                overlayContainer.style.top = '0';
-                overlayContainer.style.left = '0';
-                overlayContainer.style.width = '100%';
-                overlayContainer.style.height = '100%';
-                overlayContainer.style.pointerEvents = 'none';
-                overlayContainer.style.zIndex = '10000';
-                document.body.appendChild(overlayContainer);
-            }
-            
-            const overlayId = type === 'dragged' ? 'drag-overlay-dragged' : 
-                              type === 'dependency' ? 'drag-overlay-dep-' + depId :
-                              'drag-overlay-parent';
-            let overlayElem = document.getElementById(overlayId);
-            
-            const transform = viewport.getBasis().getRaw();
-            const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-            
-            const isMeasureBar = noteObj.id !== undefined && 
-                               noteObj.getVariable && 
-                               noteObj.getVariable('startTime') && 
-                               !noteObj.getVariable('duration') && 
-                               !noteObj.getVariable('frequency');
-            
-            const isBaseNote = noteObj === myModule.baseNote;
-            
-            const isSilence = noteObj.id !== undefined && 
-                             noteObj.getVariable && 
-                             noteObj.getVariable('startTime') && 
-                             noteObj.getVariable('duration') && 
-                             !noteObj.getVariable('frequency');
-            
-            let xCoord;
-            if (isBaseNote) {
-                xCoord = -29;
-            } else {
-                xCoord = newTime * 200 * xScaleFactor;
-            }
-            
-            const point = new tapspace.geometry.Point(space, { x: xCoord, y: 0 });
-            const screenPos = point.transitRaw(viewport);
-            
-            let yPos = 0;
-            
-            if (isBaseNote) {
-                const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
-                const baseNoteY = frequencyToY(baseNoteFreq);
-                const yOffset = 10;
-                const yPoint = new tapspace.geometry.Point(space, { x: 0, y: baseNoteY + yOffset });
-                const yScreenPos = yPoint.transitRaw(viewport);
-                yPos = yScreenPos.y;
-            } else if (isMeasureBar) {
-                const trianglesContainer = document.getElementById('measureBarTrianglesContainer');
-                if (trianglesContainer) {
-                    const rect = trianglesContainer.getBoundingClientRect();
-                    yPos = rect.top;
-                } else {
-                    yPos = window.innerHeight - 30;
-                }
-            } else if (isSilence) {
-                let parentWithFreq = null;
-                
-                const findParentWithFrequency = (note) => {
-                    if (!note) return null;
-                    
-                    let parentId = null;
-                    const startTimeString = note.variables.startTimeString;
-                    if (startTimeString) {
-                        const match = /getNoteById\((\d+)\)/.exec(startTimeString);
-                        if (match) {
-                            parentId = parseInt(match[1], 10);
-                        }
-                    }
-                    
-                    if (parentId === null && note.parentId !== undefined) {
-                        parentId = note.parentId;
-                    }
-                    
-                    if (parentId === null) {
-                        return myModule.baseNote;
-                    }
-                    
-                    const parentNote = myModule.getNoteById(parentId);
-                    
-                    if (parentNote && parentNote.getVariable && parentNote.getVariable('frequency')) {
-                        return parentNote;
-                    }
-                    
-                    return findParentWithFrequency(parentNote);
-                };
-                
-                parentWithFreq = findParentWithFrequency(noteObj);
-                
-                if (parentWithFreq) {
-                    const frequency = parentWithFreq.getVariable('frequency').valueOf();
-                    const y = frequencyToY(frequency);
-                    const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
-                    const yScreenPos = yPoint.transitRaw(viewport);
-                    yPos = yScreenPos.y;
-                } else {
-                    const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
-                    const y = frequencyToY(baseNoteFreq);
-                    const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
-                    const yScreenPos = yPoint.transitRaw(viewport);
-                    yPos = yScreenPos.y;
-                }
-            } else if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
-                try {
-                    const frequency = noteObj.getVariable('frequency').valueOf();
-                    const y = frequencyToY(frequency);
-                    const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
-                    const yScreenPos = yPoint.transitRaw(viewport);
-                    yPos = yScreenPos.y;
-                } catch (e) {
-                    console.error('Error getting frequency:', e);
-                    yPos = 100;
-                }
-            } else if (noteObj.frequency) {
-                try {
-                    const frequency = typeof noteObj.frequency === 'function' 
-                        ? noteObj.frequency().valueOf() 
-                        : noteObj.frequency.valueOf();
-                    const y = frequencyToY(frequency);
-                    const yPoint = new tapspace.geometry.Point(space, { x: 0, y });
-                    const yScreenPos = yPoint.transitRaw(viewport);
-                    yPos = yScreenPos.y;
-                } catch (e) {
-                    console.error('Error getting frequency from note object:', e);
-                    yPos = 100;
-                }
-            }
-            
-            let width = 100;
-            let height = 20;
-            
-            if (isBaseNote) {
-                width = 40;
-                height = 40;
-            } else if (isMeasureBar) {
-                width = 30;
-                height = 30;
-            } else if (noteObj.getVariable && typeof noteObj.getVariable === 'function') {
-                try {
-                    const duration = noteObj.getVariable('duration').valueOf();
-                    width = duration * 200 * xScaleFactor;
-                } catch (e) {
-                    console.error('Error getting duration:', e);
-                }
-            } else if (noteObj.duration) {
-                try {
-                    const duration = typeof noteObj.duration === 'function'
-                        ? noteObj.duration().valueOf()
-                        : noteObj.duration.valueOf();
-                    width = duration * 200 * xScaleFactor;
-                } catch (e) {
-                    console.error('Error getting duration from note object:', e);
-                }
-            }
-            
-            const origin = new tapspace.geometry.Point(space, { x: 0, y: 0 });
-            const corner = new tapspace.geometry.Point(space, { x: width, y: height });
-            
-            const originScreen = origin.transitRaw(viewport);
-            const cornerScreen = corner.transitRaw(viewport);
-            
-            const screenWidth = Math.abs(cornerScreen.x - originScreen.x);
-            const screenHeight = Math.abs(cornerScreen.y - originScreen.y);
-            
-            let noteColor = getColorForNote(noteObj);
-            
-            function blendColors(color1, color2, ratio) {
-                function parseRgba(color) {
-                    const rgba = color.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
-                    if (rgba) {
-                        return {
-                            r: parseInt(rgba[1]),
-                            g: parseInt(rgba[2]),
-                            b: parseInt(rgba[3]),
-                            a: rgba[4] ? parseFloat(rgba[4]) : 1
-                        };
-                    }
-                    return null;
-                }
-                
-                function parseHex(color) {
-                    let hex = color.replace('#', '');
-                    if (hex.length === 3) {
-                        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-                    }
-                    return {
-                        r: parseInt(hex.substring(0, 2), 16),
-                        g: parseInt(hex.substring(2, 4), 16),
-                        b: parseInt(hex.substring(4, 6), 16),
-                        a: 1
-                    };
-                }
-                
-                function parseHsla(color) {
-                    const hsla = color.match(/hsla?\(([^,]+),\s*([^,]+)%,\s*([^,]+)%(?:,\s*([\d.]+))?\)/);
-                    if (hsla) {
-                        const h = parseFloat(hsla[1]) / 360;
-                        const s = parseFloat(hsla[2]) / 100;
-                        const l = parseFloat(hsla[3]) / 100;
-                        const a = hsla[4] ? parseFloat(hsla[4]) : 1;
-                        
-                        let r, g, b;
-                        
-                        if (s === 0) {
-                            r = g = b = l;
-                        } else {
-                            const hue2rgb = (p, q, t) => {
-                                if (t < 0) t += 1;
-                                if (t > 1) t -= 1;
-                                if (t < 1/6) return p + (q - p) * 6 * t;
-                                if (t < 1/2) return q;
-                                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
-                                return p;
-                            };
-                            
-                            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-                            const p = 2 * l - q;
-                            
-                            r = hue2rgb(p, q, h + 1/3);
-                            g = hue2rgb(p, q, h);
-                            b = hue2rgb(p, q, h - 1/3);
-                        }
-                        
-                        return {
-                            r: Math.round(r * 255),
-                            g: Math.round(g * 255),
-                            b: Math.round(b * 255),
-                            a: a
-                        };
-                    }
-                    return null;
-                }
-                
-                let color1Obj;
-                if (color1.startsWith('rgba') || color1.startsWith('rgb')) {
-                    color1Obj = parseRgba(color1);
-                } else if (color1.startsWith('#')) {
-                    color1Obj = parseHex(color1);
-                } else if (color1.startsWith('hsla') || color1.startsWith('hsl')) {
-                    color1Obj = parseHsla(color1);
-                }
-                
-                let color2Obj;
-                if (color2.startsWith('rgba') || color2.startsWith('rgb')) {
-                    color2Obj = parseRgba(color2);
-                } else if (color2.startsWith('#')) {
-                    color2Obj = parseHex(color2);
-                } else if (color2.startsWith('hsla') || color2.startsWith('hsl')) {
-                    color2Obj = parseHsla(color2);
-                }
-                
-                if (!color1Obj || !color2Obj) {
-                    return color1;
-                }
-                
-                const r = Math.round(color1Obj.r * (1 - ratio) + color2Obj.r * ratio);
-                const g = Math.round(color1Obj.g * (1 - ratio) + color2Obj.g * ratio);
-                const b = Math.round(color1Obj.b * (1 - ratio) + color2Obj.b * ratio);
-                const a = color1Obj.a * (1 - ratio) + color2Obj.a * ratio;
-                
-                return `rgba(${r}, ${g}, ${b}, ${a})`;
-            }
-            
-            let overlayColor;
-            let borderColor;
-            let shadowColor;
-            
-            if (type === 'dragged') {
-                overlayColor = isSilence ? 'rgba(50, 50, 50, 0.5)' : blendColors(noteColor, 'rgba(255, 255, 255, 0.8)', 0.5);
-                borderColor = 'white';
-                shadowColor = 'rgba(255, 255, 255, 0.7)';
-            } else if (type === 'dependency') {
-                overlayColor = isSilence ? 'rgba(70, 50, 50, 0.5)' : blendColors(noteColor, 'rgba(255, 100, 100, 0.6)', 0.5);
-                borderColor = 'rgba(255, 0, 0, 0.8)';
-                shadowColor = 'rgba(255, 0, 0, 0.5)';
-            } else if (type === 'parent') {
-                overlayColor = isSilence ? 'rgba(50, 50, 70, 0.5)' : blendColors(noteColor, 'rgba(100, 200, 255, 0.6)', 0.5);
-                borderColor = 'rgba(0, 150, 255, 0.8)';
-                shadowColor = 'rgba(0, 150, 255, 0.5)';
-            }
-            
-            if (!overlayElem) {
-                overlayElem = document.createElement('div');
-                overlayElem.id = overlayId;
-                overlayElem.style.position = 'absolute';
-                overlayElem.style.pointerEvents = 'none';
-                overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
-                overlayElem.style.overflow = 'hidden';
-                overlayElem.style.boxSizing = 'border-box';
-                overlayElem.setAttribute('data-type', isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : (isSilence ? 'silence' : 'note')));
-                
-                const textElem = document.createElement('div');
-                textElem.style.fontSize = '10px';
-                textElem.style.whiteSpace = 'nowrap';
-                textElem.style.textShadow = '0 0 1px black';
-                textElem.style.color = 'white';
-                textElem.style.fontFamily = "'Roboto Mono', monospace";
-                
-                if (type === 'dragged') {
-                    textElem.textContent = isSilence ? `Silence ${noteObj.id}` : `Note ${noteObj.id}`;
-                } else if (type === 'dependency') {
-                    textElem.textContent = isSilence ? `Dep Silence ${noteObj.id}` : `Dep ${noteObj.id}`;
-                } else if (type === 'parent') {
-                    if (isBaseNote) {
-                        textElem.textContent = 'BaseNote';
-                    } else if (isMeasureBar) {
-                        textElem.textContent = `Measure ${noteObj.id}`;
-                    } else if (isSilence) {
-                        textElem.textContent = `Parent Silence ${noteObj.id}`;
-                    } else {
-                        textElem.textContent = `Parent ${noteObj.id}`;
-                    }
-                }
-                
-                overlayElem.appendChild(textElem);
-                overlayContainer.appendChild(overlayElem);
-            }
-            
-            const textElem = overlayElem.querySelector('div');
-            if (textElem) {
-                const overlayRect = overlayElem.getBoundingClientRect();
-                const dynamicFontSize = overlayRect.height * 0.4;
-                textElem.style.fontSize = `${dynamicFontSize}px`;
-                
-                if (type === 'parent') {
-                    if (isBaseNote) {
-                        textElem.textContent = 'BaseNote';
-                    } else if (isMeasureBar) {
-                        textElem.textContent = `Measure ${noteObj.id}`;
-                    } else if (isSilence) {
-                        textElem.textContent = `Parent Silence ${noteObj.id}`;
-                    } else {
-                        textElem.textContent = `Parent ${noteObj.id}`;
-                    }
-                } else if (type === 'dragged') {
-                    textElem.textContent = isSilence ? `Silence ${noteObj.id}` : `Note ${noteObj.id}`;
-                } else if (type === 'dependency') {
-                    textElem.textContent = isSilence ? `Dep Silence ${noteObj.id}` : `Dep ${noteObj.id}`;
-                }
-            }
-            
-            const currentType = overlayElem.getAttribute('data-type');
-            const newType = isBaseNote ? 'basenote' : (isMeasureBar ? 'measure' : (isSilence ? 'silence' : 'note'));
-            
-            if (currentType !== newType) {
-                overlayElem.setAttribute('data-type', newType);
-                
-                overlayElem.style.cssText = '';
-                overlayElem.style.position = 'absolute';
-                overlayElem.style.pointerEvents = 'none';
-                overlayElem.style.zIndex = type === 'dragged' ? '10001' : '10000';
-                overlayElem.style.overflow = 'hidden';
-            }
-            
-            if (isBaseNote) {
-                overlayElem.style.backgroundColor = overlayColor;
-                overlayElem.style.border = `2px solid ${borderColor}`;
-                overlayElem.style.borderRadius = '50%';
-                overlayElem.style.boxShadow = `0 0 8px ${shadowColor}`;
-                overlayElem.style.display = 'flex';
-                overlayElem.style.alignItems = 'center';
-                overlayElem.style.justifyContent = 'center';
-                
-                overlayElem.style.left = `${screenPos.x - screenWidth / 2}px`;
-                overlayElem.style.top = `${yPos - screenHeight / 2}px`;
-                overlayElem.style.width = `${screenWidth}px`;
-                overlayElem.style.height = `${screenHeight}px`;
-            } else if (isMeasureBar) {
-                overlayElem.style.backgroundColor = 'transparent';
-                overlayElem.style.width = '0';
-                overlayElem.style.height = '0';
-                overlayElem.style.borderLeft = '15px solid transparent';
-                overlayElem.style.borderRight = '15px solid transparent';
-                overlayElem.style.borderBottom = `30px solid ${overlayColor}`;
-                overlayElem.style.filter = `drop-shadow(0 0 5px ${shadowColor})`;
-                
-                overlayElem.style.left = `${screenPos.x - 15}px`;
-                overlayElem.style.top = `${yPos}px`;
-                
-                if (textElem) {
-                    textElem.style.position = 'absolute';
-                    textElem.style.bottom = '-20px';
-                    textElem.style.left = '50%';
-                    textElem.style.transform = 'translateX(-50%)';
-                }
-            } else {
-                overlayElem.style.backgroundColor = overlayColor;
-                overlayElem.style.border = isSilence ? `2px dashed ${borderColor}` : `2px solid ${borderColor}`;
-                overlayElem.style.borderRadius = '6px';
-                overlayElem.style.boxShadow = `0 0 8px ${shadowColor}`;
-                overlayElem.style.display = 'flex';
-                overlayElem.style.alignItems = 'center';
-                overlayElem.style.justifyContent = 'center';
-                
-                const _baseEl = document.querySelector(`.note-content[data-note-id="${noteObj.id}"]`);
-                const _baseRect = _baseEl ? _baseEl.getBoundingClientRect() : null;
-                const _bw = _baseEl ? (parseFloat(getComputedStyle(_baseEl).borderTopWidth) || 1) : 1;
-                overlayElem.style.left = `${screenPos.x}px`;
-                overlayElem.style.top = `${_baseRect ? (_baseRect.top - _bw) : (yPos - _bw)}px`;
-                overlayElem.style.width = `${screenWidth}px`;
-                overlayElem.style.height = `${_baseRect ? (_baseRect.height + 2 * _bw) : (screenHeight + 2 * _bw)}px`;
-                
-                if (isSilence) {
-                    overlayElem.style.borderStyle = 'dashed';
-                }
-            }
-            
-            if (type === 'dependency' || type === 'parent') {
-                const draggedElem = document.getElementById('drag-overlay-dragged');
-                if (draggedElem) {
-                    let connectionLine = document.getElementById(`connection-line-${type === 'parent' ? 'parent' : depId}`);
-                    if (!connectionLine) {
-                        connectionLine = document.createElement('div');
-                        connectionLine.id = `connection-line-${type === 'parent' ? 'parent' : depId}`;
-                        connectionLine.style.position = 'absolute';
-                        connectionLine.style.backgroundColor = type === 'dependency' ? 'rgba(255, 255, 255, 0.7)' : 'rgba(0, 150, 255, 0.7)';
-                        connectionLine.style.height = '2px';
-                        connectionLine.style.transformOrigin = 'left center';
-                        connectionLine.style.zIndex = '9999';
-                        overlayContainer.appendChild(connectionLine);
-                    }
-                    
-                    const draggedRect = draggedElem.getBoundingClientRect();
-                    const targetRect = overlayElem.getBoundingClientRect();
-                    
-                    let startX, startY, endX, endY;
-                    
-                    if (type === 'dependency') {
-                        startX = draggedRect.left + draggedRect.width / 2;
-                        startY = draggedRect.top + draggedRect.height / 2;
-                        endX = targetRect.left + targetRect.width / 2;
-                        endY = targetRect.top + targetRect.height / 2;
-                    } else {
-                        startX = targetRect.left + targetRect.width / 2;
-                        startY = targetRect.top + targetRect.height / 2;
-                        endX = draggedRect.left + draggedRect.width / 2;
-                        endY = draggedRect.top + draggedRect.height / 2;
-                    }
-                    
-                    const dx = endX - startX;
-                    const dy = endY - startY;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
-                    const angle = Math.atan2(dy, dx) * 180 / Math.PI;
-                    
-                    connectionLine.style.width = `${distance}px`;
-                    connectionLine.style.left = `${startX}px`;
-                    connectionLine.style.top = `${startY}px`;
-                    connectionLine.style.transform = `rotate(${angle}deg)`;
-                } else {
-                    let connectionLine = document.getElementById(`connection-line-${type === 'parent' ? 'parent' : depId}`);
-                    if (connectionLine) {
-                        connectionLine.remove();
-                    }
-                }
-            }
-        }
-
-        const startTime = note.getVariable('startTime').valueOf();
-        const duration = note.getVariable('duration').valueOf();
-        const x = startTime * 200 * xScaleFactor;
-        
-        let y;
-        if (note.getVariable('frequency')) {
-            const frequency = note.getVariable('frequency').valueOf();
-            y = frequencyToY(frequency);
-        } else {
-            let parentWithFreq = null;
-            
-            const findParentWithFrequency = (note) => {
-                if (!note) return null;
-                
-                let parentId = null;
-                const startTimeString = note.variables.startTimeString;
-                if (startTimeString) {
-                    const match = /getNoteById\((\d+)\)/.exec(startTimeString);
-                    if (match) {
-                        parentId = parseInt(match[1], 10);
-                    }
-                }
-                
-                if (parentId === null && note.parentId !== undefined) {
-                    parentId = note.parentId;
-                }
-                
-                if (parentId === null) {
-                    return myModule.baseNote;
-                }
-                
-                const parentNote = myModule.getNoteById(parentId);
-                
-                if (parentNote && parentNote.getVariable && parentNote.getVariable('frequency')) {
-                    return parentNote;
-                }
-                
-                return findParentWithFrequency(parentNote);
-            };
-            
-            parentWithFreq = findParentWithFrequency(note);
-            
-            if (parentWithFreq) {
-                const parentFreq = parentWithFreq.getVariable('frequency').valueOf();
-                y = frequencyToY(parentFreq);
-            } else {
-                const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
-                y = frequencyToY(baseNoteFreq);
-            }
-        }
-        
-        const width = duration * 200 * xScaleFactor;
-        const height = 20;
-        
-        noteRect.setSize({ width: width, height: height });
-        
-        const noteContainer = tapspace.createItem(`
-        <div class="note-container" style="
-          position: relative;
-          width: 100%;
-          height: 100%;
-          pointer-events: none;
-        "></div>
-      `);
-        
-        noteContainer.setSize({ width: width, height: height });
-        
-        noteContainer.addChild(noteRect, { x: 0, y: 0 });
-        
-        space.addChild(noteContainer, { x: x, y: y });
-        
-        if (note.getVariable('frequency')) {
-            const upButton = tapspace.createItem(`
-          <div style="
-            width: 10px;
-            height: 10px;
-            background: transparent;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0;
-            margin-top: 0px;
-            margin-left: 0.75px;
-            pointer-events: auto;
-          ">
-            <div class="octave-button octave-up" style="
-              width: 10px;
-              height: 10px;
-              background: rgba(255, 255, 255, 0.2);
-              border: 1px solid rgba(255, 255, 255, 0.4);
-              border-radius: 5px 0 0 0;
-              cursor: pointer;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-size: 7px;
-              color: white;
-              text-shadow: 0 0 1px black;
-              box-sizing: border-box;
-            ">▲</div>
-          </div>
-        `);
-            
-            const downButton = tapspace.createItem(`
-          <div style="
-            width: 10px;
-            height: 10px;
-            background: transparent;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 0;
-            margin-top: 0px;
-            margin-left: 0.75px;
-            pointer-events: auto;
-          ">
-            <div class="octave-button octave-down" style="
-              width: 10px;
-              height: 10px;
-              background: rgba(255, 255, 255, 0.2);
-              border: 1px solid rgba(255, 255, 255, 0.4);
-              border-radius: 0 0 0 5px;
-              cursor: pointer;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              font-size: 7px;
-              color: white;
-              text-shadow: 0 0 1px black;
-              box-sizing: border-box;
-            ">▼</div>
-          </div>
-        `);
-            
-            upButton.setSize({ width: 10, height: 10 });
-            downButton.setSize({ width: 10, height: 10 });
-            
-            const upButtonElement = upButton.element.querySelector('.octave-button');
-            const downButtonElement = downButton.element.querySelector('.octave-button');
-            
-            upButtonElement.addEventListener('mouseenter', () => {
-                upButtonElement.style.background = 'rgba(255, 255, 255, 0.4)';
-            });
-            
-            upButtonElement.addEventListener('mouseleave', () => {
-                upButtonElement.style.background = 'rgba(255, 255, 255, 0.2)';
-            });
-            
-            downButtonElement.addEventListener('mouseenter', () => {
-                downButtonElement.style.background = 'rgba(255, 255, 255, 0.4)';
-            });
-            
-            downButtonElement.addEventListener('mouseleave', () => {
-                downButtonElement.style.background = 'rgba(255, 255, 255, 0.2)';
-            });
-            
-            upButton.element.addEventListener('click', (event) => {
-                if (isLocked) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    return;
-                }
-                event.stopPropagation();
-                event.preventDefault();
-                handleOctaveChange(note.id, 'up');
-            });
-            
-            downButton.element.addEventListener('click', (event) => {
-                if (isLocked) {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    return;
-                }
-                event.stopPropagation();
-                event.preventDefault();
-                handleOctaveChange(note.id, 'down');
-            });
-            
-            noteContainer.addChild(upButton, { x: 0, y: 0 });
-            noteContainer.addChild(downButton, { x: 0, y: 10 });
-            
-            noteRect.octaveButtons = {
-                up: upButton,
-                down: downButton,
-                container: noteContainer
-            };
-        }
-
-        const resizeHandle = tapspace.createItem(`
-        <div style="
-          width: 10px;
-          height: 100%;
-          position: absolute;
-          right: 0;
-          top: 0;
-          cursor: ew-resize;
-          background: rgba(255, 255, 255, 0.2);
-          border-left: 1px solid rgba(255, 255, 255, 0.4);
-          border-radius: 0 5px 5px 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          pointer-events: auto;
-        ">
-          <div class="resize-handle-icon" style="
-            width: 2px;
-            height: 10px;
-            background: rgba(255, 255, 255, 0.7);
-          "></div>
-        </div>
-      `);
-        
-        resizeHandle.setSize({ width: 10, height: height });
-        
-        noteContainer.addChild(resizeHandle, { x: width - 10, y: 0 });
-        
-        let isResizing = false;
-        let resizeStartX = 0;
-        let resizeOriginalWidth = 0;
-        let resizeOriginalDuration = 0;
-        
-        noteRect.resizeHandle = resizeHandle;
-        
-        resizeHandle.element.addEventListener('pointerdown', function(e) {
-            if (isLocked) {
-                e.preventDefault();
-                e.stopPropagation();
-                return;
-            }
-            // Accept pointerdown anywhere within the resize handle item to improve hit-testing
-            // across tapspace wrapper elements and browser differences.
-            
-            e.stopPropagation();
-            e.preventDefault();
-            
-            if (isPlaying && !isPaused) {
-                pause();
-            }
-            
-            const transform = viewport.getBasis().getRaw();
-            const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-            
-            isResizing = true;
-            resizeStartX = e.clientX;
-            
-            resizeOriginalWidth = width;
-            resizeOriginalDuration = note.getVariable('duration').valueOf();
-            
-            noteRect.element.classList.add('resizing');
-            
-            try { resizeHandle.element.setPointerCapture(e.pointerId); } catch {}
-            
-            const existingOverlay = document.getElementById('resize-dependent-overlay');
-            if (existingOverlay) {
-                existingOverlay.remove();
-            }
-            
-            const dependentOverlay = document.createElement('div');
-            dependentOverlay.id = 'resize-dependent-overlay';
-            dependentOverlay.style.position = 'fixed';
-            dependentOverlay.style.top = '0';
-            dependentOverlay.style.left = '0';
-            dependentOverlay.style.width = '100%';
-            dependentOverlay.style.height = '100%';
-            dependentOverlay.style.pointerEvents = 'none';
-            dependentOverlay.style.zIndex = '999';
-            document.body.appendChild(dependentOverlay);
-            
-            document.addEventListener('pointermove', handleResizeMove);
-            document.addEventListener('pointerup', handleResizeUp);
-            document.addEventListener('pointercancel', handleResizeUp);
-            
-            const feedbackElement = document.createElement('div');
-            feedbackElement.id = 'resize-feedback';
-            feedbackElement.style.position = 'fixed';
-            feedbackElement.style.top = '10px';
-            feedbackElement.style.left = '50%';
-            feedbackElement.style.transform = 'translateX(-50%)';
-            feedbackElement.style.background = 'rgba(0, 0, 0, 0.7)';
-            feedbackElement.style.color = '#ffa800';
-            feedbackElement.style.padding = '5px 10px';
-            feedbackElement.style.borderRadius = '4px';
-            feedbackElement.style.fontFamily = "'Roboto Mono', monospace";
-            feedbackElement.style.fontSize = '14px';
-            feedbackElement.style.zIndex = '10000';
-            document.body.appendChild(feedbackElement);
-            updateResizeFeedback(resizeOriginalDuration);
-            
-            const styleElement = document.getElementById('resize-ghost-styles');
-            if (!styleElement) {
-                const style = document.createElement('style');
-                style.id = 'resize-ghost-styles';
-                style.textContent = `
-                .resize-ghost-note {
-                    transition: all 0.1s ease-out;
-                    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
-                }
-                
-                .resize-ghost-arrow {
-                    transition: all 0.1s ease-out;
-                    opacity: 0.7;
-                }
-            `;
-                document.head.appendChild(style);
-            }
-        });
-
-        function handleResizeMove(ev) {
-            if (!isResizing) return;
-            
-            try {
-                const transform = viewport.getBasis().getRaw();
-                const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-                
-                const screenDeltaX = ev.clientX - resizeStartX;
-                
-                const spacePoint1 = space.at(0, 0);
-                const spacePoint2 = space.at(100, 0);
-                
-                const viewportPoint1 = spacePoint1.transitRaw(viewport);
-                const viewportPoint2 = spacePoint2.transitRaw(viewport);
-                
-                const viewportDistance = Math.sqrt(
-                    Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
-                    Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
-                );
-                
-                const spaceUnitsPerScreenPixel = 100 / viewportDistance;
-                const deltaInSpaceUnits = screenDeltaX * spaceUnitsPerScreenPixel;
-                
-                const newWidthInSpaceUnits = Math.max(20, resizeOriginalWidth + deltaInSpaceUnits);
-                
-                const newDuration = newWidthInSpaceUnits / (200 * xScaleFactor);
-                
-                const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-                const beatLength = 60 / baseTempo;
-                const newDurationBeats = newDuration / beatLength;
-                
-                const sixteenthNote = 0.25;
-                const snappedBeats = Math.max(sixteenthNote, Math.round(newDurationBeats / sixteenthNote) * sixteenthNote);
-                
-                const snappedDuration = snappedBeats * beatLength;
-                const snappedWidth = snappedDuration * 200 * xScaleFactor;
-                
-                noteRect.setSize({ width: snappedWidth, height: height });
-                noteContainer.setSize({ width: snappedWidth, height: height });
-                
-                resizeHandle.translateTo(noteContainer.at(snappedWidth - 10, 0));
-                
-                updateResizeFeedback(snappedDuration, snappedBeats);
-
-                // Live GL preview via GPU bufferSubData; fallback to full sync when unavailable
-                try {
-                    if (glRenderer) {
-                        const startSec = note.getVariable('startTime').valueOf();
-                        const ok = (typeof glRenderer.setTempOverridesPreview === 'function') &&
-                                   glRenderer.setTempOverridesPreview(note.id, startSec, snappedDuration);
-                        if (!ok) {
-                            // Fallback: use tempOverrides + sync for preview
-                            glTempOverrides = {
-                                [note.id]: { startSec, durationSec: snappedDuration }
-                            };
-                            glRenderer.sync({
-                                evaluatedNotes,
-                                module: myModule,
-                                xScaleFactor,
-                                yScaleFactor,
-                                selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null,
-                                tempOverrides: glTempOverrides
-                            });
-                        } else {
-                            // No full sync required; renderer will redraw from updated buffer
-                        }
-                    }
-                } catch {}
-
-                updateDependentNotesVisualization(note, resizeOriginalDuration, snappedDuration, scale);
-            } catch (error) {
-                console.error("Error in handleResizeMove:", error);
-            }
-        }
-
-        function handleResizeUp(ev) {
-            if (!isResizing) return;
-            
-            try {
-                resizeHandle.element.releasePointerCapture(ev.pointerId);
-            } catch (err) {
-                console.warn('Error releasing pointer capture:', err);
-            }
-            
-            isResizing = false;
-            
-            noteRect.element.classList.remove('resizing');
-            
-            document.removeEventListener('pointermove', handleResizeMove);
-            document.removeEventListener('pointerup', handleResizeUp);
-            document.removeEventListener('pointercancel', handleResizeUp);
-            
-            const dependentOverlay = document.getElementById('resize-dependent-overlay');
-            if (dependentOverlay) {
-                dependentOverlay.remove();
-            }
-            // Clear temporary GL overrides now that resize is committed
-            glTempOverrides = null;
-            try {
-                if (glRenderer && typeof glRenderer.clearTempOverridesPreview === 'function') {
-                    glRenderer.clearTempOverridesPreview(note.id);
-                }
-            } catch {}
-            
-            try {
-                const transform = viewport.getBasis().getRaw();
-                const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-                
-                const screenDeltaX = ev.clientX - resizeStartX;
-                
-                const spacePoint1 = space.at(0, 0);
-                const spacePoint2 = space.at(100, 0);
-                
-                const viewportPoint1 = spacePoint1.transitRaw(viewport);
-                const viewportPoint2 = spacePoint2.transitRaw(viewport);
-                
-                const viewportDistance = Math.sqrt(
-                    Math.pow(viewportPoint2.x - viewportPoint1.x, 2) + 
-                    Math.pow(viewportPoint2.y - viewportPoint1.y, 2)
-                );
-                
-                const spaceUnitsPerScreenPixel = 100 / viewportDistance;
-                const deltaInSpaceUnits = screenDeltaX * spaceUnitsPerScreenPixel;
-                
-                const newWidthInSpaceUnits = Math.max(20, resizeOriginalWidth + deltaInSpaceUnits);
-                
-                const newDuration = newWidthInSpaceUnits / (200 * xScaleFactor);
-                
-                const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-                const beatLength = 60 / baseTempo;
-                const newDurationBeats = newDuration / beatLength;
-                
-                const sixteenthNote = 0.25;
-                const snappedBeats = Math.max(sixteenthNote, Math.round(newDurationBeats / sixteenthNote) * sixteenthNote);
-                
-                let beatsFraction;
-                try {
-                    beatsFraction = new Fraction(snappedBeats);
-                } catch (err) {
-                    console.error("Error creating fraction:", err);
-                    if (snappedBeats === 0.25) beatsFraction = new Fraction(1, 4);
-                    else if (snappedBeats === 0.5) beatsFraction = new Fraction(1, 2);
-                    else if (snappedBeats === 0.75) beatsFraction = new Fraction(3, 4);
-                    else if (snappedBeats === 1) beatsFraction = new Fraction(1, 1);
-                    else if (snappedBeats === 1.25) beatsFraction = new Fraction(5, 4);
-                    else if (snappedBeats === 1.5) beatsFraction = new Fraction(3, 2);
-                    else if (snappedBeats === 1.75) beatsFraction = new Fraction(7, 4);
-                    else if (snappedBeats === 2) beatsFraction = new Fraction(2, 1);
-                    else beatsFraction = new Fraction(Math.round(snappedBeats * 4), 4);
-                }
-                
-                const newDurationString = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFraction.n}, ${beatsFraction.d}))`;
-                const simplifiedDurationString = simplifyDuration(newDurationString, myModule);
-                
-                const originalDuration = note.getVariable('duration').valueOf();
-                
-                note.setVariable('durationString', simplifiedDurationString);
-                
-                const durationFunc = function() {
-                    try {
-                        return __evalExpr(simplifiedDurationString, myModule);
-                    } catch (error) {
-                        console.error("Error in duration function:", error);
-                        return new Fraction(60).div(myModule.baseNote.getVariable('tempo')).mul(1);
-                    }
-                };
-                
-                note.setVariable('duration', durationFunc);
-                
-                const updatedDuration = note.getVariable('duration').valueOf();
-                
-                if (Math.abs(originalDuration - updatedDuration) > 0.001) {
-                    checkAndUpdateDependentNotes(note.id, originalDuration, updatedDuration);
-                }
-                
-                evaluatedNotes = myModule.evaluateModule();
-                setEvaluatedNotes(evaluatedNotes);
-                updateVisualNotes(evaluatedNotes);
-                
-                const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
-                if (noteWidgetVisible && currentSelectedNote) {
-                    if (currentSelectedNote === myModule.baseNote) {
-                        const baseNoteElement = document.querySelector('.base-note-circle');
-                        if (baseNoteElement) {
-                            showNoteVariables(myModule.baseNote, baseNoteElement);
-                        }
-                    } else {
-                        const selectedElement = document.querySelector(
-                            `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
-                            `.measure-bar-triangle[data-note-id="${currentSelectedNote.id}"]`
-                        );
-                        
-                        if (selectedElement) {
-                            if (selectedElement.classList.contains('measure-bar-triangle')) {
-                                showNoteVariables(currentSelectedNote, selectedElement, currentSelectedNote.id);
-                            } else {
-                                showNoteVariables(currentSelectedNote, selectedElement);
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error("Error updating note duration:", error);
-                try {
-                    noteRect.setSize({ width: resizeOriginalWidth, height: height });
-                    noteContainer.setSize({ width: resizeOriginalWidth, height: height });
-                    if (resizeHandle) {
-                        resizeHandle.translateTo(noteContainer.at(resizeOriginalWidth - 10, 0));
-                    }
-                } catch (revertError) {
-                    console.error("Error reverting to original size:", revertError);
-                }
-            }
-            
-            try { captureSnapshot(`Resize Note ${note.id}`); } catch {}
-            const feedbackElement = document.getElementById('resize-feedback');
-            if (feedbackElement) {
-                feedbackElement.remove();
-            }
-        }
-        
-        function updateDependentNotesVisualization(resizedNote, originalDuration, newDuration, scale) {
-            const dependentOverlay = document.getElementById('resize-dependent-overlay');
-            if (!dependentOverlay) return;
-            
-            dependentOverlay.innerHTML = '';
-            
-            const dependentNoteIds = myModule.getDependentNotes(resizedNote.id);
-            if (!dependentNoteIds || dependentNoteIds.length === 0) return;
-            
-            const durationDelta = newDuration - originalDuration;
-            
-            const baseNoteStartTime = myModule.baseNote.getVariable('startTime').valueOf();
-            
-            const newPositions = new Map();
-            
-            dependentNoteIds.forEach(noteId => {
-                const dependentNote = myModule.getNoteById(noteId);
-                if (!dependentNote) return;
-                
-                if (!dependentNote.getVariable('duration')) return;
-                
-                const startTimeString = dependentNote.variables.startTimeString || '';
-                const isDurationDependent = startTimeString.includes(`getNoteById(${resizedNote.id}).getVariable('duration')`);
-                
-                if (!isDurationDependent) return;
-                
-                const dependentStartTime = dependentNote.getVariable('startTime').valueOf();
-                const dependentDuration = dependentNote.getVariable('duration').valueOf();
-                
-                const isSilence = !dependentNote.getVariable('frequency');
-                let dependentFrequency = null;
-                
-                if (isSilence) {
-                    let parentWithFreq = null;
-                    
-                    const findParentWithFrequency = (note) => {
-                        if (!note) return null;
-                        
-                        let parentId = null;
-                        const startTimeString = note.variables.startTimeString;
-                        if (startTimeString) {
-                            const match = /getNoteById\((\d+)\)/.exec(startTimeString);
-                            if (match) {
-                                parentId = parseInt(match[1], 10);
-                            }
-                        }
-                        
-                        if (parentId === null && note.parentId !== undefined) {
-                            parentId = note.parentId;
-                        }
-                        
-                        if (parentId === null) {
-                            return myModule.baseNote;
-                        }
-                        
-                        const parentNote = myModule.getNoteById(parentId);
-                        
-                        if (parentNote && parentNote.getVariable && parentNote.getVariable('frequency')) {
-                            return parentNote;
-                        }
-                        
-                        return findParentWithFrequency(parentNote);
-                    };
-                    
-                    parentWithFreq = findParentWithFrequency(dependentNote);
-                    
-                    if (parentWithFreq) {
-                        dependentFrequency = parentWithFreq.getVariable('frequency').valueOf();
-                    } else {
-                        dependentFrequency = myModule.baseNote.getVariable('frequency').valueOf();
-                    }
-                } else {
-                    dependentFrequency = dependentNote.getVariable('frequency').valueOf();
-                }
-                
-                let newStartTime = dependentStartTime + durationDelta;
-                
-                newStartTime = Math.max(baseNoteStartTime, newStartTime);
-                
-                newPositions.set(noteId, {
-                    noteId,
-                    note: dependentNote,
-                    originalStartTime: dependentStartTime,
-                    newStartTime,
-                    duration: dependentDuration,
-                    frequency: dependentFrequency,
-                    isSilence: isSilence
-                });
-            });
-            
-            let changes = true;
-            while (changes) {
-                changes = false;
-                
-                for (const [noteId, posInfo] of newPositions) {
-                    const secondaryDependents = myModule.getDependentNotes(noteId);
-                    
-                    secondaryDependents.forEach(depId => {
-                        if (newPositions.has(depId)) return;
-                        
-                        const depNote = myModule.getNoteById(depId);
-                        if (!depNote) return;
-                        
-                        if (!depNote.getVariable('duration')) return;
-                        
-                        const startTimeString = depNote.variables.startTimeString || '';
-                        const isDurationDependent = startTimeString.includes(`getNoteById(${noteId}).getVariable('duration')`);
-                        const isStartTimeDependent = startTimeString.includes(`getNoteById(${noteId}).getVariable('startTime')`);
-                        
-                        if (!isDurationDependent && !isStartTimeDependent) return;
-                        
-                        const dependentStartTime = depNote.getVariable('startTime').valueOf();
-                        const dependentDuration = depNote.getVariable('duration').valueOf();
-                        
-                        const isSilence = !depNote.getVariable('frequency');
-                        let dependentFrequency = null;
-                        
-                        if (isSilence) {
-                            let parentWithFreq = null;
-                            
-                            const findParentWithFrequency = (note) => {
-                                if (!note) return null;
-                                
-                                let parentId = null;
-                                const startTimeString = note.variables.startTimeString;
-                                if (startTimeString) {
-                                    const match = /getNoteById\((\d+)\)/.exec(startTimeString);
-                                    if (match) {
-                                        parentId = parseInt(match[1], 10);
-                                    }
-                                }
-                                
-                                if (parentId === null && note.parentId !== undefined) {
-                                    parentId = note.parentId;
-                                }
-                                
-                                if (parentId === null) {
-                                    return myModule.baseNote;
-                                }
-                                
-                                const parentNote = myModule.getNoteById(parentId);
-                                
-                                if (parentNote && parentNote.getVariable && parentNote.getVariable('frequency')) {
-                                    return parentNote;
-                                }
-                                
-                                return findParentWithFrequency(parentNote);
-                            };
-                            
-                            parentWithFreq = findParentWithFrequency(depNote);
-                            
-                            if (parentWithFreq) {
-                                dependentFrequency = parentWithFreq.getVariable('frequency').valueOf();
-                            } else {
-                                dependentFrequency = myModule.baseNote.getVariable('frequency').valueOf();
-                            }
-                        } else {
-                            dependentFrequency = depNote.getVariable('frequency').valueOf();
-                        }
-                        
-                        let newStartTime;
-                        
-                        if (isDurationDependent) {
-                            const parentNewStartTime = posInfo.newStartTime;
-                            const parentDuration = posInfo.duration;
-                            
-                            newStartTime = parentNewStartTime + parentDuration;
-                        } else if (isStartTimeDependent) {
-                            const delta = posInfo.newStartTime - posInfo.originalStartTime;
-                            newStartTime = dependentStartTime + delta;
-                        }
-                        
-                        newStartTime = Math.max(baseNoteStartTime, newStartTime);
-                        
-                        newPositions.set(depId, {
-                            noteId: depId,
-                            note: depNote,
-                            originalStartTime: dependentStartTime,
-                            newStartTime,
-                            duration: dependentDuration,
-                            frequency: dependentFrequency,
-                            isSilence: isSilence
-                        });
-                        
-                        changes = true;
-                    });
-                }
-            }
-            
-            for (const posInfo of newPositions.values()) {
-                const noteColor = posInfo.isSilence ? 'rgba(50, 50, 50, 0.7)' : getColorForNote(posInfo.note);
-                
-                const x = posInfo.newStartTime * 200 * xScaleFactor;
-                const y = frequencyToY(posInfo.frequency);
-                const width = posInfo.duration * 200 * xScaleFactor;
-                const height = 20;
-                
-                const point = new tapspace.geometry.Point(space, { x, y });
-                const screenPos = point.transitRaw(viewport);
-                
-                const widthPoint = new tapspace.geometry.Point(space, { x: x + width, y });
-                const widthScreenPos = widthPoint.transitRaw(viewport);
-                const screenWidth = widthScreenPos.x - screenPos.x;
-                
-                const heightPoint = new tapspace.geometry.Point(space, { x, y: y + height });
-                const heightScreenPos = heightPoint.transitRaw(viewport);
-                const screenHeight = heightScreenPos.y - screenPos.y;
-                
-                const ghostNote = document.createElement('div');
-                ghostNote.className = 'resize-ghost-note';
-                ghostNote.style.position = 'absolute';
-                ghostNote.style.left = `${screenPos.x}px`;
-                const depBaseEl = document.querySelector(`.note-content[data-note-id="${posInfo.noteId}"]`);
-                const depBaseRect = depBaseEl ? depBaseEl.getBoundingClientRect() : null;
-                const depBW = depBaseEl ? (parseFloat(getComputedStyle(depBaseEl).borderTopWidth) || 1) : 1;
-                ghostNote.style.top = `${depBaseRect ? (depBaseRect.top - depBW) : (screenPos.y - depBW)}px`;
-                ghostNote.style.width = `${screenWidth}px`;
-                ghostNote.style.height = `${depBaseRect ? (depBaseRect.height + 2 * depBW) : (screenHeight + 2 * depBW)}px`;
-                ghostNote.style.backgroundColor = noteColor;
-                ghostNote.style.opacity = '0.6';
-                ghostNote.style.borderRadius = '6px';
-                ghostNote.style.border = posInfo.isSilence ? '1px dashed white' : '1px solid white';
-                ghostNote.style.boxSizing = 'border-box';
-                ghostNote.style.zIndex = '1000';
-                ghostNote.style.pointerEvents = 'none';
-                
-                const noteIdLabel = document.createElement('div');
-                noteIdLabel.style.position = 'absolute';
-                noteIdLabel.style.top = '2px';
-                noteIdLabel.style.left = '5px';
-                noteIdLabel.style.fontSize = '8px';
-                noteIdLabel.style.color = 'white';
-                noteIdLabel.style.fontFamily = "'Roboto Mono', monospace";
-                noteIdLabel.textContent = posInfo.isSilence ? `Silence [${posInfo.noteId}]` : `[${posInfo.noteId}]`;
-                ghostNote.appendChild(noteIdLabel);
-                
-                const originalX = posInfo.originalStartTime * 200 * xScaleFactor;
-                const originalPoint = new tapspace.geometry.Point(space, { x: originalX, y });
-                const originalScreenPos = originalPoint.transitRaw(viewport);
-                
-                const isMovingForward = screenPos.x >= originalScreenPos.x;
-                
-                const arrow = document.createElement('div');
-                arrow.className = 'resize-ghost-arrow';
-                arrow.style.position = 'absolute';
-                arrow.style.top = `${screenPos.y + screenHeight/2}px`;
-                
-                if (isMovingForward) {
-                    arrow.style.left = `${originalScreenPos.x}px`;
-                    arrow.style.width = `${screenPos.x - originalScreenPos.x}px`;
-                    
-                    const arrowhead = document.createElement('div');
-                    arrowhead.style.position = 'absolute';
-                    arrowhead.style.right = '0';
-                    arrowhead.style.top = '-3px';
-                    arrowhead.style.width = '0';
-                    arrowhead.style.height = '0';
-                    arrowhead.style.borderTop = '3px solid transparent';
-                    arrowhead.style.borderBottom = '3px solid transparent';
-                    arrowhead.style.borderLeft = '6px solid white';
-                    arrow.appendChild(arrowhead);
-                } else {
-                    arrow.style.left = `${screenPos.x}px`;
-                    arrow.style.width = `${originalScreenPos.x - screenPos.x}px`;
-                    
-                    const arrowhead = document.createElement('div');
-                    arrowhead.style.position = 'absolute';
-                    arrowhead.style.left = '0';
-                    arrowhead.style.top = '-3px';
-                    arrowhead.style.width = '0';
-                    arrowhead.style.height = '0';
-                    arrowhead.style.borderTop = '3px solid transparent';
-                    arrowhead.style.borderBottom = '3px solid transparent';
-                    arrowhead.style.borderRight = '6px solid white';
-                    arrow.appendChild(arrowhead);
-                }
-                
-                arrow.style.height = '1px';
-                arrow.style.backgroundColor = 'white';
-                arrow.style.zIndex = '999';
-                
-                dependentOverlay.appendChild(arrow);
-                dependentOverlay.appendChild(ghostNote);
-            }
-        }
-        
-        function updateResizeFeedback(duration, beats) {
-            const feedbackElement = document.getElementById('resize-feedback');
-            if (!feedbackElement) return;
-            
-            if (duration === undefined || isNaN(duration) || beats === undefined || isNaN(beats)) {
-                feedbackElement.textContent = "Adjusting duration...";
-                return;
-            }
-            
-            let beatsDisplay;
-            if (beats === 0.25) beatsDisplay = "1/16 note";
-            else if (beats === 0.5) beatsDisplay = "1/8 note";
-            else if (beats === 0.75) beatsDisplay = "dotted 1/8";
-            else if (beats === 1) beatsDisplay = "1/4 note";
-            else if (beats === 1.5) beatsDisplay = "dotted 1/4";
-            else if (beats === 2) beatsDisplay = "1/2 note";
-            else if (beats === 3) beatsDisplay = "dotted 1/2";
-            else if (beats === 4) beatsDisplay = "whole note";
-            else beatsDisplay = beats.toFixed(2) + " beats";
-            
-            feedbackElement.textContent = `Duration: ${beatsDisplay} (${duration.toFixed(3)}s)`;
-        }
-
-        return noteContainer;
-    }
-
-    // Fast incremental renderer to append only specified notes after import.
+        // Legacy DOM creation removed. Rendering and interactions are handled by the WebGL2 Workspace.
+        // This stub ensures any legacy callers receive a benign value.
+        return null;
+    }// Fast incremental renderer to append only specified notes after import.
     function renderNotesIncrementally(noteIds) {
-        if ((glRenderer || glWorkspace) && isWebGL2GLOutputOnlyEnabled()) return 0;
-        if (!Array.isArray(noteIds) || noteIds.length === 0) return 0;
-        let count = 0;
-        try {
-            noteIds.forEach(id => {
-                const note = myModule.getNoteById(Number(id));
-                if (!note) return;
-                const hasStart = !!note.getVariable('startTime');
-                const hasDur = !!note.getVariable('duration');
-                // Render both frequency and silence rectangles (no frequency) when duration exists
-                if (hasStart && hasDur) {
-                    try {
-                        createNoteElement(note);
-                        count++;
-                    } catch {}
-                }
-            });
-        } catch (e) { console.warn('renderNotesIncrementally failed', e); }
-        return count;
+        // GL-only: no DOM rendering path
+        return 0;
     }
 
     function handleOctaveChange(noteId, direction) {
@@ -5220,7 +2580,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     
     function createMeasureBars() {
         // When WebGL overlay is enabled, suppress DOM bars and playhead; keep triangles for interactions.
-        const usingGL = !!glRenderer;
     
         // Preserve currently selected triangles
         const selectedMeasureBars = document.querySelectorAll('.measure-bar-triangle.selected');
@@ -5238,22 +2597,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         if (playheadContainer) playheadContainer.innerHTML = '';
         if (trianglesContainer) trianglesContainer.innerHTML = '';
     
-        // Create triangles only when not in GL-only mode
-        if (!((glRenderer || glWorkspace) && isWebGL2GLOutputOnlyEnabled())) {
-            const measurePoints = Object.entries(myModule.notes)
-                .filter(([id, note]) => note.getVariable('startTime') && !note.getVariable('duration') && !note.getVariable('frequency'))
-                .map(([id, note]) => ({ id: parseInt(id, 10), note }));
-
-            measurePoints.forEach(({ id, note }) => {
-                const triangle = createMeasureBarTriangle(null, note, id);
-                if (triangle && trianglesContainer) {
-                    trianglesContainer.appendChild(triangle);
-                    if (selectedMeasureBarIds.includes(id.toString())) {
-                        triangle.classList.add('selected');
-                    }
-                }
-            });
-        }
+        // GL-only: DOM measure triangles are disabled; Workspace handles measure interactions.
+        // No triangles are created.
     
         // No DOM bars or playhead — replaced by WebGL overlay
         invalidateModuleEndTimeCache();
@@ -5261,53 +2606,48 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
     
     function updateMeasureBarPositions() {
-        // Always update DOM measure bars/triangles positions (even when WebGL overlay is active)
-
-        const transform = viewport.getBasis().getRaw();
-        const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-
-        let finalBarX = 0;
-
+        // Update DOM measure bars/triangles positions using workspace camera basis
+        const basis = (glWorkspace && glWorkspace.camera && typeof glWorkspace.camera.getBasis === 'function')
+            ? glWorkspace.camera.getBasis()
+            : { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+        const scale = Math.sqrt((basis.a || 1) * (basis.a || 1) + (basis.b || 0) * (basis.b || 0));
+    
+        const xToScreen = (xWorld) => (basis.a * xWorld + basis.e);
+    
         measureBars.forEach(bar => {
-            let x = 0;
+            let xWorld = 0;
             if (bar.id === 'measure-bar-origin') {
-                x = 0;
+                xWorld = 0;
             } else if (bar.id === 'secondary-start-bar') {
-                x = -3 / scale;
+                xWorld = -3 / Math.max(scale, 1e-6);
             } else if (bar.id === 'measure-bar-final') {
                 const moduleEndTime = getModuleEndTime();
-                x = moduleEndTime * 200 * xScaleFactor;
-                finalBarX = x;
+                xWorld = moduleEndTime * 200 * xScaleFactor;
             } else if (bar.id === 'secondary-end-bar') {
                 const moduleEndTime = getModuleEndTime();
-                x = moduleEndTime * 200 * xScaleFactor + (3 / scale);
+                xWorld = moduleEndTime * 200 * xScaleFactor + (3 / Math.max(scale, 1e-6));
             } else {
                 const noteId = bar.getAttribute("data-note-id");
                 if (noteId) {
                     const note = myModule.getNoteById(parseInt(noteId, 10));
                     if (note) {
-                        x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
+                        xWorld = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
                     }
                 }
             }
-            
-            const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
-            const screenPos = point.transitRaw(viewport);
-            bar.style.transform = `translate(${screenPos.x}px, 0) scale(${1 / scale}, 1)`;
+            const screenX = xToScreen(xWorld);
+            bar.style.transform = `translate(${screenX}px, 0) scale(${1 / Math.max(scale, 1e-6)}, 1)`;
         });
-
+    
         const triangles = document.querySelectorAll('.measure-bar-triangle');
         triangles.forEach(triangle => {
             const noteId = triangle.getAttribute("data-note-id");
-            if (noteId) {
-                const note = myModule.getNoteById(parseInt(noteId, 10));
-                if (note) {
-                    const x = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
-                    const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
-                    const screenPos = point.transitRaw(viewport);
-                    triangle.style.transform = `translateX(${screenPos.x}px)`;
-                }
-            }
+            if (!noteId) return;
+            const note = myModule.getNoteById(parseInt(noteId, 10));
+            if (!note) return;
+            const xWorld = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
+            const screenX = xToScreen(xWorld);
+            triangle.style.transform = `translateX(${screenX}px)`;
         });
     }
     
@@ -5342,7 +2682,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                             if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
                         } catch {}
                     }
-                    // Tapspace path: handlers already positioned the viewport; do nothing here.
+                    // Legacy DOM path: handlers already positioned the viewport; do nothing here.
                 } else if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
                     try {
                         const rect = glWorkspace.containerEl.getBoundingClientRect();
@@ -5358,13 +2698,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                         }
                     } catch {}
                 } else {
-                    const viewCenter = viewport.atCenter();
-                    const targetPoint = space.at(x, viewCenter.transitRaw(space).y);
-                    viewport.match({
-                        source: viewCenter,
-                        target: targetPoint,
-                        estimator: 'X'
-                    });
                 }
             } else {
                 // When tracking is disabled, release X-lock for workspace camera
@@ -5381,11 +2714,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             // If GPU overlay is active or DOM playhead is not present, skip DOM transform
             // Also skip during active X scaling to avoid a 1-frame pop before camera recenter completes
             if (playhead && !__rmtScalingXActive) {
-                const transform = viewport.getBasis().getRaw();
-                const scale = Math.sqrt(transform.a * transform.a + transform.b * transform.b);
-                const point = new tapspace.geometry.Point(space, { x: x, y: 0 });
-                const screenPos = point.transitRaw(viewport);
-                playhead.style.transform = `translate(${screenPos.x}px, 0) scale(${1/scale}, 1)`;
+                const __basisPH = computeWorldToScreenAffine();
+                const screenX = (__basisPH.a || 1) * x + (__basisPH.e || 0);
+                playhead.style.transform = `translate(${screenX}px, 0)`;
             }
             
             playheadAnimationId = requestAnimationFrame(update);
@@ -5395,40 +2726,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
     
     function handleBackgroundGesture(gestureEvent) {
-        // In GL workspace mode, disable Tapspace gesture-based click-to-set-playhead to avoid conflicts
-        if (glWorkspace) { return; }
-        if (gestureEvent.travel <= 5) {
-            const clickedElement = gestureEvent.target;
-            const isClickOnNote = clickedElement.element.closest('.note-rect') !== null;
-            if (!isClickOnNote) {
-                const clickPoint = gestureEvent.mean;
-                const spacePoint = clickPoint.changeBasis(space);
-                let newPlayheadTime = spacePoint.point.x / (200 * xScaleFactor);
-                newPlayheadTime = Math.max(0, Math.min(newPlayheadTime, getModuleEndTime()));
-                playheadTime = newPlayheadTime;
-                updatePlayhead();
-                if (isPlaying) {
-                    stop(false);
-                }
-                initAudioContext();
-                currentTime = audioContext.currentTime;
-                totalPausedTime = 0;
-                if (isPlaying) {
-                    stop(false);
-                    play(playheadTime);
-                }
-                // Background tap parity with desktop: clear selection and close menus/dropdowns
-                try {
-                    clearSelection();
-                    if (domCache && domCache.plusminus && domCache.generalWidget) {
-                        domCache.plusminus.classList.remove('open');
-                        domCache.generalWidget.classList.remove('open');
-                    }
-                    const dd = document.getElementById('loadModuleDropdown');
-                    if (dd) dd.style.display = 'none';
-                } catch {}
-            }
-        }
+        // Legacy gesture path removed; Workspace manages background interactions.
+        return;
     }
     
     createMeasureBars();
@@ -5451,101 +2750,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
     
     function updateVisualNotes(nextEvaluated) {
-        // Sync module-scoped evaluatedNotes so helpers like frequencyToY() use fresh base/frequencies
+        // GL-only: update evaluated notes and sync the workspace renderer. No DOM mirroring.
         evaluatedNotes = nextEvaluated;
-
-        // Phase 1/2: mirror scene into GL renderers
-        if (glRenderer) {
-            try {
-                glRenderer.sync({ evaluatedNotes, module: myModule, xScaleFactor, yScaleFactor, selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null });
-            } catch (e) {
-                console.warn('glRenderer.sync failed', e);
-            }
-        }
         if (glWorkspace) {
             try {
-                glWorkspace.sync({ evaluatedNotes, module: myModule, xScaleFactor, yScaleFactor, selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null });
-            } catch (e) {
-                console.warn('glWorkspace.sync failed', e);
-            }
-        }
-
-        // GL-only: skip creating/updating Tapspace DOM items entirely for performance testing
-        if ((glRenderer || glWorkspace) && isWebGL2GLOutputOnlyEnabled()) {
-            try { invalidateModuleEndTimeCache(); updateTimingBoundaries(); } catch {}
-            return;
-        }
-
-        const selectedElements = document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected');
-        const selectedIds = Array.from(selectedElements).map(el => el.getAttribute('data-note-id'));
-        
-        const currentNotes = space.getChildren();
-        currentNotes.forEach(note => {
-            if (note.element.id !== 'baseNoteCircle') {
-                note.remove();
-                space.removeChild(note);
-            }
-        });
-
-        const baseStartTime = myModule.baseNote.getVariable('startTime').valueOf();
-        
-        newNotes = [];
-        
-        Object.entries(myModule.notes)
-            .filter(([id, note]) => note.getVariable('startTime'))
-            .forEach(([id, note]) => {
-                const startTime = note.getVariable('startTime').valueOf();
-                const duration = note.getVariable('duration')?.valueOf();
-                const frequency = note.getVariable('frequency')?.valueOf();
-                
-                if (duration) {
-                    const noteContainer = createNoteElement(note);
-                    
-                    newNotes.push({
-                        ...note,
-                        id: parseInt(id, 10),
-                        element: noteContainer,
-                        getBoundingBox: () => noteContainer.getBoundingClientRect()
-                    });
-                } else if (!duration && !frequency) {
-                    newNotes.push(note);
-                }
-            });
-
-        updateTimingBoundaries();
-        
-
-        selectedIds.forEach(id => {
-            const newElement = document.querySelector(`.note-content[data-note-id="${id}"], .base-note-circle[data-note-id="${id}"], .measure-bar-triangle[data-note-id="${id}"]`);
-            if (newElement) {
-                newElement.classList.add('selected');
-            }
-        });
-        
-        if (currentSelectedNote) {
-            const newElement = document.querySelector(`[data-note-id="${currentSelectedNote.id}"]`);
-            if (newElement) {
-                newElement.classList.add('selected');
-            }
-        }
-        
-        invalidateModuleEndTimeCache();
-        // Ensure BaseNote visuals react to frequency changes (fraction text and Y position)
-        if (!isWebGL2GLOutputOnlyEnabled()) {
-            try { updateBaseNoteFraction(); } catch {}
-            try { updateBaseNotePosition(); } catch {}
-        }
-        if (isLocked) {
-            updateNotesPointerEvents();
-        }
-        if (isTrackingEnabled) { try { updatePlayhead(); } catch {} }
-    }
-
-    // Lightweight helper to re-sync GL renderer selection ordering without rebuilding DOM
-    function syncRendererSelection() {
-        if (glRenderer) {
-            try {
-                glRenderer.sync({
+                glWorkspace.sync({
                     evaluatedNotes,
                     module: myModule,
                     xScaleFactor,
@@ -5553,9 +2762,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
                 });
             } catch (e) {
-                try { console.warn('glRenderer.sync selection update failed', e); } catch {}
+                try { console.warn('glWorkspace.sync failed', e); } catch {}
             }
         }
+        try { invalidateModuleEndTimeCache(); updateTimingBoundaries(); } catch {}
+        if (isTrackingEnabled) { try { updatePlayhead(); } catch {} }
+    }
+
+    // Lightweight helper to re-sync GL renderer selection ordering without rebuilding DOM
+    function syncRendererSelection() {
         if (glWorkspace) {
             try {
                 glWorkspace.sync({
@@ -5791,8 +3006,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         try {
             if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
                 glWorkspace.renderer.setTrackingMode(!!isTrackingEnabled);
-            } else if (glRenderer && typeof glRenderer.setTrackingMode === 'function') {
-                glRenderer.setTrackingMode(!!isTrackingEnabled);
             }
         } catch {}
 
@@ -5832,13 +3045,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     try { updatePlayhead(); } catch {}
                 } catch {}
             } else {
-                const viewCenter = viewport.atCenter();
-                const targetPoint = new tapspace.geometry.Point(space, {
-                    x: x,
-                    y: viewCenter.transitRaw(space).y,
-                    z: 0
-                });
-                viewport.translateTo(targetPoint);
             }
         } else {
             // Release X-lock immediately when tracking is disabled
@@ -6017,7 +3223,16 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 stop(true);
             }
             
-            const currentViewCenter = viewport.atCenter().transitRaw(space);
+            let currentViewCenter = null;
+            try {
+                if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                    const rect = glWorkspace.containerEl.getBoundingClientRect();
+                    const s = glWorkspace.camera.scale || 1;
+                    const worldX = (rect.width * 0.5 - glWorkspace.camera.tx) / s;
+                    const worldY = (rect.height * 0.5 - glWorkspace.camera.ty) / s;
+                    currentViewCenter = { x: worldX, y: worldY };
+                }
+            } catch {}
             
             cleanupCurrentModule();
             
@@ -6043,8 +3258,17 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 
                 initializeModule();
                 
-                const newPoint = space.at(currentViewCenter.x, currentViewCenter.y);
-                viewport.translateTo(newPoint);
+                if (currentViewCenter && glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                    try {
+                        const rect = glWorkspace.containerEl.getBoundingClientRect();
+                        const s = glWorkspace.camera.scale || 1;
+                        const cx = rect.width * 0.5;
+                        const cy = rect.height * 0.5;
+                        glWorkspace.camera.tx = cx - s * currentViewCenter.x;
+                        glWorkspace.camera.ty = cy - s * currentViewCenter.y;
+                        if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+                    } catch {}
+                }
                 
                 evaluatedNotes = myModule.evaluateModule();
                 setEvaluatedNotes(evaluatedNotes);
@@ -6109,17 +3333,24 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
     function cleanupCurrentModule() {
-        cleanupAudio();
-        const currentNotes = space.getChildren();
-        currentNotes.forEach(note => {
-            note.remove();
-            space.removeChild(note);
-        });
-        measureBars.forEach(bar => bar.remove());
+        try { cleanupAudio(); } catch {}
+        try {
+            // Remove any legacy DOM artifacts if present
+            document.querySelectorAll('.note-container, .note-rect, .note-content').forEach(el => el.remove());
+        } catch {}
+        measureBars.forEach(bar => { try { bar.remove(); } catch {} });
         measureBars = [];
         playheadTime = 0;
         totalPausedTime = 0;
         newNotes = [];
+        // Clear GL previews/end previews
+        try {
+            if (glWorkspace && glWorkspace.renderer) {
+                if (typeof glWorkspace.renderer.clearTempOverridesPreviewAll === 'function') glWorkspace.renderer.clearTempOverridesPreviewAll();
+                if (typeof glWorkspace.renderer.clearMeasurePreview === 'function') glWorkspace.renderer.clearMeasurePreview();
+                if (typeof glWorkspace.renderer.clearModuleEndPreview === 'function') glWorkspace.renderer.clearModuleEndPreview();
+            }
+        } catch {}
     }
 
     function initializeModule() {
@@ -6131,8 +3362,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
         baseNoteY = frequencyToY(baseNoteFreq);
         baseNoteDisplay = createBaseNoteDisplay();
-        centerPoint = space.at(0, baseNoteY);
-        viewport.translateTo(centerPoint);
+        // Center workspace camera to world (0, baseNoteY)
+        try {
+            if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                const rect = glWorkspace.containerEl.getBoundingClientRect();
+                const s = glWorkspace.camera.scale || 1;
+                const cx = rect.width * 0.5;
+                const cy = rect.height * 0.5;
+                glWorkspace.camera.tx = cx - s * 0;
+                glWorkspace.camera.ty = cy - s * baseNoteY;
+                if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+            }
+        } catch {}
         updateTimingBoundaries();
         createMeasureBars();
         updateVisualNotes(evaluatedNotes);
@@ -6391,11 +3632,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             try {
                 if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setHoverNoteId === 'function') {
                     glWorkspace.renderer.setHoverNoteId(null);
-                }
-            } catch {}
-            try {
-                if (glRenderer && typeof glRenderer.setHoverNoteId === 'function') {
-                    glRenderer.setHoverNoteId(null);
                 }
             } catch {}
             try {
@@ -7038,8 +4274,13 @@ try {
     try { eventBus.emit('player:requestPause'); } catch {}
     let center = null;
     try {
-      const viewCenter = viewport.atCenter();
-      center = viewCenter.transitRaw(space);
+      if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+        const rect = glWorkspace.containerEl.getBoundingClientRect();
+        const s = glWorkspace.camera.scale || 1;
+        const worldX = (rect.width * 0.5 - glWorkspace.camera.tx) / s;
+        const worldY = (rect.height * 0.5 - glWorkspace.camera.ty) / s;
+        center = { x: worldX, y: worldY };
+      }
     } catch {}
 
     try { cleanupCurrentModule(); } catch {}
@@ -7055,9 +4296,16 @@ try {
 
       initializeModule();
 
-      if (center) {
-        const pt = space.at(center.x, center.y);
-        viewport.translateTo(pt);
+      if (center && glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+        try {
+          const rect = glWorkspace.containerEl.getBoundingClientRect();
+          const s = glWorkspace.camera.scale || 1;
+          const cx = rect.width * 0.5;
+          const cy = rect.height * 0.5;
+          glWorkspace.camera.tx = cx - s * center.x;
+          glWorkspace.camera.ty = cy - s * center.y;
+          if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+        } catch {}
       }
 
       evaluatedNotes = myModule.evaluateModule();

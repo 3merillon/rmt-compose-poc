@@ -1,14 +1,14 @@
 /**
- * Phase 2: WebGL2 Workspace (Sprint 1)
+ * WebGL2 Workspace
  * - Standalone interactive workspace canvas with pan/zoom camera
  * - Reuses RendererAdapter for draw pipeline during bootstrap
  * - Provides Workspace API: init/destroy/sync/setPlayhead
  *
  * Next sprints will add GPU picking + GL-native interactions. For now this
- * establishes a Tapspace-free camera and a feature-flagged entry point.
+ * establishes a standalone camera and a feature-flagged entry point.
  */
 
-import { RendererAdapter } from './renderer-adapter.js';
+import { RendererAdapter } from './renderer.js';
 import { CameraController } from './camera-controller.js';
 import { Picking } from './picking.js';
 import { eventBus } from '../../utils/event-bus.js';
@@ -97,7 +97,7 @@ export class Workspace {
     };
     this.camera.onChange = this._onCameraChange;
 
-    // Boot RendererAdapter (Phase 1 pipeline)
+    // Boot RendererAdapter
     this.renderer = new RendererAdapter();
     const ok = this.renderer.init(containerEl);
     if (!ok) {
@@ -1528,7 +1528,7 @@ export class Workspace {
   }
 
   /**
-   * Scene sync (delegates to RendererAdapter) — use the same payload as Phase 1.
+   * Scene sync (delegates to RendererAdapter)
    * { evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId, tempOverrides }
    */
   sync(args) {

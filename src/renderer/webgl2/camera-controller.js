@@ -1,6 +1,6 @@
 /**
- * CameraController (Workspace) — Phase 2 Sprint 1
- * - Pan/zoom controller that produces a Tapspace-compatible affine basis:
+ * CameraController (Workspace)
+ * - Pan/zoom controller that produces a Workspace camera affine basis:
  *   [ a c e ]
  *   [ b d f ]
  *   [ 0 0 1 ]
@@ -8,7 +8,7 @@
  *   a = s, d = s, b = 0, c = 0, e = tx, f = ty
  *
  * Mirrors basis semantics consumed by RendererAdapter.updateViewportBasis()
- * [RendererAdapter.updateViewportBasis(raw)](src/renderer/webgl2/renderer-adapter.js:288)
+ * [RendererAdapter.updateViewportBasis()](src/renderer/webgl2/renderer.js:343)
  */
 
 export class CameraController {
@@ -331,7 +331,7 @@ export class CameraController {
     } catch {}
   }
 
-  // Return Tapspace-like raw basis (CSS px)
+  // Return Workspace camera raw basis (CSS px)
   getBasis() {
     return {
       a: this.scale, b: 0,

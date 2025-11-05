@@ -1,5 +1,5 @@
 /**
- * WebGL2 GPU Picking (Scaffold) — Phase 2 Sprint 1
+ * WebGL2 GPU Picking (Scaffold)
  * - Offscreen RGBA8 ID buffer with optional depth, DPR-aware coordinates
  * - Provides begin/end/readAt lifecycle
  * - Encoding: instance/note id encoded into RGB (24-bit), A reserved

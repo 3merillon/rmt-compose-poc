@@ -1,5 +1,4 @@
 import Fraction from 'fraction.js';
-import tapspace from 'tapspace';
 import { Module } from './module.js';
 import { Note } from './note.js';
 import { InstrumentManager, SynthInstrument, SampleInstrument } from './instruments/instrument-manager.js';
@@ -74,4 +73,4 @@ if (document.readyState === 'loading') {
     initApp();
 }
 
-export { Module, Note, InstrumentManager, Fraction, tapspace };
+export { Module, Note, InstrumentManager, Fraction };

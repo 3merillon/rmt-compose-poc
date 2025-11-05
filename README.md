@@ -1,122 +1,120 @@
 # Relative Music Theory (RMT) App
 
-A revolutionary approach to musical notation and composition based on rational number relationships.
+A production-ready, GL‑only composition tool built around rational number relationships (ratios) instead of fixed 12‑TET steps.
 
 ## Overview
 
-The Relative Music Theory (RMT) App is a proof-of-concept for representing and manipulating musical notes and structures via exact ratios, not fixed ET12 steps. This branch modernizes the codebase to native ES modules and introduces a WebGL2 renderer that provides a high‑performance overlay synchronized with the existing Tapspace scene.
-
-What changed in this branch:
-- Migrated to ES modules throughout the app, built and served via [vite.config.js](vite.config.js)
-- Added a WebGL2 overlay renderer for notes, playhead, measure bars/triangles, octave guides, and selection/hover rings: [RendererAdapter](src/renderer/webgl2/renderer-adapter.js:14)
-- Kept Tapspace interactions; the WebGL2 layer mirrors and enhances visuals while exposing CPU picking APIs for future integration
-
-## Demo
-
-Try the RMT Compose demo: https://rmt-compose-poc.vercel.app/
+The app represents and manipulates musical structures as exact ratios and durations. A WebGL2 interactive Workspace handles all rendering and interactions with a high‑performance instanced pipeline. The legacy DOM rendering layer has been removed; the Workspace and its camera are the sole sources of truth for visualization and picking.
 
 ## Features
 
-- Ratio-first music model
-  - Represent notes as mathematical relationships (rational numbers)
-  - Work with perfect intervals and ratios beyond 12-TET
-- Visual composition workspace
-  - Infinite, zoomable canvas via Tapspace
-  - ES module entry point: [src/main.js](src/main.js)
-- New WebGL2 overlay renderer (Phase 1)
-  - High‑performance drawing of note bodies with rounded borders, selection and hover rings
-  - Crisp, scale-stable fraction labels with a glyph cache/atlas and an interior mask
-  - Measure indicators:
-    - Dashed vertical measure bars and solid start/end bars
-    - Bottom-edge measure triangles with labels
-  - Octave guides:
-    - Horizontal dotted lines with labels (BaseNote, +k, −k)
-  - Playhead line with pixel-snapped rendering
-  - CPU picking helpers for notes, measure triangles, and BaseNote circle
-  - Core adapter and lifecycle:
-    - Class: [RendererAdapter](src/renderer/webgl2/renderer-adapter.js:14)
-    - View basis sync: [RendererAdapter.updateViewportBasis()](src/renderer/webgl2/renderer-adapter.js:343)
-    - Scene sync: [RendererAdapter.sync()](src/renderer/webgl2/renderer-adapter.js:377)
-    - Playhead: [RendererAdapter.setPlayhead()](src/renderer/webgl2/renderer-adapter.js:731)
+- Ratio‑first music model
+  - Notes express frequency, duration, and start time as exact expressions (compiled to functions backed by Fraction.js)
+  - Dependency‑aware evaluation and caching
 
-## Technology
+- Interactive WebGL2 Workspace
+  - Pan/zoom camera with affine world↔screen basis
+  - Selection, move, resize
+  - Measure editing (drag triangles), dashed/solid measure bars
+  - Snapping to sixteenth notes
+  - Dependency‑aware previews during drag/resize
+  - Crisp fraction labels and instanced rounded rectangles
+  - Octave guides and BaseNote indicator
+  - GPU/CPU picking for notes, measures, and BaseNote
 
-- WebGL2 overlay renderer: [src/renderer/webgl2/renderer-adapter.js](src/renderer/webgl2/renderer-adapter.js)
-- Tapspace.js for infinite 2D workspace
-- Fraction.js for exact ratio math
-- Vite for development and build: [vite.config.js](vite.config.js)
-- ES modules throughout the app (see [package.json](package.json))
+- Playback and audio
+  - Web Audio–based engine, with shared nodes and graceful pause/stop
+  - Playhead tracking (optional), pixel‑snapped playhead line
+  - Volume control
+
+- Productivity
+  - Undo/Redo history
+  - Load module from file (Main menu > Load Module)
+  - Drag a module from the Module Bar onto the workspace
+  - Export current module to file
+  - Scale controls (X/Y) for time/frequency density; camera tracking integration
+
+## Requirements
+
+- Node.js 18+
+- A modern browser with WebGL2 enabled
 
 ## Quick Start
 
-Requirements:
-- Node.js 18+ (ESM + Vite 7)
-- A modern browser with WebGL2 enabled
+Install and run the dev server:
 
-Install and run:
-- npm install
-- npm run dev
-- Open the local URL printed by Vite (defaults to http://localhost:3000)
+```bash
+npm ci
+npm run dev
+```
 
-Build:
-- npm run build
-- npm run preview
+Open the URL printed by Vite (typically http://localhost:3000).
+
+Build and preview a production bundle:
+
+```bash
+npm run build
+npm run preview
+```
+
+## Controls and Workflow
+
+- Transport
+  - Play/Pause button at the top‑left
+  - Stop button next to Play/Pause
+  - Volume slider
+- View and tracking
+  - Reset View button centers the Workspace on BaseNote (disabled when tracking is on)
+  - Tracking toggle keeps the playhead centered during playback
+  - Scale controls (bottom‑left dot): adjust horizontal (time) and vertical (frequency) density
+- Editing
+  - Click to select a note or measure
+  - Drag note body to move; drag the right tab to resize
+  - Click +/− octave regions to transpose by octaves
+  - Drag measure triangles at the bottom to adjust measure positions; dependent notes preview live
+- Import/Export
+  - Load Module from file via the main menu; Save Module to export the current module; Reset to the default module from the same menu
+  - Drag a module from the Module Bar onto the workspace to load it
+- Keyboard
+  - Undo: Ctrl/Cmd+Z
+  - Redo: Ctrl/Cmd+Y
+
+## Module Bar
+
+- Browse example modules by category (Intervals, Chords, Melodies, Custom)
+- Load a module by dragging it from the Module Bar onto the workspace
+- Load a module from file via the main menu (Main menu > Load Module)
+
+### Create your own Module Bar items
+
+1) Add your module JSON to a category folder, for example: [public/modules/custom](public/modules/custom)
+2) Update that category’s index to reference your file and label:
+   - Edit [public/modules/custom/index.json](public/modules/custom/index.json)
+   - Add an entry for your file (e.g., "my module.json") with the display label you want
+3) Save and refresh the app (or restart the dev server). Your module will appear under the Custom category
+
+Notes:
+- The default module lives at [public/modules/defaultModule.json](public/modules/defaultModule.json)
+- Other built-in categories follow the same pattern with their own index.json files
+
+## File Structure
+
+- src/main.js — ES module entry point
+- src/player.js — Orchestrates Workspace, audio, history, UI wiring
+- src/renderer/webgl2/workspace.js — Interactive Workspace (camera, picking, interactions) using the WebGL2 renderer
+- src/renderer/webgl2/renderer.js — WebGL2 programs, instancing, text, overlays, picking
+- src/renderer/webgl2/camera-controller.js — Camera and world↔screen basis publication
+- src/player/audio-engine.js — Audio graph and playback controls
+- public/modules — Bundled example modules and presets
 
 ## Browser Support and Fallbacks
 
-- WebGL2 is required for the overlay renderer. If WebGL2 is unavailable, the app still loads, but overlay visuals are disabled (the adapter safely does not initialize).
-- Tapspace-based DOM rendering remains functional; interactions are preserved.
+- WebGL2 is required. If WebGL2 cannot be created, the Workspace will not initialize.
 
-## Developer Notes
-
-- Entry points and modules
-  - App entry: [src/main.js](src/main.js)
-  - WebGL2 workspace integration: [src/renderer/webgl2/workspace.js](src/renderer/webgl2/workspace.js)
-  - Camera basis publisher: [src/renderer/webgl2/camera-controller.js](src/renderer/webgl2/camera-controller.js)
-  - WebGL2 adapter: [src/renderer/webgl2/renderer-adapter.js](src/renderer/webgl2/renderer-adapter.js)
-- Glyph atlas toggle for text rendering
-  - Enable/disable via URL: ?atlas=1 or ?atlas=0
-  - Or localStorage key: rmt:atlas with value 1 or 0
-- Public data and assets
-  - Modules and presets: [public/modules](public/modules)
-  - Instruments and samples: [public/instruments](public/instruments)
-
-## Current Status
-
-This is still a proof-of-concept. The WebGL2 layer is integrated as a synchronized overlay. Interactions remain driven by the existing Tapspace DOM and logic, while the overlay provides performance and fidelity improvements and exposes CPU picking utilities for future integration.
-
-## Architecture
-
-```mermaid
-flowchart LR
-  Browser[Browser] --> Vite[Vite Dev Server]
-  Vite --> App[ES Modules]
-  App --> Tapspace[Tapspace Viewport]
-  Tapspace --> GL[WebGL2 RendererAdapter]
-  App --> Audio[Audio Engine]
-```
-
-Key files:
-- App entry: [src/main.js](src/main.js)
-- Renderer adapter: [src/renderer/webgl2/renderer-adapter.js](src/renderer/webgl2/renderer-adapter.js)
-- Workspace integration: [src/renderer/webgl2/workspace.js](src/renderer/webgl2/workspace.js)
-- Camera basis publishing: [src/renderer/webgl2/camera-controller.js](src/renderer/webgl2/camera-controller.js)
-
-## Changelog
-
-- Refactor to ES modules and Vite-based dev/build
-- Add WebGL2 overlay renderer with:
-  - Rounded note bodies with selection/hover rings
-  - Fraction labels with glyph cache/atlas and interior mask
-  - Playhead and measure visualization (dashed bars, solid start/end bars, triangles with labels)
-  - Octave guides with dotted lines and labels
-  - CPU picking utilities for notes, measure triangles, and BaseNote circle
-- Performance improvements via instancing and screen-space paths
-- Developer toggles for glyph atlas
 
 ## Learn More
 
-For background on the theory: https://cybercyril.com
+- Project website and theory background: https://cybercyril.com
 
 ## License
 
@@ -128,4 +126,4 @@ Relative Music Theory Personal Non‑Commercial License (RMT‑PNC) v1.0
 - Outputs (music, audio, video, MIDI, scores) may be shared non‑commercially only
 - Public sharing requires attribution: “Made with Relative Music Theory (RMT) – https://cybercyril.com/”
 
-See full terms in [LICENSE.md](LICENSE.md). For commercial licensing, email cyril.monkewitz@gmail.com
+See full terms in LICENSE.md. For commercial licensing, email cyril.monkewitz@gmail.com

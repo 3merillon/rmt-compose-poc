@@ -9,8 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "fraction.js": "^4.3.7",
-    "tapspace": "^2.0.0-alpha.24"
+    "fraction.js": "^4.3.7"
   },
   "devDependencies": {
     "vite": "^7.1.12"

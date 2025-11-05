@@ -1,15 +1,10 @@
 /**
- * WebGL2 RendererAdapter (Phase 1)
+ * WebGL2 RendererAdapter
  * - Non-interactive overlay renderer for notes and playhead
- * - Uses Tapspace viewport basis (a,b,c,d,e,f) to match world->screen transform
+ * - Uses Workspace viewport basis (a,b,c,d,e,f) to match world->screen transform
  * - World units match current app semantics:
  *     x = seconds * 200 * xScaleFactor
  *     y = log2(baseFreq / freq) * 100 * yScaleFactor
- *
- * Phase 1 goals:
- * - Render notes (rects) and playhead line in sync with existing Tapspace DOM visuals
- * - Keep pointer-events: none to avoid interfering with current interactions
- * - Derive matrix from Tapspace viewport.getBasis().getRaw()
  */
 export class RendererAdapter {
   constructor() {
@@ -44,9 +39,9 @@ export class RendererAdapter {
       0, 0, 1
     ]);
 
-    // Cached scale along X (pixels per world unit), derived from Tapspace basis
+    // Cached scale along X (pixels per world unit), derived from Workspace basis
     this.xScalePxPerWU = 1;
-    // Cached scale along Y (pixels per world unit), derived from Tapspace basis
+    // Cached scale along Y (pixels per world unit), derived from Workspace basis
     this.yScalePxPerWU = 1;
 
     // Canvas offset for proper coordinate transformation
@@ -205,10 +200,10 @@ export class RendererAdapter {
   init(containerEl) {
     if (!containerEl) throw new Error('RendererAdapter.init: containerEl required');
 
-    // Create canvas overlay (attach to body as fixed to escape Tapspace stacking contexts)
+    // Create canvas overlay (attach to body as fixed to escape Workspace stacking contexts)
     const canvas = document.createElement('canvas');
     canvas.style.position = 'fixed';
-    canvas.style.pointerEvents = 'none'; // Phase 1: non-interactive overlay
+    canvas.style.pointerEvents = 'none'; // non-interactive overlay
     canvas.style.zIndex = '1004'; // above DOM bars/playhead; UI overlays use >=10000
     canvas.style.backgroundColor = 'transparent';
 
@@ -218,7 +213,7 @@ export class RendererAdapter {
       containerEl.style.position = 'relative';
     }
 
-    // Append to body to avoid being underneath Tapspace's transformed stacking contexts
+    // Append to body to avoid being underneath Workspace's transformed stacking contexts
     document.body.appendChild(canvas);
 
     // Track and mirror container bounds to canvas CSS box
@@ -333,7 +328,7 @@ export class RendererAdapter {
   }
 
   /**
-   * Provide latest Tapspace viewport basis (raw affine):
+   * Provide latest Workspace viewport basis (raw affine):
    * Expected object: { a, b, c, d, e, f }
    * Affine matrix (world -> screen), column-major mat3:
    * [ a c e ]
@@ -473,7 +468,7 @@ export class RendererAdapter {
           ? this._frequencyToY(freqVal)
           : this._yForSilence(module, note, evaluatedNotes);
 
-        // Match Tapspace DOM vertical sizing: total base height should be 22 (content + borders)
+        // Match Workspace DOM vertical sizing: total base height should be 22 (content + borders)
         // Maintain the same visual center as the previous 20-height rectangles.
         const hBase = 22; // world units
         const h = hBase;
@@ -1753,7 +1748,7 @@ export class RendererAdapter {
     // Prevent stale scissor from a previous frame from clipping the body pass
     gl.disable(gl.SCISSOR_TEST);
 
-    // Use CSS pixel size for viewport uniform because Tapspace basis gives CSS pixels
+    // Use CSS pixel size for viewport uniform because Workspace basis gives CSS pixels
     const rectCss = canvas.getBoundingClientRect();
     const vpW = Math.max(1, rectCss.width);
     const vpH = Math.max(1, rectCss.height);
@@ -2642,7 +2637,7 @@ export class RendererAdapter {
     }
   }
 }
- /* Augment RendererAdapter with measure bar rendering (Phase 1 overlay)
+ /* Augment RendererAdapter with measure bar rendering
    - Draws origin, all measure start bars, and final module end bar as thin vertical lines
    - Uses the same instanced-quad pipeline as notes (rectProgram) with per-instance colors
    - Constant pixel thickness via converting 1px to world units using xScalePxPerWU

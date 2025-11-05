@@ -591,55 +591,17 @@ html, body {
     margin-top: 0;
 }
 
-.measure-bars-container {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-    z-index: 2;
-}
+/* removed legacy: .measure-bars-container */
 
-.measure-bar {
-    position: absolute;
-    top: 0;
-    width: 1px;
-    height: 100%;
-    border-left: 1px dashed rgba(255, 255, 255, 0.5);
-    transform-origin: left;
-    will-change: transform;
-}
+/* removed legacy: .measure-bar */
 
-.measure-bar.secondary-bar {
-    border-left: 1px solid rgba(255, 255, 255, 0.7);
-    width: 1px;
-    height: 100%;
-}
+/* removed legacy: .measure-bar.secondary-bar */
 
-.measure-bar.secondary-bar.start-bar {
-    border-left-width: 2px;
-}
+/* removed legacy: .measure-bar.secondary-bar.start-bar */
 
-.measure-bar.secondary-bar.end-bar {
-    border-left-width: 2px;
-}
+/* removed legacy: .measure-bar.secondary-bar.end-bar */
 
-.playhead {
-    position: absolute;
-    top: 0;
-    width: 1px;
-    height: 100%;
-    background-color: #ffa800;
-    box-shadow: 
-        0 0 5px #ffa800,
-        0 0 10px #ffa800,
-        0 0 15px #ffa800;
-    transform-origin: left;
-    will-change: transform;
-    pointer-events: none;
-    z-index: 1002;
-}
+/* removed legacy: .playhead */
 
 .tracking-zone {
     display: flex;
@@ -947,59 +909,19 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     margin-top: 15px;
 }
 
-.note-rect {
-    cursor: pointer;
-}
+/* removed legacy: .note-rect */
 
-.note-rect .note-content > div,
-.base-note-fraction {
-    font-family: 'Roboto Mono', 'IBM Plex Mono', monospace;
-    font-weight: 400;
-}
+/* removed legacy: .note-rect .note-content > div, .base-note-fraction (font stack) */
 
-.note-rect .note-content > div {
-    font-size: 8px;
-    color: white;
-    text-shadow: 0 0 1px black;
-}
+/* removed legacy: .note-rect .note-content > div */
 
-.base-note-fraction {
-    color: white;
-    font-size: 12px;
-    text-align: center;
-    pointer-events: none;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-}
+/* removed legacy: .base-note-fraction */
 
-.fraction-numerator,
-.fraction-denominator {
-    line-height: 1;
-}
+/* removed legacy: fraction numerator/denominator */
 
-.fraction-line {
-    width: 100%;
-    height: 1px;
-    background-color: white;
-    margin: 2px 0;
-}
+/* removed legacy: .fraction-line */
 
-.base-note-circle {
-    position: absolute;
-    z-index: 10;
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    background-color: #ffa800;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    color: white;
-    overflow: hidden;
-}
+/* removed legacy: .base-note-circle */
 
 .note-widget {
     position: fixed;
@@ -1180,47 +1102,13 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     border-bottom: 1px solid rgba(255, 168, 0, 0.3);
 }
 
-.measure-bar-triangle {
-    position: fixed;
-    width: 0;
-    height: 0;
-    border-left: 15px solid transparent;
-    border-right: 15px solid transparent;
-    border-bottom: 30px solid rgba(51, 51, 51, 0.7);
-    cursor: pointer;
-    margin-left: -15px;
-    z-index: 2;
-    pointer-events: auto;
-    transition: filter 0.3s ease;
-    transform: translateX(0);
-}
+/* removed legacy: .measure-bar-triangle */
 
-.measure-bar-triangle:hover,
-.measure-bar-triangle.selected {
-    filter: drop-shadow(0 0 5px #ffa800);
-    transition: filter 0.3s ease;
-}
+/* removed legacy: .measure-bar-triangle hover/selected */
 
-.measure-id {
-    position: absolute;
-    bottom: -27px;
-    left: 50%;
-    transform: translateX(-50%);
-    color: #ffa800;
-    font-size: 10px;
-    white-space: nowrap;
-}
+/* removed legacy: .measure-id */
 
-#measureBarTrianglesContainer {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 30px;
-    pointer-events: none;
-    z-index: 2;
-    transform: translateX(0.5px);
-}
+/* removed legacy: #measureBarTrianglesContainer */
 
 .menu-actions {
     padding: 15px;
@@ -1244,27 +1132,15 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
 }
 
-.note-content.dependency {
-    box-shadow: 0 0 5px #00ffff, 0 0 10px #00ffff, 0 0 15px #00ffff !important;
-}
+/* removed legacy: .note-content.dependency */
 
-.note-content.dependent {
-    box-shadow: 0 0 5px #ff0000, 0 0 10px #ff0000, 0 0 15px #ff0000 !important;
-}
+/* removed legacy: .note-content.dependent */
 
-.base-note-circle.dependency {
-    box-shadow: 0 0 5px #00ffff, 0 0 10px #00ffff, 0 0 15px #00ffff !important;
-}
+/* removed legacy: .base-note-circle.dependency */
 
-.measure-bar-triangle.dependency {
-    filter: drop-shadow(0 0 5px #00ffff) drop-shadow(0 0 10px #00ffff);
-    transition: filter 0.3s ease;
-}
+/* removed legacy: .measure-bar-triangle.dependency */
 
-.measure-bar-triangle.dependent {
-    filter: drop-shadow(0 0 5px #ff0000) drop-shadow(0 0 10px #ff0000);
-    transition: filter 0.3s ease;
-}
+/* removed legacy: .measure-bar-triangle.dependent */
 
 .delete-note-row {
     margin-bottom: 15px;
@@ -1747,27 +1623,15 @@ input[type="range"]:active::-moz-range-thumb {
     font-weight: bold;
 }
 
-.resize-handle-icon {
-    transition: background-color 0.3s ease;
-}
+/* removed legacy: .resize-handle-icon */
   
-.note-rect:hover .resize-handle-icon {
-    background: rgba(255, 255, 255, 0.9);
-}
+/* removed legacy: .note-rect:hover .resize-handle-icon */
   
-.note-rect.resizing {
-    outline: 2px dashed #ffa800;
-}
+/* removed legacy: .note-rect.resizing */
 
-.resize-ghost-note {
-    transition: all 0.1s ease-out;
-    box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
-}
+/* removed legacy: .resize-ghost-note */
 
-.resize-ghost-arrow {
-    transition: all 0.1s ease-out;
-    opacity: 0.7;
-}
+/* removed legacy: .resize-ghost-arrow */
 
 .lock-button {
     position: fixed;
