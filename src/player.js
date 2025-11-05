@@ -2303,7 +2303,8 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
       if (!fRaw || typeof fRaw !== 'string') return;
 
       // Only retarget when the dependent references moved note's frequency
-      if (!new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)\\.getVariable\\('frequency'\\)`).test(fRaw)) return;
+      const freqRefRe = new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)\\.getVariable\\(\\s*['"]frequency['"]\\s*\\)`);
+      if (!freqRefRe.test(fRaw)) return;
 
       const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
       // If dependent starts earlier than referenced (moved) note, swap to a valid ancestor at/before depStart
@@ -3844,6 +3845,163 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           n.setVariable('startTime', function() { return __evalExpr(raw, myModule); });
           n.setVariable('startTimeString', raw);
+
+          // Frequency remapping: ensure moved note's frequency never depends on a future-starting parent;
+          // re-anchor to a valid ancestor at/before newStartSec, preserving the evaluated value.
+          try {
+            if (n && n.variables && n.variables.frequency) {
+              // Prefer the originally referenced frequency anchor when present
+              const fRaw0 = (n.variables && n.variables.frequencyString) ? n.variables.frequencyString : null;
+              let refNote = null;
+              try {
+                const mFreq = fRaw0 && fRaw0.match(/module\.getNoteById\(\s*(\d+)\s*\)\.getVariable\(\s*['"]frequency['"]\s*\)/);
+                if (mFreq) {
+                  const rid = parseInt(mFreq[1], 10);
+                  refNote = myModule.getNoteById(rid) || null;
+                } else {
+                  // Also handle explicit BaseNote frequency anchor
+                  const baseMatch = fRaw0 && /module\.baseNote\.getVariable\(\s*['"]frequency['"]\s*\)/.test(fRaw0);
+                  if (baseMatch) {
+                    refNote = myModule.baseNote;
+                  }
+                }
+              } catch {}
+              if (!refNote) {
+                // Fallback: use the chosen temporal parent’s parent as a starting point
+                const chosenParent = parent;
+                refNote = __parseParentFromStartTimeStringGL(chosenParent) || myModule.baseNote;
+              }
+
+              // Local resolver: climb ancestors until startTime <= cutoffSec, else BaseNote
+              function __resolveAncestorAtOrBeforeLocal(node, cutoffSec) {
+                try {
+                  let anc = node || myModule.baseNote;
+                  const tol = 1e-6;
+                  let guard = 0;
+                  while (anc && anc.id !== 0 && guard++ < 128) {
+                    const st = Number(anc.getVariable('startTime')?.valueOf?.() || 0);
+                    if (st <= Number(cutoffSec) + tol) break;
+                    const raw = (anc.variables && anc.variables.startTimeString) || '';
+                    const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+                    if (m) {
+                      const pid = parseInt(m[1], 10);
+                      anc = myModule.getNoteById(pid) || myModule.baseNote;
+                    } else if ((raw || '').includes('module.baseNote')) {
+                      anc = myModule.baseNote; break;
+                    } else {
+                      anc = myModule.baseNote; break;
+                    }
+                  }
+                  return anc || myModule.baseNote;
+                } catch { return myModule.baseNote; }
+              }
+
+              const anchor = __resolveAncestorAtOrBeforeLocal(refNote, newStartSec);
+
+              const curFv = n.getVariable('frequency');
+              const ancFv = anchor.getVariable('frequency');
+              const curVal = (curFv && typeof curFv.valueOf === 'function') ? curFv.valueOf() : Number(curFv);
+              const ancVal = (ancFv && typeof ancFv.valueOf === 'function') ? ancFv.valueOf() : Number(ancFv);
+
+              if (isFinite(curVal) && isFinite(ancVal) && Math.abs(ancVal) > 1e-12) {
+                let ratio;
+                try { ratio = new Fraction(curVal).div(new Fraction(ancVal)); }
+                catch { ratio = new Fraction(curVal / ancVal); }
+
+                const anchorRef = (anchor.id === 0) ? "module.baseNote" : `module.getNoteById(${anchor.id})`;
+                let rawFreq;
+                try {
+                  const r = (typeof ratio.valueOf === 'function') ? ratio.valueOf() : (ratio.n / ratio.d);
+                  if (Math.abs(r - 1) < 1e-6) {
+                    rawFreq = `${anchorRef}.getVariable('frequency')`;
+                  } else {
+                    rawFreq = `new Fraction(${ratio.n}, ${ratio.d}).mul(${anchorRef}.getVariable('frequency'))`;
+                  }
+                } catch {
+                  rawFreq = `${anchorRef}.getVariable('frequency')`;
+                }
+
+                let simplifiedF;
+                try { simplifiedF = simplifyFrequency(rawFreq, myModule); } catch { simplifiedF = rawFreq; }
+                n.setVariable('frequency', function () { return __evalExpr(simplifiedF, myModule); });
+                n.setVariable('frequencyString', simplifiedF);
+              }
+            }
+          } catch {}
+
+          // Duration remapping: re-anchor tempo reference to an ancestor at/before newStartSec, preserving seconds
+          try {
+            if (n && n.variables && n.variables.duration) {
+              const dRaw0 = (n.variables && n.variables.durationString) ? n.variables.durationString : null;
+
+              // Prefer an explicit referenced note id inside durationString (e.g., findTempo(getNoteById(id)))
+              let refNote = null;
+              try {
+                const mAny = dRaw0 && dRaw0.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
+                if (mAny) {
+                  const rid = parseInt(mAny[1], 10);
+                  refNote = myModule.getNoteById(rid) || null;
+                } else if (dRaw0 && dRaw0.indexOf('module.baseNote') !== -1) {
+                  refNote = myModule.baseNote;
+                }
+              } catch {}
+
+              if (!refNote) {
+                // Fallback: use chosen temporal parent's parent as basis when no explicit ref present
+                const chosenParent = parent;
+                refNote = __parseParentFromStartTimeStringGL(chosenParent) || myModule.baseNote;
+              }
+
+              // Local resolver: climb ancestors of refNote until startTime <= newStartSec
+              function __resolveAncestorAtOrBeforeLocalDur(node, cutoffSec) {
+                try {
+                  let anc = node || myModule.baseNote;
+                  const tol = 1e-6;
+                  let guard = 0;
+                  while (anc && anc.id !== 0 && guard++ < 128) {
+                    const st = Number(anc.getVariable('startTime')?.valueOf?.() || 0);
+                    if (st <= Number(cutoffSec) + tol) break;
+                    const raw = (anc.variables && anc.variables.startTimeString) || '';
+                    const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+                    if (m) {
+                      const pid = parseInt(m[1], 10);
+                      anc = myModule.getNoteById(pid) || myModule.baseNote;
+                    } else if ((raw || '').includes('module.baseNote')) {
+                      anc = myModule.baseNote; break;
+                    } else {
+                      anc = myModule.baseNote; break;
+                    }
+                  }
+                  return anc || myModule.baseNote;
+                } catch { return myModule.baseNote; }
+              }
+
+              const anchorDur = __resolveAncestorAtOrBeforeLocalDur(refNote, newStartSec);
+
+              // Preserve numeric duration in seconds while re-anchoring to anchorDur's tempo
+              const durVal = n.getVariable('duration');
+              const durSec = (durVal && typeof durVal.valueOf === 'function') ? durVal.valueOf() : Number(durVal);
+
+              if (isFinite(durSec) && durSec >= 0) {
+                const tempoVal = myModule.findTempo(anchorDur);
+                const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+                const beatLen = 60 / tempo;
+                const beats = durSec / beatLen;
+
+                let bf;
+                try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
+
+                const anchorRef = (anchorDur.id === 0) ? "module.baseNote" : `module.getNoteById(${anchorDur.id})`;
+                const rawDur = `new Fraction(60).div(module.findTempo(${anchorRef})).mul(new Fraction(${bf.n}, ${bf.d}))`;
+
+                let simplifiedD;
+                try { simplifiedD = simplifyDuration(rawDur, myModule); } catch { simplifiedD = rawDur; }
+
+                n.setVariable('duration', function () { return __evalExpr(simplifiedD, myModule); });
+                n.setVariable('durationString', simplifiedD);
+              }
+            }
+          } catch {}
 
           // Ensure evaluation cache sees the edited note
           try { myModule.markNoteDirty(n.id); } catch {}
