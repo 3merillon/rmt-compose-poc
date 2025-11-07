@@ -3,9 +3,6 @@
  * - Standalone interactive workspace canvas with pan/zoom camera
  * - Reuses RendererAdapter for draw pipeline during bootstrap
  * - Provides Workspace API: init/destroy/sync/setPlayhead
- *
- * Next sprints will add GPU picking + GL-native interactions. For now this
- * establishes a standalone camera and a feature-flagged entry point.
  */
 
 import { RendererAdapter } from './renderer.js';
@@ -19,8 +16,6 @@ import { eventBus } from '../../utils/event-bus.js';
 
 /**
  * Workspace: hosts a camera and a RendererAdapter instance.
- * For Sprint 1, we delegate all drawing to RendererAdapter to bootstrap quickly.
- * Future sprints will migrate interactions and picking to GL.
  */
 export class Workspace {
   constructor() {
@@ -43,9 +38,9 @@ export class Workspace {
     // Interaction state
     this._interaction = {
       active: false,
-      type: null,            // 'move' | 'resize' | 'octave'
+      type: null,            // 'move' | 'resize' | 'octave' | 'measure'
       noteId: null,
-      region: null,          // 'body' | 'tab' | 'octaveUp' | 'octaveDown'
+      region: null,          // 'body' | 'tab' | 'octaveUp' | 'octaveDown' | 'triangle'
       direction: null,       // 'up' | 'down' (for octave)
       pointerId: null,       // initiating pointer id (for touch/mouse)
       startClient: { x: 0, y: 0 },
@@ -60,7 +55,9 @@ export class Workspace {
       baselineStartSec: null,
       // Track which ids we previewed last frame to explicitly reset those that are no longer moving
       prevPreviewIds: null,
-      lastPreview: { startSec: null, durationSec: null }
+      lastPreview: { startSec: null, durationSec: null },
+      // PERFORMANCE: Cache affected dependents computed at pointerdown (avoid recomputing on every mousemove)
+      cachedDependents: null  // Set<number> of dependent note IDs
     };
 
     // Module snapshot for snapping/tempo info (filled in sync)
@@ -172,10 +169,117 @@ export class Workspace {
               const xScale = this.renderer.currentXScaleFactor || 1.0;
               const measureNote = this._module?.getNoteById?.(measureId);
               const origStartSec = Number(measureNote?.getVariable?.('startTime')?.valueOf?.() ?? 0);
-              const startWorldX = origStartSec * (200 * xScale);
+              const startWorldX = origStartSec * (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
               const ptr0 = this.screenToWorld(e.clientX, e.clientY);
               const pointerWX0 = (ptr0 && typeof ptr0.x === 'number') ? ptr0.x : startWorldX;
               const pointerOffsetWorld = pointerWX0 - startWorldX;
+
+              // INTERACTION CACHE (measure): Capture linear chain and index at pointerdown.
+              // - cachedMeasureChain: Array<{id,startSec}> from earliest ancestor -> last dependent
+              // - cachedMeasureIndex: index of active measure within chain
+              // - cachedMeasureMovingIds: closure of downstream measures + normal-note dependents (computed below)
+              // These caches are reused on every preview frame and invalidated in _endInteraction.
+              // Cache measure chain once at pointerdown to avoid O(n^2) rebuilds per frame
+              const chain0 = this._collectMeasureChainFor(Number(measureId)) || [];
+              let cidx0 = chain0.findIndex(m => Number(m.id) === Number(measureId));
+              if (cidx0 < 0) cidx0 = 0;
+
+              // Build moving-set cache for measure drag: downstream measures + all normal notes that depend on them
+              const moveSet0 = new Set();
+              try {
+                const mod = this._module;
+                const isMeasure = (n) => {
+                  try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
+                  catch { return false; }
+                };
+
+                // 1) Seed measures: downstream along the linear chain (including the anchor)
+                const seedMeasures = new Set();
+                for (let j = cidx0; j < chain0.length; j++) {
+                  const mid = Number(chain0[j].id);
+                  seedMeasures.add(mid);
+                  moveSet0.add(mid);
+                }
+                if (!seedMeasures.size) {
+                  seedMeasures.add(Number(measureId));
+                  moveSet0.add(Number(measureId));
+                }
+
+                // 2) Expand to ALL transitive dependent measures (branching graph closure)
+                const measureClosure = (seedSet) => {
+                  const out = new Set(seedSet);
+                  if (!mod || !mod.notes) return out;
+                  let changed = true;
+                  while (changed) {
+                    changed = false;
+                    for (const idStr in mod.notes) {
+                      const nn = mod.getNoteById(Number(idStr));
+                      if (!isMeasure(nn)) continue;
+                      const nid = Number(nn.id);
+                      if (out.has(nid)) continue;
+                      const sts = nn.variables?.startTimeString || '';
+                      for (const sid of out) {
+                        if (new RegExp(`getNoteById\\(\\s*${sid}\\s*\\)`).test(sts)) {
+                          out.add(nid);
+                          changed = true;
+                          break;
+                        }
+                      }
+                    }
+                  }
+                  return out;
+                };
+
+                const allMeasuresToMove = measureClosure(seedMeasures);
+                for (const mid of allMeasuresToMove) moveSet0.add(Number(mid));
+
+                // 3) Include ALL non-measure notes whose start/duration depend (transitively) on any of those measures
+                if (mod && mod.notes) {
+                  const notesObj = mod.notes || {};
+                  const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
+                  const getStartTimeStr = (nid) => {
+                    try {
+                      const n = mod.getNoteById(Number(nid));
+                      return n && n.variables && typeof n.variables.startTimeString === 'string'
+                        ? n.variables.startTimeString
+                        : null;
+                    } catch { return null; }
+                  };
+                  const refersStartOf = (nid, refId) => {
+                    const s = getStartTimeStr(nid);
+                    return !!(s && s.includes(`getNoteById(${refId})`) &&
+                              (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
+                               s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`)));
+                  };
+                  const closureStartRefs = (seedSet) => {
+                    const affected = new Set(seedSet);
+                    let changed = true;
+                    while (changed) {
+                      changed = false;
+                      for (const nid of allIds) {
+                        if (affected.has(nid)) continue;
+                        for (const refId of affected) {
+                          if (refersStartOf(nid, refId)) {
+                            affected.add(nid);
+                            changed = true;
+                            break;
+                          }
+                        }
+                      }
+                    }
+                    return affected;
+                  };
+
+                  const closure = closureStartRefs(allMeasuresToMove);
+                  for (const did of closure) {
+                    try {
+                      // Include ALL notes and measures that depend transitively on any of the measures in the seed set.
+                      // This ensures measures reached via intermediate normal-notes are also shifted during preview.
+                      moveSet0.add(Number(did));
+                    } catch {}
+                  }
+                }
+              } catch {}
 
               this._interaction = {
                 active: true,
@@ -192,7 +296,11 @@ export class Workspace {
                 origStartSec,
                 origDurationSec: 0,
                 baselineStartSec: null,
-                lastPreview: { startSec: origStartSec, durationSec: 0 }
+                lastPreview: { startSec: origStartSec, durationSec: 0 },
+                // Per-interaction cached chain/index + dependency closure for GPU preview
+                cachedMeasureChain: chain0,
+                cachedMeasureIndex: cidx0,
+                cachedMeasureMovingIds: moveSet0
               };
 
               // Keep existing selection during measure drag (match normal note behavior)
@@ -269,8 +377,8 @@ export class Workspace {
             const xwLocal = this.renderer.posSize[base + 0];
             const wwLocal = this.renderer.posSize[base + 2];
             const xScale = this.renderer.currentXScaleFactor || 1.0;
-            origStartSec = xwLocal / (200 * xScale);
-            origDurationSec = wwLocal / (200 * xScale);
+            origStartSec = xwLocal / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
+            origDurationSec = wwLocal / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
             startWorldX = xwLocal;
             // Stash for edge-aligned drag math (right-edge and offsets)
             this._interactionEdgeCache = { xw: xwLocal, ww: wwLocal };
@@ -357,9 +465,11 @@ export class Workspace {
           pointerOffsetWorld = pointerWX0 - startWorldX;
         }
 
-        // Capture baseline startSec for dragged and only affected dependents (by variable semantics) at pointerdown.
+        // PERFORMANCE: Capture baseline startSec and compute affected dependents ONCE at pointerdown
         const baseline = new Map();
         baseline.set(id, origStartSec);
+        let affectedIds = new Set();
+        
         try {
           const mod = this._module;
           const notesObj = mod && mod.notes ? mod.notes : {};
@@ -404,7 +514,6 @@ export class Workspace {
             return affected;
           };
 
-          let affectedIds = new Set();
           if (type === 'move') {
             // Notes whose startTime ultimately depends on anchor's startTime
             affectedIds = closureStartRefs(new Set([anchorId]));
@@ -437,7 +546,7 @@ export class Workspace {
                   const base = idx * 4;
                   const xwLocal = this.renderer.posSize[base + 0];
                   const xScale = this.renderer.currentXScaleFactor || 1.0;
-                  s0 = xwLocal / (200 * xScale);
+                  s0 = xwLocal / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
                 }
               } catch {}
             }
@@ -460,8 +569,90 @@ export class Workspace {
           origStartSec,
           origDurationSec,
           baselineStartSec: baseline,
-          lastPreview: { startSec: origStartSec, durationSec: origDurationSec }
+          lastPreview: { startSec: origStartSec, durationSec: origDurationSec },
+          // PERFORMANCE: Cache to avoid recomputing on every mousemove
+          cachedDependents: affectedIds,
+          // Per-interaction caches for fast parent resolution during drag (note move/resize)
+          // cachedParentChain: { list: [{id,startSec,endSec}], idx, anchorParentId }
+          cachedParentChain: null,
+          // cachedAncestorChain: [{id,startSec}] from current parent up to BaseNote (id 0)
+          cachedAncestorChain: null
         };
+        // Seed per-interaction parent/ancestor caches for note drags (move/resize)
+        try {
+          const mod = this._module;
+          const n0 = mod?.getNoteById?.(Number(id));
+          const raw0 = n0?.variables?.startTimeString || '';
+          // Parse current parent
+          let parent0 = null;
+          try {
+            if (raw0.includes('module.baseNote')) {
+              parent0 = mod?.baseNote || null;
+            } else {
+              const m = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
+              if (m) parent0 = mod?.getNoteById?.(parseInt(m[1], 10)) || null;
+            }
+          } catch {}
+          if (!parent0) parent0 = mod?.baseNote || null;
+
+          const isMeasure = (nn) => {
+            try { return !!(nn && nn.getVariable('startTime') && !nn.getVariable('duration') && !nn.getVariable('frequency')); }
+            catch { return false; }
+          };
+
+          // Build ancestor chain from current parent up to BaseNote
+          const anc = [];
+          try {
+            let curA = parent0;
+            let guardA = 0;
+            while (curA && guardA++ < 1024) {
+              const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+              anc.push({ id: Number(curA.id || 0), startSec: st });
+              if (Number(curA.id || 0) === 0) break;
+              const rawA = curA?.variables?.startTimeString || '';
+              if (rawA.includes('module.baseNote')) {
+                anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                break;
+              }
+              const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
+              if (mm) {
+                const pid = parseInt(mm[1], 10);
+                const p = mod?.getNoteById?.(pid);
+                if (!p) break;
+                curA = p;
+              } else {
+                break;
+              }
+            }
+          } catch {}
+          this._interaction.cachedAncestorChain = anc;
+
+          // Build linear measure chain if current parent is a measure
+          if (isMeasure(parent0)) {
+            const chain = (this._collectMeasureChainFor && typeof this._collectMeasureChainFor === 'function')
+              ? (this._collectMeasureChainFor(Number(parent0.id)) || [])
+              : [];
+            const list = [];
+            let idx = -1;
+            for (let i = 0; i < chain.length; i++) {
+              const mid = Number(chain[i].id);
+              const st = Number(chain[i].startSec || 0);
+              let ml = 0;
+              try {
+                const mnote = mod?.getNoteById?.(mid);
+                const mlVal = mod?.findMeasureLength?.(mnote);
+                ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+              } catch {}
+              list.push({ id: mid, startSec: st, endSec: st + ml });
+              if (mid === Number(parent0.id)) idx = i;
+            }
+            if (idx < 0 && list.length) idx = 0;
+            this._interaction.cachedParentChain = { list, idx, anchorParentId: Number(parent0.id) };
+          } else {
+            this._interaction.cachedParentChain = null;
+          }
+        } catch {}
+
         // Defer drag overlay until user actually drags (avoid bar pop on simple selection)
         // Precompute and set initial prospective parent at zero-delta so link line is correct immediately
         try {
@@ -697,8 +888,8 @@ export class Workspace {
               const base = idx * 4;
               const xwLocal = this.renderer.posSize[base + 0];
               const wwLocal = this.renderer.posSize[base + 2];
-              origStartSec = xwLocal / (200 * xScale);
-              origDurationSec = wwLocal / (200 * xScale);
+              origStartSec = xwLocal / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
+              origDurationSec = wwLocal / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
               startWorldX = xwLocal;
               startWorldRightX = xwLocal + wwLocal;
               this._interactionEdgeCache = { xw: xwLocal, ww: wwLocal };
@@ -712,9 +903,11 @@ export class Workspace {
           const pointerWX0 = (ptr0 && typeof ptr0.x === 'number') ? ptr0.x : startWorldX;
           const pointerOffsetWorld = pointerWX0 - startWorldX;
 
-          // Build baseline set for dependents (same as normal move)
+          // PERFORMANCE: Build baseline set and compute dependents ONCE during promotion
           const baseline = new Map();
           baseline.set(Number(noteId), origStartSec);
+          let affectedIds = new Set();
+          
           try {
             const mod = this._module;
             const notesObj = mod && mod.notes ? mod.notes : {};
@@ -750,7 +943,7 @@ export class Workspace {
               }
               return affected;
             };
-            const affectedIds = closureStartRefs(new Set([anchorId]));
+            affectedIds = closureStartRefs(new Set([anchorId]));
             affectedIds.delete(anchorId);
             for (const did of affectedIds) {
               let s0 = 0;
@@ -765,7 +958,7 @@ export class Workspace {
                   if (idx != null && idx >= 0 && this.renderer.posSize) {
                     const base = idx * 4;
                     const xwLocal = this.renderer.posSize[base + 0];
-                    s0 = xwLocal / (200 * xScale);
+                    s0 = xwLocal / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
                   }
                 } catch {}
               }
@@ -781,6 +974,86 @@ export class Workspace {
           this._interaction.origStartSec = origStartSec;
           this._interaction.origDurationSec = origDurationSec;
           this._interaction.baselineStartSec = baseline;
+          this._interaction.cachedDependents = affectedIds;
+          // Initialize caches
+          this._interaction.cachedParentChain = null;
+          this._interaction.cachedAncestorChain = null;
+
+          // Seed per-interaction parent/ancestor caches for note drags (move/resize) on promotion
+          try {
+            const mod = this._module;
+            const n0 = mod?.getNoteById?.(Number(noteId));
+            const raw0 = n0?.variables?.startTimeString || '';
+            // Parse current parent
+            let parent0 = null;
+            try {
+              if (raw0.includes('module.baseNote')) {
+                parent0 = mod?.baseNote || null;
+              } else {
+                const m = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
+                if (m) parent0 = mod?.getNoteById?.(parseInt(m[1], 10)) || null;
+              }
+            } catch {}
+            if (!parent0) parent0 = mod?.baseNote || null;
+
+            const isMeasure = (nn) => {
+              try { return !!(nn && nn.getVariable('startTime') && !nn.getVariable('duration') && !nn.getVariable('frequency')); }
+              catch { return false; }
+            };
+
+            // Build ancestor chain
+            const anc = [];
+            try {
+              let curA = parent0;
+              let guardA = 0;
+              while (curA && guardA++ < 1024) {
+                const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                anc.push({ id: Number(curA.id || 0), startSec: st });
+                if (Number(curA.id || 0) === 0) break;
+                const rawA = curA?.variables?.startTimeString || '';
+                if (rawA.includes('module.baseNote')) {
+                  anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                  break;
+                }
+                const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
+                if (mm) {
+                  const pid = parseInt(mm[1], 10);
+                  const p = mod?.getNoteById?.(pid);
+                  if (!p) break;
+                  curA = p;
+                } else {
+                  break;
+                }
+              }
+            } catch {}
+            this._interaction.cachedAncestorChain = anc;
+
+            // Build linear measure chain if current parent is a measure
+            if (isMeasure(parent0)) {
+              const chain = (this._collectMeasureChainFor && typeof this._collectMeasureChainFor === 'function')
+                ? (this._collectMeasureChainFor(Number(parent0.id)) || [])
+                : [];
+              const list = [];
+              let idx = -1;
+              for (let i = 0; i < chain.length; i++) {
+                const mid = Number(chain[i].id);
+                const st = Number(chain[i].startSec || 0);
+                let ml = 0;
+                try {
+                  const mnote = mod?.getNoteById?.(mid);
+                  const mlVal = mod?.findMeasureLength?.(mnote);
+                  ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                } catch {}
+                list.push({ id: mid, startSec: st, endSec: st + ml });
+                if (mid === Number(parent0.id)) idx = i;
+              }
+              if (idx < 0 && list.length) idx = 0;
+              this._interaction.cachedParentChain = { list, idx, anchorParentId: Number(parent0.id) };
+            } else {
+              this._interaction.cachedParentChain = null;
+            }
+          } catch {}
+
           try { if (this.camera) this.camera.setInputEnabled(false); } catch {}
           // Fall through to normal move-preview path below
         }
@@ -796,7 +1069,7 @@ export class Workspace {
           : this._interaction.startWorldX;
         const offsetWorld = this._interaction.pointerOffsetWorld || 0;
         const dxWorld = curWorldX - baseEdgeX - offsetWorld;
-        const dxSec = dxWorld / (200 * xScale);
+        const dxSec = dxWorld / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
 
         // Snapping helpers (use tempo at the context note when available)
         const getBeatLengthSec = (ctxNoteId) => {
@@ -840,12 +1113,30 @@ export class Workspace {
           next = Math.max(minDur, snapSixteenth(next, noteId));
           durationSec = next;
         } else if (type === 'measure') {
+          // PERF: optional per-frame marker for measure drag preview (enable via window.__RMT_PERF.measureDrag = true)
+          const __perfOn = !!(typeof window !== 'undefined' && window.__RMT_PERF && window.__RMT_PERF.measureDrag);
+          if (__perfOn) { try { performance.mark('ws:measureDrag:start'); } catch {} }
           // Dragging a measure triangle.
           // For first-in-chain measures whose parent is a normal note (not BaseNote and not a measure),
           // allow dragging past the BaseNote origin and remap parent candidates like normal notes.
           // For other measures, keep left clamp to previous measure + minimum gap.
-          const chain = this._collectMeasureChainFor(Number(noteId));
-          const cidx = chain.findIndex(m => Number(m.id) === Number(noteId));
+          // Reuse cached measure chain/index whenever available to avoid per-frame rebuilds
+          // INTERACTION CACHE REUSE (measure): use cached chain/index for snapping/clamping and GPU moving set.
+          // Fallback: compute once if missing and re-store on the interaction state.
+          let chain = (this._interaction && Array.isArray(this._interaction.cachedMeasureChain))
+            ? this._interaction.cachedMeasureChain
+            : null;
+          if (!chain || !chain.length) {
+            chain = this._collectMeasureChainFor(Number(noteId)) || [];
+            if (this._interaction) this._interaction.cachedMeasureChain = chain;
+          }
+          let cidx = (this._interaction && typeof this._interaction.cachedMeasureIndex === 'number')
+            ? this._interaction.cachedMeasureIndex
+            : -1;
+          if (cidx < 0) {
+            cidx = chain.findIndex(m => Number(m.id) === Number(noteId));
+            if (this._interaction) this._interaction.cachedMeasureIndex = cidx;
+          }
 
           // Detect if the current measure's parent is a normal note (not BaseNote, not a measure)
           let parentIsNormalNote = false;
@@ -909,6 +1200,26 @@ export class Workspace {
               this.renderer.setProspectiveParentId(cand);
             }
           } catch {}
+        // PERF: finalize and record this frame's measure-drag cost
+        if (typeof __perfOn !== 'undefined' && __perfOn) {
+          try {
+            performance.mark('ws:measureDrag:end');
+            performance.measure('ws:measureDrag', 'ws:measureDrag:start', 'ws:measureDrag:end');
+            const e = performance.getEntriesByName('ws:measureDrag');
+            const last = e && e.length ? e[e.length - 1] : null;
+            if (last) {
+              this._perf = this._perf || {};
+              this._perf.mdFrames = (this._perf.mdFrames || 0) + 1;
+              this._perf.mdSum = (this._perf.mdSum || 0) + last.duration;
+              if ((this._perf.mdFrames % 30) === 0) {
+                console.log('[PERF] measure drag avg', (this._perf.mdSum / this._perf.mdFrames).toFixed(3), 'ms over', this._perf.mdFrames, 'frames');
+              }
+            }
+            performance.clearMarks('ws:measureDrag:start');
+            performance.clearMarks('ws:measureDrag:end');
+            performance.clearMeasures('ws:measureDrag');
+          } catch {}
+        }
         } else {
           // octave: no preview changes
         }
@@ -927,342 +1238,290 @@ export class Workspace {
               const ww = this.renderer.posSize[base + 2];
               const xScale = this.renderer.currentXScaleFactor || 1.0;
               return {
-                startSec: xw / (200 * xScale),
-                durationSec: ww / (200 * xScale)
+                startSec: xw / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale),
+                durationSec: ww / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale)
               };
             } catch { return null; }
           };
 
-          let previewMap = {};
-          // Always include the dragged note with its snapped/clamped preview values
-          previewMap[noteId] = { startSec, durationSec };
+          // When fast shader path is available, avoid building per-note preview maps (O(N) per frame).
+          // The GPU path applies a uniform offset with per-instance flags, so this heavy map is unnecessary.
+          let previewMap = null;
+          if (!(this.renderer && typeof this.renderer.setDragOffsetPreview === 'function')) {
+            previewMap = {};
+            // Always include the dragged note with its snapped/clamped preview values
+            previewMap[noteId] = { startSec, durationSec };
+ 
+            // PERFORMANCE: Use cached dependents computed at pointerdown instead of recomputing every frame
+            let __depIdsSet = this._interaction.cachedDependents || new Set();
+            try {
+              const baseline = this._interaction.baselineStartSec || null;
+              const dxDelta = (type === 'move')   ? ((startSec ?? 0)    - (this._interaction.origStartSec ?? 0))        : 0;
+              const ddDelta = (type === 'resize') ? ((durationSec ?? 0) - (this._interaction.origDurationSec ?? 0))     : 0;
+              const depIds = Array.from(__depIdsSet);
+              for (const didRaw of depIds) {
+                const did = Number(didRaw);
+                // Baseline start for this dependent at interaction start
+                let baseStart = 0;
+                if (baseline && baseline.has(did)) {
+                  baseStart = baseline.get(did) || 0;
+                } else {
+                  // Fallback: read from module if not in baseline (defensive, rare)
+                  try {
+                    const n = this._module?.getNoteById?.(did);
+                    baseStart = n && n.getVariable ? n.getVariable('startTime').valueOf() : 0;
+                  } catch { baseStart = 0; }
+                }
+                // Compute new previewed start from baseline + current delta
+                const shift = (type === 'move') ? dxDelta : (type === 'resize' ? ddDelta : 0);
+                const nextStart = Math.max(0, baseStart + shift);
+                previewMap[did] = { startSec: nextStart };
+              }
+            } catch {}
+          }
 
-          // Include dependents using baseline-referenced propagation every frame (prevents hanging/lingering)
-          // Track affected-set to filter link lines to only notes that will actually move
-          let __depIdsSet = null;
+          // High-performance shader-based drag preview
           try {
-            const baseline = this._interaction.baselineStartSec || null;
-            const dxDelta = (type === 'move')   ? ((startSec ?? 0)    - (this._interaction.origStartSec ?? 0))        : 0;
-            const ddDelta = (type === 'resize') ? ((durationSec ?? 0) - (this._interaction.origDurationSec ?? 0))     : 0;
-
-            // Compute affected dependents for this frame by variable semantics
-            const mod = this._module;
-            const notesObj = mod && mod.notes ? mod.notes : {};
-            const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
-            const anchorId = Number(noteId);
-
-            const getStartTimeStr = (nid) => {
-              try {
-                const n = mod.getNoteById(Number(nid));
-                return n && n.variables && typeof n.variables.startTimeString === 'string'
-                  ? n.variables.startTimeString
-                  : null;
-              } catch { return null; }
-            };
-            const refersStartOf = (nid, refId) => {
-              const s = getStartTimeStr(nid);
-              return !!(s && s.includes(`getNoteById(${refId})`) && (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`)));
-            };
-            const refersDurationOf = (nid, refId) => {
-              const s = getStartTimeStr(nid);
-              return !!(s && s.includes(`getNoteById(${refId})`) && (s.includes(`getVariable('duration'`) || s.includes(`getVariable("duration"`)));
-            };
-            const closureStartRefs = (seedSet) => {
-              const affected = new Set(seedSet);
-              let changed = true;
-              while (changed) {
-                changed = false;
-                for (const nid of allIds) {
-                  if (affected.has(nid)) continue;
-                  for (const refId of affected) {
-                    if (refersStartOf(nid, refId)) {
-                      affected.add(nid);
-                      changed = true;
-                      break;
-                    }
-                  }
+            if (typeof this.renderer.setDragOffsetPreview === 'function') {
+              // Compute world-space deltas from the dragged note's baseline
+              const dxWorld2 = (startSec - this._interaction.origStartSec) * (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200)) * (this.renderer.currentXScaleFactor || 1.0);
+              const dwWorld = (durationSec - this._interaction.origDurationSec) * (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200)) * (this.renderer.currentXScaleFactor || 1.0);
+              
+              // PERFORMANCE: Use cached dependents instead of building from previewMap
+              const affectedIds = new Set([noteId]);
+              const cachedDeps = this._interaction.cachedDependents;
+              if (cachedDeps && cachedDeps.size > 0) {
+                for (const id of cachedDeps) {
+                  affectedIds.add(Number(id));
                 }
               }
-              return affected;
-            };
-
-            let depIdsSet = new Set();
-            if (type === 'move') {
-              depIdsSet = closureStartRefs(new Set([anchorId]));
-            } else if (type === 'resize') {
-              const seeds = new Set(allIds.filter(nid => refersDurationOf(nid, anchorId)));
-              const closure = closureStartRefs(seeds);
-              depIdsSet = new Set([...seeds, ...closure]);
-            } else {
-              depIdsSet = new Set();
-            }
-            depIdsSet.delete(anchorId);
-
-            // expose for overlay filtering
-            __depIdsSet = depIdsSet;
-
-            const depIds = Array.from(depIdsSet);
-
-            for (const didRaw of depIds) {
-              const did = Number(didRaw);
-              // Baseline start for this dependent at interaction start
-              let baseStart = 0;
-              if (baseline && baseline.has(did)) {
-                baseStart = baseline.get(did) || 0;
-              } else {
-                // Fallback: read from module if not in baseline (defensive, rare)
-                try {
-                  const n = this._module?.getNoteById?.(did);
-                  baseStart = n && n.getVariable ? n.getVariable('startTime').valueOf() : 0;
-                } catch { baseStart = 0; }
-              }
-
-              // Compute new previewed start from baseline + current delta
-              const shift = (type === 'move') ? dxDelta : (type === 'resize' ? ddDelta : 0);
-              const nextStart = Math.max(0, baseStart + shift);
-
-              // ALWAYS write dependent preview (even when shift===0) to overwrite any previous GPU preview slice
-              // This prevents “hung” dependents when the dragged note returns to the original position.
-              previewMap[did] = { startSec: nextStart };
-            }
-          } catch {}
-
-          try {
-            if (typeof this.renderer.setTempOverridesPreviewMap === 'function') {
+              
+              
+              this.renderer.setDragOffsetPreview({
+                dxWorld: dxWorld2,
+                dwWorld,
+                noteIds: affectedIds,
+                anchorId: noteId
+              });
+            } else if (typeof this.renderer.setTempOverridesPreviewMap === 'function') {
+              // Fallback to old slow method if new API not available
               this.renderer.setTempOverridesPreviewMap(previewMap);
             } else if (typeof this.renderer.setTempOverridesPreview === 'function') {
               // Fallback: single-note preview if batch API not available
               this.renderer.setTempOverridesPreview(noteId, startSec, durationSec);
             }
-          } catch {}
+          } catch (err) {
+            console.error('[PERF] Error in drag preview:', err);
+          }
           // Also preview measure triangle/bar positions during note/measure interactions
-          try {
-            const measurePreview = {};
-            // Anchor measure
-            if (type === 'measure') {
-              measurePreview[noteId] = startSec;
-            }
-            // Dependents that are measures
-            if (__depIdsSet && __depIdsSet.size) {
-              const baseline = this._interaction.baselineStartSec || null;
-              const shift = (type === 'move') ? ((startSec ?? 0) - (this._interaction.origStartSec ?? 0))
-                          : (type === 'resize') ? ((durationSec ?? 0) - (this._interaction.origDurationSec ?? 0))
-                          : 0;
-              for (const didRaw of __depIdsSet) {
-                const did = Number(didRaw);
-                try {
-                  const n = this._module?.getNoteById?.(did);
-                  const isMeasure = !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency'));
-                  if (!isMeasure) continue;
-                  let baseS = 0;
-                  if (baseline && baseline.has(did)) baseS = baseline.get(did) || 0;
-                  else baseS = Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
-                  const nextS = Math.max(baseStart, baseS + shift);
-                  measurePreview[did] = snapSixteenth(nextS);
-                } catch {}
+          // Avoid recomputing measure previews every frame when fast shader path is active.
+          if (!(this.renderer && typeof this.renderer.setDragOffsetPreview === 'function')) {
+            try {
+              const measurePreview = {};
+              // Anchor measure
+              if (type === 'measure') {
+                measurePreview[noteId] = startSec;
               }
-            }
-            if (this.renderer && typeof this.renderer.setMeasurePreviewMap === 'function') {
-              this.renderer.setMeasurePreviewMap(measurePreview);
-            }
-          } catch {}
-          // Preview module end bar while dragging normal notes:
-          // If any previewed note end exceeds the current end, move the end bar in the preview.
-          try {
-            if (this.renderer && (type === 'move' || type === 'resize')) {
-              let previewEndSec = 0;
-              const entries = Object.entries(previewMap || {});
-              for (const [idStr, ov] of entries) {
-                const idNum = Number(idStr);
-                const baseSD = buildStartDurForId(idNum);
-                // Skip entries that are not normal notes (e.g., measures are not in instanced notes)
-                if (!baseSD) continue;
-                const s = (ov && typeof ov.startSec === 'number') ? ov.startSec : (baseSD.startSec || 0);
-                const d = (ov && typeof ov.durationSec === 'number') ? ov.durationSec : (baseSD.durationSec || 0);
-                if (isFinite(s) && isFinite(d)) {
-                  previewEndSec = Math.max(previewEndSec, s + d);
+              // Dependents that are measures
+              if (__depIdsSet && __depIdsSet.size) {
+                const baseline = this._interaction.baselineStartSec || null;
+                const shift = (type === 'move') ? ((startSec ?? 0) - (this._interaction.origStartSec ?? 0))
+                            : (type === 'resize') ? ((durationSec ?? 0) - (this._interaction.origDurationSec ?? 0))
+                            : 0;
+                for (const didRaw of __depIdsSet) {
+                  const did = Number(didRaw);
+                  try {
+                    const n = this._module?.getNoteById?.(did);
+                    const isMeasure = !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency'));
+                    if (!isMeasure) continue;
+                    let baseS = 0;
+                    if (baseline && baseline.has(did)) baseS = baseline.get(did) || 0;
+                    else baseS = Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
+                    const nextS = Math.max(baseStart, baseS + shift);
+                    measurePreview[did] = snapSixteenth(nextS);
+                  } catch {}
                 }
               }
-              if (typeof this.renderer.setModuleEndPreviewSec === 'function') {
-                this.renderer.setModuleEndPreviewSec(previewEndSec || 0);
+              if (this.renderer && typeof this.renderer.setMeasurePreviewMap === 'function') {
+                this.renderer.setMeasurePreviewMap(measurePreview);
               }
-            }
-          } catch {}
+            } catch {}
+          }
         }
 
         // Full preview for direct measure-triangle drags (notes + measure chain only)
         if (this.renderer && type === 'measure') {
           try {
+            const useGpu = !!(this.renderer && typeof this.renderer.setDragOffsetPreview === 'function');
             const startDelta = (startSec ?? 0) - (this._interaction.origStartSec ?? 0);
-            const chain = this._collectMeasureChainFor(Number(noteId));
-            const cidx = chain.findIndex(m => Number(m.id) === Number(noteId));
-
-            // Preview measure triangles: dragged + downstream in the same chain (avoid unrelated chains)
-            const triPreview = {};
-            if (cidx >= 0) {
-              triPreview[noteId] = startSec;
-              for (let j = cidx + 1; j < chain.length; j++) {
-                const origS = Number(chain[j].startSec || 0);
-                triPreview[Number(chain[j].id)] = snapSixteenth(Math.max(baseStart, origS + startDelta));
-              }
+            // Reuse cached measure chain/index for GPU path as well
+            let chain = (this._interaction && Array.isArray(this._interaction.cachedMeasureChain))
+              ? this._interaction.cachedMeasureChain
+              : null;
+            if (!chain || !chain.length) {
+              chain = this._collectMeasureChainFor(Number(noteId)) || [];
+              if (this._interaction) this._interaction.cachedMeasureChain = chain;
             }
-            if (this.renderer && typeof this.renderer.setMeasurePreviewMap === 'function') {
-              this.renderer.setMeasurePreviewMap(triPreview);
+            let cidx = (this._interaction && typeof this._interaction.cachedMeasureIndex === 'number')
+              ? this._interaction.cachedMeasureIndex
+              : -1;
+            if (cidx < 0) {
+              cidx = chain.findIndex(m => Number(m.id) === Number(noteId));
+              if (this._interaction) this._interaction.cachedMeasureIndex = cidx;
             }
 
-            // Preview normal notes affected by: (a) referencing dragged measure's start, (b) referencing previous measure's length
-            const mod = this._module;
-            const notesObj = mod && mod.notes ? mod.notes : {};
-            const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
-            const getStartTimeStr = (nid) => {
-              try {
-                const n = mod.getNoteById(Number(nid));
-                return n && n.variables && typeof n.variables.startTimeString === 'string'
-                  ? n.variables.startTimeString
-                  : null;
-              } catch { return null; }
-            };
-            const refersStartOf = (nid, refId) => {
-              const s = getStartTimeStr(nid);
-              return !!(s && s.includes(`getNoteById(${refId})`) &&
-                        (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`)));
-            };
-            const refersMeasureLengthOf = (nid, refId) => {
-              const s = getStartTimeStr(nid) || '';
-              return s.includes(`findMeasureLength(module.getNoteById(${refId}))`);
-            };
-            const closureStartRefs = (seedSet) => {
-              const affected = new Set(seedSet);
-              let changed = true;
-              while (changed) {
-                changed = false;
-                for (const nid of allIds) {
-                  if (affected.has(nid)) continue;
-                  for (const refId of affected) {
-                    if (refersStartOf(nid, refId)) {
-                      affected.add(nid);
-                      changed = true;
-                      break;
-                    }
-                  }
+            if (useGpu) {
+              // GPU path for measure drags:
+              // - Shift downstream measures and ALL dependent normal notes via shader drag flags (no per-frame CPU rebuilds)
+              // - Triangles/bars pick up movement via Renderer._dragMovingIds; notes via instanced flags
+              let moveIds = new Set();
+
+              // Prefer per-interaction cached closure if available
+              if (this._interaction && this._interaction.cachedMeasureMovingIds instanceof Set && this._interaction.cachedMeasureMovingIds.size) {
+                try { for (const id of this._interaction.cachedMeasureMovingIds) moveIds.add(Number(id)); } catch {}
+              } else {
+                // Fallback: include downstream chain measures + ALL transitive dependent measures (branching) + all non-measure dependents
+                if (cidx >= 0) {
+                  for (let j = cidx; j < chain.length; j++) moveIds.add(Number(chain[j].id));
+                } else {
+                  moveIds.add(Number(noteId));
                 }
-              }
-              return affected;
-            };
-
-            // (a) Start-anchor impact
-            const startSeeds = new Set();
-            for (const nid of allIds) {
-              if (refersStartOf(nid, Number(noteId))) startSeeds.add(Number(nid));
-            }
-            const startClosure = closureStartRefs(startSeeds);
-
-            // (b) Previous measure length impact
-            let deltaLen = 0;
-            if (cidx > 0) {
-              const prevId = Number(chain[cidx - 1].id);
-              const prevStart = Number(chain[cidx - 1].startSec || 0);
-              let oldLen = 0;
-              try {
-                const prevNote = mod?.getNoteById?.(prevId);
-                const mlVal = mod?.findMeasureLength?.(prevNote);
-                oldLen = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
-              } catch {}
-              const newLen = Math.max(0, (startSec || 0) - prevStart);
-              deltaLen = newLen - oldLen;
-            }
-
-            const lenClosure = (() => {
-              if (cidx <= 0 || Math.abs(deltaLen) < 1e-9) return new Set();
-              const prevId = Number(chain[cidx - 1].id);
-              const seeds = new Set();
-              for (const nid of allIds) {
-                if (refersMeasureLengthOf(nid, prevId)) seeds.add(Number(nid));
-              }
-              return closureStartRefs(seeds);
-            })();
-
-                        // Combine shifts without double-applying when a note appears in both closures.
-                        // Priority: direct/closure dependency on dragged measure start uses startDelta.
-                        // Only apply deltaLen to notes not already shifted by startDelta.
-                        const shiftMap = new Map();
-                        for (const nid of startClosure) {
-                          shiftMap.set(Number(nid), startDelta);
-                        }
-                        if (Math.abs(deltaLen) >= 1e-9) {
-                          for (const nid of lenClosure) {
-                            const key = Number(nid);
-                            if (!shiftMap.has(key)) {
-                              shiftMap.set(key, deltaLen);
+                try {
+                  const mod = this._module;
+                  if (mod && mod.notes) {
+                    const isMeasure = (n) => {
+                      try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
+                      catch { return false; }
+                    };
+                    const notesObj = mod.notes || {};
+                    const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
+                    const getStartTimeStr = (nid) => {
+                      try {
+                        const n = mod.getNoteById(Number(nid));
+                        return n && n.variables && typeof n.variables.startTimeString === 'string'
+                          ? n.variables.startTimeString
+                          : null;
+                      } catch { return null; }
+                    };
+                    const refersStartOf = (nid, refId) => {
+                      const s = getStartTimeStr(nid);
+                      return !!(s && s.includes(`getNoteById(${refId})`) &&
+                                (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
+                                 s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`)));
+                    };
+                    const closureStartRefs = (seedSet) => {
+                      const affected = new Set(seedSet);
+                      let changed = true;
+                      while (changed) {
+                        changed = false;
+                        for (const nid of allIds) {
+                          if (affected.has(nid)) continue;
+                          for (const refId of affected) {
+                            if (refersStartOf(nid, refId)) {
+                              affected.add(nid);
+                              changed = true;
+                              break;
                             }
                           }
                         }
+                      }
+                      return affected;
+                    };
 
-            // Materialize preview overrides for normal notes
-            const previewNotes = {};
-            for (const [nid, sh] of shiftMap.entries()) {
+                    // Build measure-closure first (branching)
+                    const seedMeasures = new Set();
+                    if (cidx >= 0 && chain && chain.length) {
+                      for (let j = cidx; j < chain.length; j++) seedMeasures.add(Number(chain[j].id));
+                    } else {
+                      seedMeasures.add(Number(noteId));
+                    }
+
+                    // Derive closure of ANY measure depending on seed set
+                    const measureClosure = (seedSet) => {
+                      const out = new Set(seedSet);
+                      let changed = true;
+                      while (changed) {
+                        changed = false;
+                        for (const idStr in mod.notes) {
+                          const nn = mod.getNoteById(Number(idStr));
+                          if (!isMeasure(nn)) continue;
+                          const nid = Number(nn.id);
+                          if (out.has(nid)) continue;
+                          const sts = nn.variables?.startTimeString || '';
+                          for (const sid of out) {
+                            if (new RegExp(`getNoteById\\(\\s*${sid}\\s*\\)`).test(sts)) {
+                              out.add(nid);
+                              changed = true;
+                              break;
+                            }
+                          }
+                        }
+                      }
+                      return out;
+                    };
+
+                    const measToMove = measureClosure(seedMeasures);
+                    // Include all measures in the moving set (covers branches)
+                    for (const mid of measToMove) moveIds.add(Number(mid));
+
+                    // Then include all non-measure notes that depend on any of those measures
+                    const closure = closureStartRefs(measToMove);
+                    for (const did of closure) {
+                      try {
+                        // Add both normal notes and measures discovered via transitive dependencies
+                        // (covers measure dependents reached through intermediate normal notes).
+                        moveIds.add(Number(did));
+                      } catch {}
+                    }
+
+                    // Persist for rest of the drag to avoid recompute
+                    if (this._interaction) this._interaction.cachedMeasureMovingIds = new Set(moveIds);
+                  }
+                } catch {}
+              }
+
+              // Pass dxWorld to move everything in the moving set; dw=0 (no width change during measure drag)
+              const dxWorld = startDelta * (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200)) * (this.renderer.currentXScaleFactor || 1.0);
+              this.renderer.setDragOffsetPreview({
+                dxWorld,
+                dwWorld: 0,
+                noteIds: moveIds
+              });
+
+              // Overlay: vertical guides + link-line filtering use movingIds for clarity
               try {
-                const n = mod.getNoteById(Number(nid));
-                let baseS = 0;
-                try { baseS = Number(n.getVariable('startTime')?.valueOf?.() ?? 0); } catch {}
-                const nextS = Math.max(baseStart, baseS + sh);
-                previewNotes[Number(nid)] = { startSec: snapSixteenth(nextS) };
+                if (this.renderer?.setDragOverlay) {
+                  const movedPx = Math.hypot(
+                    (this._interaction.lastClient?.x || 0) - (this._interaction.startClient?.x || 0),
+                    (this._interaction.lastClient?.y || 0) - (this._interaction.startClient?.y || 0)
+                  );
+                  if (movedPx > 2) {
+                    this.renderer.setDragOverlay({
+                      noteId,
+                      type: 'move',
+                      dxSec: startDelta,
+                      ddurSec: 0,
+                      movingIds: Array.from(moveIds),
+                      origStartSec: this._interaction.origStartSec,
+                      origDurationSec: this._interaction.origDurationSec
+                    });
+                  }
+                }
               } catch {}
-            }
-            if (this.renderer && typeof this.renderer.setTempOverridesPreviewMap === 'function') {
-              this.renderer.setTempOverridesPreviewMap(previewNotes);
-            }
-            // Extend measure triangle preview across chains:
-            // include any MEASURE notes that shift indirectly via dependencies (startClosure/lenClosure).
-            // This ensures triangles from other chains that are linked (e.g., through normal-note deps)
-            // also move during the drag preview, matching the final drop result.
-            try {
+            } else {
+              // CPU fallback: triangles + dependent notes (previous behavior)
+              const triPreview = {};
+              if (cidx >= 0) {
+                triPreview[noteId] = startSec;
+                for (let j = cidx + 1; j < chain.length; j++) {
+                  const origS = Number(chain[j].startSec || 0);
+                  triPreview[Number(chain[j].id)] = Math.max(baseStart, origS + startDelta);
+                }
+              }
               if (this.renderer && typeof this.renderer.setMeasurePreviewMap === 'function') {
-                const combined = { ...(triPreview || {}) };
-                for (const [nidRaw, sh] of shiftMap.entries()) {
-                  const mid = Number(nidRaw);
-                  try {
-                    const n = this._module?.getNoteById?.(mid);
-                    const isMeasure = !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency'));
-                    if (!isMeasure) continue;
-                    const baseS = Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
-                    const nextS = Math.max(baseStart, baseS + (sh || 0));
-                    combined[mid] = snapSixteenth(nextS);
-                  } catch {}
-                }
-                this.renderer.setMeasurePreviewMap(combined);
+                this.renderer.setMeasurePreviewMap(triPreview);
               }
-            } catch {}
-
-            // Draw overlay guide lines (2px) for impacted notes during measure drag.
-            // Reuse existing overlay pipeline by emitting a 'move' type with dxSec = startDelta.
-            try {
-              if (this.renderer?.setDragOverlay) {
-                const EPS = 1e-6;
-                const movingIds = [];
-                for (const [nid, sh] of shiftMap.entries()) {
-                  if (Math.abs(sh) > EPS) movingIds.push(Number(nid));
-                }
-                // Include the dragged measure itself so its 2px line is emphasized
-                if (!movingIds.includes(Number(noteId))) movingIds.push(Number(noteId));
-                // Only show overlay after actual drag starts (avoid pop on click)
-                const movedPx = Math.hypot(
-                  (this._interaction.lastClient?.x || 0) - (this._interaction.startClient?.x || 0),
-                  (this._interaction.lastClient?.y || 0) - (this._interaction.startClient?.y || 0)
-                );
-                if (movedPx > 2) {
-                  this.renderer.setDragOverlay({
-                    noteId,
-                    type: 'move',
-                    dxSec: startDelta,
-                    ddurSec: 0,
-                    movingIds,
-                    origStartSec: this._interaction.origStartSec,
-                    origDurationSec: this._interaction.origDurationSec
-                  });
-                }
-              }
-            } catch {}
+            }
           } catch {}
         }
 
@@ -1270,80 +1529,19 @@ export class Workspace {
         const dxPreviewSec   = (type === 'move')   ? ((startSec ?? 0) - (this._interaction.origStartSec ?? 0)) : 0;
         const ddurPreviewSec = (type === 'resize') ? ((durationSec ?? 0) - (this._interaction.origDurationSec ?? 0)) : 0;
 
-        // Compute which dependents actually move (to filter link lines during preview)
+
+        // PERFORMANCE: Use cached dependents instead of recomputing every frame
         let movingIds = [];
         try {
           if (type === 'move' || type === 'resize') {
-            const mod = this._module;
-            const notesObj = mod && mod.notes ? mod.notes : {};
-            const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
-            const anchorId = Number(noteId);
-
-            const getStartTimeStr = (nid) => {
-              try {
-                const n = mod.getNoteById(Number(nid));
-                return n && n.variables && typeof n.variables.startTimeString === 'string'
-                  ? n.variables.startTimeString
-                  : null;
-              } catch { return null; }
-            };
-            const refersStartOf = (nid, refId) => {
-              const s = getStartTimeStr(nid);
-              return !!(s && s.includes(`getNoteById(${refId})`) &&
-                        (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`)));
-            };
-            const refersDurationOf = (nid, refId) => {
-              const s = getStartTimeStr(nid);
-              return !!(s && s.includes(`getNoteById(${refId})`) &&
-                        (s.includes(`getVariable('duration'`) || s.includes(`getVariable("duration"`)));
-            };
-            const closureStartRefs = (seedSet) => {
-              const affected = new Set(seedSet);
-              let changed = true;
-              while (changed) {
-                changed = false;
-                for (const nid of allIds) {
-                  if (affected.has(nid)) continue;
-                  for (const refId of affected) {
-                    if (refersStartOf(nid, refId)) {
-                      affected.add(nid);
-                      changed = true;
-                      break;
-                    }
-                  }
-                }
-              }
-              return affected;
-            };
-
-            let depIdsSet = new Set();
-            if (type === 'move') {
-              depIdsSet = closureStartRefs(new Set([anchorId]));
-            } else if (type === 'resize') {
-              const seeds = new Set(allIds.filter(nid => refersDurationOf(nid, anchorId)));
-              const closure = closureStartRefs(seeds);
-              depIdsSet = new Set([...seeds, ...closure]);
-            }
-            depIdsSet.delete(anchorId);
-
-            const baseline = this._interaction.baselineStartSec || null;
+            const depIdsSet = this._interaction.cachedDependents || new Set();
             const EPS = 1e-6;
             const shift = (type === 'move') ? dxPreviewSec : ddurPreviewSec;
-            const result = [];
-            for (const did of depIdsSet) {
-              let baseStart = 0;
-              if (baseline && baseline.has(did)) {
-                baseStart = baseline.get(did) || 0;
-              } else {
-                try {
-                  const n = mod?.getNoteById?.(Number(did));
-                  baseStart = n && n.getVariable ? n.getVariable('startTime').valueOf() : 0;
-                } catch { baseStart = 0; }
-              }
-              // Only include if start will actually change this frame
-              if (Math.abs(shift) > EPS) result.push(Number(did));
+            
+            // Only include dependents that will actually move this frame
+            if (Math.abs(shift) > EPS) {
+              movingIds = Array.from(depIdsSet);
             }
-            movingIds = result;
           }
         } catch {}
 
@@ -1430,7 +1628,12 @@ export class Workspace {
       // Clear cursor (hover handler will reapply)
       try { this.containerEl.style.cursor = this._currentCursor || 'default'; } catch {}
 
-      // Clear GL preview (single + batch)
+      // Clear GL preview (shader-based and legacy)
+      try {
+        if (this.renderer?.clearDragOffsetPreview) {
+          this.renderer.clearDragOffsetPreview();
+        }
+      } catch {}
       try {
         if (this.renderer?.clearTempOverridesPreview && st.noteId != null) {
           this.renderer.clearTempOverridesPreview(st.noteId);
@@ -1515,7 +1718,7 @@ export class Workspace {
         }
       } catch {}
 
-      // Reset state
+      // Reset state and invalidate per-interaction caches (measure chain, index, moving set, baselines)
       this._interaction = {
         active: false,
         type: null,
@@ -1763,54 +1966,138 @@ export class Workspace {
       if (startSec > parentStart + tol) {
         // Dragging forward
         if (isMeasure(parent)) {
-          // Advance across measure chain while startSec is beyond the measure end
-          let cur = parent;
-          let curStart = parentStart;
-          let advanced = true;
-          while (advanced) {
-            advanced = false;
-            const mlVal = mod.findMeasureLength(cur);
-            const ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
-            const end = curStart + ml;
-            if (startSec >= end - tol) {
-              const next = findNextMeasureInChain(cur);
-              if (next) {
-                cur = next;
-                curStart = Number(next.getVariable('startTime')?.valueOf?.() ?? curStart);
-                parent = cur;
-                parentStart = curStart;
-                advanced = true;
+          // Advance across measure chain using cached linear chain (no per-frame scans)
+          const ensureParentChain = () => {
+            try {
+              const ch = this._interaction && this._interaction.cachedParentChain;
+              if (ch && Array.isArray(ch.list) && ch.list.length && Number(ch.anchorParentId) === Number(parent.id)) {
+                return ch;
               }
+            } catch {}
+            // Rebuild if missing or anchor changed
+            const chain = this._collectMeasureChainFor(Number(parent.id)) || [];
+            const list = [];
+            let idxLocal = -1;
+            for (let i = 0; i < chain.length; i++) {
+              const mid = Number(chain[i].id);
+              const st = Number(chain[i].startSec || 0);
+              let ml = 0;
+              try {
+                const mnote = mod.getNoteById(mid);
+                const mlVal = mod.findMeasureLength(mnote);
+                ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+              } catch {}
+              list.push({ id: mid, startSec: st, endSec: st + ml });
+              if (mid === Number(parent.id)) idxLocal = i;
+            }
+            if (idxLocal < 0 && list.length) idxLocal = 0;
+            const out = { list, idx: idxLocal, anchorParentId: Number(parent.id) };
+            try { if (this._interaction) this._interaction.cachedParentChain = out; } catch {}
+            return out;
+          };
+
+          const cached = ensureParentChain();
+          if (cached && cached.list && cached.list.length) {
+            const list = cached.list;
+            let idx = (typeof cached.idx === 'number') ? cached.idx : 0;
+            const prevIdx = idx;
+
+            // Adjust index both directions so we always map to the closest containing measure
+            // Move left while we're before the current entry's start
+            while (idx > 0 && startSec < (Number(list[idx].startSec) - tol)) {
+              idx--;
+            }
+            // Move right while we've crossed the current entry's end
+            while (idx < list.length - 1 && startSec >= (Number(list[idx].endSec) - tol)) {
+              idx++;
+            }
+
+            // Clamp idx just in case
+            if (idx < 0) idx = 0;
+            if (idx >= list.length) idx = list.length - 1;
+
+            // Update parent from chain entry
+            const entry = list[idx];
+            parent = mod.getNoteById(Number(entry.id)) || parent;
+            parentStart = Number(entry.startSec || parentStart);
+
+            // Persist updated index
+            try {
+              if (this._interaction && this._interaction.cachedParentChain) {
+                this._interaction.cachedParentChain.idx = idx;
+              }
+            } catch {}
+
+            // Refresh ancestor chain only if the parent index actually changed
+            if (idx !== prevIdx) {
+              try {
+                const anc = [];
+                let curA = parent;
+                let guardA = 0;
+                while (curA && guardA++ < 1024) {
+                  const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                  anc.push({ id: Number(curA.id || 0), startSec: st });
+                  if (Number(curA.id || 0) === 0) break;
+                  const rawA = curA?.variables?.startTimeString || '';
+                  if (rawA.includes('module.baseNote')) {
+                    anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                    break;
+                  }
+                  const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
+                  if (mm) {
+                    const pid = parseInt(mm[1], 10);
+                    const p = mod.getNoteById(pid);
+                    if (!p) break;
+                    curA = p;
+                  } else {
+                    break;
+                  }
+                }
+                if (this._interaction) this._interaction.cachedAncestorChain = anc;
+              } catch {}
             }
           }
         }
       } else if (startSec < parentStart - tol) {
-        // Dragging backward: climb ancestor chain until we find an ancestor that starts <= startSec
-        const chain = [];
-        let cur = parent;
-        while (cur && cur.id !== 0) {
-          const raw = cur.variables?.startTimeString || '';
-          const m = raw.match(/getNoteById\((\d+)\)/);
-          if (m) {
-            const pid = parseInt(m[1], 10);
-            const p = mod.getNoteById(pid);
-            if (!p) break;
-            chain.push(p);
-            cur = p;
-          } else if (raw.includes('module.baseNote')) {
-            chain.push(mod.baseNote);
-            break;
-          } else {
-            break;
-          }
-        }
-        if (!chain.length || chain[chain.length - 1].id !== 0) chain.push(mod.baseNote);
+        // Dragging backward: use cached ancestor chain until we find an ancestor that starts <= startSec
+        const ensureAnc = () => {
+          const ac = this._interaction && this._interaction.cachedAncestorChain;
+          if (ac && Array.isArray(ac) && ac.length && Number(ac[0]?.id ?? -1) === Number(parent.id ?? -2)) return ac;
+          // Rebuild when missing or parent changed
+          const arr = [];
+          try {
+            let curA = parent;
+            let guardA = 0;
+            while (curA && guardA++ < 1024) {
+              const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+              arr.push({ id: Number(curA.id || 0), startSec: st });
+              if (Number(curA.id || 0) === 0) break;
+              const rawA = curA?.variables?.startTimeString || '';
+              if (rawA.includes('module.baseNote')) {
+                arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                break;
+              }
+              const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
+              if (mm) {
+                const pid = parseInt(mm[1], 10);
+                const p = mod.getNoteById(pid);
+                if (!p) break;
+                curA = p;
+              } else {
+                break;
+              }
+            }
+            if (this._interaction) this._interaction.cachedAncestorChain = arr;
+          } catch {}
+          return (this._interaction && this._interaction.cachedAncestorChain) || [];
+        };
 
+        const chain = ensureAnc();
         for (let i = 0; i < chain.length; i++) {
           const anc = chain[i];
-          const ancStart = Number(anc.getVariable('startTime')?.valueOf?.() ?? 0);
+          const ancStart = Number(anc.startSec || 0);
           if (startSec >= ancStart - tol) {
-            parent = anc;
+            parent = mod.getNoteById(Number(anc.id)) || parent;
             parentStart = ancStart;
             break;
           }
@@ -1905,6 +2192,18 @@ export class Workspace {
 }
 
 // Helper: collect linear measure chain for a measure id (prototype method defined outside class)
+/**
+ * Collect a linear measure chain for a given measure id.
+ * Complexity: O(M log M) worst-case due to per-level dependent scan + sort,
+ * but evaluated once per interaction (pointerdown) and reused on every frame.
+ * Usage:
+ * - Cached at pointerdown as this._interaction.cachedMeasureChain and index as cachedMeasureIndex.
+ * - Reused in [JavaScript.Workspace.prototype._updateInteraction()](src/renderer/webgl2/workspace.js:734) for snapping/clamping
+ *   and in the GPU preview path to build moving sets efficiently.
+ * Notes:
+ * - A "measure" is any note with startTime but without duration/frequency.
+ * - The chain is defined by repeatedly selecting the earliest dependent measure.
+ */
 Workspace.prototype._collectMeasureChainFor = function(measureId) {
   try {
     const mod = this._module;

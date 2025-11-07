@@ -1,13 +1,15 @@
+import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.js';
 /**
  * WebGL2 RendererAdapter
  * - Non-interactive overlay renderer for notes and playhead
  * - Uses Workspace viewport basis (a,b,c,d,e,f) to match world->screen transform
- * - World units match current app semantics:
  *     x = seconds * 200 * xScaleFactor
  *     y = log2(baseFreq / freq) * 100 * yScaleFactor
  */
 export class RendererAdapter {
-  constructor() {
+  constructor(config = null) {
+    // Normalize configuration; defaults preserve existing behavior
+    this._config = normalizeRendererConfig(config);
     this.canvas = null;
     this.gl = null;
 
@@ -22,6 +24,7 @@ export class RendererAdapter {
     this.rectInstancePosSizeBuffer = null;
     this.rectInstanceColorBuffer = null;
     this.rectInstanceFlagsBuffer = null;
+    this.rectInstanceDragFlagsBuffer = null;
 
     this.playheadVAO = null;
     this.playheadPosSizeBuffer = null;
@@ -50,10 +53,38 @@ export class RendererAdapter {
     // Data buffers (CPU side)
     this.posSize = null; // Float32Array of [x,y,w,h] per instance
     this.colors  = null; // Float32Array of [r,g,b,a] per instance
+    this._dragFlags = null; // Float32Array of [0|1] per instance (1 = apply drag offset)
+    
+    // Drag offset state (world units)
+    this._dragOffsetX = 0.0;
+    this._dragOffsetW = 0.0; // width delta for resize
+    // Flags buffer is initialized once per drag; skip re-uploads on every pointer move
+    this._dragFlagsInited = false;
+     // Drag activity flag to allow render-time gating without thrashing other epochs
+        this._dragActive = false;
+        // Track if last preview step was a resize (non-zero width delta)
+        this._dragLastWasResize = false;
 
     // Current scales for computing world coords
     this.currentXScaleFactor = 1.0;
     this.currentYScaleFactor = 1.0;
+
+    // Drag flags upload state
+    this._dragFlagsInited = false;
+    this._dragFlagsLastCount = 0;
+    // Cached signature of current drag set to avoid per-frame flag buffer re-uploads
+    this._dragSetHash = 0;
+    this._dragSetSize = 0;
+    this._dragSetIndices = null; // Int32Array of instance indices currently flagged
+    this._dragAnchorIndex = -1;  // instance index of anchor note (for ring/posSize CPU updates)
+
+    // End-bar preview baselines/deltas (populated at drag start and reused per-frame)
+    this._baselineNonMovingEndSec = null;   // max end over non-moving notes at drag start
+    this._baselineMovingIdx = null;         // Int32Array of moving indices to scan quickly
+    this._dragDxSec = 0.0;                  // seconds delta for position shift
+    this._dragDdSec = 0.0;                  // seconds delta for width (rarely used; anchor baked)
+    this._lastDragXScale = null;            // xScale snapshot when baselines computed
+
     // Track last-synced X scale to keep playhead in lockstep with scene during scale changes
     this._xScaleFactorAtLastSync = 1.0;
 
@@ -106,6 +137,8 @@ export class RendererAdapter {
     this._lastArrowEpoch = -1;
     this._arrowUpRegions = null;    // Float32Array(N*4) [xL,xR,yT,yB] per instance (upper half)
     this._arrowDownRegions = null;  // Float32Array(N*4) per instance (lower half)
+    // Track last GPU upload epoch for arrow backgrounds to avoid redundant bufferData on every frame
+    this._lastArrowUploadEpoch = -1;
 
     // Position epoch to gate dependent overlay uploads (link lines, guides)
     this._posEpoch = 0;
@@ -137,10 +170,12 @@ export class RendererAdapter {
 
     // Text rendering safety/quality controls
     // Soft cap for text texture backing store (device px); hard cap queried from GPU
-    this._softTextureCapPx = 1024;
+    this._softTextureCapPx = (this._config?.text?.softTextureCapPx ?? 1024);
     this._maxTextureSize = null;          // set in init() after GL is available
     // Clamp max on-screen font size in CSS px; beyond this we avoid up-resing text
-    this._maxOnscreenFontPx = 96;
+    this._maxOnscreenFontPx = (this._config?.text?.maxOnscreenFontPx ?? 96);
+    // Glyph base pixel size for cache/atlas
+    this._glyphBasePx = (this._config?.text?.glyphBasePx ?? 64);
     // Glyph cache path for performance (pre-rasterized digits/brackets/arrows/"silence")
     this.useGlyphCache = true;
     // Glyph atlas feature flag (atlas=1 in URL or localStorage 'rmt:atlas' === '1')
@@ -196,6 +231,18 @@ export class RendererAdapter {
     this._relDepsHasBase = false;
     this._relRdepsHasBase = false;
   }
+
+  // Update configuration at runtime. Merges partial into current and normalizes; triggers redraw.
+  setConfig(partial) {
+    try {
+      this._config = normalizeRendererConfig(deepMerge(this._config, partial || {}));
+      this.needsRedraw = true;
+    } catch {}
+  }
+
+  // Config helpers (seconds/world X, freq/world Y)
+  _cfgSX() { try { return this._config?.scales?.secondsToWorldX ?? 200; } catch { return 200; } }
+  _cfgSY() { try { return this._config?.scales?.freqToWorldY ?? 100; } catch { return 100; } }
 
   init(containerEl) {
     if (!containerEl) throw new Error('RendererAdapter.init: containerEl required');
@@ -269,7 +316,7 @@ export class RendererAdapter {
       } catch {}
 
       // Default ON unless explicitly disabled
-      this.useGlyphAtlas = (override != null) ? !!override : true;
+      this.useGlyphAtlas = (override != null) ? !!override : !!(this._config?.text?.useGlyphAtlasDefault ?? true);
       this._atlasEnabledFlagRead = true;
 
       if (this.useGlyphAtlas) {
@@ -462,18 +509,17 @@ export class RendererAdapter {
         const startSec = (ov && ov.startSec != null) ? ov.startSec : startTime;
         const durSec   = (ov && ov.durationSec != null) ? ov.durationSec : duration;
 
-        const x = startSec * 200 * this.currentXScaleFactor;
-        const w = Math.max(0, durSec * 200 * this.currentXScaleFactor);
+        const x = startSec * this._cfgSX() * this.currentXScaleFactor;
+        const w = Math.max(0, durSec * this._cfgSX() * this.currentXScaleFactor);
         let y = (freqVal != null)
           ? this._frequencyToY(freqVal)
           : this._yForSilence(module, note, evaluatedNotes);
 
-        // Match Workspace DOM vertical sizing: total base height should be 22 (content + borders)
-        // Maintain the same visual center as the previous 20-height rectangles.
-        const hBase = 22; // world units
+        // Parameterized note height and center alignment
+        const hBase = (this._config?.note?.heightWU ?? 22); // world units
         const h = hBase;
-        // Shift top-left up by half the delta (22 - 20)/2 = 1 world unit to keep center unchanged.
-        y = y - 1.0;
+        // Apply configured vertical center shift (default -1)
+        y = y + (this._config?.note?.centerShiftWU ?? -1);
 
         const isSilence = (freqVal == null || !isFinite(Number(freqVal)));
         const baseColor = this._resolveColor(evaluatedNotes?.[note.id], note);
@@ -504,6 +550,7 @@ export class RendererAdapter {
       // Use Int32 to avoid precision loss for large numeric IDs (prevents wrong highlight/pick)
       this._instanceNoteIds = new Int32Array(N);
       this._instanceFlags = new Float32Array(N);
+      this._dragFlags = new Float32Array(N);
     }
 
     // Fill arrays with reordered data
@@ -663,6 +710,12 @@ export class RendererAdapter {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceFlagsBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, this._instanceFlags, gl.DYNAMIC_DRAW);
       }
+
+      // Initialize drag flags buffer with zeros (no drag offset initially)
+      if (this.rectInstanceDragFlagsBuffer && this._dragFlags) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDragFlagsBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, this._dragFlags, gl.DYNAMIC_DRAW);
+      }
  
       // Ensure all enabled per-instance attribute buffers are large enough for instanceCount draws
       // Provide zero-initialized defaults for region buffers to prevent ANGLE/D3D buffer underruns.
@@ -739,7 +792,7 @@ export class RendererAdapter {
     // Store time; compute world X at draw-time from currentXScaleFactor to avoid scale-order pops
     this.playheadTimeSec = t;
     // Keep legacy world-x in sync for any consumers reading it prior to render
-    this.playheadXWorld = t * 200 * (this.currentXScaleFactor || 1.0);
+    this.playheadXWorld = t * this._cfgSX() * (this.currentXScaleFactor || 1.0);
     this.needsRedraw = true;
   }
 
@@ -831,8 +884,10 @@ export class RendererAdapter {
       const pid = (parentId == null) ? null : Number(parentId);
       if (this._prospectiveParentId !== pid) {
         this._prospectiveParentId = pid;
-        // Bump position epoch so dependency endpoints rebuild this frame
-        this._posEpoch = (this._posEpoch || 0) + 1;
+        // During active drag, avoid epoch bumps that trigger heavy link-line rebuilds each frame.
+        if (!this._dragActive) {
+          this._posEpoch = (this._posEpoch || 0) + 1;
+        }
         this.needsRedraw = true;
       }
     } catch {
@@ -849,6 +904,18 @@ export class RendererAdapter {
       if (!gl || !vao) return;
       gl.bindVertexArray(vao);
       if (flag) gl.enableVertexAttribArray(4); else gl.disableVertexAttribArray(4);
+      gl.bindVertexArray(null);
+    } catch {}
+  }
+
+  // Enable/disable attrib 2 (dragFlag) on the octaveLineVAO (used by vertical lines)
+  _setOctaveAttr2Enabled(flag) {
+    try {
+      const gl = this.gl;
+      const vao = this.octaveLineVAO;
+      if (!gl || !vao) return;
+      gl.bindVertexArray(vao);
+      if (flag) gl.enableVertexAttribArray(2); else gl.disableVertexAttribArray(2);
       gl.bindVertexArray(null);
     } catch {}
   }
@@ -912,18 +979,25 @@ export class RendererAdapter {
       layout(location=0) in vec2 a_unit;       // (0..1)
       layout(location=1) in vec4 a_posSize;    // (x,y,w,h) in world units
       layout(location=2) in vec4 a_color;      // RGBA
+      layout(location=6) in float a_dragFlag;  // 1.0 = apply drag offset, 0.0 = no offset
 
       uniform mat3 u_matrix;                   // world -> screen (page CSS px)
       uniform vec2 u_viewport;                 // (canvas CSS width, canvas CSS height)
       uniform vec2 u_offset;                   // canvas top-left in page CSS px
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance (negative brings closer)
+      uniform vec2 u_dragOffset;               // (dx, dw) in world units for dragging
 
       out vec4 v_color;
       out vec2 v_css;                          // canvas-local CSS px
 
       void main() {
-        vec2 worldPos = a_posSize.xy + a_unit * a_posSize.zw;
+        // Apply drag offset only to flagged instances
+        vec2 offset = a_dragFlag * u_dragOffset;
+        vec2 posAdjusted = a_posSize.xy + vec2(offset.x, 0.0);
+        vec2 sizeAdjusted = a_posSize.zw + vec2(offset.y, 0.0);
+        
+        vec2 worldPos = posAdjusted + a_unit * sizeAdjusted;
         vec3 screen = u_matrix * vec3(worldPos, 1.0);   // page CSS px
         vec2 local = screen.xy - u_offset;              // canvas-local CSS px
         // Convert to NDC
@@ -957,6 +1031,7 @@ export class RendererAdapter {
         this._uniforms.rect.u_offset   = gl.getUniformLocation(p, 'u_offset');
         this._uniforms.rect.u_layerBase= gl.getUniformLocation(p, 'u_layerBase');
         this._uniforms.rect.u_layerStep= gl.getUniformLocation(p, 'u_layerStep');
+        this._uniforms.rect.u_dragOffset= gl.getUniformLocation(p, 'u_dragOffset');
       }
     } catch {}
 
@@ -1023,6 +1098,7 @@ export class RendererAdapter {
       layout(location=2) in vec4 a_color;      // RGBA
       layout(location=3) in vec2 a_noteSize;   // (w,h) in CSS px (deprecated; kept for compatibility)
       layout(location=5) in float a_flags;     // 1.0 = silence, 0.0 = normal
+      layout(location=6) in float a_dragFlag;  // 1.0 = apply drag offset, 0.0 = no offset
  
       uniform mat3 u_matrix;                   // world -> screen (page CSS px)
       uniform vec2 u_viewport;                 // (canvas CSS width, canvas CSS height)
@@ -1030,6 +1106,7 @@ export class RendererAdapter {
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance
       uniform vec2 u_scale;                    // (px per world unit X, px per world unit Y)
+      uniform vec2 u_dragOffset;               // (dx, dw) in world units for dragging
  
       out vec4 v_color;
       out vec2 v_css;                          // canvas-local CSS px (this vertex)
@@ -1038,7 +1115,12 @@ export class RendererAdapter {
       out float v_isSilence;                   // flag propagated to FS
  
       void main() {
-        vec2 worldPos = a_posSize.xy + a_unit * a_posSize.zw;
+        // Apply drag offset only to flagged instances
+        vec2 offset = a_dragFlag * u_dragOffset;
+        vec2 posAdjusted = a_posSize.xy + vec2(offset.x, 0.0);
+        vec2 sizeAdjusted = a_posSize.zw + vec2(offset.y, 0.0);
+        
+        vec2 worldPos = posAdjusted + a_unit * sizeAdjusted;
         vec3 screen = u_matrix * vec3(worldPos, 1.0);   // page CSS px
         vec2 localCss = screen.xy - u_offset;           // canvas-local CSS px
          
@@ -1050,7 +1132,7 @@ export class RendererAdapter {
         v_css = localCss;
         v_uv = a_unit;
         // Derive CSS pixel size from world size and current scale; ignore a_noteSize
-        v_noteSize = a_posSize.zw * u_scale;
+        v_noteSize = sizeAdjusted * u_scale;
         v_isSilence = a_flags;
       }
     `;
@@ -1129,6 +1211,7 @@ export class RendererAdapter {
         this._uniforms.rectBorder.u_layerBase    = gl.getUniformLocation(prog, 'u_layerBase');
         this._uniforms.rectBorder.u_layerStep    = gl.getUniformLocation(prog, 'u_layerStep');
         this._uniforms.rectBorder.u_scale        = gl.getUniformLocation(prog, 'u_scale');
+        this._uniforms.rectBorder.u_dragOffset   = gl.getUniformLocation(prog, 'u_dragOffset');
       }
     } catch {}
 
@@ -1216,12 +1299,17 @@ export class RendererAdapter {
       uniform vec2 u_offset;   // canvas top-left CSS px
       uniform float u_layerZ;  // depth
       uniform vec2 u_scale;    // (px per world X, px per world Y)
+      uniform vec2 u_dragOffset; // (dx, dw) in world units; 0,0 when not moving (or for anchor)
 
       out vec2 v_uv;
       out vec2 v_noteSize; // CSS px
 
       void main() {
-        vec2 worldPos = a_posSize.xy + a_unit * a_posSize.zw;
+        // Apply drag/resize offset (dx,dw) when provided
+        vec2 posAdjusted  = a_posSize.xy + vec2(u_dragOffset.x, 0.0);
+        vec2 sizeAdjusted = a_posSize.zw + vec2(u_dragOffset.y, 0.0);
+
+        vec2 worldPos = posAdjusted + a_unit * sizeAdjusted;
         vec3 screen = u_matrix * vec3(worldPos, 1.0);
         vec2 localCss = screen.xy - u_offset;
 
@@ -1229,7 +1317,7 @@ export class RendererAdapter {
         float ndcY = 1.0 - (localCss.y / u_viewport.y) * 2.0;
         gl_Position = vec4(ndcX, ndcY, u_layerZ, 1.0);
         v_uv = a_unit;
-        v_noteSize = a_posSize.zw * u_scale;
+        v_noteSize = sizeAdjusted * u_scale;
       }
     `;
     const selRingFS = `#version 300 es
@@ -1278,6 +1366,7 @@ export class RendererAdapter {
         this._uniforms.selectionRing.u_cornerRadius = gl.getUniformLocation(p, 'u_cornerRadius');
         this._uniforms.selectionRing.u_borderWidth  = gl.getUniformLocation(p, 'u_borderWidth');
         this._uniforms.selectionRing.u_color        = gl.getUniformLocation(p, 'u_color');
+        this._uniforms.selectionRing.u_dragOffset   = gl.getUniformLocation(p, 'u_dragOffset');
       }
     } catch {}
 
@@ -1292,19 +1381,23 @@ export class RendererAdapter {
       uniform vec2 u_offset;   // canvas top-left CSS px
       uniform float u_layerZ;  // depth
       uniform vec2 u_scale;    // (px per world X, px per world Y)
+      uniform vec2 u_dragOffset; // (dx, dw) world units; pass 0,0 when not moving
 
       out vec2 v_uv;
       out vec2 v_noteSize; // CSS px
 
       void main() {
-        vec2 worldPos = a_posSize.xy + a_unit * a_posSize.zw;
+        vec2 posAdjusted  = a_posSize.xy + vec2(u_dragOffset.x, 0.0);
+        vec2 sizeAdjusted = a_posSize.zw + vec2(u_dragOffset.y, 0.0);
+
+        vec2 worldPos = posAdjusted + a_unit * sizeAdjusted;
         vec3 screen = u_matrix * vec3(worldPos, 1.0);
         vec2 localCss = screen.xy - u_offset;
         float ndcX = (localCss.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (localCss.y / u_viewport.y) * 2.0;
         gl_Position = vec4(ndcX, ndcY, u_layerZ, 1.0);
         v_uv = a_unit;
-        v_noteSize = a_posSize.zw * u_scale;
+        v_noteSize = sizeAdjusted * u_scale;
       }
     `;
     const selFillFS = `#version 300 es
@@ -1351,40 +1444,48 @@ export class RendererAdapter {
         this._uniforms.selectionFill.u_cornerRadius = gl.getUniformLocation(p, 'u_cornerRadius');
         this._uniforms.selectionFill.u_inset        = gl.getUniformLocation(p, 'u_inset');
         this._uniforms.selectionFill.u_color        = gl.getUniformLocation(p, 'u_color');
+        this._uniforms.selectionFill.u_dragOffset   = gl.getUniformLocation(p, 'u_dragOffset');
       }
     } catch {}
 
     // Tab overlay program: clip to inner rounded-rect and restrict to right-side band
     const tabMaskVS = `#version 300 es
       precision highp float;
- 
+
       layout(location=0) in vec2 a_unit;       // (0..1)
       layout(location=1) in vec4 a_posSize;    // (x,y,w,h) in world units
       layout(location=2) in vec4 a_color;      // RGBA (unused)
       layout(location=4) in vec4 a_tabRegion;  // (xLeftPx, xRightPx, yTopPx, yBottomPx) in note-local CSS px (centered coords)
- 
+      layout(location=6) in float a_dragFlag;  // 1.0 = apply drag offset, 0.0 = no offset
+
       uniform mat3 u_matrix;                   // world -> screen (page CSS px)
       uniform vec2 u_viewport;                 // (canvas CSS width, canvas CSS height)
       uniform vec2 u_offset;                   // canvas top-left in page CSS px
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance
       uniform vec2 u_scale;                    // (px per world X, px per world Y)
- 
+      uniform vec2 u_dragOffset;               // (dx, dw) in world units for dragging/resizing
+
       out vec2 v_uv;
       out vec2 v_noteSize;
       out vec4 v_tabRegion;
- 
+
       void main() {
-        vec2 worldPos = a_posSize.xy + a_unit * a_posSize.zw;
+        // Apply drag/resize offset only to flagged instances
+        vec2 offset = a_dragFlag * u_dragOffset;
+        vec2 posAdjusted = a_posSize.xy + vec2(offset.x, 0.0);
+        vec2 sizeAdjusted = a_posSize.zw + vec2(offset.y, 0.0);
+
+        vec2 worldPos = posAdjusted + a_unit * sizeAdjusted;
         vec3 screen = u_matrix * vec3(worldPos, 1.0);   // page CSS px
         vec2 localCss = screen.xy - u_offset;           // canvas-local CSS px
- 
+
         float ndcX = (localCss.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (localCss.y / u_viewport.y) * 2.0;
         float ndcZ = u_layerBase + float(gl_InstanceID) * u_layerStep;
         gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);
         v_uv = a_unit;
-        v_noteSize = a_posSize.zw * u_scale;
+        v_noteSize = sizeAdjusted * u_scale;
         v_tabRegion = a_tabRegion;
       }
     `;
@@ -1446,6 +1547,7 @@ export class RendererAdapter {
         this._uniforms.tabMask.u_layerBase  = gl.getUniformLocation(p, 'u_layerBase');
         this._uniforms.tabMask.u_layerStep  = gl.getUniformLocation(p, 'u_layerStep');
         this._uniforms.tabMask.u_scale      = gl.getUniformLocation(p, 'u_scale');
+        this._uniforms.tabMask.u_dragOffset = gl.getUniformLocation(p, 'u_dragOffset');
       }
     } catch {}
 
@@ -1456,6 +1558,7 @@ export class RendererAdapter {
       layout(location=1) in vec4 a_posSize;    // (x,y,w,h) in world units
       layout(location=2) in vec4 a_color;      // RGBA (unused)
       layout(location=5) in float a_flags;     // 1.0 = silence, 0.0 = normal
+      layout(location=6) in float a_dragFlag;  // 1.0 = apply drag offset, 0.0 = no offset
 
       uniform mat3  u_matrix;                  // world -> screen (page CSS px)
       uniform vec2  u_viewport;                // (canvas CSS width, canvas CSS height)
@@ -1463,13 +1566,19 @@ export class RendererAdapter {
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance
       uniform vec2  u_scale;                   // (px per world X, px per world Y)
+      uniform vec2  u_dragOffset;              // (dx, dw) in world units for dragging
 
       out vec2 v_uv;
       out vec2 v_noteSize;
       out float v_isSilence;
 
       void main() {
-        vec2 worldPos = a_posSize.xy + a_unit * a_posSize.zw;
+        // Apply drag offset only to flagged instances
+        vec2 offset = a_dragFlag * u_dragOffset;
+        vec2 posAdjusted = a_posSize.xy + vec2(offset.x, 0.0);
+        vec2 sizeAdjusted = a_posSize.zw + vec2(offset.y, 0.0);
+
+        vec2 worldPos = posAdjusted + a_unit * sizeAdjusted;
         vec3 screen   = u_matrix * vec3(worldPos, 1.0);   // page CSS px
         vec2 localCss = screen.xy - u_offset;             // canvas-local CSS px
 
@@ -1479,7 +1588,7 @@ export class RendererAdapter {
         gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);
 
         v_uv = a_unit;
-        v_noteSize = a_posSize.zw * u_scale;
+        v_noteSize = sizeAdjusted * u_scale;
         v_isSilence = a_flags;
       }
     `;
@@ -1605,6 +1714,7 @@ export class RendererAdapter {
         this._uniforms.silenceRing.u_scaleX      = gl.getUniformLocation(p, 'u_scaleX');
         this._uniforms.silenceRing.u_scaleY      = gl.getUniformLocation(p, 'u_scaleY');
         this._uniforms.silenceRing.u_alignBias   = gl.getUniformLocation(p, 'u_alignBias');
+        this._uniforms.silenceRing.u_dragOffset  = gl.getUniformLocation(p, 'u_dragOffset');
       }
     } catch {}
 
@@ -1687,6 +1797,14 @@ export class RendererAdapter {
     gl.enableVertexAttribArray(5);
     gl.vertexAttribPointer(5, 1, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(5, 1); // per-instance
+
+    // Drag flags (loc 6) - 1.0 = apply drag offset, 0.0 = no offset
+    this.rectInstanceDragFlagsBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDragFlagsBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 1, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(6);
+    gl.vertexAttribPointer(6, 1, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(6, 1); // per-instance
 
     // Dedicated buffer for single-instance draws (avoid corrupting shared per-instance buffer)
     this._singlePosSizeBuffer = gl.createBuffer();
@@ -1773,11 +1891,13 @@ export class RendererAdapter {
       if (uMat) gl.uniformMatrix3fv(uMat, false, this.matrix);
       if (uVP)  gl.uniform2f(uVP, vpW, vpH);
       if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
-      // Corner radius and border width scale with zoom (6px radius, 2px border at zoom=1)
-      const zoomScaleBody = this.xScalePxPerWU || 1.0;
-      if (uCRb) gl.uniform1f(uCRb, 6.0 * zoomScaleBody);
-      if (uBWb) gl.uniform1f(uBWb, 1.0 * zoomScaleBody);
-      if (uBCb) gl.uniform4f(uBCb, 0.388, 0.388, 0.388, 1.0); // #636363
+      // Corner radius and border width scale with zoom (configurable; defaults preserve prior behavior)
+     const zoomScaleBody = this.xScalePxPerWU || 1.0;
+     const cornerPx = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0);
+     const borderPx  = (this._config?.note?.borderPxAtZoom1 ?? 1.0);
+     if (uCRb) gl.uniform1f(uCRb, cornerPx * zoomScaleBody);
+     if (uBWb) gl.uniform1f(uBWb, borderPx * zoomScaleBody);
+     if (uBCb) gl.uniform4f(uBCb, 0.388, 0.388, 0.388, 1.0); // #636363
 
       // Per-zoom CSS scale so shader derives note CSS size robustly (no per-frame size uploads)
       const uSC = U ? U.u_scale : gl.getUniformLocation(prog, 'u_scale');
@@ -1788,6 +1908,10 @@ export class RendererAdapter {
       const uLS = U ? U.u_layerStep : gl.getUniformLocation(prog, 'u_layerStep');
       if (uLB) gl.uniform1f(uLB, 1.0);
       if (uLS) gl.uniform1f(uLS, -1.0 / Math.max(1, this.instanceCount + 5));
+
+      // Drag offset uniform (world units)
+      const uDrag = U ? U.u_dragOffset : gl.getUniformLocation(prog, 'u_dragOffset');
+      if (uDrag) gl.uniform2f(uDrag, this._dragOffsetX || 0.0, this._dragOffsetW || 0.0);
 
       // Safety for ANGLE/D3D: disable unused instanced attrib 4 during ring-only passes
       this._setAttr4Enabled(false);
@@ -1835,7 +1959,7 @@ export class RendererAdapter {
           if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
           if (uZ)   gl.uniform1f(uZ, -0.000025);
           if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
-          if (uCR)  gl.uniform1f(uCR, 6.0 * (this.xScalePxPerWU || 1.0));
+          { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
           // Border thickness (CSS px at zoom=1) per call
           if (uBW)  gl.uniform1f(uBW, ((borderPx != null ? borderPx : 2.0)) * (this.xScalePxPerWU || 1.0));
           if (uCol) gl.uniform4f(uCol, rgba[0], rgba[1], rgba[2], rgba[3]);
@@ -1859,6 +1983,15 @@ export class RendererAdapter {
             gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
             gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
             gl.vertexAttribDivisor(1, 1);
+            // Apply drag offset conditionally for moving notes
+            {
+              const uDrag = Us ? Us.u_dragOffset : gl.getUniformLocation(this.selectionRingProgram, 'u_dragOffset');
+              if (uDrag) {
+                const isAnchor = (this._dragAnchorIndex != null) && (idx === (this._dragAnchorIndex | 0));
+                const moving = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !isAnchor);
+                gl.uniform2f(uDrag, moving ? (this._dragOffsetX || 0.0) : 0.0, moving ? (this._dragOffsetW || 0.0) : 0.0);
+              }
+            }
             gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
           }
 
@@ -1873,8 +2006,8 @@ export class RendererAdapter {
         };
 
         // Dependencies: teal, Dependents: neon deep purple (slightly transparent)
-        drawIdxList(this._relDepsIdx, [0.0, 1.0, 1.0, 0.9], 2.0);
-        drawIdxList(this._relRdepsIdx, [0.615686, 0.0, 1.0, 0.9], 2.0);
+        drawIdxList(this._relDepsIdx, [0.0, 1.0, 1.0, 0.9], (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0));
+        drawIdxList(this._relRdepsIdx, [0.615686, 0.0, 1.0, 0.9], (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0));
       }
     } catch {}
  
@@ -1914,7 +2047,7 @@ export class RendererAdapter {
             if (uOffF) gl.uniform2f(uOffF, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
             if (uZF)   gl.uniform1f(uZF, -0.00002);
             if (uSCF)  gl.uniform2f(uSCF, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
-            if (uCRF)  gl.uniform1f(uCRF, 6.0 * (this.xScalePxPerWU || 1.0));
+            { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCRF)  gl.uniform1f(uCRF, cr * (this.xScalePxPerWU || 1.0)); }
             // Inset ~1.5px at zoom=1 to keep a clean gap from the ring/border
             if (uIN)   gl.uniform1f(uIN, 1.5 * (this.xScalePxPerWU || 1.0));
             // Subtle highlight fill (premultiplied-friendly)
@@ -1930,6 +2063,15 @@ export class RendererAdapter {
             gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
             gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
             gl.vertexAttribDivisor(1, 1);
+            // Apply drag offset for selection fill if selected note is moving
+            {
+              const uDrag = Uf ? Uf.u_dragOffset : gl.getUniformLocation(this.selectionFillProgram, 'u_dragOffset');
+              if (uDrag) {
+                const isAnchor = (this._dragAnchorIndex != null) && (idx === (this._dragAnchorIndex | 0));
+                const moving = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !isAnchor);
+                gl.uniform2f(uDrag, moving ? (this._dragOffsetX || 0.0) : 0.0, moving ? (this._dragOffsetW || 0.0) : 0.0);
+              }
+            }
             gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
           }
 
@@ -1950,8 +2092,8 @@ export class RendererAdapter {
           if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
           if (uZ)   gl.uniform1f(uZ, -0.00002);
           if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
-          if (uCR)  gl.uniform1f(uCR, 6.0 * (this.xScalePxPerWU || 1.0));
-          if (uBW)  gl.uniform1f(uBW, 2.0 * (this.xScalePxPerWU || 1.0));
+          { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
+          if (uBW)  gl.uniform1f(uBW, (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0) * (this.xScalePxPerWU || 1.0));
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 1.0);
 
           // Disable unused attrib 4 for selection ring pass
@@ -1964,6 +2106,16 @@ export class RendererAdapter {
           gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
           gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
           gl.vertexAttribDivisor(1, 1);
+          // Apply drag offset for selection ring if selected note is moving
+          {
+            const Usel = (this._uniforms && this._uniforms.selectionRing) ? this._uniforms.selectionRing : null;
+            const uDrag = Usel ? Usel.u_dragOffset : gl.getUniformLocation(this.selectionRingProgram, 'u_dragOffset');
+            if (uDrag) {
+              const isAnchor = (this._dragAnchorIndex != null) && (idx === (this._dragAnchorIndex | 0));
+              const moving = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !isAnchor);
+              gl.uniform2f(uDrag, moving ? (this._dragOffsetX || 0.0) : 0.0, moving ? (this._dragOffsetW || 0.0) : 0.0);
+            }
+          }
           gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
 
           // Restore instanced buffer for attribute 1
@@ -2012,9 +2164,9 @@ export class RendererAdapter {
           if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
           if (uZ)   gl.uniform1f(uZ, -0.00002);
           if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
-          if (uCR)  gl.uniform1f(uCR, 6.0 * (this.xScalePxPerWU || 1.0));
+          { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
           // Hover 1px vs selection 2px
-          if (uBW)  gl.uniform1f(uBW, 1.0 * (this.xScalePxPerWU || 1.0));
+          if (uBW)  gl.uniform1f(uBW, (this._config?.selection?.hoverThicknessPxAtZoom1 ?? 1.0) * (this.xScalePxPerWU || 1.0));
           // Slightly dim if same as selected to avoid double intensity (still visible)
           const a = sameAsSelected ? 0.6 : 1.0;
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, a);
@@ -2029,6 +2181,16 @@ export class RendererAdapter {
           gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
           gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
           gl.vertexAttribDivisor(1, 1);
+          // Apply drag offset for hover ring if hovered note is moving
+          {
+            const Uh = (this._uniforms && this._uniforms.selectionRing) ? this._uniforms.selectionRing : null;
+            const uDrag = Uh ? Uh.u_dragOffset : gl.getUniformLocation(this.selectionRingProgram, 'u_dragOffset');
+            if (uDrag) {
+              const isAnchor = (this._dragAnchorIndex != null) && (idx === (this._dragAnchorIndex | 0));
+              const moving = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !isAnchor);
+              gl.uniform2f(uDrag, moving ? (this._dragOffsetX || 0.0) : 0.0, moving ? (this._dragOffsetW || 0.0) : 0.0);
+            }
+          }
           gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
 
           // Restore instanced buffer for attribute 1
@@ -2052,8 +2214,14 @@ export class RendererAdapter {
     const uCols = Us ? Us.u_color   : gl.getUniformLocation(this.solidCssProgram, 'u_color');
     const uZs   = Us ? Us.u_z       : gl.getUniformLocation(this.solidCssProgram, 'u_z');
     if (uVPs) gl.uniform2f(uVPs, vpW, vpH);
-    if (uCols) gl.uniform4f(uCols, 1.0, 0.66, 0.0, 1.0); // #ffa800
+    {
+      const c = (this._config?.playhead?.color ?? [1.0, 0.66, 0.0, 1.0]);
+      if (uCols) gl.uniform4f(uCols, c[0], c[1], c[2], c[3]);
+    }
     if (uZs) gl.uniform1f(uZs, -0.00002);
+
+    // Ensure dragFlag attrib (2) is disabled for playhead draw
+    this._setOctaveAttr2Enabled(false);
 
     // Compute playhead X in CSS px.
     // - Tracking mode: lock to viewport center to avoid any camera/scale ordering mismatch.
@@ -2062,7 +2230,7 @@ export class RendererAdapter {
     if (this.trackingMode) {
       localXPH = vpW * 0.5;
     } else {
-      const playXW = (this.playheadTimeSec || 0) * 200.0 * (this.currentXScaleFactor || 1.0);
+      const playXW = (this.playheadTimeSec || 0) * this._cfgSX() * (this.currentXScaleFactor || 1.0);
       const sxPH = this.matrix[0] * playXW + this.matrix[6];
       localXPH = (this.canvasOffset?.x != null) ? (sxPH - this.canvasOffset.x) : sxPH;
     }
@@ -2070,7 +2238,10 @@ export class RendererAdapter {
 
     gl.bindVertexArray(this.octaveLineVAO);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([leftPH, 0.0, 1.0, vpH]), gl.DYNAMIC_DRAW);
+    {
+      const wPx = (this._config?.playhead?.thicknessPx ?? 1.0);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([leftPH, 0.0, wPx, vpH]), gl.DYNAMIC_DRAW);
+    }
     gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
     gl.bindVertexArray(null);
 
@@ -2115,7 +2286,7 @@ export class RendererAdapter {
   _frequencyToY(freq) {
     const base = (this._baseFreqCache && typeof this._baseFreqCache === 'number') ? this._baseFreqCache : 440;
     const logRatio = Math.log2(base / (freq || 1e-6));
-    return logRatio * 100 * this.currentYScaleFactor;
+    return logRatio * this._cfgSY() * this.currentYScaleFactor;
     // matches player.js frequencyToY semantics
   }
 
@@ -2278,7 +2449,7 @@ export class RendererAdapter {
       const heY = 0.5 * hCss;
 
       // Match body shader corner radius (CSS px)
-      let r = 6.0 * (this.xScalePxPerWU || 1.0);
+      let r = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0) * (this.xScalePxPerWU || 1.0);
       r = Math.max(0, Math.min(r, Math.min(heX, heY)));
 
       // SDF for rounded-rect (CSS px space)
@@ -2422,7 +2593,7 @@ export class RendererAdapter {
       // Match overlay sizing: ~0.5 * note height minus one border px, min 10px.
       {
         const borderCssInt = Math.max(1, Math.round(borderCssExact));
-        const tabWidth = Math.max(10, Math.round(hCss * 0.5) - borderCssInt);
+        const tabWidth = Math.max(10, Math.round(hCss * (this._config?.overlays?.tabWidthFactor ?? 0.5)) - borderCssInt);
         const rightInner = heX - borderCssInt;
         const tabLeft = rightInner - tabWidth;
         const inTabX = dxCss >= tabLeft && dxCss <= rightInner;
@@ -2436,7 +2607,7 @@ export class RendererAdapter {
       if (!isSilence) {
         // Match overlay sizing and slight overreach to avoid seam on the left
         const leftInner = -heX + borderCssExact;
-        const targetBgWidth = Math.max(10, Math.round(hCss * 0.5 - borderCssExact));
+        const targetBgWidth = Math.max(10, Math.round(hCss * (this._config?.overlays?.arrowColumnWidthFactor ?? 0.5) - borderCssExact));
         const bgWidth = Math.max(4, targetBgWidth);
         const xLeft = leftInner - 0.75;      // small overreach as in draw path
         const xRight = leftInner + bgWidth;
@@ -2459,6 +2630,7 @@ export class RendererAdapter {
     }
   }
   // Event-driven preview: update a single instance via bufferSubData without full sync
+  // DEPRECATED: Use setDragOffsetPreview for better performance with many notes
   setTempOverridesPreview(noteId, startSec, durationSec) {
     try {
       if (!this.gl || !this.rectInstancePosSizeBuffer || !this.posSize) return false;
@@ -2470,8 +2642,8 @@ export class RendererAdapter {
  
       const base = idx * 4;
       // Compute world X/W from seconds using current scale factors (match sync semantics)
-      const xw = Math.max(0, Number(startSec) || 0) * 200 * (this.currentXScaleFactor || 1.0);
-      const ww = Math.max(0.0001, Number(durationSec) || 0) * 200 * (this.currentXScaleFactor || 1.0);
+      const xw = Math.max(0, Number(startSec) || 0) * this._cfgSX() * (this.currentXScaleFactor || 1.0);
+      const ww = Math.max(0.0001, Number(durationSec) || 0) * this._cfgSX() * (this.currentXScaleFactor || 1.0);
       const y  = this.posSize[base + 1];
       const h  = this.posSize[base + 3];
  
@@ -2502,46 +2674,323 @@ export class RendererAdapter {
   }
 
   // Event-driven preview for a set of instances at once without full sync.
+  // DEPRECATED: Use setDragOffsetPreview for vastly better performance with many notes.
+  // Optimized fallback: batch all updates and upload the entire posSize buffer once to avoid
+  // thousands of tiny bufferSubData calls (major driver overhead on large N).
   // map: { [noteId:number]: { startSec:number, durationSec:number } }
   setTempOverridesPreviewMap(map) {
     try {
       if (!this.gl || !this.rectInstancePosSizeBuffer || !this.posSize || !map) return false;
-      const gl = this.gl;
       const entries = Object.entries(map);
       if (!entries.length) return false;
 
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
+      const xScale = this.currentXScaleFactor || 1.0;
 
+      // Update CPU-side cache in-place for all affected instances
       for (const [idStr, ov] of entries) {
         const id = Number(idStr);
         const idx = (this._noteIdToIndex && this._noteIdToIndex.get) ? this._noteIdToIndex.get(id) : undefined;
         if (idx == null || idx < 0) continue;
 
         const base = idx * 4;
-        const startSec = (ov && typeof ov.startSec === 'number') ? Math.max(0, ov.startSec) : (this.posSize[base + 0] / (200 * (this.currentXScaleFactor || 1.0)));
-        const durationSec = (ov && typeof ov.durationSec === 'number') ? Math.max(0.0001, ov.durationSec) : (this.posSize[base + 2] / (200 * (this.currentXScaleFactor || 1.0)));
 
-        const xw = startSec * 200 * (this.currentXScaleFactor || 1.0);
-        const ww = durationSec * 200 * (this.currentXScaleFactor || 1.0);
-        const y  = this.posSize[base + 1];
-        const h  = this.posSize[base + 3];
+        const startSec = (ov && typeof ov.startSec === 'number')
+          ? Math.max(0, ov.startSec)
+          : (this.posSize[base + 0] / (this._cfgSX() * xScale));
 
-        // Update CPU-side cache
+        const durationSec = (ov && typeof ov.durationSec === 'number')
+          ? Math.max(0.0001, ov.durationSec)
+          : (this.posSize[base + 2] / (this._cfgSX() * xScale));
+
+        const xw = startSec * this._cfgSX() * xScale;
+        const ww = durationSec * this._cfgSX() * xScale;
+
+        // Write back only x and w; y/h remain unchanged
         this.posSize[base + 0] = xw;
         this.posSize[base + 2] = ww;
-
-        // Upload only this instance slice to GPU
-        const slice = new Float32Array([xw, y, ww, h]);
-        gl.bufferSubData(gl.ARRAY_BUFFER, base * 4, slice);
       }
 
+      // Single batched upload of the full instance buffer
+      const gl = this.gl;
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, this.posSize, gl.DYNAMIC_DRAW);
       gl.bindBuffer(gl.ARRAY_BUFFER, null);
+
       this._posEpoch = (this._posEpoch || 0) + 1;
       this.needsRedraw = true;
       return true;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * High-performance drag preview using shader-based offsets.
+   * Instead of updating thousands of buffer entries, this sets a uniform offset
+   * and marks which instances should be shifted via a flags buffer.
+   * The flags buffer is only re-uploaded when the affected set of instances changes.
+   *
+   * @param {Object} params - Drag parameters
+   * @param {number} params.dxWorld - X offset in world units (for move)
+   * @param {number} params.dwWorld - Width delta in world units (for resize)
+   * @param {Set<number>|Array<number>} params.noteIds - IDs of notes to offset
+   * @param {number|null} [params.anchorId] - Optional anchor note id (the one being dragged).
+   *                                          Used to update CPU posSize only for the anchor so selection ring tracks.
+   */
+  setDragOffsetPreview({ dxWorld = 0, dwWorld = 0, noteIds = [], anchorId = null }) {
+    try {
+      if (!this.gl || !this._dragFlags) {
+        console.warn('[PERF] setDragOffsetPreview: missing gl or dragFlags');
+        return false;
+      }
+
+      // Update uniform offsets (no buffer upload needed)
+      this._dragOffsetX = Number(dxWorld) || 0.0;
+      this._dragOffsetW = Number(dwWorld) || 0.0;
+      this._dragActive = true;
+
+      // Also store seconds-based deltas for unified end-bar computation
+      try {
+        const denomSec = this._cfgSX() * (this.currentXScaleFactor || 1.0);
+        this._dragDxSec = (this._dragOffsetX || 0.0) / denomSec;
+        this._dragDdSec = (this._dragOffsetW || 0.0) / denomSec;
+      } catch {
+        this._dragDxSec = 0.0;
+        this._dragDdSec = 0.0;
+      }
+
+      // Build and normalize the instance-index list for the currently moving set
+      const idsSet = (noteIds instanceof Set) ? noteIds : new Set(noteIds);
+      // Persist moving ids (numeric) so glyph-atlas drag flags apply immediately, even before overlay is enabled.
+      try {
+        const moving = new Set();
+        for (const id of idsSet) moving.add(Number(id));
+        this._dragMovingIds = moving;
+      } catch { this._dragMovingIds = null; }
+
+      const idxArr = [];
+      if (this._noteIdToIndex && typeof this._noteIdToIndex.get === 'function') {
+        for (const id of idsSet) {
+          const idx = this._noteIdToIndex.get(Number(id));
+          if (idx != null && idx >= 0 && idx < (this.instanceCount || 0)) {
+            idxArr.push(idx | 0);
+          }
+        }
+      }
+      idxArr.sort((a, b) => a - b);
+
+      // Compare with previous flagged set; if unchanged, skip rebuilding/uploading flags buffer
+      let changedSet = false;
+      const prev = this._dragSetIndices;
+      if (!prev || prev.length !== idxArr.length) {
+        changedSet = true;
+      } else {
+        for (let i = 0; i < idxArr.length; i++) {
+          if (prev[i] !== idxArr[i]) { changedSet = true; break; }
+        }
+      }
+
+      if (changedSet) {
+        // Compute end-preview baselines once per moving-set change
+        try {
+          // Cache moving indices for fast scans
+          this._baselineMovingIdx = Int32Array.from(idxArr);
+          this._lastDragXScale = (this.currentXScaleFactor || 1.0);
+
+          // Mark moving indices for exclusion
+          const Ninst = Math.max(0, this.instanceCount | 0);
+          const movingMask = new Array(Ninst).fill(false);
+          for (let i = 0; i < idxArr.length; i++) {
+            const ii = idxArr[i] | 0;
+            if (ii >= 0 && ii < Ninst) movingMask[ii] = true;
+          }
+
+          // Compute baseline max end over non-moving notes once at drag start
+          let baseNonMoving = 0;
+          const denom = this._cfgSX() * (this.currentXScaleFactor || 1.0);
+          for (let i = 0; i < Ninst; i++) {
+            if (movingMask[i]) continue;
+            const o = i * 4;
+            const endSec = ((this.posSize[o + 0] || 0) + (this.posSize[o + 2] || 0)) / denom;
+            if (isFinite(endSec)) baseNonMoving = Math.max(baseNonMoving, endSec);
+          }
+          this._baselineNonMovingEndSec = baseNonMoving;
+        } catch {
+          this._baselineNonMovingEndSec = null;
+          this._baselineMovingIdx = null;
+        }
+
+        // Rebuild flags only when set changed
+        this._dragFlags.fill(0.0);
+        for (let i = 0; i < idxArr.length; i++) {
+          const idx = idxArr[i];
+          if (idx >= 0 && idx < this._dragFlags.length) this._dragFlags[idx] = 1.0;
+        }
+        const gl = this.gl;
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDragFlagsBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, this._dragFlags, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        // Cache signature
+        this._dragSetIndices = Int32Array.from(idxArr);
+        this._dragSetSize = idxArr.length | 0;
+      }
+
+      // CPU posSize cache update for selection ring/hover visuals:
+      // Only update the anchor note (if provided or falls back to current selection).
+      let anchorIdx = -1;
+      if (anchorId != null) {
+        anchorIdx = this._noteIdToIndex?.get?.(Number(anchorId)) ?? -1;
+      }
+      this._dragAnchorIndex = (anchorIdx | 0);
+
+      // Only bake CPU pos/size for the anchor when it is actually in the moving set.
+      const anchorIsMoving = (anchorIdx >= 0) && (idxArr.indexOf(anchorIdx) !== -1);
+      if (anchorIsMoving) {
+        const base = anchorIdx * 4;
+        if (this.posSize && (base + 3) < this.posSize.length) {
+          if (!this._dragOriginalPos) this._dragOriginalPos = new Map();
+          if (!this._dragOriginalPos.has(anchorIdx)) {
+            this._dragOriginalPos.set(anchorIdx, {
+              x: this.posSize[base + 0],
+              w: this.posSize[base + 2]
+            });
+          }
+          const orig = this._dragOriginalPos.get(anchorIdx);
+          // Apply the live preview offsets to CPU cache only for the anchor note that is moving
+          this.posSize[base + 0] = (orig?.x ?? this.posSize[base + 0]) + this._dragOffsetX;
+          this.posSize[base + 2] = (orig?.w ?? this.posSize[base + 2]) + this._dragOffsetW;
+        }
+      }
+
+       // Resize semantics for dependents: move by end delta, do not resize
+            {
+              const isResizePreview = !!(this._dragActive && Math.abs(this._dragOffsetW || 0.0) > 1e-9);
+              if (isResizePreview && anchorIdx != null && anchorIdx >= 0) {
+                // Shift dependents by the right-edge delta; no width delta via shader
+                const shift = this._dragOffsetW || 0.0;
+                this._dragOffsetX = shift;
+                this._dragOffsetW = 0.0;
+      
+                // Ensure anchor does not receive shader offset; it was baked into CPU posSize above.
+                try {
+                  if (this._dragFlags && this._dragFlags.length > anchorIdx) {
+                    if (this._dragFlags[anchorIdx] !== 0.0) this._dragFlags[anchorIdx] = 0.0;
+                    const gl = this.gl;
+                    if (gl && this.rectInstanceDragFlagsBuffer) {
+                      gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDragFlagsBuffer);
+                      gl.bufferData(gl.ARRAY_BUFFER, this._dragFlags, gl.DYNAMIC_DRAW);
+                      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+                    }
+                  }
+                } catch {}
+      
+                // Upload anchor's updated posSize slice so body width change is visible without shader dw.
+                try {
+                  const gl = this.gl;
+                  if (gl && this.rectInstancePosSizeBuffer && this.posSize) {
+                    const base = (anchorIdx | 0) * 4;
+                    const slice = new Float32Array([
+                      this.posSize[base + 0],
+                      this.posSize[base + 1],
+                      this.posSize[base + 2],
+                      this.posSize[base + 3]
+                    ]);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
+                    gl.bufferSubData(gl.ARRAY_BUFFER, base * 4, slice);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+                  }
+                } catch {}
+      
+                // Mark last-step as resize so we can restore anchor slice when dw returns to 0
+                this._dragLastWasResize = true;
+              } else if (this._dragLastWasResize && anchorIdx != null && anchorIdx >= 0) {
+                // Transition back to non-resize during an active drag:
+                // push anchor's current CPU pos/size to GPU to restore original width.
+                try {
+                  const gl = this.gl;
+                  if (gl && this.rectInstancePosSizeBuffer && this.posSize) {
+                    const base = (anchorIdx | 0) * 4;
+                    const slice = new Float32Array([
+                      this.posSize[base + 0],
+                      this.posSize[base + 1],
+                      this.posSize[base + 2],
+                      this.posSize[base + 3]
+                    ]);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
+                    gl.bufferSubData(gl.ARRAY_BUFFER, base * 4, slice);
+                    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+                  }
+                } catch {}
+                this._dragLastWasResize = false;
+              }
+            }
+
+      // IMPORTANT: Do NOT bump _posEpoch during drag preview.
+      // Link-line endpoints rebuilds are expensive with thousands of dependents.
+      // We keep overlays in sync via shader uniforms and minimal CPU updates.
+      this.needsRedraw = true;
+      return true;
+    } catch (err) {
+      console.error('[PERF] setDragOffsetPreview error:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Clear drag offset preview and reset all drag flags.
+   */
+  clearDragOffsetPreview() {
+    try {
+      this._dragOffsetX = 0.0;
+      this._dragOffsetW = 0.0;
+      this._dragActive = false;
+      // Clear moving set used by glyph-atlas drag flags
+      this._dragMovingIds = null;
+
+      // Restore original positions in CPU cache (only those we touched)
+      if (this._dragOriginalPos && this.posSize) {
+        for (const [idx, orig] of this._dragOriginalPos.entries()) {
+          const base = idx * 4;
+          if (base + 3 < this.posSize.length) {
+            this.posSize[base + 0] = orig.x;
+            this.posSize[base + 2] = orig.w;
+          }
+        }
+        this._dragOriginalPos = null;
+      }
+
+      if (this._dragFlags) {
+        this._dragFlags.fill(0.0);
+
+        // Upload cleared flags
+        const gl = this.gl;
+        if (gl && this.rectInstanceDragFlagsBuffer) {
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDragFlagsBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, this._dragFlags, gl.DYNAMIC_DRAW);
+          gl.bindBuffer(gl.ARRAY_BUFFER, null);
+        }
+      }
+
+      // Reset flags upload/caching state
+      this._dragFlagsInited = false;
+      this._dragFlagsLastCount = 0;
+      this._dragSetIndices = null;
+      this._dragSetSize = 0;
+      this._dragAnchorIndex = -1;
+
+      // Reset end-bar preview baselines/deltas
+      this._baselineNonMovingEndSec = null;
+      this._baselineMovingIdx = null;
+      this._dragDxSec = 0.0;
+      this._dragDdSec = 0.0;
+      this._lastDragXScale = null;
+
+      // After drag ends, bump position epoch once so any CPU-derived overlays (e.g., link lines)
+      // can rebuild from authoritative positions.
+      this._posEpoch = (this._posEpoch || 0) + 1;
+
+      this.needsRedraw = true;
+    } catch {}
   }
 
   // Clear any multi-note preview overrides; a subsequent sync restores true values.
@@ -2724,11 +3173,17 @@ export class RendererAdapter {
 
         layout(location=0) in vec2 a_unit;         // (0,0), (1,0), (0.5,1)
         layout(location=1) in vec4 a_posSizeCss;   // (x_px, y_px, w_px, h_px) in canvas-local CSS px
+        layout(location=2) in float a_dragFlag;    // 1.0 = apply horizontal drag offset, 0.0 = none
 
-        uniform vec2 u_viewport;                   // canvas CSS px size
+        uniform vec2  u_viewport;                  // canvas CSS px size
+        uniform float u_dragCssX;                  // CSS px horizontal drag offset
+        uniform float u_dragMask;                  // extra mask for single-instance draws (0 or 1)
 
         void main() {
           vec2 local = a_posSizeCss.xy + a_unit * a_posSizeCss.zw; // canvas-local CSS px
+          // Apply drag only when flagged, plus optional mask for one-off draws
+          local.x += (a_dragFlag + u_dragMask) * u_dragCssX;
+
           float ndcX = (local.x / u_viewport.x) * 2.0 - 1.0;
           float ndcY = 1.0 - (local.y / u_viewport.y) * 2.0;
           gl_Position = vec4(ndcX, ndcY, 0.0, 1.0);
@@ -2750,6 +3205,8 @@ export class RendererAdapter {
           const gl = this.gl;
           const p = this.measureTriProgram;
           this._uniforms.measureTri.u_viewport = gl.getUniformLocation(p, 'u_viewport');
+          this._uniforms.measureTri.u_dragCssX = gl.getUniformLocation(p, 'u_dragCssX');
+          this._uniforms.measureTri.u_dragMask = gl.getUniformLocation(p, 'u_dragMask');
         }
       } catch {}
       // Outline program (1px line loop) for visible edges over dark backgrounds
@@ -2770,7 +3227,9 @@ export class RendererAdapter {
           const gl = this.gl;
           const p = this.measureTriOutlineProgram;
           this._uniforms.measureTriOutline.u_viewport = gl.getUniformLocation(p, 'u_viewport');
-          this._uniforms.measureTriOutline.u_color   = gl.getUniformLocation(p, 'u_color');
+          this._uniforms.measureTriOutline.u_color    = gl.getUniformLocation(p, 'u_color');
+          this._uniforms.measureTriOutline.u_dragCssX = gl.getUniformLocation(p, 'u_dragCssX');
+          this._uniforms.measureTriOutline.u_dragMask = gl.getUniformLocation(p, 'u_dragMask');
         }
       } catch {}
 
@@ -2887,6 +3346,14 @@ export class RendererAdapter {
       gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
       gl.vertexAttribDivisor(1, 1); // per-instance
 
+      // Per-instance drag flags for triangles (1 = apply u_dragCssX)
+      this.measureTriDragFlagBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriDragFlagBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, 1 * 4, gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+      gl.vertexAttribDivisor(2, 1);
+
       // Outline buffer for triangles (same attrib layout; we will bind per-draw)
       this.measureTriPosSizeOutlineBuffer = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeOutlineBuffer);
@@ -2970,7 +3437,25 @@ export class RendererAdapter {
           outColor = vec4(u_color.rgb, u_color.a * a);
         }
       `;
-      this.silenceVLineProgram = this._createProgram(hlineVS, vlineFS);
+      // VS variant with drag flag and u_dragCssX for vertical lines
+      const vlineDragVS = `#version 300 es
+        precision highp float;
+        layout(location=0) in vec2 a_unit;         // (0..1) quad
+        layout(location=1) in vec4 a_posSizeCss;   // (x_px, y_px, w_px, h_px)
+        layout(location=2) in float a_dragFlag;    // 1.0 = apply u_dragCssX
+        uniform vec2  u_viewport;                  // canvas CSS px size
+        uniform float u_dragCssX;                  // CSS px horizontal drag offset
+        out vec2 v_css;
+        void main() {
+          vec2 local = a_posSizeCss.xy + a_unit * a_posSizeCss.zw; // canvas-local CSS px
+          local.x += a_dragFlag * u_dragCssX;
+          float ndcX = (local.x / u_viewport.x) * 2.0 - 1.0;
+          float ndcY = 1.0 - (local.y / u_viewport.y) * 2.0;
+          gl_Position = vec4(ndcX, ndcY, 0.0, 1.0);
+          v_css = local;
+        }
+      `;
+      this.silenceVLineProgram = this._createProgram(vlineDragVS, vlineFS);
 
       // Geometry for horizontal lines (screen-space quads)
       this.octaveLineVAO = gl.createVertexArray();
@@ -2989,6 +3474,14 @@ export class RendererAdapter {
       gl.enableVertexAttribArray(1);
       gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
       gl.vertexAttribDivisor(1, 1);
+
+      // Per-instance drag flags for vertical measure dashes
+      this.measureDashDragFlagBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureDashDragFlagBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, 1 * 4, gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+      gl.vertexAttribDivisor(2, 1);
 
       gl.bindVertexArray(null);
       gl.bindBuffer(gl.ARRAY_BUFFER, null);
@@ -3264,7 +3757,7 @@ export class RendererAdapter {
         this.measureColors = new Float32Array(Nd * 4);
       }
       for (let i = 0; i < Nd; i++) {
-        const xw = dashedTimes[i] * 200 * (this.currentXScaleFactor || 1.0) - w * 0.5;
+        const xw = dashedTimes[i] * this._cfgSX() * (this.currentXScaleFactor || 1.0) - w * 0.5;
         const o = i * 4;
         this.measurePosSize[o + 0] = xw;
         this.measurePosSize[o + 1] = y;
@@ -3290,7 +3783,7 @@ export class RendererAdapter {
       let k = 0;
       // Start-left solid (at origin minus 3px)
       {
-        const t0 = 0 * 200 * (this.currentXScaleFactor || 1.0);
+        const t0 = 0 * this._cfgSX() * (this.currentXScaleFactor || 1.0);
         const xw = t0 - offsetWU - w * 0.5;
         const o = k * 4;
         this.measureSolidPosSize[o+0] = xw;
@@ -3305,7 +3798,7 @@ export class RendererAdapter {
       }
       // End-right solid (at end plus 3px)
       {
-        const te = endTime * 200 * (this.currentXScaleFactor || 1.0);
+        const te = endTime * this._cfgSX() * (this.currentXScaleFactor || 1.0);
         const xw = te + offsetWU - w * 0.5;
         const o = k * 4;
         this.measureSolidPosSize[o+0] = xw;
@@ -3351,6 +3844,26 @@ export class RendererAdapter {
           this._measureTriIdToIndex = new Map();
           for (let i = 0; i < this._measureTriIds.length; i++) {
             this._measureTriIdToIndex.set(this._measureTriIds[i], i);
+          }
+        } catch {}
+        // Cache baseline last-measure metadata for efficient end-bar preview
+        try {
+          if (nextTimes && nextIds && nextTimes.length > 0) {
+            const lastIdx = nextTimes.length - 1;
+            const lastId = Number(nextIds[lastIdx]);
+            let mlSec = 0;
+            try {
+              const lastNote = module.getNoteById(lastId);
+              const mlVal = module.findMeasureLength(lastNote);
+              mlSec = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+            } catch {}
+            this._lastMeasureMeta = {
+              id: lastId,
+              baseStartSec: Number(nextTimes[lastIdx]) || 0,
+              lengthSec: mlSec
+            };
+          } else {
+            this._lastMeasureMeta = null;
           }
         } catch {}
 
@@ -3439,11 +3952,11 @@ export class RendererAdapter {
             const w = pxToWorldX;
             const offsetWU = 3.0 / (this._xScaleAtInit || (this.xScalePxPerWU || 1.0));
             // Start-left
-            const cx0 = 0.0 * 200.0 * (this.currentXScaleFactor || 1.0) - offsetWU;
+            const cx0 = 0.0 * this._cfgSX() * (this.currentXScaleFactor || 1.0) - offsetWU;
             this.measureSolidPosSize[0] = cx0 - w * 0.5;
             this.measureSolidPosSize[2] = w;
             // End-right
-            const endT = (this._moduleEndTime || 0.0) * 200.0 * (this.currentXScaleFactor || 1.0);
+            const endT = (this._moduleEndTime || 0.0) * this._cfgSX() * (this.currentXScaleFactor || 1.0);
             const cxe = endT + offsetWU;
             const oe = 4;
             this.measureSolidPosSize[oe + 0] = cxe - w * 0.5;
@@ -3483,8 +3996,8 @@ export class RendererAdapter {
         const uCol = gl.getUniformLocation(this.silenceVLineProgram, 'u_color');
 
         if (uVP)  gl.uniform2f(uVP, vpW, vpH);
-        if (uDash) gl.uniform1f(uDash, 6.0);
-        if (uGap)  gl.uniform1f(uGap, 6.0);
+        if (uDash) gl.uniform1f(uDash, (this._config?.measures?.dashPx ?? 6.0));
+        if (uGap)  gl.uniform1f(uGap,  (this._config?.measures?.gapPx  ?? 6.0));
         if (uCol)  gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.35);
 
         // Build CSS px positions spanning full viewport height from effective measure times
@@ -3501,42 +4014,104 @@ export class RendererAdapter {
           return arr;
         })();
 
-        // Compute effective module end from current preview state (measures and notes), allowing shrink
-        let endFromMeasures = 0;
-        try {
-          if (triTimesEff.length && this._measureTriIds && this._measureTriIds.length === triTimesEff.length && this._moduleRef) {
-            const lastIdx = triTimesEff.length - 1;
-            const lastId = this._measureTriIds[lastIdx];
-            const lastStart = Number(triTimesEff[lastIdx]) || 0;
-            const lastNote = this._moduleRef.getNoteById(Number(lastId));
-            const mlVal = this._moduleRef.findMeasureLength(lastNote);
-            const ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
-            endFromMeasures = Math.max(0, lastStart + ml);
-          }
-        } catch {}
-        let endFromNotes = 0;
-        try {
-          const Ninst = Math.max(0, this.instanceCount | 0);
-          const denom = 200.0 * (this.currentXScaleFactor || 1.0);
-          for (let i = 0; i < Ninst; i++) {
-            const o = i * 4;
-            const xw = this.posSize[o + 0] || 0;
-            const ww = this.posSize[o + 2] || 0;
-            const endSec = (xw + ww) / denom;
-            if (isFinite(endSec)) endFromNotes = Math.max(endFromNotes, endSec);
-          }
-        } catch {}
-        let endEff = Math.max(endFromMeasures, endFromNotes);
-        // Respect explicit preview override only to expand beyond the computed candidate
-        if (this._endTimePreviewSec != null) {
-          endEff = Math.max(endEff, this._endTimePreviewSec);
-        }
+        // Unified effective module-end preview based on baselines + drag deltas
+        const computeEffectiveEndSec = (triTimes) => {
+          try {
+            // Idle path: keep previous precise behavior (no baselines needed)
+            if (!this._dragActive) {
+              let endFromNotes = 0;
+              try {
+                const Ninst = Math.max(0, this.instanceCount | 0);
+                const denom = this._cfgSX() * (this.currentXScaleFactor || 1.0);
+                for (let i = 0; i < Ninst; i++) {
+                  const o = i * 4;
+                  const endSec = ((this.posSize[o + 0] || 0) + (this.posSize[o + 2] || 0)) / denom;
+                  if (isFinite(endSec)) endFromNotes = Math.max(endFromNotes, endSec);
+                }
+              } catch {}
+              let endFromMeasures = 0;
+              try {
+                if (triTimes.length && this._measureTriIds && this._measureTriIds.length === triTimes.length && this._moduleRef) {
+                  const lastIdx = triTimes.length - 1;
+                  const lastId = this._measureTriIds[lastIdx];
+                  const lastStart = Number(triTimes[lastIdx]) || 0;
+                  let ml = 0;
+                  if (this._lastMeasureMeta && this._lastMeasureMeta.id === Number(lastId) && isFinite(this._lastMeasureMeta.lengthSec)) {
+                    ml = this._lastMeasureMeta.lengthSec;
+                  } else {
+                    const lastNote = this._moduleRef.getNoteById(Number(lastId));
+                    const mlVal = this._moduleRef.findMeasureLength(lastNote);
+                    ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                  }
+                  endFromMeasures = Math.max(0, lastStart + ml);
+                }
+              } catch {}
+              let e0 = Math.max(endFromMeasures, endFromNotes);
+              if (this._endTimePreviewSec != null) e0 = Math.max(e0, this._endTimePreviewSec);
+              return e0;
+            }
+
+            // Drag path: derive from drag delta and baselines (no full scans)
+            let endFromMeasures = 0;
+            try {
+              if (triTimes.length && this._measureTriIds && this._measureTriIds.length === triTimes.length && this._moduleRef) {
+                const lastIdx = triTimes.length - 1;
+                const lastId = this._measureTriIds[lastIdx];
+                let lastStart = Number(triTimes[lastIdx]) || 0;
+                const hasPrev = !!(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, Number(lastId)));
+                if (!hasPrev && this._dragMovingIds && this._dragMovingIds.has(Number(lastId))) {
+                  lastStart += (this._dragDxSec || 0);
+                }
+                let ml = 0;
+                if (this._lastMeasureMeta && this._lastMeasureMeta.id === Number(lastId) && isFinite(this._lastMeasureMeta.lengthSec)) {
+                  ml = this._lastMeasureMeta.lengthSec;
+                } else {
+                  const lastNote = this._moduleRef.getNoteById(Number(lastId));
+                  const mlVal = this._moduleRef.findMeasureLength(lastNote);
+                  ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                }
+                endFromMeasures = Math.max(0, lastStart + ml);
+              }
+            } catch {}
+
+            const denom = this._cfgSX() * (this.currentXScaleFactor || 1.0);
+            const movingIdx = (this._baselineMovingIdx && this._baselineMovingIdx.length)
+              ? this._baselineMovingIdx
+              : (this._dragSetIndices || null);
+
+            let movingEnd = 0;
+            if (movingIdx && movingIdx.length) {
+              const anchorIdx = (this._dragAnchorIndex != null) ? (this._dragAnchorIndex | 0) : -1;
+              const dxSec = this._dragDxSec || 0.0;
+              const type = (this._dragOverlay && this._dragOverlay.type) || '';
+const isResize = !!this._dragLastWasResize || type === 'resize';
+const isMove = type === 'move';
+              for (let i = 0; i < movingIdx.length; i++) {
+                const idx = movingIdx[i] | 0;
+                if (idx < 0 || idx >= (this.instanceCount | 0)) continue;
+                const o = idx * 4;
+                const startSec = (this.posSize[o + 0] || 0) / denom;
+                const durSec   = (this.posSize[o + 2] || 0) / denom;
+                const isAnchor = (idx === anchorIdx);
+const addDx = isAnchor ? 0.0 : dxSec;
+const e = startSec + addDx + durSec;
+                if (isFinite(e)) movingEnd = Math.max(movingEnd, e);
+              }
+            }
+
+            let e1 = Math.max(endFromMeasures, (this._baselineNonMovingEndSec || 0), movingEnd);
+            if (this._endTimePreviewSec != null) e1 = Math.max(e1, this._endTimePreviewSec);
+            return e1;
+          } catch { return 0; }
+        };
+
+        const endEff = computeEffectiveEndSec(triTimesEff);
         const dashedTimes = [0, ...triTimesEff, endEff];
         const N = dashedTimes.length;
         const css = new Float32Array(N * 4);
         for (let i = 0; i < N; i++) {
           const t = dashedTimes[i] || 0;
-          const cxWorld = t * 200.0 * (this.currentXScaleFactor || 1.0);
+          const cxWorld = t * this._cfgSX() * (this.currentXScaleFactor || 1.0);
           const sx = this.matrix[0] * cxWorld + this.matrix[6];
           const localX = (this.canvasOffset?.x != null) ? (sx - this.canvasOffset.x) : sx;
           const left = Math.round(localX) - 0.5; // crisp 1px
@@ -3547,11 +4122,58 @@ export class RendererAdapter {
           css[o + 3] = vpH;
         }
 
+        // Enable drag-flag attribute (loc 2) for dashed bars
+        this._setOctaveAttr2Enabled(true);
         gl.bindVertexArray(this.octaveLineVAO);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
+        // Upload per-instance drag flags for dashed bars and set drag uniform (CSS px)
+        {
+          const uDX = gl.getUniformLocation(this.silenceVLineProgram, 'u_dragCssX');
+          const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
+          if (uDX) gl.uniform1f(uDX, dxCss);
+
+          const flags = new Float32Array(N);
+          // origin (0) and end (N-1) are not direct measure bars
+          flags[0] = 0.0;
+          flags[N - 1] = 0.0;
+          const flaggedIdx = [];
+          if (this._dragActive && this._dragMovingIds && this._dragMovingIds.size && this._measureTriIdToIndex) {
+            try {
+              for (const id of this._dragMovingIds) {
+                const idNum = Number(id);
+                // Skip those with preview override (position already baked)
+                const hasPrev = !!(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, idNum));
+                if (hasPrev) continue;
+                const idx = this._measureTriIdToIndex.get ? this._measureTriIdToIndex.get(idNum) : -1;
+                if (idx != null && idx >= 0 && idx < (triTimesEff ? triTimesEff.length : 0)) {
+                  const di = 1 + idx; // dashedTimes = [0, ...triTimesEff, endEff]
+                  if (di >= 0 && di < N) {
+                    flags[di] = 1.0;
+                    flaggedIdx.push(di);
+                  }
+                }
+              }
+            } catch {}
+          }
+          // Build a simple signature to gate buffer uploads and avoid per-frame churn
+          flaggedIdx.sort((a,b) => a-b);
+          const dashKey = `${N}|${flaggedIdx.join(',')}`;
+          if (this._lastDashFlagsKey !== dashKey) {
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.measureDashDragFlagBuffer);
+            // Ensure attrib pointer (loc 2) is bound to the correct buffer for ANGLE/D3D robustness
+            gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 0, 0);
+            gl.vertexAttribDivisor(2, 1);
+            gl.bufferData(gl.ARRAY_BUFFER, flags, gl.DYNAMIC_DRAW);
+            this._lastDashFlagsKey = dashKey;
+          }
+        }
+        // Rebind posSize buffer after potential flag-buffer upload changed ARRAY_BUFFER binding
         gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, css, gl.DYNAMIC_DRAW);
         gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, N);
         gl.bindVertexArray(null);
+        // Disable attrib 2 after dashed bars to avoid affecting other vertical line draws
+        this._setOctaveAttr2Enabled(false);
       }
 
       // 2) Solid start/end bars (screen-space infinite vertical lines)
@@ -3565,48 +4187,103 @@ export class RendererAdapter {
         if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.8);
         if (uZ)   gl.uniform1f(uZ, -0.00002);
 
-        // Compute effective end time from current preview state (measures and notes), allowing shrink
-        let endFromMeasures = 0;
-        try {
-          const triTimesEff = (() => {
-            let arr = this._measureTriTimes ? this._measureTriTimes.slice() : [];
-            if (this._measurePreview && this._measureTriIdToIndex) {
-              for (const id in this._measurePreview) {
-                const idx = this._measureTriIdToIndex.get(Number(id));
-                if (idx != null && idx >= 0 && idx < arr.length) {
-                  arr[idx] = this._measurePreview[id];
-                }
+        // Compute effective end using the same unified function (reuse triTimes logic)
+        const triTimesEff2 = (() => {
+          let arr = this._measureTriTimes ? this._measureTriTimes.slice() : [];
+          if (this._measurePreview && this._measureTriIdToIndex) {
+            for (const id in this._measurePreview) {
+              const idx = this._measureTriIdToIndex.get(Number(id));
+              if (idx != null && idx >= 0 && idx < arr.length) {
+                arr[idx] = this._measurePreview[id];
               }
             }
-            return arr;
-          })();
-          if (triTimesEff.length && this._measureTriIds && this._measureTriIds.length === triTimesEff.length && this._moduleRef) {
-            const lastIdx = triTimesEff.length - 1;
-            const lastId = this._measureTriIds[lastIdx];
-            const lastStart = Number(triTimesEff[lastIdx]) || 0;
+          }
+          return arr;
+        })();
+
+        const endEff = (() => {
+  const computeEff = (triTimes) => {
+    try {
+      // Idle path: same as dashed computation (uses cached last-measure length when available)
+      if (!this._dragActive) {
+        let endFromNotes = 0;
+        const Ninst = Math.max(0, this.instanceCount | 0);
+        const denom = this._cfgSX() * (this.currentXScaleFactor || 1.0);
+        for (let i = 0; i < Ninst; i++) {
+          const o = i * 4;
+          const endSec = ((this.posSize[o + 0] || 0) + (this.posSize[o + 2] || 0)) / denom;
+          if (isFinite(endSec)) endFromNotes = Math.max(endFromNotes, endSec);
+        }
+        let endFromMeasures = 0;
+        if (triTimes.length && this._measureTriIds && this._measureTriIds.length === triTimes.length && this._moduleRef) {
+          const lastIdx = triTimes.length - 1;
+          const lastId = this._measureTriIds[lastIdx];
+          const lastStart = Number(triTimes[lastIdx]) || 0;
+          let ml = 0;
+          if (this._lastMeasureMeta && this._lastMeasureMeta.id === Number(lastId) && isFinite(this._lastMeasureMeta.lengthSec)) {
+            ml = this._lastMeasureMeta.lengthSec;
+          } else {
             const lastNote = this._moduleRef.getNoteById(Number(lastId));
             const mlVal = this._moduleRef.findMeasureLength(lastNote);
-            const ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
-            endFromMeasures = Math.max(0, lastStart + ml);
+            ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
           }
-        } catch {}
-        let endFromNotes = 0;
-        try {
-          const Ninst = Math.max(0, this.instanceCount | 0);
-          const denom = 200.0 * (this.currentXScaleFactor || 1.0);
-          for (let i = 0; i < Ninst; i++) {
-            const o = i * 4;
-            const xw = this.posSize[o + 0] || 0;
-            const ww = this.posSize[o + 2] || 0;
-            const endSec = (xw + ww) / denom;
-            if (isFinite(endSec)) endFromNotes = Math.max(endFromNotes, endSec);
-          }
-        } catch {}
-        let endEff = Math.max(endFromMeasures, endFromNotes);
-        // Respect explicit preview override only to expand beyond the computed candidate
-        if (this._endTimePreviewSec != null) {
-          endEff = Math.max(endEff, this._endTimePreviewSec);
+          endFromMeasures = Math.max(0, lastStart + ml);
         }
+        let e0 = Math.max(endFromMeasures, endFromNotes);
+        if (this._endTimePreviewSec != null) e0 = Math.max(e0, this._endTimePreviewSec);
+        return e0;
+      }
+
+      // Drag path: identical to dashed bars' drag-aware effective end
+      let endFromMeasures = 0;
+      if (triTimes.length && this._measureTriIds && this._measureTriIds.length === triTimes.length && this._moduleRef) {
+        const lastIdx = triTimes.length - 1;
+        const lastId = this._measureTriIds[lastIdx];
+        let lastStart = Number(triTimes[lastIdx]) || 0;
+        const hasPrev = !!(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, Number(lastId)));
+        if (!hasPrev && this._dragMovingIds && this._dragMovingIds.has(Number(lastId))) {
+          lastStart += (this._dragDxSec || 0);
+        }
+        let ml = 0;
+        if (this._lastMeasureMeta && this._lastMeasureMeta.id === Number(lastId) && isFinite(this._lastMeasureMeta.lengthSec)) {
+          ml = this._lastMeasureMeta.lengthSec;
+        } else {
+          const lastNote = this._moduleRef.getNoteById(Number(lastId));
+          const mlVal = this._moduleRef.findMeasureLength(lastNote);
+          ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+        }
+        endFromMeasures = Math.max(0, lastStart + ml);
+      }
+
+      const denom = this._cfgSX() * (this.currentXScaleFactor || 1.0);
+      const movingIdx = (this._baselineMovingIdx && this._baselineMovingIdx.length)
+        ? this._baselineMovingIdx
+        : (this._dragSetIndices || null);
+
+      let movingEnd = 0;
+      if (movingIdx && movingIdx.length) {
+        const anchorIdx = (this._dragAnchorIndex != null) ? (this._dragAnchorIndex | 0) : -1;
+        const dxSec = this._dragDxSec || 0.0;
+        for (let i = 0; i < movingIdx.length; i++) {
+          const idx = movingIdx[i] | 0;
+          if (idx < 0 || idx >= (this.instanceCount | 0)) continue;
+          const o = idx * 4;
+          const startSec = (this.posSize[o + 0] || 0) / denom;
+          const durSec   = (this.posSize[o + 2] || 0) / denom;
+          const isAnchor = (idx === anchorIdx);
+          const addDx = isAnchor ? 0.0 : dxSec;
+          const e = startSec + addDx + durSec;
+          if (isFinite(e)) movingEnd = Math.max(movingEnd, e);
+        }
+      }
+
+      let e1 = Math.max(endFromMeasures, (this._baselineNonMovingEndSec || 0), movingEnd);
+      if (this._endTimePreviewSec != null) e1 = Math.max(e1, this._endTimePreviewSec);
+      return e1;
+    } catch { return 0; }
+  };
+  return computeEff(triTimesEff2);
+})();
 
         // Two bars: start-left (-3px) and end-right (+3px)
         const css = new Float32Array(2 * 4);
@@ -3619,7 +4296,7 @@ export class RendererAdapter {
         }
         // End
         {
-          const cxWorldE = endEff * 200.0 * (this.currentXScaleFactor || 1.0);
+          const cxWorldE = endEff * this._cfgSX() * (this.currentXScaleFactor || 1.0);
           const sxE = this.matrix[0] * cxWorldE + this.matrix[6];
           const localXE = (this.canvasOffset?.x != null) ? (sxE - this.canvasOffset.x) : sxE;
           const leftE = Math.round(localXE) - 0.5 + 3.0; // 3px right offset
@@ -3629,9 +4306,13 @@ export class RendererAdapter {
 
         gl.bindVertexArray(this.octaveLineVAO);
         gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
+        // No per-frame CPU shifting for solid bars (kept as fixed origin/end offsets)
         gl.bufferData(gl.ARRAY_BUFFER, css, gl.DYNAMIC_DRAW);
         gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 2);
         gl.bindVertexArray(null);
+
+        // Disable attrib 2 for subsequent non-dashed vertical line draws
+        this._setOctaveAttr2Enabled(false);
       }
 
       // Base note circle (screen-space size that scales with zoom; border scales with zoom like note borders)
@@ -3654,8 +4335,9 @@ export class RendererAdapter {
         const localCY = (this.canvasOffset?.y != null) ? (syC - this.canvasOffset.y) : syC;
 
         // Size in CSS px scales with zoom (40 world units mapped through current scales)
-        const circleW = 40.0 * (this.xScalePxPerWU || 1.0);
-        const circleH = 40.0 * (this.yScalePxPerWU || 1.0);
+        const circleWU = (this._config?.baseNote?.circleSizeWU ?? 40.0);
+        const circleW = circleWU * (this.xScalePxPerWU || 1.0);
+        const circleH = circleWU * (this.yScalePxPerWU || 1.0);
 
         // Convert center to top-left for quad placement
         const localX = localCX - 0.5 * circleW;
@@ -3676,7 +4358,7 @@ export class RendererAdapter {
         const uBCol= Ubc ? Ubc.u_borderColor : gl.getUniformLocation(this.baseCircleProgram, 'u_borderColor');
         if (uVPc) gl.uniform2f(uVPc, vpW, vpH);
         // Match note borders: 1 CSS px at zoom=1, scaling with zoom via xScalePxPerWU
-        if (uBWc) gl.uniform1f(uBWc, (this.xScalePxPerWU || 1.0));
+        { const bw = (this._config?.note?.borderPxAtZoom1 ?? 1.0); if (uBWc) gl.uniform1f(uBWc, bw * (this.xScalePxPerWU || 1.0)); }
         if (uFill) gl.uniform4f(uFill, 1.0, 0.66, 0.0, 1.0);          // #ffa800
         if (uBCol) gl.uniform4f(uBCol, 0.388, 0.388, 0.388, 1.0);     // #636363
 
@@ -3696,7 +4378,7 @@ export class RendererAdapter {
             const uFill2= Ubc2 ? Ubc2.u_fillColor   : gl.getUniformLocation(this.baseCircleProgram, 'u_fillColor');
             const uBCol2= Ubc2 ? Ubc2.u_borderColor : gl.getUniformLocation(this.baseCircleProgram, 'u_borderColor');
             if (uVPc2) gl.uniform2f(uVPc2, vpW, vpH);
-            if (uBWc2) gl.uniform1f(uBWc2, 2.0 * (this.xScalePxPerWU || 1.0)); // 2px at zoom=1
+            if (uBWc2) gl.uniform1f(uBWc2, (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0) * (this.xScalePxPerWU || 1.0)); // 2px at zoom=1
             if (uFill2) gl.uniform4f(uFill2, 1.0, 1.0, 1.0, 0.0);               // no interior fill
             if (uBCol2) gl.uniform4f(uBCol2, 1.0, 1.0, 1.0, 1.0);               // white ring
 
@@ -3710,7 +4392,7 @@ export class RendererAdapter {
 
         // Dependency highlight ring for BaseNote when included in sets
         try {
-          if (this.baseCircleProgram && this._lastSelectedNoteId !== 0) {
+          if (!this._dragActive && this.baseCircleProgram && this._lastSelectedNoteId !== 0) {
             const drawBaseDepRing = (rgba, widthPx) => {
               gl.useProgram(this.baseCircleProgram);
               const U = (this._uniforms && this._uniforms.baseCircle) ? this._uniforms.baseCircle : null;
@@ -3787,7 +4469,7 @@ export class RendererAdapter {
           // Convert world x to canvas-local CSS px using matrix and canvas offset
           for (let i = 0; i < count; i++) {
             const t = triTimesForDraw[i];
-            const xwCenter = (t || 0) * 200.0 * (this.currentXScaleFactor || 1.0);
+            const xwCenter = (t || 0) * this._cfgSX() * (this.currentXScaleFactor || 1.0);
 
             // world -> page CSS px
             const sx = this.matrix[0] * xwCenter + this.matrix[6];
@@ -3827,445 +4509,515 @@ export class RendererAdapter {
           this._lastTriDataEpoch = this._triDataEpoch;
           this._lastTriPreviewEpoch = this._triPreviewEpoch;
         }
+// Build per-instance drag flags for triangles and update CPU picking CSS to match shader shift
+{
+  const flags = new Float32Array(count);
+  const moving = (this._dragActive && this._dragMovingIds && this._dragMovingIds.size) ? this._dragMovingIds : null;
+  const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
 
-        // Outline first (inflated), then fill on top to ensure visible edge over dark bg
-        if (this.measureTriOutlineProgram) {
-          gl.useProgram(this.measureTriOutlineProgram);
+  // CPU picking CSS array mirroring on-screen triangles
+  const triCssPick = new Float32Array(this.measureTriPosSize);
+
+  const flaggedIdx = [];
+  if (moving && this._measureTriIdToIndex) {
+    try {
+      for (const id of moving) {
+        const idNum = Number(id);
+        const hasPrev = !!(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, idNum));
+        if (hasPrev) continue;
+        const idx = this._measureTriIdToIndex.get ? this._measureTriIdToIndex.get(idNum) : -1;
+        if (idx != null && idx >= 0 && idx < count) {
+          flags[idx] = 1.0;
+          flaggedIdx.push(idx);
+          // Adjust CPU picking left X to match shader shift
+          const o = idx * 4;
+          triCssPick[o + 0] += dxCss;
+        }
+      }
+    } catch {}
+  }
+  // Upload flags only when the moving set changes
+  flaggedIdx.sort((a,b) => a-b);
+  const triKey = `${count}|${flaggedIdx.join(',')}`;
+  if (this._lastTriFlagsKey !== triKey) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriDragFlagBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, flags, gl.DYNAMIC_DRAW);
+    this._lastTriFlagsKey = triKey;
+  }
+  // Cache CPU picking shape (always reflect current dxCss)
+  try { this._measureTriCss = triCssPick; } catch {}
+}
+
+// Outline first (inflated), then fill on top to ensure visible edge over dark bg
+if (this.measureTriOutlineProgram) {
+  gl.useProgram(this.measureTriOutlineProgram);
 /* Ensure BaseNote fraction + divider draw last, above circle and guides (ordering-only; no extra frame pass)
-   Fixes:
-   - Solid white divider that scales with zoom (thickness relative to circle size, not a fixed 1px)
-   - Text size proportional to circle size with wide clamp to avoid inversion at zoom extremes
-   - Numerator/denominator hug the divider with 1–2px dynamic gap
- */
+Fixes:
+- Solid white divider that scales with zoom (thickness relative to circle size, not a fixed 1px)
+- Text size proportional to circle size with wide clamp to avoid inversion at zoom extremes
+- Numerator/denominator hug the divider with 1–2px dynamic gap
+*/
 try {
-  if (this.drawBaseFraction && this.textProgram && this.textVAO && this.octaveLineProgram && this.octaveLineVAO) {
-    // Viewport in CSS px
-    const rectCss2 = this.canvas.getBoundingClientRect();
-    const vpW2 = Math.max(1, rectCss2.width);
-    const vpH2 = Math.max(1, rectCss2.height);
+if (this.drawBaseFraction && this.textProgram && this.textVAO && this.octaveLineProgram && this.octaveLineVAO) {
+// Viewport in CSS px
+const rectCss2 = this.canvas.getBoundingClientRect();
+const vpW2 = Math.max(1, rectCss2.width);
+const vpH2 = Math.max(1, rectCss2.height);
 
-    // BaseNote circle geometry in screen space (CSS px)
-    const baseFreq2 = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
-    const xCenterWorld2 = -30.0;
-    const yCenterWorld2 = this._frequencyToY(baseFreq2) + 10.0;
+// BaseNote circle geometry in screen space (CSS px)
+const baseFreq2 = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
+const xCenterWorld2 = -30.0;
+const yCenterWorld2 = this._frequencyToY(baseFreq2) + 10.0;
 
-    // World center -> page CSS px
-    const sxC2 = this.matrix[0] * xCenterWorld2 + this.matrix[3] * yCenterWorld2 + this.matrix[6];
-    const syC2 = this.matrix[1] * xCenterWorld2 + this.matrix[4] * yCenterWorld2 + this.matrix[7];
+// World center -> page CSS px
+const sxC2 = this.matrix[0] * xCenterWorld2 + this.matrix[3] * yCenterWorld2 + this.matrix[6];
+const syC2 = this.matrix[1] * xCenterWorld2 + this.matrix[4] * yCenterWorld2 + this.matrix[7];
 
-    // Canvas-local CSS px
-    const localCX2 = (this.canvasOffset?.x != null) ? (sxC2 - this.canvasOffset.x) : sxC2;
-    const localCY2 = (this.canvasOffset?.y != null) ? (syC2 - this.canvasOffset.y) : syC2;
+// Canvas-local CSS px
+const localCX2 = (this.canvasOffset?.x != null) ? (sxC2 - this.canvasOffset.x) : sxC2;
+const localCY2 = (this.canvasOffset?.y != null) ? (syC2 - this.canvasOffset.y) : syC2;
 
-    // Circle CSS size scales with zoom
-    const circleW2 = 40.0 * (this.xScalePxPerWU || 1.0);
-    const circleH2 = 40.0 * (this.yScalePxPerWU || 1.0);
+// Circle CSS size scales with zoom
+const circleWU2 = (this._config?.baseNote?.circleSizeWU ?? 40.0);
+const circleW2 = circleWU2 * (this.xScalePxPerWU || 1.0);
+const circleH2 = circleWU2 * (this.yScalePxPerWU || 1.0);
 
-    const localX2 = localCX2 - 0.5 * circleW2;
-    const localY2 = localCY2 - 0.5 * circleH2;
+const localX2 = localCX2 - 0.5 * circleW2;
+const localY2 = localCY2 - 0.5 * circleH2;
 
-    // Layout metrics BEFORE sizing divider
-    const minDim2 = Math.max(1.0, Math.min(circleW2, circleH2));
-    const fontPx2 = this.useGlyphCache ? Math.max(4, Math.round(minDim2 * 0.34)) : this._clampFontPx(Math.max(4, Math.round(minDim2 * 0.34)));
-    const gapPx2  = Math.max(1, Math.round(fontPx2 * 0.08));
+// Layout metrics BEFORE sizing divider
+const minDim2 = Math.max(1.0, Math.min(circleW2, circleH2));
+const fontPx2 = this.useGlyphCache ? Math.max(4, Math.round(minDim2 * 0.34)) : this._clampFontPx(Math.max(4, Math.round(minDim2 * 0.34)));
+const gapPx2  = Math.max(1, Math.round(fontPx2 * 0.08));
 
-    // Determine content widths either via glyph-cache or canvas textures (fallback)
-    const numStr2 = String(this._baseFracNum || '1');
-    const denStr2 = String(this._baseFracDen || '1');
+// Determine content widths either via glyph-cache or canvas textures (fallback)
+const numStr2 = String(this._baseFracNum || '1');
+const denStr2 = String(this._baseFracDen || '1');
 
-    let numEntry2 = null, denEntry2 = null;
-    let numEntry2W = 0,   denEntry2W = 0;
+let numEntry2 = null, denEntry2 = null;
+let numEntry2W = 0,   denEntry2W = 0;
 
-    if (this.useGlyphCache) {
-      numEntry2W = this._measureGlyphRunWidth(numStr2, fontPx2);
-      denEntry2W = this._measureGlyphRunWidth(denStr2, fontPx2);
-    } else {
-      numEntry2 = this._createTightDigitTexture(numStr2, fontPx2, 0, '#ffffff');
-      denEntry2 = this._createTightDigitTexture(denStr2, fontPx2, 0, '#ffffff');
-      numEntry2W = (numEntry2 && numEntry2.wCss) ? numEntry2.wCss : 0.0;
-      denEntry2W = (denEntry2 && denEntry2.wCss) ? denEntry2.wCss : 0.0;
-    }
+if (this.useGlyphCache) {
+numEntry2W = this._measureGlyphRunWidth(numStr2, fontPx2);
+denEntry2W = this._measureGlyphRunWidth(denStr2, fontPx2);
+} else {
+numEntry2 = this._createTightDigitTexture(numStr2, fontPx2, 0, '#ffffff');
+denEntry2 = this._createTightDigitTexture(denStr2, fontPx2, 0, '#ffffff');
+numEntry2W = (numEntry2 && numEntry2.wCss) ? numEntry2.wCss : 0.0;
+denEntry2W = (denEntry2 && denEntry2.wCss) ? denEntry2.wCss : 0.0;
+}
 
-    // Compute divider width from content + small padding
-    const contentMax2 = Math.max(numEntry2W, denEntry2W);
-    const extra2 = 2.0;
-    const dividerW2 = Math.max(6.0, contentMax2 + extra2);
-    const leftDiv2 = localCX2 - dividerW2 * 0.5;
+// Compute divider width from content + small padding
+const contentMax2 = Math.max(numEntry2W, denEntry2W);
+const extra2 = 2.0;
+const dividerW2 = Math.max(6.0, contentMax2 + extra2);
+const leftDiv2 = localCX2 - dividerW2 * 0.5;
 
-    // 1) Centered divider line — scales with zoom (thickness relative to circle height), inset to avoid AA bleeding
-    {
-      const thicknessPx = Math.max(1, Math.round(fontPx2 * 0.12));
-      const yCenter = localY2 + circleH2 * 0.5;
-      const dividerY2 = Math.floor(yCenter - thicknessPx * 0.5) + 0.5; // pixel-snapped
+// 1) Centered divider line — scales with zoom (thickness relative to circle height), inset to avoid AA bleeding
+{
+const thicknessPx = Math.max(1, Math.round(fontPx2 * 0.12));
+const yCenter = localY2 + circleH2 * 0.5;
+const dividerY2 = Math.floor(yCenter - thicknessPx * 0.5) + 0.5; // pixel-snapped
 
-      const posDiv2 = new Float32Array([leftDiv2, dividerY2, dividerW2, thicknessPx]);
+const posDiv2 = new Float32Array([leftDiv2, dividerY2, dividerW2, thicknessPx]);
 
-      // Inner circle radius (inside border) for clipping
-      const borderPxIn = (this.xScalePxPerWU || 1.0);
-      const innerR = 0.5 * minDim2 - borderPxIn;
+// Inner circle radius (inside border) for clipping
+const borderPxIn = (this.xScalePxPerWU || 1.0);
+const innerR = 0.5 * minDim2 - borderPxIn;
 
-      if (this.solidCssCircMaskProgram && this.octaveLineVAO && this.octaveLinePosSizeBuffer) {
-        gl.useProgram(this.solidCssCircMaskProgram);
-        const Ucmask = (this._uniforms && this._uniforms.solidCssCircMask) ? this._uniforms.solidCssCircMask : null;
-        const uVPm = Ucmask ? Ucmask.u_viewport : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_viewport');
-        const uZm  = Ucmask ? Ucmask.u_z        : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_z');
-        const uColm= Ucmask ? Ucmask.u_color    : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_color');
-        const uCtr = Ucmask ? Ucmask.u_circleCenter      : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_circleCenter');
-        const uRad = Ucmask ? Ucmask.u_circleRadiusInner : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_circleRadiusInner');
-        if (uVPm) gl.uniform2f(uVPm, vpW2, vpH2);
-        if (uZm)  gl.uniform1f(uZm, -0.00001); // on top
-        if (uColm)gl.uniform4f(uColm, 1.0, 1.0, 1.0, 1.0);
-        if (uCtr) gl.uniform2f(uCtr, localCX2, localCY2);
-        if (uRad) gl.uniform1f(uRad, innerR);
+if (this.solidCssCircMaskProgram && this.octaveLineVAO && this.octaveLinePosSizeBuffer) {
+ gl.useProgram(this.solidCssCircMaskProgram);
+ const Ucmask = (this._uniforms && this._uniforms.solidCssCircMask) ? this._uniforms.solidCssCircMask : null;
+ const uVPm = Ucmask ? Ucmask.u_viewport : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_viewport');
+ const uZm  = Ucmask ? Ucmask.u_z        : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_z');
+ const uColm= Ucmask ? Ucmask.u_color    : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_color');
+ const uCtr = Ucmask ? Ucmask.u_circleCenter      : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_circleCenter');
+ const uRad = Ucmask ? Ucmask.u_circleRadiusInner : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_circleRadiusInner');
+ if (uVPm) gl.uniform2f(uVPm, vpW2, vpH2);
+ if (uZm)  gl.uniform1f(uZm, -0.00001); // on top
+ if (uColm)gl.uniform4f(uColm, 1.0, 1.0, 1.0, 1.0);
+ if (uCtr) gl.uniform2f(uCtr, localCX2, localCY2);
+ if (uRad) gl.uniform1f(uRad, innerR);
 
-        gl.bindVertexArray(this.octaveLineVAO);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, posDiv2, gl.DYNAMIC_DRAW);
-        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
-        gl.bindVertexArray(null);
+ gl.bindVertexArray(this.octaveLineVAO);
+ gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
+ gl.bufferData(gl.ARRAY_BUFFER, posDiv2, gl.DYNAMIC_DRAW);
+ gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+ gl.bindVertexArray(null);
+}
+
+// 2) Numerator/Denominator — masked to inner circle
+if (this.useGlyphCache) {
+ // PMA for glyph textures and ensure top layering
+ gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+ gl.disable(gl.DEPTH_TEST);
+
+ const ascNum2 = (this._measureRunMetricsCanvas && this._measureRunMetricsCanvas(numStr2, fontPx2).ascent) || this._getRunAscent(numStr2, fontPx2);
+ const runHDen2 = this._getRunHeight(denStr2, fontPx2);
+ const sxNum2 = (numEntry2W > dividerW2) ? (dividerW2 / Math.max(1, numEntry2W)) : 1.0;
+ const sxDen2 = (denEntry2W > dividerW2) ? (dividerW2 / Math.max(1, denEntry2W)) : 1.0;
+ const usedNumW2 = numEntry2W * sxNum2;
+ const usedDenW2 = denEntry2W * sxDen2;
+ const nx2 = leftDiv2 + Math.max(0, Math.round((dividerW2 - usedNumW2) * 0.5));
+ const dx2 = leftDiv2 + Math.max(0, Math.round((dividerW2 - usedDenW2) * 0.5));
+ const ny2 = Math.round((dividerY2 - gapPx2 - ascNum2) * 2.0) / 2.0;
+ const dy2 = Math.round((dividerY2 + thicknessPx + gapPx2) * 2.0) / 2.0;
+
+ // Bind masked text program once per run
+ if (this.textCircMaskProgram) {
+   const prog = this.textCircMaskProgram;
+   gl.useProgram(prog);
+   const Utcm = (this._uniforms && this._uniforms.textCircMask) ? this._uniforms.textCircMask : null;
+   const uVPtm = Utcm ? Utcm.u_viewport : gl.getUniformLocation(prog, 'u_viewport');
+   const uTintm= Utcm ? Utcm.u_tint     : gl.getUniformLocation(prog, 'u_tint');
+   const uTexm = Utcm ? Utcm.u_tex      : gl.getUniformLocation(prog, 'u_tex');
+   const uZtm  = Utcm ? Utcm.u_z        : gl.getUniformLocation(prog, 'u_z');
+   const uCtrT = Utcm ? Utcm.u_circleCenter      : gl.getUniformLocation(prog, 'u_circleCenter');
+   const uRadT = Utcm ? Utcm.u_circleRadiusInner : gl.getUniformLocation(prog, 'u_circleRadiusInner');
+   if (uVPtm) gl.uniform2f(uVPtm, vpW2, vpH2);
+   if (uTintm)gl.uniform4f(uTintm, 1, 1, 1, 1);
+   if (uTexm) gl.uniform1i(uTexm, 0);
+   if (uZtm)  gl.uniform1f(uZtm, -0.00001);
+   if (uCtrT) gl.uniform2f(uCtrT, localCX2, localCY2);
+   if (uRadT) gl.uniform1f(uRadT, innerR);
+
+   // Draw numerator glyph-run
+   {
+     let penX = nx2;
+     for (let i = 0; i < numStr2.length; i++) {
+       const ch = numStr2[i];
+       const g = this._getGlyph(ch);
+       if (!g || !g.tex) continue;
+       const scale = Math.max(1e-6, fontPx2 / (g.basePx || 64));
+       const w = g.wCss * scale * sxNum2;
+       const h = g.hCss * scale;
+       const arr = new Float32Array([penX, ny2, w, h]);
+       gl.activeTexture(gl.TEXTURE0);
+       gl.bindTexture(gl.TEXTURE_2D, g.tex);
+       gl.bindVertexArray(this.textVAO);
+       gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+       penX += w;
+     }
+   }
+
+   // Draw denominator glyph-run
+   {
+     let penX = dx2;
+     for (let i = 0; i < denStr2.length; i++) {
+       const ch = denStr2[i];
+       const g = this._getGlyph(ch);
+       if (!g || !g.tex) continue;
+       const scale = Math.max(1e-6, fontPx2 / (g.basePx || 64));
+       const w = g.wCss * scale * sxDen2;
+       const h = g.hCss * scale;
+       const arr = new Float32Array([penX, dy2, w, h]);
+       gl.activeTexture(gl.TEXTURE0);
+       gl.bindTexture(gl.TEXTURE_2D, g.tex);
+       gl.bindVertexArray(this.textVAO);
+       gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+       penX += w;
+     }
+   }
+
+   // Restore default blend
+   gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+   gl.depthMask(true);
+   gl.bindVertexArray(null);
+   gl.bindTexture(gl.TEXTURE_2D, null);
+ }
+} else {
+ // Fallback: canvas textures masked (existing path)
+ {
+   const uVPt = gl.getUniformLocation(this.textProgram, 'u_viewport');
+   const uTint = gl.getUniformLocation(this.textProgram, 'u_tint');
+   const uTex = gl.getUniformLocation(this.textProgram, 'u_tex');
+
+   gl.useProgram(this.textProgram);
+   if (uVPt)  gl.uniform2f(uVPt, vpW2, vpH2);
+   if (uTint) gl.uniform4f(uTint, 1.0, 1.0, 1.0, 1.0);
+   if (uTex)  gl.uniform1i(uTex, 0);
+
+   // PMA for bright text over orange fill
+   gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+   gl.disable(gl.DEPTH_TEST);
+
+   // Numerator above divider (gapPx2), centered horizontally — masked to inner circle
+   if (numEntry2 && numEntry2.tex) {
+     const numW2 = Math.min(numEntry2.wCss, dividerW2);
+     const nx2 = leftDiv2 + Math.max(0, Math.round((dividerW2 - numW2) * 0.5));
+     const ascNum2 = (typeof numEntry2.ascent === 'number') ? numEntry2.ascent : numEntry2.hCss;
+     const ny2 = Math.round((dividerY2 - gapPx2 - ascNum2) * 2.0) / 2.0;
+
+     if (this.textCircMaskProgram) {
+       gl.useProgram(this.textCircMaskProgram);
+       const Utcm = (this._uniforms && this._uniforms.textCircMask) ? this._uniforms.textCircMask : null;
+       const uVPtm = Utcm ? Utcm.u_viewport : gl.getUniformLocation(this.textCircMaskProgram, 'u_viewport');
+       const uTintm= Utcm ? Utcm.u_tint     : gl.getUniformLocation(this.textCircMaskProgram, 'u_tint');
+       const uTexm = Utcm ? Utcm.u_tex      : gl.getUniformLocation(this.textCircMaskProgram, 'u_tex');
+       const uZtm  = Utcm ? Utcm.u_z        : gl.getUniformLocation(this.textCircMaskProgram, 'u_z');
+       const uCtrT = Utcm ? Utcm.u_circleCenter      : gl.getUniformLocation(this.textCircMaskProgram, 'u_circleCenter');
+       const uRadT = Utcm ? Utcm.u_circleRadiusInner : gl.getUniformLocation(this.textCircMaskProgram, 'u_circleRadiusInner');
+       if (uVPtm) gl.uniform2f(uVPtm, vpW2, vpH2);
+       if (uTintm)gl.uniform4f(uTintm, 1, 1, 1, 1);
+       if (uTexm) gl.uniform1i(uTexm, 0);
+       if (uZtm)  gl.uniform1f(uZtm, -0.00001);
+       if (uCtrT) gl.uniform2f(uCtrT, localCX2, localCY2);
+       if (uRadT) gl.uniform1f(uRadT, innerR);
+
+       const arrNum2 = new Float32Array([nx2, ny2, numW2, numEntry2.hCss]);
+       gl.activeTexture(gl.TEXTURE0);
+       gl.bindTexture(gl.TEXTURE_2D, numEntry2.tex);
+       gl.bindVertexArray(this.textVAO);
+       gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+       gl.bufferData(gl.ARRAY_BUFFER, arrNum2, gl.DYNAMIC_DRAW);
+       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+     }
+   }
+
+   // Denominator below divider (gapPx2), centered horizontally — masked to inner circle
+   if (denEntry2 && denEntry2.tex) {
+     const denW2 = Math.min(denEntry2.wCss, dividerW2);
+     const dx2 = leftDiv2 + Math.max(0, Math.round((dividerW2 - denW2) * 0.5));
+     const ascDen2 = (typeof denEntry2.ascent === 'number') ? denEntry2.ascent : denEntry2.hCss;
+     const dy2 = Math.round((dividerY2 + thicknessPx + gapPx2) * 2.0) / 2.0;
+
+     if (this.textCircMaskProgram) {
+       gl.useProgram(this.textCircMaskProgram);
+       const Utcm = (this._uniforms && this._uniforms.textCircMask) ? this._uniforms.textCircMask : null;
+       const uVPtm = Utcm ? Utcm.u_viewport : gl.getUniformLocation(this.textCircMaskProgram, 'u_viewport');
+       const uTintm= Utcm ? Utcm.u_tint     : gl.getUniformLocation(this.textCircMaskProgram, 'u_tint');
+       const uTexm = Utcm ? Utcm.u_tex      : gl.getUniformLocation(this.textCircMaskProgram, 'u_tex');
+       const uZtm  = Utcm ? Utcm.u_z        : gl.getUniformLocation(this.textCircMaskProgram, 'u_z');
+       const uCtrT = Utcm ? Utcm.u_circleCenter      : gl.getUniformLocation(this.textCircMaskProgram, 'u_circleCenter');
+       const uRadT = Utcm ? Utcm.u_circleRadiusInner : gl.getUniformLocation(this.textCircMaskProgram, 'u_circleRadiusInner');
+       if (uVPtm) gl.uniform2f(uVPtm, vpW2, vpH2);
+       if (uTintm)gl.uniform4f(uTintm, 1, 1, 1, 1);
+       if (uTexm) gl.uniform1i(uTexm, 0);
+       if (uZtm)  gl.uniform1f(uZtm, -0.00001);
+       if (uCtrT) gl.uniform2f(uCtrT, localCX2, localCY2);
+       if (uRadT) gl.uniform1f(uRadT, innerR);
+
+       const arrDen2 = new Float32Array([dx2, dy2, denW2, denEntry2.hCss]);
+       gl.activeTexture(gl.TEXTURE0);
+       gl.bindTexture(gl.TEXTURE_2D, denEntry2.tex);
+       gl.bindVertexArray(this.textVAO);
+       gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+       gl.bufferData(gl.ARRAY_BUFFER, arrDen2, gl.DYNAMIC_DRAW);
+       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+     }
+   }
+
+   // Restore default blend
+   gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+   gl.depthMask(true);
+   gl.bindVertexArray(null);
+   gl.bindTexture(gl.TEXTURE_2D, null);
+ }
+}
+}
+}
+} catch {}
+  // Re-bind the correct program after intermediate overlay draws switched programs
+  gl.useProgram(this.measureTriOutlineProgram);
+  const Uto = (this._uniforms && this._uniforms.measureTriOutline) ? this._uniforms.measureTriOutline : null;
+  const uVPto = Uto ? Uto.u_viewport : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_viewport');
+  const uColOutline = Uto ? Uto.u_color : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_color');
+  if (uVPto) gl.uniform2f(uVPto, vpW, vpH);
+  if (uColOutline) gl.uniform4f(uColOutline, 1.0, 1.0, 1.0, 0.5);
+  // Set drag uniforms (CSS px) and default mask 0 for instanced outline draw
+  {
+    const uDX = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragCssX');
+    const uMask = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragMask');
+    const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
+    if (uDX) gl.uniform1f(uDX, dxCss);
+    if (uMask) gl.uniform1f(uMask, 0.0);
+  }
+
+  gl.bindVertexArray(this.measureTriVAO);
+  // Upload outline array (no CPU drag; shader handles movement)
+  gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, this.measureTriPosSizeOutline, gl.DYNAMIC_DRAW);
+  gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, count);
+  gl.bindVertexArray(null);
+}
+
+gl.useProgram(this.measureTriProgram);
+const Um = (this._uniforms && this._uniforms.measureTri) ? this._uniforms.measureTri : null;
+const uVPt = Um ? Um.u_viewport : gl.getUniformLocation(this.measureTriProgram, 'u_viewport');
+if (uVPt) gl.uniform2f(uVPt, vpW, vpH);
+// Set drag uniforms (CSS px) and default mask 0
+{
+  const uDX = gl.getUniformLocation(this.measureTriProgram, 'u_dragCssX');
+  const uMask = gl.getUniformLocation(this.measureTriProgram, 'u_dragMask');
+  const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
+  if (uDX) gl.uniform1f(uDX, dxCss);
+  if (uMask) gl.uniform1f(uMask, 0.0);
+}
+
+gl.bindVertexArray(this.measureTriVAO);
+gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
+gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+// Upload fill array (no CPU drag; shader handles movement)
+gl.bufferData(gl.ARRAY_BUFFER, this.measureTriPosSize, gl.DYNAMIC_DRAW);
+gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, count);
+gl.bindVertexArray(null);
+
+// Selected measure triangle strong outline (2px) on top
+try {
+  if (this._lastSelectedNoteId != null && this._measureTriIds && this.measureTriPosSize && this.measureTriOutlineProgram) {
+    const selId = Number(this._lastSelectedNoteId);
+    const idx = this._measureTriIds.indexOf ? this._measureTriIds.indexOf(selId) : -1;
+    if (idx >= 0) {
+      const o = idx * 4;
+      const left = this.measureTriPosSize[o + 0];
+      const top  = this.measureTriPosSize[o + 1];
+      const w    = this.measureTriPosSize[o + 2];
+      const h    = this.measureTriPosSize[o + 3];
+      // Inflate by 2 CSS px for a visible outline
+      const inflate = 2.0;
+      const arrSel = new Float32Array([left - inflate, top - inflate, w + 2 * inflate, h + 2 * inflate]);
+
+      gl.useProgram(this.measureTriOutlineProgram);
+      const Uto2 = (this._uniforms && this._uniforms.measureTriOutline) ? this._uniforms.measureTriOutline : null;
+      const uVPto2 = Uto2 ? Uto2.u_viewport : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_viewport');
+      const uColSel = Uto2 ? Uto2.u_color : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_color');
+      if (uVPto2) gl.uniform2f(uVPto2, vpW, vpH);
+      if (uColSel) gl.uniform4f(uColSel, 1.0, 1.0, 1.0, 1.0);
+      // Apply drag mask for selected if moving (and not preview-baked)
+      {
+        const uDX = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragCssX');
+        const uMask = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragMask');
+        const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
+        if (uDX) gl.uniform1f(uDX, dxCss);
+const movingSel = !!(this._dragActive && this._dragMovingIds && this._dragMovingIds.has(selId) && !(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, selId)));
+if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       }
 
-      // 2) Numerator/Denominator — masked to inner circle
-      if (this.useGlyphCache) {
-        // PMA for glyph textures and ensure top layering
-        gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-        gl.disable(gl.DEPTH_TEST);
-
-        const ascNum2 = (this._measureRunMetricsCanvas && this._measureRunMetricsCanvas(numStr2, fontPx2).ascent) || this._getRunAscent(numStr2, fontPx2);
-        const runHDen2 = this._getRunHeight(denStr2, fontPx2);
-        const sxNum2 = (numEntry2W > dividerW2) ? (dividerW2 / Math.max(1, numEntry2W)) : 1.0;
-        const sxDen2 = (denEntry2W > dividerW2) ? (dividerW2 / Math.max(1, denEntry2W)) : 1.0;
-        const usedNumW2 = numEntry2W * sxNum2;
-        const usedDenW2 = denEntry2W * sxDen2;
-        const nx2 = leftDiv2 + Math.max(0, Math.round((dividerW2 - usedNumW2) * 0.5));
-        const dx2 = leftDiv2 + Math.max(0, Math.round((dividerW2 - usedDenW2) * 0.5));
-        const ny2 = Math.round((dividerY2 - gapPx2 - ascNum2) * 2.0) / 2.0;
-        const dy2 = Math.round((dividerY2 + thicknessPx + gapPx2) * 2.0) / 2.0;
-
-        // Bind masked text program once per run
-        if (this.textCircMaskProgram) {
-          const prog = this.textCircMaskProgram;
-          gl.useProgram(prog);
-          const Utcm = (this._uniforms && this._uniforms.textCircMask) ? this._uniforms.textCircMask : null;
-          const uVPtm = Utcm ? Utcm.u_viewport : gl.getUniformLocation(prog, 'u_viewport');
-          const uTintm= Utcm ? Utcm.u_tint     : gl.getUniformLocation(prog, 'u_tint');
-          const uTexm = Utcm ? Utcm.u_tex      : gl.getUniformLocation(prog, 'u_tex');
-          const uZtm  = Utcm ? Utcm.u_z        : gl.getUniformLocation(prog, 'u_z');
-          const uCtrT = Utcm ? Utcm.u_circleCenter      : gl.getUniformLocation(prog, 'u_circleCenter');
-          const uRadT = Utcm ? Utcm.u_circleRadiusInner : gl.getUniformLocation(prog, 'u_circleRadiusInner');
-          if (uVPtm) gl.uniform2f(uVPtm, vpW2, vpH2);
-          if (uTintm)gl.uniform4f(uTintm, 1, 1, 1, 1);
-          if (uTexm) gl.uniform1i(uTexm, 0);
-          if (uZtm)  gl.uniform1f(uZtm, -0.00001);
-          if (uCtrT) gl.uniform2f(uCtrT, localCX2, localCY2);
-          if (uRadT) gl.uniform1f(uRadT, innerR);
-
-          // Draw numerator glyph-run
-          {
-            let penX = nx2;
-            for (let i = 0; i < numStr2.length; i++) {
-              const ch = numStr2[i];
-              const g = this._getGlyph(ch);
-              if (!g || !g.tex) continue;
-              const scale = Math.max(1e-6, fontPx2 / (g.basePx || 64));
-              const w = g.wCss * scale * sxNum2;
-              const h = g.hCss * scale;
-              const arr = new Float32Array([penX, ny2, w, h]);
-              gl.activeTexture(gl.TEXTURE0);
-              gl.bindTexture(gl.TEXTURE_2D, g.tex);
-              gl.bindVertexArray(this.textVAO);
-              gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
-              gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
-              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
-              penX += w;
-            }
-          }
-
-          // Draw denominator glyph-run
-          {
-            let penX = dx2;
-            for (let i = 0; i < denStr2.length; i++) {
-              const ch = denStr2[i];
-              const g = this._getGlyph(ch);
-              if (!g || !g.tex) continue;
-              const scale = Math.max(1e-6, fontPx2 / (g.basePx || 64));
-              const w = g.wCss * scale * sxDen2;
-              const h = g.hCss * scale;
-              const arr = new Float32Array([penX, dy2, w, h]);
-              gl.activeTexture(gl.TEXTURE0);
-              gl.bindTexture(gl.TEXTURE_2D, g.tex);
-              gl.bindVertexArray(this.textVAO);
-              gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
-              gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
-              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
-              penX += w;
-            }
-          }
-
-          // Restore default blend
-          gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-          gl.depthMask(true);
-          gl.bindVertexArray(null);
-          gl.bindTexture(gl.TEXTURE_2D, null);
-        }
-      } else {
-        // Fallback: canvas textures masked (existing path)
-        {
-          const uVPt = gl.getUniformLocation(this.textProgram, 'u_viewport');
-          const uTint = gl.getUniformLocation(this.textProgram, 'u_tint');
-          const uTex = gl.getUniformLocation(this.textProgram, 'u_tex');
-
-          gl.useProgram(this.textProgram);
-          if (uVPt)  gl.uniform2f(uVPt, vpW2, vpH2);
-          if (uTint) gl.uniform4f(uTint, 1.0, 1.0, 1.0, 1.0);
-          if (uTex)  gl.uniform1i(uTex, 0);
-
-          // PMA for bright text over orange fill
-          gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-          gl.disable(gl.DEPTH_TEST);
-
-          // Numerator above divider (gapPx2), centered horizontally — masked to inner circle
-          if (numEntry2 && numEntry2.tex) {
-            const numW2 = Math.min(numEntry2.wCss, dividerW2);
-            const nx2 = leftDiv2 + Math.max(0, Math.round((dividerW2 - numW2) * 0.5));
-            const ascNum2 = (typeof numEntry2.ascent === 'number') ? numEntry2.ascent : numEntry2.hCss;
-            const ny2 = Math.round((dividerY2 - gapPx2 - ascNum2) * 2.0) / 2.0;
-  
-            if (this.textCircMaskProgram) {
-              gl.useProgram(this.textCircMaskProgram);
-              const Utcm = (this._uniforms && this._uniforms.textCircMask) ? this._uniforms.textCircMask : null;
-              const uVPtm = Utcm ? Utcm.u_viewport : gl.getUniformLocation(this.textCircMaskProgram, 'u_viewport');
-              const uTintm= Utcm ? Utcm.u_tint     : gl.getUniformLocation(this.textCircMaskProgram, 'u_tint');
-              const uTexm = Utcm ? Utcm.u_tex      : gl.getUniformLocation(this.textCircMaskProgram, 'u_tex');
-              const uZtm  = Utcm ? Utcm.u_z        : gl.getUniformLocation(this.textCircMaskProgram, 'u_z');
-              const uCtrT = Utcm ? Utcm.u_circleCenter      : gl.getUniformLocation(this.textCircMaskProgram, 'u_circleCenter');
-              const uRadT = Utcm ? Utcm.u_circleRadiusInner : gl.getUniformLocation(this.textCircMaskProgram, 'u_circleRadiusInner');
-              if (uVPtm) gl.uniform2f(uVPtm, vpW2, vpH2);
-              if (uTintm)gl.uniform4f(uTintm, 1, 1, 1, 1);
-              if (uTexm) gl.uniform1i(uTexm, 0);
-              if (uZtm)  gl.uniform1f(uZtm, -0.00001);
-              if (uCtrT) gl.uniform2f(uCtrT, localCX2, localCY2);
-              if (uRadT) gl.uniform1f(uRadT, innerR);
-  
-              const arrNum2 = new Float32Array([nx2, ny2, numW2, numEntry2.hCss]);
-              gl.activeTexture(gl.TEXTURE0);
-              gl.bindTexture(gl.TEXTURE_2D, numEntry2.tex);
-              gl.bindVertexArray(this.textVAO);
-              gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
-              gl.bufferData(gl.ARRAY_BUFFER, arrNum2, gl.DYNAMIC_DRAW);
-              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
-            }
-          }
-
-          // Denominator below divider (gapPx2), centered horizontally — masked to inner circle
-          if (denEntry2 && denEntry2.tex) {
-            const denW2 = Math.min(denEntry2.wCss, dividerW2);
-            const dx2 = leftDiv2 + Math.max(0, Math.round((dividerW2 - denW2) * 0.5));
-            const ascDen2 = (typeof denEntry2.ascent === 'number') ? denEntry2.ascent : denEntry2.hCss;
-            const dy2 = Math.round((dividerY2 + thicknessPx + gapPx2 - ascDen2) * 2.0) / 2.0;
-  
-            if (this.textCircMaskProgram) {
-              gl.useProgram(this.textCircMaskProgram);
-              const Utcm = (this._uniforms && this._uniforms.textCircMask) ? this._uniforms.textCircMask : null;
-              const uVPtm = Utcm ? Utcm.u_viewport : gl.getUniformLocation(this.textCircMaskProgram, 'u_viewport');
-              const uTintm= Utcm ? Utcm.u_tint     : gl.getUniformLocation(this.textCircMaskProgram, 'u_tint');
-              const uTexm = Utcm ? Utcm.u_tex      : gl.getUniformLocation(this.textCircMaskProgram, 'u_tex');
-              const uZtm  = Utcm ? Utcm.u_z        : gl.getUniformLocation(this.textCircMaskProgram, 'u_z');
-              const uCtrT = Utcm ? Utcm.u_circleCenter      : gl.getUniformLocation(this.textCircMaskProgram, 'u_circleCenter');
-              const uRadT = Utcm ? Utcm.u_circleRadiusInner : gl.getUniformLocation(this.textCircMaskProgram, 'u_circleRadiusInner');
-              if (uVPtm) gl.uniform2f(uVPtm, vpW2, vpH2);
-              if (uTintm)gl.uniform4f(uTintm, 1, 1, 1, 1);
-              if (uTexm) gl.uniform1i(uTexm, 0);
-              if (uZtm)  gl.uniform1f(uZtm, -0.00001);
-              if (uCtrT) gl.uniform2f(uCtrT, localCX2, localCY2);
-              if (uRadT) gl.uniform1f(uRadT, innerR);
-  
-              const arrDen2 = new Float32Array([dx2, dy2, denW2, denEntry2.hCss]);
-              gl.activeTexture(gl.TEXTURE0);
-              gl.bindTexture(gl.TEXTURE_2D, denEntry2.tex);
-              gl.bindVertexArray(this.textVAO);
-              gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
-              gl.bufferData(gl.ARRAY_BUFFER, arrDen2, gl.DYNAMIC_DRAW);
-              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
-            }
-          }
-
-          // Restore default blend
-          gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-          gl.depthMask(true);
-          gl.bindVertexArray(null);
-          gl.bindTexture(gl.TEXTURE_2D, null);
-        }
-      }
+      gl.bindVertexArray(this.measureTriVAO);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, arrSel, gl.DYNAMIC_DRAW);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 1);
+      gl.bindVertexArray(null);
     }
   }
 } catch {}
-          // Re-bind the correct program after intermediate overlay draws switched programs
-          gl.useProgram(this.measureTriOutlineProgram);
-          const Uto = (this._uniforms && this._uniforms.measureTriOutline) ? this._uniforms.measureTriOutline : null;
-          const uVPto = Uto ? Uto.u_viewport : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_viewport');
-          const uColOutline = Uto ? Uto.u_color : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_color');
-          if (uVPto) gl.uniform2f(uVPto, vpW, vpH);
-          if (uColOutline) gl.uniform4f(uColOutline, 1.0, 1.0, 1.0, 0.5);
 
-          gl.bindVertexArray(this.measureTriVAO);
-          // Buffer data uploaded on epoch changes; just draw using outline array via same buffer by reuploading only when needed.
-          // Small upload: switch contents only when different array reference
-          gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
-          // To avoid extra bufferData here, draw fill first using pos buffer; for outline we need its buffer content uploaded on epoch update above.
-          // Use the same buffer contents that were set in epoch update for outline data by issuing a temporary upload when epochs matched initially.
-          // If outline array is separate, update alongside fill in the epoch block above.
-          // Draw outline with currently bound outline content (uploaded in epoch block).
-          // If both arrays share the same buffer, ensure it contains outline content before this draw.
-          // For simplicity, assume epoch block uploaded outline content; otherwise override here:
-          // (No-op if already uploaded)
-          gl.bufferData(gl.ARRAY_BUFFER, this.measureTriPosSizeOutline, gl.DYNAMIC_DRAW);
-          gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, count);
-          gl.bindVertexArray(null);
-        }
+// Dependency/dependent measure outlines and hover
+try {
+  if (this.measureTriOutlineProgram && this._measureTriIds && this._measureTriIds.length) {
+    // Ensure the correct program is bound before setting any uniforms to avoid
+    // "uniform*: location is not from the associated program" errors.
+    gl.useProgram(this.measureTriOutlineProgram);
+    const UtoD = (this._uniforms && this._uniforms.measureTriOutline) ? this._uniforms.measureTriOutline : null;
+    const uVPd = UtoD ? UtoD.u_viewport : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_viewport');
+    const uColD = UtoD ? UtoD.u_color : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_color');
+    if (uVPd) gl.uniform2f(uVPd, vpW, vpH);
 
-        gl.useProgram(this.measureTriProgram);
-        const Um = (this._uniforms && this._uniforms.measureTri) ? this._uniforms.measureTri : null;
-        const uVPt = Um ? Um.u_viewport : gl.getUniformLocation(this.measureTriProgram, 'u_viewport');
-        if (uVPt) gl.uniform2f(uVPt, vpW, vpH);
- 
-        gl.bindVertexArray(this.measureTriVAO);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
-        gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-        // Buffer data uploaded on epoch changes; avoid per-frame upload
-        gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, count);
-        gl.bindVertexArray(null);
-
-        // Selected measure triangle strong outline (2px) on top
-        try {
-          if (this._lastSelectedNoteId != null && this._measureTriIds && this.measureTriPosSize && this.measureTriOutlineProgram) {
-            const selId = Number(this._lastSelectedNoteId);
-            const idx = this._measureTriIds.indexOf ? this._measureTriIds.indexOf(selId) : -1;
-            if (idx >= 0) {
-              const o = idx * 4;
-              const left = this.measureTriPosSize[o + 0];
-              const top  = this.measureTriPosSize[o + 1];
-              const w    = this.measureTriPosSize[o + 2];
-              const h    = this.measureTriPosSize[o + 3];
-              // Inflate by 2 CSS px for a visible outline
-              const inflate = 2.0;
-              const arrSel = new Float32Array([left - inflate, top - inflate, w + 2 * inflate, h + 2 * inflate]);
-
-              gl.useProgram(this.measureTriOutlineProgram);
-              const Uto2 = (this._uniforms && this._uniforms.measureTriOutline) ? this._uniforms.measureTriOutline : null;
-              const uVPto2 = Uto2 ? Uto2.u_viewport : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_viewport');
-              const uColSel = Uto2 ? Uto2.u_color : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_color');
-              if (uVPto2) gl.uniform2f(uVPto2, vpW, vpH);
-              if (uColSel) gl.uniform4f(uColSel, 1.0, 1.0, 1.0, 1.0);
-
-              gl.bindVertexArray(this.measureTriVAO);
-              gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
-              gl.bufferData(gl.ARRAY_BUFFER, arrSel, gl.DYNAMIC_DRAW);
-              gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 1);
-              gl.bindVertexArray(null);
-            }
-          }
-        } catch {}
-
-        // Dependency/dependent measure outlines and hover
-        try {
-          if (this.measureTriOutlineProgram && this._measureTriIds && this._measureTriIds.length) {
-            // Ensure the correct program is bound before setting any uniforms to avoid
-            // "uniform*: location is not from the associated program" errors.
-            gl.useProgram(this.measureTriOutlineProgram);
-            const UtoD = (this._uniforms && this._uniforms.measureTriOutline) ? this._uniforms.measureTriOutline : null;
-            const uVPd = UtoD ? UtoD.u_viewport : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_viewport');
-            const uColD = UtoD ? UtoD.u_color : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_color');
-            if (uVPd) gl.uniform2f(uVPd, vpW, vpH);
-
-            const drawTriOutlineAtIndex = (idx, rgba, inflateArr) => {
-              if (idx == null || idx < 0 || idx >= this._measureTriIds.length) return;
-              const o = idx * 4;
-              const src = inflateArr || this.measureTriPosSizeOutline;
-              const arr = new Float32Array([
-                src[o + 0], src[o + 1], src[o + 2], src[o + 3]
-              ]);
-              gl.useProgram(this.measureTriOutlineProgram);
-              if (uColD) gl.uniform4f(uColD, rgba[0], rgba[1], rgba[2], rgba[3]);
-              gl.bindVertexArray(this.measureTriVAO);
-              gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
-              gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
-              gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 1);
-              gl.bindVertexArray(null);
-            };
-
-            const idToIdx = this._measureTriIdToIndex || null;
-
-            // Dependencies: teal
-            if (this._lastSelectedNoteId !== 0 && this._relDepsMeasureIds && this._relDepsMeasureIds.length) {
-                for (let i = 0; i < this._relDepsMeasureIds.length; i++) {
-                    const id = Number(this._relDepsMeasureIds[i]);
-                    const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
-                    drawTriOutlineAtIndex(idx, [0.0, 1.0, 1.0, 0.9], this.measureTriPosSizeOutline);
-                }
-            }
-            // Dependents: neon deep purple
-            if (this._lastSelectedNoteId !== 0 && this._relRdepsMeasureIds && this._relRdepsMeasureIds.length) {
-              for (let i = 0; i < this._relRdepsMeasureIds.length; i++) {
-                const id = Number(this._relRdepsMeasureIds[i]);
-                const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
-                drawTriOutlineAtIndex(idx, [0.615686, 0.0, 1.0, 0.9], this.measureTriPosSizeOutline);
-              }
-            }
-            // Hover outline for measures
-            if (this._hoveredMeasureId != null && this._hoveredMeasureId !== this._lastSelectedNoteId) {
-              const id = Number(this._hoveredMeasureId);
-              const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
-              drawTriOutlineAtIndex(idx, [1.0, 1.0, 1.0, 0.6], this.measureTriPosSizeOutline);
-            }
-          }
-        } catch {}
-
-        // Draw triangle labels "[id]" over the triangles (centered, narrow texture) — near bottom edge
-        // This pass occurs AFTER triangle outline+fill so text is on top (not darkened by triangle alpha).
-        {
-          const reuseTextRuns = !!(this.useGlyphAtlas && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch);
-          if (!reuseTextRuns) {
-            if (!this._deferredGlyphRuns) this._deferredGlyphRuns = [];
-            const padX = 2.0;
-            const baseFontPx = 11;            // slightly larger for legibility
-            const minScaleX = 0.9;            // limit compression to keep digits readable
-
-            for (let i = 0; i < count; i++) {
-              const id = this._measureTriIds[i];
-              const label = `[${id}]`;
-              const o = i * 4;
-              const triLeft = this.measureTriPosSize[o + 0];
-              const triTop  = this.measureTriPosSize[o + 1];
-              const triW    = this.measureTriPosSize[o + 2];
-              const triH    = this.measureTriPosSize[o + 3];
-
-              const runW0 = this._measureGlyphRunWidth(label, baseFontPx);
-              const runH0 = this._getRunHeight(label, baseFontPx);
-
-              // Horizontal fit with minimum compression for legibility
-              const scaleX = Math.max(minScaleX, Math.min(1.0, (triW - padX) / Math.max(1, runW0)));
-              const usedW = runW0 * scaleX;
-              let x = triLeft + triW * 0.5 - usedW * 0.5;
-              let y = triTop + triH - runH0 - 0.5;
-
-              x = Math.max(triLeft, Math.min(x, triLeft + triW - usedW));
-              y = Math.max(triTop,  Math.min(y, triTop + triH - runH0));
-
-              this._deferredGlyphRuns.push({
-                text: label,
-                x,
-                y,
-                fontPx: baseFontPx,
-                color: [1.0, 0.66, 0.0, 1.0], // orange for better contrast
-                layerZ: -0.00001,
-                scaleX,
-                scLeft: triLeft, scTop: triTop, scW: triW, scH: triH
-              });
-            }
-          }
-        }
+    const drawTriOutlineAtIndex = (idx, rgba, inflateArr) => {
+      if (idx == null || idx < 0 || idx >= this._measureTriIds.length) return;
+      const o = idx * 4;
+      const src = inflateArr || this.measureTriPosSizeOutline;
+      const arr = new Float32Array([
+        src[o + 0], src[o + 1], src[o + 2], src[o + 3]
+      ]);
+      gl.useProgram(this.measureTriOutlineProgram);
+      if (uColD) gl.uniform4f(uColD, rgba[0], rgba[1], rgba[2], rgba[3]);
+      // Set drag mask per id when moving
+      {
+        const uDX = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragCssX');
+        const uMask = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragMask');
+        const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
+        if (uDX) gl.uniform1f(uDX, dxCss);
+        const idHere = this._measureTriIds[idx];
+        const moving = !!(this._dragActive && this._dragMovingIds && this._dragMovingIds.has(idHere) && !(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, idHere)));
+        // Force per-triangle shift when drawing a single outline instance so it tracks during drag
+        if (uMask) gl.uniform1f(uMask, moving ? 1.0 : 0.0);
       }
+      gl.bindVertexArray(this.measureTriVAO);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 1);
+      gl.bindVertexArray(null);
+    };
+
+    const idToIdx = this._measureTriIdToIndex || null;
+
+    // Dependencies: teal
+    if (this._lastSelectedNoteId !== 0 && this._relDepsMeasureIds && this._relDepsMeasureIds.length) {
+        for (let i = 0; i < this._relDepsMeasureIds.length; i++) {
+            const id = Number(this._relDepsMeasureIds[i]);
+            const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
+            drawTriOutlineAtIndex(idx, [0.0, 1.0, 1.0, 0.9], this.measureTriPosSizeOutline);
+        }
+    }
+    // Dependents: neon deep purple
+    if (this._lastSelectedNoteId !== 0 && this._relRdepsMeasureIds && this._relRdepsMeasureIds.length) {
+      for (let i = 0; i < this._relRdepsMeasureIds.length; i++) {
+        const id = Number(this._relRdepsMeasureIds[i]);
+        const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
+        drawTriOutlineAtIndex(idx, [0.615686, 0.0, 1.0, 0.9], this.measureTriPosSizeOutline);
+      }
+    }
+    // Hover outline for measures
+    if (this._hoveredMeasureId != null && this._hoveredMeasureId !== this._lastSelectedNoteId) {
+      const id = Number(this._hoveredMeasureId);
+      const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
+      drawTriOutlineAtIndex(idx, [1.0, 1.0, 1.0, 0.6], this.measureTriPosSizeOutline);
+    }
+  }
+} catch {}
+
+// Draw triangle labels "[id]" over the triangles (centered, narrow texture) — near bottom edge
+// This pass occurs AFTER triangle outline+fill so text is on top (not darkened by triangle alpha).
+{
+  const reuseTextRuns = !!(this.useGlyphAtlas && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch);
+  if (!reuseTextRuns) {
+    if (!this._deferredGlyphRuns) this._deferredGlyphRuns = [];
+    const padX = 2.0;
+    const baseFontPx = 11;            // slightly larger for legibility
+    const minScaleX = 0.9;            // limit compression to keep digits readable
+
+    for (let i = 0; i < count; i++) {
+      const id = this._measureTriIds[i];
+      const label = `[${id}]`;
+      const o = i * 4;
+      const triLeft = this.measureTriPosSize[o + 0];
+      const triTop  = this.measureTriPosSize[o + 1];
+      const triW    = this.measureTriPosSize[o + 2];
+      const triH    = this.measureTriPosSize[o + 3];
+
+      const runW0 = this._measureGlyphRunWidth(label, baseFontPx);
+      const runH0 = this._getRunHeight(label, baseFontPx);
+
+      // Horizontal fit with minimum compression for legibility
+      const scaleX = Math.max(minScaleX, Math.min(1.0, (triW - padX) / Math.max(1, runW0)));
+      const usedW = runW0 * scaleX;
+      let x = triLeft + triW * 0.5 - usedW * 0.5;
+      let y = triTop + triH - runH0 - 0.5;
+
+      x = Math.max(triLeft, Math.min(x, triLeft + triW - usedW));
+      y = Math.max(triTop,  Math.min(y, triTop + triH - runH0));
+
+      this._deferredGlyphRuns.push({
+        text: label,
+        noteId: id,
+        x,
+        y,
+        fontPx: baseFontPx,
+        color: [1.0, 0.66, 0.0, 1.0], // orange for better contrast
+        layerZ: -0.00001,
+        scaleX,
+        scLeft: triLeft, scTop: triTop, scW: triW, scH: triH
+      });
+    }
+  }
+}
+}
+
 
       // 4) Octave guides (horizontal dotted orange bars + labels) — disabled with GL overlay parity
       if (this.drawOctaveGuides) {
@@ -4306,8 +5058,9 @@ try {
       const localCY = (this.canvasOffset?.y != null) ? (syC - this.canvasOffset.y) : syC;
 
       // Circle size in CSS px, scales with zoom
-      const circleW = 40.0 * (this.xScalePxPerWU || 1.0);
-      const circleH = 40.0 * (this.yScalePxPerWU || 1.0);
+      const circleWU = (this._config?.baseNote?.circleSizeWU ?? 40.0);
+      const circleW = circleWU * (this.xScalePxPerWU || 1.0);
+      const circleH = circleWU * (this.yScalePxPerWU || 1.0);
       const minDim = Math.max(1.0, Math.min(circleW, circleH));
 
       // Text metrics
@@ -4552,12 +5305,13 @@ try {
       try {
         if (this.tabMaskProgram && this.rectVAO && this.rectInstanceTabRegionBuffer && this.instanceCount > 0) {
           const N = this.instanceCount;
-          const needUpdateTabs =
+          // Full rebuild only on view changes or buffer reallocation
+          const needInitTabs =
             (this._lastTabEpoch !== this._viewEpoch) ||
             (!this._tabRegions || this._tabRegions.length !== N * 4) ||
             (!this._tabInnerRegions || this._tabInnerRegions.length !== N * 4);
 
-          if (needUpdateTabs) {
+          if (needInitTabs) {
             const regions = new Float32Array(N * 4);
             const innerRegions = new Float32Array(N * 4);
 
@@ -4568,46 +5322,35 @@ try {
               const hCss = this.posSize[o + 3] * (this.yScalePxPerWU || 1.0);
 
               const pad = Math.max(2, Math.round(hCss * 0.08));
-              // Fixed strip widths (match current eighth-note sizing at all lengths), minus one border width
-              const arrowsWidth = Math.max(10, Math.round(hCss * 0.5) - borderCss);
-              const tabWidthBase = Math.max(10, Math.round(hCss * 0.5) - borderCss);
-              const tabWidth = tabWidthBase;
-
-              // Keep constant tab width regardless of note length
-              const usableTabW = tabWidth;
-
+              const tabWidth = Math.max(10, Math.round(hCss * (this._config?.overlays?.tabWidthFactor ?? 0.5)) - borderCss);
               const heX = 0.5 * wCss;
               const rightInner = heX - borderCss;
-              // Keep constant visual width: anchor to inner-right and avoid length-based clamping
-              const leftEdge = rightInner - usableTabW;
+              const leftEdge = rightInner - tabWidth;
 
               // Full-height tab strip (clip to rounded interior in shader)
-              regions[i * 4 + 0] = leftEdge;
-              regions[i * 4 + 1] = rightInner;
-              regions[i * 4 + 2] = -1e6;                  // yTop far above
-              regions[i * 4 + 3] =  1e6;                  // yBottom far below
+              regions[o + 0] = leftEdge;
+              regions[o + 1] = rightInner;
+              regions[o + 2] = -1e6;
+              regions[o + 3] =  1e6;
 
               // Centered inner rectangle ("handle") inside the tab
-              const innerBarW = Math.max(2, Math.round(hCss * 0.1));
+              const innerBarW = Math.max(2, Math.round(hCss * (this._config?.overlays?.innerTabBarWidthFactor ?? 0.1)));
               const innerBarH = Math.max(8, Math.round(hCss * 0.5));
-              const centerX = leftEdge + Math.max(0, usableTabW) * 0.5;
-              innerRegions[i * 4 + 0] = centerX - innerBarW * 0.5; // xLeft
-              innerRegions[i * 4 + 1] = centerX + innerBarW * 0.5; // xRight
-              innerRegions[i * 4 + 2] = -innerBarH * 0.5;          // yTop (centered)
-              innerRegions[i * 4 + 3] =  innerBarH * 0.5;          // yBottom
+              const centerX = leftEdge + Math.max(0, tabWidth) * 0.5;
+              innerRegions[o + 0] = centerX - innerBarW * 0.5;
+              innerRegions[o + 1] = centerX + innerBarW * 0.5;
+              innerRegions[o + 2] = -innerBarH * 0.5;
+              innerRegions[o + 3] =  innerBarH * 0.5;
             }
 
-            // Cache CPU arrays and upload both GPU buffers once
             this._tabRegions = regions;
             this._tabInnerRegions = innerRegions;
 
             const glUp = this.gl;
             if (glUp) {
               glUp.bindVertexArray(this.rectVAO);
-              // Upload primary regions
               glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
               glUp.bufferData(glUp.ARRAY_BUFFER, this._tabRegions, glUp.DYNAMIC_DRAW);
-              // Upload inner regions
               if (this.rectInstanceTabInnerBuffer) {
                 glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabInnerBuffer);
                 glUp.bufferData(glUp.ARRAY_BUFFER, this._tabInnerRegions, glUp.DYNAMIC_DRAW);
@@ -4617,6 +5360,47 @@ try {
             }
 
             this._lastTabEpoch = this._viewEpoch;
+          } else if (this._dragOffsetW !== 0.0 && this._tabRegions && this._tabInnerRegions && this._dragFlags) {
+            // Resize preview: update only flagged instances to avoid O(N) work every frame
+            const borderCss = Math.max(1, Math.round(1.0 * (this.xScalePxPerWU || 1.0)));
+            const Nloc = this.instanceCount;
+            for (let i = 0; i < Nloc; i++) {
+              if (this._dragFlags[i] !== 1.0) continue;
+              const o = i * 4;
+              const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
+              const hCss = this.posSize[o + 3] * (this.yScalePxPerWU || 1.0);
+
+              const tabWidth = Math.max(10, Math.round(hCss * 0.5) - borderCss);
+              const heX = 0.5 * wCss;
+              const rightInner = heX - borderCss;
+              const leftEdge = rightInner - tabWidth;
+
+              this._tabRegions[o + 0] = leftEdge;
+              this._tabRegions[o + 1] = rightInner;
+              this._tabRegions[o + 2] = -1e6;
+              this._tabRegions[o + 3] =  1e6;
+
+              const innerBarW = Math.max(2, Math.round(hCss * 0.1));
+              const innerBarH = Math.max(8, Math.round(hCss * 0.5));
+              const centerX = leftEdge + Math.max(0, tabWidth) * 0.5;
+              this._tabInnerRegions[o + 0] = centerX - innerBarW * 0.5;
+              this._tabInnerRegions[o + 1] = centerX + innerBarW * 0.5;
+              this._tabInnerRegions[o + 2] = -innerBarH * 0.5;
+              this._tabInnerRegions[o + 3] =  innerBarH * 0.5;
+            }
+
+            const glUp = this.gl;
+            if (glUp) {
+              glUp.bindVertexArray(this.rectVAO);
+              glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
+              glUp.bufferData(glUp.ARRAY_BUFFER, this._tabRegions, glUp.DYNAMIC_DRAW);
+              if (this.rectInstanceTabInnerBuffer) {
+                glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabInnerBuffer);
+                glUp.bufferData(glUp.ARRAY_BUFFER, this._tabInnerRegions, glUp.DYNAMIC_DRAW);
+              }
+              glUp.bindBuffer(glUp.ARRAY_BUFFER, null);
+              glUp.bindVertexArray(null);
+            }
           }
 
           const gl = this.gl;
@@ -4636,11 +5420,16 @@ try {
           if (uMat) gl.uniformMatrix3fv(uMat, false, this.matrix);
           if (uVP)  gl.uniform2f(uVP, vpW, vpH);
           if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
-          if (uCR)  gl.uniform1f(uCR, 6.0 * (this.xScalePxPerWU || 1.0));
-          if (uBW)  gl.uniform1f(uBW, 1.0 * (this.xScalePxPerWU || 1.0));
+          { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
+          { const bw = (this._config?.note?.borderPxAtZoom1 ?? 1.0); if (uBW)  gl.uniform1f(uBW, bw * (this.xScalePxPerWU || 1.0)); }
           if (uLB)  gl.uniform1f(uLB, 1.0);
           if (uLS)  gl.uniform1f(uLS, -1.0 / Math.max(1, this.instanceCount + 5));
           if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
+          // Drag/resize offset for instanced overlays
+          {
+            const uDrag = Utb ? Utb.u_dragOffset : gl.getUniformLocation(this.tabMaskProgram, 'u_dragOffset');
+            if (uDrag) gl.uniform2f(uDrag, this._dragOffsetX || 0.0, this._dragOffsetW || 0.0);
+          }
           // No bias for pull-tab (exact interior clip)
           if (uBias) gl.uniform1f(uBias, 0.0);
 
@@ -4718,7 +5507,7 @@ try {
 
       // Batched octave arrow backgrounds (upper/lower halves), clipped to inner rounded-rect
       try {
-        if (this.tabMaskProgram && this.rectVAO && this.rectInstanceArrowRegionBuffer && this.instanceCount > 0) {
+        if (!this._dragActive && this.tabMaskProgram && this.rectVAO && this.rectInstanceArrowRegionBuffer && this.instanceCount > 0) {
           const N = this.instanceCount;
           const needUpdateArrows =
             (this._lastArrowEpoch !== this._viewEpoch) ||
@@ -4750,7 +5539,7 @@ try {
               const heX = 0.5 * wCss;
               const leftInner = -heX + borderCssExact;
               // Match DOM: width proportional to note height, minus 1px border; min 10px; >=4px safety
-              const targetBgWidth = Math.max(10, Math.round(hCss * 0.5 - borderCssExact));
+              const targetBgWidth = Math.max(10, Math.round(hCss * (this._config?.overlays?.arrowColumnWidthFactor ?? 0.5) - borderCssExact));
               const bgWidth = Math.max(4, targetBgWidth);
               const xLeft = leftInner - 0.75;  // slight overreach to avoid left-edge seam; clipped by inner rounded-rect
               const xRight = leftInner + bgWidth;
@@ -4790,11 +5579,15 @@ try {
           if (uMat) gl.uniformMatrix3fv(uMat, false, this.matrix);
           if (uVP)  gl.uniform2f(uVP, vpW, vpH);
           if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
-          if (uCR)  gl.uniform1f(uCR, 6.0 * (this.xScalePxPerWU || 1.0));
-          if (uBW)  gl.uniform1f(uBW, 1.0 * (this.xScalePxPerWU || 1.0));
+          { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
+          { const bw = (this._config?.note?.borderPxAtZoom1 ?? 1.0); if (uBW)  gl.uniform1f(uBW, bw * (this.xScalePxPerWU || 1.0)); }
           if (uLB)  gl.uniform1f(uLB, 1.0);
           if (uLS)  gl.uniform1f(uLS, stepZ);
           if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
+          {
+            const uDrag = Utb ? Utb.u_dragOffset : gl.getUniformLocation(this.tabMaskProgram, 'u_dragOffset');
+            if (uDrag) gl.uniform2f(uDrag, this._dragOffsetX || 0.0, this._dragOffsetW || 0.0);
+          }
           if (uBias) gl.uniform1f(uBias, 0.35); // small inward bias to ensure no AA gap at inner border
 
           // Solid geometry blend (non-PMA)
@@ -4806,19 +5599,31 @@ try {
 
           gl.bindVertexArray(this.rectVAO);
 
+          // Upload arrow regions only when data changed (view epoch or recompute)
+          const mustUploadArrow = (this._lastArrowUploadEpoch !== this._lastArrowEpoch);
+
           // Upper half (lighter)
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.15);
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowRegionBuffer);
-          gl.bufferData(gl.ARRAY_BUFFER, this._arrowUpRegions, gl.DYNAMIC_DRAW);
+          if (mustUploadArrow) {
+            gl.bufferData(gl.ARRAY_BUFFER, this._arrowUpRegions, gl.DYNAMIC_DRAW);
+          }
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
           gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, N);
 
           // Lower half (same tint to avoid seam brightness mismatch)
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.15);
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowRegionBuffer);
-          gl.bufferData(gl.ARRAY_BUFFER, this._arrowDownRegions, gl.DYNAMIC_DRAW);
+          if (mustUploadArrow) {
+            gl.bufferData(gl.ARRAY_BUFFER, this._arrowDownRegions, gl.DYNAMIC_DRAW);
+          }
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
           gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, N);
+
+          // Mark successful upload epoch to prevent redundant buffer traffic next frames
+          if (mustUploadArrow) {
+            this._lastArrowUploadEpoch = this._lastArrowEpoch;
+          }
 
           // Restore attribute 4 to primary tab region buffer for subsequent passes
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
@@ -4836,12 +5641,18 @@ try {
     const idx = this._noteIdToIndex.get(Number(hs.id));
     if (idx != null && idx >= 0 && idx < this.instanceCount) {
       const base = idx * 4;
-      const arrPos = new Float32Array([
-        this.posSize[base + 0],
-        this.posSize[base + 1],
-        this.posSize[base + 2],
-        this.posSize[base + 3]
-      ]);
+      // Build single-instance posSize for the hovered note, applying drag preview offsets
+      // manually for moving notes (anchor already baked into CPU posSize).
+      let xwH = this.posSize[base + 0];
+      let ywH = this.posSize[base + 1];
+      let wwH = this.posSize[base + 2];
+      let hhH = this.posSize[base + 3];
+      const movingHover = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !(this._dragAnchorIndex != null && idx === (this._dragAnchorIndex | 0)));
+      if (movingHover) {
+        xwH += (this._dragOffsetX || 0.0);
+        wwH += (this._dragOffsetW || 0.0);
+      }
+      const arrPos = new Float32Array([ xwH, ywH, wwH, hhH ]);
 
       const gl = this.gl;
       gl.useProgram(this.tabMaskProgram);
@@ -4860,12 +5671,17 @@ try {
       if (uMat) gl.uniformMatrix3fv(uMat, false, this.matrix);
       if (uVP)  gl.uniform2f(uVP, vpW, vpH);
       if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
-      if (uCR)  gl.uniform1f(uCR, 6.0 * (this.xScalePxPerWU || 1.0));
-      if (uBW)  gl.uniform1f(uBW, 1.0 * (this.xScalePxPerWU || 1.0));
+      { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
+      { const bw = (this._config?.note?.borderPxAtZoom1 ?? 1.0); if (uBW)  gl.uniform1f(uBW, bw * (this.xScalePxPerWU || 1.0)); }
       if (uLB)  gl.uniform1f(uLB, 1.0);
       const stepZHover = -1.0 / Math.max(1, this.instanceCount + 5);
       if (uLS)  gl.uniform1f(uLS, stepZHover);
       if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
+      // For single-instance hover overlay, avoid double-applying drag offset
+      {
+        const uDrag = Utb ? Utb.u_dragOffset : gl.getUniformLocation(this.tabMaskProgram, 'u_dragOffset');
+        if (uDrag) gl.uniform2f(uDrag, 0.0, 0.0);
+      }
 
       // PMA off for solid geometry; force-on-top by disabling depth test for hover overlay
       gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -4928,6 +5744,10 @@ try {
   }
 } catch {}
 
+      const canSkipPerNote = !!(this._dragOriginalPos && this._dragOffsetW === 0.0 && reuseRuns && this._tabRegions && this._arrowUpRegions && (!this._anyDivider || this._dividerRegions) && !this.enableSilenceEraseBands);
+      // Fast path: during pure-move drags, overlays are moved by shader u_dragOffset.
+      // Skip heavy per-note overlay recompute when text runs are cached and no width changes are previewed.
+      if (!canSkipPerNote) {
       for (let i = 0; i < this.instanceCount; i++) {
         const o = i * 4;
         const so = i * 2;
@@ -4945,10 +5765,10 @@ try {
         const top  = sy - off.y;
 
         // Rounded-corner radius in CSS px (matches note body shader) and per-note scissor to clip overlays
-        const cornerRadiusCss = Math.min(6.0 * (this.xScalePxPerWU || 1.0), wCss * 0.5, hCss * 0.5);
+        const cornerRadiusCss = Math.min(((this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0) * (this.xScalePxPerWU || 1.0)), wCss * 0.5, hCss * 0.5);
         const dpr = this.devicePixelRatio || 1;
         // Use the exact (non-rounded) border width for shader-aligned interior clipping
-        const borderCssExact = 1.0 * (this.xScalePxPerWU || 1.0);
+        const borderCssExact = (this._config?.note?.borderPxAtZoom1 ?? 1.0) * (this.xScalePxPerWU || 1.0);
         // Use integer px only for scissor rectangle to match rasterization grid
         const borderCssInt = Math.max(1, Math.round(borderCssExact));
         const scLeftCss = left + borderCssInt;
@@ -4987,7 +5807,9 @@ try {
         const id = this._instanceNoteIds ? (this._instanceNoteIds[i] | 0) : i;
         try {
           const idLabel = `[${id}]`;
-          const idFont = this.useGlyphCache ? Math.max(6, Math.round(hCss * 0.12)) : this._clampFontPx(Math.max(6, Math.round(hCss * 0.12))); // smaller ID label
+          const idFont = this.useGlyphCache
+            ? Math.max(6, Math.round(hCss * (this._config?.overlays?.idLabelFontFactor ?? 0.12)))
+            : this._clampFontPx(Math.max(6, Math.round(hCss * (this._config?.overlays?.idLabelFontFactor ?? 0.12)))); // smaller ID label
           const leftShift = Math.max(1, Math.round(hCss * 0.04)); // nudge slightly left
 
           // Measure run width to constrain within content area and avoid overflow on very narrow notes
@@ -5001,7 +5823,7 @@ try {
 
           if (this.useGlyphCache) {
             this._deferredGlyphRuns.push({
-              text: idLabel, x: ix, y: iy, fontPx: idFont, color: [1.0, 0.66, 0.0, 1.0], layerZ,
+              text: idLabel, noteId: id, x: ix, y: iy, fontPx: idFont, color: [1.0, 0.66, 0.0, 1.0], layerZ,
               scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
               rrCx, rrCy, rrHx, rrHy, rrR
             });
@@ -5039,7 +5861,7 @@ try {
               const nx = sLeft;
               const ny = Math.round((top + hCss * 0.5 - runH * 0.5) * 2.0) / 2.0;
               this._deferredGlyphRuns.push({
-                text: labelSil, x: nx, y: ny, fontPx, color: [1,1,1,1], layerZ, scaleX: sx,
+                text: labelSil, noteId: id, x: nx, y: ny, fontPx, color: [1,1,1,1], layerZ, scaleX: sx,
                 scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                 rrCx, rrCy, rrHx, rrHy, rrR
               });
@@ -5073,12 +5895,14 @@ try {
               }
             }
           } else if (numStr != null && denStr != null) {
-            const fontPx = this.useGlyphCache ? Math.max(5, Math.round(hCss * 0.26)) : this._clampFontPx(Math.max(5, Math.round(hCss * 0.26))); // slightly larger fraction numerals
+            const fontPx = this.useGlyphCache
+              ? Math.max(5, Math.round(hCss * (this._config?.overlays?.fractionFontFactor ?? 0.26)))
+              : this._clampFontPx(Math.max(5, Math.round(hCss * (this._config?.overlays?.fractionFontFactor ?? 0.26)))); // slightly larger fraction numerals
             const gapPx  = Math.max(1, Math.round(fontPx * 0.08));
 
             // Compute divider metrics once; reuse for bar and text centering
             const centerY = top + hCss * 0.5;
-            const thicknessCss = Math.max(1, Math.round(fontPx * 0.12)); // thinner divider ~2.5x thinner
+            const thicknessCss = Math.max(1, Math.round(fontPx * (this._config?.overlays?.dividerThicknessFactor ?? 0.12))); // divider thickness via config
             const yTopDiv = Math.floor(centerY - thicknessCss * 0.5) + 0.5;
             const xLine = contentLeft;
 
@@ -5120,12 +5944,12 @@ try {
 
               // Enqueue glyph runs with horizontal compression scaleX
               this._deferredGlyphRuns.push({
-                text: String(numStr), x: nx, y: numTop, fontPx, color: [1,1,1,1], layerZ, scaleX: sxNum,
+                text: String(numStr), noteId: id, x: nx, y: numTop, fontPx, color: [1,1,1,1], layerZ, scaleX: sxNum,
                 scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                 rrCx, rrCy, rrHx, rrHy, rrR
               });
               this._deferredGlyphRuns.push({
-                text: String(denStr), x: dx, y: denTop, fontPx, color: [1,1,1,1], layerZ, scaleX: sxDen,
+                text: String(denStr), noteId: id, x: dx, y: denTop, fontPx, color: [1,1,1,1], layerZ, scaleX: sxDen,
                 scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                 rrCx, rrCy, rrHx, rrHy, rrR
               });
@@ -5215,7 +6039,7 @@ try {
                 const inkH = Math.max(0, inkBottom - inkTop);
                 const ay = Math.round((topCenterY - (inkTop + inkH * 0.5) - bias) * 2.0) / 2.0;
                 this._deferredGlyphRuns.push({
-                  text: '▲', x: ax, y: ay, fontPx: arrowFont, color: [1,1,1,1], layerZ,
+                  text: '▲', noteId: id, x: ax, y: ay, fontPx: arrowFont, color: [1,1,1,1], layerZ,
                   scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                   rrCx, rrCy, rrHx, rrHy, rrR
                 });
@@ -5230,7 +6054,7 @@ try {
                 const inkH = Math.max(0, inkBottom - inkTop);
                 const ay = Math.round((botCenterY - (inkTop + inkH * 0.5) + bias) * 2.0) / 2.0;
                 this._deferredGlyphRuns.push({
-                  text: '▼', x: ax, y: ay, fontPx: arrowFont, color: [1,1,1,1], layerZ,
+                  text: '▼', noteId: id, x: ax, y: ay, fontPx: arrowFont, color: [1,1,1,1], layerZ,
                   scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                   rrCx, rrCy, rrHx, rrHy, rrR
                 });
@@ -5297,9 +6121,9 @@ try {
               if (uMat) gl.uniformMatrix3fv(uMat, false, this.matrix);
               if (uVP)  gl.uniform2f(uVP, vpW, vpH);
               if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
-              if (uCR)  gl.uniform1f(uCR, 6.0 * (this.xScalePxPerWU || 1.0));
+              { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
               // Match normal border thickness exactly
-              if (uBW)  gl.uniform1f(uBW, 1.0 * (this.xScalePxPerWU || 1.0));
+              { const bw = (this._config?.note?.borderPxAtZoom1 ?? 1.0); if (uBW)  gl.uniform1f(uBW, bw * (this.xScalePxPerWU || 1.0)); }
               // Match solid border grey (#636363)
               if (uCol) gl.uniform4f(uCol, 0.388, 0.388, 0.388, 1.0);
               // Scale dash/gap with zoom so dash COUNT remains consistent across zoom
@@ -5321,7 +6145,12 @@ try {
               if (uSX) gl.uniform1f(uSX, (this.xScalePxPerWU || 1.0));
               if (uSY) gl.uniform1f(uSY, (this.yScalePxPerWU || 1.0));
               // Sub-pixel inward bias so dashed ring thickness aligns visually with the solid border
-              if (uAB) gl.uniform1f(uAB, 0.25);
+              if (uAB) gl.uniform1f(uAB, (this._config?.silenceRing?.alignBiasPx ?? 0.25));
+              // Drag offset for dashed ring (moves with note body/width during drag)
+              {
+                const uDrag = Usr ? Usr.u_dragOffset : gl.getUniformLocation(this.silenceDashRingProgram, 'u_dragOffset');
+                if (uDrag) gl.uniform2f(uDrag, this._dragOffsetX || 0.0, this._dragOffsetW || 0.0);
+              }
  
               // Use full-extent scissor for the dashed ring so it is not inset by the interior-only scissor.
               // This avoids clipping the outer half of the dashed border and prevents cross-note bleed.
@@ -5381,6 +6210,7 @@ try {
         // 4) Right pull tab handled by batched SDF-masked pass above (tabMaskProgram)
         // Note scissor not used; atlas per-fragment clip handles overflow
       }
+      }
       this._dividerRegions = _dividerRegions; this._anyDivider = _anyDivider;
       this._silenceEraseRegions = _silenceEraseRegions; this._anySilenceErase = _anySilenceErase;
 
@@ -5414,6 +6244,10 @@ try {
           const stepZ2 = -1.0 / Math.max(1, this.instanceCount + 5);
           if (uLS)  gl.uniform1f(uLS, stepZ2);
           if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
+          {
+            const uDrag = Utb ? Utb.u_dragOffset : gl.getUniformLocation(this.tabMaskProgram, 'u_dragOffset');
+            if (uDrag) gl.uniform2f(uDrag, this._dragOffsetX || 0.0, this._dragOffsetW || 0.0);
+          }
           if (uBias) gl.uniform1f(uBias, 0.0);
           // Use black fill with full alpha to reliably cover DOM fraction line
           if (uCol) gl.uniform4f(uCol, 0.0, 0.0, 0.0, 1.0);
@@ -5440,7 +6274,7 @@ try {
 
       // Batched fraction dividers (single instanced pass, masked to inner rounded-rect)
       try {
-        if (this.tabMaskProgram && this.rectVAO && this.rectInstanceDividerRegionBuffer && _anyDivider) {
+        if (!this._dragActive && this.tabMaskProgram && this.rectVAO && this.rectInstanceDividerRegionBuffer && _anyDivider) {
           const gl = this.gl;
           gl.useProgram(this.tabMaskProgram);
           const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
@@ -5462,12 +6296,16 @@ try {
           if (uMat) gl.uniformMatrix3fv(uMat, false, this.matrix);
           if (uVP)  gl.uniform2f(uVP, vpW, vpH);
           if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
-          if (uCR)  gl.uniform1f(uCR, 6.0 * (this.xScalePxPerWU || 1.0));
-          if (uBW)  gl.uniform1f(uBW, 1.0 * (this.xScalePxPerWU || 1.0));
+          { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
+          { const bw = (this._config?.note?.borderPxAtZoom1 ?? 1.0); if (uBW)  gl.uniform1f(uBW, bw * (this.xScalePxPerWU || 1.0)); }
           if (uLB)  gl.uniform1f(uLB, 1.0);
           const stepZ = -1.0 / Math.max(1, this.instanceCount + 5);
           if (uLS)  gl.uniform1f(uLS, stepZ);
           if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
+          {
+            const uDrag = Utb ? Utb.u_dragOffset : gl.getUniformLocation(this.tabMaskProgram, 'u_dragOffset');
+            if (uDrag) gl.uniform2f(uDrag, this._dragOffsetX || 0.0, this._dragOffsetW || 0.0);
+          }
           if (uBias) gl.uniform1f(uBias, 0.0);
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 1.0);
 
@@ -5519,8 +6357,8 @@ try {
           if (uMat) gl.uniformMatrix3fv(uMat, false, this.matrix);
           if (uVP)  gl.uniform2f(uVP, vpW, vpH);
           if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
-          if (uCR)  gl.uniform1f(uCR, 6.0 * (this.xScalePxPerWU || 1.0));
-          if (uBW)  gl.uniform1f(uBW, 1.0 * (this.xScalePxPerWU || 1.0));
+          { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
+          { const bw = (this._config?.note?.borderPxAtZoom1 ?? 1.0); if (uBW)  gl.uniform1f(uBW, bw * (this.xScalePxPerWU || 1.0)); }
           if (uCol) gl.uniform4f(uCol, 0.388, 0.388, 0.388, 1.0);
 
           {
@@ -5528,8 +6366,12 @@ try {
               0.0001,
               (this.xScalePxPerWU || 1.0) / (this._xScaleAtInit || (this.xScalePxPerWU || 1.0))
             );
-            if (uDash) gl.uniform1f(uDash, 3.0 * zoomF);
-            if (uGap)  gl.uniform1f(uGap, 3.0 * zoomF);
+            {
+              const d = (this._config?.silenceRing?.dashPx ?? 3.0);
+              const g = (this._config?.silenceRing?.gapPx  ?? 3.0);
+              if (uDash) gl.uniform1f(uDash, d * zoomF);
+              if (uGap)  gl.uniform1f(uGap,  g * zoomF);
+            }
           }
           if (uLB)   gl.uniform1f(uLB, 1.0);
           const stepZ = -1.0 / Math.max(1, this.instanceCount + 5);
@@ -5537,7 +6379,12 @@ try {
           if (uSC)   gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
           if (uSX)   gl.uniform1f(uSX, (this.xScalePxPerWU || 1.0));
           if (uSY)   gl.uniform1f(uSY, (this.yScalePxPerWU || 1.0));
-          if (uAB)   gl.uniform1f(uAB, 0.25);
+          if (uAB)   gl.uniform1f(uAB, (this._config?.silenceRing?.alignBiasPx ?? 0.25));
+          // Drag offset for dashed ring (batched path)
+          {
+            const uDrag = Usr ? Usr.u_dragOffset : gl.getUniformLocation(this.silenceDashRingProgram, 'u_dragOffset');
+            if (uDrag) gl.uniform2f(uDrag, this._dragOffsetX || 0.0, this._dragOffsetW || 0.0);
+          }
 
           gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
           gl.enable(gl.DEPTH_TEST);
@@ -6153,8 +7000,10 @@ try {
         layout(location=5) in vec4 a_clipRect;     // (x, y, w, h) CSS px clip rect
         layout(location=6) in vec4 a_rrCenterSize; // (cx, cy, hx, hy) in CSS px
         layout(location=7) in float a_rrRadius;    // inner rounded-rect radius in CSS px
+        layout(location=8) in float a_dragFlagGlyph; // 1.0 = apply horizontal drag x offset, 0.0 = none
 
         uniform vec2 u_viewport;                   // canvas CSS px size
+        uniform float u_dragCssX;                  // CSS px horizontal drag offset (applied when a_dragFlagGlyph==1)
 
         out vec2 v_uv;
         out vec4 v_color;
@@ -6166,6 +7015,9 @@ try {
         void main() {
           // Canvas-local CSS px for this vertex
           vec2 local = a_posSizeCss.xy + a_unit * a_posSizeCss.zw;
+          // Apply horizontal drag offset only to glyphs belonging to moving notes
+          local.x += a_dragFlagGlyph * u_dragCssX;
+
           float ndcX = (local.x / u_viewport.x) * 2.0 - 1.0;
           float ndcY = 1.0 - (local.y / u_viewport.y) * 2.0;
           gl_Position = vec4(ndcX, ndcY, a_z, 1.0);
@@ -6177,8 +7029,14 @@ try {
 
           v_color = a_color;
           v_css = local;
-          v_clipRect = a_clipRect;
-          v_rrCenterSize = a_rrCenterSize;
+          // Shift clip rect by the same CSS drag X so moving glyphs remain inside their note
+          vec4 clip = a_clipRect;
+          clip.x += a_dragFlagGlyph * u_dragCssX;
+          v_clipRect = clip;
+          // Shift rounded-rect interior mask center similarly
+          vec4 rr = a_rrCenterSize;
+          rr.x += a_dragFlagGlyph * u_dragCssX;
+          v_rrCenterSize = rr;
           v_rrRadius = a_rrRadius;
         }
       `;
@@ -6232,6 +7090,7 @@ try {
           const p = this.atlasTextProgram;
           this._uniforms.atlas.u_viewport = gl.getUniformLocation(p, 'u_viewport');
           this._uniforms.atlas.u_tex      = gl.getUniformLocation(p, 'u_tex');
+          this._uniforms.atlas.u_dragCssX = gl.getUniformLocation(p, 'u_dragCssX');
         }
       } catch {}
 
@@ -6302,6 +7161,14 @@ try {
       gl.enableVertexAttribArray(7);
       gl.vertexAttribPointer(7, 1, gl.FLOAT, false, 0, 0);
       gl.vertexAttribDivisor(7, 1);
+
+      // a_dragFlagGlyph (loc 8)
+      this.atlasDragFlagBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasDragFlagBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, 1 * 4, gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(8);
+      gl.vertexAttribPointer(8, 1, gl.FLOAT, false, 0, 0);
+      gl.vertexAttribDivisor(8, 1);
 
       gl.bindVertexArray(null);
       gl.bindBuffer(gl.ARRAY_BUFFER, null);
@@ -6560,8 +7427,14 @@ try {
       const Ua = (this._uniforms && this._uniforms.atlas) ? this._uniforms.atlas : null;
       const uVP = Ua ? Ua.u_viewport : gl.getUniformLocation(this.atlasTextProgram, 'u_viewport');
       const uTex = Ua ? Ua.u_tex : gl.getUniformLocation(this.atlasTextProgram, 'u_tex');
+      const uDX  = Ua ? Ua.u_dragCssX : gl.getUniformLocation(this.atlasTextProgram, 'u_dragCssX');
       if (uVP) gl.uniform2f(uVP, vpW, vpH);
       if (uTex) gl.uniform1i(uTex, 0);
+      // Drag CSS offset in px: screen dx from world dx is matrix[0]*dx (y term is zero for horizontal shift)
+      if (uDX) {
+        const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
+        gl.uniform1f(uDX, dxCss);
+      }
 
       // PMA + depth test (no depth writes)
       gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -6598,6 +7471,24 @@ try {
       if (this.atlasRRRadiusBuffer) {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasRRRadiusBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, rrR.subarray(0, count), gl.DYNAMIC_DRAW);
+      }
+      // Upload per-glyph drag flags
+      if (this.atlasDragFlagBuffer) {
+        // Build drag flags: 1 for glyphs belonging to moving notes, else 0
+        const dragFlags = new Float32Array(count);
+        let gi2 = 0;
+        const moving = (this._dragActive && this._dragMovingIds && this._dragMovingIds.size) ? this._dragMovingIds : null;
+        for (let i = 0; i < this._deferredGlyphRuns.length; i++) {
+          const r = this._deferredGlyphRuns[i];
+          if (!r || !r.text) continue;
+          const text = String(r.text);
+          const flag = (moving && r.noteId != null && moving.has(Number(r.noteId))) ? 1.0 : 0.0;
+          for (let k = 0; k < text.length; k++) {
+            dragFlags[gi2++] = flag;
+          }
+        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasDragFlagBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, dragFlags.subarray(0, count), gl.DYNAMIC_DRAW);
       }
 
       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, count);
@@ -7333,19 +8224,25 @@ try {
         precision highp float;
         layout(location=0) in vec2 a_unit;        // (s,t) in [0,1]x[0,1]
         layout(location=1) in vec4 a_endpoints;   // (x0,y0,x1,y1) in canvas-local CSS px
+        layout(location=2) in vec2 a_pFlags;      // (p0Drag, p1Drag) flags for horizontal GPU drag
 
         uniform vec2  u_viewport;                 // (canvas CSS w,h)
         uniform float u_thickness;                // CSS px
+        uniform float u_dragCssX;                 // CSS px horizontal drag offset
 
         void main() {
           vec2 p0 = a_endpoints.xy;
           vec2 p1 = a_endpoints.zw;
+          // Apply horizontal drag offset to endpoints as requested by flags
+          p0.x += a_pFlags.x * u_dragCssX;
+          p1.x += a_pFlags.y * u_dragCssX;
+
           vec2 dir = p1 - p0;
           float len = max(length(dir), 1e-6);
           vec2 n = vec2(-dir.y, dir.x) / len;
 
-          float s = a_unit.x;                   // along the line
-          float t = (a_unit.y - 0.5) * u_thickness; // across thickness centered at 0
+          float s = a_unit.x;                        // along the line
+          float t = (a_unit.y - 0.5) * u_thickness;  // across thickness centered at 0
           vec2 pos = mix(p0, p1, s) + n * t;
 
           float ndcX = (pos.x / u_viewport.x) * 2.0 - 1.0;
@@ -7367,6 +8264,7 @@ try {
           this._uniforms.linkLine.u_viewport  = gl.getUniformLocation(this.linkLineProgram, "u_viewport");
           this._uniforms.linkLine.u_thickness = gl.getUniformLocation(this.linkLineProgram, "u_thickness");
           this._uniforms.linkLine.u_color     = gl.getUniformLocation(this.linkLineProgram, "u_color");
+          this._uniforms.linkLine.u_dragCssX  = gl.getUniformLocation(this.linkLineProgram, "u_dragCssX");
         }
       } catch {}
 
@@ -7393,6 +8291,18 @@ try {
       this.linkLineEndpointsBufferRdeps = gl.createBuffer();
       gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferRdeps);
       gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+
+      // Per-instance endpoint drag flags (p0,p1) — dual buffers for deps/rdeps at location 2
+      this.linkLineFlagsBufferDeps = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferDeps);
+      gl.bufferData(gl.ARRAY_BUFFER, 2 * 4, gl.DYNAMIC_DRAW);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+      gl.vertexAttribDivisor(2, 1);
+
+      this.linkLineFlagsBufferRdeps = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferRdeps);
+      gl.bufferData(gl.ARRAY_BUFFER, 2 * 4, gl.DYNAMIC_DRAW);
 
       gl.bindVertexArray(null);
       gl.bindBuffer(gl.ARRAY_BUFFER, null);
@@ -7466,10 +8376,14 @@ try {
           y: (this.canvasOffset?.y != null) ? (sy - this.canvasOffset.y) : sy
         };
       };
+      // Screen-space horizontal drag delta in CSS px used to keep CPU-derived endpoints in sync
+      const dxCssDrag = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
 
       // Draw dependency link lines (cyan for deps, magenta for rdeps)
       try {
-        if (this.drawLinkLines && this.linkLineProgram && this.linkLineVAO && this._noteIdToIndex && ((this._dragOverlay && this._dragOverlay.noteId != null) || (this._lastSelectedNoteId != null))) {
+        // Draw link lines during drag as well; endpoint rebuild uses cached moving set
+        const suppressLinkLines = false;
+        if (!suppressLinkLines && this.drawLinkLines && this.linkLineProgram && this.linkLineVAO && this._noteIdToIndex && ((this._dragOverlay && this._dragOverlay.noteId != null) || (this._lastSelectedNoteId != null))) {
           const anchorId = (this._dragOverlay && this._dragOverlay.noteId != null) ? this._dragOverlay.noteId : this._lastSelectedNoteId;
           const selIdx = (this._noteIdToIndex && this._noteIdToIndex.get) ? this._noteIdToIndex.get(anchorId) : null;
           let selC = null;
@@ -7623,20 +8537,36 @@ try {
               const mref = this._moduleRef;
               const movingSet = this._dragMovingIds || null;
 
-              // Helpers to append endpoints into JS arrays (later converted to Float32Array)
-              const appendNoteIdxEndpoints = (indices, list) => {
+               // Is anchor moving (and not preview-baked if it is a measure)?
+               const anchorIdNum = Number(anchorId);
+               let movingAnchor = false;
+               try {
+                 const isMeasureAnchor = !!(this._measureTriIdToIndex && this._measureTriIdToIndex.get && this._measureTriIdToIndex.get(anchorIdNum) != null && this._measureTriIdToIndex.get(anchorIdNum) >= 0);
+                 const anchorHasPrev = !!(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, anchorIdNum));
+                 // Only treat the anchor as moving in the shader for MEASURE anchors without a preview-baked position.
+                 // For normal notes, the anchor's CPU posSize is already updated during preview, so shader offset would double-apply.
+                 movingAnchor = !!(this._dragActive && movingSet && movingSet.has(anchorIdNum) && isMeasureAnchor && !anchorHasPrev);
+               } catch {}
+
+              // Helpers to append endpoints and parallel GPU pFlags lists ([p0Drag, p1Drag])
+              const appendNoteIdxEndpoints = (indices, list, flagsList) => {
                 if (!indices || !indices.length) return;
                 for (let i = 0; i < indices.length; i++) {
                   const idx = indices[i];
                   if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
                   const o = idx * 4;
-                  const xw = this.posSize[o + 0], yw = this.posSize[o + 1];
-                  const ww = this.posSize[o + 2], hh = this.posSize[o + 3];
+                  let xw = this.posSize[o + 0], yw = this.posSize[o + 1];
+                  let ww = this.posSize[o + 2], hh = this.posSize[o + 3];
+                  // Do not apply CPU drag offsets here; the link-line shader applies u_dragCssX via per-endpoint flags.
                   const c  = toLocalCss(xw + 0.5 * ww, yw + 0.5 * hh);
                   list.push(selC.x, selC.y, c.x, c.y);
+                  // p0 is anchor endpoint, p1 is target note endpoint
+                  let targetId = (this._instanceNoteIds && this._instanceNoteIds[idx] != null) ? Number(this._instanceNoteIds[idx]) : null;
+                  const targetMoving = !!(movingSet && targetId != null && movingSet.has(targetId));
+                  flagsList.push(movingAnchor ? 1.0 : 0.0, targetMoving ? 1.0 : 0.0);
                 }
               };
-              const appendMeasureIdEndpoints = (ids, list) => {
+              const appendMeasureIdEndpoints = (ids, list, flagsList) => {
                 if (!ids || !ids.length) return;
                 if (!this.measureTriPosSize || (!this._measureTriIdToIndex && !this._measureTriIds)) return;
                 for (let i = 0; i < ids.length; i++) {
@@ -7655,9 +8585,13 @@ try {
                   const ax = left + w * 0.5;
                   const ay = top;
                   list.push(selC.x, selC.y, ax, ay);
+                  // p0 anchor, p1 target measure
+                  const hasPrev = !!(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, mid));
+                  const targetMoving = !!(movingSet && movingSet.has(mid) && !hasPrev);
+                  flagsList.push(movingAnchor ? 1.0 : 0.0, targetMoving ? 1.0 : 0.0);
                 }
               };
-              const appendBaseEndpointIf = (flag, list) => {
+              const appendBaseEndpointIf = (flag, list, flagsList) => {
                 if (!flag) return;
                 // Use cached CSS center if available; fallback to world->CSS
                 let bx = null, by = null;
@@ -7671,7 +8605,11 @@ try {
                   const bc = toLocalCss(xCenterWorld, yCenterWorld);
                   bx = bc.x; by = bc.y;
                 }
-                if (bx != null && by != null) list.push(selC.x, selC.y, bx, by);
+                if (bx != null && by != null) {
+                  list.push(selC.x, selC.y, bx, by);
+                  // BaseNote never drags; only anchor might
+                  flagsList.push(movingAnchor ? 1.0 : 0.0, 0.0);
+                }
               };
 
               // 1) Dependencies (cyan):
@@ -7679,6 +8617,9 @@ try {
               const pros = (this._dragOverlay ? buildProspectiveParentEndpoints() : null);
               if (pros) {
                 depsArr = pros;
+                // Ensure per-endpoint drag flags are defined for the single prospective line:
+                // p0 (anchor) follows only when the anchor is a moving MEASURE; p1 (parent candidate) never moves.
+                var depsFlagsArr = new Float32Array([movingAnchor ? 1.0 : 0.0, 0.0]);
               } else {
                 // After drop (no drag overlay), derive direct deps from the selected note's startTimeString.
                 // This avoids any stale module caches that could temporarily report a BaseNote dependency.
@@ -7723,6 +8664,7 @@ try {
                 };
 
                 const depsList = [];
+                const depsFlags = [];
                 const liveParsed = buildFromStartString();
 
                 // If we're not dragging and parsing succeeded, trust the string only.
@@ -7730,9 +8672,9 @@ try {
                   const idxs = liveParsed.noteIds
                     .map(id => this._noteIdToIndex.get(Number(id)))
                     .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
-                  appendNoteIdxEndpoints(idxs, depsList);
-                  appendMeasureIdEndpoints(liveParsed.measureIds, depsList);
-                  appendBaseEndpointIf(liveParsed.hasBase, depsList);
+                  appendNoteIdxEndpoints(idxs, depsList, depsFlags);
+                  appendMeasureIdEndpoints(liveParsed.measureIds, depsList, depsFlags);
+                  appendBaseEndpointIf(liveParsed.hasBase, depsList, depsFlags);
                 } else if (mref && typeof mref.getDirectDependencies === 'function') {
                   // During drag or when parsing unavailable, fall back to live module query
                   const isMeasureNoteId = (id) => {
@@ -7754,21 +8696,23 @@ try {
                   const idxs = noteIds
                     .map(id => this._noteIdToIndex.get(Number(id)))
                     .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
-                  appendNoteIdxEndpoints(idxs, depsList);
-                  appendMeasureIdEndpoints(measureIds, depsList);
-                  appendBaseEndpointIf(hasBase, depsList);
+                  appendNoteIdxEndpoints(idxs, depsList, depsFlags);
+                  appendMeasureIdEndpoints(measureIds, depsList, depsFlags);
+                  appendBaseEndpointIf(hasBase, depsList, depsFlags);
                 } else {
                   // Final fallback to cached snapshot from last sync (rare)
-                  appendNoteIdxEndpoints(this._relDepsIdx, depsList);
-                  appendMeasureIdEndpoints(this._relDepsMeasureIds, depsList);
-                  appendBaseEndpointIf(this._relDepsHasBase, depsList);
+                  appendNoteIdxEndpoints(this._relDepsIdx, depsList, depsFlags);
+                  appendMeasureIdEndpoints(this._relDepsMeasureIds, depsList, depsFlags);
+                  appendBaseEndpointIf(this._relDepsHasBase, depsList, depsFlags);
                 }
 
                 depsArr = depsList.length ? new Float32Array(depsList) : null;
+                var depsFlagsArr = depsFlags.length ? new Float32Array(depsFlags) : null;
               }
 
               // 2) Dependents (magenta):
               const rdepsList = [];
+              const rdepsFlags = [];
               if (mref && typeof mref.getDependentNotes === 'function') {
                 const isMeasureNoteId = (id) => {
                   try {
@@ -7791,24 +8735,25 @@ try {
                 const idxsR = noteIds
                   .map(id => this._noteIdToIndex.get(Number(id)))
                   .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
-                appendNoteIdxEndpoints(idxsR, rdepsList);
-                appendMeasureIdEndpoints(measureIds, rdepsList);
-                appendBaseEndpointIf(hasBase, rdepsList);
+                appendNoteIdxEndpoints(idxsR, rdepsList, rdepsFlags);
+                appendMeasureIdEndpoints(measureIds, rdepsList, rdepsFlags);
+                appendBaseEndpointIf(hasBase, rdepsList, rdepsFlags);
               } else {
                 if (movingSet && this._relRdepsIdx && this._instanceNoteIds) {
                   const idxsAlt = this._relRdepsIdx.filter(idx => {
                     const idAtIdx = this._instanceNoteIds && this._instanceNoteIds[idx];
                     return movingSet.has(Number(idAtIdx));
                   });
-                  appendNoteIdxEndpoints(idxsAlt, rdepsList);
+                  appendNoteIdxEndpoints(idxsAlt, rdepsList, rdepsFlags);
                 } else {
-                  appendNoteIdxEndpoints(this._relRdepsIdx, rdepsList);
+                  appendNoteIdxEndpoints(this._relRdepsIdx, rdepsList, rdepsFlags);
                 }
-                appendMeasureIdEndpoints(this._relRdepsMeasureIds, rdepsList);
-                appendBaseEndpointIf(this._relRdepsHasBase, rdepsList);
+                appendMeasureIdEndpoints(this._relRdepsMeasureIds, rdepsList, rdepsFlags);
+                appendBaseEndpointIf(this._relRdepsHasBase, rdepsList, rdepsFlags);
               }
 
               rdepsArr = rdepsList.length ? new Float32Array(rdepsList) : null;
+              var rdepsFlagsArr = rdepsFlags.length ? new Float32Array(rdepsFlags) : null;
             } catch {}
 
             // Epoch-gated upload for link endpoints; reuse buffers unless anchor/view/pos/prospective-parent/measure-tri changed
@@ -7831,10 +8776,18 @@ if (rebuild) {
   if (this._linkDepsCount > 0) {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferDeps);
     gl.bufferData(gl.ARRAY_BUFFER, this._linkEndpointsDeps, gl.DYNAMIC_DRAW);
+    if (depsFlagsArr && this.linkLineFlagsBufferDeps) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferDeps);
+      gl.bufferData(gl.ARRAY_BUFFER, depsFlagsArr, gl.DYNAMIC_DRAW);
+    }
   }
   if (this._linkRdepsCount > 0) {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferRdeps);
     gl.bufferData(gl.ARRAY_BUFFER, this._linkEndpointsRdeps, gl.DYNAMIC_DRAW);
+    if (rdepsFlagsArr && this.linkLineFlagsBufferRdeps) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferRdeps);
+      gl.bufferData(gl.ARRAY_BUFFER, rdepsFlagsArr, gl.DYNAMIC_DRAW);
+    }
   }
   gl.bindVertexArray(null);
 
@@ -7855,6 +8808,12 @@ if (rebuild) {
             if (uVP)  gl.uniform2f(uVP, vpW, vpH);
             // Fixed 2px thickness for link lines (selected or dragging)
             if (uTh)  gl.uniform1f(uTh, 2.0);
+            // Set drag delta uniform (CSS px); endpoints move via GPU flags
+            {
+              const uDX = U ? U.u_dragCssX : gl.getUniformLocation(this.linkLineProgram, 'u_dragCssX');
+              const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
+              if (uDX) gl.uniform1f(uDX, dxCss);
+            }
 
             gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
             gl.disable(gl.DEPTH_TEST);
@@ -7865,10 +8824,16 @@ if (rebuild) {
             // Draw deps: teal (more solid)
             if (this._linkDepsCount > 0) {
               if (uCol) gl.uniform4f(uCol, 0.0, 1.0, 1.0, 0.6);
+              // endpoints buffer (attrib 1)
               gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferDeps);
-              // Re-point attribute 1 to currently bound buffer (VAO stores binding at pointer time)
               gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
               gl.vertexAttribDivisor(1, 1);
+              // flags buffer (attrib 2)
+              if (this.linkLineFlagsBufferDeps) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferDeps);
+                gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+                gl.vertexAttribDivisor(2, 1);
+              }
               gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this._linkDepsCount);
             }
 
@@ -7879,6 +8844,11 @@ if (rebuild) {
               gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferRdeps);
               gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
               gl.vertexAttribDivisor(1, 1);
+              if (this.linkLineFlagsBufferRdeps) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferRdeps);
+                gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
+                gl.vertexAttribDivisor(2, 1);
+              }
               gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this._linkRdepsCount);
             }
 
@@ -7959,8 +8929,8 @@ if (rebuild) {
             try {
               const stDO = this._dragOverlay || null;
               if (this.drawDragGhosts && stDO && (stDO.type === 'move' || stDO.type === 'resize') && Array.isArray(this._relRdepsIdx) && this._relRdepsIdx.length && this.selectionFillProgram) {
-                const dxWU   = ((stDO.dxSec || 0) * 200.0) * (this.currentXScaleFactor || 1.0);
-                const ddurWU = ((stDO.ddurSec || 0) * 200.0) * (this.currentXScaleFactor || 1.0);
+                const dxWU   = ((stDO.dxSec || 0) * this._cfgSX()) * (this.currentXScaleFactor || 1.0);
+                const ddurWU = ((stDO.ddurSec || 0) * this._cfgSX()) * (this.currentXScaleFactor || 1.0);
 
                 gl.useProgram(this.selectionFillProgram);
                 const Uf2 = (this._uniforms && this._uniforms.selectionFill) ? this._uniforms.selectionFill : null;
@@ -8069,14 +9039,14 @@ if (rebuild) {
                 const scaleX = (this.currentXScaleFactor || 1.0);
                 const teal = [0.0, 0.0, 0.545098, 0.6];
                 if (st.type === 'move') {
-                  const oStart = Number(st.origStartSec || 0) * 200.0 * scaleX;
+                  const oStart = Number(st.origStartSec || 0) * this._cfgSX() * scaleX;
                   drawSnapAtWorldX(oStart, teal);
                 } else if (st.type === 'resize') {
                   // Start is an origin during right-edge resize; draw it in teal
-                  const oStart = Number(st.origStartSec || 0) * 200.0 * scaleX;
+                  const oStart = Number(st.origStartSec || 0) * this._cfgSX() * scaleX;
                   drawSnapAtWorldX(oStart, teal);
                   // Original end marks original size
-                  const oEnd = (Number(st.origStartSec || 0) + Number(st.origDurationSec || 0)) * 200.0 * scaleX;
+                  const oEnd = (Number(st.origStartSec || 0) + Number(st.origDurationSec || 0)) * this._cfgSX() * scaleX;
                   drawSnapAtWorldX(oEnd, teal);
                 }
               }
@@ -8126,11 +9096,11 @@ if (rebuild) {
             const scaleX = (this.currentXScaleFactor || 1.0);
             // Origin bar at original measure position (teal)
             if (st.origStartSec != null) {
-              const oStart = Number(st.origStartSec || 0) * 200.0 * scaleX;
+              const oStart = Number(st.origStartSec || 0) * this._cfgSX() * scaleX;
               drawSnapAtWorldX(oStart, [0.0, 0.0, 0.545098, 0.6]);
             }
             // Current bar at preview position (white, semi-transparent)
-            const curT = (Number(st.origStartSec || 0) + Number(st.dxSec || 0)) * 200.0 * scaleX;
+            const curT = (Number(st.origStartSec || 0) + Number(st.dxSec || 0)) * this._cfgSX() * scaleX;
             drawSnapAtWorldX(curT, [1.0, 1.0, 1.0, 0.6]);
           }
         }
