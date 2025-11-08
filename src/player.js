@@ -1324,11 +1324,10 @@ if (canvasEl) {
       } catch {}
     }
 
-    // Fallback: current selection, otherwise BaseNote
+    // No explicit target under drop point: reject background drops (no default to selection/BaseNote)
     if (targetNoteId == null) {
-      targetNoteId = (currentSelectedNote && currentSelectedNote.id != null)
-        ? Number(currentSelectedNote.id)
-        : 0;
+      try { notify('Drop onto a note or the BaseNote circle to import a module.', 'error'); } catch {}
+      return;
     }
 
     // Read the transferred data (Module Bar sets application/json and text/plain)
@@ -1355,8 +1354,10 @@ if (canvasEl) {
     if (!looksLikeModule) return;
 
     let targetNote = myModule.getNoteById(Number(targetNoteId));
-    if (!targetNote) targetNote = myModule.baseNote;
-
+    if (!targetNote) {
+      try { notify('Invalid drop target. Drop onto a note or the BaseNote.', 'error'); } catch {}
+      return;
+    }
     importModuleAtTarget(targetNote, data);
   }, false);
 }
@@ -3780,9 +3781,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       }
     }
 
-    // 3) Fallback to current selection or BaseNote
+    // 3) No explicit target: reject background import (require explicit BaseNote or note hit)
     if (!target) {
-      target = currentSelectedNote || myModule.baseNote;
+      try { notify('Drop or import onto a specific note or the BaseNote.', 'error'); } catch {}
+      return;
     }
 
     importModuleAtTarget(target, moduleData);
