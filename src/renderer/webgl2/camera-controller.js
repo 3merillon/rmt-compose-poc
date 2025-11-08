@@ -23,6 +23,11 @@ export class CameraController {
     this.tx = 0;
     this.ty = 0;
 
+    // Maintain viewport focus on container resize (keep the world point under the
+    // previous viewport center at the new center after resize)
+    this.maintainFocusOnResize = true;
+    this._lastRect = null;
+
     // Input gating: when false, suppress pan/zoom gestures during GL interactions
     this.inputEnabled = true;
 
@@ -75,8 +80,34 @@ export class CameraController {
     // Track container bounds for proper CSS px positioning
     this._onResize = () => {
       try {
+        const prevRect = this._lastRect;
+        const prevOffset = this.canvasOffset ? { x: this.canvasOffset.x, y: this.canvasOffset.y } : { x: 0, y: 0 };
         const r = this.containerEl.getBoundingClientRect();
+
+        // Determine if size actually changed (ignore pure position/scroll changes)
+        const sizeChanged = !!(prevRect && (Math.round(prevRect.width) !== Math.round(r.width) || Math.round(prevRect.height) !== Math.round(r.height)));
+
+        // Compute the world point under the previous viewport center BEFORE updating offsets
+        let keepWorld = null;
+        if (this.maintainFocusOnResize && prevRect && sizeChanged) {
+          const oldCenterX = prevOffset.x + prevRect.width * 0.5;
+          const oldCenterY = prevOffset.y + prevRect.height * 0.5;
+          keepWorld = this.screenToWorld(oldCenterX, oldCenterY);
+        }
+
+        // Update offsets to new rect
         this.canvasOffset = { x: r.left, y: r.top };
+        this._lastRect = { left: r.left, top: r.top, width: r.width, height: r.height };
+
+        // If we have a world point to keep centered, adjust translation so it maps to the new center
+        if (keepWorld) {
+          const s = this.scale || 1;
+          const newCenterX = r.width * 0.5;
+          const newCenterY = r.height * 0.5;
+          this.tx = newCenterX - keepWorld.x * s;
+          this.ty = newCenterY - keepWorld.y * s;
+          if (typeof this.onChange === 'function') this.onChange();
+        }
       } catch {}
     };
     try {
