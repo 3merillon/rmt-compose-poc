@@ -2,6 +2,13 @@
 
 A production-ready, GL‑only composition tool built around rational number relationships (ratios) instead of fixed 12‑TET steps.
 
+## Live Demo
+
+- Try it in your browser: https://www.rmt.world/
+- Screenshot:
+
+![RMT Compose screenshot](public/screenshot.png)
+
 ## Overview
 
 The app represents and manipulates musical structures as exact ratios and durations. A WebGL2 interactive Workspace handles all rendering and interactions with a high‑performance instanced pipeline. The legacy DOM rendering layer has been removed; the Workspace and its camera are the sole sources of truth for visualization and picking.
@@ -114,7 +121,7 @@ Notes:
 
 ## Learn More
 
-- Project website and theory background: https://cybercyril.com
+- Article and theory background: https://cybercyril.com
 
 ## License
 

@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Relative Music Theory Compose - Proof of Concept",
+  "homepage": "https://www.rmt.world/",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
