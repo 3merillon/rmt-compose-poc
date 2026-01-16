@@ -858,6 +858,312 @@ export class DependencyGraph {
   }
 
   /**
+   * Get all notes transitively affected when this note's FREQUENCY changes.
+   * This includes:
+   * - Notes whose startTime references this note's frequency (they move)
+   * - Notes whose frequency references this note's frequency (their pitch changes)
+   * - Notes whose duration references this note's frequency (their duration changes)
+   * - And transitively: notes affected by those notes' changed properties
+   *
+   * @param {number} noteId
+   * @returns {Set<number>}
+   */
+  getAllAffectedByFrequencyChange(noteId) {
+    const result = new Set();
+    const queue = [{ id: noteId, changedProp: 'frequency' }];
+    let queueIdx = 0;
+    const visited = new Map(); // id -> Set of properties that have been processed
+
+    while (queueIdx < queue.length) {
+      const { id: current, changedProp } = queue[queueIdx++];
+
+      // Track which properties we've processed for this note
+      if (!visited.has(current)) {
+        visited.set(current, new Set());
+      }
+      if (visited.get(current).has(changedProp)) {
+        continue;
+      }
+      visited.get(current).add(changedProp);
+
+      if (changedProp === 'frequency') {
+        // Notes whose startTime depends on current's frequency -> they MOVE (startTime changes)
+        const stOnFreq = this.startTimeOnFrequencyDependents.get(current);
+        if (stOnFreq) {
+          for (const dep of stOnFreq) {
+            if (dep !== noteId) {
+              result.add(dep);
+              queue.push({ id: dep, changedProp: 'startTime' });
+            }
+          }
+        }
+
+        // Notes whose frequency depends on current's frequency -> their FREQUENCY changes
+        const freqOnFreq = this.frequencyOnFrequencyDependents.get(current);
+        if (freqOnFreq) {
+          for (const dep of freqOnFreq) {
+            if (dep !== noteId) {
+              result.add(dep);
+              queue.push({ id: dep, changedProp: 'frequency' });
+            }
+          }
+        }
+
+        // Notes whose duration depends on current's frequency -> their DURATION changes
+        const durOnFreq = this.durationOnFrequencyDependents.get(current);
+        if (durOnFreq) {
+          for (const dep of durOnFreq) {
+            if (dep !== noteId) {
+              result.add(dep);
+              queue.push({ id: dep, changedProp: 'duration' });
+            }
+          }
+        }
+      } else if (changedProp === 'startTime') {
+        // Notes whose startTime depends on current's startTime -> they MOVE
+        const stOnSt = this.startTimeOnStartTimeDependents.get(current);
+        if (stOnSt) {
+          for (const dep of stOnSt) {
+            if (dep !== noteId) {
+              result.add(dep);
+              queue.push({ id: dep, changedProp: 'startTime' });
+            }
+          }
+        }
+
+        // Notes whose frequency depends on current's startTime -> their FREQUENCY changes
+        const freqOnSt = this.frequencyOnStartTimeDependents.get(current);
+        if (freqOnSt) {
+          for (const dep of freqOnSt) {
+            if (dep !== noteId) {
+              result.add(dep);
+              queue.push({ id: dep, changedProp: 'frequency' });
+            }
+          }
+        }
+
+        // Notes whose duration depends on current's startTime -> their DURATION changes
+        const durOnSt = this.durationOnStartTimeDependents.get(current);
+        if (durOnSt) {
+          for (const dep of durOnSt) {
+            if (dep !== noteId) {
+              result.add(dep);
+              queue.push({ id: dep, changedProp: 'duration' });
+            }
+          }
+        }
+      } else if (changedProp === 'duration') {
+        // Notes whose startTime depends on current's duration -> they MOVE
+        const stOnDur = this.startTimeOnDurationDependents.get(current);
+        if (stOnDur) {
+          for (const dep of stOnDur) {
+            if (dep !== noteId) {
+              result.add(dep);
+              queue.push({ id: dep, changedProp: 'startTime' });
+            }
+          }
+        }
+
+        // Notes whose frequency depends on current's duration -> their FREQUENCY changes
+        const freqOnDur = this.frequencyOnDurationDependents.get(current);
+        if (freqOnDur) {
+          for (const dep of freqOnDur) {
+            if (dep !== noteId) {
+              result.add(dep);
+              queue.push({ id: dep, changedProp: 'frequency' });
+            }
+          }
+        }
+
+        // Notes whose duration depends on current's duration -> their DURATION changes
+        const durOnDur = this.durationOnDurationDependents.get(current);
+        if (durOnDur) {
+          for (const dep of durOnDur) {
+            if (dep !== noteId) {
+              result.add(dep);
+              queue.push({ id: dep, changedProp: 'duration' });
+            }
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Get all notes transitively affected when this note's DURATION changes.
+   *
+   * @param {number} noteId
+   * @returns {Set<number>}
+   */
+  getAllAffectedByDurationChange(noteId) {
+    const result = new Set();
+    const queue = [{ id: noteId, changedProp: 'duration' }];
+    let queueIdx = 0;
+    const visited = new Map();
+
+    while (queueIdx < queue.length) {
+      const { id: current, changedProp } = queue[queueIdx++];
+
+      if (!visited.has(current)) {
+        visited.set(current, new Set());
+      }
+      if (visited.get(current).has(changedProp)) {
+        continue;
+      }
+      visited.get(current).add(changedProp);
+
+      if (changedProp === 'frequency') {
+        const stOnFreq = this.startTimeOnFrequencyDependents.get(current);
+        if (stOnFreq) {
+          for (const dep of stOnFreq) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'startTime' }); }
+          }
+        }
+        const freqOnFreq = this.frequencyOnFrequencyDependents.get(current);
+        if (freqOnFreq) {
+          for (const dep of freqOnFreq) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'frequency' }); }
+          }
+        }
+        const durOnFreq = this.durationOnFrequencyDependents.get(current);
+        if (durOnFreq) {
+          for (const dep of durOnFreq) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'duration' }); }
+          }
+        }
+      } else if (changedProp === 'startTime') {
+        const stOnSt = this.startTimeOnStartTimeDependents.get(current);
+        if (stOnSt) {
+          for (const dep of stOnSt) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'startTime' }); }
+          }
+        }
+        const freqOnSt = this.frequencyOnStartTimeDependents.get(current);
+        if (freqOnSt) {
+          for (const dep of freqOnSt) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'frequency' }); }
+          }
+        }
+        const durOnSt = this.durationOnStartTimeDependents.get(current);
+        if (durOnSt) {
+          for (const dep of durOnSt) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'duration' }); }
+          }
+        }
+      } else if (changedProp === 'duration') {
+        const stOnDur = this.startTimeOnDurationDependents.get(current);
+        if (stOnDur) {
+          for (const dep of stOnDur) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'startTime' }); }
+          }
+        }
+        const freqOnDur = this.frequencyOnDurationDependents.get(current);
+        if (freqOnDur) {
+          for (const dep of freqOnDur) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'frequency' }); }
+          }
+        }
+        const durOnDur = this.durationOnDurationDependents.get(current);
+        if (durOnDur) {
+          for (const dep of durOnDur) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'duration' }); }
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
+   * Get all notes transitively affected when this note's STARTTIME changes.
+   *
+   * @param {number} noteId
+   * @returns {Set<number>}
+   */
+  getAllAffectedByStartTimeChange(noteId) {
+    const result = new Set();
+    const queue = [{ id: noteId, changedProp: 'startTime' }];
+    let queueIdx = 0;
+    const visited = new Map();
+
+    while (queueIdx < queue.length) {
+      const { id: current, changedProp } = queue[queueIdx++];
+
+      if (!visited.has(current)) {
+        visited.set(current, new Set());
+      }
+      if (visited.get(current).has(changedProp)) {
+        continue;
+      }
+      visited.get(current).add(changedProp);
+
+      if (changedProp === 'frequency') {
+        const stOnFreq = this.startTimeOnFrequencyDependents.get(current);
+        if (stOnFreq) {
+          for (const dep of stOnFreq) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'startTime' }); }
+          }
+        }
+        const freqOnFreq = this.frequencyOnFrequencyDependents.get(current);
+        if (freqOnFreq) {
+          for (const dep of freqOnFreq) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'frequency' }); }
+          }
+        }
+        const durOnFreq = this.durationOnFrequencyDependents.get(current);
+        if (durOnFreq) {
+          for (const dep of durOnFreq) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'duration' }); }
+          }
+        }
+      } else if (changedProp === 'startTime') {
+        const stOnSt = this.startTimeOnStartTimeDependents.get(current);
+        if (stOnSt) {
+          for (const dep of stOnSt) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'startTime' }); }
+          }
+        }
+        const freqOnSt = this.frequencyOnStartTimeDependents.get(current);
+        if (freqOnSt) {
+          for (const dep of freqOnSt) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'frequency' }); }
+          }
+        }
+        const durOnSt = this.durationOnStartTimeDependents.get(current);
+        if (durOnSt) {
+          for (const dep of durOnSt) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'duration' }); }
+          }
+        }
+      } else if (changedProp === 'duration') {
+        const stOnDur = this.startTimeOnDurationDependents.get(current);
+        if (stOnDur) {
+          for (const dep of stOnDur) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'startTime' }); }
+          }
+        }
+        const freqOnDur = this.frequencyOnDurationDependents.get(current);
+        if (freqOnDur) {
+          for (const dep of freqOnDur) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'frequency' }); }
+          }
+        }
+        const durOnDur = this.durationOnDurationDependents.get(current);
+        if (durOnDur) {
+          for (const dep of durOnDur) {
+            if (dep !== noteId) { result.add(dep); queue.push({ id: dep, changedProp: 'duration' }); }
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Get all transitive dependencies (what this note depends on, transitively)
    *
    * @param {number} noteId

@@ -240,15 +240,17 @@ export class Module {
     const graph = this._dependencyGraph;
     const numId = Number(noteId);
 
-    // Get transitive dependents whose startTime would be affected by each property change
-    const startTimeSet = graph.getAllStartTimeOnStartTimeDependents(numId);
-    const durationSet = graph.getAllStartTimeOnDurationDependents(numId);
-    const frequencySet = graph.getAllStartTimeOnFrequencyDependents(numId);
+    // Use the new transitive traversal methods that properly follow all dependency chains
+    // These methods do a BFS that tracks which property changed and propagates through
+    // all dependent properties (startTime, frequency, duration) transitively
+    const frequencyAffected = graph.getAllAffectedByFrequencyChange(numId);
+    const startTimeAffected = graph.getAllAffectedByStartTimeChange(numId);
+    const durationAffected = graph.getAllAffectedByDurationChange(numId);
 
     return {
-      frequency: Array.from(frequencySet),
-      startTime: Array.from(startTimeSet),
-      duration: Array.from(durationSet)
+      frequency: Array.from(frequencyAffected),
+      startTime: Array.from(startTimeAffected),
+      duration: Array.from(durationAffected)
     };
   }
 
