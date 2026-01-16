@@ -836,9 +836,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                     
                     
-                    depNote.setVariable('startTime', function() {
-                        return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
-                    });
+                    // Set the expression string directly - the Note class will compile it to binary
                     depNote.setVariable('startTimeString', newRaw);
                     
                     myModule.markNoteDirty(depId);

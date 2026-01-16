@@ -735,88 +735,101 @@ function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
 }
 
 // ===== Feature: Evaluate to BaseNote =====
+// Helper to convert a decimal to a clean Fraction string
+function toFractionString(value) {
+    try {
+        const frac = new Fraction(value);
+        // Use the Fraction's built-in simplification
+        if (frac.d === 1) {
+            return `new Fraction(${frac.s * frac.n})`;
+        }
+        return `new Fraction(${frac.s * frac.n}, ${frac.d})`;
+    } catch {
+        // Fallback for values that Fraction can't handle cleanly
+        return `new Fraction(${value})`;
+    }
+}
+
+// Create BaseNote-relative expression for startTime
+function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance) {
+    const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
+    const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
+    const beatLength = 60 / baseTempo;
+
+    const offsetSeconds = noteStartTime - baseStartTime;
+    const offsetBeats = offsetSeconds / beatLength;
+
+    if (Math.abs(offsetBeats) < 1e-10) {
+        return `module.baseNote.getVariable('startTime')`;
+    }
+
+    const beatsFrac = toFractionString(offsetBeats);
+    return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac}))`;
+}
+
+// Create BaseNote-relative expression for duration
+function createBaseNoteDurationExpr(durationSeconds, moduleInstance) {
+    const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
+    const beatLength = 60 / baseTempo;
+    const durationBeats = durationSeconds / beatLength;
+
+    const beatsFrac = toFractionString(durationBeats);
+    return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac})`;
+}
+
+// Create BaseNote-relative expression for frequency
+function createBaseNoteFrequencyExpr(frequency, moduleInstance) {
+    const baseFreq = moduleInstance.baseNote.getVariable('frequency').valueOf();
+    const ratio = frequency / baseFreq;
+
+    if (Math.abs(ratio - 1) < 1e-10) {
+        return `module.baseNote.getVariable('frequency')`;
+    }
+
+    const ratioFrac = toFractionString(ratio);
+    return `${ratioFrac}.mul(module.baseNote.getVariable('frequency'))`;
+}
+
 export function evaluateNoteToBaseNote(noteId) {
-    const note = getModule().getNoteById(parseInt(noteId, 10));
+    const moduleInstance = getModule();
+    const note = moduleInstance.getNoteById(parseInt(noteId, 10));
     if (!note) {
         console.error("Note not found:", noteId);
         return;
     }
 
-    const variablesToProcess = ['startTime', 'duration', 'frequency'];
+    // Check if this is a measure note (only has startTime)
+    const isMeasureNote = note.variables.startTime && !note.variables.duration && !note.variables.frequency;
+    const variablesToProcess = isMeasureNote ? ['startTime'] : ['startTime', 'duration', 'frequency'];
     let success = true;
-    const MAX_ITERATIONS = 15;
 
-    variablesToProcess.forEach(varName => {
-        if (!note.variables[varName + 'String']) return;
+    for (const varName of variablesToProcess) {
+        if (!note.variables[varName + 'String']) continue;
 
-        let currentRawExpr = note.variables[varName + 'String'];
-        let newRawExpr = currentRawExpr;
-        let iterations = 0;
+        // Get the current evaluated value
+        const currentValue = note.getVariable(varName);
+        if (currentValue == null) continue;
 
-        do {
-            currentRawExpr = newRawExpr;
-            if (currentRawExpr.indexOf("module.getNoteById(") === -1) break;
-            newRawExpr = replaceNoteReferencesWithBaseNoteOnly(currentRawExpr, getModule());
-            iterations++;
-        } while (currentRawExpr !== newRawExpr && iterations < MAX_ITERATIONS);
+        const value = currentValue.valueOf();
 
-        newRawExpr = removeExcessParentheses(newRawExpr);
-        newRawExpr = balanceParentheses(newRawExpr);
-
-        if (newRawExpr.indexOf("module.getNoteById(") !== -1) {
-            try {
-                const originalValue = note.getVariable(varName).valueOf();
-
-                if (varName === 'startTime') {
-                    newRawExpr = `module.baseNote.getVariable('startTime').add(new Fraction(${originalValue}))`;
-                } else if (varName === 'duration') {
-                    newRawExpr = `new Fraction(${originalValue})`;
-                } else if (varName === 'frequency') {
-                    const baseFreq = getModule().baseNote.getVariable('frequency').valueOf();
-                    const ratio = originalValue / baseFreq;
-                    newRawExpr = `new Fraction(${ratio}).mul(module.baseNote.getVariable('frequency'))`;
-                }
-            } catch (error) {
-                console.error(`Error creating direct expression for ${varName}:`, error);
-                return;
-            }
+        // Create the BaseNote-relative expression directly from the value
+        let newExpr;
+        if (varName === 'startTime') {
+            newExpr = createBaseNoteStartTimeExpr(value, moduleInstance);
+        } else if (varName === 'duration') {
+            newExpr = createBaseNoteDurationExpr(value, moduleInstance);
+        } else if (varName === 'frequency') {
+            newExpr = createBaseNoteFrequencyExpr(value, moduleInstance);
         }
 
-        try {
-            // Final canonicalization by type before testing and saving
-            let simplifiedByType = newRawExpr;
-            try {
-                if (varName === 'startTime') {
-                    simplifiedByType = simplifyStartTime(newRawExpr, getModule());
-                } else if (varName === 'duration') {
-                    simplifiedByType = simplifyDuration(newRawExpr, getModule());
-                } else if (varName === 'frequency') {
-                    simplifiedByType = simplifyFrequency(newRawExpr, getModule());
-                } else {
-                    simplifiedByType = simplifyGeneric(newRawExpr, varName, getModule());
-                }
-            } catch {}
-
-            const testFunc = new Function("module", "Fraction", "return " + simplifiedByType + ";");
-            const testResult = testFunc(getModule(), Fraction);
-            const originalValue = note.getVariable(varName).valueOf();
-            const newValue = testResult.valueOf();
-
-            if (Math.abs(originalValue - newValue) > 0.0001) return;
-
-            note.setVariable(varName, function() {
-                return new Function("module", "Fraction", "return " + simplifiedByType + ";")(getModule(), Fraction);
-            });
-            note.setVariable(varName + 'String', simplifiedByType);
-        } catch (error) {
-            console.error(`Error evaluating ${varName} for note ${noteId}:`, error);
-            success = false;
+        if (newExpr) {
+            note.setVariable(varName + 'String', newExpr);
         }
-    });
+    }
 
     // re-evaluate and update UI
-    getModule().markNoteDirty(note.id);
-    const evaluated = getModule().evaluateModule();
+    moduleInstance.markNoteDirty(note.id);
+    const evaluated = moduleInstance.evaluateModule();
     setEvaluatedNotes(evaluated);
     if (typeof externalFunctions.updateVisualNotes === 'function') {
         externalFunctions.updateVisualNotes(evaluated);
@@ -831,7 +844,7 @@ export function evaluateNoteToBaseNote(noteId) {
     showNoteVariables(currentSelectedNote, newElem);
 
     try {
-        const snap = getModule().createModuleJSON();
+        const snap = moduleInstance.createModuleJSON();
         eventBus.emit('history:capture', { label: `Evaluate Note ${noteId} to BaseNote`, snapshot: snap });
     } catch {}
 
@@ -839,113 +852,98 @@ export function evaluateNoteToBaseNote(noteId) {
 }
 
 // ===== Feature: Evaluate entire module =====
+// Optimized version using batch operations to avoid per-note overhead
 export function evaluateEntireModule() {
     const moduleInstance = getModule();
     const noteIds = Object.keys(moduleInstance.notes).map(id => parseInt(id, 10)).filter(id => id !== 0);
-    noteIds.sort((a, b) => a - b);
 
-    let successCount = 0;
-    let skippedCount = 0;
-    const failedNotes = [];
+    // Pre-compute BaseNote reference values ONCE (avoid repeated lookups)
+    const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
+    const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
+    const baseFreq = moduleInstance.baseNote.getVariable('frequency').valueOf();
+    const beatLength = 60 / baseTempo;
+
+    // Collect all expression updates in a single pass
+    const updates = [];
 
     for (const noteId of noteIds) {
-        try {
-            const note = moduleInstance.getNoteById(noteId);
-            if (!note) continue;
+        const note = moduleInstance.getNoteById(noteId);
+        if (!note) continue;
 
-            const isMeasureNote = note.variables.startTime && !note.variables.duration && !note.variables.frequency;
-            const variablesToProcess = ['startTime', 'duration', 'frequency'];
-            let noteSuccess = true;
+        // Check if this is a measure note (only has startTime)
+        const isMeasureNote = note.hasExpression('startTime') &&
+                              !note.hasExpression('duration') &&
+                              !note.hasExpression('frequency');
 
-            for (const varName of variablesToProcess) {
-                if (!note.variables[varName + 'String']) continue;
+        // Process startTime for all notes
+        if (note.hasExpression('startTime')) {
+            const currentValue = note.getVariable('startTime');
+            if (currentValue != null) {
+                const value = currentValue.valueOf();
+                const offsetSeconds = value - baseStartTime;
+                const offsetBeats = offsetSeconds / beatLength;
 
-                const originalExpr = note.variables[varName + 'String'];
-                const originalValue = note.getVariable(varName).valueOf();
-
-                if (originalExpr.indexOf("module.getNoteById(") === -1 &&
-                    (originalExpr.indexOf("module.baseNote") !== -1 ||
-                     originalExpr.indexOf("new Fraction") !== -1)) {
-                    continue;
+                let expr;
+                if (Math.abs(offsetBeats) < 1e-10) {
+                    expr = `module.baseNote.getVariable('startTime')`;
+                } else {
+                    const beatsFrac = toFractionString(offsetBeats);
+                    expr = `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac}))`;
                 }
+                updates.push({ noteId, varName: 'startTime', expr });
+            }
+        }
 
-                let newExpr;
-                try {
-                    newExpr = replaceNoteReferencesWithBaseNoteOnly(originalExpr, moduleInstance);
-                    const testFunc = new Function("module", "Fraction", "return " + newExpr + ";");
-                    const testResult = testFunc(moduleInstance, Fraction);
+        // Process duration and frequency only for non-measure notes
+        if (!isMeasureNote) {
+            if (note.hasExpression('duration')) {
+                const currentValue = note.getVariable('duration');
+                if (currentValue != null) {
+                    const durationSeconds = currentValue.valueOf();
+                    const durationBeats = durationSeconds / beatLength;
+                    const beatsFrac = toFractionString(durationBeats);
+                    const expr = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac})`;
+                    updates.push({ noteId, varName: 'duration', expr });
+                }
+            }
 
-                    if (Math.abs(testResult.valueOf() - originalValue) < 0.0001) {
-                        note.setVariable(varName, function() {
-                            return new Function("module", "Fraction", "return " + newExpr + ";")(moduleInstance, Fraction);
-                        });
-                        note.setVariable(varName + 'String', newExpr);
-                        noteSuccess = true;
+            if (note.hasExpression('frequency')) {
+                const currentValue = note.getVariable('frequency');
+                if (currentValue != null) {
+                    const frequency = currentValue.valueOf();
+                    const ratio = frequency / baseFreq;
+
+                    let expr;
+                    if (Math.abs(ratio - 1) < 1e-10) {
+                        expr = `module.baseNote.getVariable('frequency')`;
                     } else {
-                        // Fallback direct expression
-                        const baseNote = moduleInstance.baseNote;
-                        let directExpr;
-                        if (varName === 'startTime') {
-                            const baseStartTime = baseNote.getVariable('startTime').valueOf();
-                            const offset = originalValue - baseStartTime;
-                            const baseTempo = baseNote.getVariable('tempo').valueOf();
-                            const beatLength = 60 / baseTempo;
-                            const offsetBeats = offset / beatLength;
-                            directExpr = `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetBeats})))`;
-                        } else if (varName === 'duration') {
-                            const baseTempo = baseNote.getVariable('tempo').valueOf();
-                            const beatLength = 60 / baseTempo;
-                            const durationBeats = originalValue / beatLength;
-                            directExpr = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${durationBeats}))`;
-                        } else if (varName === 'frequency') {
-                            const baseFreq = baseNote.getVariable('frequency').valueOf();
-                            const ratio = originalValue / baseFreq;
-                            directExpr = `new Fraction(${ratio}).mul(module.baseNote.getVariable('frequency'))`;
-                        }
-                        const directFunc = new Function("module", "Fraction", "return " + directExpr + ";");
-                        const directResult = directFunc(moduleInstance, Fraction);
-                        if (Math.abs(directResult.valueOf() - originalValue) < 0.0001) {
-                            note.setVariable(varName, function() {
-                                return new Function("module", "Fraction", "return " + directExpr + ";")(moduleInstance, Fraction);
-                            });
-                            note.setVariable(varName + 'String', directExpr);
-                            noteSuccess = true;
-                        } else {
-                            noteSuccess = false;
-                            failedNotes.push({ noteId, varName, originalExpr, originalValue });
-                        }
+                        const ratioFrac = toFractionString(ratio);
+                        expr = `${ratioFrac}.mul(module.baseNote.getVariable('frequency'))`;
                     }
-                } catch (error) {
-                    console.error(`Error evaluating ${varName} for note ${noteId}:`, error);
-                    noteSuccess = false;
-                    failedNotes.push({ noteId, varName, originalExpr, originalValue, error: error.message });
+                    updates.push({ noteId, varName: 'frequency', expr });
                 }
             }
-
-            if (noteSuccess) {
-                successCount++;
-                moduleInstance.markNoteDirty(noteId);
-            } else {
-                skippedCount++;
-            }
-        } catch (error) {
-            console.error(`Error evaluating note ${noteId}:`, error);
-            skippedCount++;
-            failedNotes.push({ noteId, error: error.message });
         }
     }
 
+    // Apply all updates in a single batch operation (bypasses per-note notifications)
+    moduleInstance.batchSetExpressions(updates);
+
+    // Single evaluation pass at the end
     const evaluated = moduleInstance.evaluateModule();
     setEvaluatedNotes(evaluated);
+
     if (typeof externalFunctions.updateVisualNotes === 'function') {
         externalFunctions.updateVisualNotes(evaluated);
     }
 
     try {
-        const snap = getModule().createModuleJSON();
+        const snap = moduleInstance.createModuleJSON();
         eventBus.emit('history:capture', { label: 'Evaluate Module', snapshot: snap });
     } catch {}
-    showNotification(`Module evaluation complete: ${successCount} notes processed, ${skippedCount} notes skipped`, 'success');
+
+    const noteCount = noteIds.length;
+    showNotification(`Module evaluation complete: ${noteCount} notes converted to BaseNote references`, 'success');
 }
 
 // ===== Feature: Liberate dependencies (replace references with raw values) =====

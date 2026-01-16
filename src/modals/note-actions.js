@@ -54,13 +54,14 @@ export function createEvaluateSection(note, measureId, effectiveNoteId, modalsAp
     }
   }
 
-  // Evaluate to BaseNote
-  if (modalsApi?.showEvaluateConfirmation && effectiveNoteId !== undefined && effectiveNoteId !== null) {
+  // Evaluate to BaseNote (only for non-baseNote notes)
+  const isBaseNote = note === getModule()?.baseNote;
+  if (!isBaseNote && modalsApi?.showEvaluateConfirmation && effectiveNoteId !== undefined && effectiveNoteId !== null) {
     const evalBtn = actionButton('Evaluate to BaseNote', 'evaluate-note-btn', () => {
       modalsApi.showEvaluateConfirmation(effectiveNoteId);
     });
     wrap.appendChild(evalBtn);
-  } else if (modalsApi?.evaluateNoteToBaseNote && effectiveNoteId !== undefined && effectiveNoteId !== null) {
+  } else if (!isBaseNote && modalsApi?.evaluateNoteToBaseNote && effectiveNoteId !== undefined && effectiveNoteId !== null) {
     const evalBtn = actionButton('Evaluate to BaseNote', 'evaluate-note-btn', () => {
       modalsApi.evaluateNoteToBaseNote(effectiveNoteId);
     });

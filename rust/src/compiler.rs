@@ -101,25 +101,27 @@ impl ExpressionCompiler {
 
     /// Parse and emit bytecode for an expression
     fn parse_and_emit(&mut self, expr: &str) -> Result<(), String> {
-        let trimmed = expr.trim();
+        // Strip outer parentheses first to ensure method chains are found at depth 0
+        let trimmed = self.strip_outer_parens(expr.trim());
 
         // Try to parse as a sum (handles .add/.sub chains)
-        if let Some(terms) = self.try_split_add_sub(trimmed) {
+        if let Some(terms) = self.try_split_add_sub(&trimmed) {
             if terms.len() > 1 {
                 return self.emit_sum(&terms);
             }
         }
 
         // Single term (possibly a product)
-        self.parse_and_emit_product(trimmed)
+        self.parse_and_emit_product(&trimmed)
     }
 
     /// Parse and emit a product expression
     fn parse_and_emit_product(&mut self, expr: &str) -> Result<(), String> {
-        let trimmed = expr.trim();
+        // Strip outer parentheses first to ensure method chains are found at depth 0
+        let trimmed = self.strip_outer_parens(expr.trim());
 
         // Try to split by .mul/.div
-        if let Some((base, operations)) = self.try_split_mul_div(trimmed) {
+        if let Some((base, operations)) = self.try_split_mul_div(&trimmed) {
             if !operations.is_empty() {
                 self.parse_and_emit_atomic(&base)?;
                 for (op, operand) in operations {
@@ -135,7 +137,7 @@ impl ExpressionCompiler {
         }
 
         // Single atomic
-        self.parse_and_emit_atomic(trimmed)
+        self.parse_and_emit_atomic(&trimmed)
     }
 
     /// Parse and emit an atomic expression
@@ -255,9 +257,17 @@ impl ExpressionCompiler {
                 Some((n, d))
             }
             2 => {
-                let num: i32 = args[0].parse().ok()?;
-                let den: i32 = args[1].parse().ok()?;
-                Some((num, den))
+                // Try parsing as f64 to handle decimal values
+                let num: f64 = args[0].parse().ok()?;
+                let den: f64 = args[1].parse().ok()?;
+                // If both are integers, use them directly
+                if num.fract() == 0.0 && den.fract() == 0.0 {
+                    Some((num as i32, den as i32))
+                } else {
+                    // Convert decimal ratio to proper fraction
+                    let (n, d) = self.decimal_to_fraction(num / den);
+                    Some((n, d))
+                }
             }
             _ => None,
         }
@@ -575,30 +585,35 @@ impl ExpressionCompiler {
     }
 
     fn strip_outer_parens(&self, s: &str) -> String {
-        let trimmed = s.trim();
-        if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
-            return trimmed.to_string();
-        }
+        let mut result = s.trim().to_string();
 
-        let mut depth = 0;
-        for (i, ch) in trimmed.chars().enumerate() {
-            match ch {
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 && i != trimmed.len() - 1 {
-                        return trimmed.to_string();
+        // Keep stripping outer parentheses until none remain
+        while result.starts_with('(') && result.ends_with(')') {
+            let mut depth = 0;
+            let mut is_matching = true;
+
+            for (i, ch) in result.chars().enumerate() {
+                match ch {
+                    '(' => depth += 1,
+                    ')' => {
+                        depth -= 1;
+                        if depth == 0 && i != result.len() - 1 {
+                            is_matching = false;
+                            break;
+                        }
                     }
+                    _ => {}
                 }
-                _ => {}
+            }
+
+            if is_matching && depth == 0 {
+                result = result[1..result.len() - 1].trim().to_string();
+            } else {
+                break;
             }
         }
 
-        if depth == 0 {
-            trimmed[1..trimmed.len() - 1].trim().to_string()
-        } else {
-            trimmed.to_string()
-        }
+        result
     }
 
     // === Utility functions ===

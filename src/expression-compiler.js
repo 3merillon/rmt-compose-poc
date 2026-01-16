@@ -61,7 +61,8 @@ export class ExpressionCompiler {
    * Parse a text expression into an AST
    */
   parse(expr) {
-    const trimmed = expr.trim();
+    // Strip outer parentheses first to ensure method chains are found at depth 0
+    const trimmed = this.stripOuterParens(expr.trim());
     if (!trimmed) {
       return { type: 'const', num: 0, den: 1 };
     }
@@ -86,7 +87,8 @@ export class ExpressionCompiler {
    * Parse a product expression (handles .mul/.div chains)
    */
   parseProduct(expr) {
-    const trimmed = expr.trim();
+    // Strip outer parentheses first to ensure method chains are found at depth 0
+    const trimmed = this.stripOuterParens(expr.trim());
 
     // Try to split by .mul/.div
     const mulDivResult = this.splitMulDiv(trimmed);
@@ -126,6 +128,11 @@ export class ExpressionCompiler {
         const num = this.parseNumber(args[0]);
         const den = this.parseNumber(args[1]);
         if (num !== null && den !== null) {
+          // Handle decimal values in num/den by converting to proper fraction
+          if (!Number.isInteger(num) || !Number.isInteger(den)) {
+            const frac = this.decimalToFraction(num / den);
+            return { type: 'const', num: frac.num, den: frac.den };
+          }
           return { type: 'const', num, den };
         }
       }
@@ -448,30 +455,35 @@ export class ExpressionCompiler {
   }
 
   /**
-   * Strip outer parentheses if they match
+   * Strip outer parentheses if they match (strips ALL layers)
    */
   stripOuterParens(s) {
-    const trimmed = s.trim();
-    if (!trimmed.startsWith('(') || !trimmed.endsWith(')')) {
-      return trimmed;
-    }
+    let result = s.trim();
 
-    // Check if outer parens are matching
-    let depth = 0;
-    for (let i = 0; i < trimmed.length; i++) {
-      if (trimmed[i] === '(') depth++;
-      else if (trimmed[i] === ')') {
-        depth--;
-        if (depth === 0 && i !== trimmed.length - 1) {
-          return trimmed; // Outer parens don't match
+    // Keep stripping outer parentheses until none remain
+    while (result.startsWith('(') && result.endsWith(')')) {
+      // Check if outer parens are matching
+      let depth = 0;
+      let isMatching = true;
+      for (let i = 0; i < result.length; i++) {
+        if (result[i] === '(') depth++;
+        else if (result[i] === ')') {
+          depth--;
+          if (depth === 0 && i !== result.length - 1) {
+            isMatching = false; // Outer parens don't match
+            break;
+          }
         }
+      }
+
+      if (isMatching && depth === 0) {
+        result = result.substring(1, result.length - 1).trim();
+      } else {
+        break;
       }
     }
 
-    if (depth === 0) {
-      return trimmed.substring(1, trimmed.length - 1).trim();
-    }
-    return trimmed;
+    return result;
   }
 
   /**

@@ -809,6 +809,43 @@ export class Module {
   }
 
   /**
+   * Batch set expressions for multiple notes without individual notifications.
+   * This is much faster than calling note.setVariable() repeatedly because:
+   * 1. Skips individual _notifyChange() calls during batch
+   * 2. Registers all dependencies at once at the end
+   * 3. Emits single invalidateModuleEndTimeCache event
+   *
+   * @param {Array<{noteId: number, varName: string, expr: string}>} updates
+   *   Array of updates, each with noteId, varName (e.g., 'startTime'), and expr (expression text)
+   */
+  batchSetExpressions(updates) {
+    if (!updates || updates.length === 0) return;
+
+    const affectedNoteIds = new Set();
+
+    // Process all updates without triggering notifications
+    for (const { noteId, varName, expr } of updates) {
+      const note = this.notes[noteId];
+      if (!note) continue;
+
+      // Compile and set expression directly, bypassing _notifyChange
+      try {
+        note.expressions[varName] = compiler.compile(expr, varName);
+        note.lastModifiedTime = Date.now();
+        affectedNoteIds.add(noteId);
+      } catch (e) {
+        console.warn(`Failed to compile expression for note ${noteId}.${varName}:`, e);
+      }
+    }
+
+    // Register all dependencies and mark dirty in batch
+    this.markNotesDirtyBatch(affectedNoteIds);
+
+    // Single event emission at the end
+    invalidateModuleEndTimeCache();
+  }
+
+  /**
    * Get pool statistics (for performance monitoring)
    */
   getPoolStats() {
