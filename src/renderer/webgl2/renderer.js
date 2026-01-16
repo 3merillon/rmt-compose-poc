@@ -3041,6 +3041,31 @@ export class RendererAdapter {
           // Apply the live preview offsets to CPU cache only for the anchor note that is moving
           this.posSize[base + 0] = (orig?.x ?? this.posSize[base + 0]) + this._dragOffsetX;
           this.posSize[base + 2] = (orig?.w ?? this.posSize[base + 2]) + this._dragOffsetW;
+
+          // Anchor's rectangle should NOT receive shader offset since posSize already has it baked in.
+          // Set dragFlag to 0 and upload the anchor's posSize to GPU.
+          if (this._dragFlags && anchorIdx < this._dragFlags.length && this._dragFlags[anchorIdx] !== 0.0) {
+            this._dragFlags[anchorIdx] = 0.0;
+            const gl = this.gl;
+            if (gl && this.rectInstanceDragFlagsBuffer) {
+              gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDragFlagsBuffer);
+              gl.bufferData(gl.ARRAY_BUFFER, this._dragFlags, gl.DYNAMIC_DRAW);
+              gl.bindBuffer(gl.ARRAY_BUFFER, null);
+            }
+          }
+          // Upload anchor's posSize slice to GPU so rectangle matches text
+          const gl = this.gl;
+          if (gl && this.rectInstancePosSizeBuffer) {
+            const slice = new Float32Array([
+              this.posSize[base + 0],
+              this.posSize[base + 1],
+              this.posSize[base + 2],
+              this.posSize[base + 3]
+            ]);
+            gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
+            gl.bufferSubData(gl.ARRAY_BUFFER, base * 4, slice);
+            gl.bindBuffer(gl.ARRAY_BUFFER, null);
+          }
         }
       }
 
