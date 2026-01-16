@@ -894,6 +894,24 @@ export function evaluateEntireModule() {
             }
         }
 
+        // Process beatsPerMeasure for measure notes (convert to BaseNote reference)
+        if (isMeasureNote && note.hasExpression('beatsPerMeasure')) {
+            const currentValue = note.getVariable('beatsPerMeasure');
+            if (currentValue != null) {
+                const beats = currentValue.valueOf();
+                const baseBeats = moduleInstance.baseNote.getVariable('beatsPerMeasure').valueOf();
+
+                let expr;
+                if (Math.abs(beats - baseBeats) < 1e-10) {
+                    expr = `module.baseNote.getVariable('beatsPerMeasure')`;
+                } else {
+                    const beatsFrac = toFractionString(beats);
+                    expr = beatsFrac;
+                }
+                updates.push({ noteId, varName: 'beatsPerMeasure', expr });
+            }
+        }
+
         // Process duration and frequency only for non-measure notes
         if (!isMeasureNote) {
             if (note.hasExpression('duration')) {
