@@ -32,6 +32,32 @@ export class DependencyGraph {
     this.startTimeOnStartTimeDependents = new Map();
     // Inverse map: noteId -> Set<noteId whose startTime depends on this note's duration>
     this.startTimeOnDurationDependents = new Map();
+    // Inverse map: noteId -> Set<noteId whose startTime depends on this note's frequency>
+    this.startTimeOnFrequencyDependents = new Map();
+
+    // Frequency-specific dependency tracking (for property-colored visualization)
+    // Forward map: noteId -> Set<noteId its frequency depends on>
+    this.frequencyDependencies = new Map();
+    // Inverse map: noteId -> Set<noteId whose frequency depends on it>
+    this.frequencyDependents = new Map();
+    // Track notes whose frequency references baseNote
+    this.frequencyBaseNoteDependents = new Set();
+    // Property-specific: which property of dependency is referenced by this note's frequency
+    this.frequencyOnStartTimeDependents = new Map();
+    this.frequencyOnDurationDependents = new Map();
+    this.frequencyOnFrequencyDependents = new Map();
+
+    // Duration-specific dependency tracking (for property-colored visualization)
+    // Forward map: noteId -> Set<noteId its duration depends on>
+    this.durationDependencies = new Map();
+    // Inverse map: noteId -> Set<noteId whose duration depends on it>
+    this.durationDependents = new Map();
+    // Track notes whose duration references baseNote
+    this.durationBaseNoteDependents = new Set();
+    // Property-specific: which property of dependency is referenced by this note's duration
+    this.durationOnStartTimeDependents = new Map();
+    this.durationOnDurationDependents = new Map();
+    this.durationOnFrequencyDependents = new Map();
   }
 
   /**
@@ -79,9 +105,10 @@ export class DependencyGraph {
    * Tracks which notes' startTime depends on another note's startTime vs duration
    */
   _updateStartTimePropertyDependencies(noteId, newPropDeps) {
-    // VAR indices: 0 = startTime, 1 = duration
+    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency
     const VAR_START_TIME = 0;
     const VAR_DURATION = 1;
+    const VAR_FREQUENCY = 2;
 
     // Helper to update a specific property inverse map
     const updatePropertyMap = (propMap, depNoteId, varIndex, newPropDeps) => {
@@ -114,6 +141,7 @@ export class DependencyGraph {
     for (const depNoteId of allDepNotes) {
       updatePropertyMap(this.startTimeOnStartTimeDependents, depNoteId, VAR_START_TIME, newPropDeps);
       updatePropertyMap(this.startTimeOnDurationDependents, depNoteId, VAR_DURATION, newPropDeps);
+      updatePropertyMap(this.startTimeOnFrequencyDependents, depNoteId, VAR_FREQUENCY, newPropDeps);
     }
   }
 
@@ -155,6 +183,204 @@ export class DependencyGraph {
       this.startTimeBaseNoteDependents.add(noteId);
     } else {
       this.startTimeBaseNoteDependents.delete(noteId);
+    }
+  }
+
+  /**
+   * Register frequency-specific dependencies for a note
+   * Used for property-colored visualization
+   *
+   * @param {number} noteId - The note being registered
+   * @param {BinaryExpression} freqExpr - The frequency expression
+   */
+  registerFrequencyDependencies(noteId, freqExpr) {
+    const newDeps = freqExpr ? freqExpr.getDependencySet() : new Set();
+    const referencesBase = freqExpr ? freqExpr.referencesBase : false;
+    this._updateFrequencyDependencies(noteId, newDeps, referencesBase);
+
+    // Also update property-specific tracking
+    const propDeps = freqExpr ? freqExpr.getPropertyDependencies() : new Map();
+    this._updateFrequencyPropertyDependencies(noteId, propDeps);
+  }
+
+  /**
+   * Internal: Update frequency-specific dependency tracking for a note
+   */
+  _updateFrequencyDependencies(noteId, newDeps, referencesBase) {
+    const oldDeps = this.frequencyDependencies.get(noteId) || new Set();
+
+    // Remove from inverse index for deps that are no longer referenced
+    for (const oldDep of oldDeps) {
+      if (!newDeps.has(oldDep)) {
+        const depSet = this.frequencyDependents.get(oldDep);
+        if (depSet) {
+          depSet.delete(noteId);
+          if (depSet.size === 0) {
+            this.frequencyDependents.delete(oldDep);
+          }
+        }
+      }
+    }
+
+    // Add to inverse index for new deps
+    for (const newDep of newDeps) {
+      if (!oldDeps.has(newDep)) {
+        if (!this.frequencyDependents.has(newDep)) {
+          this.frequencyDependents.set(newDep, new Set());
+        }
+        this.frequencyDependents.get(newDep).add(noteId);
+      }
+    }
+
+    // Update forward index
+    this.frequencyDependencies.set(noteId, newDeps);
+
+    // Track baseNote references
+    if (referencesBase) {
+      this.frequencyBaseNoteDependents.add(noteId);
+    } else {
+      this.frequencyBaseNoteDependents.delete(noteId);
+    }
+  }
+
+  /**
+   * Internal: Update property-specific frequency dependency tracking
+   * Tracks which notes' frequency depends on another note's startTime/duration/frequency
+   */
+  _updateFrequencyPropertyDependencies(noteId, newPropDeps) {
+    const VAR_START_TIME = 0;
+    const VAR_DURATION = 1;
+    const VAR_FREQUENCY = 2;
+
+    const updatePropertyMap = (propMap, depNoteId, varIndex, newPropDeps) => {
+      const newNoteProps = newPropDeps.get(depNoteId);
+      const shouldHave = newNoteProps && newNoteProps.has(varIndex);
+
+      let depSet = propMap.get(depNoteId);
+      const currentlyHas = depSet && depSet.has(noteId);
+
+      if (shouldHave && !currentlyHas) {
+        if (!depSet) {
+          depSet = new Set();
+          propMap.set(depNoteId, depSet);
+        }
+        depSet.add(noteId);
+      } else if (!shouldHave && currentlyHas) {
+        depSet.delete(noteId);
+        if (depSet.size === 0) {
+          propMap.delete(depNoteId);
+        }
+      }
+    };
+
+    const allDepNotes = new Set([
+      ...this.frequencyDependencies.get(noteId) || [],
+      ...newPropDeps.keys()
+    ]);
+
+    for (const depNoteId of allDepNotes) {
+      updatePropertyMap(this.frequencyOnStartTimeDependents, depNoteId, VAR_START_TIME, newPropDeps);
+      updatePropertyMap(this.frequencyOnDurationDependents, depNoteId, VAR_DURATION, newPropDeps);
+      updatePropertyMap(this.frequencyOnFrequencyDependents, depNoteId, VAR_FREQUENCY, newPropDeps);
+    }
+  }
+
+  /**
+   * Register duration-specific dependencies for a note
+   * Used for property-colored visualization
+   *
+   * @param {number} noteId - The note being registered
+   * @param {BinaryExpression} durExpr - The duration expression
+   */
+  registerDurationDependencies(noteId, durExpr) {
+    const newDeps = durExpr ? durExpr.getDependencySet() : new Set();
+    const referencesBase = durExpr ? durExpr.referencesBase : false;
+    this._updateDurationDependencies(noteId, newDeps, referencesBase);
+
+    // Also update property-specific tracking
+    const propDeps = durExpr ? durExpr.getPropertyDependencies() : new Map();
+    this._updateDurationPropertyDependencies(noteId, propDeps);
+  }
+
+  /**
+   * Internal: Update duration-specific dependency tracking for a note
+   */
+  _updateDurationDependencies(noteId, newDeps, referencesBase) {
+    const oldDeps = this.durationDependencies.get(noteId) || new Set();
+
+    // Remove from inverse index for deps that are no longer referenced
+    for (const oldDep of oldDeps) {
+      if (!newDeps.has(oldDep)) {
+        const depSet = this.durationDependents.get(oldDep);
+        if (depSet) {
+          depSet.delete(noteId);
+          if (depSet.size === 0) {
+            this.durationDependents.delete(oldDep);
+          }
+        }
+      }
+    }
+
+    // Add to inverse index for new deps
+    for (const newDep of newDeps) {
+      if (!oldDeps.has(newDep)) {
+        if (!this.durationDependents.has(newDep)) {
+          this.durationDependents.set(newDep, new Set());
+        }
+        this.durationDependents.get(newDep).add(noteId);
+      }
+    }
+
+    // Update forward index
+    this.durationDependencies.set(noteId, newDeps);
+
+    // Track baseNote references
+    if (referencesBase) {
+      this.durationBaseNoteDependents.add(noteId);
+    } else {
+      this.durationBaseNoteDependents.delete(noteId);
+    }
+  }
+
+  /**
+   * Internal: Update property-specific duration dependency tracking
+   * Tracks which notes' duration depends on another note's startTime/duration/frequency
+   */
+  _updateDurationPropertyDependencies(noteId, newPropDeps) {
+    const VAR_START_TIME = 0;
+    const VAR_DURATION = 1;
+    const VAR_FREQUENCY = 2;
+
+    const updatePropertyMap = (propMap, depNoteId, varIndex, newPropDeps) => {
+      const newNoteProps = newPropDeps.get(depNoteId);
+      const shouldHave = newNoteProps && newNoteProps.has(varIndex);
+
+      let depSet = propMap.get(depNoteId);
+      const currentlyHas = depSet && depSet.has(noteId);
+
+      if (shouldHave && !currentlyHas) {
+        if (!depSet) {
+          depSet = new Set();
+          propMap.set(depNoteId, depSet);
+        }
+        depSet.add(noteId);
+      } else if (!shouldHave && currentlyHas) {
+        depSet.delete(noteId);
+        if (depSet.size === 0) {
+          propMap.delete(depNoteId);
+        }
+      }
+    };
+
+    const allDepNotes = new Set([
+      ...this.durationDependencies.get(noteId) || [],
+      ...newPropDeps.keys()
+    ]);
+
+    for (const depNoteId of allDepNotes) {
+      updatePropertyMap(this.durationOnStartTimeDependents, depNoteId, VAR_START_TIME, newPropDeps);
+      updatePropertyMap(this.durationOnDurationDependents, depNoteId, VAR_DURATION, newPropDeps);
+      updatePropertyMap(this.durationOnFrequencyDependents, depNoteId, VAR_FREQUENCY, newPropDeps);
     }
   }
 
@@ -266,12 +492,100 @@ export class DependencyGraph {
     // Also remove from property-specific tracking
     this.startTimeOnStartTimeDependents.delete(noteId);
     this.startTimeOnDurationDependents.delete(noteId);
+    this.startTimeOnFrequencyDependents.delete(noteId);
 
     // Remove this note from other notes' property-specific dependent sets
     for (const [, depSet] of this.startTimeOnStartTimeDependents) {
       depSet.delete(noteId);
     }
     for (const [, depSet] of this.startTimeOnDurationDependents) {
+      depSet.delete(noteId);
+    }
+    for (const [, depSet] of this.startTimeOnFrequencyDependents) {
+      depSet.delete(noteId);
+    }
+
+    // Remove from frequency-specific tracking
+    const freqDeps = this.frequencyDependencies.get(noteId);
+    if (freqDeps) {
+      for (const dep of freqDeps) {
+        const depSet = this.frequencyDependents.get(dep);
+        if (depSet) {
+          depSet.delete(noteId);
+          if (depSet.size === 0) {
+            this.frequencyDependents.delete(dep);
+          }
+        }
+      }
+      this.frequencyDependencies.delete(noteId);
+    }
+
+    const freqDependentsOfThis = this.frequencyDependents.get(noteId);
+    if (freqDependentsOfThis) {
+      for (const dep of freqDependentsOfThis) {
+        const depDeps = this.frequencyDependencies.get(dep);
+        if (depDeps) {
+          depDeps.delete(noteId);
+        }
+      }
+      this.frequencyDependents.delete(noteId);
+    }
+
+    this.frequencyBaseNoteDependents.delete(noteId);
+
+    // Remove from frequency property-specific tracking
+    this.frequencyOnStartTimeDependents.delete(noteId);
+    this.frequencyOnDurationDependents.delete(noteId);
+    this.frequencyOnFrequencyDependents.delete(noteId);
+    for (const [, depSet] of this.frequencyOnStartTimeDependents) {
+      depSet.delete(noteId);
+    }
+    for (const [, depSet] of this.frequencyOnDurationDependents) {
+      depSet.delete(noteId);
+    }
+    for (const [, depSet] of this.frequencyOnFrequencyDependents) {
+      depSet.delete(noteId);
+    }
+
+    // Remove from duration-specific tracking
+    const durDeps = this.durationDependencies.get(noteId);
+    if (durDeps) {
+      for (const dep of durDeps) {
+        const depSet = this.durationDependents.get(dep);
+        if (depSet) {
+          depSet.delete(noteId);
+          if (depSet.size === 0) {
+            this.durationDependents.delete(dep);
+          }
+        }
+      }
+      this.durationDependencies.delete(noteId);
+    }
+
+    const durDependentsOfThis = this.durationDependents.get(noteId);
+    if (durDependentsOfThis) {
+      for (const dep of durDependentsOfThis) {
+        const depDeps = this.durationDependencies.get(dep);
+        if (depDeps) {
+          depDeps.delete(noteId);
+        }
+      }
+      this.durationDependents.delete(noteId);
+    }
+
+    this.durationBaseNoteDependents.delete(noteId);
+
+    // Remove from duration property-specific tracking
+    this.durationOnStartTimeDependents.delete(noteId);
+    this.durationOnDurationDependents.delete(noteId);
+    this.durationOnFrequencyDependents.delete(noteId);
+    for (const [, depSet] of this.durationOnStartTimeDependents) {
+      depSet.delete(noteId);
+    }
+    for (const [, depSet] of this.durationOnDurationDependents) {
+      depSet.delete(noteId);
+    }
+    for (const [, depSet] of this.durationOnFrequencyDependents) {
       depSet.delete(noteId);
     }
   }
@@ -484,6 +798,66 @@ export class DependencyGraph {
   }
 
   /**
+   * Get direct dependents whose startTime references this note's frequency property
+   * O(1) lookup
+   *
+   * @param {number} noteId
+   * @returns {Set<number>}
+   */
+  getStartTimeOnFrequencyDependents(noteId) {
+    return this.startTimeOnFrequencyDependents.get(noteId) || new Set();
+  }
+
+  /**
+   * Get all transitive dependents whose startTime is affected when this note's frequency changes
+   * Used for property-colored visualization - orange color
+   *
+   * @param {number} noteId
+   * @returns {Set<number>}
+   */
+  getAllStartTimeOnFrequencyDependents(noteId) {
+    const result = new Set();
+    const queue = [noteId];
+    let queueIdx = 0;
+    const visited = new Set([noteId]);
+
+    while (queueIdx < queue.length) {
+      const current = queue[queueIdx++];
+      // Get notes whose startTime references current note's frequency
+      const frequencyDeps = this.startTimeOnFrequencyDependents.get(current);
+
+      if (frequencyDeps) {
+        for (const dep of frequencyDeps) {
+          if (!visited.has(dep)) {
+            visited.add(dep);
+            result.add(dep);
+            // Continue traversing - the dependent's startTime now changes,
+            // so we need to find notes that depend on the dependent's startTime
+            queue.push(dep);
+          }
+        }
+      }
+
+      // Also traverse through notes whose startTime depends on current's startTime
+      // (since if current's startTime changes, their startTime changes too)
+      if (current !== noteId) {
+        const startTimeDeps = this.startTimeOnStartTimeDependents.get(current);
+        if (startTimeDeps) {
+          for (const dep of startTimeDeps) {
+            if (!visited.has(dep)) {
+              visited.add(dep);
+              result.add(dep);
+              queue.push(dep);
+            }
+          }
+        }
+      }
+    }
+
+    return result;
+  }
+
+  /**
    * Get all transitive dependencies (what this note depends on, transitively)
    *
    * @param {number} noteId
@@ -654,6 +1028,21 @@ export class DependencyGraph {
     this.startTimeBaseNoteDependents.clear();
     this.startTimeOnStartTimeDependents.clear();
     this.startTimeOnDurationDependents.clear();
+    this.startTimeOnFrequencyDependents.clear();
+    // Frequency-specific
+    this.frequencyDependencies.clear();
+    this.frequencyDependents.clear();
+    this.frequencyBaseNoteDependents.clear();
+    this.frequencyOnStartTimeDependents.clear();
+    this.frequencyOnDurationDependents.clear();
+    this.frequencyOnFrequencyDependents.clear();
+    // Duration-specific
+    this.durationDependencies.clear();
+    this.durationDependents.clear();
+    this.durationBaseNoteDependents.clear();
+    this.durationOnStartTimeDependents.clear();
+    this.durationOnDurationDependents.clear();
+    this.durationOnFrequencyDependents.clear();
   }
 
   /**

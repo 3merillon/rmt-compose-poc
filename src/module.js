@@ -94,6 +94,14 @@ export class Module {
     // Also register startTime-specific dependencies for drag preview
     const startTimeExpr = note.getExpression('startTime');
     this._dependencyGraph.registerStartTimeDependencies(note.id, startTimeExpr);
+
+    // Register frequency-specific dependencies for property-colored visualization
+    const freqExpr = note.getExpression('frequency');
+    this._dependencyGraph.registerFrequencyDependencies(note.id, freqExpr);
+
+    // Register duration-specific dependencies for property-colored visualization
+    const durExpr = note.getExpression('duration');
+    this._dependencyGraph.registerDurationDependencies(note.id, durExpr);
   }
 
   /**
@@ -214,6 +222,76 @@ export class Module {
     }
 
     return Array.from(result);
+  }
+
+  /**
+   * Get dependents categorized by which property of THIS note they reference
+   * Used for property-colored dependency visualization
+   *
+   * The paradigm is:
+   * - Orange (frequency): Notes that would MOVE if I change the selected note's FREQUENCY
+   * - Teal (startTime): Notes that would MOVE if I change the selected note's STARTTIME
+   * - Purple (duration): Notes that would MOVE if I change the selected note's DURATION
+   *
+   * @param {number} noteId
+   * @returns {{ frequency: number[], startTime: number[], duration: number[] }}
+   */
+  getDependentsByProperty(noteId) {
+    const graph = this._dependencyGraph;
+    const numId = Number(noteId);
+
+    // Get transitive dependents whose startTime would be affected by each property change
+    const startTimeSet = graph.getAllStartTimeOnStartTimeDependents(numId);
+    const durationSet = graph.getAllStartTimeOnDurationDependents(numId);
+    const frequencySet = graph.getAllStartTimeOnFrequencyDependents(numId);
+
+    return {
+      frequency: Array.from(frequencySet),
+      startTime: Array.from(startTimeSet),
+      duration: Array.from(durationSet)
+    };
+  }
+
+  /**
+   * Get dependencies categorized by which expression of THIS note references them
+   * Used for property-colored dependency visualization
+   *
+   * @param {number} noteId
+   * @returns {{ frequency: number[], startTime: number[], duration: number[] }}
+   */
+  getDirectDependenciesByProperty(noteId) {
+    const graph = this._dependencyGraph;
+    const numId = Number(noteId);
+    const note = this.getNoteById(numId);
+
+    // Get base arrays from dependency graph
+    const freqArr = Array.from(graph.frequencyDependencies.get(numId) || new Set());
+    const startArr = Array.from(graph.startTimeDependencies.get(numId) || new Set());
+    const durArr = Array.from(graph.durationDependencies.get(numId) || new Set());
+
+    // Include baseNote (0) if the expression references it
+    // The referencesBase flag is tracked separately from the dependencies array
+    if (note) {
+      const freqExpr = note.getExpression('frequency');
+      const startExpr = note.getExpression('startTime');
+      const durExpr = note.getExpression('duration');
+
+      if (freqExpr && freqExpr.referencesBase && !freqArr.includes(0)) {
+        freqArr.push(0);
+      }
+      if (startExpr && startExpr.referencesBase && !startArr.includes(0)) {
+        startArr.push(0);
+      }
+      if (durExpr && durExpr.referencesBase && !durArr.includes(0)) {
+        durArr.push(0);
+      }
+    }
+
+    return {
+      frequency: freqArr,
+      startTime: startArr,
+      duration: durArr
+    };
   }
 
   /**
