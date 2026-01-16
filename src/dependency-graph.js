@@ -93,27 +93,38 @@ export class DependencyGraph {
   registerStartTimeDependencies(noteId, startTimeExpr) {
     const newDeps = startTimeExpr ? startTimeExpr.getDependencySet() : new Set();
     const referencesBase = startTimeExpr ? startTimeExpr.referencesBase : false;
+
+    // CRITICAL: Capture old deps BEFORE updating the forward index
+    // This is needed for _updateStartTimePropertyDependencies to properly clean up stale inverse entries
+    const oldDeps = this.startTimeDependencies.get(noteId) || new Set();
+
     this._updateStartTimeDependencies(noteId, newDeps, referencesBase);
 
-    // Also update property-specific tracking
+    // Also update property-specific tracking, passing old deps for proper cleanup
     const propDeps = startTimeExpr ? startTimeExpr.getPropertyDependencies() : new Map();
-    this._updateStartTimePropertyDependencies(noteId, propDeps);
+    this._updateStartTimePropertyDependencies(noteId, propDeps, oldDeps);
   }
 
   /**
    * Internal: Update property-specific startTime dependency tracking
    * Tracks which notes' startTime depends on another note's startTime vs duration
+   * @param {number} noteId - The note being updated
+   * @param {Map} newPropDeps - New property dependencies from the expression
+   * @param {Set} oldDeps - The OLD forward deps (captured before _updateStartTimeDependencies)
    */
-  _updateStartTimePropertyDependencies(noteId, newPropDeps) {
-    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency
+  _updateStartTimePropertyDependencies(noteId, newPropDeps, oldDeps) {
+    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency, 5 = measureLength
+    // measureLength is derived from duration, so treat it as duration-related
     const VAR_START_TIME = 0;
     const VAR_DURATION = 1;
     const VAR_FREQUENCY = 2;
+    const VAR_MEASURE_LENGTH = 5;
 
     // Helper to update a specific property inverse map
-    const updatePropertyMap = (propMap, depNoteId, varIndex, newPropDeps) => {
+    // varIndices is an array of VAR indices that should map to this property
+    const updatePropertyMap = (propMap, depNoteId, varIndices, newPropDeps) => {
       const newNoteProps = newPropDeps.get(depNoteId);
-      const shouldHave = newNoteProps && newNoteProps.has(varIndex);
+      const shouldHave = newNoteProps && varIndices.some(idx => newNoteProps.has(idx));
 
       let depSet = propMap.get(depNoteId);
       const currentlyHas = depSet && depSet.has(noteId);
@@ -132,16 +143,19 @@ export class DependencyGraph {
       }
     };
 
-    // Get all notes that could be affected (union of old and new deps)
+    // Get all notes that could be affected (union of OLD and NEW deps)
+    // CRITICAL: We must use oldDeps passed in, NOT this.startTimeDependencies.get(noteId)
+    // because the forward index has already been updated to the new deps
     const allDepNotes = new Set([
-      ...this.startTimeDependencies.get(noteId) || [],
+      ...oldDeps,
       ...newPropDeps.keys()
     ]);
 
     for (const depNoteId of allDepNotes) {
-      updatePropertyMap(this.startTimeOnStartTimeDependents, depNoteId, VAR_START_TIME, newPropDeps);
-      updatePropertyMap(this.startTimeOnDurationDependents, depNoteId, VAR_DURATION, newPropDeps);
-      updatePropertyMap(this.startTimeOnFrequencyDependents, depNoteId, VAR_FREQUENCY, newPropDeps);
+      updatePropertyMap(this.startTimeOnStartTimeDependents, depNoteId, [VAR_START_TIME], newPropDeps);
+      // measureLength (5) is derived from duration, so include it with duration
+      updatePropertyMap(this.startTimeOnDurationDependents, depNoteId, [VAR_DURATION, VAR_MEASURE_LENGTH], newPropDeps);
+      updatePropertyMap(this.startTimeOnFrequencyDependents, depNoteId, [VAR_FREQUENCY], newPropDeps);
     }
   }
 
@@ -196,11 +210,16 @@ export class DependencyGraph {
   registerFrequencyDependencies(noteId, freqExpr) {
     const newDeps = freqExpr ? freqExpr.getDependencySet() : new Set();
     const referencesBase = freqExpr ? freqExpr.referencesBase : false;
+
+    // CRITICAL: Capture old deps BEFORE updating the forward index
+    // This is needed for _updateFrequencyPropertyDependencies to properly clean up stale inverse entries
+    const oldDeps = this.frequencyDependencies.get(noteId) || new Set();
+
     this._updateFrequencyDependencies(noteId, newDeps, referencesBase);
 
-    // Also update property-specific tracking
+    // Also update property-specific tracking, passing old deps for proper cleanup
     const propDeps = freqExpr ? freqExpr.getPropertyDependencies() : new Map();
-    this._updateFrequencyPropertyDependencies(noteId, propDeps);
+    this._updateFrequencyPropertyDependencies(noteId, propDeps, oldDeps);
   }
 
   /**
@@ -246,15 +265,21 @@ export class DependencyGraph {
   /**
    * Internal: Update property-specific frequency dependency tracking
    * Tracks which notes' frequency depends on another note's startTime/duration/frequency
+   * @param {number} noteId - The note being updated
+   * @param {Map} newPropDeps - New property dependencies from the expression
+   * @param {Set} oldDeps - The OLD forward deps (captured before _updateFrequencyDependencies)
    */
-  _updateFrequencyPropertyDependencies(noteId, newPropDeps) {
+  _updateFrequencyPropertyDependencies(noteId, newPropDeps, oldDeps) {
+    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency, 5 = measureLength
+    // measureLength is derived from duration, so treat it as duration-related
     const VAR_START_TIME = 0;
     const VAR_DURATION = 1;
     const VAR_FREQUENCY = 2;
+    const VAR_MEASURE_LENGTH = 5;
 
-    const updatePropertyMap = (propMap, depNoteId, varIndex, newPropDeps) => {
+    const updatePropertyMap = (propMap, depNoteId, varIndices, newPropDeps) => {
       const newNoteProps = newPropDeps.get(depNoteId);
-      const shouldHave = newNoteProps && newNoteProps.has(varIndex);
+      const shouldHave = newNoteProps && varIndices.some(idx => newNoteProps.has(idx));
 
       let depSet = propMap.get(depNoteId);
       const currentlyHas = depSet && depSet.has(noteId);
@@ -273,15 +298,19 @@ export class DependencyGraph {
       }
     };
 
+    // Get all notes that could be affected (union of OLD and NEW deps)
+    // CRITICAL: We must use oldDeps passed in, NOT this.frequencyDependencies.get(noteId)
+    // because the forward index has already been updated to the new deps
     const allDepNotes = new Set([
-      ...this.frequencyDependencies.get(noteId) || [],
+      ...oldDeps,
       ...newPropDeps.keys()
     ]);
 
     for (const depNoteId of allDepNotes) {
-      updatePropertyMap(this.frequencyOnStartTimeDependents, depNoteId, VAR_START_TIME, newPropDeps);
-      updatePropertyMap(this.frequencyOnDurationDependents, depNoteId, VAR_DURATION, newPropDeps);
-      updatePropertyMap(this.frequencyOnFrequencyDependents, depNoteId, VAR_FREQUENCY, newPropDeps);
+      updatePropertyMap(this.frequencyOnStartTimeDependents, depNoteId, [VAR_START_TIME], newPropDeps);
+      // measureLength (5) is derived from duration, so include it with duration
+      updatePropertyMap(this.frequencyOnDurationDependents, depNoteId, [VAR_DURATION, VAR_MEASURE_LENGTH], newPropDeps);
+      updatePropertyMap(this.frequencyOnFrequencyDependents, depNoteId, [VAR_FREQUENCY], newPropDeps);
     }
   }
 
@@ -295,11 +324,16 @@ export class DependencyGraph {
   registerDurationDependencies(noteId, durExpr) {
     const newDeps = durExpr ? durExpr.getDependencySet() : new Set();
     const referencesBase = durExpr ? durExpr.referencesBase : false;
+
+    // CRITICAL: Capture old deps BEFORE updating the forward index
+    // This is needed for _updateDurationPropertyDependencies to properly clean up stale inverse entries
+    const oldDeps = this.durationDependencies.get(noteId) || new Set();
+
     this._updateDurationDependencies(noteId, newDeps, referencesBase);
 
-    // Also update property-specific tracking
+    // Also update property-specific tracking, passing old deps for proper cleanup
     const propDeps = durExpr ? durExpr.getPropertyDependencies() : new Map();
-    this._updateDurationPropertyDependencies(noteId, propDeps);
+    this._updateDurationPropertyDependencies(noteId, propDeps, oldDeps);
   }
 
   /**
@@ -345,15 +379,21 @@ export class DependencyGraph {
   /**
    * Internal: Update property-specific duration dependency tracking
    * Tracks which notes' duration depends on another note's startTime/duration/frequency
+   * @param {number} noteId - The note being updated
+   * @param {Map} newPropDeps - New property dependencies from the expression
+   * @param {Set} oldDeps - The OLD forward deps (captured before _updateDurationDependencies)
    */
-  _updateDurationPropertyDependencies(noteId, newPropDeps) {
+  _updateDurationPropertyDependencies(noteId, newPropDeps, oldDeps) {
+    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency, 5 = measureLength
+    // measureLength is derived from duration, so treat it as duration-related
     const VAR_START_TIME = 0;
     const VAR_DURATION = 1;
     const VAR_FREQUENCY = 2;
+    const VAR_MEASURE_LENGTH = 5;
 
-    const updatePropertyMap = (propMap, depNoteId, varIndex, newPropDeps) => {
+    const updatePropertyMap = (propMap, depNoteId, varIndices, newPropDeps) => {
       const newNoteProps = newPropDeps.get(depNoteId);
-      const shouldHave = newNoteProps && newNoteProps.has(varIndex);
+      const shouldHave = newNoteProps && varIndices.some(idx => newNoteProps.has(idx));
 
       let depSet = propMap.get(depNoteId);
       const currentlyHas = depSet && depSet.has(noteId);
@@ -372,15 +412,19 @@ export class DependencyGraph {
       }
     };
 
+    // Get all notes that could be affected (union of OLD and NEW deps)
+    // CRITICAL: We must use oldDeps passed in, NOT this.durationDependencies.get(noteId)
+    // because the forward index has already been updated to the new deps
     const allDepNotes = new Set([
-      ...this.durationDependencies.get(noteId) || [],
+      ...oldDeps,
       ...newPropDeps.keys()
     ]);
 
     for (const depNoteId of allDepNotes) {
-      updatePropertyMap(this.durationOnStartTimeDependents, depNoteId, VAR_START_TIME, newPropDeps);
-      updatePropertyMap(this.durationOnDurationDependents, depNoteId, VAR_DURATION, newPropDeps);
-      updatePropertyMap(this.durationOnFrequencyDependents, depNoteId, VAR_FREQUENCY, newPropDeps);
+      updatePropertyMap(this.durationOnStartTimeDependents, depNoteId, [VAR_START_TIME], newPropDeps);
+      // measureLength (5) is derived from duration, so include it with duration
+      updatePropertyMap(this.durationOnDurationDependents, depNoteId, [VAR_DURATION, VAR_MEASURE_LENGTH], newPropDeps);
+      updatePropertyMap(this.durationOnFrequencyDependents, depNoteId, [VAR_FREQUENCY], newPropDeps);
     }
   }
 

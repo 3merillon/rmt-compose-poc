@@ -9064,13 +9064,39 @@ try {
                 // Use property-colored dependents
                 const propDeps = mref.getDependentsByProperty(Number(anchorId));
 
+                // Helper to check if an ID is a measure note
+                const isMeasureNoteIdRdeps = (id) => {
+                  try {
+                    const n = mref.getNoteById(Number(id));
+                    return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                  } catch { return false; }
+                };
+
                 for (const prop of ['frequency', 'startTime', 'duration']) {
                   const propIds = propDeps[prop] || [];
                   const filteredIds = movingSet ? propIds.filter(id => movingSet.has(Number(id))) : propIds;
-                  const propIdxs = filteredIds
+
+                  // Separate note IDs from measure IDs
+                  const noteIdsRdeps = [];
+                  const measureIdsRdeps = [];
+                  for (const id of filteredIds) {
+                    const numId = Number(id);
+                    if (numId === 0) continue; // baseNote handled separately if needed
+                    if (isMeasureNoteIdRdeps(numId)) {
+                      measureIdsRdeps.push(numId);
+                    } else {
+                      noteIdsRdeps.push(numId);
+                    }
+                  }
+
+                  // Add note endpoints
+                  const propIdxs = noteIdsRdeps
                     .map(id => this._noteIdToIndex.get(Number(id)))
                     .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
                   appendNoteIdxEndpoints(propIdxs, rdepsListByProp[prop], rdepsFlagsByProp[prop]);
+
+                  // Add measure endpoints
+                  appendMeasureIdEndpoints(measureIdsRdeps, rdepsListByProp[prop], rdepsFlagsByProp[prop]);
                 }
               } else if (mref && typeof mref.getDependentNotes === 'function') {
                 // Fallback: put all in startTime (teal) for backwards compatibility
