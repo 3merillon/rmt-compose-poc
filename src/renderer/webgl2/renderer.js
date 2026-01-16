@@ -230,6 +230,20 @@ export class RendererAdapter {
     // Base highlight flags for dependency sets (when selected entity is measure/note)
     this._relDepsHasBase = false;
     this._relRdepsHasBase = false;
+
+    // PERFORMANCE: Cache dependency highlight data per selected note to avoid recomputation
+    // Invalidated when module structure changes or selection changes
+    this._depHighlightCache = {
+      noteId: null,                // cached selectedNoteId
+      deps: null,                  // raw dependency IDs
+      rdeps: null,                 // raw dependent IDs
+      depIdx: null,                // index array for deps
+      rdepIdx: null,               // index array for rdeps
+      depMeasureIds: null,         // measure IDs in deps
+      rdepMeasureIds: null,        // measure IDs in rdeps
+      depsHasBase: false,
+      rdepsHasBase: false
+    };
   }
 
   // Update configuration at runtime. Merges partial into current and normalizes; triggers redraw.
@@ -531,20 +545,22 @@ export class RendererAdapter {
       }
     }
 
-    // Reorder to draw selected last (on top) - always reallocate when sorting for consistency
-    let needsReallocation = false;
+    // PERFORMANCE: Instead of O(n log n) sort, use O(1) swap to move selected note to end
+    // This avoids full buffer reallocation on every selection change
     if (selectedNoteId != null) {
-      items.sort((a, b) => {
-        const aSel = (a.id === selectedNoteId) ? 1 : 0;
-        const bSel = (b.id === selectedNoteId) ? 1 : 0;
-        return aSel - bSel;
-      });
-      needsReallocation = true; // Always reallocate when sorting to ensure clean state
+      const selIdx = items.findIndex(it => it.id === selectedNoteId);
+      if (selIdx >= 0 && selIdx < items.length - 1) {
+        // Swap selected item with the last item (O(1) instead of O(n log n) sort)
+        const lastIdx = items.length - 1;
+        const temp = items[lastIdx];
+        items[lastIdx] = items[selIdx];
+        items[selIdx] = temp;
+      }
     }
 
-    // Allocate/resize typed arrays - always reallocate when needed for consistency
+    // Allocate/resize typed arrays only when count changes
     const N = items.length;
-    if (!this.posSize || this.posSize.length !== N * 4 || needsReallocation) {
+    if (!this.posSize || this.posSize.length !== N * 4) {
       this.posSize = new Float32Array(N * 4);
       this.colors  = new Float32Array(N * 4);
       // Use Int32 to avoid precision loss for large numeric IDs (prevents wrong highlight/pick)
@@ -589,13 +605,72 @@ export class RendererAdapter {
     } catch {}
 
     // Compute related highlight index sets from module when a note is selected
+    // PERFORMANCE: Use cached dependency data when selection hasn't changed
     try {
       if (selectedNoteId != null && module && typeof module.getDirectDependencies === 'function' && this._noteIdToIndex) {
         const selIdNum = Number(selectedNoteId);
-        const depsRaw = module.getDirectDependencies(selIdNum);
-        const rdepsRaw = (typeof module.getDependentNotes === 'function') ? module.getDependentNotes(selIdNum) : [];
-        const deps = Array.isArray(depsRaw) ? depsRaw : [];
-        const rdeps = Array.isArray(rdepsRaw) ? rdepsRaw : [];
+        const cache = this._depHighlightCache;
+
+        // Check if we can reuse cached dependency data (same selection AND same posEpoch)
+        // posEpoch changes when module data is modified (e.g., after drop), so we must recompute
+        let deps, rdeps;
+        if (cache.noteId === selIdNum && cache.deps && cache.rdeps && cache.posEpoch === this._posEpoch) {
+          // Reuse cached raw dependency arrays
+          deps = cache.deps;
+          rdeps = cache.rdeps;
+          // Also reuse measure IDs and base flags (these don't change with reordering)
+          this._relDepsMeasureIds = cache.depMeasureIds;
+          this._relRdepsMeasureIds = cache.rdepMeasureIds;
+          this._relDepsHasBase = cache.depsHasBase;
+          this._relRdepsHasBase = cache.rdepsHasBase;
+        } else {
+          // Selection changed - compute and cache dependency data
+          const depsRaw = module.getDirectDependencies(selIdNum);
+          const rdepsRaw = (typeof module.getDependentNotes === 'function') ? module.getDependentNotes(selIdNum) : [];
+          deps = Array.isArray(depsRaw) ? depsRaw : [];
+          rdeps = Array.isArray(rdepsRaw) ? rdepsRaw : [];
+
+          // Compute measure IDs and base flags
+          const depMeasureIds = [];
+          const rdepMeasureIds = [];
+          let depsHasBase = false;
+          let rdepsHasBase = false;
+
+          const isMeasureNote = (id) => {
+            try {
+              const n = module.getNoteById(Number(id));
+              return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+            } catch { return false; }
+          };
+
+          for (let k = 0; k < deps.length; k++) {
+            const id = Number(deps[k]);
+            if (id === 0) { depsHasBase = true; continue; }
+            if (isMeasureNote(id)) depMeasureIds.push(id);
+          }
+          for (let k = 0; k < rdeps.length; k++) {
+            const id = Number(rdeps[k]);
+            if (id === 0) { rdepsHasBase = true; continue; }
+            if (isMeasureNote(id)) rdepMeasureIds.push(id);
+          }
+
+          // Cache the computed data (including posEpoch for invalidation)
+          cache.noteId = selIdNum;
+          cache.posEpoch = this._posEpoch;
+          cache.deps = deps;
+          cache.rdeps = rdeps;
+          cache.depMeasureIds = Array.from(new Set(depMeasureIds));
+          cache.rdepMeasureIds = Array.from(new Set(rdepMeasureIds));
+          cache.depsHasBase = depsHasBase;
+          cache.rdepsHasBase = rdepsHasBase;
+
+          this._relDepsMeasureIds = cache.depMeasureIds;
+          this._relRdepsMeasureIds = cache.rdepMeasureIds;
+          this._relDepsHasBase = depsHasBase;
+          this._relRdepsHasBase = rdepsHasBase;
+        }
+
+        // Always recompute indices (they depend on current buffer ordering)
         const toIdx = (id) => {
           const idx = this._noteIdToIndex.get(Number(id));
           return (idx != null && idx >= 0 && idx < N) ? idx : null;
@@ -613,38 +688,6 @@ export class RendererAdapter {
         }
         this._relDepsIdx = Array.from(depSet);
         this._relRdepsIdx = Array.from(rdepSet);
-
-        // Collect related measure IDs and base flags
-        try {
-          this._relDepsMeasureIds = [];
-          this._relRdepsMeasureIds = [];
-          this._relDepsHasBase = false;
-          this._relRdepsHasBase = false;
-
-          const isMeasureNote = (id) => {
-            try {
-              const n = module.getNoteById(Number(id));
-              return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
-            } catch { return false; }
-          };
-
-          if (Array.isArray(deps)) {
-            for (let k = 0; k < deps.length; k++) {
-              const id = Number(deps[k]);
-              if (id === 0) { this._relDepsHasBase = true; continue; }
-              if (isMeasureNote(id)) this._relDepsMeasureIds.push(id);
-            }
-          }
-          if (Array.isArray(rdeps)) {
-            for (let k = 0; k < rdeps.length; k++) {
-              const id = Number(rdeps[k]);
-              if (id === 0) { this._relRdepsHasBase = true; continue; }
-              if (isMeasureNote(id)) this._relRdepsMeasureIds.push(id);
-            }
-          }
-          if (this._relDepsMeasureIds) this._relDepsMeasureIds = Array.from(new Set(this._relDepsMeasureIds));
-          if (this._relRdepsMeasureIds) this._relRdepsMeasureIds = Array.from(new Set(this._relRdepsMeasureIds));
-        } catch {}
       } else {
         this._relDepsIdx = null;
         this._relRdepsIdx = null;
@@ -652,6 +695,8 @@ export class RendererAdapter {
         this._relRdepsMeasureIds = null;
         this._relDepsHasBase = false;
         this._relRdepsHasBase = false;
+        // Clear cache when no selection
+        this._depHighlightCache.noteId = null;
       }
     } catch { this._relDepsIdx = null; this._relRdepsIdx = null; }
  
@@ -781,7 +826,9 @@ export class RendererAdapter {
     this._lastNoteFracDenStrs = this._noteFracDenStrs;
 
     // Rebuild glyph runs only when necessary; viewport changes are handled by _lastTextViewEpoch gating in _render()
-    this._textDirty = contentChanged || selChanged || (this.instanceCount !== this._lastInstanceCount);
+    // PERFORMANCE: Selection change doesn't affect text content (fractions, "silence"), only ring/highlights
+    // so we don't mark text dirty for selection changes - just need redraw for the visual updates
+    this._textDirty = contentChanged || (this.instanceCount !== this._lastInstanceCount);
     this._lastInstanceCount = this.instanceCount;
 
     this.needsRedraw = true;
@@ -3693,14 +3740,18 @@ export class RendererAdapter {
           n?.variables?.startTime && !n?.variables?.duration && !n?.variables?.frequency
         );
         if (measureNotes.length > 0) {
-          measureNotes.sort(
-            (a, b) =>
-              a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf()
-          );
+          measureNotes.sort((a, b) => {
+            const aStart = a.getVariable('startTime');
+            const bStart = b.getVariable('startTime');
+            if (!aStart || !bStart) return 0;
+            return aStart.valueOf() - bStart.valueOf();
+          });
           const lastMeasure = measureNotes[measureNotes.length - 1];
           const st = lastMeasure.getVariable('startTime');
-          const ml = module.findMeasureLength(lastMeasure);
-          measureEnd = st.add(ml).valueOf();
+          if (st) {
+            const ml = module.findMeasureLength(lastMeasure);
+            measureEnd = st.add(ml).valueOf();
+          }
         }
       } catch {}
       let lastNoteEnd = 0;
@@ -4900,6 +4951,12 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       gl.bindVertexArray(this.measureTriVAO);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, arrSel, gl.DYNAMIC_DRAW);
+      // Upload zero drag flag for single-instance draw to avoid double-offset
+      // (shader adds both a_dragFlag and u_dragMask; we use u_dragMask for single draws)
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriDragFlagBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0.0]), gl.DYNAMIC_DRAW);
+      // Invalidate flags cache so next frame re-uploads full flags array
+      this._lastTriFlagsKey = null;
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 1);
       gl.bindVertexArray(null);
     }
@@ -4940,6 +4997,12 @@ try {
       gl.bindVertexArray(this.measureTriVAO);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+      // Upload zero drag flag for single-instance draw to avoid double-offset
+      // (shader adds both a_dragFlag and u_dragMask; we use u_dragMask for single draws)
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriDragFlagBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0.0]), gl.DYNAMIC_DRAW);
+      // Invalidate flags cache so next frame re-uploads full flags array
+      this._lastTriFlagsKey = null;
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 1);
       gl.bindVertexArray(null);
     };
@@ -4947,12 +5010,29 @@ try {
     const idToIdx = this._measureTriIdToIndex || null;
 
     // Dependencies: teal
-    if (this._lastSelectedNoteId !== 0 && this._relDepsMeasureIds && this._relDepsMeasureIds.length) {
+    // During drag, use prospective parent if set (overrides actual dependencies)
+    if (this._lastSelectedNoteId !== 0) {
+      const prospPid = this._prospectiveParentId;
+      const prospectiveIsMeasure = (prospPid != null && prospPid !== 0 && idToIdx && idToIdx.has(Number(prospPid)));
+      const prospectiveIsBase = (prospPid === 0);
+
+      if (this._dragActive && prospPid != null) {
+        // During drag with a prospective parent:
+        // - If prospective is a measure: draw teal outline on it
+        // - If prospective is BaseNote (0): draw nothing (no teal measure outline)
+        if (prospectiveIsMeasure) {
+          const idx = idToIdx.get(Number(prospPid));
+          drawTriOutlineAtIndex(idx, [0.0, 1.0, 1.0, 0.9], this.measureTriPosSizeOutline);
+        }
+        // else: prospective is BaseNote, don't draw any teal measure outline
+      } else if (this._relDepsMeasureIds && this._relDepsMeasureIds.length) {
+        // Normal case (not dragging or no prospective): draw actual dependencies
         for (let i = 0; i < this._relDepsMeasureIds.length; i++) {
             const id = Number(this._relDepsMeasureIds[i]);
             const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
             drawTriOutlineAtIndex(idx, [0.0, 1.0, 1.0, 0.9], this.measureTriPosSizeOutline);
         }
+      }
     }
     // Dependents: neon deep purple
     if (this._lastSelectedNoteId !== 0 && this._relRdepsMeasureIds && this._relRdepsMeasureIds.length) {
@@ -8467,16 +8547,23 @@ try {
                 // Avoid degenerate self-parent case (e.g., while dragging a measure, candidate resolves to the same measure)
                 // Falling back to the default dependency rendering preserves a visible parent link.
                 if (Number(pid) === Number(anchorId)) return null;
-                // Suppress BaseNote link when dragging a measure triangle if that measure does not directly reference BaseNote.
-                // Only allow BaseNote parent line for measures whose startTimeString references module.baseNote (e.g., first in chain).
+                // When pid === 0 (BaseNote) during an active drag, always show the BaseNote link.
+                // The prospective parent computation has determined that dropping here will anchor to BaseNote,
+                // so the preview should show that link regardless of the measure's current startTimeString.
+                // Only suppress BaseNote link when NOT actively dragging and measure doesn't reference BaseNote.
                 try {
                   if (pid === 0) {
-                    const mod = this._moduleRef;
-                    const n = mod?.getNoteById?.(Number(anchorId));
-                    const isMeasure = !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
-                    const s = n?.variables?.startTimeString || '';
-                    const refsBase = /module\.baseNote/.test(s);
-                    if (isMeasure && !refsBase) return null;
+                    const isActiveDrag = !!(this._dragActive && this._dragOverlay);
+                    if (!isActiveDrag) {
+                      // Not dragging - use existing logic to only show BaseNote link if measure references it
+                      const mod = this._moduleRef;
+                      const n = mod?.getNoteById?.(Number(anchorId));
+                      const isMeasure = !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                      const s = n?.variables?.startTimeString || '';
+                      const refsBase = /module\.baseNote/.test(s);
+                      if (isMeasure && !refsBase) return null;
+                    }
+                    // If actively dragging and pid === 0, allow the BaseNote link to show (preview what will happen on drop)
                   }
                 } catch {}
 
