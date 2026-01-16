@@ -38,6 +38,25 @@ The app uses a **binary bytecode compilation system** for expression evaluation:
   - Crisp fraction labels and instanced rounded rectangles
   - Octave guides and BaseNote indicator
   - GPU/CPU picking for notes, measures, and BaseNote
+  - Property-colored dependency visualization (see below)
+
+## Dependency Visualization Colors
+
+When a note or measure is selected, dependency lines show which notes are connected. Each property type has a distinct color:
+
+| Property   | Color  | Meaning |
+|------------|--------|---------|
+| Frequency  | Orange | Notes whose frequency expression references the selected note |
+| StartTime  | Teal   | Notes whose start time expression references the selected note |
+| Duration   | Purple | Notes whose duration expression references the selected note |
+
+**Visual distinctions:**
+- **Dependencies** (what the selected note depends on): brighter, thicker lines
+- **Dependents** (what depends on the selected note): dimmer, thinner lines
+
+**During drag operations:**
+- StartTime links remain fully visible (these notes will move)
+- Frequency and Duration links dim significantly (these properties don't affect position)
 
 - Playback and audio
   - Web Audio-based engine, with shared nodes and graceful pause/stop
@@ -55,7 +74,7 @@ The app uses a **binary bytecode compilation system** for expression evaluation:
 
 - Node.js 18+
 - A modern browser with WebGL2 enabled
-- (Optional) Rust toolchain for WASM builds
+- (Optional) Rust toolchain with `wasm-pack` for WASM builds
 
 ## Quick Start
 
@@ -75,13 +94,40 @@ npm run build
 npm run preview
 ```
 
-### WASM Build (Optional)
+### Rust/WASM Core (Optional)
 
-To build the Rust/WASM core for enhanced performance:
+The app includes an optional Rust/WASM core (`rmt-core`) for high-performance expression evaluation. The JavaScript implementation works standalone, but WASM provides faster evaluation for complex modules.
+
+**Prerequisites:**
+- Install Rust: https://rustup.rs/
+- Install wasm-pack: `cargo install wasm-pack`
+
+**Build commands:**
 
 ```bash
-npm run build:wasm
+# Build WASM (release mode)
+npm run wasm:build
+
+# Build WASM (debug mode, faster compilation)
+npm run wasm:dev
+
+# Run Rust tests in headless browser
+npm run wasm:test
+
+# Clean WASM artifacts
+npm run wasm:clean
+
+# Dev server with WASM
+npm run dev:wasm
 ```
+
+**Rust crate structure (`rust/`):**
+- `src/lib.rs` - WASM entry point and module exports
+- `src/fraction.rs` - Arbitrary-precision rational arithmetic
+- `src/bytecode.rs` - Opcode definitions matching JavaScript
+- `src/evaluator.rs` - Stack-based bytecode interpreter
+- `src/compiler.rs` - Expression text to bytecode compiler
+- `src/graph.rs` - Dependency graph algorithms (BFS, topological sort)
 
 ## Controls and Workflow
 
@@ -145,8 +191,18 @@ Notes:
 - src/player/audio-engine.js - Audio graph and playback controls
 
 ### WASM Core (Optional)
-- rust/ - Rust implementation for high-performance evaluation
-- src/wasm/ - JavaScript adapters for WASM integration
+- rust/src/lib.rs - WASM entry point with panic hooks
+- rust/src/fraction.rs - Arbitrary-precision Fraction type (num-rational based)
+- rust/src/bytecode.rs - Opcode enum matching JavaScript OP constants
+- rust/src/evaluator.rs - Stack VM with Fraction pooling
+- rust/src/compiler.rs - Expression parser and bytecode emitter
+- rust/src/graph.rs - Dependency graph with BFS traversal
+- src/wasm/index.js - WASM loader with graceful fallback
+- src/wasm/config.js - Feature flags and WASM availability detection
+- src/wasm/evaluator-adapter.js - JS/WASM evaluator bridge
+- src/wasm/fraction-adapter.js - JS/WASM fraction bridge
+- src/wasm/compiler-adapter.js - JS/WASM compiler bridge
+- src/wasm/graph-adapter.js - JS/WASM graph bridge
 
 ### Assets
 - public/modules - Bundled example modules and presets
