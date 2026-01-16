@@ -19,3 +19,13 @@ Thumbs.db
 # Logs
 *.log
 npm-debug.log*
+
+# Claude Code
+.claude/
+
+# Rust build artifacts (keep Cargo.lock for reproducible builds)
+rust/target/
+rust/pkg/
+
+# Rust debug files
+*.pdb

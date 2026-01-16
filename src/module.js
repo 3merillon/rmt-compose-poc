@@ -1,530 +1,854 @@
 import Fraction from 'fraction.js';
 import { Note } from './note.js';
+import { DependencyGraph } from './dependency-graph.js';
+import { createEvaluator, createIncrementalEvaluator } from './wasm/evaluator-adapter.js';
+import { compiler, decompiler } from './expression-compiler.js';
 
 let memoizedModuleEndTime = null;
 let moduleLastModifiedTime = 0;
 
 export function invalidateModuleEndTimeCache() {
-    memoizedModuleEndTime = null;
-    moduleLastModifiedTime = Date.now();
+  memoizedModuleEndTime = null;
+  moduleLastModifiedTime = Date.now();
 }
 
-
+/**
+ * Module class - Binary-native implementation
+ *
+ * All expression evaluation is done through the binary evaluator.
+ * No Function-based evaluation or *String dual storage.
+ */
 export class Module {
-    constructor(baseNoteVariables = {}) {
-        this.notes = {};
-        this.nextId = 1;
-        this._evaluationCache = {};
-        this._lastEvaluationTime = 0;
-        this._dirtyNotes = new Set();
-        this._dependenciesCache = new Map();
-        this._dependentsCache = new Map();
+  constructor(baseNoteVariables = {}) {
+    this.notes = {};
+    this.nextId = 1;
 
-        const defaultBaseNoteVariables = {
-            frequency: () => new Fraction(440),
-            startTime: () => new Fraction(0),
-            tempo: () => new Fraction(60),
-            beatsPerMeasure: () => new Fraction(4),
-            instrument: 'sine-wave',
-            measureLength: () => {
-                const tempo = this.getNoteById(0).getVariable('tempo');
-                const beatsPerMeasure = this.getNoteById(0).getVariable('beatsPerMeasure');
-                return beatsPerMeasure.div(tempo).mul(60);
-            },
-        };
+    // Binary evaluation infrastructure
+    // Uses WASM evaluator when available, falls back to JS automatically
+    this._dependencyGraph = new DependencyGraph();
+    this._binaryEvaluator = createEvaluator(this);
+    this._incrementalEvaluator = createIncrementalEvaluator(
+      this, // Module reference (we use notes Map interface)
+      this._dependencyGraph,
+      this._binaryEvaluator
+    );
 
-        const finalBaseNoteVariables = { ...defaultBaseNoteVariables, ...baseNoteVariables };
-        this.baseNote = new Note(0, finalBaseNoteVariables);
-        this.baseNote.module = this;
-        this.notes[0] = this.baseNote;
-    }
-    
-    markNoteDirty(noteId) {
-        this._dirtyNotes.add(Number(noteId));
-        this._dependenciesCache.delete(Number(noteId));
-        this._dependentsCache.clear();
-        const dependents = this.getDependentNotes(Number(noteId));
-        dependents.forEach(depId => this._dirtyNotes.add(Number(depId)));
-    }
+    // Evaluation cache (Map<noteId, {startTime, duration, ...}>)
+    this._evaluationCache = new Map();
+    this._dirtyNotes = new Set();
 
-    getDirectDependencies(noteId) {
-        if (this._dependenciesCache.has(noteId)) return this._dependenciesCache.get(noteId);
-        
-        const note = this.getNoteById(noteId);
-        if (!note || !note.variables) return [];
-        
-        const dependencies = new Set();
-        
-        if (this._explicitDependencies && this._explicitDependencies.has(noteId)) {
-            const explicitDeps = this._explicitDependencies.get(noteId);
-            explicitDeps.forEach(depId => dependencies.add(depId));
-        }
-        
-        function findReferences(expr) {
-            const regex = /getNoteById\((\d+)\)/g;
-            const references = new Set();
-            let match;
-            while ((match = regex.exec(expr)) !== null) {
-                references.add(parseInt(match[1]));
-            }
-            return references;
-        }
-        
-        for (const [key, value] of Object.entries(note.variables)) {
-            if (typeof value === 'function') {
-                const funcString = value.toString();
-                const refs = findReferences(funcString);
-                refs.forEach(ref => dependencies.add(ref));
-            } else if (key.endsWith('String')) {
-                const refs = findReferences(value);
-                refs.forEach(ref => dependencies.add(ref));
-            }
-        }
-        
-        const result = Array.from(dependencies);
-        this._dependenciesCache.set(noteId, result);
-        return result;
-    }
+    // Create base note with default values
+    const defaultBaseNoteVariables = {
+      frequency: 'new Fraction(440)',
+      startTime: 'new Fraction(0)',
+      tempo: 'new Fraction(60)',
+      beatsPerMeasure: 'new Fraction(4)',
+      instrument: 'sine-wave',
+      measureLength: "new Fraction(60).div(module.findTempo(module.baseNote)).mul(module.baseNote.getVariable('beatsPerMeasure'))",
+    };
 
-    getDependentNotes(noteId) {
-        if (noteId == null) return [];
-        if (this._dependentsCache.has(noteId)) return this._dependentsCache.get(noteId);
-        
-        const dependents = new Set();
-        const visited = new Set();
-        
-        const checkDependencies = (id) => {
-            if (visited.has(id)) return;
-            visited.add(id);
-            
-            for (const [checkId, note] of Object.entries(this.notes)) {
-                if (!note) continue;
-                if (checkId !== String(id)) {
-                    let deps;
-                    if (this._dependenciesCache.has(Number(checkId))) {
-                        deps = this._dependenciesCache.get(Number(checkId));
-                    } else {
-                        deps = this.getDirectDependencies(Number(checkId));
-                    }
-                    
-                    if (deps.includes(id)) {
-                        dependents.add(Number(checkId));
-                        checkDependencies(Number(checkId));
-                    }
-                }
-            }
-        };
-        
-        checkDependencies(noteId);
-        const result = Array.from(dependents);
-        this._dependentsCache.set(noteId, result);
-        return result;
-    }
-
-    addNote(variables = {}) {
-        const id = this.nextId++;
-        const note = new Note(id, variables);
-        note.module = this;
-        this.notes[id] = note;
-        this.markNoteDirty(id);
-        invalidateModuleEndTimeCache();
-        return note;
-    }
-    
-    removeNote(id) {
-        delete this.notes[id];
-        delete this._evaluationCache[id];
-        this.markNoteDirty(id);
-        invalidateModuleEndTimeCache();
-    }
-
-    getNoteById(id) {
-        return this.notes[id];
-    }
-
-    evaluateModule() {
-        const currentTime = Date.now();
-        
-        if (this._dirtyNotes.size === 0 && 
-            Object.keys(this._evaluationCache).length > 0 && 
-            this._lastEvaluationTime > 0) {
-            return { ...this._evaluationCache };
-        }
-        
-        const evaluatedNotes = { ...this._evaluationCache };
-        const notesToEvaluate = this._dirtyNotes.size > 0 
-            ? [...this._dirtyNotes] 
-            : Object.keys(this.notes).map(id => parseInt(id, 10));
-        
-        notesToEvaluate.forEach(id => {
-            const note = this.notes[id];
-            if (note) {
-                evaluatedNotes[id] = note.getAllVariables();
-            } else {
-                delete evaluatedNotes[id];
-            }
-        });
-        
-        this._evaluationCache = { ...evaluatedNotes };
-        this._lastEvaluationTime = currentTime;
-        this._dirtyNotes.clear();
-        
-        return evaluatedNotes;
-    }
-
-    findMeasureLength(note) {
-        this._trackDependency(note.id, 0);
-        const tempo = this.findTempo(note);
-
-        // Prefer per-note beatsPerMeasure. Otherwise, inherit only from non-measure ancestors; fallback to BaseNote.
-        let beatsPerMeasure = null;
+    // Merge defaults with provided variables (convert functions to strings if needed)
+    const finalVars = { ...defaultBaseNoteVariables };
+    for (const [key, value] of Object.entries(baseNoteVariables)) {
+      if (key === 'color' || key === 'instrument') {
+        finalVars[key] = value;
+      } else if (key.endsWith('String')) {
+        // Use the string value directly
+        const baseName = key.slice(0, -6);
+        finalVars[baseName] = value;
+      } else if (typeof value === 'string') {
+        finalVars[key] = value;
+      } else if (typeof value === 'function') {
+        // Try to extract expression from function
         try {
-            const isMeasure = (n) => {
-                try { return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency); }
-                catch { return false; }
-            };
-
-            // Direct per-note override
-            if (note && note.variables && (note.variables.beatsPerMeasure || note.variables.beatsPerMeasureString)) {
-                beatsPerMeasure = note.getVariable('beatsPerMeasure');
-            } else {
-                // Walk up ancestry but skip measure ancestors to avoid cross-measure inheritance
-                let cur = note;
-                while (cur && cur.id !== 0) {
-                    cur = this.getNoteById(cur.parentId);
-                    if (!cur) break;
-                    if (cur.variables && (cur.variables.beatsPerMeasure || cur.variables.beatsPerMeasureString)) {
-                        if (!isMeasure(cur)) {
-                            beatsPerMeasure = cur.getVariable('beatsPerMeasure');
-                            break;
-                        }
-                    }
-                }
-                if (!beatsPerMeasure) {
-                    beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
-                }
-            }
-        } catch {
-            beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
-        }
-
-        return beatsPerMeasure.div(tempo).mul(60);
-    }
-
-    findTempo(note) {
-        this._trackDependency(note.id, 0);
-        while (note) {
-            if (note.variables.tempo) return note.getVariable('tempo');
-            note = this.getNoteById(note.parentId);
-        }
-        return this.baseNote.getVariable('tempo');
-    }
-
-    findInstrument(note) {
-        this._trackDependency(note.id, 0);
-        if (!note.variables.frequency && !note.getVariable('frequency')) return 'sine-wave';
-        if (note.variables.instrument !== undefined) return note.getVariable('instrument');
-        
-        let currentNote = note;
-        const freqString = currentNote.variables.frequencyString;
-        if (freqString) {
-            const noteRefMatch = freqString.match(/module\.getNoteById\((\d+)\)\.getVariable\('frequency'\)/);
-            if (noteRefMatch) {
-                const parentId = parseInt(noteRefMatch[1], 10);
-                const parentNote = this.getNoteById(parentId);
-                if (parentNote) return this.findInstrument(parentNote);
-            }
-            
-            if (freqString.includes("module.baseNote.getVariable('frequency')")) {
-                return this.findInstrument(this.baseNote);
-            }
-        }
-        
-        return 'sine-wave';
-    }
-
-    _trackDependency(noteId, dependencyId) {
-        if (noteId == null) return;
-        if (!this._explicitDependencies) this._explicitDependencies = new Map();
-        if (!this._explicitDependencies.has(noteId)) this._explicitDependencies.set(noteId, new Set());
-        this._explicitDependencies.get(noteId).add(dependencyId);
-    }
-
-    generateMeasures(fromNote, n) {
-        const notesArray = [];
-        for (let i = 0; i < n; i++) {
-          const prevNote = (i === 0) ? fromNote : this.getNoteById(notesArray[i - 1].id);
-          const measureLength = this.findMeasureLength(prevNote);
-          
-          const newStartTimeFunction = () => {
-            if (i === 0) {
-              return prevNote.getVariable('startTime').add(measureLength);
-            } else {
-              const prevStartTime = notesArray[i - 1].getVariable('startTime');
-              return prevStartTime.add(measureLength);
-            }
-          };
-      
-          let rawString;
-          if (prevNote.id === 0) {
-            rawString = "module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))";
-          } else {
-            rawString = `module.getNoteById(${prevNote.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevNote.id})))`;
+          const funcStr = value.toString();
+          const match = funcStr.match(/return\s+(.+?);?\s*\}?\s*$/);
+          if (match) {
+            finalVars[key] = match[1];
           }
-      
-          const newNote = this.addNote({
-            startTime: newStartTimeFunction,
-            startTimeString: rawString
-          });
-          newNote.parentId = prevNote.id;
-          notesArray.push(newNote);
+        } catch (e) {
+          // Keep default
         }
-        return notesArray;
+      }
     }
 
-    static async loadFromJSON(source) {
-        let data;
-        
-        if (typeof source === 'string') {
-            const response = await fetch(source);
-            data = await response.json();
-        } else {
-            data = source;
+    this.baseNote = new Note(0, finalVars);
+    this.baseNote.module = this;
+    this.notes[0] = this.baseNote;
+
+    // Register base note in dependency graph
+    this._registerNoteDependencies(this.baseNote);
+
+    // Mark all dirty for initial evaluation
+    this._dirtyNotes.add(0);
+  }
+
+  /**
+   * Register a note's dependencies in the graph
+   */
+  _registerNoteDependencies(note) {
+    const allDeps = note.getAllDependencies();
+    const refsBase = note.referencesBaseNote();
+    this._dependencyGraph._updateDependencies(note.id, allDeps, refsBase);
+
+    // Also register startTime-specific dependencies for drag preview
+    const startTimeExpr = note.getExpression('startTime');
+    this._dependencyGraph.registerStartTimeDependencies(note.id, startTimeExpr);
+
+    // Register frequency-specific dependencies for property-colored visualization
+    const freqExpr = note.getExpression('frequency');
+    this._dependencyGraph.registerFrequencyDependencies(note.id, freqExpr);
+
+    // Register duration-specific dependencies for property-colored visualization
+    const durExpr = note.getExpression('duration');
+    this._dependencyGraph.registerDurationDependencies(note.id, durExpr);
+  }
+
+  /**
+   * Mark a note as dirty (needs re-evaluation)
+   */
+  markNoteDirty(noteId) {
+    const numId = Number(noteId);
+    this._dirtyNotes.add(numId);
+
+    // Update dependency graph for this note
+    const note = this.getNoteById(numId);
+    if (note) {
+      this._registerNoteDependencies(note);
+    }
+
+    // Invalidate incremental evaluator (this note's bytecode may have changed)
+    if (this._incrementalEvaluator) {
+      this._incrementalEvaluator.invalidate(numId);
+    }
+
+    // Also mark dependents as dirty (but don't invalidate - their bytecode hasn't changed)
+    const dependents = this._dependencyGraph.getAllDependents(numId);
+    for (const depId of dependents) {
+      this._dirtyNotes.add(depId);
+      // Use markDirtyOnly for dependents - they need re-evaluation but not re-registration
+      if (this._incrementalEvaluator && typeof this._incrementalEvaluator.markDirtyOnly === 'function') {
+        this._incrementalEvaluator.markDirtyOnly(depId);
+      }
+    }
+
+    // If this is the base note (0), also mark all baseNoteDependents as dirty
+    // These are notes that reference baseNote via module.baseNote, findTempo, findMeasureLength
+    if (numId === 0) {
+      const baseNoteDeps = this._dependencyGraph.getBaseNoteDependents();
+      for (const depId of baseNoteDeps) {
+        this._dirtyNotes.add(depId);
+        if (this._incrementalEvaluator && typeof this._incrementalEvaluator.markDirtyOnly === 'function') {
+          this._incrementalEvaluator.markDirtyOnly(depId);
         }
-        
-        const baseNoteVariables = {
-            frequency: () => (new Function("module", "Fraction", "getNoteById", "return " + data.baseNote.frequency + ";"))(null, Fraction, null),
-            frequencyString: data.baseNote.frequency,
-            startTime: () => (new Function("module", "Fraction", "getNoteById", "return " + data.baseNote.startTime + ";"))(null, Fraction, null),
-            startTimeString: data.baseNote.startTime,
-            tempo: () => (new Function("module", "Fraction", "getNoteById", "return " + data.baseNote.tempo + ";"))(null, Fraction, null),
-            tempoString: data.baseNote.tempo,
-            beatsPerMeasure: () => (new Function("module", "Fraction", "getNoteById", "return " + data.baseNote.beatsPerMeasure + ";"))(null, Fraction, null),
-            beatsPerMeasureString: data.baseNote.beatsPerMeasure,
-            instrument: data.baseNote.instrument || 'sine-wave'
-        };
-    
-        const moduleInstance = new Module(baseNoteVariables);
-        
-        data.notes.forEach((noteData) => {
-            const variables = {};
-            const noteId = parseInt(noteData.id);
-            
-            Object.entries(noteData).forEach(([key, value]) => {
-                if (key !== 'id') {
-                    if (key === 'color' || key === 'instrument') {
-                        variables[key] = value;
-                    } else if (typeof value === "string" && (value.includes('module.') || value.includes('new Fraction') || value.includes('eval(') || value.includes('getNoteById'))) {
-                        const func = new Function("module", "Fraction", "getNoteById", "return " + value + ";");
-                        variables[key] = function() {
-                            return func(moduleInstance, Fraction, moduleInstance.getNoteById.bind(moduleInstance));
-                        };
-                        variables[key + 'String'] = value;
-                    } else {
-                        variables[key] = value;
-                    }
-                }
-            });
-            
-            if (!isNaN(noteId)) {
-                const note = new Note(noteId, variables);
-                note.module = moduleInstance;
-                moduleInstance.notes[noteId] = note;
-                if (noteId >= moduleInstance.nextId) {
-                    moduleInstance.nextId = noteId + 1;
-                }
-            } else {
-                moduleInstance.addNote(variables);
-            }
-        });
-        
-        moduleInstance.baseNote.module = moduleInstance;
-        return moduleInstance;
+      }
+    }
+  }
+
+  /**
+   * Mark multiple notes as dirty in a single batch operation.
+   * More efficient than calling markNoteDirty() repeatedly because it:
+   * 1. Collects all IDs first, then processes dependencies in bulk
+   * 2. Avoids redundant getAllDependents() calls for notes that will be marked anyway
+   * 3. Does a single invalidateAll() on the incremental evaluator at the end
+   *
+   * @param {Iterable<number>} noteIds - IDs of notes to mark dirty
+   */
+  markNotesDirtyBatch(noteIds) {
+    const idsToProcess = new Set();
+    for (const id of noteIds) {
+      idsToProcess.add(Number(id));
     }
 
-    static async loadFromData(data) {
-        const baseNoteVariables = {
-            frequency: () => eval(data.baseNote.frequency),
-            frequencyString: data.baseNote.frequency,
-            startTime: () => eval(data.baseNote.startTime),
-            startTimeString: data.baseNote.startTime,
-            tempo: () => eval(data.baseNote.tempo),
-            tempoString: data.baseNote.tempo,
-            beatsPerMeasure: () => eval(data.baseNote.beatsPerMeasure),
-            beatsPerMeasureString: data.baseNote.beatsPerMeasure
-        };
-    
-        const module = new Module(baseNoteVariables);
-    
-        data.notes.forEach((noteData) => {
-            const variables = {};
-    
-            if (noteData.startTime) {
-                variables.startTime = () => eval(noteData.startTime);
-                variables.startTimeString = noteData.startTime;
-            }
-            if (noteData.duration) {
-                variables.duration = () => eval(noteData.duration);
-                variables.durationString = noteData.duration;
-            }
-            if (noteData.frequency) {
-                variables.frequency = () => eval(noteData.frequency);
-                variables.frequencyString = noteData.frequency;
-            }
-            if (noteData.color) {
-                variables.color = noteData.color;
-            }
-    
-            module.addNote(variables);
-        });
-    
-        return module;
+    // First pass: register dependencies for all notes (updates the graph)
+    for (const numId of idsToProcess) {
+      const note = this.getNoteById(numId);
+      if (note) {
+        this._registerNoteDependencies(note);
+      }
     }
 
-    async exportOrderedModule() {
-        const moduleData = this.createModuleJSON();
-        const tempModule = await Module.loadFromJSON(moduleData);
-        tempModule.reindexModule();
-        return JSON.stringify(tempModule.createModuleJSON(), null, 2);
+    // Second pass: collect all notes that need to be dirty (including dependents)
+    const allDirty = new Set(idsToProcess);
+
+    // Check if base note is being marked - if so, add all base note dependents
+    if (idsToProcess.has(0)) {
+      const baseNoteDeps = this._dependencyGraph.getBaseNoteDependents();
+      for (const depId of baseNoteDeps) {
+        allDirty.add(depId);
+      }
     }
 
-    createModuleJSON() {
-      const moduleObj = {};
-    
-      const baseObj = {};
-      Object.keys(this.baseNote.variables).forEach(key => {
-        if (key.endsWith("String")) {
-          const prop = key.slice(0, -6);
-          baseObj[prop] = this.baseNote.variables[key];
-        } else if (key === "color" || key === "instrument") {
-          baseObj[key] = this.baseNote.variables[key];
+    // For each note, add its dependents (but skip if already in allDirty)
+    for (const numId of idsToProcess) {
+      const dependents = this._dependencyGraph.getAllDependents(numId);
+      for (const depId of dependents) {
+        allDirty.add(depId);
+      }
+    }
+
+    // Add all to dirty set
+    for (const id of allDirty) {
+      this._dirtyNotes.add(id);
+    }
+
+    // Single invalidation of incremental evaluator
+    if (this._incrementalEvaluator) {
+      this._incrementalEvaluator.invalidateAll();
+    }
+  }
+
+  /**
+   * Get direct dependencies of a note (O(1) via dependency graph)
+   */
+  getDirectDependencies(noteId) {
+    const deps = this._dependencyGraph.getDependencies(noteId);
+    return Array.from(deps);
+  }
+
+  /**
+   * Get all notes that depend on this note (O(d) via inverted index)
+   */
+  getDependentNotes(noteId) {
+    const deps = this._dependencyGraph.getAllDependents(noteId);
+    const result = new Set(deps);
+
+    // If this is base note (0), also include baseNoteDependents
+    if (Number(noteId) === 0) {
+      const baseNoteDeps = this._dependencyGraph.getBaseNoteDependents();
+      for (const depId of baseNoteDeps) {
+        result.add(depId);
+      }
+    }
+
+    return Array.from(result);
+  }
+
+  /**
+   * Get dependents categorized by which property of THIS note they reference
+   * Used for property-colored dependency visualization
+   *
+   * The paradigm is:
+   * - Orange (frequency): Notes that would MOVE if I change the selected note's FREQUENCY
+   * - Teal (startTime): Notes that would MOVE if I change the selected note's STARTTIME
+   * - Purple (duration): Notes that would MOVE if I change the selected note's DURATION
+   *
+   * @param {number} noteId
+   * @returns {{ frequency: number[], startTime: number[], duration: number[] }}
+   */
+  getDependentsByProperty(noteId) {
+    const graph = this._dependencyGraph;
+    const numId = Number(noteId);
+
+    // Use the new transitive traversal methods that properly follow all dependency chains
+    // These methods do a BFS that tracks which property changed and propagates through
+    // all dependent properties (startTime, frequency, duration) transitively
+    const frequencyAffected = graph.getAllAffectedByFrequencyChange(numId);
+    const startTimeAffected = graph.getAllAffectedByStartTimeChange(numId);
+    const durationAffected = graph.getAllAffectedByDurationChange(numId);
+
+    return {
+      frequency: Array.from(frequencyAffected),
+      startTime: Array.from(startTimeAffected),
+      duration: Array.from(durationAffected)
+    };
+  }
+
+  /**
+   * Get dependencies categorized by which expression of THIS note references them
+   * Used for property-colored dependency visualization
+   *
+   * @param {number} noteId
+   * @returns {{ frequency: number[], startTime: number[], duration: number[] }}
+   */
+  getDirectDependenciesByProperty(noteId) {
+    const graph = this._dependencyGraph;
+    const numId = Number(noteId);
+    const note = this.getNoteById(numId);
+
+    // Get base arrays from dependency graph
+    const freqArr = Array.from(graph.frequencyDependencies.get(numId) || new Set());
+    const startArr = Array.from(graph.startTimeDependencies.get(numId) || new Set());
+    const durArr = Array.from(graph.durationDependencies.get(numId) || new Set());
+
+    // Include baseNote (0) if the expression references it
+    // The referencesBase flag is tracked separately from the dependencies array
+    if (note) {
+      const freqExpr = note.getExpression('frequency');
+      const startExpr = note.getExpression('startTime');
+      const durExpr = note.getExpression('duration');
+
+      if (freqExpr && freqExpr.referencesBase && !freqArr.includes(0)) {
+        freqArr.push(0);
+      }
+      if (startExpr && startExpr.referencesBase && !startArr.includes(0)) {
+        startArr.push(0);
+      }
+      if (durExpr && durExpr.referencesBase && !durArr.includes(0)) {
+        durArr.push(0);
+      }
+    }
+
+    return {
+      frequency: freqArr,
+      startTime: startArr,
+      duration: durArr
+    };
+  }
+
+  /**
+   * Add a new note
+   */
+  addNote(variables = {}) {
+    const id = this.nextId++;
+    const note = new Note(id, variables);
+    note.module = this;
+    this.notes[id] = note;
+
+    // Register dependencies
+    this._registerNoteDependencies(note);
+
+    // Mark dirty
+    this.markNoteDirty(id);
+    invalidateModuleEndTimeCache();
+
+    return note;
+  }
+
+  /**
+   * Remove a note
+   */
+  removeNote(id) {
+    delete this.notes[id];
+    this._evaluationCache.delete(id);
+    this._dependencyGraph.removeNote(id);
+
+    if (this._incrementalEvaluator) {
+      this._incrementalEvaluator.cache.delete(id);
+    }
+
+    invalidateModuleEndTimeCache();
+  }
+
+  /**
+   * Get a note by ID
+   */
+  getNoteById(id) {
+    return this.notes[id];
+  }
+
+  /**
+   * Evaluate all dirty notes and return the evaluation cache
+   */
+  evaluateModule() {
+    if (this._dirtyNotes.size === 0 && this._evaluationCache.size > 0) {
+      return this._evaluationCache;
+    }
+
+    // Use incremental evaluator
+    const cache = this._incrementalEvaluator.evaluateDirty();
+
+    // Update our cache reference
+    this._evaluationCache = cache;
+    this._dirtyNotes.clear();
+
+    return cache;
+  }
+
+  /**
+   * Get the evaluation cache (for Note.getVariable)
+   */
+  getEvaluationCache() {
+    // Ensure we have evaluated
+    if (this._dirtyNotes.size > 0) {
+      this.evaluateModule();
+    }
+    return this._evaluationCache;
+  }
+
+  /**
+   * Evaluate a specific note's variable (for on-demand evaluation)
+   */
+  evaluateNoteVariable(noteId, varName) {
+    // Ensure evaluation is up to date
+    const cache = this.getEvaluationCache();
+    const noteCache = cache.get(noteId);
+    if (noteCache && noteCache[varName] !== undefined) {
+      return noteCache[varName];
+    }
+    return null;
+  }
+
+  /**
+   * Find tempo for a note (walks inheritance chain)
+   */
+  findTempo(note) {
+    if (!note) return this.baseNote.getVariable('tempo') || new Fraction(60);
+
+    let current = note;
+    while (current) {
+      if (current.hasExpression('tempo')) {
+        return current.getVariable('tempo');
+      }
+      current = current.parentId !== undefined ? this.getNoteById(current.parentId) : null;
+    }
+    return this.baseNote.getVariable('tempo') || new Fraction(60);
+  }
+
+  /**
+   * Find measure length for a note
+   */
+  findMeasureLength(note) {
+    const tempo = this.findTempo(note);
+
+    // Find beatsPerMeasure
+    let beatsPerMeasure = null;
+    const isMeasure = (n) => {
+      try {
+        return !!(n && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
+      } catch {
+        return false;
+      }
+    };
+
+    // Check direct per-note override
+    if (note && note.hasExpression('beatsPerMeasure')) {
+      beatsPerMeasure = note.getVariable('beatsPerMeasure');
+    } else {
+      // Walk up ancestry (skip measure ancestors)
+      let cur = note;
+      while (cur && cur.id !== 0) {
+        cur = this.getNoteById(cur.parentId);
+        if (!cur) break;
+        if (cur.hasExpression('beatsPerMeasure') && !isMeasure(cur)) {
+          beatsPerMeasure = cur.getVariable('beatsPerMeasure');
+          break;
         }
+      }
+      if (!beatsPerMeasure) {
+        beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
+      }
+    }
+
+    if (!beatsPerMeasure) beatsPerMeasure = new Fraction(4);
+    if (!tempo) return beatsPerMeasure.mul(1); // 1 second per beat default
+
+    return beatsPerMeasure.div(tempo).mul(60);
+  }
+
+  /**
+   * Find instrument for a note
+   */
+  findInstrument(note) {
+    if (!note) return 'sine-wave';
+    if (!note.hasExpression('frequency') && !note.getVariable('frequency')) {
+      return 'sine-wave';
+    }
+
+    // Check direct instrument property
+    if (note.properties.instrument) {
+      return note.properties.instrument;
+    }
+
+    // Check frequency expression for parent reference
+    const freqSource = note.getExpressionSource('frequency');
+    if (freqSource) {
+      const noteRefMatch = freqSource.match(/module\.getNoteById\((\d+)\)\.getVariable\('frequency'\)/);
+      if (noteRefMatch) {
+        const parentId = parseInt(noteRefMatch[1], 10);
+        const parentNote = this.getNoteById(parentId);
+        if (parentNote) return this.findInstrument(parentNote);
+      }
+
+      if (freqSource.includes("module.baseNote.getVariable('frequency')")) {
+        return this.findInstrument(this.baseNote);
+      }
+    }
+
+    return 'sine-wave';
+  }
+
+  /**
+   * Generate measure notes starting from a given note
+   */
+  generateMeasures(fromNote, n) {
+    const notesArray = [];
+
+    for (let i = 0; i < n; i++) {
+      const prevNote = (i === 0) ? fromNote : this.getNoteById(notesArray[i - 1].id);
+
+      let rawString;
+      if (prevNote.id === 0) {
+        rawString = "module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))";
+      } else {
+        rawString = `module.getNoteById(${prevNote.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevNote.id})))`;
+      }
+
+      const newNote = this.addNote({
+        startTime: rawString
       });
-      moduleObj.baseNote = baseObj;
-    
-      const notesArray = [];
-      Object.values(this.notes).forEach(note => {
-        if (note.id === 0) return;
-        const noteObj = { id: note.id };
-        Object.keys(note.variables).forEach(key => {
-          if (key.endsWith("String")) {
-            const prop = key.slice(0, -6);
-            noteObj[prop] = note.variables[key];
-          } else if (key === "color" || key === "instrument") {
-            noteObj[key] = note.variables[key];
-          }
-        });
-        notesArray.push(noteObj);
-      });
-      notesArray.sort((a, b) => a.id - b.id);
-      moduleObj.notes = notesArray;
-    
-      return moduleObj;
-   }
+      newNote.parentId = prevNote.id;
+      notesArray.push(newNote);
+    }
 
-   reindexModule() {
+    return notesArray;
+  }
+
+  /**
+   * Load module from JSON file or object
+   */
+  static async loadFromJSON(source) {
+    let data;
+
+    if (typeof source === 'string') {
+      const response = await fetch(source);
+      data = await response.json();
+    } else {
+      data = source;
+    }
+
+    // Create base note variables from JSON
+    const baseVars = {};
+    for (const [key, value] of Object.entries(data.baseNote)) {
+      baseVars[key] = value;
+    }
+
+    const moduleInstance = new Module(baseVars);
+
+    // Load notes
+    for (const noteData of data.notes) {
+      const noteId = parseInt(noteData.id);
+      const variables = {};
+
+      for (const [key, value] of Object.entries(noteData)) {
+        if (key === 'id') continue;
+        variables[key] = value;
+      }
+
+      if (!isNaN(noteId)) {
+        const note = new Note(noteId, variables);
+        note.module = moduleInstance;
+        moduleInstance.notes[noteId] = note;
+
+        // Register dependencies
+        moduleInstance._registerNoteDependencies(note);
+
+        if (noteId >= moduleInstance.nextId) {
+          moduleInstance.nextId = noteId + 1;
+        }
+      } else {
+        moduleInstance.addNote(variables);
+      }
+    }
+
+    // Mark all notes dirty for initial evaluation using invalidateAll for clean slate
+    moduleInstance.invalidateAll();
+
+    return moduleInstance;
+  }
+
+  /**
+   * Export module as ordered JSON
+   */
+  async exportOrderedModule() {
+    const moduleData = this.createModuleJSON();
+    const tempModule = await Module.loadFromJSON(moduleData);
+    tempModule.reindexModule();
+    return JSON.stringify(tempModule.createModuleJSON(), null, 2);
+  }
+
+  /**
+   * Create JSON representation of module
+   */
+  createModuleJSON() {
+    const moduleObj = {};
+
+    // Export base note
+    const baseObj = {};
+    const baseExprs = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+    for (const name of baseExprs) {
+      const source = this.baseNote.getExpressionSource(name);
+      if (source) {
+        baseObj[name] = source;
+      }
+    }
+    if (this.baseNote.properties.color) baseObj.color = this.baseNote.properties.color;
+    if (this.baseNote.properties.instrument) baseObj.instrument = this.baseNote.properties.instrument;
+    moduleObj.baseNote = baseObj;
+
+    // Export notes
+    const notesArray = [];
+    for (const note of Object.values(this.notes)) {
+      if (note.id === 0) continue;
+
+      const noteObj = { id: note.id };
+      for (const name of baseExprs) {
+        const source = note.getExpressionSource(name);
+        if (source) {
+          noteObj[name] = source;
+        }
+      }
+      if (note.properties.color) noteObj.color = note.properties.color;
+      if (note.properties.instrument) noteObj.instrument = note.properties.instrument;
+
+      notesArray.push(noteObj);
+    }
+
+    notesArray.sort((a, b) => a.id - b.id);
+    moduleObj.notes = notesArray;
+
+    return moduleObj;
+  }
+
+  /**
+   * Reindex module (renumber notes in order)
+   */
+  reindexModule() {
     const baseNote = this.baseNote;
-    const originalColors = {};
-    for (const id in this.notes) {
-        if (this.notes[id].variables && this.notes[id].variables.color) {
-            originalColors[id] = this.notes[id].variables.color;
-        }
-    }
-    
+
+    // Separate measures and regular notes
     const measureNotes = [];
     const regularNotes = [];
+
     for (const id in this.notes) {
-        const note = this.notes[id];
-        if (Number(id) === 0) continue;
-        if (note.variables.startTime && !note.variables.duration && !note.variables.frequency) {
-            measureNotes.push(note);
-        } else {
-            regularNotes.push(note);
-        }
+      const note = this.notes[id];
+      if (Number(id) === 0) continue;
+
+      const isMeasure = note.hasExpression('startTime') &&
+                        !note.hasExpression('duration') &&
+                        !note.hasExpression('frequency');
+
+      if (isMeasure) {
+        measureNotes.push(note);
+      } else {
+        regularNotes.push(note);
+      }
     }
-    
-    measureNotes.sort((a, b) => a.getVariable("startTime").valueOf() - b.getVariable("startTime").valueOf());
-    regularNotes.sort((a, b) => a.getVariable("startTime").valueOf() - b.getVariable("startTime").valueOf());
-    
-    const newMapping = {};
-    newMapping[baseNote.id] = 0;
+
+    // Sort by startTime
+    const sortByStartTime = (a, b) => {
+      const aStart = a.getVariable('startTime');
+      const bStart = b.getVariable('startTime');
+      if (!aStart || !bStart) return 0;
+      return aStart.valueOf() - bStart.valueOf();
+    };
+
+    measureNotes.sort(sortByStartTime);
+    regularNotes.sort(sortByStartTime);
+
+    // Build ID mapping
+    const newMapping = { 0: 0 };
     let newId = 1;
+
     for (const note of measureNotes) {
-        newMapping[note.id] = newId;
-        newId++;
+      newMapping[note.id] = newId++;
     }
     for (const note of regularNotes) {
-        newMapping[note.id] = newId;
-        newId++;
+      newMapping[note.id] = newId++;
     }
-    
+
+    // Track parent relationships
     const parentRelationships = {};
     for (const id in this.notes) {
-        const note = this.notes[id];
-        if (note.parentId !== undefined) {
-            parentRelationships[id] = note.parentId;
+      const note = this.notes[id];
+      if (note.parentId !== undefined) {
+        parentRelationships[id] = note.parentId;
+      }
+    }
+
+    // Update expression references
+    const updateReferences = (exprText) => {
+      return exprText.replace(/(?:module\.)?getNoteById\(\s*(\d+)\s*\)/g, (match, p1) => {
+        const oldRefId = parseInt(p1, 10);
+        if (oldRefId === 0) {
+          return 'module.baseNote';
         }
-    }
-    
-    function updateRawDependencies(str) {
-        return str.replace(/(?:module\.)?getNoteById\(\s*(\d+)\s*\)/g, (match, p1) => {
-            const oldRefId = parseInt(p1, 10);
-            if (oldRefId === 0) {
-                return "module.baseNote";
-            }
-            const newRefId = newMapping[oldRefId];
-            if (typeof newRefId !== "number") {
-                console.warn("No new mapping found for old id " + oldRefId);
-                return match;
-            }
-            return "module.getNoteById(" + newRefId + ")";
-        });
-    }
-    
-    const newNotes = {};
-    newNotes[0] = baseNote;
-    
+        const newRefId = newMapping[oldRefId];
+        if (typeof newRefId !== 'number') {
+          console.warn('No new mapping found for old id ' + oldRefId);
+          return match;
+        }
+        return 'module.getNoteById(' + newRefId + ')';
+      });
+    };
+
+    // Rebuild notes with new IDs
+    const newNotes = { 0: baseNote };
+
     for (const oldId in this.notes) {
-        if (Number(oldId) === 0) continue;
-        const note = this.notes[oldId];
-        const updatedId = newMapping[note.id];
-        
-        const variables = {};
-        
-        for (const key in note.variables) {
-            if (key.endsWith("String")) {
-                variables[key] = updateRawDependencies(note.variables[key]);
-                const baseKey = key.slice(0, -6);
-                variables[baseKey] = function() {
-                    return new Function("module", "Fraction", "return " + variables[key] + ";")(this, Fraction);
-                };
-            } else if (key === 'color' || key === 'instrument') {
-                variables[key] = note.variables[key];
-            }
+      if (Number(oldId) === 0) continue;
+
+      const note = this.notes[oldId];
+      const updatedId = newMapping[note.id];
+
+      // Create new variables with updated references
+      const variables = {};
+      const exprNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+
+      for (const name of exprNames) {
+        const source = note.getExpressionSource(name);
+        if (source) {
+          variables[name] = updateReferences(source);
         }
-        
-        const newNote = new Note(updatedId, variables);
-        newNote.module = this;
-        
-        if (parentRelationships[oldId] !== undefined) {
-            const oldParentId = parentRelationships[oldId];
-            newNote.parentId = newMapping[oldParentId] !== undefined ? newMapping[oldParentId] : 0;
-        }
-        
-        newNotes[updatedId] = newNote;
+      }
+
+      if (note.properties.color) variables.color = note.properties.color;
+      if (note.properties.instrument) variables.instrument = note.properties.instrument;
+
+      const newNote = new Note(updatedId, variables);
+      newNote.module = this;
+
+      // Update parent reference
+      if (parentRelationships[oldId] !== undefined) {
+        const oldParentId = parentRelationships[oldId];
+        newNote.parentId = newMapping[oldParentId] !== undefined ? newMapping[oldParentId] : 0;
+      }
+
+      newNotes[updatedId] = newNote;
     }
-    
+
+    // Replace notes
     this.notes = newNotes;
-    this._evaluationCache = {};
-    this._lastEvaluationTime = 0;
-    this._dirtyNotes = new Set();
-    this._dependenciesCache = new Map();
-    this._dependentsCache = new Map();
-    
+    this.nextId = newId;
+
+    // Rebuild dependency graph
+    this._dependencyGraph.clear();
+    this._evaluationCache.clear();
+    this._dirtyNotes.clear();
+
     for (const id in this.notes) {
-        this._dirtyNotes.add(Number(id));
+      const note = this.notes[id];
+      this._registerNoteDependencies(note);
+      this._dirtyNotes.add(Number(id));
     }
-    
+
+    if (this._incrementalEvaluator) {
+      this._incrementalEvaluator.invalidateAll();
+    }
+
     invalidateModuleEndTimeCache();
+  }
+
+  /**
+   * Invalidate all cached evaluations
+   */
+  invalidateAll() {
+    this._evaluationCache.clear();
+    this._dirtyNotes.clear();
+
+    for (const id of Object.keys(this.notes)) {
+      this._dirtyNotes.add(Number(id));
+    }
+
+    if (this._incrementalEvaluator) {
+      this._incrementalEvaluator.invalidateAll();
+    }
+  }
+
+  /**
+   * Get the module end time (cached for performance)
+   * Returns the time in seconds when the last note/measure ends
+   */
+  getModuleEndTime() {
+    // Use cached value if available and module hasn't changed
+    if (memoizedModuleEndTime !== null && this._dirtyNotes.size === 0) {
+      return memoizedModuleEndTime;
+    }
+
+    // Ensure evaluation cache is up to date
+    this.evaluateModule();
+
+    // Compute measure end time
+    const measureNotes = Object.values(this.notes).filter(note =>
+      note.variables.startTime && !note.variables.duration && !note.variables.frequency
+    );
+
+    let measureEnd = 0;
+    if (measureNotes.length > 0) {
+      // Find last measure by startTime without full sort
+      let lastMeasure = measureNotes[0];
+      let lastMeasureStart = lastMeasure.getVariable('startTime');
+
+      for (let i = 1; i < measureNotes.length; i++) {
+        const note = measureNotes[i];
+        const noteStart = note.getVariable('startTime');
+        if (noteStart && lastMeasureStart && noteStart.valueOf() > lastMeasureStart.valueOf()) {
+          lastMeasure = note;
+          lastMeasureStart = noteStart;
+        }
+      }
+
+      if (lastMeasureStart) {
+        measureEnd = lastMeasureStart.add(this.findMeasureLength(lastMeasure)).valueOf();
+      }
+    }
+
+    // Compute last note end time
+    let lastNoteEnd = 0;
+    for (const id in this.notes) {
+      const note = this.notes[id];
+      if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
+        const noteStart = note.getVariable('startTime');
+        const noteDuration = note.getVariable('duration');
+        if (noteStart && noteDuration) {
+          const noteEnd = noteStart.valueOf() + noteDuration.valueOf();
+          if (noteEnd > lastNoteEnd) lastNoteEnd = noteEnd;
+        }
+      }
+    }
+
+    memoizedModuleEndTime = Math.max(measureEnd, lastNoteEnd);
+    return memoizedModuleEndTime;
+  }
+
+  /**
+   * Get dependency graph (for debugging)
+   */
+  getDependencyGraph() {
+    return this._dependencyGraph;
+  }
+
+  /**
+   * Batch set expressions for multiple notes without individual notifications.
+   * This is much faster than calling note.setVariable() repeatedly because:
+   * 1. Skips individual _notifyChange() calls during batch
+   * 2. Registers all dependencies at once at the end
+   * 3. Emits single invalidateModuleEndTimeCache event
+   *
+   * @param {Array<{noteId: number, varName: string, expr: string}>} updates
+   *   Array of updates, each with noteId, varName (e.g., 'startTime'), and expr (expression text)
+   */
+  batchSetExpressions(updates) {
+    if (!updates || updates.length === 0) return;
+
+    const affectedNoteIds = new Set();
+
+    // Process all updates without triggering notifications
+    for (const { noteId, varName, expr } of updates) {
+      const note = this.notes[noteId];
+      if (!note) continue;
+
+      // Compile and set expression directly, bypassing _notifyChange
+      try {
+        note.expressions[varName] = compiler.compile(expr, varName);
+        note.lastModifiedTime = Date.now();
+        affectedNoteIds.add(noteId);
+      } catch (e) {
+        console.warn(`Failed to compile expression for note ${noteId}.${varName}:`, e);
+      }
+    }
+
+    // Register all dependencies and mark dirty in batch
+    this.markNotesDirtyBatch(affectedNoteIds);
+
+    // Single event emission at the end
+    invalidateModuleEndTimeCache();
+  }
+
+  /**
+   * Get pool statistics (for performance monitoring)
+   */
+  getPoolStats() {
+    return this._binaryEvaluator.getPoolStats();
   }
 }

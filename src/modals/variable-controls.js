@@ -27,25 +27,11 @@ function recompileNoteAndDependents(noteId, visited = new Set()) {
   if (!moduleInstance) return;
   if (visited.has(noteId)) return;
   visited.add(noteId);
-  const note = moduleInstance.getNoteById(noteId);
-  if (!note) return;
 
-  Object.keys(note.variables).forEach((varKey) => {
-    if (varKey.endsWith('String')) {
-      const baseKey = varKey.slice(0, -6);
-      try {
-        const rawExpr = note.variables[varKey];
-        // eslint-disable-next-line no-new-func
-        const newFunc = new Function('module', 'Fraction', 'return ' + rawExpr + ';');
-        note.setVariable(baseKey, function () {
-          return newFunc(moduleInstance, Fraction);
-        });
-      } catch (err) {
-        console.error('Error recompiling note', noteId, 'variable', baseKey, ':', err);
-      }
-    }
-  });
+  // Mark the note dirty so the binary evaluator will re-evaluate it
+  try { moduleInstance.markNoteDirty(noteId); } catch {}
 
+  // Also mark all dependents dirty
   const dependents = moduleInstance.getDependentNotes(noteId);
   dependents.forEach((depId) => recompileNoteAndDependents(depId, visited));
 }
@@ -534,10 +520,7 @@ function createMeasureBeatsSelector(note, measureId, externalFunctions) {
       pauseIfPlaying();
       if (!measureNote) return;
       const raw = `new Fraction(${n}, ${d})`;
-      measureNote.setVariable('beatsPerMeasure', function () {
-        // eslint-disable-next-line no-new-func
-        return new Function('module', 'Fraction', 'return ' + raw + ';')(moduleInstance, Fraction);
-      });
+      // Set the expression string directly - the Note class will compile it to binary
       measureNote.setVariable('beatsPerMeasureString', raw);
 
       // Recompile updated note and dependents so functions are in sync
@@ -803,11 +786,7 @@ export function createMeasureDurationRow(note, measureId, externalFunctions) {
       if (!measureNote) return;
 
       const raw = (rawInput.value || '').trim() || 'new Fraction(4)';
-
-      measureNote.setVariable('beatsPerMeasure', function () {
-        // eslint-disable-next-line no-new-func
-        return new Function('module', 'Fraction', 'return ' + raw + ';')(moduleInstance, Fraction);
-      });
+      // Set the expression string directly - the Note class will compile it to binary
       measureNote.setVariable('beatsPerMeasureString', raw);
 
       // Recompile note and its dependents so functions stay in sync
@@ -1181,22 +1160,15 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           simplifiedExpression = validatedExpression;
         }
 
+        // Set the expression string directly - the Note class will compile it to binary
         if (measureId !== null && measureId !== undefined) {
           // Write to measure note
           const measureNote = moduleInstance.getNoteById(parseInt(measureId, 10));
           if (measureNote) {
-            measureNote.setVariable(key, function () {
-              // eslint-disable-next-line no-new-func
-              return new Function('module', 'Fraction', 'return ' + simplifiedExpression + ';')(moduleInstance, Fraction);
-            });
             measureNote.setVariable(key + 'String', simplifiedExpression);
           }
         } else {
           // Write to regular note
-          note.setVariable(key, function () {
-            // eslint-disable-next-line no-new-func
-            return new Function('module', 'Fraction', 'return ' + simplifiedExpression + ';')(moduleInstance, Fraction);
-          });
           note.setVariable(key + 'String', simplifiedExpression);
         }
 

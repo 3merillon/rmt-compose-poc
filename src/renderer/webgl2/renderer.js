@@ -151,6 +151,14 @@ export class RendererAdapter {
     this._linkEndpointsRdeps = null;
     this._linkDepsCount = 0;
     this._linkRdepsCount = 0;
+    // Property-colored link lines (rdeps categorized by property)
+    this._linkEndpointsByProperty = { frequency: null, startTime: null, duration: null };
+    this._linkCountByProperty = { frequency: 0, startTime: 0, duration: 0 };
+    this._linkFlagsByProperty = { frequency: null, startTime: null, duration: null };
+    // Property-colored link lines (deps categorized by property)
+    this._linkDepsEndpointsByProperty = { frequency: null, startTime: null, duration: null };
+    this._linkDepsCountByProperty = { frequency: 0, startTime: 0, duration: 0 };
+    this._linkDepsFlagsByProperty = { frequency: null, startTime: null, duration: null };
 
     // Rendering feature toggles (suppress legacy-equivalent visuals in GL)
     this.drawMeasureBars = true;    // dashed vertical measure bars
@@ -230,6 +238,36 @@ export class RendererAdapter {
     // Base highlight flags for dependency sets (when selected entity is measure/note)
     this._relDepsHasBase = false;
     this._relRdepsHasBase = false;
+
+    // Property-colored dependency visualization
+    // Dependents (rdeps) categorized by which property of the selected note they reference:
+    // - frequency: notes that would move if selected note's frequency changes (orange)
+    // - startTime: notes that would move if selected note's startTime changes (teal)
+    // - duration: notes that would move if selected note's duration changes (purple)
+    this._relRdepsIdxByProperty = { frequency: null, startTime: null, duration: null };
+    // Dependencies (deps) categorized by which expression of the selected note references them:
+    this._relDepsIdxByProperty = { frequency: null, startTime: null, duration: null };
+    // Base flags per property (for baseNote ring coloring)
+    this._relRdepsHasBaseByProperty = { frequency: false, startTime: false, duration: false };
+    this._relDepsHasBaseByProperty = { frequency: false, startTime: false, duration: false };
+
+    // PERFORMANCE: Cache dependency highlight data per selected note to avoid recomputation
+    // Invalidated when module structure changes or selection changes
+    this._depHighlightCache = {
+      noteId: null,                // cached selectedNoteId
+      posEpoch: null,              // cached posEpoch for invalidation
+      deps: null,                  // raw dependency IDs
+      rdeps: null,                 // raw dependent IDs
+      depIdx: null,                // index array for deps
+      rdepIdx: null,               // index array for rdeps
+      depMeasureIds: null,         // measure IDs in deps
+      rdepMeasureIds: null,        // measure IDs in rdeps
+      depsHasBase: false,
+      rdepsHasBase: false,
+      // Property-colored cache
+      rdepsByProperty: null,       // { frequency: [], startTime: [], duration: [] }
+      depsByProperty: null         // { frequency: [], startTime: [], duration: [] }
+    };
   }
 
   // Update configuration at runtime. Merges partial into current and normalizes; triggers redraw.
@@ -531,20 +569,22 @@ export class RendererAdapter {
       }
     }
 
-    // Reorder to draw selected last (on top) - always reallocate when sorting for consistency
-    let needsReallocation = false;
+    // PERFORMANCE: Instead of O(n log n) sort, use O(1) swap to move selected note to end
+    // This avoids full buffer reallocation on every selection change
     if (selectedNoteId != null) {
-      items.sort((a, b) => {
-        const aSel = (a.id === selectedNoteId) ? 1 : 0;
-        const bSel = (b.id === selectedNoteId) ? 1 : 0;
-        return aSel - bSel;
-      });
-      needsReallocation = true; // Always reallocate when sorting to ensure clean state
+      const selIdx = items.findIndex(it => it.id === selectedNoteId);
+      if (selIdx >= 0 && selIdx < items.length - 1) {
+        // Swap selected item with the last item (O(1) instead of O(n log n) sort)
+        const lastIdx = items.length - 1;
+        const temp = items[lastIdx];
+        items[lastIdx] = items[selIdx];
+        items[selIdx] = temp;
+      }
     }
 
-    // Allocate/resize typed arrays - always reallocate when needed for consistency
+    // Allocate/resize typed arrays only when count changes
     const N = items.length;
-    if (!this.posSize || this.posSize.length !== N * 4 || needsReallocation) {
+    if (!this.posSize || this.posSize.length !== N * 4) {
       this.posSize = new Float32Array(N * 4);
       this.colors  = new Float32Array(N * 4);
       // Use Int32 to avoid precision loss for large numeric IDs (prevents wrong highlight/pick)
@@ -589,13 +629,86 @@ export class RendererAdapter {
     } catch {}
 
     // Compute related highlight index sets from module when a note is selected
+    // PERFORMANCE: Use cached dependency data when selection hasn't changed
     try {
       if (selectedNoteId != null && module && typeof module.getDirectDependencies === 'function' && this._noteIdToIndex) {
         const selIdNum = Number(selectedNoteId);
-        const depsRaw = module.getDirectDependencies(selIdNum);
-        const rdepsRaw = (typeof module.getDependentNotes === 'function') ? module.getDependentNotes(selIdNum) : [];
-        const deps = Array.isArray(depsRaw) ? depsRaw : [];
-        const rdeps = Array.isArray(rdepsRaw) ? rdepsRaw : [];
+        const cache = this._depHighlightCache;
+
+        // Check if we can reuse cached dependency data (same selection AND same posEpoch)
+        // posEpoch changes when module data is modified (e.g., after drop), so we must recompute
+        let deps, rdeps, rdepsByProperty, depsByProperty;
+        if (cache.noteId === selIdNum && cache.deps && cache.rdeps && cache.posEpoch === this._posEpoch) {
+          // Reuse cached raw dependency arrays
+          deps = cache.deps;
+          rdeps = cache.rdeps;
+          rdepsByProperty = cache.rdepsByProperty;
+          depsByProperty = cache.depsByProperty;
+          // Also reuse measure IDs and base flags (these don't change with reordering)
+          this._relDepsMeasureIds = cache.depMeasureIds;
+          this._relRdepsMeasureIds = cache.rdepMeasureIds;
+          this._relDepsHasBase = cache.depsHasBase;
+          this._relRdepsHasBase = cache.rdepsHasBase;
+        } else {
+          // Selection changed - compute and cache dependency data
+          const depsRaw = module.getDirectDependencies(selIdNum);
+          const rdepsRaw = (typeof module.getDependentNotes === 'function') ? module.getDependentNotes(selIdNum) : [];
+          deps = Array.isArray(depsRaw) ? depsRaw : [];
+          rdeps = Array.isArray(rdepsRaw) ? rdepsRaw : [];
+
+          // Get property-colored dependents (notes that would move if property changes)
+          rdepsByProperty = (typeof module.getDependentsByProperty === 'function')
+            ? module.getDependentsByProperty(selIdNum)
+            : { frequency: [], startTime: [], duration: [] };
+
+          // Get property-colored dependencies (what this note's expressions reference)
+          depsByProperty = (typeof module.getDirectDependenciesByProperty === 'function')
+            ? module.getDirectDependenciesByProperty(selIdNum)
+            : { frequency: [], startTime: [], duration: [] };
+
+          // Compute measure IDs and base flags
+          const depMeasureIds = [];
+          const rdepMeasureIds = [];
+          let depsHasBase = false;
+          let rdepsHasBase = false;
+
+          const isMeasureNote = (id) => {
+            try {
+              const n = module.getNoteById(Number(id));
+              return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+            } catch { return false; }
+          };
+
+          for (let k = 0; k < deps.length; k++) {
+            const id = Number(deps[k]);
+            if (id === 0) { depsHasBase = true; continue; }
+            if (isMeasureNote(id)) depMeasureIds.push(id);
+          }
+          for (let k = 0; k < rdeps.length; k++) {
+            const id = Number(rdeps[k]);
+            if (id === 0) { rdepsHasBase = true; continue; }
+            if (isMeasureNote(id)) rdepMeasureIds.push(id);
+          }
+
+          // Cache the computed data (including posEpoch for invalidation)
+          cache.noteId = selIdNum;
+          cache.posEpoch = this._posEpoch;
+          cache.deps = deps;
+          cache.rdeps = rdeps;
+          cache.rdepsByProperty = rdepsByProperty;
+          cache.depsByProperty = depsByProperty;
+          cache.depMeasureIds = Array.from(new Set(depMeasureIds));
+          cache.rdepMeasureIds = Array.from(new Set(rdepMeasureIds));
+          cache.depsHasBase = depsHasBase;
+          cache.rdepsHasBase = rdepsHasBase;
+
+          this._relDepsMeasureIds = cache.depMeasureIds;
+          this._relRdepsMeasureIds = cache.rdepMeasureIds;
+          this._relDepsHasBase = depsHasBase;
+          this._relRdepsHasBase = rdepsHasBase;
+        }
+
+        // Always recompute indices (they depend on current buffer ordering)
         const toIdx = (id) => {
           const idx = this._noteIdToIndex.get(Number(id));
           return (idx != null && idx >= 0 && idx < N) ? idx : null;
@@ -614,37 +727,44 @@ export class RendererAdapter {
         this._relDepsIdx = Array.from(depSet);
         this._relRdepsIdx = Array.from(rdepSet);
 
-        // Collect related measure IDs and base flags
-        try {
-          this._relDepsMeasureIds = [];
-          this._relRdepsMeasureIds = [];
-          this._relDepsHasBase = false;
-          this._relRdepsHasBase = false;
-
-          const isMeasureNote = (id) => {
-            try {
-              const n = module.getNoteById(Number(id));
-              return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
-            } catch { return false; }
-          };
-
-          if (Array.isArray(deps)) {
-            for (let k = 0; k < deps.length; k++) {
-              const id = Number(deps[k]);
-              if (id === 0) { this._relDepsHasBase = true; continue; }
-              if (isMeasureNote(id)) this._relDepsMeasureIds.push(id);
-            }
+        // Compute property-colored indices for rdeps (dependents)
+        // These follow the paradigm: which notes would MOVE if this property changes
+        const rdepsIdxByProp = { frequency: [], startTime: [], duration: [] };
+        for (const prop of ['frequency', 'startTime', 'duration']) {
+          const propIds = rdepsByProperty[prop] || [];
+          const propIdxSet = new Set();
+          for (const id of propIds) {
+            const ii = toIdx(id);
+            if (ii != null && ii !== selIdx) propIdxSet.add(ii);
           }
-          if (Array.isArray(rdeps)) {
-            for (let k = 0; k < rdeps.length; k++) {
-              const id = Number(rdeps[k]);
-              if (id === 0) { this._relRdepsHasBase = true; continue; }
-              if (isMeasureNote(id)) this._relRdepsMeasureIds.push(id);
-            }
+          rdepsIdxByProp[prop] = Array.from(propIdxSet);
+        }
+        this._relRdepsIdxByProperty = rdepsIdxByProp;
+
+        // Compute property-colored indices for deps (dependencies)
+        const depsIdxByProp = { frequency: [], startTime: [], duration: [] };
+        for (const prop of ['frequency', 'startTime', 'duration']) {
+          const propIds = depsByProperty[prop] || [];
+          const propIdxSet = new Set();
+          for (const id of propIds) {
+            const ii = toIdx(id);
+            if (ii != null && ii !== selIdx) propIdxSet.add(ii);
           }
-          if (this._relDepsMeasureIds) this._relDepsMeasureIds = Array.from(new Set(this._relDepsMeasureIds));
-          if (this._relRdepsMeasureIds) this._relRdepsMeasureIds = Array.from(new Set(this._relRdepsMeasureIds));
-        } catch {}
+          depsIdxByProp[prop] = Array.from(propIdxSet);
+        }
+        this._relDepsIdxByProperty = depsIdxByProp;
+
+        // Compute base flags per property
+        this._relRdepsHasBaseByProperty = {
+          frequency: (rdepsByProperty.frequency || []).includes(0),
+          startTime: (rdepsByProperty.startTime || []).includes(0),
+          duration: (rdepsByProperty.duration || []).includes(0)
+        };
+        this._relDepsHasBaseByProperty = {
+          frequency: (depsByProperty.frequency || []).includes(0),
+          startTime: (depsByProperty.startTime || []).includes(0),
+          duration: (depsByProperty.duration || []).includes(0)
+        };
       } else {
         this._relDepsIdx = null;
         this._relRdepsIdx = null;
@@ -652,6 +772,13 @@ export class RendererAdapter {
         this._relRdepsMeasureIds = null;
         this._relDepsHasBase = false;
         this._relRdepsHasBase = false;
+        // Clear property-colored arrays
+        this._relRdepsIdxByProperty = { frequency: null, startTime: null, duration: null };
+        this._relDepsIdxByProperty = { frequency: null, startTime: null, duration: null };
+        this._relRdepsHasBaseByProperty = { frequency: false, startTime: false, duration: false };
+        this._relDepsHasBaseByProperty = { frequency: false, startTime: false, duration: false };
+        // Clear cache when no selection
+        this._depHighlightCache.noteId = null;
       }
     } catch { this._relDepsIdx = null; this._relRdepsIdx = null; }
  
@@ -781,7 +908,9 @@ export class RendererAdapter {
     this._lastNoteFracDenStrs = this._noteFracDenStrs;
 
     // Rebuild glyph runs only when necessary; viewport changes are handled by _lastTextViewEpoch gating in _render()
-    this._textDirty = contentChanged || selChanged || (this.instanceCount !== this._lastInstanceCount);
+    // PERFORMANCE: Selection change doesn't affect text content (fractions, "silence"), only ring/highlights
+    // so we don't mark text dirty for selection changes - just need redraw for the visual updates
+    this._textDirty = contentChanged || (this.instanceCount !== this._lastInstanceCount);
     this._lastInstanceCount = this.instanceCount;
 
     this.needsRedraw = true;
@@ -2005,9 +2134,62 @@ export class RendererAdapter {
           gl.depthMask(true);
         };
 
-        // Dependencies: teal, Dependents: neon deep purple (slightly transparent)
-        drawIdxList(this._relDepsIdx, [0.0, 1.0, 1.0, 0.9], (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0));
-        drawIdxList(this._relRdepsIdx, [0.615686, 0.0, 1.0, 0.9], (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0));
+        // Property-colored dependency visualization
+        // Colors follow the paradigm: which notes would MOVE if this property changes
+        // Orange: frequency change would move these notes
+        // Teal: startTime change would move these notes
+        // Purple: duration change would move these notes
+        //
+        // During drag/resize: dim non-relevant properties to emphasize what's actually changing
+        const isDragging = !!(this._dragActive && this._dragOverlay);
+        const dragType = this._dragOverlay?.type || '';
+        const isResize = dragType === 'resize';
+
+        // Normal colors (full brightness)
+        const HIGHLIGHT_COLORS_NORMAL = {
+          frequency: { dep: [1.0, 0.5, 0.0, 0.9], rdep: [1.0, 0.5, 0.0, 0.4] },
+          startTime: { dep: [0.0, 1.0, 1.0, 0.9], rdep: [0.0, 1.0, 1.0, 0.4] },
+          duration:  { dep: [0.615, 0.0, 1.0, 0.9], rdep: [0.615, 0.0, 1.0, 0.4] }
+        };
+
+        // During drag (move): startTime full, others dimmed
+        const HIGHLIGHT_COLORS_DRAG = {
+          frequency: { dep: [1.0, 0.5, 0.0, 0.15], rdep: [1.0, 0.5, 0.0, 0.08] },
+          startTime: { dep: [0.0, 1.0, 1.0, 0.9], rdep: [0.0, 1.0, 1.0, 0.4] },
+          duration:  { dep: [0.615, 0.0, 1.0, 0.15], rdep: [0.615, 0.0, 1.0, 0.08] }
+        };
+
+        // During resize: duration full, others dimmed
+        const HIGHLIGHT_COLORS_RESIZE = {
+          frequency: { dep: [1.0, 0.5, 0.0, 0.15], rdep: [1.0, 0.5, 0.0, 0.08] },
+          startTime: { dep: [0.0, 1.0, 1.0, 0.15], rdep: [0.0, 1.0, 1.0, 0.08] },
+          duration:  { dep: [0.615, 0.0, 1.0, 0.9], rdep: [0.615, 0.0, 1.0, 0.4] }
+        };
+
+        const HIGHLIGHT_COLORS = isDragging
+          ? (isResize ? HIGHLIGHT_COLORS_RESIZE : HIGHLIGHT_COLORS_DRAG)
+          : HIGHLIGHT_COLORS_NORMAL;
+
+        const DEP_THICKNESS = (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0) * 1.25;
+        const RDEP_THICKNESS = (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0) * 0.75;
+
+        // Draw property-colored rings for dependents (notes affected by property change)
+        // Draw in order: startTime first (teal), then frequency (orange), then duration (purple)
+        // This stacking order ensures all colors are visible for overlapping dependencies
+        for (const prop of ['startTime', 'frequency', 'duration']) {
+          const rdepsIdx = this._relRdepsIdxByProperty?.[prop];
+          if (rdepsIdx?.length) {
+            drawIdxList(rdepsIdx, HIGHLIGHT_COLORS[prop].rdep, RDEP_THICKNESS);
+          }
+        }
+
+        // Draw property-colored rings for dependencies (what this note's expressions reference)
+        for (const prop of ['startTime', 'frequency', 'duration']) {
+          const depsIdx = this._relDepsIdxByProperty?.[prop];
+          if (depsIdx?.length) {
+            drawIdxList(depsIdx, HIGHLIGHT_COLORS[prop].dep, DEP_THICKNESS);
+          }
+        }
       }
     } catch {}
  
@@ -3693,14 +3875,18 @@ export class RendererAdapter {
           n?.variables?.startTime && !n?.variables?.duration && !n?.variables?.frequency
         );
         if (measureNotes.length > 0) {
-          measureNotes.sort(
-            (a, b) =>
-              a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf()
-          );
+          measureNotes.sort((a, b) => {
+            const aStart = a.getVariable('startTime');
+            const bStart = b.getVariable('startTime');
+            if (!aStart || !bStart) return 0;
+            return aStart.valueOf() - bStart.valueOf();
+          });
           const lastMeasure = measureNotes[measureNotes.length - 1];
           const st = lastMeasure.getVariable('startTime');
-          const ml = module.findMeasureLength(lastMeasure);
-          measureEnd = st.add(ml).valueOf();
+          if (st) {
+            const ml = module.findMeasureLength(lastMeasure);
+            measureEnd = st.add(ml).valueOf();
+          }
         }
       } catch {}
       let lastNoteEnd = 0;
@@ -4410,8 +4596,40 @@ const e = startSec + addDx + durSec;
               gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
               gl.bindVertexArray(null);
             };
-            if (this._relDepsHasBase) drawBaseDepRing([0.0, 1.0, 1.0, 0.9], 2.0); // teal
-            if (this._relRdepsHasBase) drawBaseDepRing([0.615686, 0.0, 1.0, 0.9], 1.0); // neon deep purple (1px)
+            // Property-colored base note rings
+            // Dependencies (what this note depends on from baseNote) - brighter, thicker
+            const BASE_DEP_COLORS = {
+              frequency: [1.0, 0.5, 0.0, 0.9],   // Orange
+              startTime: [0.0, 1.0, 1.0, 0.9],   // Teal
+              duration:  [0.615, 0.0, 1.0, 0.9]  // Purple
+            };
+            // Dependents (baseNote doesn't depend on notes, so this is rarely used)
+            const BASE_RDEP_COLORS = {
+              frequency: [1.0, 0.5, 0.0, 0.4],   // Orange (dimmer)
+              startTime: [0.0, 1.0, 1.0, 0.4],   // Teal (dimmer)
+              duration:  [0.615, 0.0, 1.0, 0.4]  // Purple (dimmer)
+            };
+
+            // Draw property-colored deps rings for baseNote
+            for (const prop of ['startTime', 'frequency', 'duration']) {
+              if (this._relDepsHasBaseByProperty?.[prop]) {
+                drawBaseDepRing(BASE_DEP_COLORS[prop], 2.5);
+              }
+            }
+            // Draw property-colored rdeps rings for baseNote (if any)
+            for (const prop of ['startTime', 'frequency', 'duration']) {
+              if (this._relRdepsHasBaseByProperty?.[prop]) {
+                drawBaseDepRing(BASE_RDEP_COLORS[prop], 1.5);
+              }
+            }
+
+            // Fallback for old behavior
+            if (this._relDepsHasBase && !this._relDepsHasBaseByProperty?.startTime && !this._relDepsHasBaseByProperty?.frequency && !this._relDepsHasBaseByProperty?.duration) {
+              drawBaseDepRing([0.0, 1.0, 1.0, 0.9], 2.0);
+            }
+            if (this._relRdepsHasBase && !this._relRdepsHasBaseByProperty?.startTime && !this._relRdepsHasBaseByProperty?.frequency && !this._relRdepsHasBaseByProperty?.duration) {
+              drawBaseDepRing([0.615686, 0.0, 1.0, 0.9], 1.0);
+            }
           }
         } catch {}
 
@@ -4900,6 +5118,12 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       gl.bindVertexArray(this.measureTriVAO);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, arrSel, gl.DYNAMIC_DRAW);
+      // Upload zero drag flag for single-instance draw to avoid double-offset
+      // (shader adds both a_dragFlag and u_dragMask; we use u_dragMask for single draws)
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriDragFlagBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0.0]), gl.DYNAMIC_DRAW);
+      // Invalidate flags cache so next frame re-uploads full flags array
+      this._lastTriFlagsKey = null;
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 1);
       gl.bindVertexArray(null);
     }
@@ -4940,6 +5164,12 @@ try {
       gl.bindVertexArray(this.measureTriVAO);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
       gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+      // Upload zero drag flag for single-instance draw to avoid double-offset
+      // (shader adds both a_dragFlag and u_dragMask; we use u_dragMask for single draws)
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriDragFlagBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0.0]), gl.DYNAMIC_DRAW);
+      // Invalidate flags cache so next frame re-uploads full flags array
+      this._lastTriFlagsKey = null;
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 1);
       gl.bindVertexArray(null);
     };
@@ -4947,12 +5177,29 @@ try {
     const idToIdx = this._measureTriIdToIndex || null;
 
     // Dependencies: teal
-    if (this._lastSelectedNoteId !== 0 && this._relDepsMeasureIds && this._relDepsMeasureIds.length) {
+    // During drag, use prospective parent if set (overrides actual dependencies)
+    if (this._lastSelectedNoteId !== 0) {
+      const prospPid = this._prospectiveParentId;
+      const prospectiveIsMeasure = (prospPid != null && prospPid !== 0 && idToIdx && idToIdx.has(Number(prospPid)));
+      const prospectiveIsBase = (prospPid === 0);
+
+      if (this._dragActive && prospPid != null) {
+        // During drag with a prospective parent:
+        // - If prospective is a measure: draw teal outline on it
+        // - If prospective is BaseNote (0): draw nothing (no teal measure outline)
+        if (prospectiveIsMeasure) {
+          const idx = idToIdx.get(Number(prospPid));
+          drawTriOutlineAtIndex(idx, [0.0, 1.0, 1.0, 0.9], this.measureTriPosSizeOutline);
+        }
+        // else: prospective is BaseNote, don't draw any teal measure outline
+      } else if (this._relDepsMeasureIds && this._relDepsMeasureIds.length) {
+        // Normal case (not dragging or no prospective): draw actual dependencies
         for (let i = 0; i < this._relDepsMeasureIds.length; i++) {
             const id = Number(this._relDepsMeasureIds[i]);
             const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
             drawTriOutlineAtIndex(idx, [0.0, 1.0, 1.0, 0.9], this.measureTriPosSizeOutline);
         }
+      }
     }
     // Dependents: neon deep purple
     if (this._lastSelectedNoteId !== 0 && this._relRdepsMeasureIds && this._relRdepsMeasureIds.length) {
@@ -8304,6 +8551,32 @@ try {
       gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferRdeps);
       gl.bufferData(gl.ARRAY_BUFFER, 2 * 4, gl.DYNAMIC_DRAW);
 
+      // Property-colored link line buffers (rdeps split by property)
+      this._linkBuffersByProperty = {};
+      for (const prop of ['frequency', 'startTime', 'duration']) {
+        this._linkBuffersByProperty[prop] = {
+          endpoints: gl.createBuffer(),
+          flags: gl.createBuffer()
+        };
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].endpoints);
+        gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].flags);
+        gl.bufferData(gl.ARRAY_BUFFER, 2 * 4, gl.DYNAMIC_DRAW);
+      }
+
+      // Property-colored link line buffers (deps split by property)
+      this._linkDepsBuffersByProperty = {};
+      for (const prop of ['frequency', 'startTime', 'duration']) {
+        this._linkDepsBuffersByProperty[prop] = {
+          endpoints: gl.createBuffer(),
+          flags: gl.createBuffer()
+        };
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].endpoints);
+        gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].flags);
+        gl.bufferData(gl.ARRAY_BUFFER, 2 * 4, gl.DYNAMIC_DRAW);
+      }
+
       gl.bindVertexArray(null);
       gl.bindBuffer(gl.ARRAY_BUFFER, null);
 
@@ -8467,16 +8740,23 @@ try {
                 // Avoid degenerate self-parent case (e.g., while dragging a measure, candidate resolves to the same measure)
                 // Falling back to the default dependency rendering preserves a visible parent link.
                 if (Number(pid) === Number(anchorId)) return null;
-                // Suppress BaseNote link when dragging a measure triangle if that measure does not directly reference BaseNote.
-                // Only allow BaseNote parent line for measures whose startTimeString references module.baseNote (e.g., first in chain).
+                // When pid === 0 (BaseNote) during an active drag, always show the BaseNote link.
+                // The prospective parent computation has determined that dropping here will anchor to BaseNote,
+                // so the preview should show that link regardless of the measure's current startTimeString.
+                // Only suppress BaseNote link when NOT actively dragging and measure doesn't reference BaseNote.
                 try {
                   if (pid === 0) {
-                    const mod = this._moduleRef;
-                    const n = mod?.getNoteById?.(Number(anchorId));
-                    const isMeasure = !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
-                    const s = n?.variables?.startTimeString || '';
-                    const refsBase = /module\.baseNote/.test(s);
-                    if (isMeasure && !refsBase) return null;
+                    const isActiveDrag = !!(this._dragActive && this._dragOverlay);
+                    if (!isActiveDrag) {
+                      // Not dragging - use existing logic to only show BaseNote link if measure references it
+                      const mod = this._moduleRef;
+                      const n = mod?.getNoteById?.(Number(anchorId));
+                      const isMeasure = !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                      const s = n?.variables?.startTimeString || '';
+                      const refsBase = /module\.baseNote/.test(s);
+                      if (isMeasure && !refsBase) return null;
+                    }
+                    // If actively dragging and pid === 0, allow the BaseNote link to show (preview what will happen on drop)
                   }
                 } catch {}
 
@@ -8612,7 +8892,11 @@ try {
                 }
               };
 
-              // 1) Dependencies (cyan):
+              // 1) Dependencies (property-colored):
+              // Build separate endpoint lists for each property type (what this note's expressions reference)
+              const depsListByProp = { frequency: [], startTime: [], duration: [] };
+              const depsFlagsByProp = { frequency: [], startTime: [], duration: [] };
+
               // If there is a prospective parent candidate DURING DRAG, show only that single line.
               const pros = (this._dragOverlay ? buildProspectiveParentEndpoints() : null);
               if (pros) {
@@ -8620,9 +8904,63 @@ try {
                 // Ensure per-endpoint drag flags are defined for the single prospective line:
                 // p0 (anchor) follows only when the anchor is a moving MEASURE; p1 (parent candidate) never moves.
                 var depsFlagsArr = new Float32Array([movingAnchor ? 1.0 : 0.0, 0.0]);
+                // Put prospective parent in startTime (it's for startTime dependency)
+                depsListByProp.startTime.push(...pros);
+                depsFlagsByProp.startTime.push(movingAnchor ? 1.0 : 0.0, 0.0);
+              } else if (mref && typeof mref.getDirectDependenciesByProperty === 'function') {
+                // Use property-colored dependencies
+                const propDeps = mref.getDirectDependenciesByProperty(Number(anchorId));
+
+                // Helper to check if an ID is a measure note
+                const isMeasureNoteId = (id) => {
+                  try {
+                    const n = mref.getNoteById(Number(id));
+                    return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                  } catch { return false; }
+                };
+
+                for (const prop of ['frequency', 'startTime', 'duration']) {
+                  const propIds = propDeps[prop] || [];
+
+                  // Separate note IDs from measure IDs
+                  const noteIds = [];
+                  const measureIds = [];
+                  for (const id of propIds) {
+                    const numId = Number(id);
+                    if (numId === 0) continue; // baseNote handled separately
+                    if (isMeasureNoteId(numId)) {
+                      measureIds.push(numId);
+                    } else {
+                      noteIds.push(numId);
+                    }
+                  }
+
+                  // Add note endpoints
+                  const propIdxs = noteIds
+                    .map(id => this._noteIdToIndex.get(Number(id)))
+                    .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
+                  appendNoteIdxEndpoints(propIdxs, depsListByProp[prop], depsFlagsByProp[prop]);
+
+                  // Add measure endpoints
+                  appendMeasureIdEndpoints(measureIds, depsListByProp[prop], depsFlagsByProp[prop]);
+
+                  // Handle baseNote for this property
+                  if (propIds.includes(0)) {
+                    appendBaseEndpointIf(true, depsListByProp[prop], depsFlagsByProp[prop]);
+                  }
+                }
+
+                // Build combined depsArr for legacy code paths
+                const depsList = [];
+                const depsFlags = [];
+                for (const prop of ['frequency', 'startTime', 'duration']) {
+                  depsList.push(...depsListByProp[prop]);
+                  depsFlags.push(...depsFlagsByProp[prop]);
+                }
+                depsArr = depsList.length ? new Float32Array(depsList) : null;
+                var depsFlagsArr = depsFlags.length ? new Float32Array(depsFlags) : null;
               } else {
-                // After drop (no drag overlay), derive direct deps from the selected note's startTimeString.
-                // This avoids any stale module caches that could temporarily report a BaseNote dependency.
+                // Fallback: use old logic, put everything in startTime
                 const buildFromStartString = () => {
                   const out = { noteIds: [], measureIds: [], hasBase: false, parsed: false };
                   try {
@@ -8634,14 +8972,10 @@ try {
 
                     out.parsed = true;
 
-                    // Only count BaseNote when startTimeString explicitly references its startTime or duration
-                    // e.g., module.baseNote.getVariable('startTime'|'duration')
                     const baseRefRe = /module\.baseNote\s*\.\s*getVariable\s*\(\s*['"](startTime|duration)['"]\s*\)/;
                     out.hasBase = baseRefRe.test(s);
 
                     const seen = new Set();
-                    // Only count note references that access startTime or duration of that note:
-                    // module.getNoteById(id).getVariable('startTime'|'duration')
                     const re = /module\.getNoteById\(\s*(\d+)\s*\)\s*\.\s*getVariable\s*\(\s*['"](startTime|duration)['"]\s*\)/g;
                     let m;
                     while ((m = re.exec(s))) {
@@ -8649,7 +8983,6 @@ try {
                       if (!isFinite(id) || id === 0) continue;
                       if (id === Number(anchorId) || seen.has(id)) continue;
                       seen.add(id);
-                      // Classify measure vs normal note
                       try {
                         const ref = mod.getNoteById(id);
                         const isMeasure = !!(ref && ref.variables && ref.variables.startTime && !ref.variables.duration && !ref.variables.frequency);
@@ -8667,7 +9000,6 @@ try {
                 const depsFlags = [];
                 const liveParsed = buildFromStartString();
 
-                // If we're not dragging and parsing succeeded, trust the string only.
                 if (liveParsed.parsed) {
                   const idxs = liveParsed.noteIds
                     .map(id => this._noteIdToIndex.get(Number(id)))
@@ -8676,7 +9008,6 @@ try {
                   appendMeasureIdEndpoints(liveParsed.measureIds, depsList, depsFlags);
                   appendBaseEndpointIf(liveParsed.hasBase, depsList, depsFlags);
                 } else if (mref && typeof mref.getDirectDependencies === 'function') {
-                  // During drag or when parsing unavailable, fall back to live module query
                   const isMeasureNoteId = (id) => {
                     try {
                       const n = mref.getNoteById(Number(id));
@@ -8700,20 +9031,75 @@ try {
                   appendMeasureIdEndpoints(measureIds, depsList, depsFlags);
                   appendBaseEndpointIf(hasBase, depsList, depsFlags);
                 } else {
-                  // Final fallback to cached snapshot from last sync (rare)
                   appendNoteIdxEndpoints(this._relDepsIdx, depsList, depsFlags);
                   appendMeasureIdEndpoints(this._relDepsMeasureIds, depsList, depsFlags);
                   appendBaseEndpointIf(this._relDepsHasBase, depsList, depsFlags);
                 }
 
+                // Put in startTime for fallback
+                depsListByProp.startTime = depsList;
+                depsFlagsByProp.startTime = depsFlags;
                 depsArr = depsList.length ? new Float32Array(depsList) : null;
                 var depsFlagsArr = depsFlags.length ? new Float32Array(depsFlags) : null;
               }
 
-              // 2) Dependents (magenta):
+              // Store property-colored deps arrays
+              var depsArrByProp = {};
+              var depsFlagsArrByProp = {};
+              for (const prop of ['frequency', 'startTime', 'duration']) {
+                depsArrByProp[prop] = depsListByProp[prop].length ? new Float32Array(depsListByProp[prop]) : null;
+                depsFlagsArrByProp[prop] = depsFlagsByProp[prop].length ? new Float32Array(depsFlagsByProp[prop]) : null;
+              }
+
+              // 2) Dependents (property-colored):
+              // Build separate endpoint lists for each property type
+              const rdepsListByProp = { frequency: [], startTime: [], duration: [] };
+              const rdepsFlagsByProp = { frequency: [], startTime: [], duration: [] };
+
+              // Also build a combined list for legacy fallback
               const rdepsList = [];
               const rdepsFlags = [];
-              if (mref && typeof mref.getDependentNotes === 'function') {
+
+              if (mref && typeof mref.getDependentsByProperty === 'function') {
+                // Use property-colored dependents
+                const propDeps = mref.getDependentsByProperty(Number(anchorId));
+
+                // Helper to check if an ID is a measure note
+                const isMeasureNoteIdRdeps = (id) => {
+                  try {
+                    const n = mref.getNoteById(Number(id));
+                    return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                  } catch { return false; }
+                };
+
+                for (const prop of ['frequency', 'startTime', 'duration']) {
+                  const propIds = propDeps[prop] || [];
+                  const filteredIds = movingSet ? propIds.filter(id => movingSet.has(Number(id))) : propIds;
+
+                  // Separate note IDs from measure IDs
+                  const noteIdsRdeps = [];
+                  const measureIdsRdeps = [];
+                  for (const id of filteredIds) {
+                    const numId = Number(id);
+                    if (numId === 0) continue; // baseNote handled separately if needed
+                    if (isMeasureNoteIdRdeps(numId)) {
+                      measureIdsRdeps.push(numId);
+                    } else {
+                      noteIdsRdeps.push(numId);
+                    }
+                  }
+
+                  // Add note endpoints
+                  const propIdxs = noteIdsRdeps
+                    .map(id => this._noteIdToIndex.get(Number(id)))
+                    .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
+                  appendNoteIdxEndpoints(propIdxs, rdepsListByProp[prop], rdepsFlagsByProp[prop]);
+
+                  // Add measure endpoints
+                  appendMeasureIdEndpoints(measureIdsRdeps, rdepsListByProp[prop], rdepsFlagsByProp[prop]);
+                }
+              } else if (mref && typeof mref.getDependentNotes === 'function') {
+                // Fallback: put all in startTime (teal) for backwards compatibility
                 const isMeasureNoteId = (id) => {
                   try {
                     const n = mref.getNoteById(Number(id));
@@ -8735,23 +9121,37 @@ try {
                 const idxsR = noteIds
                   .map(id => this._noteIdToIndex.get(Number(id)))
                   .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
-                appendNoteIdxEndpoints(idxsR, rdepsList, rdepsFlags);
-                appendMeasureIdEndpoints(measureIds, rdepsList, rdepsFlags);
-                appendBaseEndpointIf(hasBase, rdepsList, rdepsFlags);
+                appendNoteIdxEndpoints(idxsR, rdepsListByProp.startTime, rdepsFlagsByProp.startTime);
+                appendMeasureIdEndpoints(measureIds, rdepsListByProp.startTime, rdepsFlagsByProp.startTime);
+                appendBaseEndpointIf(hasBase, rdepsListByProp.startTime, rdepsFlagsByProp.startTime);
               } else {
+                // Use cached indices, put in startTime for backwards compatibility
                 if (movingSet && this._relRdepsIdx && this._instanceNoteIds) {
                   const idxsAlt = this._relRdepsIdx.filter(idx => {
                     const idAtIdx = this._instanceNoteIds && this._instanceNoteIds[idx];
                     return movingSet.has(Number(idAtIdx));
                   });
-                  appendNoteIdxEndpoints(idxsAlt, rdepsList, rdepsFlags);
+                  appendNoteIdxEndpoints(idxsAlt, rdepsListByProp.startTime, rdepsFlagsByProp.startTime);
                 } else {
-                  appendNoteIdxEndpoints(this._relRdepsIdx, rdepsList, rdepsFlags);
+                  appendNoteIdxEndpoints(this._relRdepsIdx, rdepsListByProp.startTime, rdepsFlagsByProp.startTime);
                 }
-                appendMeasureIdEndpoints(this._relRdepsMeasureIds, rdepsList, rdepsFlags);
-                appendBaseEndpointIf(this._relRdepsHasBase, rdepsList, rdepsFlags);
+                appendMeasureIdEndpoints(this._relRdepsMeasureIds, rdepsListByProp.startTime, rdepsFlagsByProp.startTime);
+                appendBaseEndpointIf(this._relRdepsHasBase, rdepsListByProp.startTime, rdepsFlagsByProp.startTime);
               }
 
+              // Store property-colored arrays
+              var rdepsArrByProp = {};
+              var rdepsFlagsArrByProp = {};
+              for (const prop of ['frequency', 'startTime', 'duration']) {
+                rdepsArrByProp[prop] = rdepsListByProp[prop].length ? new Float32Array(rdepsListByProp[prop]) : null;
+                rdepsFlagsArrByProp[prop] = rdepsFlagsByProp[prop].length ? new Float32Array(rdepsFlagsByProp[prop]) : null;
+              }
+
+              // Legacy combined array (for compatibility)
+              for (const prop of ['frequency', 'startTime', 'duration']) {
+                rdepsList.push(...rdepsListByProp[prop]);
+                rdepsFlags.push(...rdepsFlagsByProp[prop]);
+              }
               rdepsArr = rdepsList.length ? new Float32Array(rdepsList) : null;
               var rdepsFlagsArr = rdepsFlags.length ? new Float32Array(rdepsFlags) : null;
             } catch {}
@@ -8789,6 +9189,45 @@ if (rebuild) {
       gl.bufferData(gl.ARRAY_BUFFER, rdepsFlagsArr, gl.DYNAMIC_DRAW);
     }
   }
+
+  // Upload property-colored rdeps buffers
+  for (const prop of ['frequency', 'startTime', 'duration']) {
+    const propArr = rdepsArrByProp?.[prop];
+    const propFlags = rdepsFlagsArrByProp?.[prop];
+    const count = propArr ? Math.max(0, Math.floor(propArr.length / 4)) : 0;
+    this._linkCountByProperty[prop] = count;
+    this._linkEndpointsByProperty[prop] = propArr;
+    this._linkFlagsByProperty[prop] = propFlags;
+
+    if (count > 0 && this._linkBuffersByProperty?.[prop]) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].endpoints);
+      gl.bufferData(gl.ARRAY_BUFFER, propArr, gl.DYNAMIC_DRAW);
+      if (propFlags) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].flags);
+        gl.bufferData(gl.ARRAY_BUFFER, propFlags, gl.DYNAMIC_DRAW);
+      }
+    }
+  }
+
+  // Upload property-colored deps buffers
+  for (const prop of ['frequency', 'startTime', 'duration']) {
+    const propArr = depsArrByProp?.[prop];
+    const propFlags = depsFlagsArrByProp?.[prop];
+    const count = propArr ? Math.max(0, Math.floor(propArr.length / 4)) : 0;
+    this._linkDepsCountByProperty[prop] = count;
+    this._linkDepsEndpointsByProperty[prop] = propArr;
+    this._linkDepsFlagsByProperty[prop] = propFlags;
+
+    if (count > 0 && this._linkDepsBuffersByProperty?.[prop]) {
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].endpoints);
+      gl.bufferData(gl.ARRAY_BUFFER, propArr, gl.DYNAMIC_DRAW);
+      if (propFlags) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].flags);
+        gl.bufferData(gl.ARRAY_BUFFER, propFlags, gl.DYNAMIC_DRAW);
+      }
+    }
+  }
+
   gl.bindVertexArray(null);
 
   // Update last states
@@ -8821,35 +9260,101 @@ if (rebuild) {
 
             gl.bindVertexArray(this.linkLineVAO);
 
-            // Draw deps: teal (more solid)
-            if (this._linkDepsCount > 0) {
-              if (uCol) gl.uniform4f(uCol, 0.0, 1.0, 1.0, 0.6);
-              // endpoints buffer (attrib 1)
-              gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferDeps);
-              gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-              gl.vertexAttribDivisor(1, 1);
-              // flags buffer (attrib 2)
-              if (this.linkLineFlagsBufferDeps) {
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferDeps);
+            // Draw property-colored deps (dependencies) — 2px thickness
+            // Colors show which expression of the selected note references each dependency
+            const isDragging = !!(this._dragActive && this._dragOverlay);
+            const dragType = this._dragOverlay?.type || '';
+            const isMove = dragType === 'move';
+            const isResize = dragType === 'resize';
+
+            // Deps colors (brighter, thicker - these are what the selected note depends on)
+            const DEPS_LINE_COLORS_NORMAL = {
+              frequency: [1.0, 0.5, 0.0, 0.6],   // Orange
+              startTime: [0.0, 1.0, 1.0, 0.6],   // Teal
+              duration:  [0.615, 0.0, 1.0, 0.6]  // Purple
+            };
+
+            const DEPS_LINE_COLORS_DRAG = {
+              frequency: [1.0, 0.5, 0.0, 0.15],
+              startTime: [0.0, 1.0, 1.0, 0.6],
+              duration:  [0.615, 0.0, 1.0, 0.15]
+            };
+
+            const DEPS_LINE_COLORS_RESIZE = {
+              frequency: [1.0, 0.5, 0.0, 0.15],
+              startTime: [0.0, 1.0, 1.0, 0.15],
+              duration:  [0.615, 0.0, 1.0, 0.6]
+            };
+
+            const DEPS_LINE_COLORS = isDragging
+              ? (isResize ? DEPS_LINE_COLORS_RESIZE : DEPS_LINE_COLORS_DRAG)
+              : DEPS_LINE_COLORS_NORMAL;
+
+            if (uTh) gl.uniform1f(uTh, 2.0);
+
+            for (const prop of ['startTime', 'frequency', 'duration']) {
+              const count = this._linkDepsCountByProperty?.[prop] || 0;
+              if (count > 0 && this._linkDepsBuffersByProperty?.[prop]) {
+                const color = DEPS_LINE_COLORS[prop];
+                if (uCol) gl.uniform4f(uCol, color[0], color[1], color[2], color[3]);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].endpoints);
+                gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+                gl.vertexAttribDivisor(1, 1);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].flags);
                 gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
                 gl.vertexAttribDivisor(2, 1);
+
+                gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, count);
               }
-              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this._linkDepsCount);
             }
 
-            // Draw rdeps: neon deep purple (lighter) — 1px thickness
-            if (this._linkRdepsCount > 0) {
-              if (uTh) gl.uniform1f(uTh, 1.0);
-              if (uCol) gl.uniform4f(uCol, 0.615686, 0.0, 1.0, 0.25);
-              gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferRdeps);
-              gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-              gl.vertexAttribDivisor(1, 1);
-              if (this.linkLineFlagsBufferRdeps) {
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferRdeps);
+            // Draw property-colored rdeps (dependents) — 1px thickness
+            // Colors follow the paradigm: which notes would MOVE if this property changes
+            // Orange: frequency, Teal: startTime, Purple: duration
+
+            // Rdeps colors (dimmer, thinner - these depend on the selected note)
+            const RDEPS_LINE_COLORS_NORMAL = {
+              frequency: [1.0, 0.5, 0.0, 0.25],   // Orange
+              startTime: [0.0, 1.0, 1.0, 0.25],   // Teal
+              duration:  [0.615, 0.0, 1.0, 0.25]  // Purple
+            };
+
+            const RDEPS_LINE_COLORS_DRAG = {
+              frequency: [1.0, 0.5, 0.0, 0.08],
+              startTime: [0.0, 1.0, 1.0, 0.3],
+              duration:  [0.615, 0.0, 1.0, 0.08]
+            };
+
+            const RDEPS_LINE_COLORS_RESIZE = {
+              frequency: [1.0, 0.5, 0.0, 0.08],
+              startTime: [0.0, 1.0, 1.0, 0.08],
+              duration:  [0.615, 0.0, 1.0, 0.3]
+            };
+
+            const RDEPS_LINE_COLORS = isDragging
+              ? (isResize ? RDEPS_LINE_COLORS_RESIZE : RDEPS_LINE_COLORS_DRAG)
+              : RDEPS_LINE_COLORS_NORMAL;
+
+            if (uTh) gl.uniform1f(uTh, 1.0);
+
+            for (const prop of ['startTime', 'frequency', 'duration']) {
+              const count = this._linkCountByProperty?.[prop] || 0;
+              if (count > 0 && this._linkBuffersByProperty?.[prop]) {
+                const color = RDEPS_LINE_COLORS[prop];
+                if (uCol) gl.uniform4f(uCol, color[0], color[1], color[2], color[3]);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].endpoints);
+                gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+                gl.vertexAttribDivisor(1, 1);
+
+                gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].flags);
                 gl.vertexAttribPointer(2, 2, gl.FLOAT, false, 0, 0);
                 gl.vertexAttribDivisor(2, 1);
+
+                gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, count);
               }
-              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this._linkRdepsCount);
             }
 
             gl.bindVertexArray(null);

@@ -1,5 +1,5 @@
 import Fraction from 'fraction.js';
-import { Module } from './module.js';
+import { Module, invalidateModuleEndTimeCache as invalidateModuleEndTimeCacheGlobal } from './module.js';
 import { modals } from './modals/index.js';
 import { updateStackClickSelectedNote } from './stack-click.js';
 import { eventBus } from './utils/event-bus.js';
@@ -8,16 +8,7 @@ import { setModule, setEvaluatedNotes } from './store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpressionByFraction } from './utils/simplify.js';
 import { Workspace } from './renderer/webgl2/workspace.js';
 
-// Compiled expression cache (kept for performance; flags and perf logs removed)
-const __exprCompileCache = new Map();
-function __evalExpr(expr, moduleInstance) {
-  let fn = __exprCompileCache.get(expr);
-  if (!fn) {
-    fn = new Function("module", "Fraction", "return " + expr + ";");
-    __exprCompileCache.set(expr, fn);
-  }
-  return fn(moduleInstance, Fraction);
-}
+// Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
 // Defer heavy UI sync without feature flags or polyfills
 // Use requestAnimationFrame to guarantee next-frame execution even when idle callbacks are throttled.
@@ -613,11 +604,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 delete myModule.notes[id];
             }
         });
-        
+
         myModule.nextId = 1;
-        myModule._evaluationCache = {};
-        myModule._dirtyNotes.clear();
-        myModule.markNoteDirty(0);
+        // Use invalidateAll() to properly reset evaluation state with correct Map type
+        myModule.invalidateAll();
         
         evaluatedNotes = myModule.evaluateModule();
         setEvaluatedNotes(evaluatedNotes);
@@ -694,14 +684,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 simplifiedExp = simplifyFrequency(newRawExp, myModule);
                             }
                         } catch {}
-                        depNote.variables[key] = simplifiedExp;
-                        try {
-                            depNote.setVariable(baseKey, function() {
-                                return __evalExpr(simplifiedExp, myModule);
-                            });
-                        } catch (err) {
-                            console.error("Error compiling new expression for note", depId, "variable", baseKey, ":", err);
-                        }
+                        // Set expression via *String property - Note class handles binary compilation
+                        depNote.setVariable(key, simplifiedExp);
                     }
                 }
             });
@@ -767,9 +751,13 @@ document.addEventListener('DOMContentLoaded', async function() {
     function checkAndUpdateDependentNotes(noteId, oldDuration, newDuration) {
         const note = myModule.getNoteById(noteId);
         if (!note) return;
-        
-        const noteStartTime = note.getVariable('startTime').valueOf();
-        const baseNoteStartTime = myModule.baseNote.getVariable('startTime').valueOf();
+
+        const noteStartVal = note.getVariable('startTime');
+        const baseStartVal = myModule.baseNote.getVariable('startTime');
+        if (!noteStartVal || !baseStartVal) return;
+
+        const noteStartTime = noteStartVal.valueOf();
+        const baseNoteStartTime = baseStartVal.valueOf();
         const dependentNotes = myModule.getDependentNotes(noteId);
         
         dependentNotes.forEach(depId => {
@@ -848,9 +836,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     }
                     
                     
-                    depNote.setVariable('startTime', function() {
-                        return new Function("module", "Fraction", "return " + newRaw + ";")(myModule, Fraction);
-                    });
+                    // Set the expression string directly - the Note class will compile it to binary
                     depNote.setVariable('startTimeString', newRaw);
                     
                     myModule.markNoteDirty(depId);
@@ -893,18 +879,24 @@ document.addEventListener('DOMContentLoaded', async function() {
     function isLastMeasureInChain(measureId) {
         const measure = myModule.getNoteById(parseInt(measureId, 10));
         if (!measure) return false;
-        
+
+        // Check if any other measure is a CHAIN LINK to this one (uses findMeasureLength)
+        // Anchors (measures that start a new chain) don't count - they form their own chains
+        const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+
         return !Object.values(myModule.notes).some(otherNote => {
             if (otherNote.id === measure.id) return false;
             if (!otherNote.variables.startTimeString) return false;
-            
+
             const startTimeString = otherNote.variables.startTimeString;
-            const regex = new RegExp(`module\\.getNoteById\\(\\s*${measure.id}\\s*\\)\\.getVariable\\('startTime'\\)`);
-            
-            return regex.test(startTimeString) && 
-                  otherNote.variables.startTime && 
-                  !otherNote.variables.duration && 
-                  !otherNote.variables.frequency;
+
+            // Only count chain links (use findMeasureLength), not anchors
+            const isChainLink = startTimeString.includes(linkPattern);
+            const isMeasure = otherNote.variables.startTime &&
+                              !otherNote.variables.duration &&
+                              !otherNote.variables.frequency;
+
+            return isChainLink && isMeasure;
         });
     }
       
@@ -923,19 +915,28 @@ document.addEventListener('DOMContentLoaded', async function() {
             note.variables.startTime && !note.variables.duration && !note.variables.frequency
         );
         if (measureNotes.length > 0) {
-            measureNotes.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
+            measureNotes.sort((a, b) => {
+                const aStart = a.getVariable('startTime');
+                const bStart = b.getVariable('startTime');
+                if (!aStart || !bStart) return 0;
+                return aStart.valueOf() - bStart.valueOf();
+            });
             const lastMeasure = measureNotes[measureNotes.length - 1];
-            measureEnd = lastMeasure.getVariable('startTime')
-                .add(myModule.findMeasureLength(lastMeasure))
-                .valueOf();
+            const lastMeasureStart = lastMeasure.getVariable('startTime');
+            if (lastMeasureStart) {
+                measureEnd = lastMeasureStart
+                    .add(myModule.findMeasureLength(lastMeasure))
+                    .valueOf();
+            }
         }
 
         let lastNoteEnd = 0;
         Object.values(myModule.notes).forEach(note => {
             if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
-                const noteStart = note.getVariable('startTime').valueOf();
-                const noteDuration = note.getVariable('duration').valueOf();
-                const noteEnd = noteStart + noteDuration;
+                const noteStart = note.getVariable('startTime');
+                const noteDuration = note.getVariable('duration');
+                if (!noteStart || !noteDuration) return;
+                const noteEnd = noteStart.valueOf() + noteDuration.valueOf();
                 if (noteEnd > lastNoteEnd) {
                     lastNoteEnd = noteEnd;
                 }
@@ -956,8 +957,24 @@ document.addEventListener('DOMContentLoaded', async function() {
   
     // Load last session from localStorage if available; otherwise load default module
     let savedSnapshot = null;
-    try { savedSnapshot = JSON.parse(localStorage.getItem('rmt:moduleSnapshot:v1') || 'null'); } catch {}
+    try {
+      savedSnapshot = JSON.parse(localStorage.getItem('rmt:moduleSnapshot:v1') || 'null');
+      // Validate the snapshot has proper expression strings (not legacy function format)
+      if (savedSnapshot && savedSnapshot.baseNote) {
+        const testExpr = savedSnapshot.baseNote.tempo || savedSnapshot.baseNote.frequency;
+        // Check if any expression contains legacy function wrapper patterns
+        if (testExpr && (typeof testExpr !== 'string' || testExpr.includes('newFunc') || testExpr.includes('__evalExpr'))) {
+          console.warn('[RMT] Detected legacy localStorage snapshot format, clearing...');
+          localStorage.removeItem('rmt:moduleSnapshot:v1');
+          savedSnapshot = null;
+        }
+      }
+    } catch {
+      savedSnapshot = null;
+    }
+    // Use Module for binary expression evaluation (performance optimization)
     let myModule = await Module.loadFromJSON(savedSnapshot || 'modules/defaultModule.json');
+    console.log('[RMT] Loaded Module with binary expression system');
     setModule(myModule);
     updateNotesPointerEvents();
     let evaluatedNotes = myModule.evaluateModule();
@@ -1541,11 +1558,8 @@ if (canvasEl) {
                             }
                         } catch {}
 
-                        impNote.variables[key] = expr;
-                        // Assign function directly (no setVariable) to avoid emitting events per variable
-                        impNote.variables[baseKey] = function() {
-                            return __evalExpr(expr, myModule);
-                        };
+                        // Set expression via *String property - Note class handles binary compilation
+                        impNote.setVariable(key, expr);
                     } else if (key === 'color') {
                         impNote.variables.color = impNote.variables.color;
                     }
@@ -1564,7 +1578,7 @@ if (canvasEl) {
               try {
                 const importedSet = new Set(importedIds.map(Number));
                 const isMeasure = (n) => {
-                  try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); } catch { return false; }
+                  try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); } catch { return false; }
                 };
                 // Collect imported measures
                 const measures = importedIds
@@ -1652,6 +1666,7 @@ if (canvasEl) {
                   try { first.parentId = parentIdForPID; } catch {}
 
                   // Subsequent measures: start = prev.startTime + findMeasureLength(prev), and parentId = prev.id
+                  // Note: We don't call markNoteDirty here - the batch marking below handles all imported notes
                   for (let i = 1; i < chain.length; i++) {
                     const prevId = Number(chain[i - 1]);
                     const curId  = Number(chain[i]);
@@ -1659,10 +1674,8 @@ if (canvasEl) {
                     if (!curNote) continue;
                     const rawStart = `module.getNoteById(${prevId}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevId})))`;
                     const simplifiedStart = simplifyStartTime(rawStart, myModule);
-                    curNote.setVariable('startTime', function () { return __evalExpr(simplifiedStart, myModule); });
                     curNote.setVariable('startTimeString', simplifiedStart);
                     try { curNote.parentId = prevId; } catch {}
-                    try { myModule.markNoteDirty(curId); } catch {}
                   }
                 });
               } catch (e) {
@@ -1671,10 +1684,12 @@ if (canvasEl) {
             })();
 
             // Avoid global cache flush; only mark affected notes dirty
+            // Use batch marking for efficiency (avoids O(n²) individual getAllDependents calls)
             try {
-                myModule.markNoteDirty(0);
-                if (targetNote && typeof targetNote.id === 'number') myModule.markNoteDirty(targetNote.id);
-                importedIds.forEach(id => myModule.markNoteDirty(Number(id)));
+                const batchIds = [0];
+                if (targetNote && typeof targetNote.id === 'number') batchIds.push(targetNote.id);
+                importedIds.forEach(id => batchIds.push(Number(id)));
+                myModule.markNotesDirtyBatch(batchIds);
             } catch {}
 
             invalidateModuleEndTimeCache();
@@ -2104,7 +2119,8 @@ if (canvasEl) {
 // === GL move helpers: parent selection, expression emission, and frequency retargeting ===
 function __isMeasureNoteGL(note) {
   try {
-    return !!(note && note.getVariable('startTime') && !note.getVariable('duration') && !note.getVariable('frequency'));
+    // Use hasExpression instead of getVariable to avoid dependency on evaluation cache
+    return !!(note && note.hasExpression && note.hasExpression('startTime') && !note.hasExpression('duration') && !note.hasExpression('frequency'));
   } catch { return false; }
 }
 
@@ -2129,17 +2145,20 @@ function __parseParentFromStartTimeStringGL(note) {
 function __findNextMeasureInChainGL(measure) {
   try {
     if (!__isMeasureNoteGL(measure)) return null;
-    const dependents = [];
+    // Only find CHAIN LINKS (measures that use findMeasureLength), not anchors starting new chains
+    const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+    const chainLinks = [];
     for (const id in myModule.notes) {
       const n = myModule.getNoteById(parseInt(id, 10));
       if (!n || !__isMeasureNoteGL(n)) continue;
       const startTimeString = n.variables.startTimeString || '';
-      const regex = new RegExp(`getNoteById\\(\\s*${measure.id}\\s*\\)`);
-      if (regex.test(startTimeString)) dependents.push(n);
+      // Only include chain links (use findMeasureLength), not anchors
+      if (startTimeString.includes(linkPattern)) chainLinks.push(n);
     }
-    if (dependents.length === 0) return null;
-    dependents.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
-    return dependents[0];
+    if (chainLinks.length === 0) return null;
+    // Sort by startTime and return earliest (there should typically be only one chain link)
+    chainLinks.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
+    return chainLinks[0];
   } catch { return null; }
 }
 
@@ -2334,7 +2353,6 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
           }
         } catch {}
 
-        dep.setVariable('frequency', function() { return __evalExpr(simplified, myModule); });
         dep.setVariable('frequencyString', simplified);
         try { myModule.markNoteDirty(dep.id); } catch {}
       }
@@ -2396,7 +2414,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           const replacedS = sRaw.replace(noteRefRegex, parentRef);
           let simplifiedS;
           try { simplifiedS = simplifyStartTime(replacedS, myModule); } catch { simplifiedS = replacedS; }
-          dep.setVariable('startTime', function() { return __evalExpr(simplifiedS, myModule); });
           dep.setVariable('startTimeString', simplifiedS);
           changed = true;
         }
@@ -2409,7 +2426,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           const replacedD = dRaw.replace(noteRefRegex, parentRef);
           let simplifiedD;
           try { simplifiedD = simplifyDuration(replacedD, myModule); } catch { simplifiedD = replacedD; }
-          dep.setVariable('duration', function() { return __evalExpr(simplifiedD, myModule); });
           dep.setVariable('durationString', simplifiedD);
           changed = true;
         }
@@ -2422,7 +2438,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           const replacedF = fRaw.replace(noteRefRegex, parentRef);
           let simplifiedF;
           try { simplifiedF = simplifyFrequency(replacedF, myModule); } catch { simplifiedF = replacedF; }
-          dep.setVariable('frequency', function() { return __evalExpr(simplifiedF, myModule); });
           dep.setVariable('frequencyString', simplifiedF);
           changed = true;
         }
@@ -2490,17 +2505,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // No raw expression to preserve; fallback to numeric exact fraction.
                 const newFrequency = currentFrequency.mul(new Fraction(factor.n, factor.d));
                 const newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
-                note.setVariable('frequency', function() {
-                    return __evalExpr(newRaw, myModule);
-                });
                 note.setVariable('frequencyString', newRaw);
             } else {
                 // Multiply and simplify robustly while preserving anchors
                 const multiplied = multiplyExpressionByFraction(rawExpression, factor.n, factor.d, 'frequency', myModule);
                 const simplified = simplifyFrequency(multiplied, myModule);
-                note.setVariable('frequency', function() {
-                    return __evalExpr(simplified, myModule);
-                });
                 note.setVariable('frequencyString', simplified);
             }
 
@@ -3197,9 +3206,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 newModule.baseNote.id = 0;
             }
             myModule = newModule;
-            setModule(newModule);
+            setModule(newModule, { skipBackgroundEval: true });
+            console.log('[RMT] Reset to Module');
 
-            myModule.markNoteDirty(0);
+            // loadFromJSON already calls invalidateAll(), no need to mark dirty again
             initializeModule();
             invalidateModuleEndTimeCache();
 
@@ -3247,19 +3257,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             
             Module.loadFromJSON(data).then(newModule => {
                 myModule = newModule;
-                setModule(newModule);
-                
-                myModule._evaluationCache = {};
-                myModule._dirtyNotes.clear();
-                myModule._dependenciesCache.clear();
-                myModule._dependentsCache.clear();
-                
-                for (const id in myModule.notes) {
-                    myModule.markNoteDirty(Number(id));
-                }
-                
+                setModule(newModule, { skipBackgroundEval: true });
+
+                // loadFromJSON already calls invalidateAll(), no need for manual cache clearing
                 initializeModule();
-                
+
                 if (currentViewCenter && glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
                     try {
                         const rect = glWorkspace.containerEl.getBoundingClientRect();
@@ -3271,10 +3273,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                         if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
                     } catch {}
                 }
-                
-                evaluatedNotes = myModule.evaluateModule();
-                setEvaluatedNotes(evaluatedNotes);
-                updateVisualNotes(evaluatedNotes);
+
                 try { captureSnapshot('Reorder Module'); } catch {}
                 notify('Module reordered successfully', 'success');
                 
@@ -3307,11 +3306,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                         // Ensure canonical id for base note; otherwise use module-defined base note values as-is
                         newModule.baseNote.id = 0;
                     }
-                    
+
                     myModule = newModule;
-                    setModule(newModule);
-                    
-                    myModule.markNoteDirty(0);
+                    setModule(newModule, { skipBackgroundEval: true });
+
+                    // loadFromJSON already calls invalidateAll(), no need to mark dirty again
                     initializeModule();
                     invalidateModuleEndTimeCache();
                     
@@ -3383,37 +3382,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
     function createModuleJSON() {
-        const moduleData = {
-            baseNote: {
-                frequency: myModule.baseNote.variables.frequencyString || `new Fraction(${myModule.baseNote.variables.frequency.n}, ${myModule.baseNote.variables.frequency.d})`,
-                startTime: myModule.baseNote.variables.startTimeString || `new Fraction(${myModule.baseNote.variables.startTime.n}, ${myModule.baseNote.variables.startTime.d})`,
-                tempo: myModule.baseNote.variables.tempoString || `new Fraction(${myModule.baseNote.variables.tempo.n}, ${myModule.baseNote.variables.tempo.d})`,
-                beatsPerMeasure: myModule.baseNote.variables.beatsPerMeasureString || `new Fraction(${myModule.baseNote.variables.beatsPerMeasure.n}, ${myModule.baseNote.variables.beatsPerMeasure.d})`,
-                instrument: myModule.baseNote.variables.instrument || 'sine-wave'
-            },
-            notes: []
-        };
-
-        Object.entries(myModule.notes).forEach(([id, note]) => {
-            if (id !== '0') {
-                const noteData = {
-                    id: note.id
-                };
-                Object.entries(note.variables).forEach(([key, value]) => {
-                    if (!key.endsWith('String')) {
-                        if (typeof value === 'function') {
-                            noteData[key] = note.variables[key + 'String'] || value.toString();
-                        } else if (value instanceof Fraction) {
-                            noteData[key] = `new Fraction(${value.n}, ${value.d})`;
-                        } else {
-                            noteData[key] = value;
-                        }
-                    }
-                });
-                moduleData.notes.push(noteData);
-            }
-        });
-        return moduleData;
+        // Use the Module's built-in JSON export method
+        return myModule.createModuleJSON();
     }
 
     function saveModule() {
@@ -3711,6 +3681,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     function invalidateModuleEndTimeCache() {
         memoizedModuleEndTime = null;
         moduleLastModifiedTime = Date.now();
+        // Also invalidate the global cache in module.js used by audio-engine
+        invalidateModuleEndTimeCacheGlobal();
     }
 
 // Event bus subscriptions for incremental modularization
@@ -3845,7 +3817,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
           } catch {}
 
-          n.setVariable('startTime', function() { return __evalExpr(raw, myModule); });
           n.setVariable('startTimeString', raw);
 
           // Frequency remapping: ensure moved note's frequency never depends on a future-starting parent;
@@ -3925,7 +3896,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
                 let simplifiedF;
                 try { simplifiedF = simplifyFrequency(rawFreq, myModule); } catch { simplifiedF = rawFreq; }
-                n.setVariable('frequency', function () { return __evalExpr(simplifiedF, myModule); });
                 n.setVariable('frequencyString', simplifiedF);
               }
             }
@@ -3999,7 +3969,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 let simplifiedD;
                 try { simplifiedD = simplifyDuration(rawDur, myModule); } catch { simplifiedD = rawDur; }
 
-                n.setVariable('duration', function () { return __evalExpr(simplifiedD, myModule); });
                 n.setVariable('durationString', simplifiedD);
               }
             }
@@ -4076,7 +4045,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           const simplified = simplifyDuration(raw, myModule);
 
           n.setVariable('durationString', simplified);
-          n.setVariable('duration', function() { return __evalExpr(simplified, myModule); });
 
           const updatedDuration = n.getVariable('duration')?.valueOf?.() ?? newDurationSec;
 
@@ -4123,15 +4091,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       });
      eventBus.on('workspace:measureResizeCommit', ({ measureId, newStartSec }) => {
        try {
-         if (measureId == null || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
+         if (measureId == null || typeof newStartSec !== 'number' || !isFinite(newStartSec)) {
+           return;
+         }
          const mId = Number(measureId);
- 
+
          // Pause playback during edit if needed
          try { eventBus.emit('player:requestPause'); } catch {}
  
          // Helper: identify "measure" notes (startTime set, no duration/frequency)
+         // Use hasExpression instead of getVariable to avoid dependency on evaluation cache
          const __isMeasure = (n) => {
-           try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
+           try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
            catch { return false; }
          };
  
@@ -4154,19 +4125,54 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
          };
  
          // Collect the linear chain for this measure only (do not mix with other chains)
+         // OPTIMIZED: Use DependencyGraph.getMeasureChain() when available for O(d) vs O(n²) performance
          const chain = (() => {
+           const depGraph = myModule._dependencyGraph;
+           const isMeasureById = (id) => {
+             try {
+               const n = myModule.getNoteById(Number(id));
+               return __isMeasure(n);
+             } catch { return false; }
+           };
+           const getStartTime = (id) => {
+             try {
+               const n = myModule.getNoteById(Number(id));
+               const st = n && n.getVariable && n.getVariable('startTime');
+               return Number(st && st.valueOf ? st.valueOf() : 0);
+             } catch { return 0; }
+           };
+           // Check if a dependent is a chain link (uses findMeasureLength) vs an anchor (starts new chain)
+           const isChainLinkById = (depId, parentId) => {
+             try {
+               const n = myModule.getNoteById(Number(depId));
+               const expr = (n && n.variables && n.variables.startTimeString) || '';
+               // Chain link pattern: findMeasureLength(module.getNoteById(parentId))
+               const linkPattern = `findMeasureLength(module.getNoteById(${parentId}))`;
+               return expr.includes(linkPattern);
+             } catch { return false; }
+           };
+
+           // Fast path: use DependencyGraph if available
+           if (depGraph && typeof depGraph.getMeasureChain === 'function') {
+             return depGraph.getMeasureChain(Number(mId), isMeasureById, getStartTime, isChainLinkById);
+           }
+
+           // Fallback to original implementation
            const out = [];
-           // Walk backward to earliest measure in this chain
+           // Walk backward to earliest measure in this chain (only through chain links, not anchors)
+           // A chain link uses findMeasureLength(module.getNoteById(X)) - anchors don't
            let cur = note;
            let guard = 0;
            while (guard++ < 1024) {
              const raw = (cur && cur.variables && cur.variables.startTimeString) ? cur.variables.startTimeString : '';
-             const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-             if (m) {
-               const pid = parseInt(m[1], 10);
+             // Check if current note is a CHAIN LINK (uses findMeasureLength)
+             const linkMatch = raw.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
+             if (linkMatch) {
+               const pid = parseInt(linkMatch[1], 10);
                const pn = myModule.getNoteById(pid);
                if (pn && __isMeasure(pn)) { cur = pn; continue; }
              }
+             // If no findMeasureLength, this is an anchor or root - stop backward walk
              break;
            }
            const pushWithStart = (n) => {
@@ -4174,29 +4180,32 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
              catch { out.push({ id: Number(n.id), startSec: 0 }); }
            };
            pushWithStart(cur);
-           // Forward: at each step pick earliest dependent measure
-           const findDependents = (m) => {
-             const arr = [];
+           // Forward: at each step pick the next CHAIN LINK measure (not anchors from other chains)
+           // A chain link uses findMeasureLength(getNoteById(X)) to compute start time
+           const findNextChainLink = (m) => {
+             const candidates = [];
              try {
+               // Pattern for chain link: findMeasureLength(module.getNoteById(ID))
+               const linkPattern = `findMeasureLength(module.getNoteById(${m.id}))`;
                for (const id in myModule.notes) {
                  const nn = myModule.getNoteById(Number(id));
                  if (!__isMeasure(nn)) continue;
                  const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
-                 const re = new RegExp('getNoteById\\(\\s*' + m.id + '\\s*\\)');
-                 if (re.test(sts)) arr.push(nn);
+                 // Only include measures that are CHAIN LINKS (use findMeasureLength), not anchors
+                 if (sts.includes(linkPattern)) candidates.push(nn);
                }
              } catch {}
-             arr.sort((a, b) => {
+             // Sort by startTime and return earliest (there should typically be only one chain link)
+             candidates.sort((a, b) => {
                try { return a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf(); } catch { return 0; }
              });
-             return arr;
+             return candidates.length > 0 ? candidates[0] : null;
            };
            guard = 0;
            let curN = cur;
            while (guard++ < 2048) {
-             const deps = findDependents(curN);
-             if (!deps.length) break;
-             const next = deps[0];
+             const next = findNextChainLink(curN);
+             if (!next) break;
              pushWithStart(next);
              curN = next;
            }
@@ -4204,7 +4213,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
          })();
  
          const idx = chain.findIndex(e => Number(e.id) === mId);
-         if (idx < 0) return;
+         if (idx < 0) {
+           return;
+         }
  
          const tol = 1e-6;
  
@@ -4216,7 +4227,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             const baseAnchored = !!(raw && raw.indexOf('module.baseNote') !== -1);
 
             const isMeasure = (n) => {
-              try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
+              try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
               catch { return false; }
             };
 
@@ -4252,7 +4263,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 ? `${baseRef}.getVariable('startTime')`
                 : `${baseRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${baseRef})).mul(new Fraction(${bf.n}, ${bf.d})))`;
               const simplifiedStart = simplifyStartTime(newRaw, myModule);
-              note.setVariable('startTime', function () { return __evalExpr(simplifiedStart, myModule); });
               note.setVariable('startTimeString', simplifiedStart);
               try { myModule.markNoteDirty(note.id); } catch {}
             } else if (parentNote && !isMeasure(parentNote)) {
@@ -4276,21 +4286,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 raw2 = emitStartTimeExprForParentGL(cand || myModule.baseNote, Number(newStartSec));
               }
 
-              note.setVariable('startTime', function () { return __evalExpr(raw2, myModule); });
               note.setVariable('startTimeString', raw2);
               try { myModule.markNoteDirty(note.id); } catch {}
             } else {
               // Fallback heuristics: choose a suitable parent and express relative start.
               const parent = selectSuitableParentForStartGL(note, Number(newStartSec));
               const raw3 = emitStartTimeExprForParentGL(parent, Number(newStartSec));
-              note.setVariable('startTime', function () { return __evalExpr(raw3, myModule); });
               note.setVariable('startTimeString', raw3);
               try { myModule.markNoteDirty(note.id); } catch {}
             }
           } catch (e) {
             const parent = selectSuitableParentForStartGL(note, Number(newStartSec));
             const raw = emitStartTimeExprForParentGL(parent, Number(newStartSec));
-            note.setVariable('startTime', function () { return __evalExpr(raw, myModule); });
             note.setVariable('startTimeString', raw);
             try { myModule.markNoteDirty(note.id); } catch {}
           }
@@ -4312,15 +4319,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
            let bf; try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
            const rawBeats = `new Fraction(${bf.n}, ${bf.d})`;
            try {
-             prev.setVariable('beatsPerMeasure', function () { return __evalExpr(rawBeats, myModule); });
              prev.setVariable('beatsPerMeasureString', rawBeats);
              try { myModule.markNoteDirty(prev.id); } catch {}
-           } catch {}
- 
+           } catch (e) { /* ignore */ }
+
            try {
              const rawStart = `module.getNoteById(${prev.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prev.id})))`;
              const simplifiedStart = simplifyStartTime(rawStart, myModule);
-             note.setVariable('startTime', function () { return __evalExpr(simplifiedStart, myModule); });
              note.setVariable('startTimeString', simplifiedStart);
              try { myModule.markNoteDirty(note.id); } catch {}
            } catch {}
@@ -4448,13 +4453,11 @@ try {
     try {
       const newModule = await Module.loadFromJSON(snapshot);
       myModule = newModule;
-      setModule(newModule);
+      setModule(newModule, { skipBackgroundEval: true });
 
-      for (const id in myModule.notes) {
-        myModule.markNoteDirty(Number(id));
-      }
-
+      // loadFromJSON already calls invalidateAll(), no need to mark dirty again
       initializeModule();
+      invalidateModuleEndTimeCache();
 
       if (center && glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
         try {
@@ -4468,10 +4471,6 @@ try {
         } catch {}
       }
 
-      evaluatedNotes = myModule.evaluateModule();
-      setEvaluatedNotes(evaluatedNotes);
-      updateVisualNotes(evaluatedNotes);
-      createMeasureBars();
       if (typeof updateNotesPointerEvents === 'function') updateNotesPointerEvents();
 
       // Persist restored state so reloads resume exactly where the user left
