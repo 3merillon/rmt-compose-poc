@@ -282,21 +282,25 @@ function parseAtomic(s) {
     return mkAnchorAtom(mkMeasureAnchor(ref));
   }
 
-  // 3) Fraction literal
+  // 3) Fraction literal (new Fraction(...))
   const frac = tryParseFractionLiteral(str);
   if (frac) return mkCoeffAtom(frac);
 
-  // 4) Known variable references
+  // 4) Bare numeric literal (e.g., 1.5, 0.25, 2)
+  const bareNum = tryParseBareNumeric(str);
+  if (bareNum) return mkCoeffAtom(bareNum);
+
+  // 5) Known variable references
   const vref = tryParseKnownVariableRef(str);
   if (vref) return mkAnchorAtom(vref);
 
-  // 5) Parenthesized nested sum or other expressions: keep opaque (we do not distribute)
+  // 6) Parenthesized nested sum or other expressions: keep opaque (we do not distribute)
   if (startsWithParen(str) && endsWithParen(str)) {
     // If the inner contains .add/.sub at top-level, keep opaque
     return mkOpaqueAtom(s);
   }
 
-  // 6) Fallback to opaque
+  // 7) Fallback to opaque
   return mkOpaqueAtom(s);
 }
 
@@ -674,6 +678,25 @@ function parseNumeric(x) {
   const n = Number(x);
   if (!isFinite(n)) return null;
   return n;
+}
+
+/**
+ * Try to parse a bare numeric literal like 1.5, 0.25, 2, -3
+ * Returns a Fraction if successful, null otherwise.
+ */
+function tryParseBareNumeric(s) {
+  // Must be purely numeric (possibly with sign and decimal point)
+  const trimmed = trim(s);
+  if (!trimmed) return null;
+  // Match: optional sign, digits, optional decimal point + digits
+  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return null;
+  const num = parseNumeric(trimmed);
+  if (num == null) return null;
+  try {
+    return new Fraction(num);
+  } catch {
+    return null;
+  }
 }
 
 // =============== Chain splitters (.add/.sub and .mul/.div) ===============

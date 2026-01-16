@@ -27,25 +27,11 @@ function recompileNoteAndDependents(noteId, visited = new Set()) {
   if (!moduleInstance) return;
   if (visited.has(noteId)) return;
   visited.add(noteId);
-  const note = moduleInstance.getNoteById(noteId);
-  if (!note) return;
 
-  Object.keys(note.variables).forEach((varKey) => {
-    if (varKey.endsWith('String')) {
-      const baseKey = varKey.slice(0, -6);
-      try {
-        const rawExpr = note.variables[varKey];
-        // eslint-disable-next-line no-new-func
-        const newFunc = new Function('module', 'Fraction', 'return ' + rawExpr + ';');
-        note.setVariable(baseKey, function () {
-          return newFunc(moduleInstance, Fraction);
-        });
-      } catch (err) {
-        console.error('Error recompiling note', noteId, 'variable', baseKey, ':', err);
-      }
-    }
-  });
+  // Mark the note dirty so the binary evaluator will re-evaluate it
+  try { moduleInstance.markNoteDirty(noteId); } catch {}
 
+  // Also mark all dependents dirty
   const dependents = moduleInstance.getDependentNotes(noteId);
   dependents.forEach((depId) => recompileNoteAndDependents(depId, visited));
 }

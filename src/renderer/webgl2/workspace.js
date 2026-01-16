@@ -184,14 +184,12 @@ export class Workspace {
               let cidx0 = chain0.findIndex(m => Number(m.id) === Number(measureId));
               if (cidx0 < 0) cidx0 = 0;
 
-              // Build moving-set cache for measure drag: downstream measures + all normal notes that depend on them
+              // Build moving-set cache for measure drag: downstream measures + all normal notes whose startTime depends on them
+              // OPTIMIZED: Uses DependencyGraph.getAllStartTimeDependents() for O(d) instead of O(N×M) regex scanning
               const moveSet0 = new Set();
               try {
                 const mod = this._module;
-                const isMeasure = (n) => {
-                  try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
-                  catch { return false; }
-                };
+                const depGraph = mod._dependencyGraph;
 
                 // 1) Seed measures: downstream along the linear chain (including the anchor)
                 const seedMeasures = new Set();
@@ -205,78 +203,104 @@ export class Workspace {
                   moveSet0.add(Number(measureId));
                 }
 
-                // 2) Expand to ALL transitive dependent measures (branching graph closure)
-                const measureClosure = (seedSet) => {
-                  const out = new Set(seedSet);
-                  if (!mod || !mod.notes) return out;
-                  let changed = true;
-                  while (changed) {
-                    changed = false;
-                    for (const idStr in mod.notes) {
-                      const nn = mod.getNoteById(Number(idStr));
-                      if (!isMeasure(nn)) continue;
-                      const nid = Number(nn.id);
-                      if (out.has(nid)) continue;
-                      const sts = nn.variables?.startTimeString || '';
-                      for (const sid of out) {
-                        if (new RegExp(`getNoteById\\(\\s*${sid}\\s*\\)`).test(sts)) {
-                          out.add(nid);
-                          changed = true;
-                          break;
-                        }
-                      }
+                // 2) & 3) Use DependencyGraph to get ALL transitive startTime dependents efficiently
+                // Include ALL dependent measures (both chain links AND anchors) for preview
+                // Anchors depend on this measure so they should move in preview
+                // Use startTime-specific dependents to avoid moving notes that only reference for frequency/duration
+                if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
+                  // Get all transitive startTime dependents of each seed measure
+                  for (const seedId of seedMeasures) {
+                    const allDeps = depGraph.getAllStartTimeDependents(seedId);
+                    for (const depId of allDeps) {
+                      moveSet0.add(Number(depId));
                     }
                   }
-                  return out;
-                };
-
-                const allMeasuresToMove = measureClosure(seedMeasures);
-                for (const mid of allMeasuresToMove) moveSet0.add(Number(mid));
-
-                // 3) Include ALL non-measure notes whose start/duration depend (transitively) on any of those measures
-                if (mod && mod.notes) {
-                  const notesObj = mod.notes || {};
-                  const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
-                  const getStartTimeStr = (nid) => {
-                    try {
-                      const n = mod.getNoteById(Number(nid));
-                      return n && n.variables && typeof n.variables.startTimeString === 'string'
-                        ? n.variables.startTimeString
-                        : null;
-                    } catch { return null; }
+                } else if (depGraph && typeof depGraph.getAllDependents === 'function') {
+                  // Fallback to old behavior
+                  for (const seedId of seedMeasures) {
+                    const allDeps = depGraph.getAllDependents(seedId);
+                    for (const depId of allDeps) {
+                      moveSet0.add(Number(depId));
+                    }
+                  }
+                } else {
+                  // Fallback to original O(N×M) implementation if DependencyGraph not available
+                  // Include ALL dependent measures (both chain links AND anchors) for preview
+                  const isMeasure = (n) => {
+                    try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
+                    catch { return false; }
                   };
-                  const refersStartOf = (nid, refId) => {
-                    const s = getStartTimeStr(nid);
-                    return !!(s && s.includes(`getNoteById(${refId})`) &&
-                              (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
-                               s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`)));
-                  };
-                  const closureStartRefs = (seedSet) => {
-                    const affected = new Set(seedSet);
+
+                  // Expand to ALL transitive dependent measures (including anchors)
+                  const measureClosure = (seedSet) => {
+                    const out = new Set(seedSet);
+                    if (!mod || !mod.notes) return out;
                     let changed = true;
                     while (changed) {
                       changed = false;
-                      for (const nid of allIds) {
-                        if (affected.has(nid)) continue;
-                        for (const refId of affected) {
-                          if (refersStartOf(nid, refId)) {
-                            affected.add(nid);
+                      for (const idStr in mod.notes) {
+                        const nn = mod.getNoteById(Number(idStr));
+                        if (!isMeasure(nn)) continue;
+                        const nid = Number(nn.id);
+                        if (out.has(nid)) continue;
+                        const sts = nn.variables?.startTimeString || '';
+                        // Include ANY measure that references a seed (both chain links and anchors)
+                        for (const sid of out) {
+                          if (sts.includes(`getNoteById(${sid})`)) {
+                            out.add(nid);
                             changed = true;
                             break;
                           }
                         }
                       }
                     }
-                    return affected;
+                    return out;
                   };
 
-                  const closure = closureStartRefs(allMeasuresToMove);
-                  for (const did of closure) {
-                    try {
-                      // Include ALL notes and measures that depend transitively on any of the measures in the seed set.
-                      // This ensures measures reached via intermediate normal-notes are also shifted during preview.
+                  const allMeasuresToMove = measureClosure(seedMeasures);
+                  for (const mid of allMeasuresToMove) moveSet0.add(Number(mid));
+
+                  // Include ALL non-measure notes whose start/duration depend (transitively) on any of those measures
+                  if (mod && mod.notes) {
+                    const notesObj = mod.notes || {};
+                    const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
+                    const getStartTimeStr = (nid) => {
+                      try {
+                        const n = mod.getNoteById(Number(nid));
+                        return n && n.variables && typeof n.variables.startTimeString === 'string'
+                          ? n.variables.startTimeString
+                          : null;
+                      } catch { return null; }
+                    };
+                    const refersStartOf = (nid, refId) => {
+                      const s = getStartTimeStr(nid);
+                      return !!(s && s.includes(`getNoteById(${refId})`) &&
+                                (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
+                                 s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`)));
+                    };
+                    const closureStartRefs = (seedSet) => {
+                      const affected = new Set(seedSet);
+                      let changed = true;
+                      while (changed) {
+                        changed = false;
+                        for (const nid of allIds) {
+                          if (affected.has(nid)) continue;
+                          for (const refId of affected) {
+                            if (refersStartOf(nid, refId)) {
+                              affected.add(nid);
+                              changed = true;
+                              break;
+                            }
+                          }
+                        }
+                      }
+                      return affected;
+                    };
+
+                    const closure = closureStartRefs(allMeasuresToMove);
+                    for (const did of closure) {
                       moveSet0.add(Number(did));
-                    } catch {}
+                    }
                   }
                 }
               } catch {}
@@ -472,62 +496,35 @@ export class Workspace {
         
         try {
           const mod = this._module;
-          const notesObj = mod && mod.notes ? mod.notes : {};
-          const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
           const anchorId = Number(id);
 
-          const getStartTimeStr = (nid) => {
-            try {
-              const n = mod.getNoteById(Number(nid));
-              return n && n.variables && typeof n.variables.startTimeString === 'string'
-                ? n.variables.startTimeString
-                : null;
-            } catch { return null; }
-          };
-          const refersStartOf = (nid, refId) => {
-            const s = getStartTimeStr(nid);
-            return !!(s && s.includes(`getNoteById(${refId})`) && (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`)));
-          };
-          const refersDurationOf = (nid, refId) => {
-            const s = getStartTimeStr(nid);
-            return !!(s && s.includes(`getNoteById(${refId})`) && (s.includes(`getVariable('duration'`) || s.includes(`getVariable("duration"`)));
-          };
-
-          // Closure over start-time references: given a seed set, add notes whose startTime depends on any in the set.
-          const closureStartRefs = (seedSet) => {
-            const affected = new Set(seedSet);
-            let changed = true;
-            while (changed) {
-              changed = false;
-              for (const nid of allIds) {
-                if (affected.has(nid)) continue;
-                // If nid's start references any member of affected, include it
-                for (const refId of affected) {
-                  if (refersStartOf(nid, refId)) {
-                    affected.add(nid);
-                    changed = true;
-                    break;
-                  }
-                }
-              }
-            }
-            return affected;
-          };
-
+          // PERFORMANCE: Use DependencyGraph for O(V+E) traversal instead of O(n²) string matching
           if (type === 'move') {
-            // Notes whose startTime ultimately depends on anchor's startTime
-            affectedIds = closureStartRefs(new Set([anchorId]));
+            // For MOVE: include notes whose startTime depends on the dragged note's startTime
+            // When we move a note (change its startTime), only notes referencing its startTime should move
+            const graph = mod._dependencyGraph;
+            if (graph && typeof graph.getAllStartTimeOnStartTimeDependents === 'function') {
+              affectedIds = graph.getAllStartTimeOnStartTimeDependents(anchorId);
+            } else if (graph && typeof graph.getAllStartTimeDependents === 'function') {
+              // Fallback to old behavior if property-specific tracking not available
+              affectedIds = graph.getAllStartTimeDependents(anchorId);
+            } else if (graph && typeof graph.getAllDependents === 'function') {
+              affectedIds = graph.getAllDependents(anchorId);
+            }
           } else if (type === 'resize') {
-            // Stage 1: notes whose startTime directly references anchor's duration
-            const seeds = new Set(allIds.filter(nid => refersDurationOf(nid, anchorId)));
-            // Stage 2: plus any notes whose startTime references those seeds' start (transitively)
-            const closure = closureStartRefs(seeds);
-            affectedIds = new Set([...seeds, ...closure]);
-          } else {
-            affectedIds = new Set(); // octave does not preview position changes
+            // For RESIZE: include notes whose startTime depends on the dragged note's duration
+            // When we resize a note (change its duration), only notes referencing its duration should move
+            const graph = mod._dependencyGraph;
+            if (graph && typeof graph.getAllStartTimeOnDurationDependents === 'function') {
+              affectedIds = graph.getAllStartTimeOnDurationDependents(anchorId);
+            } else if (graph && typeof graph.getAllDependents === 'function') {
+              // Fallback: no preview for resize if property-specific tracking not available
+              affectedIds = new Set();
+            }
           }
+          // octave type does not preview position changes, affectedIds stays empty
 
-          // Remove anchor from dependents set
+          // Remove anchor from dependents set (it's not affected by its own movement)
           affectedIds.delete(anchorId);
 
           // Record baselines for affected set
@@ -596,7 +593,7 @@ export class Workspace {
           if (!parent0) parent0 = mod?.baseNote || null;
 
           const isMeasure = (nn) => {
-            try { return !!(nn && nn.getVariable('startTime') && !nn.getVariable('duration') && !nn.getVariable('frequency')); }
+            try { return !!(nn && nn.hasExpression && nn.hasExpression('startTime') && !nn.hasExpression('duration') && !nn.hasExpression('frequency')); }
             catch { return false; }
           };
 
@@ -904,46 +901,24 @@ export class Workspace {
           const pointerOffsetWorld = pointerWX0 - startWorldX;
 
           // PERFORMANCE: Build baseline set and compute dependents ONCE during promotion
+          // OPTIMIZED: Use DependencyGraph.getAllStartTimeDependents() for O(V+E) instead of O(n²) string matching
           const baseline = new Map();
           baseline.set(Number(noteId), origStartSec);
           let affectedIds = new Set();
-          
+
           try {
             const mod = this._module;
-            const notesObj = mod && mod.notes ? mod.notes : {};
-            const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
             const anchorId = Number(noteId);
-            const getStartTimeStr = (nid) => {
-              try {
-                const n = mod.getNoteById(Number(nid));
-                return n && n.variables && typeof n.variables.startTimeString === 'string'
-                  ? n.variables.startTimeString
-                  : null;
-              } catch { return null; }
-            };
-            const refersStartOf = (nid, refId) => {
-              const s = getStartTimeStr(nid);
-              return !!(s && s.includes(`getNoteById(${refId})`) && (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`)));
-            };
-            const closureStartRefs = (seedSet) => {
-              const affected = new Set(seedSet);
-              let changed = true;
-              while (changed) {
-                changed = false;
-                for (const nid of allIds) {
-                  if (affected.has(nid)) continue;
-                  for (const refId of affected) {
-                    if (refersStartOf(nid, refId)) {
-                      affected.add(nid);
-                      changed = true;
-                      break;
-                    }
-                  }
-                }
-              }
-              return affected;
-            };
-            affectedIds = closureStartRefs(new Set([anchorId]));
+            const depGraph = mod && mod._dependencyGraph;
+
+            // Use startTime-specific DependencyGraph for fast transitive dependent lookup
+            // This ensures we only move notes whose startTime actually depends on the dragged note
+            if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
+              affectedIds = depGraph.getAllStartTimeDependents(anchorId);
+            } else if (depGraph && typeof depGraph.getAllDependents === 'function') {
+              // Fallback to old behavior
+              affectedIds = depGraph.getAllDependents(anchorId);
+            }
             affectedIds.delete(anchorId);
             for (const did of affectedIds) {
               let s0 = 0;
@@ -997,7 +972,7 @@ export class Workspace {
             if (!parent0) parent0 = mod?.baseNote || null;
 
             const isMeasure = (nn) => {
-              try { return !!(nn && nn.getVariable('startTime') && !nn.getVariable('duration') && !nn.getVariable('frequency')); }
+              try { return !!(nn && nn.hasExpression && nn.hasExpression('startTime') && !nn.hasExpression('duration') && !nn.hasExpression('frequency')); }
               catch { return false; }
             };
 
@@ -1138,34 +1113,35 @@ export class Workspace {
             if (this._interaction) this._interaction.cachedMeasureIndex = cidx;
           }
 
-          // Detect if the current measure's parent is a normal note (not BaseNote, not a measure)
-          let parentIsNormalNote = false;
+          // Detect the parent type to determine drag behavior:
+          // - BaseNote anchored: clamp to baseStart (can't go before time 0)
+          // - Parent is another measure: move freely, relink on drop
+          // - Parent is a normal note: move freely, relink on drop
+          let parentIsBaseNote = false;
           try {
             const mod = this._module;
             const n = mod?.getNoteById?.(Number(noteId));
             const s = n?.variables?.startTimeString || '';
-            if (s && !s.includes('module.baseNote')) {
-              const mref = s.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (mref) {
-                const pid = parseInt(mref[1], 10);
-                const pn = mod?.getNoteById?.(pid);
-                const isMeasure = !!(pn && pn.getVariable && pn.getVariable('startTime') && !pn.getVariable('duration') && !pn.getVariable('frequency'));
-                parentIsNormalNote = !isMeasure;
-              }
+            if (s && s.includes('module.baseNote')) {
+              parentIsBaseNote = true;
             }
           } catch {}
-
-          // Compute left bound (previous measure start if not first; base start otherwise)
+          // Compute left bound:
+          // - For subsequent measures in chain (cidx > 0): previous measure's start
+          // - For first measure anchored to BaseNote: baseStart (time 0)
+          // - For first measure with any other parent: no left clamp (can relink)
           let left = baseStart;
-          if (cidx > 0) left = Number(chain[cidx - 1].startSec || baseStart);
+          if (cidx > 0) {
+            left = Number(chain[cidx - 1].startSec || baseStart);
+          }
 
           // No right clamp: downstream measures will preview-shift with this triangle.
           let next = this._interaction.origStartSec + dxSec;
 
           if (cidx === 0) {
             // First measure in chain
-            if (!parentIsNormalNote) {
-              // Parent is BaseNote or a measure: clamp against base start.
+            if (parentIsBaseNote) {
+              // Anchored to BaseNote: clamp against baseStart (time 0)
               // If inside the first 1/16 bucket from origin, force exact origin.
               const bl = getBeatLengthSec(noteId);
               const sixteenthLen = bl / 4;
@@ -1181,7 +1157,7 @@ export class Workspace {
                 next = snapSixteenth(next, noteId);
               }
             } else {
-              // Parent is a normal note: allow past origin (no base clamp), just snap to grid
+              // Parent is a measure or normal note: move freely, will relink on drop
               next = snapSixteenth(next, noteId);
             }
           } else {
@@ -1193,11 +1169,138 @@ export class Workspace {
           }
           startSec = next;
 
-          // Live parent remapping visualization during measure drag (matches normal-note behavior)
+          // Live parent remapping visualization during measure drag
+          // Mirror exact commit-time logic from player.js selectSuitableParentForStartGL
           try {
             if (this.renderer?.setProspectiveParentId) {
-              const cand = this._resolveProspectiveParentCandidate(Number(noteId), startSec, e.clientX, e.clientY);
-              this.renderer.setProspectiveParentId(cand);
+              let prospectiveParent = null;
+
+              if (cidx === 0) {
+                // First measure in chain: compute prospective parent using same logic as commit
+                const mod = this._module;
+                const tol = 1e-2;
+                const note = mod?.getNoteById?.(Number(noteId));
+
+                if (note && mod) {
+                  // Parse current parent from startTimeString
+                  const parseParent = (n) => {
+                    try {
+                      const raw = n?.variables?.startTimeString || '';
+                      const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+                      if (m) {
+                        const pid = parseInt(m[1], 10);
+                        return mod.getNoteById(pid) || mod.baseNote;
+                      }
+                      if (raw.includes('module.baseNote')) return mod.baseNote;
+                    } catch {}
+                    return mod.baseNote;
+                  };
+
+                  // Check if note is a measure
+                  const isMeasure = (n) => {
+                    try {
+                      return !!(n && n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency);
+                    } catch { return false; }
+                  };
+
+                  // Find next measure in chain (CHAIN LINK only)
+                  const findNextInChain = (measure) => {
+                    if (!isMeasure(measure)) return null;
+                    const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+                    let best = null;
+                    let bestStart = Infinity;
+                    for (const id in mod.notes) {
+                      const nn = mod.getNoteById(Number(id));
+                      if (!isMeasure(nn)) continue;
+                      const sts = nn.variables?.startTimeString || '';
+                      if (sts.includes(linkPattern)) {
+                        const st = Number(nn.getVariable('startTime')?.valueOf?.() ?? Infinity);
+                        if (st < bestStart) {
+                          bestStart = st;
+                          best = nn;
+                        }
+                      }
+                    }
+                    return best;
+                  };
+
+                  let parent = parseParent(note);
+                  let parentStart = Number(parent?.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                  const origStart = Number(note.getVariable?.('startTime')?.valueOf?.() ?? 0);
+
+                  // No change if effectively no movement
+                  if (Math.abs(startSec - origStart) < tol) {
+                    prospectiveParent = Number(parent?.id ?? 0);
+                  } else if (startSec > parentStart + tol) {
+                    // Forward drag: walk forward through parent's chain
+                    if (isMeasure(parent)) {
+                      let cur = parent;
+                      let curStart = parentStart;
+                      let advanced = true;
+                      while (advanced) {
+                        advanced = false;
+                        const mlVal = mod.findMeasureLength(cur);
+                        const ml = Number(mlVal?.valueOf?.() ?? 0);
+                        const end = curStart + ml;
+                        if (startSec >= end - tol) {
+                          const next = findNextInChain(cur);
+                          if (next) {
+                            cur = next;
+                            curStart = Number(next.getVariable('startTime')?.valueOf?.() ?? 0);
+                            parent = cur;
+                            parentStart = curStart;
+                            advanced = true;
+                          }
+                        }
+                      }
+                    }
+                    prospectiveParent = Number(parent?.id ?? 0);
+                  } else if (startSec < parentStart - tol) {
+                    // Backward drag: climb ancestor chain
+                    let ancestorChain = [];
+                    let cur = parent;
+                    while (cur && cur.id !== 0) {
+                      const raw = cur.variables?.startTimeString || '';
+                      const m = raw.match(/getNoteById\((\d+)\)/);
+                      if (m) {
+                        const pid = parseInt(m[1], 10);
+                        cur = mod.getNoteById(pid);
+                        if (cur) ancestorChain.push(cur);
+                        else break;
+                      } else if (raw.includes('module.baseNote')) {
+                        ancestorChain.push(mod.baseNote);
+                        break;
+                      } else {
+                        break;
+                      }
+                    }
+                    if (ancestorChain.length === 0 || ancestorChain[ancestorChain.length - 1]?.id !== 0) {
+                      ancestorChain.push(mod.baseNote);
+                    }
+
+                    for (let i = 0; i < ancestorChain.length; i++) {
+                      const anc = ancestorChain[i];
+                      const ancStart = Number(anc?.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                      if (startSec >= ancStart - tol) {
+                        parent = anc;
+                        break;
+                      }
+                    }
+                    prospectiveParent = Number(parent?.id ?? 0);
+                  } else {
+                    prospectiveParent = Number(parent?.id ?? 0);
+                  }
+
+                  // Clamp to BaseNote when earlier than base
+                  if (startSec < baseStart) {
+                    prospectiveParent = 0;
+                  }
+                }
+              }
+              // For cidx > 0 (subsequent measures in chain), prospectiveParent stays null
+              // Their parent is always the previous measure in chain, which doesn't change
+
+              this.renderer.setProspectiveParentId(prospectiveParent);
             }
           } catch {}
         // PERF: finalize and record this frame's measure-drag cost
@@ -1332,7 +1435,7 @@ export class Workspace {
                   const did = Number(didRaw);
                   try {
                     const n = this._module?.getNoteById?.(did);
-                    const isMeasure = !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency'));
+                    const isMeasure = !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
                     if (!isMeasure) continue;
                     let baseS = 0;
                     if (baseline && baseline.has(did)) baseS = baseline.get(did) || 0;
@@ -1380,103 +1483,44 @@ export class Workspace {
               if (this._interaction && this._interaction.cachedMeasureMovingIds instanceof Set && this._interaction.cachedMeasureMovingIds.size) {
                 try { for (const id of this._interaction.cachedMeasureMovingIds) moveIds.add(Number(id)); } catch {}
               } else {
-                // Fallback: include downstream chain measures + ALL transitive dependent measures (branching) + all non-measure dependents
-                if (cidx >= 0) {
-                  for (let j = cidx; j < chain.length; j++) moveIds.add(Number(chain[j].id));
-                } else {
-                  moveIds.add(Number(noteId));
-                }
+                // OPTIMIZED: Use DependencyGraph.getAllStartTimeDependents() for O(V+E) instead of O(n³) regex scanning
                 try {
                   const mod = this._module;
-                  if (mod && mod.notes) {
-                    const isMeasure = (n) => {
-                      try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
-                      catch { return false; }
-                    };
-                    const notesObj = mod.notes || {};
-                    const allIds = Object.keys(notesObj).map(k => Number(k)).filter(n => !isNaN(n));
-                    const getStartTimeStr = (nid) => {
-                      try {
-                        const n = mod.getNoteById(Number(nid));
-                        return n && n.variables && typeof n.variables.startTimeString === 'string'
-                          ? n.variables.startTimeString
-                          : null;
-                      } catch { return null; }
-                    };
-                    const refersStartOf = (nid, refId) => {
-                      const s = getStartTimeStr(nid);
-                      return !!(s && s.includes(`getNoteById(${refId})`) &&
-                                (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
-                                 s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`)));
-                    };
-                    const closureStartRefs = (seedSet) => {
-                      const affected = new Set(seedSet);
-                      let changed = true;
-                      while (changed) {
-                        changed = false;
-                        for (const nid of allIds) {
-                          if (affected.has(nid)) continue;
-                          for (const refId of affected) {
-                            if (refersStartOf(nid, refId)) {
-                              affected.add(nid);
-                              changed = true;
-                              break;
-                            }
-                          }
-                        }
-                      }
-                      return affected;
-                    };
+                  const depGraph = mod && mod._dependencyGraph;
 
-                    // Build measure-closure first (branching)
-                    const seedMeasures = new Set();
-                    if (cidx >= 0 && chain && chain.length) {
-                      for (let j = cidx; j < chain.length; j++) seedMeasures.add(Number(chain[j].id));
-                    } else {
-                      seedMeasures.add(Number(noteId));
-                    }
-
-                    // Derive closure of ANY measure depending on seed set
-                    const measureClosure = (seedSet) => {
-                      const out = new Set(seedSet);
-                      let changed = true;
-                      while (changed) {
-                        changed = false;
-                        for (const idStr in mod.notes) {
-                          const nn = mod.getNoteById(Number(idStr));
-                          if (!isMeasure(nn)) continue;
-                          const nid = Number(nn.id);
-                          if (out.has(nid)) continue;
-                          const sts = nn.variables?.startTimeString || '';
-                          for (const sid of out) {
-                            if (new RegExp(`getNoteById\\(\\s*${sid}\\s*\\)`).test(sts)) {
-                              out.add(nid);
-                              changed = true;
-                              break;
-                            }
-                          }
-                        }
-                      }
-                      return out;
-                    };
-
-                    const measToMove = measureClosure(seedMeasures);
-                    // Include all measures in the moving set (covers branches)
-                    for (const mid of measToMove) moveIds.add(Number(mid));
-
-                    // Then include all non-measure notes that depend on any of those measures
-                    const closure = closureStartRefs(measToMove);
-                    for (const did of closure) {
-                      try {
-                        // Add both normal notes and measures discovered via transitive dependencies
-                        // (covers measure dependents reached through intermediate normal notes).
-                        moveIds.add(Number(did));
-                      } catch {}
-                    }
-
-                    // Persist for rest of the drag to avoid recompute
-                    if (this._interaction) this._interaction.cachedMeasureMovingIds = new Set(moveIds);
+                  // Seed measures: downstream along the linear chain (including the anchor)
+                  const seedMeasures = new Set();
+                  if (cidx >= 0 && chain && chain.length) {
+                    for (let j = cidx; j < chain.length; j++) seedMeasures.add(Number(chain[j].id));
+                  } else {
+                    seedMeasures.add(Number(noteId));
                   }
+
+                  // Add seed measures to moveIds
+                  for (const mid of seedMeasures) moveIds.add(Number(mid));
+
+                  // Use DependencyGraph for transitive startTime dependents (fast path)
+                  // Include ALL startTime dependents (both chain links AND anchors) for preview
+                  // Use startTime-specific dependents to avoid moving notes that only reference for frequency/duration
+                  if (depGraph && typeof depGraph.getAllStartTimeDependents === 'function') {
+                    for (const seedId of seedMeasures) {
+                      const allDeps = depGraph.getAllStartTimeDependents(seedId);
+                      for (const depId of allDeps) {
+                        moveIds.add(Number(depId));
+                      }
+                    }
+                  } else if (depGraph && typeof depGraph.getAllDependents === 'function') {
+                    // Fallback to old behavior
+                    for (const seedId of seedMeasures) {
+                      const allDeps = depGraph.getAllDependents(seedId);
+                      for (const depId of allDeps) {
+                        moveIds.add(Number(depId));
+                      }
+                    }
+                  }
+
+                  // Persist for rest of the drag to avoid recompute
+                  if (this._interaction) this._interaction.cachedMeasureMovingIds = new Set(moveIds);
                 } catch {}
               }
 
@@ -1911,7 +1955,7 @@ export class Workspace {
 
       // Helper: is a "measure" note (has startTime but no duration/frequency)
       const isMeasure = (n) => {
-        try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
+        try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
         catch { return false; }
       };
 
@@ -1934,22 +1978,31 @@ export class Workspace {
         return mod.baseNote;
       };
 
-      // Helper: next measure in chain (first measure whose startTimeString references the given measure id)
+      // Helper: next measure in chain (CHAIN LINK that uses findMeasureLength, not anchors)
       const findNextMeasureInChain = (measure) => {
         try {
           if (!isMeasure(measure)) return null;
-          const dependents = [];
+          // Only find CHAIN LINKS (measures that use findMeasureLength), not anchors starting new chains
+          const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+          const chainLinks = [];
           for (const id in mod.notes) {
             const nn = mod.getNoteById(Number(id));
             if (!isMeasure(nn)) continue;
             const sts = nn.variables?.startTimeString || '';
-            if (new RegExp(`getNoteById\\(\\s*${measure.id}\\s*\\)`).test(sts)) {
-              dependents.push(nn);
+            // Only include chain links (use findMeasureLength), not anchors
+            if (sts.includes(linkPattern)) {
+              chainLinks.push(nn);
             }
           }
-          if (!dependents.length) return null;
-          dependents.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
-          return dependents[0];
+          if (!chainLinks.length) return null;
+          // Sort by startTime and return earliest (there should typically be only one chain link)
+          chainLinks.sort((a, b) => {
+            const aStart = a.getVariable('startTime');
+            const bStart = b.getVariable('startTime');
+            if (!aStart || !bStart) return 0;
+            return aStart.valueOf() - bStart.valueOf();
+          });
+          return chainLinks[0];
         } catch { return null; }
       };
 
@@ -2194,8 +2247,8 @@ export class Workspace {
 // Helper: collect linear measure chain for a measure id (prototype method defined outside class)
 /**
  * Collect a linear measure chain for a given measure id.
- * Complexity: O(M log M) worst-case due to per-level dependent scan + sort,
- * but evaluated once per interaction (pointerdown) and reused on every frame.
+ * OPTIMIZED: Uses DependencyGraph inverted index for O(d) complexity where d = chain length,
+ * instead of O(N × M) regex scanning.
  * Usage:
  * - Cached at pointerdown as this._interaction.cachedMeasureChain and index as cachedMeasureIndex.
  * - Reused in [JavaScript.Workspace.prototype._updateInteraction()](src/renderer/webgl2/workspace.js:734) for snapping/clamping
@@ -2208,34 +2261,74 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
   try {
     const mod = this._module;
     if (!mod || !mod.notes) return [];
-    const isMeasure = (n) => {
-      try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
-      catch { return false; }
+
+    // Check if note is a measure (has startTime but no duration/frequency)
+    const isMeasureById = (id) => {
+      try {
+        const n = mod.getNoteById(Number(id));
+        return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
+      } catch { return false; }
     };
 
     const note = mod.getNoteById(Number(measureId));
-    if (!note || !isMeasure(note)) return [];
+    if (!note || !isMeasureById(measureId)) return [];
 
-    const getParentMeasureId = (n) => {
+    // Get startTime for a note by ID
+    const getStartTime = (id) => {
+      try {
+        const n = mod.getNoteById(Number(id));
+        const st = n && n.getVariable && n.getVariable('startTime');
+        return Number(st && st.valueOf ? st.valueOf() : 0);
+      } catch { return 0; }
+    };
+
+    // Check if a dependent is a chain link (uses findMeasureLength) vs an anchor (starts new chain)
+    const isChainLinkById = (depId, parentId) => {
+      try {
+        const n = mod.getNoteById(Number(depId));
+        const expr = (n && n.variables && n.variables.startTimeString) || '';
+        // Chain link pattern: findMeasureLength(module.getNoteById(parentId))
+        const linkPattern = `findMeasureLength(module.getNoteById(${parentId}))`;
+        return expr.includes(linkPattern);
+      } catch { return false; }
+    };
+
+    // Use DependencyGraph if available (O(d) vs O(N×M))
+    const depGraph = mod._dependencyGraph;
+    if (depGraph && typeof depGraph.getMeasureChain === 'function') {
+      return depGraph.getMeasureChain(Number(measureId), isMeasureById, getStartTime, isChainLinkById);
+    }
+
+    // Fallback to original O(N×M) implementation if DependencyGraph not available
+    const isMeasure = (n) => {
+      try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
+      catch { return false; }
+    };
+
+    // Get the parent measure id ONLY if this note is a CHAIN LINK (uses findMeasureLength)
+    // If it's an anchor (no findMeasureLength), return null to stop backward walk
+    const getChainLinkParentId = (n) => {
       try {
         const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
-        const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-        if (m) {
-          const pid = parseInt(m[1], 10);
+        // Check if this is a chain link (uses findMeasureLength)
+        const linkMatch = raw.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
+        if (linkMatch) {
+          const pid = parseInt(linkMatch[1], 10);
           const pn = mod.getNoteById(pid);
           return isMeasure(pn) ? pid : null;
         }
-        if ((raw || '').includes('module.baseNote')) return 0;
+        // If no findMeasureLength, this is an anchor (or root) - stop backward walk
+        return null;
       } catch {}
       return null;
     };
 
-    // Backward to the earliest measure in this chain
+    // Backward to the earliest measure in this chain (only through chain links, not anchors)
     let cur = note;
     let guard = 0;
     while (guard++ < 1024) {
-      const pid = getParentMeasureId(cur);
-      if (pid == null || pid === 0) break;
+      const pid = getChainLinkParentId(cur);
+      if (pid == null) break; // Stop at anchors or roots
       const p = mod.getNoteById(pid);
       if (!p || !isMeasure(p)) break;
       cur = p;
@@ -2253,34 +2346,38 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     };
     pushWithStart(cur);
 
-    // Forward linearly: at each step choose the earliest dependent measure
-    const findDependents = (m) => {
-      const arr = [];
+    // Forward linearly: at each step choose the next CHAIN LINK measure (not anchors from other chains)
+    // A chain link uses findMeasureLength(getNoteById(X)) to compute start time
+    // An anchor uses getNoteById(X).getVariable('startTime') directly (starts a new chain)
+    const findNextChainLink = (m) => {
+      const candidates = [];
       try {
+        // Pattern for chain link: findMeasureLength(module.getNoteById(ID))
+        const linkPattern = `findMeasureLength(module.getNoteById(${m.id}))`;
         for (const id in mod.notes) {
           const nn = mod.getNoteById(Number(id));
           if (!isMeasure(nn)) continue;
           const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
-          const re = new RegExp('getNoteById\\(\\s*' + m.id + '\\s*\\)');
-          if (re.test(sts)) {
-            arr.push(nn);
+          // Only include measures that are CHAIN LINKS (use findMeasureLength), not anchors
+          if (sts.includes(linkPattern)) {
+            candidates.push(nn);
           }
         }
       } catch {}
-      arr.sort((a, b) => {
+      // Sort by startTime and return earliest (there should typically be only one chain link)
+      candidates.sort((a, b) => {
         const sa = Number(a.getVariable('startTime') && a.getVariable('startTime').valueOf ? a.getVariable('startTime').valueOf() : 0);
         const sb = Number(b.getVariable('startTime') && b.getVariable('startTime').valueOf ? b.getVariable('startTime').valueOf() : 0);
         return sa - sb;
       });
-      return arr;
+      return candidates.length > 0 ? candidates[0] : null;
     };
 
     guard = 0;
     let curN = cur;
     while (guard++ < 2048) {
-      const deps = findDependents(curN);
-      if (!deps.length) break;
-      const next = deps[0]; // earliest dependent -> single linear chain
+      const next = findNextChainLink(curN);
+      if (!next) break;
       pushWithStart(next);
       curN = next;
     }
@@ -2289,108 +2386,54 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
   } catch { return []; }
 };
 
-// Prototype helper appended after class definition below.
-// It is placed here but evaluated after the class is defined (module load order),
-// because assignment to Workspace.prototype occurs after class declaration executes.
+/**
+ * Determine the role of a measure in chain structure based on its startTimeString expression.
+ * @param {Object} note - The note object with variables.startTimeString
+ * @returns {Object} { role: 'root'|'anchor'|'link', parentId: number|null }
+ *   - 'root': anchored directly to BaseNote (first measure at time 0)
+ *   - 'link': chain link using findMeasureLength (subsequent measure in same chain)
+ *   - 'anchor': first measure of a dependent chain (references another measure's startTime directly)
+ */
+function getMeasureChainRole(note) {
+  const expr = (note && note.variables && note.variables.startTimeString) || '';
+
+  // Root: anchored directly to BaseNote
+  if (expr.includes('module.baseNote')) {
+    return { role: 'root', parentId: 0 };
+  }
+
+  // Check for chain link pattern (uses findMeasureLength)
+  // Pattern: getNoteById(X)...findMeasureLength(getNoteById(X))
+  const linkMatch = expr.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
+  if (linkMatch) {
+    return { role: 'link', parentId: parseInt(linkMatch[1], 10) };
+  }
+
+  // Check for anchor pattern (direct getNoteById reference without findMeasureLength)
+  const anchorMatch = expr.match(/getNoteById\s*\(\s*(\d+)\s*\)/);
+  if (anchorMatch) {
+    return { role: 'anchor', parentId: parseInt(anchorMatch[1], 10) };
+  }
+
+  return { role: 'orphan', parentId: null };
+}
+
+/**
+ * Check if depNote is a chain link to parentNote (same chain, not an anchor starting a new chain)
+ * @param {Object} depNote - The dependent note to check
+ * @param {Object} parentNote - The potential parent note
+ * @returns {boolean} true if depNote is a chain link to parentNote
+ */
+function isChainLinkTo(depNote, parentNote) {
+  const role = getMeasureChainRole(depNote);
+  return role.role === 'link' && role.parentId === Number(parentNote.id);
+}
+
+// Deferred prototype helper (no longer needed since method is defined above, kept for compatibility)
 let __RMT_WS_CHAIN_HELPER_PATCH = (function attachChainHelperOnce(){
   try {
     if (Workspace && Workspace.prototype && typeof Workspace.prototype._collectMeasureChainFor === 'function') {
-      return; // already attached
+      return; // already attached above
     }
   } catch {}
-  // Defer attaching until after class is available
-  const __attach = () => {
-    try {
-      if (!Workspace || !Workspace.prototype) return false;
-      Workspace.prototype._collectMeasureChainFor = function(measureId) {
-        try {
-          const mod = this._module;
-          if (!mod || !mod.notes) return [];
-          const isMeasure = (n) => {
-            try { return !!(n && n.getVariable('startTime') && !n.getVariable('duration') && !n.getVariable('frequency')); }
-            catch { return false; }
-          };
-
-          const note = mod.getNoteById(Number(measureId));
-          if (!note || !isMeasure(note)) return [];
-
-          const getParentMeasureId = (n) => {
-            try {
-              const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
-              const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (m) {
-                const pid = parseInt(m[1], 10);
-                const pn = mod.getNoteById(pid);
-                return isMeasure(pn) ? pid : null;
-              }
-              if ((raw || '').includes('module.baseNote')) return 0;
-            } catch {}
-            return null;
-          };
-
-          // Backward to earliest measure of this chain
-          let cur = note;
-          let guard = 0;
-          while (guard++ < 1024) {
-            const pid = getParentMeasureId(cur);
-            if (pid == null || pid === 0) break;
-            const p = mod.getNoteById(pid);
-            if (!p || !isMeasure(p)) break;
-            cur = p;
-          }
-
-          // Helper to push with evaluated start
-          const chain = [];
-          const pushWithStart = (n) => {
-            try {
-              const st = n.getVariable && n.getVariable('startTime');
-              const t = Number(st && st.valueOf ? st.valueOf() : 0);
-              chain.push({ id: Number(n.id), startSec: t });
-            } catch {
-              chain.push({ id: Number(n.id), startSec: 0 });
-            }
-          };
-          pushWithStart(cur);
-
-          // Forward linearly: at each step choose earliest dependent measure
-          const findDependents = (m) => {
-            const arr = [];
-            try {
-              for (const id in mod.notes) {
-                const nn = mod.getNoteById(Number(id));
-                if (!isMeasure(nn)) continue;
-                const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
-                const re = new RegExp('getNoteById\\(\\s*' + m.id + '\\s*\\)');
-                if (re.test(sts)) arr.push(nn);
-              }
-            } catch {}
-            arr.sort((a, b) => {
-              const sa = Number(a.getVariable && a.getVariable('startTime') && a.getVariable('startTime').valueOf ? a.getVariable('startTime').valueOf() : 0);
-              const sb = Number(b.getVariable && b.getVariable('startTime') && b.getVariable('startTime').valueOf ? b.getVariable('startTime').valueOf() : 0);
-              return sa - sb;
-            });
-            return arr;
-          };
-
-          guard = 0;
-          let curN = cur;
-          while (guard++ < 2048) {
-            const deps = findDependents(curN);
-            if (!deps.length) break;
-            const next = deps[0]; // earliest dependent -> single linear chain
-            pushWithStart(next);
-            curN = next;
-          }
-
-          return chain;
-        } catch { return []; }
-      };
-      return true;
-    } catch { return false; }
-  };
-
-  // Try now; if class not yet defined, queue microtask
-  if (!__attach()) {
-    Promise.resolve().then(__attach);
-  }
 })();

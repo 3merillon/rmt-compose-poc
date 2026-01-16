@@ -17,6 +17,9 @@ export class AudioEngine {
     // Track currently scheduled/playing oscillators for pause/stop
     /** @type {Set<{oscillator:any,gainNode:GainNode}>} */
     this.activeOscillators = new Set();
+
+    // Streaming playback state
+    this._streamingState = null;
   }
 
   // Return nodes so legacy code can alias them without deep coupling
@@ -62,9 +65,8 @@ export class AudioEngine {
 
   /**
    * preparePlayback(module, fromTime)
-   * Mirrors the legacy player preparePlayback behavior but uses this.audioContext
-   * and this.instrumentManager. Returns a Promise<PreparedNote[]> identical
-   * to the legacy shape so the caller can schedule start/stop the same way.
+   * Prepares note data for playback without creating oscillators upfront.
+   * Oscillators are created just-in-time during play() to avoid blocking.
    */
   preparePlayback(module, fromTime) {
     return new Promise((resolve) => {
@@ -73,56 +75,57 @@ export class AudioEngine {
         : Promise.resolve();
 
       resumePromise.then(() => {
-        const evaluatedNotes = module.evaluateModule();
+        const t0 = performance.now();
 
-        // Compute module end time like legacy getModuleEndTime()
-        const measureNotes = Object.values(module.notes).filter(note =>
-          note.variables.startTime && !note.variables.duration && !note.variables.frequency
-        );
-        let measureEnd = 0;
-        if (measureNotes.length > 0) {
-          measureNotes.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
-          const lastMeasure = measureNotes[measureNotes.length - 1];
-          measureEnd = lastMeasure.getVariable('startTime')
-            .add(module.findMeasureLength(lastMeasure))
-            .valueOf();
-        }
-        let lastNoteEnd = 0;
-        Object.values(module.notes).forEach(note => {
-          if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
-            const noteStart = note.getVariable('startTime').valueOf();
-            const noteDuration = note.getVariable('duration').valueOf();
-            const noteEnd = noteStart + noteDuration;
-            if (noteEnd > lastNoteEnd) lastNoteEnd = noteEnd;
+        // evaluateModule() is now called inside getModuleEndTime() if needed
+        const moduleEndTime = module.getModuleEndTime();
+        const evalCache = module.getEvaluationCache();
+
+        const t1 = performance.now();
+
+        // Cache instrument lookups
+        const instrumentCache = new Map();
+        const getInstrument = (note) => {
+          if (!instrumentCache.has(note.id)) {
+            instrumentCache.set(note.id, module.findInstrument(note).toLowerCase());
           }
-        });
-        const moduleEndTime = Math.max(measureEnd, lastNoteEnd);
+          return instrumentCache.get(note.id);
+        };
 
-        const activeNotes = [];
+        // Build note data list (no oscillators yet)
+        const noteDataList = [];
         for (const id in module.notes) {
           const note = module.notes[id];
-          if (!note.getVariable('startTime') || !note.getVariable('duration')) continue;
+          const cached = evalCache.get(Number(id));
+          if (!cached || !cached.startTime || !cached.duration) continue;
 
-          const noteStart = note.getVariable('startTime').valueOf();
-          const noteDuration = note.getVariable('duration').valueOf();
+          const noteStart = cached.startTime.valueOf();
+          const noteDuration = cached.duration.valueOf();
           const noteEnd = noteStart + noteDuration;
 
           if (noteEnd > fromTime && noteStart < moduleEndTime) {
-            activeNotes.push({
-              noteInstance: note,
+            const adjustedStart = Math.max(0, noteStart - fromTime);
+            const adjustedDuration = noteEnd - Math.max(noteStart, fromTime);
+
+            noteDataList.push({
               id: note.id,
-              startTime: note.getVariable('startTime'),
-              duration: note.getVariable('duration'),
-              frequency: note.getVariable('frequency')
+              startTime: adjustedStart,
+              duration: adjustedDuration,
+              frequency: cached.frequency ? cached.frequency.valueOf() : null,
+              instrument: cached.frequency ? getInstrument(note) : null
             });
           }
         }
 
+        // Sort by start time for streaming playback
+        noteDataList.sort((a, b) => a.startTime - b.startTime);
+
+        const t2 = performance.now();
+
+        // Collect unique instruments and wait for samples to load
         const uniqueInstruments = new Set();
-        activeNotes.forEach(note => {
-          if (!note.frequency) return;
-          const instrumentName = module.findInstrument(note.noteInstance).toLowerCase();
-          uniqueInstruments.add(instrumentName);
+        noteDataList.forEach(note => {
+          if (note.instrument) uniqueInstruments.add(note.instrument);
         });
 
         const loadPromises = Array.from(uniqueInstruments).map(instrumentName => {
@@ -135,101 +138,140 @@ export class AudioEngine {
 
         Promise.all(loadPromises)
           .then(() => {
-            const preparedNotes = activeNotes.map(activeNote => {
-              const noteStart = activeNote.startTime.valueOf();
-              const noteDuration = activeNote.duration.valueOf();
-              const noteEnd = noteStart + noteDuration;
+            const t3 = performance.now();
+            console.log(`[AudioEngine] preparePlayback timing:
+  getModuleEndTime: ${(t1-t0).toFixed(1)}ms
+  buildNoteData: ${(t2-t1).toFixed(1)}ms
+  loadSamples: ${(t3-t2).toFixed(1)}ms
+  TOTAL: ${(t3-t0).toFixed(1)}ms
+  notes: ${noteDataList.length}`);
 
-              const adjustedStart = Math.max(0, noteStart - fromTime);
-              const adjustedDuration = noteEnd - Math.max(noteStart, fromTime);
-
-              if (!activeNote.frequency) {
-                return {
-                  note: {
-                    ...activeNote,
-                    startTime: new Fraction(adjustedStart),
-                    duration: new Fraction(adjustedDuration)
-                  },
-                  oscillator: null,
-                  gainNode: null
-                };
-              }
-
-              const instrumentName = module.findInstrument(activeNote.noteInstance).toLowerCase();
-              const oscillator = this.instrumentManager.createOscillator(instrumentName, activeNote.frequency.valueOf());
-              const gainNode = this.audioContext.createGain();
-
-              return {
-                note: {
-                  ...activeNote,
-                  startTime: new Fraction(adjustedStart),
-                  duration: new Fraction(adjustedDuration),
-                  instrument: instrumentName
-                },
-                oscillator,
-                gainNode
-              };
-            });
-
-            resolve(preparedNotes);
+            // Return note data (not oscillators) - oscillators created in play()
+            resolve(noteDataList);
           })
           .catch(error => {
-            // eslint-disable-next-line no-console
             console.error('Error loading samples:', error);
             resolve([]);
           });
       });
     });
   }
+
   /**
-   * Schedule and start playback of prepared notes.
-   * Returns the baseStartTime used so legacy UI timebase stays consistent.
-   * @param {Array} preparedNotes
+   * Schedule and start playback with streaming oscillator creation.
+   * Creates oscillators in batches to avoid blocking the main thread.
+   * @param {Array} noteDataList - Note data from preparePlayback
    * @param {{initialVolume?:number}} options
-   * @returns {number} baseStartTime (AudioContext time used to schedule start)
+   * @returns {number} baseStartTime
    */
-  play(preparedNotes, { initialVolume = this.INITIAL_VOLUME } = {}) {
+  play(noteDataList, { initialVolume = this.INITIAL_VOLUME } = {}) {
     const baseStartTime = this.audioContext.currentTime + 0.1;
 
-    for (const prep of preparedNotes) {
-      if (!prep || !prep.note || !prep.oscillator || !prep.gainNode) {
-        continue; // skip measure points/silence
+    // Stop any existing streaming
+    this._stopStreaming();
+
+    // Schedule notes in time-based batches
+    // Create oscillators for notes starting within the next LOOKAHEAD seconds
+    const LOOKAHEAD = 2.0; // seconds ahead to schedule
+    const BATCH_INTERVAL = 100; // ms between batch processing
+
+    let nextIndex = 0;
+    let scheduledUpTo = 0; // audio time we've scheduled up to
+
+    const scheduleNextBatch = () => {
+      if (!this._streamingState || this._streamingState.stopped) return;
+
+      const currentTime = this.audioContext.currentTime;
+      const targetTime = currentTime - baseStartTime + LOOKAHEAD;
+
+      // Schedule all notes that start before targetTime
+      let scheduled = 0;
+      while (nextIndex < noteDataList.length) {
+        const noteData = noteDataList[nextIndex];
+
+        // Stop if this note starts after our target window
+        if (noteData.startTime > targetTime) break;
+
+        // Skip notes without frequency (measure markers)
+        if (noteData.frequency && noteData.instrument) {
+          this._scheduleNote(noteData, baseStartTime, initialVolume);
+        }
+
+        nextIndex++;
+        scheduled++;
       }
-      const start = baseStartTime + prep.note.startTime.valueOf();
-      const duration = prep.note.duration.valueOf();
-      const instrumentName = prep.note.instrument;
 
-      try {
-        this.instrumentManager.applyEnvelope(instrumentName, prep.gainNode, start, duration, initialVolume);
-      } catch (e) {
-        console.warn('applyEnvelope failed', e);
+      scheduledUpTo = targetTime;
+
+      // Continue scheduling if there are more notes
+      if (nextIndex < noteDataList.length) {
+        this._streamingState.timerId = setTimeout(scheduleNextBatch, BATCH_INTERVAL);
       }
+    };
 
-      try {
-        prep.oscillator.connect(prep.gainNode);
-        prep.gainNode.connect(this.generalVolumeGainNode);
-      } catch {}
+    // Initialize streaming state
+    this._streamingState = {
+      stopped: false,
+      timerId: null,
+      noteDataList,
+      baseStartTime
+    };
 
-      try {
-        prep.oscillator.start(start);
-        prep.oscillator.stop(start + duration);
-      } catch {}
-
-      this.activeOscillators.add({ oscillator: prep.oscillator, gainNode: prep.gainNode });
-      // On natural end, remove from tracking
-      try {
-        prep.oscillator.onended = () => {
-          for (const entry of this.activeOscillators) {
-            if (entry.oscillator === prep.oscillator) {
-              this.activeOscillators.delete(entry);
-              break;
-            }
-          }
-        };
-      } catch {}
-    }
+    // Start the first batch immediately
+    scheduleNextBatch();
 
     return baseStartTime;
+  }
+
+  /**
+   * Schedule a single note for playback
+   */
+  _scheduleNote(noteData, baseStartTime, initialVolume) {
+    const start = baseStartTime + noteData.startTime;
+    const duration = noteData.duration;
+
+    // Create oscillator and gain node just-in-time
+    const oscillator = this.instrumentManager.createOscillator(noteData.instrument, noteData.frequency);
+    const gainNode = this.audioContext.createGain();
+
+    try {
+      this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, initialVolume);
+    } catch (e) {
+      console.warn('applyEnvelope failed', e);
+    }
+
+    try {
+      oscillator.connect(gainNode);
+      gainNode.connect(this.generalVolumeGainNode);
+    } catch {}
+
+    try {
+      oscillator.start(start);
+      oscillator.stop(start + duration);
+    } catch {}
+
+    const entry = { oscillator, gainNode };
+    this.activeOscillators.add(entry);
+
+    // Cleanup on natural end
+    try {
+      oscillator.onended = () => {
+        this.activeOscillators.delete(entry);
+      };
+    } catch {}
+  }
+
+  /**
+   * Stop the streaming scheduler
+   */
+  _stopStreaming() {
+    if (this._streamingState) {
+      this._streamingState.stopped = true;
+      if (this._streamingState.timerId) {
+        clearTimeout(this._streamingState.timerId);
+      }
+      this._streamingState = null;
+    }
   }
 
   /**
@@ -239,6 +281,7 @@ export class AudioEngine {
    */
   pauseFade(rampTime = this.GENERAL_VOLUME_RAMP_TIME) {
     return new Promise((resolve) => {
+      this._stopStreaming();
       const now = this.audioContext.currentTime;
       for (const entry of this.activeOscillators) {
         try {
@@ -256,6 +299,7 @@ export class AudioEngine {
    * Immediately stop and disconnect all active oscillators, clear tracking.
    */
   stopAll() {
+    this._stopStreaming();
     const now = this.audioContext.currentTime;
     for (const entry of this.activeOscillators) {
       try { entry.oscillator.stop(now); } catch {}

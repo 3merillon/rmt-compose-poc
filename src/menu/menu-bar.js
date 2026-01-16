@@ -55,7 +55,7 @@ const menuAPI = (function() {
             const storedState = localStorage.getItem('ui-state');
             if (!storedState) return false;
             const uiState = JSON.parse(storedState);
-            if (!uiState.categories || !Array.isArray(uiState.categories)) return false;
+            if (!uiState.categories || !Array.isArray(uiState.categories) || uiState.categories.length === 0) return false;
             domCache.iconsContainer.innerHTML = '';
             categoryContainers = [];
             const moduleDataCache = {};
@@ -187,7 +187,17 @@ const menuAPI = (function() {
         setupResizeEvents();
         setupTouchEdgeAutoscroll();
         const loaded = loadUIStateFromLocalStorage();
-        if (!loaded) loadModuleIcons();
+        // loadUIStateFromLocalStorage returns false (sync) or a Promise (async)
+        if (loaded === false) {
+            loadModuleIcons();
+        } else if (loaded && typeof loaded.then === 'function') {
+            // It's a Promise - wait for it and fallback to loadModuleIcons on failure
+            loaded.then(success => {
+                if (!success) loadModuleIcons();
+            }).catch(() => {
+                loadModuleIcons();
+            });
+        }
         window.addEventListener('resize', updateMaxHeight);
         setupAutoSave();
     }
