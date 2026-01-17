@@ -5779,7 +5779,7 @@ try {
 
       // Batched octave arrow backgrounds (upper/lower halves), clipped to inner rounded-rect
       try {
-        if (!this._dragActive && this.tabMaskProgram && this.rectVAO && this.rectInstanceArrowRegionBuffer && this.instanceCount > 0) {
+        if (this.tabMaskProgram && this.rectVAO && this.rectInstanceArrowRegionBuffer && this.instanceCount > 0) {
           const N = this.instanceCount;
           const needUpdateArrows =
             (this._lastArrowEpoch !== this._viewEpoch) ||
@@ -6546,7 +6546,7 @@ try {
 
       // Batched fraction dividers (single instanced pass, masked to inner rounded-rect)
       try {
-        if (!this._dragActive && this.tabMaskProgram && this.rectVAO && this.rectInstanceDividerRegionBuffer && _anyDivider) {
+        if (this.tabMaskProgram && this.rectVAO && this.rectInstanceDividerRegionBuffer && _anyDivider) {
           const gl = this.gl;
           gl.useProgram(this.tabMaskProgram);
           const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
