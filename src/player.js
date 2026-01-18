@@ -2406,13 +2406,15 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
   try {
     // Resolve an ancestor of "note" whose startTime is at or before cutoffSec.
     // Falls back to BaseNote when none qualifies. Local to avoid global pollution.
-    function __resolveAncestorAtOrBefore(note, cutoffSec) {
+    function __resolveAncestorAtOrBefore(note, cutoffSec, requireFrequency = false) {
       try {
         let anc = __parseParentFromStartTimeStringGL(note);
         const tol = 1e-6;
         while (anc && anc.id !== 0) {
           const st = Number(anc.getVariable('startTime').valueOf() || 0);
-          if (st <= cutoffSec + tol) return anc;
+          // Skip measure bars when we need frequency (measures have no frequency expression)
+          const isMeasure = __isMeasureNoteGL(anc);
+          if (st <= cutoffSec + tol && (!requireFrequency || !isMeasure)) return anc;
           const raw = (anc.variables && anc.variables.startTimeString) || '';
           const m = raw.match(/getNoteById\((\d+)\)/);
           if (m) {
@@ -2458,7 +2460,7 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
       const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
       // If dependent starts earlier than referenced (moved) note, swap to a valid ancestor at/before depStart
       if (depStart < movedStart - 1e-6) {
-        const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart);
+        const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, true); // requireFrequency=true to skip measure bars
 
         // Check for transitive corruption using new helper
         const depTransitivelyCorrupt = depGraph?.isFrequencyTransitivelyCorrupted?.(dep.id);
@@ -2504,13 +2506,15 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
 }
 function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
   try {
-    function __resolveAncestorAtOrBefore(note, cutoffSec) {
+    function __resolveAncestorAtOrBefore(note, cutoffSec, requireFrequency = false) {
       try {
         let anc = __parseParentFromStartTimeStringGL(note);
         const tol = 1e-6;
         while (anc && anc.id !== 0) {
           const st = Number(anc.getVariable('startTime').valueOf() || 0);
-          if (st <= cutoffSec + tol) return anc;
+          // Skip measure bars when we need frequency (measures have no frequency expression)
+          const isMeasure = __isMeasureNoteGL(anc);
+          if (st <= cutoffSec + tol && (!requireFrequency || !isMeasure)) return anc;
           const raw = (anc.variables && anc.variables.startTimeString) || '';
           const m = raw.match(/getNoteById\((\d+)\)/);
           if (m) {
@@ -2526,7 +2530,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
         if (!anc) anc = myModule.baseNote;
         const st2 = Number(anc.getVariable('startTime').valueOf() || 0);
-        return (st2 <= cutoffSec + 1e-6) ? anc : myModule.baseNote;
+        return (st2 <= cutoffSec + tol) ? anc : myModule.baseNote;
       } catch { return myModule.baseNote; }
     }
 
@@ -2541,7 +2545,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
       if (!(depStart < movedStart - 1e-6)) return;
 
-      const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart);
+      // For startTime/duration, measure bars are valid (they have startTime)
+      const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, false);
       const parentRef = (replacementTarget && replacementTarget.id === 0)
         ? "module.baseNote"
         : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
@@ -2579,16 +2584,21 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       try {
         const fRaw = dep.variables && dep.variables.frequencyString;
         if (typeof fRaw === 'string' && !fRaw.includes('.pow(') && noteRefRegex.test(fRaw)) {
-          const replacedF = fRaw.replace(noteRefRegex, parentRef);
+          // For frequency references, we need an ancestor that HAS frequency (not a measure bar)
+          const freqReplacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, true); // requireFrequency=true
+          const freqParentRef = (freqReplacementTarget && freqReplacementTarget.id === 0)
+            ? "module.baseNote"
+            : (freqReplacementTarget ? `module.getNoteById(${freqReplacementTarget.id})` : "module.baseNote");
+          const replacedF = fRaw.replace(noteRefRegex, freqParentRef);
           let simplifiedF;
           // Check if corruption is involved - skip simplification if so
           const depGraph = myModule._dependencyGraph;
           const movedHasCorruptFreq = depGraph &&
             typeof depGraph.isPropertyCorrupted === 'function' &&
             depGraph.isPropertyCorrupted(movedId, 0x04);
-          const targetHasCorruptFreq = replacementTarget && replacementTarget.id !== 0 && depGraph &&
+          const targetHasCorruptFreq = freqReplacementTarget && freqReplacementTarget.id !== 0 && depGraph &&
             typeof depGraph.isPropertyCorrupted === 'function' &&
-            depGraph.isPropertyCorrupted(replacementTarget.id, 0x04);
+            depGraph.isPropertyCorrupted(freqReplacementTarget.id, 0x04);
           const depHasCorruptFreq = depGraph &&
             typeof depGraph.isPropertyCorrupted === 'function' &&
             depGraph.isPropertyCorrupted(dep.id, 0x04);
@@ -2682,8 +2692,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 updateBaseNoteFraction();
                 updateBaseNotePosition();
             }
-            // Ensure evaluation cache sees the edited note
+            // Ensure evaluation cache sees the edited note and all its dependents
             try { myModule.markNoteDirty(note.id); } catch {}
+            // Mark all dependent notes dirty so changes propagate through the dependency graph
+            try {
+                const dependents = myModule.getDependentNotes(note.id);
+                dependents.forEach(depId => {
+                    myModule.markNoteDirty(depId);
+                });
+            } catch {}
             evaluatedNotes = myModule.evaluateModule();
             setEvaluatedNotes(evaluatedNotes);
             updateVisualNotes(evaluatedNotes);
@@ -4014,14 +4031,17 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               }
 
               // Local resolver: climb ancestors until startTime <= cutoffSec, else BaseNote
-              function __resolveAncestorAtOrBeforeLocal(node, cutoffSec) {
+              // If requireFrequency is true, skip measure bars (they have no frequency expression)
+              function __resolveAncestorAtOrBeforeLocal(node, cutoffSec, requireFrequency = false) {
                 try {
                   let anc = node || myModule.baseNote;
                   const tol = 1e-6;
                   let guard = 0;
                   while (anc && anc.id !== 0 && guard++ < 128) {
                     const st = Number(anc.getVariable('startTime')?.valueOf?.() || 0);
-                    if (st <= Number(cutoffSec) + tol) break;
+                    // Skip measure bars when we need frequency (measures have no frequency expression)
+                    const isMeasure = __isMeasureNoteGL(anc);
+                    if (st <= Number(cutoffSec) + tol && (!requireFrequency || !isMeasure)) break;
                     const raw = (anc.variables && anc.variables.startTimeString) || '';
                     const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
                     if (m) {
@@ -4037,7 +4057,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 } catch { return myModule.baseNote; }
               }
 
-              const anchor = __resolveAncestorAtOrBeforeLocal(refNote, newStartSec);
+              const anchor = __resolveAncestorAtOrBeforeLocal(refNote, newStartSec, true); // requireFrequency=true to skip measure bars
 
               // Use transitive corruption detection for robust handling
               const depGraph = myModule._dependencyGraph;
