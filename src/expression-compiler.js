@@ -179,9 +179,19 @@ export class ExpressionCompiler {
       return { type: 'const', num: frac.num, den: frac.den };
     }
 
-    // 8. Check for Fraction with method chain: new Fraction(...).mul/div/add/sub(...)
+    // 8. Check for .pow() expressions: base.pow(exponent)
+    const powResult = this.splitPow(trimmed);
+    if (powResult) {
+      return {
+        type: 'power',
+        base: this.parseProduct(powResult.base),
+        exponent: this.parseProduct(powResult.exponent)
+      };
+    }
+
+    // 9. Check for Fraction with method chain: new Fraction(...).mul/div/add/sub(...)
     // This handles expressions like "new Fraction(1, 2).mul(something)"
-    const fracChainMatch = trimmed.match(/^new\s*Fraction\s*\(\s*([^)]+)\s*\)\s*\.(mul|div|add|sub)\s*\(/);
+    const fracChainMatch = trimmed.match(/^new\s*Fraction\s*\(\s*([^)]+)\s*\)\s*\.(mul|div|add|sub|pow)\s*\(/);
     if (fracChainMatch) {
       // Parse as a product/sum - splitMulDiv/splitAddSub should handle this
       const mulDivResult = this.splitMulDiv(trimmed);
@@ -373,6 +383,38 @@ export class ExpressionCompiler {
   }
 
   /**
+   * Split expression by top-level .pow() calls
+   * Returns { base, exponent } if found, or null
+   */
+  splitPow(expr) {
+    let depth = 0;
+    let i = 0;
+
+    while (i < expr.length) {
+      const ch = expr[i];
+      if (ch === '(') depth++;
+      else if (ch === ')') depth--;
+      else if (depth === 0 && expr.startsWith('.pow(', i)) {
+        const base = expr.substring(0, i).trim();
+        const { arg, nextIndex } = this.readCallArgument(expr, i + 5);
+
+        // Check if there are more operations after .pow()
+        // If so, we need to handle it differently
+        if (nextIndex < expr.length) {
+          // There's more after .pow(), so we can't split here as a simple pow
+          // Return null and let the normal product/sum handling deal with it
+          return null;
+        }
+
+        return { base, exponent: arg };
+      }
+      i++;
+    }
+
+    return null;
+  }
+
+  /**
    * Split expression by top-level .mul()/.div() calls
    */
   splitMulDiv(expr) {
@@ -513,6 +555,13 @@ export class ExpressionCompiler {
 
       case 'product':
         this.emitProduct(binary, ast.base, ast.operations);
+        break;
+
+      case 'power':
+        // Emit base, then exponent, then POW opcode
+        this.emitBytecode(ast.base, binary);
+        this.emitBytecode(ast.exponent, binary);
+        binary.writeByte(OP.POW);
         break;
 
       default:
@@ -765,6 +814,13 @@ export class ExpressionDecompiler {
         case OP.NEG: {
           const a = stack.pop();
           stack.push(`${a}.neg()`);
+          break;
+        }
+
+        case OP.POW: {
+          const exp = stack.pop();
+          const base = stack.pop();
+          stack.push(`${base}.pow(${exp})`);
           break;
         }
 

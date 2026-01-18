@@ -199,6 +199,58 @@ export class Module {
   }
 
   /**
+   * Set expressions on multiple notes in a single batch operation.
+   * More efficient than calling setVariable() repeatedly because it:
+   * 1. Skips per-note change notifications
+   * 2. Batches dependency re-registration
+   * 3. Marks all affected notes dirty in one pass
+   *
+   * @param {Array<{noteId: number, varName: string, expr: string}>} updates - Array of expression updates
+   */
+  batchSetExpressions(updates) {
+    if (!updates || updates.length === 0) return;
+
+    const affectedNoteIds = new Set();
+
+    // Phase 1: Apply all expression changes silently (no per-note notifications)
+    for (const { noteId, varName, expr } of updates) {
+      const note = this.getNoteById(noteId);
+      if (!note) {
+        console.warn(`batchSetExpressions: Note ${noteId} not found`);
+        continue;
+      }
+
+      // Handle both direct variable names and *String suffixed names
+      const baseName = varName.endsWith('String') ? varName.slice(0, -6) : varName;
+
+      if (typeof note._setExpressionSilent === 'function') {
+        note._setExpressionSilent(baseName, expr);
+      } else {
+        // Fallback: compile directly (for compatibility)
+        try {
+          note.expressions[baseName] = compiler.compile(expr, baseName);
+          note.lastModifiedTime = Date.now();
+        } catch (e) {
+          console.warn(`batchSetExpressions: Failed to compile ${baseName} for note ${noteId}:`, e);
+        }
+      }
+
+      affectedNoteIds.add(noteId);
+    }
+
+    // Phase 2: Re-register dependencies for all affected notes
+    for (const noteId of affectedNoteIds) {
+      const note = this.getNoteById(noteId);
+      if (note) {
+        this._registerNoteDependencies(note);
+      }
+    }
+
+    // Phase 3: Mark all affected notes (and their dependents) dirty in batch
+    this.markNotesDirtyBatch(affectedNoteIds);
+  }
+
+  /**
    * Get direct dependencies of a note (O(1) via dependency graph)
    */
   getDirectDependencies(noteId) {
@@ -297,6 +349,71 @@ export class Module {
   }
 
   /**
+   * Get the full parent chain for a specific property, walking backward to baseNote
+   * Used for visualizing the complete dependency chain per variable
+   *
+   * @param {number} noteId - The note to start from
+   * @param {string} property - 'frequency' | 'startTime' | 'duration'
+   * @returns {number[]} - Array of note IDs from noteId back to baseNote/root (excluding noteId itself)
+   */
+  getParentChainByProperty(noteId, property) {
+    const graph = this._dependencyGraph;
+    const numId = Number(noteId);
+    const chain = [];
+    const visited = new Set([numId]);
+    let current = numId;
+
+    // Map property name to dependency map
+    const depMapName = `${property}Dependencies`;
+    const depMap = graph[depMapName];
+    if (!depMap) return chain;
+
+    // Also check for baseNote references
+    const baseDepSetName = `${property}BaseNoteDependents`;
+    const baseDepSet = graph[baseDepSetName];
+
+    while (true) {
+      const deps = depMap.get(current);
+
+      // Check if current note references baseNote for this property
+      if (baseDepSet && baseDepSet.has(current)) {
+        chain.push(0); // baseNote ID is 0
+        break;
+      }
+
+      if (!deps || deps.size === 0) break;
+
+      // Find the next parent (first unvisited dependency)
+      let parent = null;
+      for (const depId of deps) {
+        if (!visited.has(depId)) {
+          parent = depId;
+          break;
+        }
+      }
+      if (parent === null) break;
+
+      chain.push(parent);
+      visited.add(parent);
+      current = parent;
+    }
+
+    return chain; // Array of parent IDs (not including noteId itself)
+  }
+
+  /**
+   * Get the children tree as edges for a specific property
+   * Used for visualizing the dependent tree from selected note
+   *
+   * @param {number} noteId - The root note
+   * @param {string} property - 'frequency' | 'startTime' | 'duration'
+   * @returns {{ edges: Array<{parentId: number, childId: number, depth: number}>, maxDepth: number }}
+   */
+  getChildrenTreeByProperty(noteId, property) {
+    return this._dependencyGraph.getChildrenTreeByProperty(noteId, property);
+  }
+
+  /**
    * Add a new note
    */
   addNote(variables = {}) {
@@ -350,9 +467,44 @@ export class Module {
 
     // Update our cache reference
     this._evaluationCache = cache;
+
+    // Update corruption flags in dependency graph after evaluation
+    // This enables visual tinting for notes with irrational values (TET scales)
+    this._updateCorruptionFlags(cache);
+
     this._dirtyNotes.clear();
 
     return cache;
+  }
+
+  /**
+   * Update corruption flags in dependency graph from evaluation cache
+   * @param {Map} cache - Evaluation cache with corruptionFlags per note
+   * @private
+   */
+  _updateCorruptionFlags(cache) {
+    if (!this._dependencyGraph || typeof this._dependencyGraph.setCorruptionFlags !== 'function') {
+      return;
+    }
+
+    if (!cache || typeof cache.get !== 'function') {
+      return;
+    }
+
+    try {
+      // Always iterate through all notes and fetch from cache
+      // This ensures we handle both regular Maps and lazy cache proxies correctly
+      // (Lazy proxies' entries() method only yields locally-cached items, missing WASM-resident data)
+      for (const id of Object.keys(this.notes)) {
+        const noteId = Number(id);
+        const result = cache.get(noteId);
+        if (result && result.corruptionFlags !== undefined) {
+          this._dependencyGraph.setCorruptionFlags(noteId, result.corruptionFlags);
+        }
+      }
+    } catch (e) {
+      // Silently fail - corruption tracking is a visual enhancement, not critical
+    }
   }
 
   /**

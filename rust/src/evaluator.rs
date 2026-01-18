@@ -2,14 +2,21 @@
 //!
 //! Evaluates binary bytecode expressions using a stack machine.
 //! This is a direct port of the JavaScript BinaryEvaluator from binary-evaluator.js.
+//!
+//! Supports both rational (exact) and irrational (f64) values via the Value type.
+//! Operations like Pow may produce irrational results, which "corrupt" the value.
 
 use crate::bytecode::{read_i32, read_u16, Op, Var};
 use crate::fraction::Fraction;
+use crate::value::{Value, corruption_flag_for_var};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 /// Evaluated values for a single note
+///
+/// Values can be either rational (exact fractions) or irrational (f64).
+/// The corruption_flags field tracks which properties contain irrational values.
 #[derive(Clone, Default, Serialize, Deserialize)]
 pub struct EvaluatedNote {
     #[serde(rename = "startTime")]
@@ -21,28 +28,119 @@ pub struct EvaluatedNote {
     pub beats_per_measure: Option<FractionData>,
     #[serde(rename = "measureLength")]
     pub measure_length: Option<FractionData>,
+    /// Bitmask of corruption flags indicating which properties are irrational
+    /// See value.rs for flag constants (CORRUPT_START_TIME, CORRUPT_FREQUENCY, etc.)
+    #[serde(default, rename = "corruptionFlags")]
+    pub corruption_flags: u8,
 }
 
 /// Serializable fraction data for JS interop
+///
+/// Supports both rational values (s/n/d fields) and irrational values (f field).
+/// The corrupted field indicates whether this is an irrational approximation.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct FractionData {
-    pub s: i32, // sign: -1, 0, or 1
-    pub n: u32, // absolute numerator
-    pub d: u32, // denominator
+    /// Sign: -1, 0, or 1 (for rational values)
+    #[serde(default)]
+    pub s: i32,
+    /// Absolute numerator (for rational values)
+    #[serde(default)]
+    pub n: u32,
+    /// Denominator (for rational values)
+    #[serde(default = "default_denominator")]
+    pub d: u32,
+    /// Float value (for irrational values, or as convenience)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub f: Option<f64>,
+    /// Is this value corrupted (irrational)?
+    #[serde(default)]
+    pub corrupted: bool,
+}
+
+fn default_denominator() -> u32 {
+    1
 }
 
 impl FractionData {
+    /// Create from a Fraction (rational, not corrupted)
     pub fn from_fraction(f: &Fraction) -> Self {
         FractionData {
             s: f.s(),
             n: f.n(),
             d: f.d(),
+            f: None,
+            corrupted: false,
         }
     }
 
+    /// Create from a Value (may be rational or irrational)
+    pub fn from_value(v: &Value) -> Self {
+        match v {
+            Value::Rational(frac) => FractionData {
+                s: frac.s(),
+                n: frac.n(),
+                d: frac.d(),
+                f: None,
+                corrupted: false,
+            },
+            Value::Irrational(val) => {
+                // Approximate irrational as a fraction so valueOf() works correctly
+                // Use a denominator of 1_000_000 for microsecond precision
+                let abs_val = val.abs();
+                let sign = if *val < 0.0 { -1 } else if *val > 0.0 { 1 } else { 0 };
+                let denom = 1_000_000u32;
+                let numer = (abs_val * (denom as f64)).round() as u32;
+                FractionData {
+                    s: sign,
+                    n: numer,
+                    d: denom,
+                    f: Some(*val),
+                    corrupted: true,
+                }
+            }
+        }
+    }
+
+    /// Convert to Fraction (approximates irrational values)
     pub fn to_fraction(&self) -> Fraction {
-        let num = (self.s as i32) * (self.n as i32);
-        Fraction::new(num, self.d as i32)
+        if self.corrupted {
+            // Approximate irrational as fraction
+            Fraction::from_f64(self.f.unwrap_or(0.0))
+        } else {
+            let num = (self.s as i32) * (self.n as i32);
+            Fraction::new(num, self.d as i32)
+        }
+    }
+
+    /// Convert to Value
+    pub fn to_value(&self) -> Value {
+        if self.corrupted {
+            Value::Irrational(self.f.unwrap_or(0.0))
+        } else {
+            let num = (self.s as i32) * (self.n as i32);
+            Value::Rational(Fraction::new(num, self.d as i32))
+        }
+    }
+
+    /// Get the f64 representation
+    pub fn to_f64(&self) -> f64 {
+        if let Some(f) = self.f {
+            f
+        } else {
+            (self.s as f64) * (self.n as f64) / (self.d as f64)
+        }
+    }
+}
+
+impl Default for FractionData {
+    fn default() -> Self {
+        FractionData {
+            s: 0,
+            n: 0,
+            d: 1,
+            f: None,
+            corrupted: false,
+        }
     }
 }
 
@@ -71,10 +169,13 @@ impl EvaluatedNote {
 }
 
 /// Stack-based evaluator for binary expressions
+///
+/// Now supports both rational (Fraction) and irrational (f64) values via the Value type.
+/// Operations like Pow may produce irrational results.
 #[wasm_bindgen]
 pub struct Evaluator {
-    /// Evaluation stack
-    stack: Vec<Fraction>,
+    /// Evaluation stack (supports both rational and irrational values)
+    stack: Vec<Value>,
     /// Maximum stack size (for safety)
     max_stack_size: usize,
 }
@@ -105,7 +206,7 @@ impl Default for Evaluator {
 
 impl Evaluator {
     /// Push a value onto the stack
-    fn push(&mut self, value: Fraction) -> Result<(), String> {
+    fn push(&mut self, value: Value) -> Result<(), String> {
         if self.stack.len() >= self.max_stack_size {
             return Err("Stack overflow in evaluator".to_string());
         }
@@ -114,14 +215,14 @@ impl Evaluator {
     }
 
     /// Pop a value from the stack
-    fn pop(&mut self) -> Result<Fraction, String> {
+    fn pop(&mut self) -> Result<Value, String> {
         self.stack
             .pop()
             .ok_or_else(|| "Stack underflow in evaluator".to_string())
     }
 
     /// Peek at the top of the stack
-    fn peek(&self) -> Result<&Fraction, String> {
+    fn peek(&self) -> Result<&Value, String> {
         self.stack
             .last()
             .ok_or_else(|| "Stack empty in evaluator".to_string())
@@ -132,16 +233,16 @@ impl Evaluator {
         self.stack.clear();
     }
 
-    /// Get a default value for a variable
-    fn default_value(var: Var) -> Fraction {
-        match var {
+    /// Get a default value for a variable (always rational)
+    fn default_value(var: Var) -> Value {
+        Value::Rational(match var {
             Var::StartTime => Fraction::new(0, 1),
             Var::Duration => Fraction::new(1, 1),
             Var::Frequency => Fraction::new(440, 1),
             Var::Tempo => Fraction::new(60, 1),
             Var::BeatsPerMeasure => Fraction::new(4, 1),
             Var::MeasureLength => Fraction::new(4, 1),
-        }
+        })
     }
 
     /// Evaluate a binary expression
@@ -152,15 +253,15 @@ impl Evaluator {
     /// * `eval_cache` - Pre-evaluated note values
     ///
     /// # Returns
-    /// The evaluated Fraction result
+    /// The evaluated Value result (may be rational or irrational)
     pub fn evaluate(
         &mut self,
         bytecode: &[u8],
         length: usize,
         eval_cache: &HashMap<u32, EvaluatedNote>,
-    ) -> Result<Fraction, String> {
+    ) -> Result<Value, String> {
         if length == 0 {
-            return Ok(Fraction::new(0, 1));
+            return Ok(Value::rational(0, 1));
         }
 
         self.clear_stack();
@@ -182,7 +283,7 @@ impl Evaluator {
                     pc += 4;
                     let den = read_i32(bytecode, pc);
                     pc += 4;
-                    self.push(Fraction::new(num, den))?;
+                    self.push(Value::rational(num, den))?;
                 }
 
                 Op::LoadRef => {
@@ -197,11 +298,11 @@ impl Evaluator {
                     let var = Var::from_byte(var_idx)
                         .ok_or_else(|| format!("Invalid variable index: {}", var_idx))?;
 
-                    // Look up in evaluation cache
+                    // Look up in evaluation cache (preserves corruption status)
                     let value = eval_cache
                         .get(&note_id)
                         .and_then(|note| note.get_var(var))
-                        .map(|fd| fd.to_fraction());
+                        .map(|fd| fd.to_value());
 
                     // For inheritable properties, fall back to base note
                     let value = value.or_else(|| {
@@ -209,7 +310,7 @@ impl Evaluator {
                             eval_cache
                                 .get(&0)
                                 .and_then(|note| note.get_var(var))
-                                .map(|fd| fd.to_fraction())
+                                .map(|fd| fd.to_value())
                         } else {
                             None
                         }
@@ -233,7 +334,7 @@ impl Evaluator {
                     let value = eval_cache
                         .get(&0)
                         .and_then(|note| note.get_var(var))
-                        .map(|fd| fd.to_fraction())
+                        .map(|fd| fd.to_value())
                         .unwrap_or_else(|| Self::default_value(var));
 
                     self.push(value)?;
@@ -268,6 +369,14 @@ impl Evaluator {
                     self.push(a.neg())?;
                 }
 
+                Op::Pow => {
+                    // NEW: Power operation for TET support
+                    // May produce irrational result (corruption)
+                    let exp = self.pop()?;
+                    let base = self.pop()?;
+                    self.push(base.pow(&exp))?;
+                }
+
                 Op::FindTempo => {
                     // Pop note reference (not used in current impl, uses base note)
                     let _ = self.pop()?;
@@ -276,8 +385,8 @@ impl Evaluator {
                     let tempo = eval_cache
                         .get(&0)
                         .and_then(|note| note.tempo.as_ref())
-                        .map(|fd| fd.to_fraction())
-                        .unwrap_or_else(|| Fraction::new(60, 1));
+                        .map(|fd| fd.to_value())
+                        .unwrap_or_else(|| Value::rational(60, 1));
 
                     self.push(tempo)?;
                 }
@@ -292,19 +401,19 @@ impl Evaluator {
                         .get(&note_id)
                         .and_then(|note| note.beats_per_measure.as_ref())
                         .or_else(|| eval_cache.get(&0).and_then(|note| note.beats_per_measure.as_ref()))
-                        .map(|fd| fd.to_fraction())
-                        .unwrap_or_else(|| Fraction::new(4, 1));
+                        .map(|fd| fd.to_value())
+                        .unwrap_or_else(|| Value::rational(4, 1));
 
                     // Get tempo - try note first, then base note
                     let tempo = eval_cache
                         .get(&note_id)
                         .and_then(|note| note.tempo.as_ref())
                         .or_else(|| eval_cache.get(&0).and_then(|note| note.tempo.as_ref()))
-                        .map(|fd| fd.to_fraction())
-                        .unwrap_or_else(|| Fraction::new(60, 1));
+                        .map(|fd| fd.to_value())
+                        .unwrap_or_else(|| Value::rational(60, 1));
 
                     // Compute measureLength = beatsPerMeasure / tempo * 60
-                    let sixty = Fraction::new(60, 1);
+                    let sixty = Value::rational(60, 1);
                     let measure = beats_per_measure.mul(&sixty).div(&tempo);
 
                     self.push(measure)?;
@@ -313,7 +422,7 @@ impl Evaluator {
                 Op::FindInstrument => {
                     // Not fully implemented - return default
                     let _ = self.pop()?;
-                    self.push(Fraction::new(0, 1))?;
+                    self.push(Value::rational(0, 1))?;
                 }
 
                 Op::Dup => {
@@ -333,38 +442,64 @@ impl Evaluator {
         if self.stack.len() != 1 {
             // Warning but continue - return top of stack or zero
             if self.stack.is_empty() {
-                return Ok(Fraction::new(0, 1));
+                return Ok(Value::rational(0, 1));
             }
         }
 
         self.pop()
     }
 
+    /// Evaluate and return as Fraction (for backward compatibility)
+    /// Irrational values are approximated
+    pub fn evaluate_as_fraction(
+        &mut self,
+        bytecode: &[u8],
+        length: usize,
+        eval_cache: &HashMap<u32, EvaluatedNote>,
+    ) -> Result<Fraction, String> {
+        let value = self.evaluate(bytecode, length, eval_cache)?;
+        Ok(match value {
+            Value::Rational(f) => f,
+            Value::Irrational(v) => Fraction::from_f64(v),
+        })
+    }
+
     /// Evaluate a complete note (all variables)
+    /// Tracks corruption flags for each property
     pub fn evaluate_note(
         &mut self,
         expressions: &NoteExpressions,
         eval_cache: &HashMap<u32, EvaluatedNote>,
     ) -> EvaluatedNote {
         let mut result = EvaluatedNote::default();
+        let mut corruption_flags: u8 = 0;
 
         // Evaluate in dependency order
         // 1. Variables that don't typically depend on others
         if let Some((bytecode, len)) = &expressions.tempo {
             if let Ok(val) = self.evaluate(bytecode, *len, eval_cache) {
-                result.tempo = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::Tempo as u8);
+                }
+                result.tempo = Some(FractionData::from_value(&val));
             }
         }
 
         if let Some((bytecode, len)) = &expressions.beats_per_measure {
             if let Ok(val) = self.evaluate(bytecode, *len, eval_cache) {
-                result.beats_per_measure = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::BeatsPerMeasure as u8);
+                }
+                result.beats_per_measure = Some(FractionData::from_value(&val));
             }
         }
 
         if let Some((bytecode, len)) = &expressions.frequency {
             if let Ok(val) = self.evaluate(bytecode, *len, eval_cache) {
-                result.frequency = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::Frequency as u8);
+                }
+                result.frequency = Some(FractionData::from_value(&val));
             }
         }
 
@@ -375,7 +510,10 @@ impl Evaluator {
 
         if let Some((bytecode, len)) = &expressions.measure_length {
             if let Ok(val) = self.evaluate(bytecode, *len, &working_cache) {
-                result.measure_length = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::MeasureLength as u8);
+                }
+                result.measure_length = Some(FractionData::from_value(&val));
             }
         }
 
@@ -385,16 +523,23 @@ impl Evaluator {
         // 3. startTime and duration may depend on measureLength/tempo
         if let Some((bytecode, len)) = &expressions.start_time {
             if let Ok(val) = self.evaluate(bytecode, *len, &working_cache) {
-                result.start_time = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::StartTime as u8);
+                }
+                result.start_time = Some(FractionData::from_value(&val));
             }
         }
 
         if let Some((bytecode, len)) = &expressions.duration {
             if let Ok(val) = self.evaluate(bytecode, *len, &working_cache) {
-                result.duration = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::Duration as u8);
+                }
+                result.duration = Some(FractionData::from_value(&val));
             }
         }
 
+        result.corruption_flags = corruption_flags;
         result
     }
 }
@@ -459,8 +604,8 @@ impl Evaluator {
             .evaluate(bytecode, length, &cache)
             .map_err(|e| JsValue::from_str(&e))?;
 
-        // Return as serialized object
-        let data = FractionData::from_fraction(&result);
+        // Return as serialized object (now supports both rational and irrational)
+        let data = FractionData::from_value(&result);
         serde_wasm_bindgen::to_value(&data).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -570,10 +715,11 @@ impl NoteBytecode {
 ///
 /// This evaluator keeps the evaluation cache in WASM memory to avoid
 /// O(N²) serialization overhead when evaluating large modules.
+/// Now supports both rational (Fraction) and irrational (f64) values via the Value type.
 #[wasm_bindgen]
 pub struct PersistentEvaluator {
-    /// Evaluation stack
-    stack: Vec<Fraction>,
+    /// Evaluation stack (supports both rational and irrational values)
+    stack: Vec<Value>,
     /// Maximum stack size (for safety)
     max_stack_size: usize,
 
@@ -739,6 +885,7 @@ impl PersistentEvaluator {
     }
 
     /// Evaluate a single note using internal cache
+    /// Tracks corruption flags for each property
     #[wasm_bindgen(js_name = evaluateNoteInternal)]
     pub fn evaluate_note_internal(&mut self, note_id: u32) -> bool {
         // Get bytecode for this note
@@ -748,34 +895,49 @@ impl PersistentEvaluator {
         };
 
         let mut result = EvaluatedNote::default();
+        let mut corruption_flags: u8 = 0;
 
         // Evaluate in dependency order
         // 1. Variables that don't typically depend on others
         if let Some((bc, len)) = bytecode.get_expr(Var::Tempo) {
             if let Ok(val) = self.evaluate_with_cache(bc, len) {
-                result.tempo = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::Tempo as u8);
+                }
+                result.tempo = Some(FractionData::from_value(&val));
             }
         }
 
         if let Some((bc, len)) = bytecode.get_expr(Var::BeatsPerMeasure) {
             if let Ok(val) = self.evaluate_with_cache(bc, len) {
-                result.beats_per_measure = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::BeatsPerMeasure as u8);
+                }
+                result.beats_per_measure = Some(FractionData::from_value(&val));
             }
         }
 
         if let Some((bc, len)) = bytecode.get_expr(Var::Frequency) {
             if let Ok(val) = self.evaluate_with_cache(bc, len) {
-                result.frequency = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::Frequency as u8);
+                }
+                result.frequency = Some(FractionData::from_value(&val));
             }
         }
 
         // 2. measureLength depends on tempo/beatsPerMeasure
         // Temporarily insert partial result for self-reference
+        result.corruption_flags = corruption_flags;
         self.cache.insert(note_id, result.clone());
 
         if let Some((bc, len)) = bytecode.get_expr(Var::MeasureLength) {
             if let Ok(val) = self.evaluate_with_cache(bc, len) {
-                result.measure_length = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::MeasureLength as u8);
+                }
+                result.measure_length = Some(FractionData::from_value(&val));
+                result.corruption_flags = corruption_flags;
                 self.cache.insert(note_id, result.clone());
             }
         }
@@ -783,14 +945,21 @@ impl PersistentEvaluator {
         // 3. startTime and duration may depend on measureLength/tempo
         if let Some((bc, len)) = bytecode.get_expr(Var::StartTime) {
             if let Ok(val) = self.evaluate_with_cache(bc, len) {
-                result.start_time = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::StartTime as u8);
+                }
+                result.start_time = Some(FractionData::from_value(&val));
+                result.corruption_flags = corruption_flags;
                 self.cache.insert(note_id, result.clone());
             }
         }
 
         if let Some((bc, len)) = bytecode.get_expr(Var::Duration) {
             if let Ok(val) = self.evaluate_with_cache(bc, len) {
-                result.duration = Some(FractionData::from_fraction(&val));
+                if val.is_corrupted() {
+                    corruption_flags |= corruption_flag_for_var(Var::Duration as u8);
+                }
+                result.duration = Some(FractionData::from_value(&val));
             }
         }
 
@@ -804,34 +973,38 @@ impl PersistentEvaluator {
             let beats = result
                 .beats_per_measure
                 .as_ref()
-                .map(|f| f.to_fraction())
+                .map(|f| f.to_value())
                 .or_else(|| {
                     self.cache
                         .get(&0)
                         .and_then(|c| c.beats_per_measure.as_ref())
-                        .map(|f| f.to_fraction())
+                        .map(|f| f.to_value())
                 })
-                .unwrap_or_else(|| Fraction::new(4, 1));
+                .unwrap_or_else(|| Value::rational(4, 1));
 
             let tempo = result
                 .tempo
                 .as_ref()
-                .map(|f| f.to_fraction())
+                .map(|f| f.to_value())
                 .or_else(|| {
                     self.cache
                         .get(&0)
                         .and_then(|c| c.tempo.as_ref())
-                        .map(|f| f.to_fraction())
+                        .map(|f| f.to_value())
                 })
-                .unwrap_or_else(|| Fraction::new(60, 1));
+                .unwrap_or_else(|| Value::rational(60, 1));
 
             // measureLength = beatsPerMeasure / tempo * 60
-            let sixty = Fraction::new(60, 1);
+            let sixty = Value::rational(60, 1);
             let measure_len = beats.mul(&sixty).div(&tempo);
-            result.measure_length = Some(FractionData::from_fraction(&measure_len));
+            if measure_len.is_corrupted() {
+                corruption_flags |= corruption_flag_for_var(Var::MeasureLength as u8);
+            }
+            result.measure_length = Some(FractionData::from_value(&measure_len));
         }
 
-        // Store final result
+        // Store final result with all corruption flags
+        result.corruption_flags = corruption_flags;
         self.cache.insert(note_id, result);
         true
     }
@@ -898,7 +1071,7 @@ impl Default for PersistentEvaluator {
 
 impl PersistentEvaluator {
     /// Push a value onto the stack
-    fn push(&mut self, value: Fraction) -> Result<(), String> {
+    fn push(&mut self, value: Value) -> Result<(), String> {
         if self.stack.len() >= self.max_stack_size {
             return Err("Stack overflow in evaluator".to_string());
         }
@@ -907,7 +1080,7 @@ impl PersistentEvaluator {
     }
 
     /// Pop a value from the stack
-    fn pop(&mut self) -> Result<Fraction, String> {
+    fn pop(&mut self) -> Result<Value, String> {
         self.stack
             .pop()
             .ok_or_else(|| "Stack underflow in evaluator".to_string())
@@ -918,22 +1091,23 @@ impl PersistentEvaluator {
         self.stack.clear();
     }
 
-    /// Get a default value for a variable
-    fn default_value(var: Var) -> Fraction {
-        match var {
+    /// Get a default value for a variable (always rational)
+    fn default_value(var: Var) -> Value {
+        Value::Rational(match var {
             Var::StartTime => Fraction::new(0, 1),
             Var::Duration => Fraction::new(1, 1),
             Var::Frequency => Fraction::new(440, 1),
             Var::Tempo => Fraction::new(60, 1),
             Var::BeatsPerMeasure => Fraction::new(4, 1),
             Var::MeasureLength => Fraction::new(4, 1),
-        }
+        })
     }
 
     /// Evaluate bytecode using the internal cache
-    fn evaluate_with_cache(&mut self, bytecode: &[u8], length: usize) -> Result<Fraction, String> {
+    /// Returns a Value which may be rational or irrational
+    fn evaluate_with_cache(&mut self, bytecode: &[u8], length: usize) -> Result<Value, String> {
         if length == 0 {
-            return Ok(Fraction::new(0, 1));
+            return Ok(Value::rational(0, 1));
         }
 
         self.clear_stack();
@@ -955,7 +1129,7 @@ impl PersistentEvaluator {
                     pc += 4;
                     let den = read_i32(bytecode, pc);
                     pc += 4;
-                    self.push(Fraction::new(num, den))?;
+                    self.push(Value::rational(num, den))?;
                 }
 
                 Op::LoadRef => {
@@ -970,11 +1144,11 @@ impl PersistentEvaluator {
                     let var = Var::from_byte(var_idx)
                         .ok_or_else(|| format!("Invalid variable index: {}", var_idx))?;
 
-                    // Look up in internal cache
+                    // Look up in internal cache (preserves corruption status)
                     let value = self.cache
                         .get(&note_id)
                         .and_then(|note| note.get_var(var))
-                        .map(|fd| fd.to_fraction());
+                        .map(|fd| fd.to_value());
 
                     // For inheritable properties, fall back to base note
                     let value = value.or_else(|| {
@@ -982,7 +1156,7 @@ impl PersistentEvaluator {
                             self.cache
                                 .get(&0)
                                 .and_then(|note| note.get_var(var))
-                                .map(|fd| fd.to_fraction())
+                                .map(|fd| fd.to_value())
                         } else {
                             None
                         }
@@ -1006,7 +1180,7 @@ impl PersistentEvaluator {
                     let value = self.cache
                         .get(&0)
                         .and_then(|note| note.get_var(var))
-                        .map(|fd| fd.to_fraction())
+                        .map(|fd| fd.to_value())
                         .unwrap_or_else(|| Self::default_value(var));
 
                     self.push(value)?;
@@ -1041,6 +1215,14 @@ impl PersistentEvaluator {
                     self.push(a.neg())?;
                 }
 
+                Op::Pow => {
+                    // Power operation for TET support
+                    // May produce irrational result (corruption)
+                    let exp = self.pop()?;
+                    let base = self.pop()?;
+                    self.push(base.pow(&exp))?;
+                }
+
                 Op::FindTempo => {
                     // Pop note reference (not used in current impl, uses base note)
                     let _ = self.pop()?;
@@ -1049,8 +1231,8 @@ impl PersistentEvaluator {
                     let tempo = self.cache
                         .get(&0)
                         .and_then(|note| note.tempo.as_ref())
-                        .map(|fd| fd.to_fraction())
-                        .unwrap_or_else(|| Fraction::new(60, 1));
+                        .map(|fd| fd.to_value())
+                        .unwrap_or_else(|| Value::rational(60, 1));
 
                     self.push(tempo)?;
                 }
@@ -1065,19 +1247,19 @@ impl PersistentEvaluator {
                         .get(&note_id)
                         .and_then(|note| note.beats_per_measure.as_ref())
                         .or_else(|| self.cache.get(&0).and_then(|note| note.beats_per_measure.as_ref()))
-                        .map(|fd| fd.to_fraction())
-                        .unwrap_or_else(|| Fraction::new(4, 1));
+                        .map(|fd| fd.to_value())
+                        .unwrap_or_else(|| Value::rational(4, 1));
 
                     // Get tempo - try note first, then base note
                     let tempo = self.cache
                         .get(&note_id)
                         .and_then(|note| note.tempo.as_ref())
                         .or_else(|| self.cache.get(&0).and_then(|note| note.tempo.as_ref()))
-                        .map(|fd| fd.to_fraction())
-                        .unwrap_or_else(|| Fraction::new(60, 1));
+                        .map(|fd| fd.to_value())
+                        .unwrap_or_else(|| Value::rational(60, 1));
 
                     // Compute measureLength = beatsPerMeasure / tempo * 60
-                    let sixty = Fraction::new(60, 1);
+                    let sixty = Value::rational(60, 1);
                     let measure = beats_per_measure.mul(&sixty).div(&tempo);
 
                     self.push(measure)?;
@@ -1086,7 +1268,7 @@ impl PersistentEvaluator {
                 Op::FindInstrument => {
                     // Not fully implemented - return default
                     let _ = self.pop()?;
-                    self.push(Fraction::new(0, 1))?;
+                    self.push(Value::rational(0, 1))?;
                 }
 
                 Op::Dup => {
@@ -1107,7 +1289,7 @@ impl PersistentEvaluator {
 
         if self.stack.len() != 1 {
             if self.stack.is_empty() {
-                return Ok(Fraction::new(0, 1));
+                return Ok(Value::rational(0, 1));
             }
         }
 
@@ -1136,6 +1318,7 @@ mod tests {
 
         let result = evaluator.evaluate(&bytecode, bytecode.len(), &cache).unwrap();
         assert_eq!(result.to_f64(), 0.75);
+        assert!(result.is_rational()); // Should be rational, not corrupted
     }
 
     #[test]
@@ -1159,6 +1342,7 @@ mod tests {
         let cache = HashMap::new();
         let result = evaluator.evaluate(&bytecode, bytecode.len(), &cache).unwrap();
         assert_eq!(result.to_f64(), 0.75);
+        assert!(result.is_rational());
     }
 
     #[test]
@@ -1181,10 +1365,86 @@ mod tests {
         // Create cache with base note having startTime = 5
         let mut cache = HashMap::new();
         let mut base_note = EvaluatedNote::default();
-        base_note.start_time = Some(FractionData { s: 1, n: 5, d: 1 });
+        base_note.start_time = Some(FractionData { s: 1, n: 5, d: 1, f: None, corrupted: false });
         cache.insert(0, base_note);
 
         let result = evaluator.evaluate(&bytecode, bytecode.len(), &cache).unwrap();
         assert_eq!(result.to_f64(), 6.0); // 5 + 1 = 6
+        assert!(result.is_rational());
+    }
+
+    #[test]
+    fn test_evaluate_pow_rational() {
+        let mut evaluator = Evaluator::new();
+        let mut bytecode = Vec::new();
+
+        // Push 2
+        bytecode.push(Op::LoadConst as u8);
+        write_i32(&mut bytecode, 2);
+        write_i32(&mut bytecode, 1);
+
+        // Push 3 (exponent)
+        bytecode.push(Op::LoadConst as u8);
+        write_i32(&mut bytecode, 3);
+        write_i32(&mut bytecode, 1);
+
+        // Pow: 2^3 = 8
+        bytecode.push(Op::Pow as u8);
+
+        let cache = HashMap::new();
+        let result = evaluator.evaluate(&bytecode, bytecode.len(), &cache).unwrap();
+        assert_eq!(result.to_f64(), 8.0);
+        assert!(result.is_rational()); // 2^3 is rational
+    }
+
+    #[test]
+    fn test_evaluate_pow_irrational_tet() {
+        let mut evaluator = Evaluator::new();
+        let mut bytecode = Vec::new();
+
+        // Push 2 (base)
+        bytecode.push(Op::LoadConst as u8);
+        write_i32(&mut bytecode, 2);
+        write_i32(&mut bytecode, 1);
+
+        // Push 1/12 (exponent for TET semitone)
+        bytecode.push(Op::LoadConst as u8);
+        write_i32(&mut bytecode, 1);
+        write_i32(&mut bytecode, 12);
+
+        // Pow: 2^(1/12) is irrational
+        bytecode.push(Op::Pow as u8);
+
+        let cache = HashMap::new();
+        let result = evaluator.evaluate(&bytecode, bytecode.len(), &cache).unwrap();
+
+        // Should be approximately 1.059463...
+        let expected = 2.0_f64.powf(1.0 / 12.0);
+        assert!((result.to_f64() - expected).abs() < 1e-10);
+        assert!(result.is_corrupted()); // Should be irrational (corrupted)
+    }
+
+    #[test]
+    fn test_evaluate_pow_perfect_root() {
+        let mut evaluator = Evaluator::new();
+        let mut bytecode = Vec::new();
+
+        // Push 4
+        bytecode.push(Op::LoadConst as u8);
+        write_i32(&mut bytecode, 4);
+        write_i32(&mut bytecode, 1);
+
+        // Push 1/2 (square root)
+        bytecode.push(Op::LoadConst as u8);
+        write_i32(&mut bytecode, 1);
+        write_i32(&mut bytecode, 2);
+
+        // Pow: 4^(1/2) = 2 (perfect square root, stays rational)
+        bytecode.push(Op::Pow as u8);
+
+        let cache = HashMap::new();
+        let result = evaluator.evaluate(&bytecode, bytecode.len(), &cache).unwrap();
+        assert_eq!(result.to_f64(), 2.0);
+        assert!(result.is_rational()); // Perfect square root stays rational
     }
 }

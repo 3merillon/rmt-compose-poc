@@ -503,6 +503,8 @@ class WasmIncrementalEvaluator {
     // This ensures fresh values will be fetched from WASM
     for (const noteId of this.dirty) {
       this.cache._localCache.delete(noteId);
+      // Also clear the wrapper's JS cache to ensure fresh corruptionFlags are read
+      this.evaluator._jsCache.delete(noteId);
     }
 
     // 4. SINGLE WASM CALL - evaluates all dirty notes in order
@@ -849,16 +851,23 @@ class WasmPersistentEvaluatorWrapper {
       frequency: null,
       tempo: null,
       beatsPerMeasure: null,
-      measureLength: null
+      measureLength: null,
+      corruptionFlags: wasmNote.corruptionFlags || 0
     };
 
-    for (const key of Object.keys(result)) {
+    for (const key of ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength']) {
       const val = wasmNote[key];
       if (val && val.s !== undefined) {
         const frac = new Fraction(0);
-        frac.s = val.s || 1;
+        // Be careful with sign: 0 is valid (means zero value), don't default to 1
+        frac.s = (val.s !== undefined && val.s !== null) ? val.s : 1;
         frac.n = val.n || 0;
         frac.d = val.d || 1;
+        // For irrational values, store the float value if available
+        if (val.corrupted && val.f !== undefined) {
+          frac._irrational = true;
+          frac._floatValue = val.f;
+        }
         result[key] = frac;
       }
     }

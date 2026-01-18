@@ -6,7 +6,265 @@
  */
 
 import Fraction from 'fraction.js';
-import { OP, VAR } from './binary-note.js';
+import { OP, VAR, getCorruptionFlag } from './binary-note.js';
+
+/**
+ * MusicValue wrapper supporting both rational and irrational numbers
+ *
+ * Enables TET scale support via expressions like 2^(1/12) while preserving
+ * exact rational arithmetic when possible.
+ */
+export class MusicValue {
+  /**
+   * @param {'rational'|'irrational'} type - Value type
+   * @param {Fraction|number} data - Fraction for rational, number for irrational
+   */
+  constructor(type, data) {
+    this.type = type;
+    if (type === 'rational') {
+      this.fraction = data; // Fraction.js instance
+      this.float = null;
+    } else {
+      this.fraction = null;
+      this.float = data; // f64 number
+    }
+  }
+
+  /**
+   * Create a rational value from a Fraction
+   */
+  static rational(frac) {
+    return new MusicValue('rational', frac);
+  }
+
+  /**
+   * Create an irrational value from a number
+   */
+  static irrational(f) {
+    return new MusicValue('irrational', f);
+  }
+
+  /**
+   * Create from numerator and denominator
+   */
+  static fromND(n, d) {
+    return MusicValue.rational(new Fraction(n, d));
+  }
+
+  /**
+   * Check if this value is corrupted (irrational)
+   */
+  isCorrupted() {
+    return this.type === 'irrational';
+  }
+
+  /**
+   * Convert to f64
+   */
+  toFloat() {
+    return this.type === 'rational'
+      ? this.fraction.valueOf()
+      : this.float;
+  }
+
+  /**
+   * Get a Fraction representation (approximates irrational values)
+   */
+  toFraction() {
+    if (this.type === 'rational') {
+      return this.fraction;
+    }
+    // Approximate irrational as fraction
+    return new Fraction(this.float);
+  }
+
+  /**
+   * Get fraction components for compatibility with existing code
+   */
+  get s() { return this.type === 'rational' ? this.fraction.s : (this.float < 0 ? -1 : this.float > 0 ? 1 : 0); }
+  get n() { return this.type === 'rational' ? this.fraction.n : 0; }
+  get d() { return this.type === 'rational' ? this.fraction.d : 1; }
+
+  /**
+   * Add two values
+   */
+  add(other) {
+    if (this.type === 'rational' && other.type === 'rational') {
+      return MusicValue.rational(this.fraction.add(other.fraction));
+    }
+    return MusicValue.irrational(this.toFloat() + other.toFloat());
+  }
+
+  /**
+   * Subtract two values
+   */
+  sub(other) {
+    if (this.type === 'rational' && other.type === 'rational') {
+      return MusicValue.rational(this.fraction.sub(other.fraction));
+    }
+    return MusicValue.irrational(this.toFloat() - other.toFloat());
+  }
+
+  /**
+   * Multiply two values
+   */
+  mul(other) {
+    if (this.type === 'rational' && other.type === 'rational') {
+      return MusicValue.rational(this.fraction.mul(other.fraction));
+    }
+    return MusicValue.irrational(this.toFloat() * other.toFloat());
+  }
+
+  /**
+   * Divide two values
+   */
+  div(other) {
+    if (this.type === 'rational' && other.type === 'rational') {
+      return MusicValue.rational(this.fraction.div(other.fraction));
+    }
+    const divisor = other.toFloat();
+    if (divisor === 0) {
+      // Match Fraction behavior: return 1 for division by zero
+      return MusicValue.fromND(1, 1);
+    }
+    return MusicValue.irrational(this.toFloat() / divisor);
+  }
+
+  /**
+   * Negate the value
+   */
+  neg() {
+    if (this.type === 'rational') {
+      return MusicValue.rational(this.fraction.neg());
+    }
+    return MusicValue.irrational(-this.float);
+  }
+
+  /**
+   * Power operation - the key to TET support
+   * May produce irrational result (corruption)
+   */
+  pow(exponent) {
+    if (this.type === 'rational' && exponent.type === 'rational') {
+      const result = tryRationalPower(this.fraction, exponent.fraction);
+      if (result) {
+        return MusicValue.rational(result);
+      }
+    }
+    return MusicValue.irrational(Math.pow(this.toFloat(), exponent.toFloat()));
+  }
+
+  /**
+   * Get valueOf for compatibility
+   */
+  valueOf() {
+    return this.toFloat();
+  }
+}
+
+/**
+ * Try to compute base^(num/den) as a rational if possible
+ * Returns Fraction if rational, null if irrational
+ */
+function tryRationalPower(base, exp) {
+  const expNum = exp.s * exp.n;
+  const expDen = exp.d;
+
+  // Zero exponent: always 1
+  if (expNum === 0) {
+    return new Fraction(1, 1);
+  }
+
+  // Integer exponent: always rational
+  if (expDen === 1) {
+    return rationalIntPower(base, expNum);
+  }
+
+  // Fractional exponent: check for perfect n-th root
+  // base^(p/q) = (base^p)^(1/q)
+  const basePowered = rationalIntPower(base, expNum);
+  return tryPerfectNthRoot(basePowered, expDen);
+}
+
+/**
+ * Compute base^n for integer n
+ */
+function rationalIntPower(base, n) {
+  if (n === 0) {
+    return new Fraction(1, 1);
+  }
+
+  const absN = Math.abs(n);
+  let result = new Fraction(1, 1);
+
+  // Simple repeated multiplication (could optimize with squaring)
+  for (let i = 0; i < absN; i++) {
+    result = result.mul(base);
+  }
+
+  if (n < 0) {
+    return result.inverse();
+  }
+  return result;
+}
+
+/**
+ * Check if value has a perfect n-th root that is rational
+ * Returns Fraction if perfect root, null otherwise
+ */
+function tryPerfectNthRoot(value, n) {
+  if (n === 0) return null;
+  if (n === 1) return value;
+
+  const num = value.s * value.n;
+  const den = value.d;
+
+  const numAbs = Math.abs(num);
+
+  const numRoot = integerNthRoot(numAbs, n);
+  const denRoot = integerNthRoot(den, n);
+
+  if (numRoot === null || denRoot === null) {
+    return null;
+  }
+
+  // Verify it's exact
+  if (Math.pow(numRoot, n) === numAbs && Math.pow(denRoot, n) === den) {
+    // Handle sign: odd roots preserve sign, even roots of negatives are not real
+    let sign;
+    if (num < 0) {
+      if (n % 2 === 1) {
+        sign = -1;
+      } else {
+        return null; // Even root of negative is not real
+      }
+    } else {
+      sign = 1;
+    }
+    return new Fraction(sign * numRoot, denRoot);
+  }
+
+  return null;
+}
+
+/**
+ * Integer n-th root if exact, null otherwise
+ */
+function integerNthRoot(value, n) {
+  if (value === 0) return 0;
+  if (value === 1 || n === 1) return value;
+
+  const root = Math.round(Math.pow(value, 1 / n));
+
+  // Check root and neighbors (floating point might be slightly off)
+  for (let candidate = root - 1; candidate <= root + 1; candidate++) {
+    if (candidate >= 0 && Math.pow(candidate, n) === value) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
 
 /**
  * Fraction object pool to reduce GC pressure
@@ -381,6 +639,32 @@ export class BinaryEvaluator {
           break;
         }
 
+        case OP.POW: {
+          // Power operation for TET support
+          // Note: This is handled by the WASM evaluator in most cases,
+          // but we implement it here for completeness and fallback
+          const exp = this.pop();
+          const base = this.pop();
+
+          // Convert to MusicValue for power calculation
+          const baseValue = MusicValue.rational(new Fraction(base.s * base.n, base.d));
+          const expValue = MusicValue.rational(new Fraction(exp.s * exp.n, exp.d));
+          const powResult = baseValue.pow(expValue);
+
+          // Convert back to pooled Fraction
+          // Note: If the result is irrational, we lose the corruption flag here
+          // The WASM evaluator handles corruption tracking properly
+          if (powResult.isCorrupted()) {
+            // Approximate as fraction
+            const frac = new Fraction(powResult.toFloat());
+            this.push(this.pool.alloc(frac.s * frac.n, frac.d));
+          } else {
+            const frac = powResult.fraction;
+            this.push(this.pool.alloc(frac.s * frac.n, frac.d));
+          }
+          break;
+        }
+
         case OP.FIND_TEMPO: {
           // Find tempo for a note (walks parent chain)
           const noteRef = this.pop();
@@ -507,6 +791,7 @@ export class BinaryEvaluator {
       tempo: null,
       beatsPerMeasure: null,
       measureLength: null,
+      corruptionFlags: 0, // Track irrational values (TET scales)
     };
 
     // Create a working cache that includes this note's partial results
@@ -528,6 +813,16 @@ export class BinaryEvaluator {
       return null;
     };
 
+    // Corruption flag mapping: name -> bit flag
+    const corruptionFlagMap = {
+      startTime: 0x01,
+      duration: 0x02,
+      frequency: 0x04,
+      tempo: 0x08,
+      beatsPerMeasure: 0x10,
+      measureLength: 0x20,
+    };
+
     const safeEvaluate = (name) => {
       try {
         const expr = getExpr(name);
@@ -539,6 +834,18 @@ export class BinaryEvaluator {
           const value = new Fraction(pooledValue.s * pooledValue.n, pooledValue.d);
           // Update result immediately so later expressions in this note can use it
           result[name] = value;
+
+          // Check if bytecode contains POW opcode (0x15) - indicates potential irrational value
+          // This is a heuristic: actual corruption depends on whether the power produces an irrational
+          if (expr.bytecode && expr.length > 0) {
+            for (let i = 0; i < expr.length; i++) {
+              if (expr.bytecode[i] === OP.POW) {
+                result.corruptionFlags |= corruptionFlagMap[name] || 0;
+                break;
+              }
+            }
+          }
+
           return value;
         }
       } catch (e) {

@@ -415,16 +415,16 @@ mod tests {
         let a = Fraction::new(1, 2);
         let b = Fraction::new(1, 4);
 
-        let sum = a.add(&b);
+        let sum = (&a).add(&b);
         assert_eq!(sum.to_string_repr(), "3/4");
 
-        let diff = a.sub(&b);
+        let diff = (&a).sub(&b);
         assert_eq!(diff.to_string_repr(), "1/4");
 
-        let prod = a.mul(&b);
+        let prod = (&a).mul(&b);
         assert_eq!(prod.to_string_repr(), "1/8");
 
-        let quot = a.div(&b);
+        let quot = (&a).div(&b);
         assert_eq!(quot.to_string_repr(), "2");
     }
 
@@ -485,7 +485,7 @@ mod tests {
     fn test_division_by_zero() {
         let a = Fraction::new(1, 1);
         let zero = Fraction::new(0, 1);
-        let result = a.div(&zero);
+        let result = (&a).div(&zero);
         // Should return 1 (matching JS behavior)
         assert_eq!(result.to_f64(), 1.0);
     }

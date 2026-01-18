@@ -1022,6 +1022,11 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     padding: 4px 0;
 }
 
+.evaluated-value.corrupted-value {
+    color: #d4a574; /* Brown/orange tint for corrupted irrational values */
+    font-style: italic;
+}
+
 .value-label {
     color: rgba(255, 168, 0, 0.6);
     font-size: 0.9em;

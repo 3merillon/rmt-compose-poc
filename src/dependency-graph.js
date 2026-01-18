@@ -58,6 +58,11 @@ export class DependencyGraph {
     this.durationOnStartTimeDependents = new Map();
     this.durationOnDurationDependents = new Map();
     this.durationOnFrequencyDependents = new Map();
+
+    // Corruption tracking for irrational number support (TET scales)
+    // Maps noteId -> u8 bitmask indicating which properties are corrupted (contain irrational values)
+    // Bit flags: 0x01=startTime, 0x02=duration, 0x04=frequency, 0x08=tempo, 0x10=beatsPerMeasure, 0x20=measureLength
+    this.corruptionFlags = new Map();
   }
 
   /**
@@ -632,6 +637,9 @@ export class DependencyGraph {
     for (const [, depSet] of this.durationOnFrequencyDependents) {
       depSet.delete(noteId);
     }
+
+    // Remove from corruption tracking
+    this.corruptionFlags.delete(noteId);
   }
 
   /**
@@ -1367,6 +1375,48 @@ export class DependencyGraph {
   }
 
   /**
+   * Get the children tree as edges for a specific property
+   * Used for visualizing the complete dependent tree per variable
+   *
+   * @param {number} noteId - The root note to start from
+   * @param {string} property - 'frequency' | 'startTime' | 'duration'
+   * @returns {{ edges: Array<{parentId: number, childId: number, depth: number}>, maxDepth: number }}
+   */
+  getChildrenTreeByProperty(noteId, property) {
+    const edges = [];
+    const visited = new Set([noteId]);
+    const queue = [{ id: noteId, depth: 0 }];
+    let queueIdx = 0;
+    let maxDepth = 0;
+
+    // Select appropriate dependents map based on property
+    // e.g., startTimeOnStartTimeDependents, frequencyOnFrequencyDependents, durationOnDurationDependents
+    const propCapitalized = property.charAt(0).toUpperCase() + property.slice(1);
+    const mapName = `${property}On${propCapitalized}Dependents`;
+    const dependentsMap = this[mapName];
+    if (!dependentsMap) return { edges, maxDepth };
+
+    while (queueIdx < queue.length) {
+      const { id: parentId, depth } = queue[queueIdx++];
+      const children = dependentsMap.get(parentId);
+
+      if (children) {
+        for (const childId of children) {
+          if (!visited.has(childId)) {
+            visited.add(childId);
+            const childDepth = depth + 1;
+            maxDepth = Math.max(maxDepth, childDepth);
+            edges.push({ parentId, childId, depth: childDepth });
+            queue.push({ id: childId, depth: childDepth });
+          }
+        }
+      }
+    }
+
+    return { edges, maxDepth };
+  }
+
+  /**
    * Clear the entire graph
    */
   clear() {
@@ -1393,6 +1443,136 @@ export class DependencyGraph {
     this.durationOnStartTimeDependents.clear();
     this.durationOnDurationDependents.clear();
     this.durationOnFrequencyDependents.clear();
+    // Corruption tracking
+    this.corruptionFlags.clear();
+  }
+
+  /**
+   * Set corruption flags for a note
+   * Called after evaluation to record which properties contain irrational values
+   *
+   * @param {number} noteId - The note ID
+   * @param {number} flags - Bitmask of corrupted properties (0x01=startTime, 0x02=duration, 0x04=frequency, etc.)
+   */
+  setCorruptionFlags(noteId, flags) {
+    if (flags === 0) {
+      this.corruptionFlags.delete(noteId);
+    } else {
+      this.corruptionFlags.set(noteId, flags);
+    }
+  }
+
+  /**
+   * Get corruption flags for a note
+   *
+   * @param {number} noteId - The note ID
+   * @returns {number} - Bitmask of corrupted properties (0 if not corrupted)
+   */
+  getCorruptionFlags(noteId) {
+    return this.corruptionFlags.get(noteId) || 0;
+  }
+
+  /**
+   * Check if a note has any corrupted properties
+   *
+   * @param {number} noteId - The note ID
+   * @returns {boolean} - True if any property is corrupted
+   */
+  isNoteCorrupted(noteId) {
+    return this.corruptionFlags.has(noteId) && this.corruptionFlags.get(noteId) !== 0;
+  }
+
+  /**
+   * Check if a specific property of a note is corrupted
+   *
+   * @param {number} noteId - The note ID
+   * @param {number} propertyFlag - The property flag to check (e.g., 0x04 for frequency)
+   * @returns {boolean} - True if the property is corrupted
+   */
+  isPropertyCorrupted(noteId, propertyFlag) {
+    const flags = this.corruptionFlags.get(noteId) || 0;
+    return (flags & propertyFlag) !== 0;
+  }
+
+  /**
+   * Clear corruption flags for a note
+   *
+   * @param {number} noteId - The note ID
+   */
+  clearCorruptionFlags(noteId) {
+    this.corruptionFlags.delete(noteId);
+  }
+
+  /**
+   * Get all corrupted note IDs
+   *
+   * @returns {Set<number>} - Set of note IDs that have corruption
+   */
+  getCorruptedNotes() {
+    const result = new Set();
+    for (const [noteId, flags] of this.corruptionFlags) {
+      if (flags !== 0) {
+        result.add(noteId);
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Check if a note's frequency is transitively corrupted
+   * (either directly corrupted or depends on a corrupted frequency)
+   *
+   * @param {number} noteId - The note ID
+   * @returns {boolean} - True if frequency is transitively corrupted
+   */
+  isFrequencyTransitivelyCorrupted(noteId) {
+    // Check direct corruption first (fast path)
+    if (this.isPropertyCorrupted(noteId, 0x04)) return true;
+
+    // BFS through frequency dependency chain
+    const visited = new Set([noteId]);
+    const queue = [noteId];
+    let idx = 0;
+
+    while (idx < queue.length) {
+      const freqDeps = this.frequencyDependencies.get(queue[idx++]);
+      if (freqDeps) {
+        for (const depId of freqDeps) {
+          if (visited.has(depId)) continue;
+          visited.add(depId);
+          if (this.isPropertyCorrupted(depId, 0x04)) return true;
+          queue.push(depId);
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Get all transitive frequency dependencies (notes that affect this note's frequency)
+   *
+   * @param {number} noteId - The note ID
+   * @returns {Set<number>} - Set of note IDs that this note's frequency depends on
+   */
+  getAllFrequencyDependencies(noteId) {
+    const result = new Set();
+    const queue = [noteId];
+    let idx = 0;
+    const visited = new Set([noteId]);
+
+    while (idx < queue.length) {
+      const freqDeps = this.frequencyDependencies.get(queue[idx++]);
+      if (freqDeps) {
+        for (const dep of freqDeps) {
+          if (!visited.has(dep)) {
+            visited.add(dep);
+            result.add(dep);
+            queue.push(dep);
+          }
+        }
+      }
+    }
+    return result;
   }
 
   /**
@@ -1419,6 +1599,7 @@ export class DependencyGraph {
       maxDependencies: maxDeps,
       maxDependents: maxDependents,
       baseNoteDependents: this.baseNoteDependents.size,
+      corruptedNotes: this.corruptionFlags.size,
     };
   }
 

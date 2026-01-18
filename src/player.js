@@ -2142,6 +2142,127 @@ function __parseParentFromStartTimeStringGL(note) {
   return myModule.baseNote;
 }
 
+/**
+ * Rebuild a frequency expression to target a new anchor while preserving corruption.
+ * Corruption is "unwashable" - if the note's frequency involves irrational values,
+ * we must express the relationship to the new anchor using .pow() to preserve exactness.
+ *
+ * @param {Note} note - The note whose frequency expression is being rebuilt
+ * @param {Note} newAnchor - The new anchor note to reference
+ * @param {Object} depGraph - The dependency graph for corruption checks
+ * @returns {string|null} - New expression string, or null if cannot be rebuilt
+ */
+function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
+  try {
+    const anchorRef = newAnchor.id === 0 ? "module.baseNote" : `module.getNoteById(${newAnchor.id})`;
+
+    const noteFreq = note.getVariable('frequency');
+    const anchorFreq = newAnchor.getVariable('frequency');
+    if (!noteFreq || !anchorFreq) return null;
+
+    const noteVal = typeof noteFreq.valueOf === 'function' ? noteFreq.valueOf() : Number(noteFreq);
+    const anchorVal = typeof anchorFreq.valueOf === 'function' ? anchorFreq.valueOf() : Number(anchorFreq);
+
+    if (!isFinite(noteVal) || !isFinite(anchorVal) || Math.abs(anchorVal) < 1e-12) return null;
+
+    const ratio = noteVal / anchorVal;
+
+    // If ratio is 1, just reference anchor directly
+    if (Math.abs(ratio - 1) < 1e-9) {
+      return `${anchorRef}.getVariable('frequency')`;
+    }
+
+    // Check if corruption is involved
+    const noteTransitivelyCorrupt = depGraph?.isFrequencyTransitivelyCorrupted?.(note.id);
+    const anchorCorrupt = newAnchor.id !== 0 && depGraph?.isPropertyCorrupted?.(newAnchor.id, 0x04);
+
+    // If note is transitively corrupt, we need to express ratio using .pow() to preserve precision
+    if (noteTransitivelyCorrupt && !anchorCorrupt) {
+      // The ratio contains irrational factors - express as 2^(semitones/12)
+      // This preserves the exact relationship
+      const log2Ratio = Math.log2(ratio);
+
+      // Try to express as TET interval: 2^(n/12) for various denominators
+      for (const denom of [12, 24, 1, 2, 3, 4, 6]) {
+        const numer = Math.round(log2Ratio * denom);
+        const reconstructed = Math.pow(2, numer / denom);
+
+        // Check if this approximation is exact enough
+        if (Math.abs(reconstructed - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-12) {
+          // Found exact representation
+          const gcd = (a, b) => b === 0 ? Math.abs(a) : gcd(b, a % b);
+          const g = gcd(Math.abs(numer), denom);
+          const simpNum = numer / g;
+          const simpDen = denom / g;
+
+          if (simpDen === 1) {
+            // Integer power of 2
+            if (simpNum === 0) {
+              return `${anchorRef}.getVariable('frequency')`;
+            }
+            const multiplier = Math.pow(2, simpNum);
+            return `new Fraction(${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
+          }
+          return `${anchorRef}.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(${simpNum}, ${simpDen})))`;
+        }
+      }
+
+      // Couldn't find clean TET representation - try to factor out the rational part
+      // The ratio might be rationalPart * 2^(irrationalPart)
+      const semitones = log2Ratio * 12;
+      const tetPart = Math.round(semitones);
+      const tetRatio = Math.pow(2, tetPart / 12);
+      const remainingRatio = ratio / tetRatio;
+
+      // Check if remaining ratio is close to a simple fraction
+      try {
+        const remainingFrac = new Fraction(remainingRatio).simplify(1e-9);
+        if (Math.abs(remainingFrac.valueOf() - remainingRatio) / Math.max(Math.abs(remainingRatio), 1e-12) < 1e-9) {
+          // We can express as: rationalPart * anchor * 2^(tetPart/12)
+          const gcd = (a, b) => b === 0 ? Math.abs(a) : gcd(b, a % b);
+          const g = gcd(Math.abs(tetPart), 12);
+          const simpTetNum = tetPart / g;
+          const simpTetDen = 12 / g;
+
+          let expr = `${anchorRef}.getVariable('frequency')`;
+
+          if (simpTetDen === 1) {
+            if (simpTetNum !== 0) {
+              const tetMult = Math.pow(2, simpTetNum);
+              expr = `new Fraction(${tetMult}).mul(${expr})`;
+            }
+          } else {
+            expr = `${expr}.mul(new Fraction(2).pow(new Fraction(${simpTetNum}, ${simpTetDen})))`;
+          }
+
+          if (remainingFrac.n !== remainingFrac.d) {
+            expr = `new Fraction(${remainingFrac.n}, ${remainingFrac.d}).mul(${expr})`;
+          }
+
+          return expr;
+        }
+      } catch {}
+
+      // Last resort: just use the TET approximation (may have small error but preserves corruption)
+      const gcd = (a, b) => b === 0 ? Math.abs(a) : gcd(b, a % b);
+      const g = gcd(Math.abs(tetPart), 12);
+      return `${anchorRef}.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(${tetPart / g}, ${12 / g})))`;
+    }
+
+    // Clean case or anchor is also corrupt - use rational fraction
+    try {
+      const ratioFrac = new Fraction(ratio);
+      // Verify precision
+      if (Math.abs(ratioFrac.valueOf() - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-9) {
+        return `new Fraction(${ratioFrac.n}, ${ratioFrac.d}).mul(${anchorRef}.getVariable('frequency'))`;
+      }
+    } catch {}
+
+    // Fallback: use float (shouldn't happen often)
+    return `new Fraction(${ratio}).mul(${anchorRef}.getVariable('frequency'))`;
+  } catch { return null; }
+}
+
 function __findNextMeasureInChainGL(measure) {
   try {
     if (!__isMeasureNoteGL(measure)) return null;
@@ -2316,6 +2437,14 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
     const movedStart = Number(movedNote.getVariable('startTime').valueOf() || 0);
     const dependents = myModule.getDependentNotes(movedId) || [];
 
+    // Get dependency graph for corruption checks
+    const depGraph = myModule._dependencyGraph;
+
+    // Check if the moved note has corrupt frequency
+    const movedHasCorruptFreq = depGraph &&
+      typeof depGraph.isPropertyCorrupted === 'function' &&
+      depGraph.isPropertyCorrupted(movedId, 0x04); // 0x04 = frequency corruption flag
+
     dependents.forEach(depId => {
       const dep = myModule.getNoteById(Number(depId));
       if (!dep) return;
@@ -2330,13 +2459,23 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
       // If dependent starts earlier than referenced (moved) note, swap to a valid ancestor at/before depStart
       if (depStart < movedStart - 1e-6) {
         const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart);
-        const parentRef = (replacementTarget && replacementTarget.id === 0) ? "module.baseNote"
-                         : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
 
-        const replaced = fRaw.replace(new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g'), parentRef);
+        // Check for transitive corruption using new helper
+        const depTransitivelyCorrupt = depGraph?.isFrequencyTransitivelyCorrupted?.(dep.id);
+        const targetCorrupt = replacementTarget?.id !== 0 && depGraph?.isPropertyCorrupted?.(replacementTarget.id, 0x04);
+        const anyCorruption = depTransitivelyCorrupt || movedHasCorruptFreq || targetCorrupt || fRaw.includes('.pow(');
 
-        let simplified;
-        try { simplified = simplifyFrequency(replaced, myModule); } catch { simplified = replaced; }
+        let newFreqString;
+        if (anyCorruption) {
+          // Use value-based rebuilding to preserve evaluated frequency exactly
+          newFreqString = rebuildFrequencyForAnchor(dep, replacementTarget, depGraph);
+        } else {
+          // Simple reference substitution with simplification for clean cases
+          const parentRef = (replacementTarget && replacementTarget.id === 0) ? "module.baseNote"
+                           : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
+          const replaced = fRaw.replace(new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g'), parentRef);
+          try { newFreqString = simplifyFrequency(replaced, myModule); } catch { newFreqString = replaced; }
+        }
 
         // Minimal guarded trace for frequency retargets
         try {
@@ -2346,15 +2485,19 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
               depId: dep.id,
               movedStart,
               depStart,
-              parentRef,
+              targetId: replacementTarget?.id,
+              anyCorruption,
+              depTransitivelyCorrupt,
               from: fRaw,
-              to: simplified
+              to: newFreqString
             });
           }
         } catch {}
 
-        dep.setVariable('frequencyString', simplified);
-        try { myModule.markNoteDirty(dep.id); } catch {}
+        if (newFreqString) {
+          dep.setVariable('frequencyString', newFreqString);
+          try { myModule.markNoteDirty(dep.id); } catch {}
+        }
       }
     });
   } catch {}
@@ -2432,12 +2575,29 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       } catch {}
 
       // frequencyString (generic path; frequency-specific pass may already handle this)
+      // Skip notes with .pow() - their expressions should be preserved as-is
       try {
         const fRaw = dep.variables && dep.variables.frequencyString;
-        if (typeof fRaw === 'string' && noteRefRegex.test(fRaw)) {
+        if (typeof fRaw === 'string' && !fRaw.includes('.pow(') && noteRefRegex.test(fRaw)) {
           const replacedF = fRaw.replace(noteRefRegex, parentRef);
           let simplifiedF;
-          try { simplifiedF = simplifyFrequency(replacedF, myModule); } catch { simplifiedF = replacedF; }
+          // Check if corruption is involved - skip simplification if so
+          const depGraph = myModule._dependencyGraph;
+          const movedHasCorruptFreq = depGraph &&
+            typeof depGraph.isPropertyCorrupted === 'function' &&
+            depGraph.isPropertyCorrupted(movedId, 0x04);
+          const targetHasCorruptFreq = replacementTarget && replacementTarget.id !== 0 && depGraph &&
+            typeof depGraph.isPropertyCorrupted === 'function' &&
+            depGraph.isPropertyCorrupted(replacementTarget.id, 0x04);
+          const depHasCorruptFreq = depGraph &&
+            typeof depGraph.isPropertyCorrupted === 'function' &&
+            depGraph.isPropertyCorrupted(dep.id, 0x04);
+          const corruptionInvolved = movedHasCorruptFreq || targetHasCorruptFreq || depHasCorruptFreq;
+          if (corruptionInvolved) {
+            simplifiedF = replacedF; // Skip simplification, just substitute references
+          } else {
+            try { simplifiedF = simplifyFrequency(replacedF, myModule); } catch { simplifiedF = replacedF; }
+          }
           dep.setVariable('frequencyString', simplifiedF);
           changed = true;
         }
@@ -2506,6 +2666,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 const newFrequency = currentFrequency.mul(new Fraction(factor.n, factor.d));
                 const newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
                 note.setVariable('frequencyString', newRaw);
+            } else if (rawExpression.includes('.pow(')) {
+                // Corrupted note with .pow() - wrap in multiplication to preserve the TET expression
+                // Don't simplify as it would destroy the .pow() expression
+                const wrapped = `new Fraction(${factor.n}, ${factor.d}).mul(${rawExpression})`;
+                note.setVariable('frequencyString', wrapped);
             } else {
                 // Multiply and simplify robustly while preserving anchors
                 const multiplied = multiplyExpressionByFraction(rawExpression, factor.n, factor.d, 'frequency', myModule);
@@ -3785,6 +3950,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     } catch (e) {
       console.warn('eventBus subscription failed', e);
     }
+
       // GL Workspace: commit handlers for move/resize coming from webgl2/workspace.js
       eventBus.on('workspace:noteMoveCommit', ({ noteId, newStartSec }) => {
         try {
@@ -3825,6 +3991,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (n && n.variables && n.variables.frequency) {
               // Prefer the originally referenced frequency anchor when present
               const fRaw0 = (n.variables && n.variables.frequencyString) ? n.variables.frequencyString : null;
+
+              // Now we handle ALL cases including .pow() expressions using value-based rebuilding
               let refNote = null;
               try {
                 const mFreq = fRaw0 && fRaw0.match(/module\.getNoteById\(\s*(\d+)\s*\)\.getVariable\(\s*['"]frequency['"]\s*\)/);
@@ -3871,33 +4039,79 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
               const anchor = __resolveAncestorAtOrBeforeLocal(refNote, newStartSec);
 
-              const curFv = n.getVariable('frequency');
-              const ancFv = anchor.getVariable('frequency');
-              const curVal = (curFv && typeof curFv.valueOf === 'function') ? curFv.valueOf() : Number(curFv);
-              const ancVal = (ancFv && typeof ancFv.valueOf === 'function') ? ancFv.valueOf() : Number(ancFv);
+              // Use transitive corruption detection for robust handling
+              const depGraph = myModule._dependencyGraph;
+              const isTransitivelyCorrupt = depGraph?.isFrequencyTransitivelyCorrupted?.(n.id);
+              const anchorIsCorrupt = anchor?.id !== 0 && depGraph?.isPropertyCorrupted?.(anchor.id, 0x04);
+              const corruptionInvolved = isTransitivelyCorrupt || anchorIsCorrupt || (fRaw0 && fRaw0.includes('.pow('));
 
-              if (isFinite(curVal) && isFinite(ancVal) && Math.abs(ancVal) > 1e-12) {
-                let ratio;
-                try { ratio = new Fraction(curVal).div(new Fraction(ancVal)); }
-                catch { ratio = new Fraction(curVal / ancVal); }
-
-                const anchorRef = (anchor.id === 0) ? "module.baseNote" : `module.getNoteById(${anchor.id})`;
-                let rawFreq;
-                try {
-                  const r = (typeof ratio.valueOf === 'function') ? ratio.valueOf() : (ratio.n / ratio.d);
-                  if (Math.abs(r - 1) < 1e-6) {
-                    rawFreq = `${anchorRef}.getVariable('frequency')`;
-                  } else {
-                    rawFreq = `new Fraction(${ratio.n}, ${ratio.d}).mul(${anchorRef}.getVariable('frequency'))`;
-                  }
-                } catch {
-                  rawFreq = `${anchorRef}.getVariable('frequency')`;
+              if (corruptionInvolved) {
+                // Use value-based rebuilding for ALL corruption cases
+                // This preserves the evaluated frequency exactly by computing the ratio
+                const newExpr = rebuildFrequencyForAnchor(n, anchor, depGraph);
+                if (newExpr) {
+                  n.setVariable('frequencyString', newExpr);
                 }
+                // If newExpr is null, preserve original expression (safer than corrupting)
+              } else {
+                // No corruption involved - safe to use ratio-based rebuilding with simplification
+                const curFv = n.getVariable('frequency');
+                const ancFv = anchor.getVariable('frequency');
+                const curVal = (curFv && typeof curFv.valueOf === 'function') ? curFv.valueOf() : Number(curFv);
+                const ancVal = (ancFv && typeof ancFv.valueOf === 'function') ? ancFv.valueOf() : Number(ancFv);
 
-                let simplifiedF;
-                try { simplifiedF = simplifyFrequency(rawFreq, myModule); } catch { simplifiedF = rawFreq; }
-                n.setVariable('frequencyString', simplifiedF);
+                if (isFinite(curVal) && isFinite(ancVal) && Math.abs(ancVal) > 1e-12) {
+                  let ratio;
+                  try { ratio = new Fraction(curVal).div(new Fraction(ancVal)); }
+                  catch { ratio = new Fraction(curVal / ancVal); }
+
+                  const anchorRef = (anchor.id === 0) ? "module.baseNote" : `module.getNoteById(${anchor.id})`;
+                  let rawFreq;
+                  try {
+                    const r = (typeof ratio.valueOf === 'function') ? ratio.valueOf() : (ratio.n / ratio.d);
+                    if (Math.abs(r - 1) < 1e-6) {
+                      rawFreq = `${anchorRef}.getVariable('frequency')`;
+                    } else {
+                      rawFreq = `new Fraction(${ratio.n}, ${ratio.d}).mul(${anchorRef}.getVariable('frequency'))`;
+                    }
+                  } catch {
+                    rawFreq = `${anchorRef}.getVariable('frequency')`;
+                  }
+
+                  let simplifiedF;
+                  try { simplifiedF = simplifyFrequency(rawFreq, myModule); } catch { simplifiedF = rawFreq; }
+                  n.setVariable('frequencyString', simplifiedF);
+                }
               }
+
+              // Enhanced frequency debug logging
+              try {
+                if (typeof window !== 'undefined' && window.__RMT_DEBUG_GL_MOVE) {
+                  // Re-evaluate to get the new frequency after expression change
+                  try { myModule.markNoteDirty(n.id); } catch {}
+                  const freqAfterObj = n.getVariable('frequency');
+                  const freqAfter = Number(freqAfterObj?.valueOf?.());
+                  const freqChain = depGraph?.getAllFrequencyDependencies?.(n.id);
+
+                  // Get anchor's frequency for comparison
+                  const anchorFreqObj = anchor?.getVariable?.('frequency');
+                  const anchorFreq = Number(anchorFreqObj?.valueOf?.());
+
+                  console.debug('[GLMove] frequencyRemap', {
+                    noteId: n.id,
+                    refNoteId: refNote?.id,
+                    anchorId: anchor?.id,
+                    isTransitivelyCorrupt,
+                    anchorIsCorrupt,
+                    corruptionInvolved,
+                    oldFreqString: fRaw0,
+                    newFreqString: n.variables?.frequencyString,
+                    freqAfter,
+                    anchorFreq,
+                    freqChain: freqChain ? [...freqChain].slice(0, 10) : []
+                  });
+                }
+              } catch {}
             }
           } catch {}
 

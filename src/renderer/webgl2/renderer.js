@@ -538,9 +538,14 @@ export class RendererAdapter {
         const hasDur = !!note.getVariable('duration');
         if (!hasStart || !hasDur) continue;
 
-        const startTime = note.getVariable('startTime').valueOf();
-        const duration  = note.getVariable('duration').valueOf();
+        const startTimeRaw = note.getVariable('startTime')?.valueOf?.();
+        const durationRaw  = note.getVariable('duration')?.valueOf?.();
         const freqVal   = note.getVariable('frequency')?.valueOf?.() ?? null;
+
+        // Skip notes with invalid (NaN/undefined) startTime or duration
+        const startTime = (typeof startTimeRaw === 'number' && isFinite(startTimeRaw)) ? startTimeRaw : null;
+        const duration = (typeof durationRaw === 'number' && isFinite(durationRaw)) ? durationRaw : null;
+        if (startTime === null || duration === null) continue;
 
         // World coords with optional temp overrides (e.g., dragging/resizing)
         const ov = tempOverrides && tempOverrides[note.id] ? tempOverrides[note.id] : null;
@@ -548,7 +553,7 @@ export class RendererAdapter {
         const durSec   = (ov && ov.durationSec != null) ? ov.durationSec : duration;
 
         const x = startSec * this._cfgSX() * this.currentXScaleFactor;
-        const w = Math.max(0, durSec * this._cfgSX() * this.currentXScaleFactor);
+        const w = Math.max(0.0001, durSec * this._cfgSX() * this.currentXScaleFactor); // Minimum width to prevent invisible notes
         let y = (freqVal != null)
           ? this._frequencyToY(freqVal)
           : this._yForSilence(module, note, evaluatedNotes);
@@ -560,7 +565,7 @@ export class RendererAdapter {
         y = y + (this._config?.note?.centerShiftWU ?? -1);
 
         const isSilence = (freqVal == null || !isFinite(Number(freqVal)));
-        const baseColor = this._resolveColor(evaluatedNotes?.[note.id], note);
+        const baseColor = this._resolveColor(evaluatedNotes?.[note.id], note, module);
         const color = isSilence ? [0.0, 0.0, 0.0, 0.75] : baseColor;
 
         items.push({ id: note.id, x, y, w, h, color, isSilence });
@@ -765,6 +770,27 @@ export class RendererAdapter {
           startTime: (depsByProperty.startTime || []).includes(0),
           duration: (depsByProperty.duration || []).includes(0)
         };
+
+        // Compute full parent chains per property for segmented line visualization
+        // Each chain is an array of note IDs from the selected note back to baseNote
+        const chainsByProp = { frequency: [], startTime: [], duration: [] };
+        const chainIdxByProp = { frequency: [], startTime: [], duration: [] };
+        if (typeof module.getParentChainByProperty === 'function') {
+          for (const prop of ['frequency', 'startTime', 'duration']) {
+            const chain = module.getParentChainByProperty(selIdNum, prop);
+            chainsByProp[prop] = chain;
+            // Convert chain to indices (excluding baseNote which is handled separately)
+            const chainIdxSet = new Set();
+            for (const id of chain) {
+              if (id === 0) continue; // baseNote handled via _relDepsHasBaseByProperty
+              const ii = toIdx(id);
+              if (ii != null && ii !== selIdx) chainIdxSet.add(ii);
+            }
+            chainIdxByProp[prop] = Array.from(chainIdxSet);
+          }
+        }
+        this._relDepsChainByProperty = chainsByProp;
+        this._relDepsChainIdxByProperty = chainIdxByProp;
       } else {
         this._relDepsIdx = null;
         this._relRdepsIdx = null;
@@ -777,6 +803,9 @@ export class RendererAdapter {
         this._relDepsIdxByProperty = { frequency: null, startTime: null, duration: null };
         this._relRdepsHasBaseByProperty = { frequency: false, startTime: false, duration: false };
         this._relDepsHasBaseByProperty = { frequency: false, startTime: false, duration: false };
+        // Clear chain data
+        this._relDepsChainByProperty = { frequency: [], startTime: [], duration: [] };
+        this._relDepsChainIdxByProperty = { frequency: [], startTime: [], duration: [] };
         // Clear cache when no selection
         this._depHighlightCache.noteId = null;
       }
@@ -2170,8 +2199,8 @@ export class RendererAdapter {
           ? (isResize ? HIGHLIGHT_COLORS_RESIZE : HIGHLIGHT_COLORS_DRAG)
           : HIGHLIGHT_COLORS_NORMAL;
 
-        const DEP_THICKNESS = (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0) * 1.25;
-        const RDEP_THICKNESS = (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0) * 0.75;
+        const DEP_THICKNESS = (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0) * 1.5;
+        const RDEP_THICKNESS = (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0) * 1.0;
 
         // Draw property-colored rings for dependents (notes affected by property change)
         // Draw in order: startTime first (teal), then frequency (orange), then duration (purple)
@@ -2183,11 +2212,12 @@ export class RendererAdapter {
           }
         }
 
-        // Draw property-colored rings for dependencies (what this note's expressions reference)
+        // Draw property-colored rings for full parent chain (all ancestors back to baseNote)
+        // Uses chain indices instead of direct deps to show the full dependency path
         for (const prop of ['startTime', 'frequency', 'duration']) {
-          const depsIdx = this._relDepsIdxByProperty?.[prop];
-          if (depsIdx?.length) {
-            drawIdxList(depsIdx, HIGHLIGHT_COLORS[prop].dep, DEP_THICKNESS);
+          const chainIdx = this._relDepsChainIdxByProperty?.[prop];
+          if (chainIdx?.length) {
+            drawIdxList(chainIdx, HIGHLIGHT_COLORS[prop].dep, DEP_THICKNESS);
           }
         }
       }
@@ -2503,12 +2533,12 @@ export class RendererAdapter {
     return this._findParentWithFrequency(module, parent);
   }
 
-  _resolveColor(evNote, note) {
+  _resolveColor(evNote, note, module) {
     // Try evaluated color first
     let c = evNote?.color;
     if (c != null) {
       const rgba = this._parseAnyColor(c);
-      if (rgba) return rgba;
+      if (rgba) return this._applyCorruptionTint(rgba, note, module);
     }
     // Check raw variable
     if (note?.variables?.color) {
@@ -2516,12 +2546,108 @@ export class RendererAdapter {
         ? note.variables.color()
         : note.variables.color;
       const rgba = this._parseAnyColor(col);
-      if (rgba) return rgba;
+      if (rgba) return this._applyCorruptionTint(rgba, note, module);
     }
     // Deterministic fallback from note id (hsla)
     const id = Number(note?.id ?? 0);
     const hue = (id * 137.508) % 360;
-    return this._hslaToRgba(hue, 70, 60, 0.7);
+    const rgba = this._hslaToRgba(hue, 70, 60, 0.7);
+    return this._applyCorruptionTint(rgba, note, module);
+  }
+
+  /**
+   * Apply corruption tint to a color when note contains irrational values (TET scales)
+   * Corrupted notes get a noticeable brown/orange tint to indicate they use irrational numbers
+   * Notes that reference corrupted notes also get the tint (propagated corruption)
+   * @param {Array<number>} rgba - [r, g, b, a] color values in 0-1 range
+   * @param {Object} note - The note object
+   * @param {Object} module - The module containing dependency graph
+   * @returns {Array<number>} - Tinted [r, g, b, a] color
+   */
+  _applyCorruptionTint(rgba, note, module) {
+    if (!module || !note) return rgba;
+
+    try {
+      const depGraph = typeof module.getDependencyGraph === 'function'
+        ? module.getDependencyGraph()
+        : null;
+      if (!depGraph || typeof depGraph.isNoteCorrupted !== 'function') return rgba;
+
+      const noteId = Number(note.id ?? 0);
+
+      // Check if this note is directly corrupted
+      let isCorrupted = depGraph.isNoteCorrupted(noteId);
+
+      // If not directly corrupted, check if any of its transitive dependencies are corrupted
+      // (propagated corruption - notes referencing corrupted notes should also be tinted)
+      // Use getAllDependencies for transitive check (A -> B -> C, if C is corrupted, A is also tinted)
+      if (!isCorrupted && typeof depGraph.getAllDependencies === 'function') {
+        const allDeps = depGraph.getAllDependencies(noteId);
+        if (allDeps && allDeps.size > 0) {
+          for (const depId of allDeps) {
+            if (depGraph.isNoteCorrupted(depId)) {
+              isCorrupted = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!isCorrupted) return rgba;
+
+      // Apply strong brown/orange tint for corrupted notes (TET scales)
+      // Brown is achieved by shifting toward orange (30°) and reducing lightness
+      const [r, g, b, a] = rgba;
+
+      // Convert to HSL for hue manipulation
+      const max = Math.max(r, g, b);
+      const min = Math.min(r, g, b);
+      let l = (max + min) / 2;
+      let h = 0, s = 0;
+
+      if (max !== min) {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+        else if (max === g) h = ((b - r) / d + 2) / 6;
+        else h = ((r - g) / d + 4) / 6;
+      }
+
+      // Shift hue toward brown/orange (0.083 = 30/360, which is orange-brown)
+      // Use a strong blend for very noticeable effect
+      const targetHue = 0.083; // 30° in 0-1 range (orange/brown)
+      const blendAmount = 0.7; // Strong shift toward brown
+      let newH = h + (targetHue - h) * blendAmount;
+      // Handle hue wrap-around for colors on the opposite side of the wheel
+      if (Math.abs(targetHue - h) > 0.5) {
+        // Closer via wrap-around
+        if (h > targetHue) {
+          newH = h + ((targetHue + 1) - h) * blendAmount;
+          if (newH > 1) newH -= 1;
+        } else {
+          newH = (h + 1) + (targetHue - (h + 1)) * blendAmount;
+          if (newH > 1) newH -= 1;
+        }
+      }
+
+      // Increase saturation significantly for brown effect
+      const newS = Math.min(1.0, s * 1.4 + 0.2);
+
+      // Darken slightly for brown appearance (brown = dark orange)
+      const newL = Math.max(0.2, l * 0.85);
+
+      // Convert back to RGB
+      return this._hslToRgba(newH * 360, newS * 100, newL * 100, a);
+    } catch {
+      return rgba;
+    }
+  }
+
+  /**
+   * Convert HSL to RGBA (h in 0-360, s,l in 0-100)
+   */
+  _hslToRgba(h, s, l, a) {
+    return this._hslaToRgba(h, s, l, a);
   }
 
   _parseAnyColor(col) {
@@ -8742,98 +8868,6 @@ try {
               return (k === arr.length) ? arr : arr.slice(0, k);
             };
 
-            // Optional: build a single prospective-parent endpoint (if provided) to replace deps lines
-            const buildProspectiveParentEndpoints = () => {
-              try {
-                // When dragging a measure triangle to the right, do not switch to a prospective parent.
-                // Keep showing the existing parent link so it never disappears during push-right.
-                {
-                  const st = this._dragOverlay || null;
-                  if (st && st.type === 'move' && Number(st.dxSec) > 0) {
-                    let isMeasureAnchor = false;
-                    try {
-                      const mod = this._moduleRef;
-                      const n = mod?.getNoteById?.(Number(anchorId));
-                      isMeasureAnchor = !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
-                    } catch {}
-                    if (isMeasureAnchor) return null;
-                  }
-                }
-
-                const pid = this._prospectiveParentId;
-                if (pid == null) return null;
-                // Avoid degenerate self-parent case (e.g., while dragging a measure, candidate resolves to the same measure)
-                // Falling back to the default dependency rendering preserves a visible parent link.
-                if (Number(pid) === Number(anchorId)) return null;
-                // When pid === 0 (BaseNote) during an active drag, always show the BaseNote link.
-                // The prospective parent computation has determined that dropping here will anchor to BaseNote,
-                // so the preview should show that link regardless of the measure's current startTimeString.
-                // Only suppress BaseNote link when NOT actively dragging and measure doesn't reference BaseNote.
-                try {
-                  if (pid === 0) {
-                    const isActiveDrag = !!(this._dragActive && this._dragOverlay);
-                    if (!isActiveDrag) {
-                      // Not dragging - use existing logic to only show BaseNote link if measure references it
-                      const mod = this._moduleRef;
-                      const n = mod?.getNoteById?.(Number(anchorId));
-                      const isMeasure = !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
-                      const s = n?.variables?.startTimeString || '';
-                      const refsBase = /module\.baseNote/.test(s);
-                      if (isMeasure && !refsBase) return null;
-                    }
-                    // If actively dragging and pid === 0, allow the BaseNote link to show (preview what will happen on drop)
-                  }
-                } catch {}
-
-                // Resolve parent anchor in canvas-local CSS px:
-                // - BaseNote (id 0): use cached circle center
-                // - Measure id: use triangle apex center from measureTriPosSize
-                // - Note id: use note body center via world->CSS
-                let px = 0, py = 0;
-
-                if (pid === 0) {
-                  // BaseNote center (prefer cached CSS center; fallback to world transform)
-                  if (this._baseCircleCss && isFinite(this._baseCircleCss.cx) && isFinite(this._baseCircleCss.cy)) {
-                    px = this._baseCircleCss.cx;
-                    py = this._baseCircleCss.cy;
-                  } else {
-                    const baseFreq = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
-                    const xCenterWorld = -30.0;
-                    const yCenterWorld = this._frequencyToY(baseFreq) + 10.0;
-                    const pc = toLocalCss(xCenterWorld, yCenterWorld);
-                    px = pc.x; py = pc.y;
-                  }
-                } else {
-                  // Measure triangle?
-                  const idNum = Number(pid);
-                  const triIdx = (this._measureTriIdToIndex && this._measureTriIdToIndex.get)
-                    ? this._measureTriIdToIndex.get(idNum)
-                    : (this._measureTriIds && this._measureTriIds.indexOf ? this._measureTriIds.indexOf(idNum) : -1);
-
-                  if (triIdx != null && triIdx >= 0 && this.measureTriPosSize && this.measureTriPosSize.length >= (triIdx + 1) * 4) {
-                    const o = triIdx * 4;
-                    const left = this.measureTriPosSize[o + 0];
-                    const top  = this.measureTriPosSize[o + 1];
-                    const w    = this.measureTriPosSize[o + 2];
-                    // Apex (top middle)
-                    px = left + w * 0.5;
-                    py = top;
-                  } else {
-                    // Fallback: treat as note id if present
-                    const pIdx = this._noteIdToIndex && this._noteIdToIndex.get ? this._noteIdToIndex.get(idNum) : null;
-                    if (pIdx == null || pIdx < 0 || pIdx >= this.instanceCount) return null;
-                    const o = pIdx * 4;
-                    const xw = this.posSize[o + 0], yw = this.posSize[o + 1];
-                    const ww = this.posSize[o + 2], hh = this.posSize[o + 3];
-                    const pc = toLocalCss(xw + 0.5 * ww, yw + 0.5 * hh);
-                    px = pc.x; py = pc.y;
-                  }
-                }
-
-                return new Float32Array([ selC.x, selC.y, px, py ]);
-              } catch { return null; }
-            };
-
             // Prefer live sets for the anchor (dragged or selected) using moduleRef; fallback to cached sets
             // Extend endpoints to cover measure triangles and BaseNote in addition to notes.
             let depsArr = null;
@@ -8922,56 +8956,115 @@ try {
               const depsListByProp = { frequency: [], startTime: [], duration: [] };
               const depsFlagsByProp = { frequency: [], startTime: [], duration: [] };
 
-              // If there is a prospective parent candidate DURING DRAG, show only that single line.
-              const pros = (this._dragOverlay ? buildProspectiveParentEndpoints() : null);
-              if (pros) {
-                depsArr = pros;
-                // Ensure per-endpoint drag flags are defined for the single prospective line:
-                // p0 (anchor) follows only when the anchor is a moving MEASURE; p1 (parent candidate) never moves.
-                var depsFlagsArr = new Float32Array([movingAnchor ? 1.0 : 0.0, 0.0]);
-                // Put prospective parent in startTime (it's for startTime dependency)
-                depsListByProp.startTime.push(...pros);
-                depsFlagsByProp.startTime.push(movingAnchor ? 1.0 : 0.0, 0.0);
-              } else if (mref && typeof mref.getDirectDependenciesByProperty === 'function') {
-                // Use property-colored dependencies
-                const propDeps = mref.getDirectDependenciesByProperty(Number(anchorId));
+              // Helper to check if an ID is a measure note (used by both parent chains and children trees)
+              const isMeasureNoteId = (id) => {
+                try {
+                  const n = mref?.getNoteById?.(Number(id));
+                  return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                } catch { return false; }
+              };
 
-                // Helper to check if an ID is a measure note
-                const isMeasureNoteId = (id) => {
+              // Helper to get center point for a note/measure/baseNote (used by both parent chains and children trees)
+              const getCenterForId = (id) => {
+                const numId = Number(id);
+                if (numId === 0) {
+                  // baseNote
+                  if (this._baseCircleCss && isFinite(this._baseCircleCss.cx) && isFinite(this._baseCircleCss.cy)) {
+                    return { x: this._baseCircleCss.cx, y: this._baseCircleCss.cy };
+                  }
+                  const baseFreq = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
+                  const xCenterWorld = -30.0;
+                  const yCenterWorld = this._frequencyToY(baseFreq) + 10.0;
+                  return toLocalCss(xCenterWorld, yCenterWorld);
+                }
+                if (isMeasureNoteId(numId)) {
+                  // measure triangle
+                  const triIdx = (this._measureTriIdToIndex && this._measureTriIdToIndex.get)
+                    ? this._measureTriIdToIndex.get(numId)
+                    : (this._measureTriIds && this._measureTriIds.indexOf ? this._measureTriIds.indexOf(numId) : -1);
+                  if (triIdx != null && triIdx >= 0 && this.measureTriPosSize && this.measureTriPosSize.length >= (triIdx + 1) * 4) {
+                    const o = triIdx * 4;
+                    const left = this.measureTriPosSize[o + 0];
+                    const top  = this.measureTriPosSize[o + 1];
+                    const w    = this.measureTriPosSize[o + 2];
+                    return { x: left + w * 0.5, y: top };
+                  }
+                  return null;
+                }
+                // regular note
+                const idx = this._noteIdToIndex.get(numId);
+                if (idx == null || idx < 0 || idx >= this.instanceCount) return null;
+                const o = idx * 4;
+                const xw = this.posSize[o + 0], yw = this.posSize[o + 1];
+                const ww = this.posSize[o + 2], hh = this.posSize[o + 3];
+                return toLocalCss(xw + 0.5 * ww, yw + 0.5 * hh);
+              };
+
+              // During drag, show full parent chain starting from prospective parent
+              // But for measure anchors dragging right, don't switch parent (keep existing chain)
+              let prospectiveParentId = null;
+              if (this._dragOverlay && this._prospectiveParentId != null) {
+                const st = this._dragOverlay;
+                const pid = this._prospectiveParentId;
+                let usePros = true;
+
+                // When dragging a measure triangle to the right, don't switch to prospective parent
+                if (st.type === 'move' && Number(st.dxSec) > 0) {
                   try {
-                    const n = mref.getNoteById(Number(id));
-                    return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
-                  } catch { return false; }
-                };
+                    const n = mref?.getNoteById?.(Number(anchorId));
+                    const isMeasureAnchor = !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                    if (isMeasureAnchor) usePros = false;
+                  } catch {}
+                }
+
+                // Avoid degenerate self-parent case
+                if (Number(pid) === Number(anchorId)) usePros = false;
+
+                if (usePros) prospectiveParentId = pid;
+              }
+
+              if (mref && typeof mref.getParentChainByProperty === 'function') {
+                // Use full parent chain for segmented line visualization
+                // Each chain is: [parent1, parent2, ..., baseNote] (excluding selected note)
+                // We draw connected segments: selected → parent1 → parent2 → ... → baseNote
+                // During drag, for startTime we use the prospective parent and then continue its chain
 
                 for (const prop of ['frequency', 'startTime', 'duration']) {
-                  const propIds = propDeps[prop] || [];
+                  let chain;
 
-                  // Separate note IDs from measure IDs
-                  const noteIds = [];
-                  const measureIds = [];
-                  for (const id of propIds) {
-                    const numId = Number(id);
-                    if (numId === 0) continue; // baseNote handled separately
-                    if (isMeasureNoteId(numId)) {
-                      measureIds.push(numId);
-                    } else {
-                      noteIds.push(numId);
-                    }
+                  // During drag, use prospective parent for startTime chain
+                  if (prop === 'startTime' && prospectiveParentId != null) {
+                    // Build chain: [prospectiveParent, ...prospectiveParent's chain]
+                    const prospectiveChain = (prospectiveParentId === 0)
+                      ? [0] // baseNote is the end
+                      : [prospectiveParentId, ...mref.getParentChainByProperty(Number(prospectiveParentId), prop)];
+                    chain = prospectiveChain;
+                  } else {
+                    chain = mref.getParentChainByProperty(Number(anchorId), prop);
                   }
 
-                  // Add note endpoints
-                  const propIdxs = noteIds
-                    .map(id => this._noteIdToIndex.get(Number(id)))
-                    .filter(ii => ii != null && ii >= 0 && ii < this.instanceCount);
-                  appendNoteIdxEndpoints(propIdxs, depsListByProp[prop], depsFlagsByProp[prop]);
+                  if (!chain || chain.length === 0) continue;
 
-                  // Add measure endpoints
-                  appendMeasureIdEndpoints(measureIds, depsListByProp[prop], depsFlagsByProp[prop]);
+                  // Build connected segments: selected → chain[0] → chain[1] → ... → chain[n-1]
+                  // First segment: from selected note (selC) to first chain element
+                  let prevCenter = { x: selC.x, y: selC.y };
+                  let prevMoving = movingAnchor;
 
-                  // Handle baseNote for this property
-                  if (propIds.includes(0)) {
-                    appendBaseEndpointIf(true, depsListByProp[prop], depsFlagsByProp[prop]);
+                  for (let i = 0; i < chain.length; i++) {
+                    const curId = chain[i];
+                    const curCenter = getCenterForId(curId);
+                    if (!curCenter) continue;
+
+                    // Add segment from prev to cur
+                    depsListByProp[prop].push(prevCenter.x, prevCenter.y, curCenter.x, curCenter.y);
+
+                    // Compute moving flags
+                    const curMoving = !!(movingSet && movingSet.has(Number(curId)));
+                    depsFlagsByProp[prop].push(prevMoving ? 1.0 : 0.0, curMoving ? 1.0 : 0.0);
+
+                    // Update prev for next segment
+                    prevCenter = curCenter;
+                    prevMoving = curMoving;
                   }
                 }
 
@@ -9085,8 +9178,34 @@ try {
               const rdepsList = [];
               const rdepsFlags = [];
 
-              if (mref && typeof mref.getDependentsByProperty === 'function') {
-                // Use property-colored dependents
+              if (mref && typeof mref.getChildrenTreeByProperty === 'function') {
+                // Use tree-based rendering: draw connected segments through the dependency tree
+                // This shows the transitive chain structure instead of star pattern from selection
+                for (const prop of ['frequency', 'startTime', 'duration']) {
+                  const tree = mref.getChildrenTreeByProperty(Number(anchorId), prop);
+                  if (!tree?.edges?.length) continue;
+
+                  for (const edge of tree.edges) {
+                    // During drag, only include edges where child is in the moving set
+                    if (movingSet && !movingSet.has(edge.childId)) continue;
+
+                    const parentCenter = getCenterForId(edge.parentId);
+                    const childCenter = getCenterForId(edge.childId);
+                    if (!parentCenter || !childCenter) continue;
+
+                    // Add segment from parent to child
+                    rdepsListByProp[prop].push(parentCenter.x, parentCenter.y, childCenter.x, childCenter.y);
+
+                    // Compute moving flags for drag preview
+                    const parentMoving = edge.parentId === Number(anchorId)
+                      ? movingAnchor
+                      : !!(movingSet && movingSet.has(edge.parentId));
+                    const childMoving = !!(movingSet && movingSet.has(edge.childId));
+                    rdepsFlagsByProp[prop].push(parentMoving ? 1.0 : 0.0, childMoving ? 1.0 : 0.0);
+                  }
+                }
+              } else if (mref && typeof mref.getDependentsByProperty === 'function') {
+                // Fallback: Use property-colored dependents with star pattern
                 const propDeps = mref.getDependentsByProperty(Number(anchorId));
 
                 // Helper to check if an ID is a measure note
@@ -9125,7 +9244,7 @@ try {
                 }
               } else if (mref && typeof mref.getDependentNotes === 'function') {
                 // Fallback: put all in startTime (teal) for backwards compatibility
-                const isMeasureNoteId = (id) => {
+                const isMeasureNoteIdFallback = (id) => {
                   try {
                     const n = mref.getNoteById(Number(id));
                     return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
@@ -9140,7 +9259,7 @@ try {
                 for (const idRaw of rawFiltered) {
                   const id = Number(idRaw);
                   if (id === 0) { hasBase = true; continue; }
-                  if (isMeasureNoteId(id)) { measureIds.push(id); continue; }
+                  if (isMeasureNoteIdFallback(id)) { measureIds.push(id); continue; }
                   noteIds.push(id);
                 }
                 const idxsR = noteIds
@@ -9315,7 +9434,7 @@ if (rebuild) {
               ? (isResize ? DEPS_LINE_COLORS_RESIZE : DEPS_LINE_COLORS_DRAG)
               : DEPS_LINE_COLORS_NORMAL;
 
-            if (uTh) gl.uniform1f(uTh, 2.0);
+            if (uTh) gl.uniform1f(uTh, 4.0);
 
             for (const prop of ['startTime', 'frequency', 'duration']) {
               const count = this._linkDepsCountByProperty?.[prop] || 0;
@@ -9362,7 +9481,7 @@ if (rebuild) {
               ? (isResize ? RDEPS_LINE_COLORS_RESIZE : RDEPS_LINE_COLORS_DRAG)
               : RDEPS_LINE_COLORS_NORMAL;
 
-            if (uTh) gl.uniform1f(uTh, 1.0);
+            if (uTh) gl.uniform1f(uTh, 2.0);
 
             for (const prop of ['startTime', 'frequency', 'duration']) {
               const count = this._linkCountByProperty?.[prop] || 0;

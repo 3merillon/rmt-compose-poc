@@ -18,6 +18,7 @@ export const OP = {
   MUL:            0x12,  // Pop 2, push product
   DIV:            0x13,  // Pop 2, push quotient
   NEG:            0x14,  // Pop 1, push negation
+  POW:            0x15,  // Pop 2 (base, exponent), push base^exponent (may corrupt to irrational)
 
   // Module lookup operations
   FIND_TEMPO:     0x20,  // Pop noteRef, push tempo lookup result
@@ -48,6 +49,25 @@ export const VAR_NAMES = {
   4: 'beatsPerMeasure',
   5: 'measureLength',
 };
+
+// Corruption flags (bitmask indicating which properties contain irrational values)
+export const CORRUPT = {
+  START_TIME:       0x01,
+  DURATION:         0x02,
+  FREQUENCY:        0x04,
+  TEMPO:            0x08,
+  BEATS_PER_MEASURE: 0x10,
+  MEASURE_LENGTH:   0x20,
+};
+
+/**
+ * Get corruption flag for a variable index
+ * @param {number} varIndex - Variable index (0-5)
+ * @returns {number} Corruption flag bitmask
+ */
+export function getCorruptionFlag(varIndex) {
+  return 1 << varIndex;
+}
 
 /**
  * Binary expression storage

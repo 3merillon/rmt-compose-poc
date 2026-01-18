@@ -13,12 +13,14 @@ pub mod bytecode;
 pub mod evaluator;
 pub mod graph;
 pub mod compiler;
+pub mod value;
 
 // Re-export main types for convenience
 pub use fraction::Fraction;
 pub use evaluator::{Evaluator, PersistentEvaluator};
 pub use graph::DependencyGraph;
 pub use compiler::ExpressionCompiler;
+pub use value::{Value, ValueData};
 
 /// Initialize the WASM module
 /// Call this once when loading the module to set up panic hooks

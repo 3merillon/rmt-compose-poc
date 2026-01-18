@@ -139,12 +139,12 @@ export class AudioEngine {
         Promise.all(loadPromises)
           .then(() => {
             const t3 = performance.now();
-            console.log(`[AudioEngine] preparePlayback timing:
+            /*console.log(`[AudioEngine] preparePlayback timing:
   getModuleEndTime: ${(t1-t0).toFixed(1)}ms
   buildNoteData: ${(t2-t1).toFixed(1)}ms
   loadSamples: ${(t3-t2).toFixed(1)}ms
   TOTAL: ${(t3-t0).toFixed(1)}ms
-  notes: ${noteDataList.length}`);
+  notes: ${noteDataList.length}`);*/
 
             // Return note data (not oscillators) - oscillators created in play()
             resolve(noteDataList);

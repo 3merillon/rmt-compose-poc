@@ -18,6 +18,7 @@ pub enum Op {
     Mul = 0x12,            // Pop 2, push product
     Div = 0x13,            // Pop 2, push quotient
     Neg = 0x14,            // Pop 1, push negation
+    Pow = 0x15,            // Pop 2 (base, exponent), push base^exponent (may corrupt to irrational)
 
     // Module lookup operations
     FindTempo = 0x20,      // Pop noteRef, push tempo lookup result
@@ -41,6 +42,7 @@ impl Op {
             0x12 => Some(Op::Mul),
             0x13 => Some(Op::Div),
             0x14 => Some(Op::Neg),
+            0x15 => Some(Op::Pow),
             0x20 => Some(Op::FindTempo),
             0x21 => Some(Op::FindMeasure),
             0x22 => Some(Op::FindInstrument),

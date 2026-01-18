@@ -189,6 +189,20 @@ export class Note {
   }
 
   /**
+   * Internal: Set expression from text WITHOUT triggering change notification.
+   * Used by batch operations to avoid per-note overhead.
+   * Caller is responsible for marking notes dirty.
+   */
+  _setExpressionSilent(name, exprText) {
+    try {
+      this.expressions[name] = compiler.compile(exprText, name);
+      this.lastModifiedTime = Date.now();
+    } catch (e) {
+      console.warn(`Failed to compile expression for ${name}:`, e);
+    }
+  }
+
+  /**
    * Internal: Notify module of change
    */
   _notifyChange() {

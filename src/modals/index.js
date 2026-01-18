@@ -222,22 +222,37 @@ function collectVariables(note, measureId, moduleInstance) {
     if (!module || !module.baseNote) {
         return variables;
     }
-    
+
+    // Get corruption status from dependency graph
+    const depGraph = typeof module.getDependencyGraph === 'function' ? module.getDependencyGraph() : null;
+    const noteId = note?.id ?? (measureId !== null ? parseInt(measureId, 10) : null);
+    const isNoteCorrupted = depGraph && noteId !== null && typeof depGraph.isNoteCorrupted === 'function'
+        ? depGraph.isNoteCorrupted(noteId)
+        : false;
+
+    // Property-specific corruption flags (for per-variable corruption display)
+    // Bit flags: 0x01=startTime, 0x02=duration, 0x04=frequency
+    const corruptionFlags = depGraph && noteId !== null && typeof depGraph.getCorruptionFlags === 'function'
+        ? depGraph.getCorruptionFlags(noteId)
+        : 0;
+
     if (note === module.baseNote) {
         Object.keys(note.variables).forEach(key => {
             if (!key.endsWith('String') && key !== 'measureLength') {
                 variables[key] = {
                     evaluated: note.getVariable(key),
-                    raw: note.variables[key + 'String'] || note.variables[key].toString()
+                    raw: note.variables[key + 'String'] || note.variables[key].toString(),
+                    isCorrupted: false // BaseNote is never corrupted
                 };
             }
         });
-        
+
         if (!variables.instrument) {
             variables.instrument = {
                 evaluated: note.getVariable('instrument') || 'sine-wave',
                 raw: note.getVariable('instrument') || 'sine-wave',
-                isInherited: false
+                isInherited: false,
+                isCorrupted: false
             };
         }
     } else if (measureId !== null) {
@@ -245,37 +260,45 @@ function collectVariables(note, measureId, moduleInstance) {
         if (noteInstance && typeof noteInstance.getVariable === 'function') {
             variables.startTime = {
                 evaluated: noteInstance.getVariable('startTime'),
-                raw: noteInstance.variables.startTimeString || "undefined"
+                raw: noteInstance.variables.startTimeString || "undefined",
+                isCorrupted: (corruptionFlags & 0x01) !== 0
             };
         } else {
             console.error("Invalid measure note:", noteInstance);
         }
     } else {
         const variableNames = ['startTime', 'duration', 'frequency', 'color'];
+        // Map variable names to their corruption flag bits
+        const flagMap = { startTime: 0x01, duration: 0x02, frequency: 0x04 };
+
         variableNames.forEach(key => {
             if (note.variables && note.variables[key] !== undefined) {
+                const propertyCorrupted = (corruptionFlags & (flagMap[key] || 0)) !== 0;
+
                 if (key === 'color') {
                     const value = note.getVariable(key);
-                    variables[key] = { evaluated: value, raw: value };
+                    variables[key] = { evaluated: value, raw: value, isCorrupted: false };
                 } else {
                     variables[key] = {
                         evaluated: note.getVariable(key),
-                        raw: note.variables[key + 'String'] || note.variables[key].toString()
+                        raw: note.variables[key + 'String'] || note.variables[key].toString(),
+                        isCorrupted: propertyCorrupted
                     };
                 }
             }
         });
-        
+
         const hasOwnInstrument = note.variables.instrument !== undefined;
         const inheritedInstrument = module.findInstrument(note);
 
         variables.instrument = {
             evaluated: hasOwnInstrument ? note.getVariable('instrument') : inheritedInstrument,
             raw: hasOwnInstrument ? note.getVariable('instrument') : inheritedInstrument,
-            isInherited: !hasOwnInstrument
+            isInherited: !hasOwnInstrument,
+            isCorrupted: false
         };
     }
-    
+
     return variables;
 }
 
@@ -750,6 +773,342 @@ function toFractionString(value) {
     }
 }
 
+// Check if an expression contains a .pow() operation
+function containsPowOperation(exprText) {
+    return exprText && /\.pow\s*\(/.test(exprText);
+}
+
+// Check if expression already references baseNote frequency
+function referencesBaseNoteFrequency(exprText) {
+    return exprText && /module\.baseNote\.getVariable\s*\(\s*['"]frequency['"]\s*\)/.test(exprText);
+}
+
+// ===== Symbolic Expression Chain Tracing =====
+// Traces a frequency expression back to baseNote, preserving POW operations algebraically
+
+/**
+ * Represents the algebraic form of a frequency expression:
+ * frequency = coeff * baseNote.frequency * 2^(powNum/powDen)
+ *
+ * Where coeff is a rational number (Fraction) and pow is the exponent for base 2
+ */
+function createFrequencyAlgebra(coeff = new Fraction(1), powNum = 0, powDen = 1) {
+    return { coeff, powNum, powDen };
+}
+
+/**
+ * Multiply two frequency algebras together:
+ * (c1 * base * 2^(p1)) * (c2 * base * 2^(p2)) = (c1*c2) * base * 2^(p1+p2)
+ * But we only have one baseNote reference, so:
+ * result.coeff = a.coeff * b.coeff
+ * result.pow = a.pow + b.pow
+ */
+function multiplyFrequencyAlgebras(a, b) {
+    const newCoeff = a.coeff.mul(b.coeff);
+    // Add exponents: p1/d1 + p2/d2 = (p1*d2 + p2*d1) / (d1*d2)
+    const newPowNum = a.powNum * b.powDen + b.powNum * a.powDen;
+    const newPowDen = a.powDen * b.powDen;
+    // Simplify the fraction
+    const g = gcd(Math.abs(newPowNum), newPowDen);
+    return createFrequencyAlgebra(newCoeff, newPowNum / g, newPowDen / g);
+}
+
+function gcd(a, b) {
+    return b === 0 ? a : gcd(b, a % b);
+}
+
+/**
+ * Parse a frequency expression and extract its algebraic components.
+ * Returns { coeff, powNum, powDen, noteRef } where noteRef is null if it references baseNote,
+ * or the noteId if it references another note.
+ *
+ * Supported patterns:
+ * - module.baseNote.getVariable('frequency')
+ * - module.getNoteById(N).getVariable('frequency')
+ * - <expr>.mul(new Fraction(a, b))
+ * - <expr>.mul(new Fraction(a))
+ * - new Fraction(a, b).mul(<expr>)
+ * - <expr>.mul(new Fraction(2).pow(new Fraction(n, d)))
+ * - new Fraction(2).pow(new Fraction(n, d)).mul(<expr>)
+ */
+function parseFrequencyExpression(exprText) {
+    if (!exprText) return null;
+
+    const expr = exprText.trim();
+
+    // Base case: direct baseNote reference
+    const baseNoteMatch = expr.match(/^module\.baseNote\.getVariable\s*\(\s*['"]frequency['"]\s*\)$/);
+    if (baseNoteMatch) {
+        return { algebra: createFrequencyAlgebra(), noteRef: null };
+    }
+
+    // Base case: direct note reference
+    const noteRefMatch = expr.match(/^module\.getNoteById\s*\(\s*(\d+)\s*\)\.getVariable\s*\(\s*['"]frequency['"]\s*\)$/);
+    if (noteRefMatch) {
+        return { algebra: createFrequencyAlgebra(), noteRef: parseInt(noteRefMatch[1], 10) };
+    }
+
+    // Pattern: <something>.mul(<something>)
+    const mulMatch = findTopLevelMul(expr);
+    if (mulMatch) {
+        const { left, right } = mulMatch;
+
+        // Check if right is a fraction constant: new Fraction(a) or new Fraction(a, b)
+        const fracMatch = right.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
+        if (fracMatch) {
+            const num = parseInt(fracMatch[1], 10);
+            const den = fracMatch[2] ? parseInt(fracMatch[2], 10) : 1;
+            const leftParsed = parseFrequencyExpression(left);
+            if (leftParsed) {
+                leftParsed.algebra.coeff = leftParsed.algebra.coeff.mul(new Fraction(num, den));
+                return leftParsed;
+            }
+        }
+
+        // Check if left is a fraction constant
+        const fracMatchLeft = left.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
+        if (fracMatchLeft) {
+            const num = parseInt(fracMatchLeft[1], 10);
+            const den = fracMatchLeft[2] ? parseInt(fracMatchLeft[2], 10) : 1;
+            const rightParsed = parseFrequencyExpression(right);
+            if (rightParsed) {
+                rightParsed.algebra.coeff = rightParsed.algebra.coeff.mul(new Fraction(num, den));
+                return rightParsed;
+            }
+        }
+
+        // Check if right is a POW expression: new Fraction(2).pow(new Fraction(n, d))
+        const powMatch = right.match(/^new\s+Fraction\s*\(\s*2\s*\)\.pow\s*\(\s*new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
+        if (powMatch) {
+            const powNum = parseInt(powMatch[1], 10);
+            const powDen = powMatch[2] ? parseInt(powMatch[2], 10) : 1;
+            const leftParsed = parseFrequencyExpression(left);
+            if (leftParsed) {
+                // Add to existing pow
+                const newPowNum = leftParsed.algebra.powNum * powDen + powNum * leftParsed.algebra.powDen;
+                const newPowDen = leftParsed.algebra.powDen * powDen;
+                const g = gcd(Math.abs(newPowNum), newPowDen);
+                leftParsed.algebra.powNum = newPowNum / g;
+                leftParsed.algebra.powDen = newPowDen / g;
+                return leftParsed;
+            }
+        }
+
+        // Check if left is a POW expression
+        const powMatchLeft = left.match(/^new\s+Fraction\s*\(\s*2\s*\)\.pow\s*\(\s*new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
+        if (powMatchLeft) {
+            const powNum = parseInt(powMatchLeft[1], 10);
+            const powDen = powMatchLeft[2] ? parseInt(powMatchLeft[2], 10) : 1;
+            const rightParsed = parseFrequencyExpression(right);
+            if (rightParsed) {
+                const newPowNum = rightParsed.algebra.powNum * powDen + powNum * rightParsed.algebra.powDen;
+                const newPowDen = rightParsed.algebra.powDen * powDen;
+                const g = gcd(Math.abs(newPowNum), newPowDen);
+                rightParsed.algebra.powNum = newPowNum / g;
+                rightParsed.algebra.powDen = newPowDen / g;
+                return rightParsed;
+            }
+        }
+
+        // Both sides might be expressions that need parsing
+        const leftParsed = parseFrequencyExpression(left);
+        const rightParsed = parseFrequencyExpression(right);
+        if (leftParsed && rightParsed) {
+            // One should have noteRef, the other should be coefficient/pow only
+            if (leftParsed.noteRef === null && rightParsed.noteRef !== null) {
+                // Left is baseNote-based, right references a note - combine
+                return {
+                    algebra: multiplyFrequencyAlgebras(leftParsed.algebra, rightParsed.algebra),
+                    noteRef: rightParsed.noteRef
+                };
+            } else if (rightParsed.noteRef === null && leftParsed.noteRef !== null) {
+                return {
+                    algebra: multiplyFrequencyAlgebras(leftParsed.algebra, rightParsed.algebra),
+                    noteRef: leftParsed.noteRef
+                };
+            } else if (leftParsed.noteRef === null && rightParsed.noteRef === null) {
+                // Both reference baseNote - combine algebras
+                return {
+                    algebra: multiplyFrequencyAlgebras(leftParsed.algebra, rightParsed.algebra),
+                    noteRef: null
+                };
+            }
+        }
+    }
+
+    // Couldn't parse
+    return null;
+}
+
+/**
+ * Find top-level .mul() call, handling nested parentheses
+ */
+function findTopLevelMul(expr) {
+    // Find .mul( at top level (not inside parentheses)
+    let depth = 0;
+    let mulStart = -1;
+
+    for (let i = 0; i < expr.length - 4; i++) {
+        if (expr[i] === '(') depth++;
+        else if (expr[i] === ')') depth--;
+        else if (depth === 0 && expr.substring(i, i + 5) === '.mul(') {
+            mulStart = i;
+            break;
+        }
+    }
+
+    if (mulStart === -1) return null;
+
+    const left = expr.substring(0, mulStart);
+    // Find matching closing paren
+    let parenDepth = 0;
+    let argStart = mulStart + 5;
+    for (let i = argStart; i < expr.length; i++) {
+        if (expr[i] === '(') parenDepth++;
+        else if (expr[i] === ')') {
+            if (parenDepth === 0) {
+                const right = expr.substring(argStart, i);
+                return { left: left.trim(), right: right.trim() };
+            }
+            parenDepth--;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Trace a frequency expression recursively back to baseNote.
+ * Returns the combined algebra, or null if tracing fails.
+ */
+function traceFrequencyToBaseNote(noteId, moduleInstance, visited = new Set()) {
+    // Prevent infinite loops
+    if (visited.has(noteId)) return null;
+    visited.add(noteId);
+
+    // BaseNote case
+    if (noteId === 0) {
+        return createFrequencyAlgebra();
+    }
+
+    const note = moduleInstance.getNoteById(noteId);
+    if (!note) return null;
+
+    const exprText = note.getExpressionSource('frequency');
+    if (!exprText) return null;
+
+    const parsed = parseFrequencyExpression(exprText);
+    if (!parsed) return null;
+
+    if (parsed.noteRef === null) {
+        // Already references baseNote directly
+        return parsed.algebra;
+    }
+
+    // Recursively trace the referenced note
+    const refAlgebra = traceFrequencyToBaseNote(parsed.noteRef, moduleInstance, visited);
+    if (!refAlgebra) return null;
+
+    // Combine: this note's algebra applied to the referenced note's algebra
+    return multiplyFrequencyAlgebras(parsed.algebra, refAlgebra);
+}
+
+/**
+ * Convert a frequency algebra back to an expression string
+ */
+function algebraToExpression(algebra) {
+    const parts = [];
+
+    // Start with baseNote.frequency
+    let base = `module.baseNote.getVariable('frequency')`;
+
+    // Add coefficient if not 1
+    if (!algebra.coeff.equals(1)) {
+        const c = algebra.coeff;
+        if (c.d === 1) {
+            parts.push(`new Fraction(${c.s * c.n})`);
+        } else {
+            parts.push(`new Fraction(${c.s * c.n}, ${c.d})`);
+        }
+    }
+
+    // Add POW if exponent is non-zero
+    if (algebra.powNum !== 0) {
+        if (algebra.powDen === 1) {
+            parts.push(`new Fraction(2).pow(new Fraction(${algebra.powNum}))`);
+        } else {
+            parts.push(`new Fraction(2).pow(new Fraction(${algebra.powNum}, ${algebra.powDen}))`);
+        }
+    }
+
+    // Build the expression
+    if (parts.length === 0) {
+        return base;
+    }
+
+    // Chain with .mul()
+    let result = base;
+    for (const part of parts) {
+        result = `${result}.mul(${part})`;
+    }
+
+    return result;
+}
+
+// Try to detect TET interval from frequency ratio relative to baseNote
+// Common temperaments: 12-TET, 24-TET, 31-TET, 53-TET, 19-TET
+// The tolerance is set to handle floating-point accumulation from corrupt dependency chains
+function detectTETInterval(ratio) {
+    if (ratio <= 0) return null;
+
+    // Calculate semitones from ratio: n = divisions * log2(ratio)
+    const log2Ratio = Math.log2(ratio);
+
+    // Check common TET systems (ordered by commonality)
+    const tetSystems = [12, 24, 19, 31, 53];
+    // Use tolerances that handle floating-point accumulation from corrupt dependency chains
+    // (e.g., noteA depends on noteB depends on baseNote, each adding small FP errors)
+    const stepTolerance = 0.0001; // Tolerance for detecting integer steps
+    const ratioTolerance = 1e-6; // Relative tolerance for verifying reconstructed ratio
+
+    for (const divisions of tetSystems) {
+        const steps = log2Ratio * divisions;
+        const roundedSteps = Math.round(steps);
+
+        // Skip if rounded to 0 (would mean ratio ~= 1, handled elsewhere)
+        if (roundedSteps === 0) continue;
+
+        // Check if it's close to an integer number of steps
+        if (Math.abs(steps - roundedSteps) < stepTolerance) {
+            // Verify by computing back - this catches false positives
+            const reconstructedRatio = Math.pow(2, roundedSteps / divisions);
+            const relativeError = Math.abs(reconstructedRatio - ratio) / ratio;
+            if (relativeError < ratioTolerance) {
+                // Simplify the fraction n/divisions
+                const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
+                const g = gcd(Math.abs(roundedSteps), divisions);
+                return {
+                    base: 2,
+                    numerator: roundedSteps / g,
+                    denominator: divisions / g
+                };
+            }
+        }
+    }
+
+    return null;
+}
+
+// Create a POW-based frequency expression from TET interval
+function createTETFrequencyExpr(interval) {
+    const { base, numerator, denominator } = interval;
+    if (denominator === 1) {
+        // Simple integer power (e.g., octave)
+        return `module.baseNote.getVariable('frequency').mul(new Fraction(${base}).pow(new Fraction(${numerator})))`;
+    }
+    return `module.baseNote.getVariable('frequency').mul(new Fraction(${base}).pow(new Fraction(${numerator}, ${denominator})))`;
+}
+
 // Create BaseNote-relative expression for startTime
 function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance) {
     const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
@@ -778,14 +1137,42 @@ function createBaseNoteDurationExpr(durationSeconds, moduleInstance) {
 }
 
 // Create BaseNote-relative expression for frequency
-function createBaseNoteFrequencyExpr(frequency, moduleInstance) {
+// Preserves POW expressions by tracing the dependency chain algebraically
+function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null) {
     const baseFreq = moduleInstance.baseNote.getVariable('frequency').valueOf();
     const ratio = frequency / baseFreq;
 
+    // If ratio is effectively 1, just reference baseNote directly
     if (Math.abs(ratio - 1) < 1e-10) {
         return `module.baseNote.getVariable('frequency')`;
     }
 
+    // Option 1: Try symbolic chain tracing - this preserves POW expressions exactly
+    // We trust the algebraic tracing since it's mathematically sound.
+    // Note: We can't verify by evaluating because Fraction.pow() returns null for fractional exponents
+    if (note) {
+        const algebra = traceFrequencyToBaseNote(note.id, moduleInstance);
+        if (algebra) {
+            const tracedExpr = algebraToExpression(algebra);
+            return tracedExpr;
+        }
+    }
+
+    // Option 2: If note has existing POW expression referencing baseNote, preserve it
+    if (note) {
+        const currentExpr = note.getExpressionSource('frequency');
+        if (currentExpr && containsPowOperation(currentExpr) && referencesBaseNoteFrequency(currentExpr)) {
+            return currentExpr;
+        }
+    }
+
+    // Option 3: Try to detect TET interval from the ratio (for non-chain cases)
+    const tetInterval = detectTETInterval(ratio);
+    if (tetInterval) {
+        return createTETFrequencyExpr(tetInterval);
+    }
+
+    // Option 4: Fallback to fraction approximation
     const ratioFrac = toFractionString(ratio);
     return `${ratioFrac}.mul(module.baseNote.getVariable('frequency'))`;
 }
@@ -819,7 +1206,7 @@ export function evaluateNoteToBaseNote(noteId) {
         } else if (varName === 'duration') {
             newExpr = createBaseNoteDurationExpr(value, moduleInstance);
         } else if (varName === 'frequency') {
-            newExpr = createBaseNoteFrequencyExpr(value, moduleInstance);
+            newExpr = createBaseNoteFrequencyExpr(value, moduleInstance, note);
         }
 
         if (newExpr) {
@@ -836,12 +1223,13 @@ export function evaluateNoteToBaseNote(noteId) {
     }
 
     const newElem = document.querySelector(`.note-content[data-note-id="${noteId}"]`);
-    if (currentSelectedNote && currentSelectedNote.id !== 0 && newElem) {
+    if (note && note.id !== 0 && newElem) {
         if (externalFunctions.bringSelectedNoteToFront) {
-            externalFunctions.bringSelectedNoteToFront(currentSelectedNote, newElem);
+            externalFunctions.bringSelectedNoteToFront(note, newElem);
         }
     }
-    showNoteVariables(currentSelectedNote, newElem);
+    // Use the note we just updated to ensure the UI shows fresh expression data
+    showNoteVariables(note, newElem);
 
     try {
         const snap = moduleInstance.createModuleJSON();
@@ -860,7 +1248,6 @@ export function evaluateEntireModule() {
     // Pre-compute BaseNote reference values ONCE (avoid repeated lookups)
     const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
     const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
-    const baseFreq = moduleInstance.baseNote.getVariable('frequency').valueOf();
     const beatLength = 60 / baseTempo;
 
     // Collect all expression updates in a single pass
@@ -929,15 +1316,7 @@ export function evaluateEntireModule() {
                 const currentValue = note.getVariable('frequency');
                 if (currentValue != null) {
                     const frequency = currentValue.valueOf();
-                    const ratio = frequency / baseFreq;
-
-                    let expr;
-                    if (Math.abs(ratio - 1) < 1e-10) {
-                        expr = `module.baseNote.getVariable('frequency')`;
-                    } else {
-                        const ratioFrac = toFractionString(ratio);
-                        expr = `${ratioFrac}.mul(module.baseNote.getVariable('frequency'))`;
-                    }
+                    const expr = createBaseNoteFrequencyExpr(frequency, moduleInstance, note);
                     updates.push({ noteId, varName: 'frequency', expr });
                 }
             }
@@ -959,6 +1338,12 @@ export function evaluateEntireModule() {
         const snap = moduleInstance.createModuleJSON();
         eventBus.emit('history:capture', { label: 'Evaluate Module', snapshot: snap });
     } catch {}
+
+    // Refresh the variable editor if a note is currently selected
+    if (currentSelectedNote) {
+        const selectedElem = document.querySelector(`.note-content[data-note-id="${currentSelectedNote.id}"], .base-note-circle[data-note-id="${currentSelectedNote.id}"]`);
+        showNoteVariables(currentSelectedNote, selectedElem);
+    }
 
     const noteCount = noteIds.length;
     showNotification(`Module evaluation complete: ${noteCount} notes converted to BaseNote references`, 'success');
