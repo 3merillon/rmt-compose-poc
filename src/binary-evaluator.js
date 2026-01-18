@@ -353,6 +353,10 @@ export class BinaryEvaluator {
 
     // Evaluation cache: noteId -> { startTime, duration, frequency, ... }
     this.cache = new Map();
+
+    // Track if the last evaluation produced an irrational value (corruption)
+    // This is set during evaluate() when a POW operation produces an irrational result
+    this._lastEvalWasCorrupted = false;
   }
 
   /**
@@ -466,6 +470,9 @@ export class BinaryEvaluator {
    * @returns {Fraction} - The evaluated result
    */
   evaluate(expr, evalCache = null) {
+    // Reset corruption flag for this evaluation
+    this._lastEvalWasCorrupted = false;
+
     if (expr.isEmpty()) {
       return this.pool.alloc(0, 1);
     }
@@ -652,9 +659,9 @@ export class BinaryEvaluator {
           const powResult = baseValue.pow(expValue);
 
           // Convert back to pooled Fraction
-          // Note: If the result is irrational, we lose the corruption flag here
-          // The WASM evaluator handles corruption tracking properly
           if (powResult.isCorrupted()) {
+            // Track that this evaluation produced an irrational result
+            this._lastEvalWasCorrupted = true;
             // Approximate as fraction
             const frac = new Fraction(powResult.toFloat());
             this.push(this.pool.alloc(frac.s * frac.n, frac.d));
@@ -835,15 +842,10 @@ export class BinaryEvaluator {
           // Update result immediately so later expressions in this note can use it
           result[name] = value;
 
-          // Check if bytecode contains POW opcode (0x15) - indicates potential irrational value
-          // This is a heuristic: actual corruption depends on whether the power produces an irrational
-          if (expr.bytecode && expr.length > 0) {
-            for (let i = 0; i < expr.length; i++) {
-              if (expr.bytecode[i] === OP.POW) {
-                result.corruptionFlags |= corruptionFlagMap[name] || 0;
-                break;
-              }
-            }
+          // Check if the evaluation actually produced an irrational value
+          // This is set by the POW opcode handler when the result is irrational
+          if (this._lastEvalWasCorrupted) {
+            result.corruptionFlags |= corruptionFlagMap[name] || 0;
           }
 
           return value;
