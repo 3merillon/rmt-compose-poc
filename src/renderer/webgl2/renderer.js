@@ -54,6 +54,7 @@ export class RendererAdapter {
     this.posSize = null; // Float32Array of [x,y,w,h] per instance
     this.colors  = null; // Float32Array of [r,g,b,a] per instance
     this._dragFlags = null; // Float32Array of [0|1] per instance (1 = apply drag offset)
+    this._corruptionType = null; // Float32Array of [0|1|2] per instance (corruption hatching)
     
     // Drag offset state (world units)
     this._dragOffsetX = 0.0;
@@ -462,6 +463,12 @@ export class RendererAdapter {
     // Keep a module reference for on-the-fly computations (e.g., link lines during drag)
     this._moduleRef = module;
 
+    // Bump position epoch at START of sync to invalidate dependency highlight cache.
+    // This ensures cached dependency data is recomputed when module data changes
+    // (e.g., when a parent note's octave changes, affecting child note positions).
+    // Previously this was only bumped at the END of sync, causing stale cache hits.
+    this._posEpoch = (this._posEpoch || 0) + 1;
+
     // CSS px -> world units (Y) for padding to match DOM borders
     const pxToWorldY = 1.0 / (this.yScalePxPerWU || 1.0);
 
@@ -596,6 +603,7 @@ export class RendererAdapter {
       this._instanceNoteIds = new Int32Array(N);
       this._instanceFlags = new Float32Array(N);
       this._dragFlags = new Float32Array(N);
+      this._corruptionType = new Float32Array(N);
     }
 
     // Fill arrays with reordered data
@@ -630,6 +638,57 @@ export class RendererAdapter {
       for (let i = 0; i < N; i++) {
         const idVal = (items[i] && items[i].id != null) ? Number(items[i].id) : null;
         if (idVal != null) this._noteIdToIndex.set(idVal, i);
+      }
+    } catch {}
+
+    // Compute corruption type for hatching display (0=none, 1=transitive, 2=direct)
+    // Always reset to 0 first to avoid stale data
+    if (this._corruptionType) {
+      this._corruptionType.fill(0.0);
+    }
+    try {
+      const depGraph = module?.getDependencyGraph?.();
+      if (depGraph && this._corruptionType && typeof depGraph.isNoteCorrupted === 'function') {
+        for (let i = 0; i < N; i++) {
+          const noteId = Number(items[i]?.id ?? 0);
+          const isDirectlyCorrupt = depGraph.isNoteCorrupted(noteId);
+
+          if (isDirectlyCorrupt) {
+            // Check if this note's corruption comes from its own bytecode or from dependencies
+            // A note is "directly" corrupted only if it has POW and no corrupted dependencies,
+            // OR if it has POW in its own expressions (not just inherited)
+            // For now, check if any dependency is also corrupted - if so, might be transitive
+            let hasCorruptDependency = false;
+            if (typeof depGraph.getAllDependencies === 'function') {
+              const allDeps = depGraph.getAllDependencies(noteId);
+              if (allDeps && allDeps.size > 0) {
+                for (const depId of allDeps) {
+                  if (depGraph.isNoteCorrupted(depId)) {
+                    hasCorruptDependency = true;
+                    break;
+                  }
+                }
+              }
+            }
+            // If has corrupt dependency, mark as transitive (1.0), else direct (2.0)
+            // This handles the case where a note gets corruption flags from evaluating
+            // an expression that references a corrupt note
+            this._corruptionType[i] = hasCorruptDependency ? 1.0 : 2.0;
+          } else if (typeof depGraph.getAllDependencies === 'function') {
+            // Not directly corrupted, check transitive corruption
+            const allDeps = depGraph.getAllDependencies(noteId);
+            let isTransitive = false;
+            if (allDeps && allDeps.size > 0) {
+              for (const depId of allDeps) {
+                if (depGraph.isNoteCorrupted(depId)) {
+                  isTransitive = true;
+                  break;
+                }
+              }
+            }
+            this._corruptionType[i] = isTransitive ? 1.0 : 0.0;
+          }
+        }
       }
     } catch {}
 
@@ -872,7 +931,13 @@ export class RendererAdapter {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDragFlagsBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, this._dragFlags, gl.DYNAMIC_DRAW);
       }
- 
+
+      // Upload corruption type buffer for hatching display
+      if (this.rectInstanceCorruptionBuffer && this._corruptionType) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceCorruptionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, this._corruptionType, gl.DYNAMIC_DRAW);
+      }
+
       // Ensure all enabled per-instance attribute buffers are large enough for instanceCount draws
       // Provide zero-initialized defaults for region buffers to prevent ANGLE/D3D buffer underruns.
       const instCount = Math.max(0, this.instanceCount | 0);
@@ -908,7 +973,9 @@ export class RendererAdapter {
       gl.bindBuffer(gl.ARRAY_BUFFER, null);
     }
 
-    // Bump position epoch on scene upload so dependent overlay passes can gate uploads
+    // Note: posEpoch was already bumped at start of sync() to invalidate dependency cache.
+    // This second bump ensures overlay passes (link lines, etc.) see final positions.
+    // The double-bump is intentional: first invalidates caches, second signals scene completion.
     this._posEpoch = (this._posEpoch || 0) + 1;
 
     // Invalidate cached tab/arrow regions after scene changes
@@ -1250,14 +1317,15 @@ export class RendererAdapter {
     // Simple rectangular program with border (no complex SDF)
     const rectBorderVS = `#version 300 es
       precision highp float;
- 
+
       layout(location=0) in vec2 a_unit;       // (0..1)
       layout(location=1) in vec4 a_posSize;    // (x,y,w,h) in world units
       layout(location=2) in vec4 a_color;      // RGBA
       layout(location=3) in vec2 a_noteSize;   // (w,h) in CSS px (deprecated; kept for compatibility)
       layout(location=5) in float a_flags;     // 1.0 = silence, 0.0 = normal
       layout(location=6) in float a_dragFlag;  // 1.0 = apply drag offset, 0.0 = no offset
- 
+      layout(location=7) in float a_corruptionType; // 0=none, 1=transitive, 2=direct
+
       uniform mat3 u_matrix;                   // world -> screen (page CSS px)
       uniform vec2 u_viewport;                 // (canvas CSS width, canvas CSS height)
       uniform vec2 u_offset;                   // canvas top-left in page CSS px
@@ -1265,23 +1333,24 @@ export class RendererAdapter {
       uniform float u_layerStep;               // depth step per instance
       uniform vec2 u_scale;                    // (px per world unit X, px per world unit Y)
       uniform vec2 u_dragOffset;               // (dx, dw) in world units for dragging
- 
+
       out vec4 v_color;
       out vec2 v_css;                          // canvas-local CSS px (this vertex)
       out vec2 v_uv;                           // local (0..1)
       out vec2 v_noteSize;                     // note size in CSS px
       out float v_isSilence;                   // flag propagated to FS
- 
+      out float v_corruptionType;              // corruption type for hatching
+
       void main() {
         // Apply drag offset only to flagged instances
         vec2 offset = a_dragFlag * u_dragOffset;
         vec2 posAdjusted = a_posSize.xy + vec2(offset.x, 0.0);
         vec2 sizeAdjusted = a_posSize.zw + vec2(offset.y, 0.0);
-        
+
         vec2 worldPos = posAdjusted + a_unit * sizeAdjusted;
         vec3 screen = u_matrix * vec3(worldPos, 1.0);   // page CSS px
         vec2 localCss = screen.xy - u_offset;           // canvas-local CSS px
-         
+
         float ndcX = (localCss.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (localCss.y / u_viewport.y) * 2.0;
         float ndcZ = u_layerBase + float(gl_InstanceID) * u_layerStep;
@@ -1292,61 +1361,101 @@ export class RendererAdapter {
         // Derive CSS pixel size from world size and current scale; ignore a_noteSize
         v_noteSize = sizeAdjusted * u_scale;
         v_isSilence = a_flags;
+        v_corruptionType = a_corruptionType;
       }
     `;
     const rectBorderFS = `#version 300 es
       precision highp float;
- 
+
       in vec4 v_color;
       in vec2 v_uv;
-      in vec2 v_noteSize;   // CSS px
-      in float v_isSilence; // 1.0 for silence -> suppress solid border
- 
+      in vec2 v_noteSize;             // CSS px
+      in float v_isSilence;           // 1.0 for silence -> suppress solid border
+      in float v_corruptionType;      // 0=none, 1=transitive, 2=direct
+
       uniform float u_cornerRadius;   // CSS px (scaled with zoom)
       uniform float u_borderWidth;    // CSS px (scaled with zoom)
       uniform vec4  u_borderColor;    // RGBA
- 
+      uniform float u_hatchSpacing;   // CSS px between diagonal lines
+      uniform float u_hatchThickness; // CSS px line thickness
+      uniform vec4  u_hatchColor;     // RGBA for hatching lines
+
       out vec4 outColor;
- 
+
       // Signed distance to rounded rectangle with half-size b and corner radius r.
       // Negative inside, positive outside, zero at the boundary.
       float sdRoundRect(vec2 p, vec2 b, float r) {
         vec2 q = abs(p) - (b - vec2(r));
         return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
       }
- 
+
+      // Compute diagonal hatch pattern at given angle (radians)
+      // Returns 1.0 on line, 0.0 off line, with anti-aliasing
+      float diagonalHatch(vec2 pos, float spacing, float thickness, float angle) {
+        float c = cos(angle);
+        float s = sin(angle);
+        vec2 rotated = vec2(pos.x * c - pos.y * s, pos.x * s + pos.y * c);
+        float d = mod(rotated.x, spacing);
+        float dist = min(d, spacing - d);
+        float aa = fwidth(dist);
+        float halfThick = thickness * 0.5;
+        return 1.0 - smoothstep(halfThick - aa, halfThick + aa, dist);
+      }
+
       void main() {
         // Local CSS px coordinates centered at note center
         vec2 he = 0.5 * v_noteSize;
         vec2 p  = v_uv * v_noteSize - he;
         float r = min(u_cornerRadius, min(he.x, he.y)); // avoid degenerate radius
         float bw = max(u_borderWidth, 0.0);
- 
+
         // Distance field: negative inside, positive outside
         float d = sdRoundRect(p, he, r);
- 
+
         // Pixel-size dependent AA ramp
         float aa = max(fwidth(d), 1.0); // ~1px minimum
- 
+
         // Coverage inside outer boundary (rounded rect with radius r)
         float aOuter = 1.0 - smoothstep(0.0, aa, d);
- 
+
         // Coverage inside inner boundary offset by border width bw (rounded rect with radius r-bw)
         // Using d + bw shifts the isocontour inward by bw
         float aInnerShape = 1.0 - smoothstep(0.0, aa, d + bw);
- 
+
         // Border ring = area between outer and inner coverages — suppress when silence
         float ring = clamp(aOuter - aInnerShape, 0.0, 1.0) * (1.0 - clamp(v_isSilence, 0.0, 1.0));
- 
+
         // Interior = inner shape only
         float interior = clamp(aInnerShape, 0.0, 1.0);
- 
+
+        // Compute hatching pattern for corrupted notes
+        // Use top-left anchored coordinates so pattern is stable during resize
+        // (v_uv goes 0..1, multiply by noteSize for CSS px from top-left corner)
+        vec2 hatchPos = v_uv * v_noteSize;
+        float hatchMask = 0.0;
+        if (v_corruptionType > 0.5 && u_hatchSpacing > 0.0) {
+          // Single diagonal for transitive corruption (45 degrees = PI/4)
+          float hatch1 = diagonalHatch(hatchPos, u_hatchSpacing, u_hatchThickness, 0.785398);
+          if (v_corruptionType > 1.5) {
+            // Crosshatch for direct corruption (add opposite diagonal -45 degrees)
+            float hatch2 = diagonalHatch(hatchPos, u_hatchSpacing, u_hatchThickness, -0.785398);
+            hatchMask = max(hatch1, hatch2);
+          } else {
+            hatchMask = hatch1;
+          }
+          // Mask hatch to interior only (respect rounded corners)
+          hatchMask *= interior;
+        }
+
+        // Composite: apply hatch color over note color in interior
+        vec3 hatchedRgb = mix(v_color.rgb, u_hatchColor.rgb, hatchMask * u_hatchColor.a);
+
         // Composite color and alpha:
         // - Border draws with u_borderColor on the ring (if not silence)
-        // - Interior draws with note v_color
-        vec3 rgb = u_borderColor.rgb * ring + v_color.rgb * interior;
+        // - Interior draws with hatched note color
+        vec3 rgb = u_borderColor.rgb * ring + hatchedRgb * interior;
         float a   = u_borderColor.a   * ring + v_color.a   * interior;
- 
+
         // Discard fragments with no coverage to avoid unnecessary blending
         if (a <= 0.0) discard;
         outColor = vec4(rgb, a);
@@ -1370,6 +1479,9 @@ export class RendererAdapter {
         this._uniforms.rectBorder.u_layerStep    = gl.getUniformLocation(prog, 'u_layerStep');
         this._uniforms.rectBorder.u_scale        = gl.getUniformLocation(prog, 'u_scale');
         this._uniforms.rectBorder.u_dragOffset   = gl.getUniformLocation(prog, 'u_dragOffset');
+        this._uniforms.rectBorder.u_hatchSpacing   = gl.getUniformLocation(prog, 'u_hatchSpacing');
+        this._uniforms.rectBorder.u_hatchThickness = gl.getUniformLocation(prog, 'u_hatchThickness');
+        this._uniforms.rectBorder.u_hatchColor     = gl.getUniformLocation(prog, 'u_hatchColor');
       }
     } catch {}
 
@@ -1964,6 +2076,14 @@ export class RendererAdapter {
     gl.vertexAttribPointer(6, 1, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(6, 1); // per-instance
 
+    // Corruption type (loc 7) - 0.0 = none, 1.0 = transitive, 2.0 = direct
+    this.rectInstanceCorruptionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceCorruptionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 1, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(7);
+    gl.vertexAttribPointer(7, 1, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(7, 1); // per-instance
+
     // Dedicated buffer for single-instance draws (avoid corrupting shared per-instance buffer)
     this._singlePosSizeBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
@@ -2070,6 +2190,16 @@ export class RendererAdapter {
       // Drag offset uniform (world units)
       const uDrag = U ? U.u_dragOffset : gl.getUniformLocation(prog, 'u_dragOffset');
       if (uDrag) gl.uniform2f(uDrag, this._dragOffsetX || 0.0, this._dragOffsetW || 0.0);
+
+      // Hatching uniforms for corruption visualization (scale with zoom like corner radius)
+      const uHatchSpacing   = U ? U.u_hatchSpacing   : gl.getUniformLocation(prog, 'u_hatchSpacing');
+      const uHatchThickness = U ? U.u_hatchThickness : gl.getUniformLocation(prog, 'u_hatchThickness');
+      const uHatchColor     = U ? U.u_hatchColor     : gl.getUniformLocation(prog, 'u_hatchColor');
+      const hatchSpacingBase = 5.0;  // base spacing at zoom=1 (2x denser)
+      const hatchThicknessBase = 1.5; // base line width at zoom=1
+      if (uHatchSpacing)   gl.uniform1f(uHatchSpacing, hatchSpacingBase * zoomScaleBody);
+      if (uHatchThickness) gl.uniform1f(uHatchThickness, hatchThicknessBase * zoomScaleBody);
+      if (uHatchColor)     gl.uniform4f(uHatchColor, 0.45, 0.28, 0.12, 0.85); // Brown, less transparent
 
       // Safety for ANGLE/D3D: disable unused instanced attrib 4 during ring-only passes
       this._setAttr4Enabled(false);
@@ -2557,90 +2687,20 @@ export class RendererAdapter {
 
   /**
    * Apply corruption tint to a color when note contains irrational values (TET scales)
-   * Corrupted notes get a noticeable brown/orange tint to indicate they use irrational numbers
-   * Notes that reference corrupted notes also get the tint (propagated corruption)
+   * NOTE: Color tinting has been replaced by diagonal hatching in the shader.
+   * This method now simply returns the color unchanged.
+   * Corruption visualization is handled via:
+   * - Direct corruption (POW ops): Crosshatch pattern (X)
+   * - Transitive corruption: Single diagonal hatch
    * @param {Array<number>} rgba - [r, g, b, a] color values in 0-1 range
-   * @param {Object} note - The note object
-   * @param {Object} module - The module containing dependency graph
-   * @returns {Array<number>} - Tinted [r, g, b, a] color
+   * @param {Object} note - The note object (unused, kept for API compatibility)
+   * @param {Object} module - The module (unused, kept for API compatibility)
+   * @returns {Array<number>} - Original rgba color unchanged
    */
   _applyCorruptionTint(rgba, note, module) {
-    if (!module || !note) return rgba;
-
-    try {
-      const depGraph = typeof module.getDependencyGraph === 'function'
-        ? module.getDependencyGraph()
-        : null;
-      if (!depGraph || typeof depGraph.isNoteCorrupted !== 'function') return rgba;
-
-      const noteId = Number(note.id ?? 0);
-
-      // Check if this note is directly corrupted
-      let isCorrupted = depGraph.isNoteCorrupted(noteId);
-
-      // If not directly corrupted, check if any of its transitive dependencies are corrupted
-      // (propagated corruption - notes referencing corrupted notes should also be tinted)
-      // Use getAllDependencies for transitive check (A -> B -> C, if C is corrupted, A is also tinted)
-      if (!isCorrupted && typeof depGraph.getAllDependencies === 'function') {
-        const allDeps = depGraph.getAllDependencies(noteId);
-        if (allDeps && allDeps.size > 0) {
-          for (const depId of allDeps) {
-            if (depGraph.isNoteCorrupted(depId)) {
-              isCorrupted = true;
-              break;
-            }
-          }
-        }
-      }
-
-      if (!isCorrupted) return rgba;
-
-      // Apply strong brown/orange tint for corrupted notes (TET scales)
-      // Brown is achieved by shifting toward orange (30°) and reducing lightness
-      const [r, g, b, a] = rgba;
-
-      // Convert to HSL for hue manipulation
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      let l = (max + min) / 2;
-      let h = 0, s = 0;
-
-      if (max !== min) {
-        const d = max - min;
-        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-        if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
-        else if (max === g) h = ((b - r) / d + 2) / 6;
-        else h = ((r - g) / d + 4) / 6;
-      }
-
-      // Shift hue toward brown/orange (0.083 = 30/360, which is orange-brown)
-      // Use a strong blend for very noticeable effect
-      const targetHue = 0.083; // 30° in 0-1 range (orange/brown)
-      const blendAmount = 0.7; // Strong shift toward brown
-      let newH = h + (targetHue - h) * blendAmount;
-      // Handle hue wrap-around for colors on the opposite side of the wheel
-      if (Math.abs(targetHue - h) > 0.5) {
-        // Closer via wrap-around
-        if (h > targetHue) {
-          newH = h + ((targetHue + 1) - h) * blendAmount;
-          if (newH > 1) newH -= 1;
-        } else {
-          newH = (h + 1) + (targetHue - (h + 1)) * blendAmount;
-          if (newH > 1) newH -= 1;
-        }
-      }
-
-      // Increase saturation significantly for brown effect
-      const newS = Math.min(1.0, s * 1.4 + 0.2);
-
-      // Darken slightly for brown appearance (brown = dark orange)
-      const newL = Math.max(0.2, l * 0.85);
-
-      // Convert back to RGB
-      return this._hslToRgba(newH * 360, newS * 100, newL * 100, a);
-    } catch {
-      return rgba;
-    }
+    // Corruption visualization is now handled by diagonal hatching in the shader
+    // See rectBorderFS fragment shader for the hatching implementation
+    return rgba;
   }
 
   /**

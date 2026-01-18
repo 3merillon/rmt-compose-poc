@@ -499,13 +499,14 @@ class WasmIncrementalEvaluator {
     // 2. Topological sort dirty notes
     const sorted = this.topoSort(this.dirty);
 
-    // 3. Clear stale local cache entries BEFORE WASM evaluation
-    // This ensures fresh values will be fetched from WASM
-    for (const noteId of this.dirty) {
-      this.cache._localCache.delete(noteId);
-      // Also clear the wrapper's JS cache to ensure fresh corruptionFlags are read
-      this.evaluator._jsCache.delete(noteId);
-    }
+    // 3. Clear ALL local cache entries BEFORE WASM evaluation
+    // Using clear() instead of selective delete ensures no stale values persist
+    // This is safer than selective clearing because:
+    // - WASM evaluation may affect notes not explicitly in dirty set (via dependencies)
+    // - It avoids subtle bugs where getAllDependents might miss some dependents
+    // - Performance impact is minimal since lazy fetch is O(1) per note
+    this.cache._localCache.clear();
+    // The wrapper's JS cache is also cleared entirely (done in evaluateDirty below)
 
     // 4. SINGLE WASM CALL - evaluates all dirty notes in order
     this.evaluator.evaluateDirty(sorted);

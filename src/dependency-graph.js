@@ -1375,8 +1375,12 @@ export class DependencyGraph {
   }
 
   /**
-   * Get the children tree as edges for a specific property
-   * Used for visualizing the complete dependent tree per variable
+   * Get the children tree as edges for a specific property, with cross-property traversal.
+   * Used for visualizing the complete dependent tree per variable.
+   *
+   * This traverses all dependency paths that originate from changing the given property,
+   * following cross-property dependencies (e.g., a frequency change can affect startTime
+   * of another note, which in turn affects startTime of its dependents).
    *
    * @param {number} noteId - The root note to start from
    * @param {string} property - 'frequency' | 'startTime' | 'duration'
@@ -1384,30 +1388,99 @@ export class DependencyGraph {
    */
   getChildrenTreeByProperty(noteId, property) {
     const edges = [];
-    const visited = new Set([noteId]);
-    const queue = [{ id: noteId, depth: 0 }];
+    // Track visited as Map<noteId, Set<propertyThatCausedVisit>> to allow revisiting
+    // with different property contexts while avoiding infinite loops
+    const visited = new Map();
+    visited.set(noteId, new Set([property]));
+
+    const queue = [{ id: noteId, depth: 0, changedProp: property }];
     let queueIdx = 0;
     let maxDepth = 0;
 
-    // Select appropriate dependents map based on property
-    // e.g., startTimeOnStartTimeDependents, frequencyOnFrequencyDependents, durationOnDurationDependents
-    const propCapitalized = property.charAt(0).toUpperCase() + property.slice(1);
-    const mapName = `${property}On${propCapitalized}Dependents`;
-    const dependentsMap = this[mapName];
-    if (!dependentsMap) return { edges, maxDepth };
+    // Helper to add edge and queue child if not visited with this property
+    const addEdge = (parentId, childId, depth, childChangedProp) => {
+      if (!visited.has(childId)) {
+        visited.set(childId, new Set());
+      }
+      // Only process if we haven't visited this child with this specific property change
+      if (!visited.get(childId).has(childChangedProp)) {
+        visited.get(childId).add(childChangedProp);
+        maxDepth = Math.max(maxDepth, depth);
+        edges.push({ parentId, childId, depth });
+        queue.push({ id: childId, depth, changedProp: childChangedProp });
+      }
+    };
 
     while (queueIdx < queue.length) {
-      const { id: parentId, depth } = queue[queueIdx++];
-      const children = dependentsMap.get(parentId);
+      const { id: parentId, depth, changedProp } = queue[queueIdx++];
+      const childDepth = depth + 1;
 
-      if (children) {
-        for (const childId of children) {
-          if (!visited.has(childId)) {
-            visited.add(childId);
-            const childDepth = depth + 1;
-            maxDepth = Math.max(maxDepth, childDepth);
-            edges.push({ parentId, childId, depth: childDepth });
-            queue.push({ id: childId, depth: childDepth });
+      // Based on which property changed on the parent, find all affected children
+      // This mirrors the logic in getAllAffectedBy*Change methods
+      if (changedProp === 'frequency') {
+        // Notes whose startTime depends on parent's frequency -> they MOVE
+        const stOnFreq = this.startTimeOnFrequencyDependents.get(parentId);
+        if (stOnFreq) {
+          for (const childId of stOnFreq) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'startTime');
+          }
+        }
+        // Notes whose frequency depends on parent's frequency -> their FREQUENCY changes
+        const freqOnFreq = this.frequencyOnFrequencyDependents.get(parentId);
+        if (freqOnFreq) {
+          for (const childId of freqOnFreq) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'frequency');
+          }
+        }
+        // Notes whose duration depends on parent's frequency -> their DURATION changes
+        const durOnFreq = this.durationOnFrequencyDependents.get(parentId);
+        if (durOnFreq) {
+          for (const childId of durOnFreq) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'duration');
+          }
+        }
+      } else if (changedProp === 'startTime') {
+        // Notes whose startTime depends on parent's startTime -> they MOVE
+        const stOnSt = this.startTimeOnStartTimeDependents.get(parentId);
+        if (stOnSt) {
+          for (const childId of stOnSt) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'startTime');
+          }
+        }
+        // Notes whose frequency depends on parent's startTime -> their FREQUENCY changes
+        const freqOnSt = this.frequencyOnStartTimeDependents.get(parentId);
+        if (freqOnSt) {
+          for (const childId of freqOnSt) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'frequency');
+          }
+        }
+        // Notes whose duration depends on parent's startTime -> their DURATION changes
+        const durOnSt = this.durationOnStartTimeDependents.get(parentId);
+        if (durOnSt) {
+          for (const childId of durOnSt) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'duration');
+          }
+        }
+      } else if (changedProp === 'duration') {
+        // Notes whose startTime depends on parent's duration -> they MOVE
+        const stOnDur = this.startTimeOnDurationDependents.get(parentId);
+        if (stOnDur) {
+          for (const childId of stOnDur) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'startTime');
+          }
+        }
+        // Notes whose frequency depends on parent's duration -> their FREQUENCY changes
+        const freqOnDur = this.frequencyOnDurationDependents.get(parentId);
+        if (freqOnDur) {
+          for (const childId of freqOnDur) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'frequency');
+          }
+        }
+        // Notes whose duration depends on parent's duration -> their DURATION changes
+        const durOnDur = this.durationOnDurationDependents.get(parentId);
+        if (durOnDur) {
+          for (const childId of durOnDur) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'duration');
           }
         }
       }
