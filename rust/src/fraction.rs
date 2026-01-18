@@ -40,6 +40,18 @@ impl Fraction {
         Fraction { inner: r }
     }
 
+    /// Create from BigInt numerator and denominator
+    pub fn from_big_ints(num: BigInt, den: BigInt) -> Self {
+        if den.is_zero() {
+            return Fraction {
+                inner: BigRational::new(BigInt::from(0), BigInt::from(1)),
+            };
+        }
+        Fraction {
+            inner: BigRational::new(num, den),
+        }
+    }
+
     /// Get the underlying BigRational
     pub fn as_big_rational(&self) -> &BigRational {
         &self.inner

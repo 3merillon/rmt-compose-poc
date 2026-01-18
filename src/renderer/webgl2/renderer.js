@@ -472,9 +472,16 @@ export class RendererAdapter {
     // CSS px -> world units (Y) for padding to match DOM borders
     const pxToWorldY = 1.0 / (this.yScalePxPerWU || 1.0);
 
+    // Helper to access evaluatedNotes (handles both Map and object)
+    const getEv = (id) => {
+      if (!evaluatedNotes) return null;
+      if (typeof evaluatedNotes.get === 'function') return evaluatedNotes.get(id);
+      return evaluatedNotes[id];
+    };
+
     // Resolve base frequency (fast path via evaluated cache)
     try {
-      const baseEv = evaluatedNotes?.[0]?.frequency;
+      const baseEv = getEv(0)?.frequency;
       if (baseEv != null) {
         this._baseFreqCache = (typeof baseEv.valueOf === 'function') ? baseEv.valueOf() : Number(baseEv);
       } else {
@@ -515,7 +522,7 @@ export class RendererAdapter {
       };
 
       // Prefer evaluated base frequency, fall back to raw baseNote variable
-      const baseEv = evaluatedNotes?.[0]?.frequency;
+      const baseEv = getEv(0)?.frequency;
       coerceFrom(baseEv);
       if (!assigned) {
         const bf = module?.baseNote?.getVariable?.('frequency');
@@ -541,13 +548,31 @@ export class RendererAdapter {
       const note = module.notes[idStr];
       if (!note) continue;
       try {
-        const hasStart = !!note.getVariable('startTime');
-        const hasDur = !!note.getVariable('duration');
+        // Use evaluatedNotes cache if available (required for correct display after reorder)
+        const ev = getEv(note.id);
+        const hasStart = ev ? (ev.startTime != null) : !!note.getVariable('startTime');
+        const hasDur = ev ? (ev.duration != null) : !!note.getVariable('duration');
         if (!hasStart || !hasDur) continue;
 
-        const startTimeRaw = note.getVariable('startTime')?.valueOf?.();
-        const durationRaw  = note.getVariable('duration')?.valueOf?.();
-        const freqVal   = note.getVariable('frequency')?.valueOf?.() ?? null;
+        // Prefer evaluated cache values to avoid stale data after module reorder
+        const startTimeRaw = ev?.startTime?.valueOf?.() ?? ev?.startTime ?? note.getVariable('startTime')?.valueOf?.();
+        const durationRaw  = ev?.duration?.valueOf?.() ?? ev?.duration ?? note.getVariable('duration')?.valueOf?.();
+        const freqRaw = ev?.frequency;
+        // For irrational/corrupted frequencies (or large fractions that overflow u32),
+        // use _floatValue if available for precision
+        let freqVal = null;
+        if (freqRaw != null) {
+          if (freqRaw._irrational && freqRaw._floatValue !== undefined) {
+            freqVal = freqRaw._floatValue;
+          } else {
+            freqVal = freqRaw?.valueOf?.() ?? freqRaw;
+          }
+        } else {
+          const noteFreq = note.getVariable('frequency');
+          if (noteFreq) {
+            freqVal = noteFreq._floatValue ?? noteFreq?.valueOf?.() ?? null;
+          }
+        }
 
         // Skip notes with invalid (NaN/undefined) startTime or duration
         const startTime = (typeof startTimeRaw === 'number' && isFinite(startTimeRaw)) ? startTimeRaw : null;
@@ -572,7 +597,7 @@ export class RendererAdapter {
         y = y + (this._config?.note?.centerShiftWU ?? -1);
 
         const isSilence = (freqVal == null || !isFinite(Number(freqVal)));
-        const baseColor = this._resolveColor(evaluatedNotes?.[note.id], note, module);
+        const baseColor = this._resolveColor(ev, note, module);
         const color = isSilence ? [0.0, 0.0, 0.0, 0.75] : baseColor;
 
         items.push({ id: note.id, x, y, w, h, color, isSilence });
@@ -879,7 +904,7 @@ export class RendererAdapter {
       try {
         // Try evaluated notes first
         let fnum = null;
-        const ev = evaluatedNotes && evaluatedNotes[id];
+        const ev = getEv(id);
         const fv = ev && ev.frequency;
         if (fv != null) {
           fnum = (typeof fv.valueOf === 'function') ? fv.valueOf() : Number(fv);

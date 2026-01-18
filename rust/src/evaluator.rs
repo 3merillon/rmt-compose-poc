@@ -6,7 +6,7 @@
 //! Supports both rational (exact) and irrational (f64) values via the Value type.
 //! Operations like Pow may produce irrational results, which "corrupt" the value.
 
-use crate::bytecode::{read_i32, read_u16, Op, Var};
+use crate::bytecode::{read_i32, read_u16, read_big_int_signed, read_big_int_unsigned, Op, Var};
 use crate::fraction::Fraction;
 use crate::value::{Value, corruption_flag_for_var};
 use serde::{Deserialize, Serialize};
@@ -63,26 +63,50 @@ fn default_denominator() -> u32 {
 
 impl FractionData {
     /// Create from a Fraction (rational, not corrupted)
+    ///
+    /// For fractions with numerator or denominator larger than u32::MAX,
+    /// we store the float value and mark as "corrupted" to preserve precision.
     pub fn from_fraction(f: &Fraction) -> Self {
-        FractionData {
-            s: f.s(),
-            n: f.n(),
-            d: f.d(),
-            f: None,
-            corrupted: false,
+        let n_val = f.n();
+        let d_val = f.d();
+
+        // Check if values fit in u32 by comparing with the original BigInt values
+        // If n() or d() returned u32::MAX, check if that's the actual value
+        let n_overflow = n_val == u32::MAX && f.numerator_str().parse::<u64>().unwrap_or(0) > u32::MAX as u64;
+        let d_overflow = d_val == u32::MAX && f.denominator_str().parse::<u64>().unwrap_or(0) > u32::MAX as u64;
+
+        if n_overflow || d_overflow {
+            // Value is too large for u32 - store as float to preserve precision
+            let float_val = f.to_f64();
+            let abs_val = float_val.abs();
+            let sign = if float_val < 0.0 { -1 } else if float_val > 0.0 { 1 } else { 0 };
+            let denom = 1_000_000u32;
+            let numer = (abs_val * (denom as f64)).round() as u32;
+            FractionData {
+                s: sign,
+                n: numer,
+                d: denom,
+                f: Some(float_val),
+                corrupted: true, // Mark as corrupted so JS uses float value
+            }
+        } else {
+            FractionData {
+                s: f.s(),
+                n: n_val,
+                d: d_val,
+                f: None,
+                corrupted: false,
+            }
         }
     }
 
     /// Create from a Value (may be rational or irrational)
     pub fn from_value(v: &Value) -> Self {
         match v {
-            Value::Rational(frac) => FractionData {
-                s: frac.s(),
-                n: frac.n(),
-                d: frac.d(),
-                f: None,
-                corrupted: false,
-            },
+            Value::Rational(frac) => {
+                // Use from_fraction to handle overflow cases
+                Self::from_fraction(frac)
+            }
             Value::Irrational(val) => {
                 // Approximate irrational as a fraction so valueOf() works correctly
                 // Use a denominator of 1_000_000 for microsecond precision
@@ -284,6 +308,22 @@ impl Evaluator {
                     let den = read_i32(bytecode, pc);
                     pc += 4;
                     self.push(Value::rational(num, den))?;
+                }
+
+                Op::LoadConstBig => {
+                    // Read signed numerator (variable length)
+                    let (num, num_bytes) = read_big_int_signed(bytecode, pc)
+                        .map_err(|e| format!("Error reading big numerator: {}", e))?;
+                    pc += num_bytes;
+
+                    // Read unsigned denominator (variable length)
+                    let (den, den_bytes) = read_big_int_unsigned(bytecode, pc)
+                        .map_err(|e| format!("Error reading big denominator: {}", e))?;
+                    pc += den_bytes;
+
+                    // Create Fraction from BigInts
+                    let frac = Fraction::from_big_ints(num, den);
+                    self.push(Value::Rational(frac))?;
                 }
 
                 Op::LoadRef => {
@@ -799,11 +839,14 @@ impl PersistentEvaluator {
         self.generation += 1;
     }
 
-    /// Clear the entire cache
+    /// Clear the entire cache and bytecode store
+    /// This must clear bytecode_store because when a module is replaced (e.g., after reorder),
+    /// notes with the same IDs may have different expressions/bytecode.
     #[wasm_bindgen(js_name = invalidateAll)]
     pub fn invalidate_all(&mut self) {
         self.cache.clear();
         self.dirty.clear();
+        self.bytecode_store.clear();
         self.generation += 1;
     }
 
@@ -1130,6 +1173,22 @@ impl PersistentEvaluator {
                     let den = read_i32(bytecode, pc);
                     pc += 4;
                     self.push(Value::rational(num, den))?;
+                }
+
+                Op::LoadConstBig => {
+                    // Read signed numerator (variable length)
+                    let (num, num_bytes) = read_big_int_signed(bytecode, pc)
+                        .map_err(|e| format!("Error reading big numerator: {}", e))?;
+                    pc += num_bytes;
+
+                    // Read unsigned denominator (variable length)
+                    let (den, den_bytes) = read_big_int_unsigned(bytecode, pc)
+                        .map_err(|e| format!("Error reading big denominator: {}", e))?;
+                    pc += den_bytes;
+
+                    // Create Fraction from BigInts
+                    let frac = Fraction::from_big_ints(num, den);
+                    self.push(Value::Rational(frac))?;
                 }
 
                 Op::LoadRef => {

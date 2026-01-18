@@ -269,12 +269,25 @@ export class ExpressionCompiler {
   }
 
   /**
-   * Parse a number (integer or float) and convert to fraction components
-   * Returns { num, den } for fraction representation
+   * Parse a number (integer or float)
+   * Returns number for small values, BigInt string for large integers, or null if invalid
    */
   parseNumber(s) {
     const trimmed = s.trim();
-    // Handle negative numbers
+
+    // Check if this looks like an integer (possibly large)
+    if (/^-?\d+$/.test(trimmed)) {
+      // For large integers that exceed safe integer range, return as string
+      // The emitConstant function will convert to BigInt
+      const num = Number(trimmed);
+      if (Number.isSafeInteger(num)) {
+        return num;
+      }
+      // For large integers, return the string - BigInt(str) will be used later
+      return trimmed;
+    }
+
+    // Handle floats
     const num = Number(trimmed);
     if (isFinite(num) && !isNaN(num)) {
       return num;
@@ -572,33 +585,57 @@ export class ExpressionCompiler {
 
   /**
    * Emit a constant Fraction
+   * Automatically chooses LOAD_CONST for small values or LOAD_CONST_BIG for large values
    */
   emitConstant(binary, num, den) {
-    // Convert floats to integer fractions
-    let finalNum = num;
-    let finalDen = den;
+    // Check if inputs are integers (as number or string)
+    const numIsInteger = (typeof num === 'string' && /^-?\d+$/.test(num)) || Number.isInteger(num);
+    const denIsInteger = (typeof den === 'string' && /^-?\d+$/.test(den)) || Number.isInteger(den);
 
-    if (!Number.isInteger(num) || !Number.isInteger(den)) {
-      // Convert the decimal value to a proper fraction
-      const value = num / den;
+    // Convert to BigInt for range checking and to handle large values
+    let finalNumBig = BigInt(num);
+    let finalDenBig = BigInt(den);
+
+    // For decimal inputs, convert to fraction first
+    if (!numIsInteger || !denIsInteger) {
+      const value = Number(num) / Number(den);
       const frac = this.decimalToFraction(value);
-      finalNum = frac.num;
-      finalDen = frac.den;
+      finalNumBig = BigInt(frac.num);
+      finalDenBig = BigInt(frac.den);
     }
 
-    // Normalize using Fraction.js for proper reduction
-    try {
-      const frac = new Fraction(finalNum, finalDen);
-      finalNum = frac.s * frac.n;
-      finalDen = frac.d;
-    } catch (e) {
-      // If Fraction.js fails, use raw values
-      console.warn(`Fraction normalization failed for ${num}/${den}:`, e);
-    }
+    // Normalize using Fraction.js for proper reduction (if values fit in safe integer range)
+    const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+    const MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
 
-    binary.writeByte(OP.LOAD_CONST);
-    binary.writeInt32(finalNum);
-    binary.writeInt32(finalDen);
+    if (finalNumBig >= MIN_SAFE && finalNumBig <= MAX_SAFE &&
+        finalDenBig >= MIN_SAFE && finalDenBig <= MAX_SAFE) {
+      try {
+        const frac = new Fraction(Number(finalNumBig), Number(finalDenBig));
+        finalNumBig = BigInt(frac.s) * BigInt(frac.n);
+        finalDenBig = BigInt(frac.d);
+      } catch (e) {
+        console.warn(`Fraction normalization failed for ${num}/${den}:`, e);
+      }
+    }
+    // For very large values, we skip Fraction.js normalization and trust the input is already reduced
+
+    // Check if values fit in i32 range for backward-compatible LOAD_CONST
+    const MIN_I32 = -2147483648n;
+    const MAX_I32 = 2147483647n;
+
+    if (finalNumBig >= MIN_I32 && finalNumBig <= MAX_I32 &&
+        finalDenBig >= MIN_I32 && finalDenBig <= MAX_I32) {
+      // Use legacy format for backward compatibility
+      binary.writeByte(OP.LOAD_CONST);
+      binary.writeInt32(Number(finalNumBig));
+      binary.writeInt32(Number(finalDenBig));
+    } else {
+      // Use new BigInt format for large values
+      binary.writeByte(OP.LOAD_CONST_BIG);
+      binary.writeBigIntSigned(finalNumBig);
+      binary.writeBigIntUnsigned(finalDenBig < 0n ? -finalDenBig : finalDenBig);
+    }
   }
 
   /**
@@ -767,6 +804,21 @@ export class ExpressionDecompiler {
           break;
         }
 
+        case OP.LOAD_CONST_BIG: {
+          // Read signed numerator
+          const { value: num, bytesRead: numBytes } = this.readBigIntSigned(bytecode, pc);
+          pc += numBytes;
+          // Read unsigned denominator
+          const { value: den, bytesRead: denBytes } = this.readBigIntUnsigned(bytecode, pc);
+          pc += denBytes;
+          if (den === 1n) {
+            stack.push(`new Fraction(${num})`);
+          } else {
+            stack.push(`new Fraction(${num}, ${den})`);
+          }
+          break;
+        }
+
         case OP.LOAD_REF: {
           const noteId = this.readUint16(bytecode, pc);
           pc += 2;
@@ -869,6 +921,32 @@ export class ExpressionDecompiler {
                 (bytecode[offset + 2] << 8) |
                 bytecode[offset + 3];
     return val | 0;
+  }
+
+  /**
+   * Read a signed BigInt from bytecode
+   * Format: [sign(1)] [len(2)] [bytes(n)]
+   * @returns {{ value: bigint, bytesRead: number }}
+   */
+  readBigIntSigned(bytecode, offset) {
+    const sign = bytecode[offset];
+    const { value: magnitude, bytesRead: magBytes } = this.readBigIntUnsigned(bytecode, offset + 1);
+    const value = sign === 0x01 ? -magnitude : magnitude;
+    return { value, bytesRead: 1 + magBytes };
+  }
+
+  /**
+   * Read an unsigned BigInt from bytecode
+   * Format: [len(2)] [bytes(n)]
+   * @returns {{ value: bigint, bytesRead: number }}
+   */
+  readBigIntUnsigned(bytecode, offset) {
+    const len = (bytecode[offset] << 8) | bytecode[offset + 1];
+    let value = 0n;
+    for (let i = 0; i < len; i++) {
+      value = (value << 8n) | BigInt(bytecode[offset + 2 + i]);
+    }
+    return { value, bytesRead: 2 + len };
   }
 
   indexToVarName(idx) {

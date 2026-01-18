@@ -1683,8 +1683,9 @@ if (canvasEl) {
               }
             })();
 
-            // Avoid global cache flush; only mark affected notes dirty
-            // Use batch marking for efficiency (avoids O(n²) individual getAllDependents calls)
+            // Use batch marking to register dependencies before evaluation
+            // This ensures imported notes have their dependencies registered in the graph
+            // before the topological sort, so parent notes are evaluated before children
             try {
                 const batchIds = [0];
                 if (targetNote && typeof targetNote.id === 'number') batchIds.push(targetNote.id);

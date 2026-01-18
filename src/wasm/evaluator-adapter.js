@@ -864,7 +864,7 @@ class WasmPersistentEvaluatorWrapper {
         frac.s = (val.s !== undefined && val.s !== null) ? val.s : 1;
         frac.n = val.n || 0;
         frac.d = val.d || 1;
-        // For irrational values, store the float value if available
+        // For irrational values (or large fractions that overflow u32), store the float value
         if (val.corrupted && val.f !== undefined) {
           frac._irrational = true;
           frac._floatValue = val.f;

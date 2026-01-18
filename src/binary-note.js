@@ -11,6 +11,7 @@ export const OP = {
   LOAD_CONST:     0x01,  // Push Fraction constant: [num_hi, num_lo, num_lo2, num_lo3, den_hi, den_lo, den_lo2, den_lo3]
   LOAD_REF:       0x02,  // Push note reference: [noteId_hi, noteId_lo, varIndex]
   LOAD_BASE:      0x03,  // Push baseNote variable: [varIndex]
+  LOAD_CONST_BIG: 0x04,  // Push BigInt Fraction: [sign(1), num_len(2), num_bytes(n), den_len(2), den_bytes(n)]
 
   // Arithmetic operations
   ADD:            0x10,  // Pop 2, push sum
@@ -131,6 +132,59 @@ export class BinaryExpression {
   }
 
   /**
+   * Write a signed BigInt as variable-length bytes
+   * Format: [sign(1)] [len(2)] [bytes(n)]
+   * @param {bigint} value - The BigInt value to write
+   */
+  writeBigIntSigned(value) {
+    const bigVal = BigInt(value);
+    const isNegative = bigVal < 0n;
+    const magnitude = isNegative ? -bigVal : bigVal;
+
+    // Write sign byte (0x00 = positive, 0x01 = negative)
+    this.writeByte(isNegative ? 0x01 : 0x00);
+
+    // Write magnitude as unsigned
+    this.writeBigIntUnsigned(magnitude);
+  }
+
+  /**
+   * Write an unsigned BigInt as variable-length bytes
+   * Format: [len(2)] [bytes(n)]
+   * @param {bigint} value - The BigInt value to write (must be non-negative)
+   */
+  writeBigIntUnsigned(value) {
+    const bigVal = BigInt(value);
+    if (bigVal < 0n) {
+      throw new Error('writeBigIntUnsigned requires non-negative value');
+    }
+
+    // Handle zero specially
+    if (bigVal === 0n) {
+      this.writeUint16(1);  // Length = 1
+      this.writeByte(0);    // Value = 0
+      return;
+    }
+
+    // Convert to hex string, then to bytes (big-endian)
+    let hex = bigVal.toString(16);
+    if (hex.length % 2) hex = '0' + hex;  // Pad to even length
+    const byteLen = hex.length / 2;
+
+    // Write length as u16 (max 65535 bytes = 524280 bits)
+    if (byteLen > 65535) {
+      throw new Error('BigInt too large for bytecode encoding');
+    }
+    this.writeUint16(byteLen);
+
+    // Write bytes (big-endian)
+    this.ensureCapacity(byteLen);
+    for (let i = 0; i < byteLen; i++) {
+      this.bytecode[this.length++] = parseInt(hex.substr(i * 2, 2), 16);
+    }
+  }
+
+  /**
    * Add a note dependency
    */
   addDependency(noteId) {
@@ -177,6 +231,18 @@ export class BinaryExpression {
         case OP.LOAD_CONST:
           pc += 8; // Skip 8 bytes (num + den as 32-bit each)
           break;
+
+        case OP.LOAD_CONST_BIG: {
+          // Skip sign byte
+          pc += 1;
+          // Read and skip numerator: len(2) + bytes(len)
+          const numLen = (bytecode[pc] << 8) | bytecode[pc + 1];
+          pc += 2 + numLen;
+          // Read and skip denominator: len(2) + bytes(len)
+          const denLen = (bytecode[pc] << 8) | bytecode[pc + 1];
+          pc += 2 + denLen;
+          break;
+        }
 
         case OP.LOAD_REF: {
           // [noteId_hi, noteId_lo, varIndex]

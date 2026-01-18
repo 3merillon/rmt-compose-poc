@@ -410,6 +410,32 @@ export class BinaryEvaluator {
   }
 
   /**
+   * Read a signed BigInt from bytecode
+   * Format: [sign(1)] [len(2)] [bytes(n)]
+   * @returns {{ value: bigint, bytesRead: number }}
+   */
+  readBigIntSigned(bytecode, offset) {
+    const sign = bytecode[offset];
+    const { value: magnitude, bytesRead: magBytes } = this.readBigIntUnsigned(bytecode, offset + 1);
+    const value = sign === 0x01 ? -magnitude : magnitude;
+    return { value, bytesRead: 1 + magBytes };
+  }
+
+  /**
+   * Read an unsigned BigInt from bytecode
+   * Format: [len(2)] [bytes(n)]
+   * @returns {{ value: bigint, bytesRead: number }}
+   */
+  readBigIntUnsigned(bytecode, offset) {
+    const len = (bytecode[offset] << 8) | bytecode[offset + 1];
+    let value = 0n;
+    for (let i = 0; i < len; i++) {
+      value = (value << 8n) | BigInt(bytecode[offset + 2 + i]);
+    }
+    return { value, bytesRead: 2 + len };
+  }
+
+  /**
    * Push a value onto the evaluation stack
    */
   push(value) {
@@ -492,6 +518,19 @@ export class BinaryEvaluator {
           const den = this.readInt32(bytecode, pc);
           pc += 4;
           this.push(this.pool.alloc(num, den));
+          break;
+        }
+
+        case OP.LOAD_CONST_BIG: {
+          // Read signed numerator (variable length)
+          const { value: numBig, bytesRead: numBytes } = this.readBigIntSigned(bytecode, pc);
+          pc += numBytes;
+          // Read unsigned denominator (variable length)
+          const { value: denBig, bytesRead: denBytes } = this.readBigIntUnsigned(bytecode, pc);
+          pc += denBytes;
+          // Create Fraction from BigInt using string constructor for large values
+          const frac = new Fraction(numBig.toString(), denBig.toString());
+          this.push(this.pool.allocFrom(frac));
           break;
         }
 

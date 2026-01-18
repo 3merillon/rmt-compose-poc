@@ -168,7 +168,7 @@ export class Module {
       }
     }
 
-    // Second pass: collect all notes that need to be dirty (including dependents)
+    // Second pass: collect all notes that need to be dirty (including dependents AND dependencies)
     const allDirty = new Set(idsToProcess);
 
     // Check if base note is being marked - if so, add all base note dependents
@@ -179,7 +179,7 @@ export class Module {
       }
     }
 
-    // For each note, add its dependents (but skip if already in allDirty)
+    // For each note, add its dependents (notes that depend on it)
     for (const numId of idsToProcess) {
       const dependents = this._dependencyGraph.getAllDependents(numId);
       for (const depId of dependents) {
@@ -187,15 +187,45 @@ export class Module {
       }
     }
 
+    // CRITICAL: Also add transitive dependencies (notes that the dirty notes depend on)
+    // This ensures that when invalidateAll() clears the WASM cache,
+    // dependency notes are also re-evaluated before their dependents.
+    // Without this, frequency chains break because the dependency's frequency
+    // isn't in the cache when the dependent note tries to load it.
+    // We need transitive closure because A->B->C means A needs both B and C.
+    const visited = new Set();
+    const addDependenciesRecursive = (noteId) => {
+      if (visited.has(noteId)) return;
+      visited.add(noteId);
+      const dependencies = this._dependencyGraph.getDependencies(noteId);
+      for (const depId of dependencies) {
+        allDirty.add(depId);
+        addDependenciesRecursive(depId);
+      }
+    };
+    for (const numId of idsToProcess) {
+      addDependenciesRecursive(numId);
+    }
+
     // Add all to dirty set
     for (const id of allDirty) {
       this._dirtyNotes.add(id);
     }
 
-    // Single invalidation of incremental evaluator
+    // Selective invalidation - only mark affected notes dirty, not ALL notes
     if (this._incrementalEvaluator) {
-      this._incrementalEvaluator.invalidateAll();
+      // Notes in idsToProcess may have new/changed bytecode - use invalidate()
+      for (const id of idsToProcess) {
+        this._incrementalEvaluator.invalidate(id);
+      }
+      // Notes in allDirty (but not in idsToProcess) just need re-evaluation - use markDirtyOnly()
+      for (const id of allDirty) {
+        if (!idsToProcess.has(id)) {
+          this._incrementalEvaluator.markDirtyOnly(id);
+        }
+      }
     }
+
   }
 
   /**
@@ -877,6 +907,12 @@ export class Module {
     if (this._incrementalEvaluator) {
       this._incrementalEvaluator.invalidateAll();
     }
+
+    // Evaluate all notes to repopulate corruption flags in dependency graph.
+    // This is critical: reindexing clears the graph's corruptionFlags Map,
+    // and evaluateModule() calls _updateCorruptionFlags() to restore them
+    // for correct transitive corruption detection and visualization.
+    this.evaluateModule();
 
     invalidateModuleEndTimeCache();
   }
