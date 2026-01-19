@@ -1,4 +1,5 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "curl https://sh.rustup.rs -sSf | sh -s -- -y && . $HOME/.cargo/env && cargo install wasm-pack && npm run build",
   "outputDirectory": "dist",
   "framework": "vite"

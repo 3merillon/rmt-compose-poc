@@ -8,13 +8,17 @@
     "dev": "vite",
     "build": "npm run wasm:build && vite build",
     "preview": "vite preview",
-    "wasm:build": "cd rust && wasm-pack build --target web --out-dir pkg"
+    "wasm:build": "cd rust && wasm-pack build --target web --out-dir pkg",
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "dependencies": {
     "fraction.js": "^4.3.7"
   },
   "devDependencies": {
-    "vite": "^7.1.12"
+    "vite": "^7.1.12",
+    "vitepress": "^1.6.4"
   },
   "author": "Cyril Monkewitz",
   "license": "LicenseRef-RMT-PNC-1.0"
