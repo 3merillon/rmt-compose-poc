@@ -1,6 +1,6 @@
 # Relative Music Theory Personal Non-Commercial License (RMT-PNC) v1.0
 
-Copyright (c) 2025 Cyril Monkewitz. All rights reserved.
+Copyright (c) 2026 Cyril Monkewitz. All rights reserved.
 
 This is a custom license. It grants limited rights for personal, non-commercial use, allows private modifications that are not shared, prohibits redistribution, and requires attribution when sharing outputs or media. It also restricts commercial use of outputs created with the Software.
 

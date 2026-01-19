@@ -250,7 +250,7 @@ export default defineConfig({
 
     footer: {
       message: 'Released under the RMT Personal Non-Commercial License',
-      copyright: 'Copyright 2024-present Cyril Monkewitz'
+      copyright: 'Copyright 2026-present Cyril Monkewitz'
     },
 
     editLink: {

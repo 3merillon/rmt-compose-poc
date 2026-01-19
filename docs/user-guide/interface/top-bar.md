@@ -115,7 +115,7 @@ At the bottom of the menu:
 
 | Link | Destination |
 |------|-------------|
-| **Info** | Author website (cybercyril.com) |
+| **Documentation** | Full documentation site (docs.rmt.world) |
 | **Donate** | Support the project (Stripe) |
 | **License** | View the RMT-PNC license |
 
