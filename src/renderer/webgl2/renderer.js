@@ -142,8 +142,6 @@ export class RendererAdapter {
     this._arrowDownRegions = null;  // Float32Array(N*4) per instance (lower half)
     // Track last GPU upload epoch for arrow backgrounds to avoid redundant bufferData on every frame
     this._lastArrowUploadEpoch = -1;
-    // Corruption buffer epoch tracking (skip upload when unchanged)
-    this._lastCorruptionUploadEpoch = -1;
 
     // Position epoch to gate dependent overlay uploads (link lines, guides)
     this._posEpoch = 0;
@@ -973,22 +971,12 @@ export class RendererAdapter {
         gl.bufferData(gl.ARRAY_BUFFER, this._dragFlags, gl.DYNAMIC_DRAW);
       }
 
-      // Upload corruption type buffer for hatching display (epoch-gated)
+      // Upload corruption type buffer for hatching display
+      // Note: Must upload every sync because item order changes when selection changes
+      // (selected note is swapped to end of array), so epoch-gating would cause stale data
       if (this.rectInstanceCorruptionBuffer && this._corruptionType) {
-        // Check if corruption data changed by comparing epochs
-        let corruptionEpoch = 0;
-        try {
-          const depGraph = module?.getDependencyGraph?.();
-          if (depGraph && typeof depGraph.getCorruptionEpoch === 'function') {
-            corruptionEpoch = depGraph.getCorruptionEpoch();
-          }
-        } catch {}
-        // Upload only if epoch changed or first upload
-        if (this._lastCorruptionUploadEpoch !== corruptionEpoch) {
-          gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceCorruptionBuffer);
-          gl.bufferData(gl.ARRAY_BUFFER, this._corruptionType, gl.DYNAMIC_DRAW);
-          this._lastCorruptionUploadEpoch = corruptionEpoch;
-        }
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceCorruptionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, this._corruptionType, gl.DYNAMIC_DRAW);
       }
 
       // Ensure all enabled per-instance attribute buffers are large enough for instanceCount draws
