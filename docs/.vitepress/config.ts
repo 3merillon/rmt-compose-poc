@@ -7,11 +7,23 @@ export default defineConfig({
   // Ignore dead links during development (some pages are planned but not yet created)
   ignoreDeadLinks: true,
 
+  // Sitemap for Google indexing
+  sitemap: {
+    hostname: 'https://docs.rmt.world'
+  },
+
   head: [
     ['link', { rel: 'icon', href: '/favicon.ico' }],
+    ['link', { rel: 'canonical', href: 'https://docs.rmt.world/' }],
     ['meta', { property: 'og:title', content: 'RMT Compose Documentation' }],
     ['meta', { property: 'og:description', content: 'Learn to compose music using exact ratios and relative music theory' }],
     ['meta', { property: 'og:type', content: 'website' }],
+    ['meta', { property: 'og:url', content: 'https://docs.rmt.world/' }],
+    ['meta', { property: 'og:image', content: 'https://docs.rmt.world/screenshot.png' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+    ['meta', { name: 'twitter:title', content: 'RMT Compose Documentation' }],
+    ['meta', { name: 'twitter:description', content: 'Learn to compose music using exact ratios and relative music theory' }],
+    ['meta', { name: 'twitter:image', content: 'https://docs.rmt.world/screenshot.png' }],
   ],
 
   themeConfig: {
