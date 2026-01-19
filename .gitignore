@@ -25,5 +25,6 @@ npm-debug.log*
 rust/target/
 rust/pkg/
 
-# Docs
-docs/
+# Docs build cache
+docs/.vitepress/cache/
+docs/.vitepress/dist/
