@@ -6412,11 +6412,18 @@ try {
               : this._clampFontPx(Math.max(5, Math.round(hCss * (this._config?.overlays?.fractionFontFactor ?? 0.26)))); // slightly larger fraction numerals
             const gapPx  = Math.max(1, Math.round(fontPx * 0.08));
 
+            // Check if note is corrupted (direct or transitive) to show ≈ prefix
+            const isCorrupted = this._corruptionType && this._corruptionType[i] > 0;
+            const approxSymbol = '≈';
+            const approxW = isCorrupted ? this._measureGlyphRunWidth(approxSymbol, fontPx) : 0;
+            const approxGap = isCorrupted ? Math.max(1, Math.round(fontPx * 0.1)) : 0;
+            const approxOffset = approxW + approxGap;
+
             // Compute divider metrics once; reuse for bar and text centering
             const centerY = top + hCss * 0.5;
             const thicknessCss = Math.max(1, Math.round(fontPx * (this._config?.overlays?.dividerThicknessFactor ?? 0.12))); // divider thickness via config
             const yTopDiv = Math.floor(centerY - thicknessCss * 0.5) + 0.5;
-            const xLine = contentLeft;
+            const xLine = contentLeft + approxOffset;
 
             if (this.useGlyphCache) {
               // Measure glyph-run widths
@@ -6424,13 +6431,13 @@ try {
               const denWforDiv = this._measureGlyphRunWidth(String(denStr), fontPx);
               const contentMax = Math.max(numWforDiv, denWforDiv);
               const extra = 2.0; // small padding
-              const dividerW = Math.max(6.0, Math.min(contentWidth, contentMax + extra));
+              const dividerW = Math.max(6.0, Math.min(contentWidth - approxOffset, contentMax + extra));
 
               // Defer divider region for batched pass
               {
                 if (!_dividerRegions) _dividerRegions = new Float32Array(this.instanceCount * 4);
                 const heX_local = 0.5 * wCss;
-                const xL_local = -heX_local + (arrowsWidth + pad);
+                const xL_local = -heX_local + (arrowsWidth + pad) + approxOffset;
                 const xR_local = xL_local + dividerW;
                 const yT_local = -thicknessCss * 0.5;
                 const yB_local =  thicknessCss * 0.5;
@@ -6465,6 +6472,18 @@ try {
                 scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                 rrCx, rrCy, rrHx, rrHy, rrR
               });
+
+              // Render ≈ symbol to the left of fraction, vertically centered
+              if (isCorrupted) {
+                const approxH = this._getRunHeight(approxSymbol, fontPx);
+                const approxAsc = (this._measureRunMetricsCanvas && this._measureRunMetricsCanvas(approxSymbol, fontPx).ascent) || this._getRunAscent(approxSymbol, fontPx);
+                const approxY = Math.round((centerY - approxAsc * 0.5) * 2.0) / 2.0;
+                this._deferredGlyphRuns.push({
+                  text: approxSymbol, noteId: id, x: contentLeft, y: approxY, fontPx, color: [1,1,1,1], layerZ, scaleX: 1.0,
+                  scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
+                  rrCx, rrCy, rrHx, rrHy, rrR
+                });
+              }
             } else {
               const numEntry = this._createTightDigitTexture(String(numStr), fontPx, 0, '#ffffff');
               const denEntry = this._createTightDigitTexture(String(denStr), fontPx, 0, '#ffffff');
@@ -6473,13 +6492,13 @@ try {
               const denWforDiv = (denEntry && denEntry.wCss) ? denEntry.wCss : 0;
               const contentMax = Math.max(numWforDiv, denWforDiv);
               const extra = 2.0;
-              const dividerW = Math.max(6.0, Math.min(contentWidth, contentMax + extra));
+              const dividerW = Math.max(6.0, Math.min(contentWidth - approxOffset, contentMax + extra));
 
               // Defer divider region for batched pass
               {
                 if (!_dividerRegions) _dividerRegions = new Float32Array(this.instanceCount * 4);
                 const heX_local = 0.5 * wCss;
-                const xL_local = -heX_local + (arrowsWidth + pad);
+                const xL_local = -heX_local + (arrowsWidth + pad) + approxOffset;
                 const xR_local = xL_local + dividerW;
                 const yT_local = -thicknessCss * 0.5;
                 const yB_local =  thicknessCss * 0.5;
@@ -6496,6 +6515,22 @@ try {
               if (uVPt) gl.uniform2f(uVPt, vpW, vpH);
               if (uTint) gl.uniform4f(uTint, 1, 1, 1, 1);
               if (uZText) gl.uniform1f(uZText, layerZ);
+
+              // Render ≈ symbol for corrupted notes (non-glyph-cache path)
+              if (isCorrupted) {
+                const approxEntry = this._createTightDigitTexture(approxSymbol, fontPx, 0, '#ffffff');
+                if (approxEntry && approxEntry.tex) {
+                  const approxAsc = (approxEntry && typeof approxEntry.ascent === 'number') ? approxEntry.ascent : (approxEntry ? approxEntry.hCss * 0.5 : 0);
+                  const approxY = Math.round((centerY - approxAsc * 0.5) * 2.0) / 2.0;
+                  const arrApprox = new Float32Array([contentLeft, approxY, approxEntry.wCss, approxEntry.hCss]);
+                  gl.activeTexture(gl.TEXTURE0);
+                  gl.bindTexture(gl.TEXTURE_2D, approxEntry.tex);
+                  gl.bindVertexArray(this.textVAO);
+                  gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+                  gl.bufferData(gl.ARRAY_BUFFER, arrApprox, gl.DYNAMIC_DRAW);
+                  gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+                }
+              }
 
               if (numEntry && numEntry.tex) {
                 const numW = Math.min(numEntry.wCss, dividerW);

@@ -271,6 +271,11 @@ function collectVariables(note, measureId, moduleInstance) {
         // Map variable names to their corruption flag bits
         const flagMap = { startTime: 0x01, duration: 0x02, frequency: 0x04 };
 
+        // Check if frequency is transitively corrupted (for display purposes only)
+        const freqTransitivelyCorrupted = depGraph && noteId !== null
+            && typeof depGraph.isFrequencyTransitivelyCorrupted === 'function'
+            && depGraph.isFrequencyTransitivelyCorrupted(noteId);
+
         variableNames.forEach(key => {
             if (note.variables && note.variables[key] !== undefined) {
                 const propertyCorrupted = (corruptionFlags & (flagMap[key] || 0)) !== 0;
@@ -282,7 +287,9 @@ function collectVariables(note, measureId, moduleInstance) {
                     variables[key] = {
                         evaluated: note.getVariable(key),
                         raw: note.variables[key + 'String'] || note.variables[key].toString(),
-                        isCorrupted: propertyCorrupted
+                        isCorrupted: propertyCorrupted,
+                        // For frequency, flag if transitively corrupted (for display purposes)
+                        isTransitivelyCorrupted: key === 'frequency' && freqTransitivelyCorrupted
                     };
                 }
             }

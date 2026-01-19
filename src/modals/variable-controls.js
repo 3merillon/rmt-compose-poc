@@ -43,14 +43,20 @@ function buildEvaluatedDiv(value) {
   let displayValue = 'null';
   if (value?.evaluated !== null && value?.evaluated !== undefined) {
     const ev = value.evaluated;
-    // Check if this is a corrupted (irrational) value - display as float
-    // Corrupted values have _irrational flag (from WASM), _floatValue, or isCorrupted from dependency graph
-    const isCorrupted = ev._irrational || ev._floatValue !== undefined || value.isCorrupted;
-    if (isCorrupted) {
+    // Check if this is a directly corrupted (irrational) value from WASM
+    const isDirectlyCorrupted = ev._irrational || ev._floatValue !== undefined;
+    // Check if this is transitively corrupted (depends on a corrupted note) - for display only
+    const isTransitivelyCorrupted = value.isTransitivelyCorrupted;
+
+    if (isDirectlyCorrupted) {
       // Display as float with reasonable precision
       // Prefer _floatValue (exact irrational), fall back to valueOf() (approximated fraction)
       const floatVal = ev._floatValue !== undefined ? ev._floatValue : (typeof ev.valueOf === 'function' ? ev.valueOf() : ev);
       displayValue = `≈${Number(floatVal).toPrecision(8)}`;
+      evaluatedDiv.classList.add('corrupted-value');
+    } else if (isTransitivelyCorrupted) {
+      // Transitively corrupted: show fraction with ≈ prefix to indicate it's an approximation
+      displayValue = `≈${String(ev)}`;
       evaluatedDiv.classList.add('corrupted-value');
     } else {
       displayValue = String(ev);
