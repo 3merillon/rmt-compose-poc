@@ -11,7 +11,7 @@ A production-ready, GL-only composition tool built around rational number relati
 
 ## Overview
 
-The app represents and manipulates musical structures as exact ratios and durations. A WebGL2 interactive Workspace handles all rendering and interactions with a high-performance instanced pipeline. The legacy DOM rendering layer has been removed; the Workspace and its camera are the sole sources of truth for visualization and picking.
+The app represents and manipulates musical structures as exact ratios and durations, with support for equal temperament systems (12-TET, 19-TET, 31-TET, Bohlen-Pierce). A WebGL2 interactive Workspace handles all rendering and interactions with a high-performance instanced pipeline. The legacy DOM rendering layer has been removed; the Workspace and its camera are the sole sources of truth for visualization and picking.
 
 ## Architecture
 
@@ -28,6 +28,11 @@ The app uses a **binary bytecode compilation system** for expression evaluation:
   - Notes express frequency, duration, and start time as exact expressions (compiled to bytecode backed by Fraction.js)
   - Dependency-aware evaluation with O(1) lookup and caching
   - Property-specific dependency tracking (startTime vs duration)
+
+- Multi-TET system support
+  - Built-in support for 12-TET, 19-TET, 31-TET, and Bohlen-Pierce (13-BP) tuning systems
+  - Notes using TET frequencies display **≈** prefix to indicate irrational/approximated values
+  - Create custom TET modules using power expressions
 
 - Interactive WebGL2 Workspace
   - Pan/zoom camera with affine world-screen basis
@@ -123,6 +128,35 @@ Notes:
 - The default module lives at [public/modules/defaultModule.json](public/modules/defaultModule.json)
 - Other built-in categories follow the same pattern with their own index.json files
 
+## Equal Temperament Systems
+
+While RMT is built around exact ratios, it also supports equal temperament tuning systems for exploring microtonal and alternative scales.
+
+### Included TET Modules
+Load these from the Module Bar under Melodies:
+- **TET-12** - Standard 12-tone equal temperament (semitones)
+- **TET-19** - 19 equal divisions of the octave
+- **TET-31** - 31 equal divisions of the octave (high-resolution)
+- **BP-13** - Bohlen-Pierce scale (13 equal divisions of 3:1 instead of 2:1)
+
+### Understanding the ≈ Symbol
+Notes with equal temperament frequencies display an **≈** prefix before their frequency fraction. This indicates that the displayed value is an approximation of an irrational number (like 2^(1/12)).
+
+### Creating Custom TET Modules
+To create notes in a TET system, use power expressions for frequency:
+
+| System | Frequency Step Expression |
+|--------|---------------------------|
+| 12-TET | `new Fraction(2).pow(new Fraction(1, 12))` |
+| 19-TET | `new Fraction(2).pow(new Fraction(1, 19))` |
+| 31-TET | `new Fraction(2).pow(new Fraction(1, 31))` |
+| BP-13  | `new Fraction(3).pow(new Fraction(1, 13))` |
+
+Chain the step to move up the scale:
+```json
+"frequency": "previousNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))"
+```
+
 ## File Structure
 
 ### Core Expression System
@@ -150,6 +184,7 @@ Notes:
 
 ### Assets
 - public/modules - Bundled example modules and presets
+  - melodies/ - Includes TET examples (TET-12, TET-19, TET-31, BP-13)
 
 ## Browser Support and Fallbacks
 

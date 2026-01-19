@@ -11,6 +11,7 @@ dist/
 # Editor directories
 .vscode/
 .idea/
+.claude/
 
 # OS files
 .DS_Store
