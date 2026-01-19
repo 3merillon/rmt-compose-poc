@@ -3,7 +3,9 @@
     "allow": [
       "Bash(node -e:*)",
       "Bash(npm run build:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(npm add:*)",
+      "Bash(npm run docs:build:*)"
     ]
   }
 }
