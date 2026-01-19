@@ -24,7 +24,8 @@ export default defineConfig({
       { text: 'Tutorials', link: '/tutorials/' },
       { text: 'Reference', link: '/reference/' },
       { text: 'Developer', link: '/developer/' },
-      { text: 'App', link: 'https://rmt.world', target: '_blank' }
+      { text: 'App', link: 'https://rmt.world', target: '_blank' },
+      { text: '❤️ Donate', link: 'https://buy.stripe.com/7sYeV7aW70eG75I9N6bAs00', target: '_blank' }
     ],
 
     sidebar: {
