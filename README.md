@@ -5,6 +5,7 @@ A production-ready, GL-only composition tool built around rational number relati
 ## Live Demo
 
 - Try it in your browser: https://www.rmt.world/
+- **New to RMT?** Check out the [Documentation](https://docs.rmt.world/) for guides and tutorials
 - Screenshot:
 
 ![RMT Compose screenshot](public/screenshot.png)
@@ -192,7 +193,8 @@ Chain the step to move up the scale:
 
 ## Learn More
 
-- Article and theory background: https://cybercyril.com
+- **Documentation**: https://docs.rmt.world/
+- Original article: https://cybercyril.com
 
 ## License
 
