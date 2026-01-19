@@ -444,6 +444,15 @@ export class Module {
   }
 
   /**
+   * Get the children tree for ALL properties in a single traversal (optimization).
+   * @param {number} noteId - The root note
+   * @returns {{ edgesByProperty: { frequency: Array, startTime: Array, duration: Array }, maxDepth: number }}
+   */
+  getChildrenTreeByAllProperties(noteId) {
+    return this._dependencyGraph.getChildrenTreeByAllProperties(noteId);
+  }
+
+  /**
    * Add a new note
    */
   addNote(variables = {}) {

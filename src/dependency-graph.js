@@ -63,6 +63,9 @@ export class DependencyGraph {
     // Maps noteId -> u8 bitmask indicating which properties are corrupted (contain irrational values)
     // Bit flags: 0x01=startTime, 0x02=duration, 0x04=frequency, 0x08=tempo, 0x10=beatsPerMeasure, 0x20=measureLength
     this.corruptionFlags = new Map();
+
+    // Epoch counter for corruption changes (allows renderer to skip buffer upload when unchanged)
+    this._corruptionEpoch = 0;
   }
 
   /**
@@ -1490,6 +1493,114 @@ export class DependencyGraph {
   }
 
   /**
+   * Get the children tree for ALL properties in a single traversal.
+   * This is an optimization over calling getChildrenTreeByProperty 3 times.
+   * Returns edges tagged by originating property for property-colored visualization.
+   *
+   * @param {number} noteId - The root note to start from
+   * @returns {{ edgesByProperty: { frequency: Array, startTime: Array, duration: Array }, maxDepth: number }}
+   */
+  getChildrenTreeByAllProperties(noteId) {
+    const edgesByProperty = { frequency: [], startTime: [], duration: [] };
+    const visited = new Map(); // noteId -> Set<"changedProp:originProp">
+    let maxDepth = 0;
+
+    // Queue items: { id, depth, changedProp, originProp }
+    // originProp tracks which root property initiated this branch
+    const queue = [];
+    let queueIdx = 0;
+
+    // Seed queue with all 3 properties from root
+    for (const prop of ['frequency', 'startTime', 'duration']) {
+      if (!visited.has(noteId)) {
+        visited.set(noteId, new Set());
+      }
+      visited.get(noteId).add(`${prop}:${prop}`);
+      queue.push({ id: noteId, depth: 0, changedProp: prop, originProp: prop });
+    }
+
+    const addEdge = (parentId, childId, depth, childChangedProp, originProp) => {
+      if (!visited.has(childId)) {
+        visited.set(childId, new Set());
+      }
+      const key = `${childChangedProp}:${originProp}`;
+      if (!visited.get(childId).has(key)) {
+        visited.get(childId).add(key);
+        maxDepth = Math.max(maxDepth, depth);
+        edgesByProperty[originProp].push({ parentId, childId, depth });
+        queue.push({ id: childId, depth, changedProp: childChangedProp, originProp });
+      }
+    };
+
+    while (queueIdx < queue.length) {
+      const { id: parentId, depth, changedProp, originProp } = queue[queueIdx++];
+      const childDepth = depth + 1;
+
+      // Same propagation logic as getChildrenTreeByProperty, but track originProp
+      if (changedProp === 'frequency') {
+        const stOnFreq = this.startTimeOnFrequencyDependents.get(parentId);
+        if (stOnFreq) {
+          for (const childId of stOnFreq) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'startTime', originProp);
+          }
+        }
+        const freqOnFreq = this.frequencyOnFrequencyDependents.get(parentId);
+        if (freqOnFreq) {
+          for (const childId of freqOnFreq) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'frequency', originProp);
+          }
+        }
+        const durOnFreq = this.durationOnFrequencyDependents.get(parentId);
+        if (durOnFreq) {
+          for (const childId of durOnFreq) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'duration', originProp);
+          }
+        }
+      } else if (changedProp === 'startTime') {
+        const stOnSt = this.startTimeOnStartTimeDependents.get(parentId);
+        if (stOnSt) {
+          for (const childId of stOnSt) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'startTime', originProp);
+          }
+        }
+        const freqOnSt = this.frequencyOnStartTimeDependents.get(parentId);
+        if (freqOnSt) {
+          for (const childId of freqOnSt) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'frequency', originProp);
+          }
+        }
+        const durOnSt = this.durationOnStartTimeDependents.get(parentId);
+        if (durOnSt) {
+          for (const childId of durOnSt) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'duration', originProp);
+          }
+        }
+      } else if (changedProp === 'duration') {
+        const stOnDur = this.startTimeOnDurationDependents.get(parentId);
+        if (stOnDur) {
+          for (const childId of stOnDur) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'startTime', originProp);
+          }
+        }
+        const freqOnDur = this.frequencyOnDurationDependents.get(parentId);
+        if (freqOnDur) {
+          for (const childId of freqOnDur) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'frequency', originProp);
+          }
+        }
+        const durOnDur = this.durationOnDurationDependents.get(parentId);
+        if (durOnDur) {
+          for (const childId of durOnDur) {
+            if (childId !== noteId) addEdge(parentId, childId, childDepth, 'duration', originProp);
+          }
+        }
+      }
+    }
+
+    return { edgesByProperty, maxDepth };
+  }
+
+  /**
    * Clear the entire graph
    */
   clear() {
@@ -1528,6 +1639,9 @@ export class DependencyGraph {
    * @param {number} flags - Bitmask of corrupted properties (0x01=startTime, 0x02=duration, 0x04=frequency, etc.)
    */
   setCorruptionFlags(noteId, flags) {
+    const existing = this.corruptionFlags.get(noteId) || 0;
+    if (existing === flags) return; // No change, skip epoch bump
+    this._corruptionEpoch++;
     if (flags === 0) {
       this.corruptionFlags.delete(noteId);
     } else {
@@ -1543,6 +1657,14 @@ export class DependencyGraph {
    */
   getCorruptionFlags(noteId) {
     return this.corruptionFlags.get(noteId) || 0;
+  }
+
+  /**
+   * Get the corruption epoch counter (for renderer to detect changes)
+   * @returns {number} - Current corruption epoch
+   */
+  getCorruptionEpoch() {
+    return this._corruptionEpoch;
   }
 
   /**

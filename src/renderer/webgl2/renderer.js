@@ -49,6 +49,8 @@ export class RendererAdapter {
 
     // Canvas offset for proper coordinate transformation
     this.canvasOffset = { x: 0, y: 0 };
+    // Cached canvas bounding rect (updated on resize/scroll, avoids per-frame layout query)
+    this._cachedCanvasRect = null;
 
     // Data buffers (CPU side)
     this.posSize = null; // Float32Array of [x,y,w,h] per instance
@@ -140,9 +142,14 @@ export class RendererAdapter {
     this._arrowDownRegions = null;  // Float32Array(N*4) per instance (lower half)
     // Track last GPU upload epoch for arrow backgrounds to avoid redundant bufferData on every frame
     this._lastArrowUploadEpoch = -1;
+    // Corruption buffer epoch tracking (skip upload when unchanged)
+    this._lastCorruptionUploadEpoch = -1;
 
     // Position epoch to gate dependent overlay uploads (link lines, guides)
     this._posEpoch = 0;
+    // Scene epoch: bumped after sync completes; used for post-sync overlay gating
+    // Separate from _posEpoch to avoid double-invalidation of dependency caches
+    this._sceneEpoch = 0;
     // Link-line caching: rebuild only when anchor/view/pos epoch changes
     this._lastLinkPosEpoch = -1;
     this._lastLinkViewEpoch = -1;
@@ -363,21 +370,30 @@ export class RendererAdapter {
       }
     } catch {}
 
+    // Helper to update cached canvas rect (avoids per-frame getBoundingClientRect)
+    const updateCachedRect = () => {
+      try { this._cachedCanvasRect = this.canvas.getBoundingClientRect(); } catch {}
+    };
+
     // Observe container resize and reposition canvas box accordingly
     this._resizeObserver = new ResizeObserver(() => {
       try { updateBounds(); } catch {}
       this._resizeCanvasToDisplaySize();
+      updateCachedRect();
       this.needsRedraw = true;
     });
     this._resizeObserver.observe(containerEl);
 
     // Also track window scroll/resize to keep fixed canvas aligned with container
-    this._onWinScroll = () => { try { updateBounds(); } catch {}; this.needsRedraw = true; };
-    this._onWinResize = () => { try { updateBounds(); } catch {}; this._resizeCanvasToDisplaySize(); this.needsRedraw = true; };
+    this._onWinScroll = () => { try { updateBounds(); } catch {}; updateCachedRect(); this.needsRedraw = true; };
+    this._onWinResize = () => { try { updateBounds(); } catch {}; this._resizeCanvasToDisplaySize(); updateCachedRect(); this.needsRedraw = true; };
     try {
       window.addEventListener('scroll', this._onWinScroll, true);
       window.addEventListener('resize', this._onWinResize, true);
     } catch {}
+
+    // Initialize cached canvas rect
+    try { this._cachedCanvasRect = this.canvas.getBoundingClientRect(); } catch {}
 
     // Start render loop
     const loop = () => {
@@ -957,10 +973,22 @@ export class RendererAdapter {
         gl.bufferData(gl.ARRAY_BUFFER, this._dragFlags, gl.DYNAMIC_DRAW);
       }
 
-      // Upload corruption type buffer for hatching display
+      // Upload corruption type buffer for hatching display (epoch-gated)
       if (this.rectInstanceCorruptionBuffer && this._corruptionType) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceCorruptionBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, this._corruptionType, gl.DYNAMIC_DRAW);
+        // Check if corruption data changed by comparing epochs
+        let corruptionEpoch = 0;
+        try {
+          const depGraph = module?.getDependencyGraph?.();
+          if (depGraph && typeof depGraph.getCorruptionEpoch === 'function') {
+            corruptionEpoch = depGraph.getCorruptionEpoch();
+          }
+        } catch {}
+        // Upload only if epoch changed or first upload
+        if (this._lastCorruptionUploadEpoch !== corruptionEpoch) {
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceCorruptionBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, this._corruptionType, gl.DYNAMIC_DRAW);
+          this._lastCorruptionUploadEpoch = corruptionEpoch;
+        }
       }
 
       // Ensure all enabled per-instance attribute buffers are large enough for instanceCount draws
@@ -998,10 +1026,10 @@ export class RendererAdapter {
       gl.bindBuffer(gl.ARRAY_BUFFER, null);
     }
 
-    // Note: posEpoch was already bumped at start of sync() to invalidate dependency cache.
-    // This second bump ensures overlay passes (link lines, etc.) see final positions.
-    // The double-bump is intentional: first invalidates caches, second signals scene completion.
-    this._posEpoch = (this._posEpoch || 0) + 1;
+    // Bump scene epoch to signal sync completion for overlay passes.
+    // Note: _posEpoch was bumped at start of sync() for cache invalidation.
+    // Using separate _sceneEpoch avoids double-invalidation of dependency highlight cache.
+    this._sceneEpoch = (this._sceneEpoch || 0) + 1;
 
     // Invalidate cached tab/arrow regions after scene changes
     this._lastTabEpoch = -1;
@@ -2170,7 +2198,8 @@ export class RendererAdapter {
     gl.disable(gl.SCISSOR_TEST);
 
     // Use CSS pixel size for viewport uniform because Workspace basis gives CSS pixels
-    const rectCss = canvas.getBoundingClientRect();
+    // Use cached rect when available to avoid per-frame layout query
+    const rectCss = this._cachedCanvasRect || canvas.getBoundingClientRect();
     const vpW = Math.max(1, rectCss.width);
     const vpH = Math.max(1, rectCss.height);
     
@@ -8935,7 +8964,15 @@ try {
             }
           }
 
-          if (selC) {
+          // Check if we need to rebuild endpoints (epoch-gated to avoid redundant CPU work)
+          const anchorChanged = (this._lastLinkAnchorId !== anchorId);
+          const viewChanged   = (this._lastLinkViewEpoch !== this._viewEpoch);
+          const posChanged    = (this._lastLinkPosEpoch !== this._posEpoch);
+          const prosChanged   = (this._lastLinkProspectiveParentId !== this._prospectiveParentId);
+          const triChanged    = (this._lastLinkTriDataEpoch !== this._triDataEpoch);
+          const needsRebuild = anchorChanged || viewChanged || posChanged || prosChanged || triChanged;
+
+          if (selC && needsRebuild) {
             const buildEndpoints = (indices) => {
               if (!indices || !indices.length) return null;
               const arr = new Float32Array(indices.length * 4);
@@ -9263,14 +9300,15 @@ try {
               const rdepsList = [];
               const rdepsFlags = [];
 
-              if (mref && typeof mref.getChildrenTreeByProperty === 'function') {
-                // Use tree-based rendering: draw connected segments through the dependency tree
-                // This shows the transitive chain structure instead of star pattern from selection
-                for (const prop of ['frequency', 'startTime', 'duration']) {
-                  const tree = mref.getChildrenTreeByProperty(Number(anchorId), prop);
-                  if (!tree?.edges?.length) continue;
+              if (mref && typeof mref.getChildrenTreeByAllProperties === 'function') {
+                // Use batched tree traversal (single BFS instead of 3 separate calls)
+                const allTrees = mref.getChildrenTreeByAllProperties(Number(anchorId));
 
-                  for (const edge of tree.edges) {
+                for (const prop of ['frequency', 'startTime', 'duration']) {
+                  const edges = allTrees.edgesByProperty[prop];
+                  if (!edges?.length) continue;
+
+                  for (const edge of edges) {
                     // During drag, only include edges where child is in the moving set
                     if (movingSet && !movingSet.has(edge.childId)) continue;
 
@@ -9282,6 +9320,25 @@ try {
                     rdepsListByProp[prop].push(parentCenter.x, parentCenter.y, childCenter.x, childCenter.y);
 
                     // Compute moving flags for drag preview
+                    const parentMoving = edge.parentId === Number(anchorId)
+                      ? movingAnchor
+                      : !!(movingSet && movingSet.has(edge.parentId));
+                    const childMoving = !!(movingSet && movingSet.has(edge.childId));
+                    rdepsFlagsByProp[prop].push(parentMoving ? 1.0 : 0.0, childMoving ? 1.0 : 0.0);
+                  }
+                }
+              } else if (mref && typeof mref.getChildrenTreeByProperty === 'function') {
+                // Fallback to individual calls for backwards compatibility
+                for (const prop of ['frequency', 'startTime', 'duration']) {
+                  const tree = mref.getChildrenTreeByProperty(Number(anchorId), prop);
+                  if (!tree?.edges?.length) continue;
+
+                  for (const edge of tree.edges) {
+                    if (movingSet && !movingSet.has(edge.childId)) continue;
+                    const parentCenter = getCenterForId(edge.parentId);
+                    const childCenter = getCenterForId(edge.childId);
+                    if (!parentCenter || !childCenter) continue;
+                    rdepsListByProp[prop].push(parentCenter.x, parentCenter.y, childCenter.x, childCenter.y);
                     const parentMoving = edge.parentId === Number(anchorId)
                       ? movingAnchor
                       : !!(movingSet && movingSet.has(edge.parentId));
@@ -9385,88 +9442,82 @@ try {
               var rdepsFlagsArr = rdepsFlags.length ? new Float32Array(rdepsFlags) : null;
             } catch {}
 
-            // Epoch-gated upload for link endpoints; reuse buffers unless anchor/view/pos/prospective-parent/measure-tri changed
-const anchorChanged = (this._lastLinkAnchorId !== anchorId);
-const viewChanged   = (this._lastLinkViewEpoch !== this._viewEpoch);
-const posChanged    = (this._lastLinkPosEpoch !== this._posEpoch);
-const prosChanged   = (this._lastLinkProspectiveParentId !== this._prospectiveParentId);
-const triChanged    = (this._lastLinkTriDataEpoch !== this._triDataEpoch);
-const rebuild = anchorChanged || viewChanged || posChanged || prosChanged || triChanged;
+            // Upload computed endpoints to GPU (only runs when needsRebuild was true)
+            // Store endpoint arrays (CSS px) for current anchor
+            this._linkEndpointsDeps  = depsArr  || new Float32Array(0);
+            this._linkEndpointsRdeps = rdepsArr || new Float32Array(0);
+            this._linkDepsCount  = Math.max(0, Math.floor(this._linkEndpointsDeps.length  / 4));
+            this._linkRdepsCount = Math.max(0, Math.floor(this._linkEndpointsRdeps.length / 4));
 
-if (rebuild) {
-  // Compute endpoint arrays (CSS px) for current anchor
-  this._linkEndpointsDeps  = depsArr  || new Float32Array(0);
-  this._linkEndpointsRdeps = rdepsArr || new Float32Array(0);
-  this._linkDepsCount  = Math.max(0, Math.floor(this._linkEndpointsDeps.length  / 4));
-  this._linkRdepsCount = Math.max(0, Math.floor(this._linkEndpointsRdeps.length / 4));
+            // Upload to dedicated buffers
+            gl.bindVertexArray(this.linkLineVAO);
+            if (this._linkDepsCount > 0) {
+              gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferDeps);
+              gl.bufferData(gl.ARRAY_BUFFER, this._linkEndpointsDeps, gl.DYNAMIC_DRAW);
+              if (depsFlagsArr && this.linkLineFlagsBufferDeps) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferDeps);
+                gl.bufferData(gl.ARRAY_BUFFER, depsFlagsArr, gl.DYNAMIC_DRAW);
+              }
+            }
+            if (this._linkRdepsCount > 0) {
+              gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferRdeps);
+              gl.bufferData(gl.ARRAY_BUFFER, this._linkEndpointsRdeps, gl.DYNAMIC_DRAW);
+              if (rdepsFlagsArr && this.linkLineFlagsBufferRdeps) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferRdeps);
+                gl.bufferData(gl.ARRAY_BUFFER, rdepsFlagsArr, gl.DYNAMIC_DRAW);
+              }
+            }
 
-  // Upload to dedicated buffers once per epoch
-  gl.bindVertexArray(this.linkLineVAO);
-  if (this._linkDepsCount > 0) {
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferDeps);
-    gl.bufferData(gl.ARRAY_BUFFER, this._linkEndpointsDeps, gl.DYNAMIC_DRAW);
-    if (depsFlagsArr && this.linkLineFlagsBufferDeps) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferDeps);
-      gl.bufferData(gl.ARRAY_BUFFER, depsFlagsArr, gl.DYNAMIC_DRAW);
-    }
-  }
-  if (this._linkRdepsCount > 0) {
-    gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferRdeps);
-    gl.bufferData(gl.ARRAY_BUFFER, this._linkEndpointsRdeps, gl.DYNAMIC_DRAW);
-    if (rdepsFlagsArr && this.linkLineFlagsBufferRdeps) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferRdeps);
-      gl.bufferData(gl.ARRAY_BUFFER, rdepsFlagsArr, gl.DYNAMIC_DRAW);
-    }
-  }
+            // Upload property-colored rdeps buffers
+            for (const prop of ['frequency', 'startTime', 'duration']) {
+              const propArr = rdepsArrByProp?.[prop];
+              const propFlags = rdepsFlagsArrByProp?.[prop];
+              const count = propArr ? Math.max(0, Math.floor(propArr.length / 4)) : 0;
+              this._linkCountByProperty[prop] = count;
+              this._linkEndpointsByProperty[prop] = propArr;
+              this._linkFlagsByProperty[prop] = propFlags;
 
-  // Upload property-colored rdeps buffers
-  for (const prop of ['frequency', 'startTime', 'duration']) {
-    const propArr = rdepsArrByProp?.[prop];
-    const propFlags = rdepsFlagsArrByProp?.[prop];
-    const count = propArr ? Math.max(0, Math.floor(propArr.length / 4)) : 0;
-    this._linkCountByProperty[prop] = count;
-    this._linkEndpointsByProperty[prop] = propArr;
-    this._linkFlagsByProperty[prop] = propFlags;
+              if (count > 0 && this._linkBuffersByProperty?.[prop]) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].endpoints);
+                gl.bufferData(gl.ARRAY_BUFFER, propArr, gl.DYNAMIC_DRAW);
+                if (propFlags) {
+                  gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].flags);
+                  gl.bufferData(gl.ARRAY_BUFFER, propFlags, gl.DYNAMIC_DRAW);
+                }
+              }
+            }
 
-    if (count > 0 && this._linkBuffersByProperty?.[prop]) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].endpoints);
-      gl.bufferData(gl.ARRAY_BUFFER, propArr, gl.DYNAMIC_DRAW);
-      if (propFlags) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._linkBuffersByProperty[prop].flags);
-        gl.bufferData(gl.ARRAY_BUFFER, propFlags, gl.DYNAMIC_DRAW);
-      }
-    }
-  }
+            // Upload property-colored deps buffers
+            for (const prop of ['frequency', 'startTime', 'duration']) {
+              const propArr = depsArrByProp?.[prop];
+              const propFlags = depsFlagsArrByProp?.[prop];
+              const count = propArr ? Math.max(0, Math.floor(propArr.length / 4)) : 0;
+              this._linkDepsCountByProperty[prop] = count;
+              this._linkDepsEndpointsByProperty[prop] = propArr;
+              this._linkDepsFlagsByProperty[prop] = propFlags;
 
-  // Upload property-colored deps buffers
-  for (const prop of ['frequency', 'startTime', 'duration']) {
-    const propArr = depsArrByProp?.[prop];
-    const propFlags = depsFlagsArrByProp?.[prop];
-    const count = propArr ? Math.max(0, Math.floor(propArr.length / 4)) : 0;
-    this._linkDepsCountByProperty[prop] = count;
-    this._linkDepsEndpointsByProperty[prop] = propArr;
-    this._linkDepsFlagsByProperty[prop] = propFlags;
+              if (count > 0 && this._linkDepsBuffersByProperty?.[prop]) {
+                gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].endpoints);
+                gl.bufferData(gl.ARRAY_BUFFER, propArr, gl.DYNAMIC_DRAW);
+                if (propFlags) {
+                  gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].flags);
+                  gl.bufferData(gl.ARRAY_BUFFER, propFlags, gl.DYNAMIC_DRAW);
+                }
+              }
+            }
 
-    if (count > 0 && this._linkDepsBuffersByProperty?.[prop]) {
-      gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].endpoints);
-      gl.bufferData(gl.ARRAY_BUFFER, propArr, gl.DYNAMIC_DRAW);
-      if (propFlags) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._linkDepsBuffersByProperty[prop].flags);
-        gl.bufferData(gl.ARRAY_BUFFER, propFlags, gl.DYNAMIC_DRAW);
-      }
-    }
-  }
+            gl.bindVertexArray(null);
 
-  gl.bindVertexArray(null);
+            // Update last states
+            this._lastLinkAnchorId = anchorId;
+            this._lastLinkViewEpoch = this._viewEpoch;
+            this._lastLinkPosEpoch = this._posEpoch;
+            this._lastLinkProspectiveParentId = this._prospectiveParentId;
+            this._lastLinkTriDataEpoch = this._triDataEpoch;
+          } // end if (selC && needsRebuild)
 
-  // Update last states
-  this._lastLinkAnchorId = anchorId;
-  this._lastLinkViewEpoch = this._viewEpoch;
-  this._lastLinkPosEpoch = this._posEpoch;
-  this._lastLinkProspectiveParentId = this._prospectiveParentId;
-  this._lastLinkTriDataEpoch = this._triDataEpoch;
-}
-
+          // Draw link lines if selection exists (uses cached/fresh endpoints)
+          if (selC || this._linkDepsCount > 0 || this._linkRdepsCount > 0) {
             // Common state for both batches
             gl.useProgram(this.linkLineProgram);
             const U = (this._uniforms && this._uniforms.linkLine) ? this._uniforms.linkLine : null;
