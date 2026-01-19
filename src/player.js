@@ -2144,6 +2144,382 @@ function __parseParentFromStartTimeStringGL(note) {
 }
 
 /**
+ * Parse a frequency expression to extract algebra and note reference.
+ * Returns { algebra: {coeff, powers}, noteRef: number|null } or null if parsing fails.
+ * noteRef is null for baseNote references, otherwise the note ID.
+ *
+ * Handles chained .mul() calls correctly by finding the LAST .mul() at top level
+ * and recursively parsing the left side.
+ */
+function parseFrequencyExpressionLocal(exprText, moduleInstance) {
+  const debug = typeof window !== 'undefined' && window.__RMT_DEBUG_ALGEBRA;
+  if (!exprText) return null;
+  const expr = exprText.trim();
+
+  if (debug) console.log('[ParseFreq] Input:', expr);
+
+  // Base case: direct baseNote reference
+  if (/^module\.baseNote\.getVariable\s*\(\s*['"]frequency['"]\s*\)$/.test(expr)) {
+    if (debug) console.log('[ParseFreq] -> baseNote direct ref');
+    return { algebra: { coeff: new Fraction(1), powers: [] }, noteRef: null };
+  }
+
+  // Base case: direct note reference
+  const noteRefMatch = expr.match(/^module\.getNoteById\s*\(\s*(\d+)\s*\)\.getVariable\s*\(\s*['"]frequency['"]\s*\)$/);
+  if (noteRefMatch) {
+    if (debug) console.log('[ParseFreq] -> note direct ref:', noteRefMatch[1]);
+    return { algebra: { coeff: new Fraction(1), powers: [] }, noteRef: parseInt(noteRefMatch[1], 10) };
+  }
+
+  // Find the LAST top-level .mul() to handle chained calls correctly
+  // e.g., "a.mul(b).mul(c)" should split as "a.mul(b)" and "c"
+  let depth = 0;
+  let lastMulStart = -1;
+  for (let i = 0; i < expr.length - 4; i++) {
+    if (expr[i] === '(') depth++;
+    else if (expr[i] === ')') depth--;
+    else if (depth === 0 && expr.substring(i, i + 5) === '.mul(') {
+      lastMulStart = i;
+      // Don't break - keep searching for the last one
+    }
+  }
+
+  if (lastMulStart === -1) return null;
+
+  const left = expr.substring(0, lastMulStart).trim();
+  // Find matching closing paren for this .mul() call
+  let parenDepth = 0;
+  const argStart = lastMulStart + 5;
+  let right = null;
+  let argEnd = -1;
+  for (let i = argStart; i < expr.length; i++) {
+    if (expr[i] === '(') parenDepth++;
+    else if (expr[i] === ')') {
+      if (parenDepth === 0) {
+        right = expr.substring(argStart, i).trim();
+        argEnd = i;
+        break;
+      }
+      parenDepth--;
+    }
+  }
+  if (!right) return null;
+
+  // Check if there's anything after the closing paren (shouldn't be for valid expressions)
+  const remainder = expr.substring(argEnd + 1).trim();
+  if (remainder.length > 0) {
+    // There's more after this .mul() - this shouldn't happen with proper last-mul detection
+    // but handle it gracefully by returning null
+    return null;
+  }
+
+  const gcdLocal = (a, b) => b === 0 ? Math.abs(a) : gcdLocal(b, a % b);
+
+  // Helper to merge a power term into an algebra
+  function mergePowerIntoAlgebra(algebra, base, expNum, expDen) {
+    const existingPower = algebra.powers.find(p => p.base === base);
+    if (existingPower) {
+      const newNum = existingPower.expNum * expDen + expNum * existingPower.expDen;
+      const newDen = existingPower.expDen * expDen;
+      const g = gcdLocal(Math.abs(newNum), newDen);
+      existingPower.expNum = newNum / g;
+      existingPower.expDen = newDen / g;
+      // Remove if zero
+      if (existingPower.expNum === 0) {
+        algebra.powers = algebra.powers.filter(p => p.base !== base);
+      }
+    } else if (expNum !== 0) {
+      algebra.powers.push({ base, expNum, expDen });
+    }
+  }
+
+  // Check if right is a fraction constant: new Fraction(a) or new Fraction(a, b)
+  const fracMatch = right.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
+  if (fracMatch) {
+    const num = parseInt(fracMatch[1], 10);
+    const den = fracMatch[2] ? parseInt(fracMatch[2], 10) : 1;
+    const leftParsed = parseFrequencyExpressionLocal(left, moduleInstance);
+    if (leftParsed) {
+      leftParsed.algebra.coeff = leftParsed.algebra.coeff.mul(new Fraction(num, den));
+      return leftParsed;
+    }
+  }
+
+  // Check if left is a fraction constant (e.g., new Fraction(3,2).mul(expr))
+  const fracMatchLeft = left.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
+  if (fracMatchLeft) {
+    const num = parseInt(fracMatchLeft[1], 10);
+    const den = fracMatchLeft[2] ? parseInt(fracMatchLeft[2], 10) : 1;
+    const rightParsed = parseFrequencyExpressionLocal(right, moduleInstance);
+    if (rightParsed) {
+      rightParsed.algebra.coeff = rightParsed.algebra.coeff.mul(new Fraction(num, den));
+      return rightParsed;
+    }
+  }
+
+  // Check if right is a POW expression: new Fraction(BASE).pow(new Fraction(n, d))
+  const powMatch = right.match(/^new\s+Fraction\s*\(\s*(\d+)\s*\)\.pow\s*\(\s*new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
+  if (powMatch) {
+    const base = parseInt(powMatch[1], 10);
+    const expNum = parseInt(powMatch[2], 10);
+    const expDen = powMatch[3] ? parseInt(powMatch[3], 10) : 1;
+    const leftParsed = parseFrequencyExpressionLocal(left, moduleInstance);
+    if (leftParsed) {
+      mergePowerIntoAlgebra(leftParsed.algebra, base, expNum, expDen);
+      return leftParsed;
+    }
+  }
+
+  // Check if left is a POW expression (e.g., new Fraction(2).pow(...).mul(expr))
+  const powMatchLeft = left.match(/^new\s+Fraction\s*\(\s*(\d+)\s*\)\.pow\s*\(\s*new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
+  if (powMatchLeft) {
+    const base = parseInt(powMatchLeft[1], 10);
+    const expNum = parseInt(powMatchLeft[2], 10);
+    const expDen = powMatchLeft[3] ? parseInt(powMatchLeft[3], 10) : 1;
+    const rightParsed = parseFrequencyExpressionLocal(right, moduleInstance);
+    if (rightParsed) {
+      mergePowerIntoAlgebra(rightParsed.algebra, base, expNum, expDen);
+      return rightParsed;
+    }
+  }
+
+  // Try parsing both sides as expressions and combining them
+  // This handles cases like: expr1.mul(expr2) where both sides need recursive parsing
+  const leftParsed = parseFrequencyExpressionLocal(left, moduleInstance);
+  const rightParsed = parseFrequencyExpressionLocal(right, moduleInstance);
+
+  if (leftParsed && rightParsed) {
+    // One side should have the noteRef, combine algebras
+    if (leftParsed.noteRef !== null && rightParsed.noteRef === null) {
+      // Left has the note reference, right is just algebra (coeff/powers)
+      if (debug) console.log('[ParseFreq] -> combined (left has ref)');
+      return {
+        algebra: multiplyAlgebrasLocal(leftParsed.algebra, rightParsed.algebra),
+        noteRef: leftParsed.noteRef
+      };
+    } else if (rightParsed.noteRef !== null && leftParsed.noteRef === null) {
+      // Right has the note reference
+      if (debug) console.log('[ParseFreq] -> combined (right has ref)');
+      return {
+        algebra: multiplyAlgebrasLocal(leftParsed.algebra, rightParsed.algebra),
+        noteRef: rightParsed.noteRef
+      };
+    } else if (leftParsed.noteRef === null && rightParsed.noteRef === null) {
+      // Both reference baseNote - combine algebras
+      if (debug) console.log('[ParseFreq] -> combined (both baseNote)');
+      return {
+        algebra: multiplyAlgebrasLocal(leftParsed.algebra, rightParsed.algebra),
+        noteRef: null
+      };
+    }
+    // Both have note refs - shouldn't happen in valid expressions
+    if (debug) console.log('[ParseFreq] -> FAIL: both sides have noteRef');
+  }
+
+  if (debug) console.log('[ParseFreq] -> FAIL: could not parse left=', left, 'right=', right, 'leftParsed=', leftParsed, 'rightParsed=', rightParsed);
+  return null;
+}
+
+/**
+ * Trace frequency algebra from a note back to baseNote.
+ * Returns combined algebra or null if tracing fails.
+ */
+function traceFrequencyAlgebraToBaseNote(noteId, moduleInstance, visited = new Set()) {
+  if (visited.has(noteId)) return null;
+  visited.add(noteId);
+
+  if (noteId === 0 || noteId === null) {
+    return { coeff: new Fraction(1), powers: [] };
+  }
+
+  const note = moduleInstance.getNoteById(noteId);
+  if (!note) return null;
+
+  const exprText = note.variables?.frequencyString;
+  if (!exprText) return null;
+
+  const parsed = parseFrequencyExpressionLocal(exprText, moduleInstance);
+  if (!parsed) return null;
+
+  if (parsed.noteRef === null) {
+    // Already references baseNote directly
+    return parsed.algebra;
+  }
+
+  // Recursively trace the referenced note
+  const refAlgebra = traceFrequencyAlgebraToBaseNote(parsed.noteRef, moduleInstance, visited);
+  if (!refAlgebra) return null;
+
+  // Combine: this note's algebra applied to the referenced note's algebra
+  return multiplyAlgebrasLocal(parsed.algebra, refAlgebra);
+}
+
+/**
+ * Multiply two frequency algebras together
+ */
+function multiplyAlgebrasLocal(a, b) {
+  const gcdLocal = (x, y) => y === 0 ? Math.abs(x) : gcdLocal(y, x % y);
+  const newCoeff = a.coeff.mul(b.coeff);
+
+  // Merge power terms
+  const map = new Map();
+  for (const p of a.powers) {
+    map.set(p.base, { base: p.base, expNum: p.expNum, expDen: p.expDen });
+  }
+  for (const p of b.powers) {
+    if (map.has(p.base)) {
+      const existing = map.get(p.base);
+      const newNum = existing.expNum * p.expDen + p.expNum * existing.expDen;
+      const newDen = existing.expDen * p.expDen;
+      const g = gcdLocal(Math.abs(newNum), newDen);
+      map.set(p.base, { base: p.base, expNum: newNum / g, expDen: newDen / g });
+    } else {
+      map.set(p.base, { base: p.base, expNum: p.expNum, expDen: p.expDen });
+    }
+  }
+
+  const newPowers = [...map.values()].filter(p => p.expNum !== 0).sort((x, y) => x.base - y.base);
+  return { coeff: newCoeff, powers: newPowers };
+}
+
+/**
+ * Divide algebra a by algebra b (a / b)
+ */
+function divideAlgebrasLocal(a, b) {
+  const gcdLocal = (x, y) => y === 0 ? Math.abs(x) : gcdLocal(y, x % y);
+  const newCoeff = a.coeff.div(b.coeff);
+
+  // Subtract power exponents
+  const map = new Map();
+  for (const p of a.powers) {
+    map.set(p.base, { base: p.base, expNum: p.expNum, expDen: p.expDen });
+  }
+  for (const p of b.powers) {
+    if (map.has(p.base)) {
+      const existing = map.get(p.base);
+      // Subtract: a/b - c/d = (ad - bc) / bd
+      const newNum = existing.expNum * p.expDen - p.expNum * existing.expDen;
+      const newDen = existing.expDen * p.expDen;
+      const g = gcdLocal(Math.abs(newNum), newDen);
+      map.set(p.base, { base: p.base, expNum: newNum / g, expDen: newDen / g });
+    } else {
+      // Subtracting means negative exponent
+      map.set(p.base, { base: p.base, expNum: -p.expNum, expDen: p.expDen });
+    }
+  }
+
+  const newPowers = [...map.values()].filter(p => p.expNum !== 0).sort((x, y) => x.base - y.base);
+  return { coeff: newCoeff, powers: newPowers };
+}
+
+/**
+ * Convert algebra to expression string relative to an anchor
+ */
+function algebraToExpressionLocal(algebra, anchorRef) {
+  const parts = [];
+  let base = `${anchorRef}.getVariable('frequency')`;
+
+  // Add coefficient if not 1
+  if (!algebra.coeff.equals(1)) {
+    const c = algebra.coeff;
+    if (c.d === 1) {
+      parts.push(`new Fraction(${c.s * c.n})`);
+    } else {
+      parts.push(`new Fraction(${c.s * c.n}, ${c.d})`);
+    }
+  }
+
+  // Add each power term
+  for (const p of algebra.powers) {
+    if (p.expDen === 1) {
+      parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.expNum}))`);
+    } else {
+      parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.expNum}, ${p.expDen}))`);
+    }
+  }
+
+  // Build the expression
+  if (parts.length === 0) {
+    return base;
+  }
+
+  // Chain with .mul()
+  let result = base;
+  for (const part of parts) {
+    result = `${result}.mul(${part})`;
+  }
+
+  return result;
+}
+
+/**
+ * Rebuild a frequency expression using algebraic preservation.
+ * This preserves POW terms exactly by parsing the original expression's algebra
+ * and recomposing it relative to the new anchor.
+ *
+ * @param {Note} note - The note whose frequency expression is being rebuilt
+ * @param {Note} newAnchor - The new anchor note to reference
+ * @param {Object} moduleInstance - The module instance for tracing
+ * @returns {string|null} - New expression string, or null if cannot be rebuilt algebraically
+ */
+function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
+  const debug = typeof window !== 'undefined' && window.__RMT_DEBUG_ALGEBRA;
+  try {
+    const exprText = note.variables?.frequencyString;
+    if (!exprText) {
+      if (debug) console.log('[AlgebraRebuild] No frequencyString');
+      return null;
+    }
+
+    // Parse the current expression
+    const parsed = parseFrequencyExpressionLocal(exprText, moduleInstance);
+    if (!parsed) {
+      if (debug) console.log('[AlgebraRebuild] Failed to parse:', exprText);
+      return null;
+    }
+    if (debug) console.log('[AlgebraRebuild] Parsed:', JSON.stringify(parsed, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+
+    const anchorRef = newAnchor.id === 0 ? "module.baseNote" : `module.getNoteById(${newAnchor.id})`;
+
+    // Get the old reference's algebra relative to baseNote
+    const oldRefId = parsed.noteRef;  // null means baseNote
+    const oldRefAlgebra = traceFrequencyAlgebraToBaseNote(oldRefId, moduleInstance);
+    if (!oldRefAlgebra) {
+      if (debug) console.log('[AlgebraRebuild] Failed to trace oldRef:', oldRefId);
+      return null;
+    }
+    if (debug) console.log('[AlgebraRebuild] oldRefAlgebra:', JSON.stringify(oldRefAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+
+    // Get the new anchor's algebra relative to baseNote
+    const newAnchorAlgebra = traceFrequencyAlgebraToBaseNote(newAnchor.id, moduleInstance);
+    if (!newAnchorAlgebra) {
+      if (debug) console.log('[AlgebraRebuild] Failed to trace newAnchor:', newAnchor.id);
+      return null;
+    }
+    if (debug) console.log('[AlgebraRebuild] newAnchorAlgebra:', JSON.stringify(newAnchorAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+
+    // The note's absolute algebra (relative to baseNote) is:
+    // noteAbsoluteAlgebra = parsed.algebra * oldRefAlgebra
+    const noteAbsoluteAlgebra = multiplyAlgebrasLocal(parsed.algebra, oldRefAlgebra);
+    if (debug) console.log('[AlgebraRebuild] noteAbsoluteAlgebra:', JSON.stringify(noteAbsoluteAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+
+    // To express relative to newAnchor, we need:
+    // noteAbsoluteAlgebra = newRelativeAlgebra * newAnchorAlgebra
+    // So: newRelativeAlgebra = noteAbsoluteAlgebra / newAnchorAlgebra
+    const newRelativeAlgebra = divideAlgebrasLocal(noteAbsoluteAlgebra, newAnchorAlgebra);
+    if (debug) console.log('[AlgebraRebuild] newRelativeAlgebra:', JSON.stringify(newRelativeAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+
+    // Generate the new expression
+    const result = algebraToExpressionLocal(newRelativeAlgebra, anchorRef);
+    if (debug) console.log('[AlgebraRebuild] Result:', result);
+    return result;
+  } catch (e) {
+    if (debug) console.log('[AlgebraRebuild] Exception:', e);
+    return null;
+  }
+}
+
+/**
  * Rebuild a frequency expression to target a new anchor while preserving corruption.
  * Corruption is "unwashable" - if the note's frequency involves irrational values,
  * we must express the relationship to the new anchor using .pow() to preserve exactness.
@@ -2179,73 +2555,89 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
 
     // If note is transitively corrupt, we need to express ratio using .pow() to preserve precision
     if (noteTransitivelyCorrupt && !anchorCorrupt) {
-      // The ratio contains irrational factors - express as 2^(semitones/12)
-      // This preserves the exact relationship
-      const log2Ratio = Math.log2(ratio);
+      // The ratio contains irrational factors - express as base^(n/d) to preserve the exact relationship
+      // Supports multi-base TET systems: base 2 (octave), base 3 (tritave/Bohlen-Pierce), etc.
 
-      // Try to express as TET interval: 2^(n/12) for various denominators
-      for (const denom of [12, 24, 1, 2, 3, 4, 6]) {
-        const numer = Math.round(log2Ratio * denom);
-        const reconstructed = Math.pow(2, numer / denom);
+      // TET configurations: {base, divisions[]}
+      // Ordered by commonality within each base
+      const tetConfigs = [
+        { base: 2, divisions: [12, 24, 19, 31, 53, 1, 2, 3, 4, 6] },  // Standard octave-based
+        { base: 3, divisions: [13, 19, 39, 1, 2, 3] },                 // Bohlen-Pierce (tritave)
+      ];
 
-        // Check if this approximation is exact enough
-        if (Math.abs(reconstructed - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-12) {
-          // Found exact representation
-          const gcd = (a, b) => b === 0 ? Math.abs(a) : gcd(b, a % b);
-          const g = gcd(Math.abs(numer), denom);
-          const simpNum = numer / g;
-          const simpDen = denom / g;
+      const gcd = (a, b) => b === 0 ? Math.abs(a) : gcd(b, a % b);
 
-          if (simpDen === 1) {
-            // Integer power of 2
-            if (simpNum === 0) {
-              return `${anchorRef}.getVariable('frequency')`;
+      // Try each base to find exact TET representation
+      for (const config of tetConfigs) {
+        const logBaseRatio = Math.log(ratio) / Math.log(config.base);
+
+        for (const denom of config.divisions) {
+          const numer = Math.round(logBaseRatio * denom);
+          const reconstructed = Math.pow(config.base, numer / denom);
+
+          // Check if this approximation is exact enough
+          if (Math.abs(reconstructed - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-12) {
+            // Found exact representation
+            const g = gcd(Math.abs(numer), denom);
+            const simpNum = numer / g;
+            const simpDen = denom / g;
+
+            if (simpDen === 1) {
+              // Integer power of base
+              if (simpNum === 0) {
+                return `${anchorRef}.getVariable('frequency')`;
+              }
+              const multiplier = Math.pow(config.base, simpNum);
+              return `new Fraction(${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
             }
-            const multiplier = Math.pow(2, simpNum);
-            return `new Fraction(${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
+            return `${anchorRef}.getVariable('frequency').mul(new Fraction(${config.base}).pow(new Fraction(${simpNum}, ${simpDen})))`;
           }
-          return `${anchorRef}.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(${simpNum}, ${simpDen})))`;
         }
       }
 
-      // Couldn't find clean TET representation - try to factor out the rational part
-      // The ratio might be rationalPart * 2^(irrationalPart)
+      // Couldn't find clean single-base TET representation - try to factor out the rational part
+      // First, try base 2 (most common), then base 3
+      for (const base of [2, 3]) {
+        const logBaseRatio = Math.log(ratio) / Math.log(base);
+        const defaultDenom = base === 2 ? 12 : 13;  // 12-TET for base 2, 13-BP for base 3
+        const steps = logBaseRatio * defaultDenom;
+        const tetPart = Math.round(steps);
+        const tetRatio = Math.pow(base, tetPart / defaultDenom);
+        const remainingRatio = ratio / tetRatio;
+
+        // Check if remaining ratio is close to a simple fraction
+        try {
+          const remainingFrac = new Fraction(remainingRatio).simplify(1e-9);
+          if (Math.abs(remainingFrac.valueOf() - remainingRatio) / Math.max(Math.abs(remainingRatio), 1e-12) < 1e-9) {
+            // We can express as: rationalPart * anchor * base^(tetPart/defaultDenom)
+            const g = gcd(Math.abs(tetPart), defaultDenom);
+            const simpTetNum = tetPart / g;
+            const simpTetDen = defaultDenom / g;
+
+            let expr = `${anchorRef}.getVariable('frequency')`;
+
+            if (simpTetDen === 1) {
+              if (simpTetNum !== 0) {
+                const tetMult = Math.pow(base, simpTetNum);
+                expr = `new Fraction(${tetMult}).mul(${expr})`;
+              }
+            } else {
+              expr = `${expr}.mul(new Fraction(${base}).pow(new Fraction(${simpTetNum}, ${simpTetDen})))`;
+            }
+
+            if (remainingFrac.n !== remainingFrac.d) {
+              expr = `new Fraction(${remainingFrac.n}, ${remainingFrac.d}).mul(${expr})`;
+            }
+
+            return expr;
+          }
+        } catch {}
+      }
+
+      // Last resort: use base 2 TET approximation (may have small error but preserves corruption)
+      const log2Ratio = Math.log2(ratio);
       const semitones = log2Ratio * 12;
       const tetPart = Math.round(semitones);
-      const tetRatio = Math.pow(2, tetPart / 12);
-      const remainingRatio = ratio / tetRatio;
-
-      // Check if remaining ratio is close to a simple fraction
-      try {
-        const remainingFrac = new Fraction(remainingRatio).simplify(1e-9);
-        if (Math.abs(remainingFrac.valueOf() - remainingRatio) / Math.max(Math.abs(remainingRatio), 1e-12) < 1e-9) {
-          // We can express as: rationalPart * anchor * 2^(tetPart/12)
-          const gcd = (a, b) => b === 0 ? Math.abs(a) : gcd(b, a % b);
-          const g = gcd(Math.abs(tetPart), 12);
-          const simpTetNum = tetPart / g;
-          const simpTetDen = 12 / g;
-
-          let expr = `${anchorRef}.getVariable('frequency')`;
-
-          if (simpTetDen === 1) {
-            if (simpTetNum !== 0) {
-              const tetMult = Math.pow(2, simpTetNum);
-              expr = `new Fraction(${tetMult}).mul(${expr})`;
-            }
-          } else {
-            expr = `${expr}.mul(new Fraction(2).pow(new Fraction(${simpTetNum}, ${simpTetDen})))`;
-          }
-
-          if (remainingFrac.n !== remainingFrac.d) {
-            expr = `new Fraction(${remainingFrac.n}, ${remainingFrac.d}).mul(${expr})`;
-          }
-
-          return expr;
-        }
-      } catch {}
-
-      // Last resort: just use the TET approximation (may have small error but preserves corruption)
-      const gcd = (a, b) => b === 0 ? Math.abs(a) : gcd(b, a % b);
       const g = gcd(Math.abs(tetPart), 12);
       return `${anchorRef}.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(${tetPart / g}, ${12 / g})))`;
     }
@@ -4067,13 +4459,19 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               const corruptionInvolved = isTransitivelyCorrupt || anchorIsCorrupt || (fRaw0 && fRaw0.includes('.pow('));
 
               if (corruptionInvolved) {
-                // Use value-based rebuilding for ALL corruption cases
-                // This preserves the evaluated frequency exactly by computing the ratio
-                const newExpr = rebuildFrequencyForAnchor(n, anchor, depGraph);
+                // FIRST: Try algebraic preservation - this preserves POW terms exactly
+                // by parsing the original expression and recomposing relative to the new anchor
+                let newExpr = rebuildFrequencyAlgebraically(n, anchor, myModule);
+
+                // FALLBACK: If algebraic approach fails, use value-based ratio detection
+                if (!newExpr) {
+                  newExpr = rebuildFrequencyForAnchor(n, anchor, depGraph);
+                }
+
                 if (newExpr) {
                   n.setVariable('frequencyString', newExpr);
                 }
-                // If newExpr is null, preserve original expression (safer than corrupting)
+                // If newExpr is still null, preserve original expression (safer than corrupting)
               } else {
                 // No corruption involved - safe to use ratio-based rebuilding with simplification
                 const curFv = n.getVariable('frequency');

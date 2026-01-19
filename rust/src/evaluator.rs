@@ -100,7 +100,7 @@ impl FractionData {
         }
     }
 
-    /// Create from a Value (may be rational or irrational)
+    /// Create from a Value (may be rational, irrational, or symbolic)
     pub fn from_value(v: &Value) -> Self {
         match v {
             Value::Rational(frac) => {
@@ -119,6 +119,22 @@ impl FractionData {
                     n: numer,
                     d: denom,
                     f: Some(*val),
+                    corrupted: true,
+                }
+            }
+            Value::Symbolic(sp) => {
+                // Approximate symbolic as a fraction for valueOf() compatibility
+                // The f64 value preserves accuracy for playback
+                let val = sp.to_f64();
+                let abs_val = val.abs();
+                let sign = if val < 0.0 { -1 } else if val > 0.0 { 1 } else { 0 };
+                let denom = 1_000_000u32;
+                let numer = (abs_val * (denom as f64)).round() as u32;
+                FractionData {
+                    s: sign,
+                    n: numer,
+                    d: denom,
+                    f: Some(val),
                     corrupted: true,
                 }
             }
@@ -490,7 +506,7 @@ impl Evaluator {
     }
 
     /// Evaluate and return as Fraction (for backward compatibility)
-    /// Irrational values are approximated
+    /// Irrational and symbolic values are approximated
     pub fn evaluate_as_fraction(
         &mut self,
         bytecode: &[u8],
@@ -501,6 +517,14 @@ impl Evaluator {
         Ok(match value {
             Value::Rational(f) => f,
             Value::Irrational(v) => Fraction::from_f64(v),
+            Value::Symbolic(sp) => {
+                // If symbolic is actually rational, return exact value
+                if let Some(rational) = sp.to_rational_fraction() {
+                    rational
+                } else {
+                    Fraction::from_f64(sp.to_f64())
+                }
+            }
         })
     }
 

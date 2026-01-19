@@ -785,32 +785,57 @@ function referencesBaseNoteFrequency(exprText) {
 
 // ===== Symbolic Expression Chain Tracing =====
 // Traces a frequency expression back to baseNote, preserving POW operations algebraically
+// Supports multiple bases (2, 3, 5, etc.) for multi-base TET systems
 
 /**
  * Represents the algebraic form of a frequency expression:
- * frequency = coeff * baseNote.frequency * 2^(powNum/powDen)
+ * frequency = coeff * baseNote.frequency * base1^(exp1) * base2^(exp2) * ...
  *
- * Where coeff is a rational number (Fraction) and pow is the exponent for base 2
+ * Where coeff is a rational number (Fraction) and powers is an array of {base, expNum, expDen}
+ * @param {Fraction} coeff - Rational coefficient
+ * @param {Array<{base: number, expNum: number, expDen: number}>} powers - Power terms
  */
-function createFrequencyAlgebra(coeff = new Fraction(1), powNum = 0, powDen = 1) {
-    return { coeff, powNum, powDen };
+function createFrequencyAlgebra(coeff = new Fraction(1), powers = []) {
+    return { coeff, powers };
+}
+
+/**
+ * Merge power terms, combining like bases: base^a * base^b = base^(a+b)
+ */
+function mergePowerTerms(a, b) {
+    const map = new Map();
+
+    for (const p of a) {
+        map.set(p.base, { base: p.base, expNum: p.expNum, expDen: p.expDen });
+    }
+
+    for (const p of b) {
+        if (map.has(p.base)) {
+            const existing = map.get(p.base);
+            // Add exponents: a/b + c/d = (ad+bc)/bd
+            const newNum = existing.expNum * p.expDen + p.expNum * existing.expDen;
+            const newDen = existing.expDen * p.expDen;
+            const g = gcd(Math.abs(newNum), newDen);
+            map.set(p.base, { base: p.base, expNum: newNum / g, expDen: newDen / g });
+        } else {
+            map.set(p.base, { base: p.base, expNum: p.expNum, expDen: p.expDen });
+        }
+    }
+
+    // Filter out zero exponents and sort by base
+    return [...map.values()]
+        .filter(p => p.expNum !== 0)
+        .sort((a, b) => a.base - b.base);
 }
 
 /**
  * Multiply two frequency algebras together:
- * (c1 * base * 2^(p1)) * (c2 * base * 2^(p2)) = (c1*c2) * base * 2^(p1+p2)
- * But we only have one baseNote reference, so:
- * result.coeff = a.coeff * b.coeff
- * result.pow = a.pow + b.pow
+ * (c1 * prod(bi^ei)) * (c2 * prod(bj^ej)) = (c1*c2) * prod(combined powers)
  */
 function multiplyFrequencyAlgebras(a, b) {
     const newCoeff = a.coeff.mul(b.coeff);
-    // Add exponents: p1/d1 + p2/d2 = (p1*d2 + p2*d1) / (d1*d2)
-    const newPowNum = a.powNum * b.powDen + b.powNum * a.powDen;
-    const newPowDen = a.powDen * b.powDen;
-    // Simplify the fraction
-    const g = gcd(Math.abs(newPowNum), newPowDen);
-    return createFrequencyAlgebra(newCoeff, newPowNum / g, newPowDen / g);
+    const newPowers = mergePowerTerms(a.powers, b.powers);
+    return createFrequencyAlgebra(newCoeff, newPowers);
 }
 
 function gcd(a, b) {
@@ -819,7 +844,7 @@ function gcd(a, b) {
 
 /**
  * Parse a frequency expression and extract its algebraic components.
- * Returns { coeff, powNum, powDen, noteRef } where noteRef is null if it references baseNote,
+ * Returns { algebra, noteRef } where noteRef is null if it references baseNote,
  * or the noteId if it references another note.
  *
  * Supported patterns:
@@ -828,8 +853,8 @@ function gcd(a, b) {
  * - <expr>.mul(new Fraction(a, b))
  * - <expr>.mul(new Fraction(a))
  * - new Fraction(a, b).mul(<expr>)
- * - <expr>.mul(new Fraction(2).pow(new Fraction(n, d)))
- * - new Fraction(2).pow(new Fraction(n, d)).mul(<expr>)
+ * - <expr>.mul(new Fraction(BASE).pow(new Fraction(n, d)))  -- any positive integer base
+ * - new Fraction(BASE).pow(new Fraction(n, d)).mul(<expr>)
  */
 function parseFrequencyExpression(exprText) {
     if (!exprText) return null;
@@ -877,35 +902,32 @@ function parseFrequencyExpression(exprText) {
             }
         }
 
-        // Check if right is a POW expression: new Fraction(2).pow(new Fraction(n, d))
-        const powMatch = right.match(/^new\s+Fraction\s*\(\s*2\s*\)\.pow\s*\(\s*new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
+        // Check if right is a POW expression: new Fraction(BASE).pow(new Fraction(n, d))
+        // Now matches any positive integer base, not just 2
+        const powMatch = right.match(/^new\s+Fraction\s*\(\s*(\d+)\s*\)\.pow\s*\(\s*new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
         if (powMatch) {
-            const powNum = parseInt(powMatch[1], 10);
-            const powDen = powMatch[2] ? parseInt(powMatch[2], 10) : 1;
+            const base = parseInt(powMatch[1], 10);
+            const expNum = parseInt(powMatch[2], 10);
+            const expDen = powMatch[3] ? parseInt(powMatch[3], 10) : 1;
             const leftParsed = parseFrequencyExpression(left);
             if (leftParsed) {
-                // Add to existing pow
-                const newPowNum = leftParsed.algebra.powNum * powDen + powNum * leftParsed.algebra.powDen;
-                const newPowDen = leftParsed.algebra.powDen * powDen;
-                const g = gcd(Math.abs(newPowNum), newPowDen);
-                leftParsed.algebra.powNum = newPowNum / g;
-                leftParsed.algebra.powDen = newPowDen / g;
+                // Add to existing powers using mergePowerTerms
+                const newPower = [{ base, expNum, expDen }];
+                leftParsed.algebra.powers = mergePowerTerms(leftParsed.algebra.powers, newPower);
                 return leftParsed;
             }
         }
 
         // Check if left is a POW expression
-        const powMatchLeft = left.match(/^new\s+Fraction\s*\(\s*2\s*\)\.pow\s*\(\s*new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
+        const powMatchLeft = left.match(/^new\s+Fraction\s*\(\s*(\d+)\s*\)\.pow\s*\(\s*new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
         if (powMatchLeft) {
-            const powNum = parseInt(powMatchLeft[1], 10);
-            const powDen = powMatchLeft[2] ? parseInt(powMatchLeft[2], 10) : 1;
+            const base = parseInt(powMatchLeft[1], 10);
+            const expNum = parseInt(powMatchLeft[2], 10);
+            const expDen = powMatchLeft[3] ? parseInt(powMatchLeft[3], 10) : 1;
             const rightParsed = parseFrequencyExpression(right);
             if (rightParsed) {
-                const newPowNum = rightParsed.algebra.powNum * powDen + powNum * rightParsed.algebra.powDen;
-                const newPowDen = rightParsed.algebra.powDen * powDen;
-                const g = gcd(Math.abs(newPowNum), newPowDen);
-                rightParsed.algebra.powNum = newPowNum / g;
-                rightParsed.algebra.powDen = newPowDen / g;
+                const newPower = [{ base, expNum, expDen }];
+                rightParsed.algebra.powers = mergePowerTerms(rightParsed.algebra.powers, newPower);
                 return rightParsed;
             }
         }
@@ -1015,6 +1037,7 @@ function traceFrequencyToBaseNote(noteId, moduleInstance, visited = new Set()) {
 
 /**
  * Convert a frequency algebra back to an expression string
+ * Supports multi-base power terms
  */
 function algebraToExpression(algebra) {
     const parts = [];
@@ -1032,12 +1055,12 @@ function algebraToExpression(algebra) {
         }
     }
 
-    // Add POW if exponent is non-zero
-    if (algebra.powNum !== 0) {
-        if (algebra.powDen === 1) {
-            parts.push(`new Fraction(2).pow(new Fraction(${algebra.powNum}))`);
+    // Add each power term
+    for (const p of algebra.powers) {
+        if (p.expDen === 1) {
+            parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.expNum}))`);
         } else {
-            parts.push(`new Fraction(2).pow(new Fraction(${algebra.powNum}, ${algebra.powDen}))`);
+            parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.expNum}, ${p.expDen}))`);
         }
     }
 
@@ -1056,42 +1079,49 @@ function algebraToExpression(algebra) {
 }
 
 // Try to detect TET interval from frequency ratio relative to baseNote
-// Common temperaments: 12-TET, 24-TET, 31-TET, 53-TET, 19-TET
+// Supports multiple bases:
+// - Base 2: Standard octave-based TET systems (12-TET, 24-TET, 19-TET, 31-TET, 53-TET)
+// - Base 3: Bohlen-Pierce (tritave-based) systems (13-BP, 19-BP, 39-BP)
 // The tolerance is set to handle floating-point accumulation from corrupt dependency chains
 function detectTETInterval(ratio) {
     if (ratio <= 0) return null;
 
-    // Calculate semitones from ratio: n = divisions * log2(ratio)
-    const log2Ratio = Math.log2(ratio);
+    // TET configurations: {base, divisions[]}
+    // Ordered by commonality within each base
+    const tetConfigs = [
+        { base: 2, divisions: [12, 24, 19, 31, 53] },    // Standard octave-based
+        { base: 3, divisions: [13, 19, 39] },             // Bohlen-Pierce (tritave)
+    ];
 
-    // Check common TET systems (ordered by commonality)
-    const tetSystems = [12, 24, 19, 31, 53];
     // Use tolerances that handle floating-point accumulation from corrupt dependency chains
     // (e.g., noteA depends on noteB depends on baseNote, each adding small FP errors)
     const stepTolerance = 0.0001; // Tolerance for detecting integer steps
     const ratioTolerance = 1e-6; // Relative tolerance for verifying reconstructed ratio
 
-    for (const divisions of tetSystems) {
-        const steps = log2Ratio * divisions;
-        const roundedSteps = Math.round(steps);
+    for (const config of tetConfigs) {
+        const logBaseRatio = Math.log(ratio) / Math.log(config.base);
 
-        // Skip if rounded to 0 (would mean ratio ~= 1, handled elsewhere)
-        if (roundedSteps === 0) continue;
+        for (const divisions of config.divisions) {
+            const steps = logBaseRatio * divisions;
+            const roundedSteps = Math.round(steps);
 
-        // Check if it's close to an integer number of steps
-        if (Math.abs(steps - roundedSteps) < stepTolerance) {
-            // Verify by computing back - this catches false positives
-            const reconstructedRatio = Math.pow(2, roundedSteps / divisions);
-            const relativeError = Math.abs(reconstructedRatio - ratio) / ratio;
-            if (relativeError < ratioTolerance) {
-                // Simplify the fraction n/divisions
-                const gcd = (a, b) => b === 0 ? a : gcd(b, a % b);
-                const g = gcd(Math.abs(roundedSteps), divisions);
-                return {
-                    base: 2,
-                    numerator: roundedSteps / g,
-                    denominator: divisions / g
-                };
+            // Skip if rounded to 0 (would mean ratio ~= 1, handled elsewhere)
+            if (roundedSteps === 0) continue;
+
+            // Check if it's close to an integer number of steps
+            if (Math.abs(steps - roundedSteps) < stepTolerance) {
+                // Verify by computing back - this catches false positives
+                const reconstructedRatio = Math.pow(config.base, roundedSteps / divisions);
+                const relativeError = Math.abs(reconstructedRatio - ratio) / ratio;
+                if (relativeError < ratioTolerance) {
+                    // Simplify the fraction n/divisions
+                    const g = gcd(Math.abs(roundedSteps), divisions);
+                    return {
+                        base: config.base,
+                        numerator: roundedSteps / g,
+                        denominator: divisions / g
+                    };
+                }
             }
         }
     }

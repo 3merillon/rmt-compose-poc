@@ -9,24 +9,287 @@ import Fraction from 'fraction.js';
 import { OP, VAR, getCorruptionFlag } from './binary-note.js';
 
 /**
- * MusicValue wrapper supporting both rational and irrational numbers
+ * SymbolicPower represents an irrational value preserving its algebraic structure:
+ * value = coefficient × base₁^exp₁ × base₂^exp₂ × ... × baseₙ^expₙ
+ *
+ * This enables mathematical operations like combining like-base powers:
+ * 2^(1/12) × 2^(1/12) = 2^(1/6)
+ *
+ * Used for multi-base TET support (base 2, 3, etc.)
+ */
+export class SymbolicPower {
+  /**
+   * @param {Fraction} coefficient - Rational coefficient
+   * @param {Array<{base: number, exp: Fraction}>} powers - Array of power terms (base is positive integer)
+   */
+  constructor(coefficient, powers = []) {
+    this.coefficient = coefficient instanceof Fraction ? coefficient : new Fraction(coefficient);
+    this.powers = powers; // [{base: number, exp: Fraction}, ...]
+  }
+
+  /**
+   * Create a symbolic power from a single base^exponent
+   * @param {number} base - Positive integer base
+   * @param {Fraction} exp - Rational exponent
+   */
+  static fromPower(base, exp) {
+    return new SymbolicPower(new Fraction(1), [{ base, exp: exp instanceof Fraction ? exp : new Fraction(exp) }]);
+  }
+
+  /**
+   * Create a symbolic power from just a rational coefficient (no power terms)
+   */
+  static fromRational(frac) {
+    return new SymbolicPower(frac instanceof Fraction ? frac : new Fraction(frac), []);
+  }
+
+  /**
+   * Convert to f64 for audio playback/rendering
+   */
+  toFloat() {
+    let result = this.coefficient.valueOf();
+    for (const p of this.powers) {
+      result *= Math.pow(p.base, p.exp.valueOf());
+    }
+    return result;
+  }
+
+  /**
+   * Check if this is purely rational (no irrational power terms)
+   */
+  isRational() {
+    return this.powers.length === 0 || this.powers.every(p => p.exp.d === 1);
+  }
+
+  /**
+   * If rational, convert to Fraction; otherwise return null
+   */
+  toRationalFraction() {
+    if (!this.isRational()) return null;
+
+    let result = this.coefficient;
+    for (const p of this.powers) {
+      // exp.d is 1, so this is an integer power
+      const intExp = p.exp.s * p.exp.n;
+      if (intExp >= 0) {
+        result = result.mul(new Fraction(Math.pow(p.base, intExp)));
+      } else {
+        result = result.div(new Fraction(Math.pow(p.base, -intExp)));
+      }
+    }
+    return result;
+  }
+
+  /**
+   * Normalize: sort powers by base, remove zero exponents
+   */
+  normalize() {
+    // Filter out zero exponents
+    this.powers = this.powers.filter(p => p.exp.n !== 0);
+    // Sort by base
+    this.powers.sort((a, b) => a.base - b.base);
+    return this;
+  }
+
+  /**
+   * Multiply two SymbolicPower values
+   * Combines like-base powers: base^a × base^b = base^(a+b)
+   */
+  mul(other) {
+    const newCoeff = this.coefficient.mul(other.coefficient);
+
+    // Merge power terms, combining like bases
+    const powerMap = new Map();
+
+    for (const p of this.powers) {
+      powerMap.set(p.base, { base: p.base, exp: new Fraction(p.exp.s * p.exp.n, p.exp.d) });
+    }
+
+    for (const p of other.powers) {
+      if (powerMap.has(p.base)) {
+        const existing = powerMap.get(p.base);
+        existing.exp = existing.exp.add(p.exp);
+      } else {
+        powerMap.set(p.base, { base: p.base, exp: new Fraction(p.exp.s * p.exp.n, p.exp.d) });
+      }
+    }
+
+    // Filter out zero exponents
+    const newPowers = [...powerMap.values()].filter(p => p.exp.n !== 0);
+
+    return new SymbolicPower(newCoeff, newPowers).normalize();
+  }
+
+  /**
+   * Divide by another SymbolicPower
+   * base^a ÷ base^b = base^(a-b)
+   */
+  div(other) {
+    const newCoeff = this.coefficient.div(other.coefficient);
+
+    // Merge power terms, subtracting exponents for like bases
+    const powerMap = new Map();
+
+    for (const p of this.powers) {
+      powerMap.set(p.base, { base: p.base, exp: new Fraction(p.exp.s * p.exp.n, p.exp.d) });
+    }
+
+    for (const p of other.powers) {
+      if (powerMap.has(p.base)) {
+        const existing = powerMap.get(p.base);
+        existing.exp = existing.exp.sub(p.exp);
+      } else {
+        // Subtracting: 1 / base^exp = base^(-exp)
+        powerMap.set(p.base, { base: p.base, exp: p.exp.neg() });
+      }
+    }
+
+    const newPowers = [...powerMap.values()].filter(p => p.exp.n !== 0);
+
+    return new SymbolicPower(newCoeff, newPowers).normalize();
+  }
+
+  /**
+   * Raise to a rational power
+   * (coeff × base^exp)^n = coeff^n × base^(exp×n)
+   */
+  pow(exponent) {
+    const exp = exponent instanceof Fraction ? exponent : new Fraction(exponent);
+
+    // Try to compute coefficient^exp as rational
+    const coeffPow = tryRationalPower(this.coefficient, exp);
+    const newCoeff = coeffPow || new Fraction(Math.pow(this.coefficient.valueOf(), exp.valueOf()));
+
+    const newPowers = this.powers.map(p => ({
+      base: p.base,
+      exp: p.exp.mul(exp)
+    }));
+
+    return new SymbolicPower(newCoeff, newPowers).normalize();
+  }
+
+  /**
+   * Multiply by a rational Fraction
+   */
+  mulRational(frac) {
+    return new SymbolicPower(this.coefficient.mul(frac), this.powers.map(p => ({ ...p })));
+  }
+
+  /**
+   * Clone this SymbolicPower
+   */
+  clone() {
+    return new SymbolicPower(
+      new Fraction(this.coefficient.s * this.coefficient.n, this.coefficient.d),
+      this.powers.map(p => ({ base: p.base, exp: new Fraction(p.exp.s * p.exp.n, p.exp.d) }))
+    );
+  }
+
+  /**
+   * Check equality with another SymbolicPower
+   */
+  equals(other) {
+    if (!this.coefficient.equals(other.coefficient)) return false;
+    if (this.powers.length !== other.powers.length) return false;
+
+    const aNorm = this.clone().normalize();
+    const bNorm = other.clone().normalize();
+
+    for (let i = 0; i < aNorm.powers.length; i++) {
+      if (aNorm.powers[i].base !== bNorm.powers[i].base) return false;
+      if (!aNorm.powers[i].exp.equals(bNorm.powers[i].exp)) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Convert to expression string for serialization
+   */
+  toExpressionString() {
+    let parts = [];
+
+    // Add coefficient if not 1
+    if (!this.coefficient.equals(1)) {
+      if (this.coefficient.d === 1) {
+        parts.push(`new Fraction(${this.coefficient.s * this.coefficient.n})`);
+      } else {
+        parts.push(`new Fraction(${this.coefficient.s * this.coefficient.n}, ${this.coefficient.d})`);
+      }
+    }
+
+    // Add each power term
+    for (const p of this.powers) {
+      if (p.exp.d === 1) {
+        parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.exp.s * p.exp.n}))`);
+      } else {
+        parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.exp.s * p.exp.n}, ${p.exp.d}))`);
+      }
+    }
+
+    if (parts.length === 0) {
+      return 'new Fraction(1)';
+    }
+
+    // Chain with .mul()
+    return parts.reduce((acc, part) => acc ? `${acc}.mul(${part})` : part);
+  }
+
+  /**
+   * Serialize to JSON-compatible object
+   */
+  toJSON() {
+    return {
+      symbolic: true,
+      coefficient: { s: this.coefficient.s, n: this.coefficient.n, d: this.coefficient.d },
+      powers: this.powers.map(p => ({
+        base: p.base,
+        exp: { s: p.exp.s, n: p.exp.n, d: p.exp.d }
+      })),
+      f: this.toFloat()
+    };
+  }
+
+  /**
+   * Deserialize from JSON object
+   */
+  static fromJSON(json) {
+    if (!json || !json.symbolic) return null;
+
+    const coeff = new Fraction(json.coefficient.s * json.coefficient.n, json.coefficient.d);
+    const powers = json.powers.map(p => ({
+      base: p.base,
+      exp: new Fraction(p.exp.s * p.exp.n, p.exp.d)
+    }));
+
+    return new SymbolicPower(coeff, powers);
+  }
+}
+
+/**
+ * MusicValue wrapper supporting rational, irrational, and symbolic numbers
  *
  * Enables TET scale support via expressions like 2^(1/12) while preserving
- * exact rational arithmetic when possible.
+ * exact rational arithmetic when possible, and symbolic form for irrational powers.
  */
 export class MusicValue {
   /**
-   * @param {'rational'|'irrational'} type - Value type
-   * @param {Fraction|number} data - Fraction for rational, number for irrational
+   * @param {'rational'|'irrational'|'symbolic'} type - Value type
+   * @param {Fraction|number|SymbolicPower} data - Fraction for rational, number for irrational, SymbolicPower for symbolic
    */
   constructor(type, data) {
     this.type = type;
     if (type === 'rational') {
       this.fraction = data; // Fraction.js instance
       this.float = null;
+      this.symbolic = null;
+    } else if (type === 'symbolic') {
+      this.fraction = null;
+      this.float = null;
+      this.symbolic = data; // SymbolicPower instance
     } else {
       this.fraction = null;
       this.float = data; // f64 number
+      this.symbolic = null;
     }
   }
 
@@ -45,6 +308,13 @@ export class MusicValue {
   }
 
   /**
+   * Create a symbolic value from a SymbolicPower
+   */
+  static symbolic(sp) {
+    return new MusicValue('symbolic', sp);
+  }
+
+  /**
    * Create from numerator and denominator
    */
   static fromND(n, d) {
@@ -52,27 +322,57 @@ export class MusicValue {
   }
 
   /**
-   * Check if this value is corrupted (irrational)
+   * Check if this value is corrupted (irrational or symbolic)
    */
   isCorrupted() {
-    return this.type === 'irrational';
+    return this.type === 'irrational' || this.type === 'symbolic';
+  }
+
+  /**
+   * Check if this value is symbolic (preserves algebraic structure)
+   */
+  isSymbolic() {
+    return this.type === 'symbolic';
+  }
+
+  /**
+   * Get the SymbolicPower if symbolic, or convert to one
+   */
+  toSymbolic() {
+    if (this.type === 'symbolic') {
+      return this.symbolic;
+    } else if (this.type === 'rational') {
+      return SymbolicPower.fromRational(this.fraction);
+    } else {
+      // Irrational - cannot convert to symbolic, return as coefficient only
+      return new SymbolicPower(new Fraction(this.float), []);
+    }
   }
 
   /**
    * Convert to f64
    */
   toFloat() {
-    return this.type === 'rational'
-      ? this.fraction.valueOf()
-      : this.float;
+    if (this.type === 'rational') {
+      return this.fraction.valueOf();
+    } else if (this.type === 'symbolic') {
+      return this.symbolic.toFloat();
+    }
+    return this.float;
   }
 
   /**
-   * Get a Fraction representation (approximates irrational values)
+   * Get a Fraction representation (approximates irrational/symbolic values)
    */
   toFraction() {
     if (this.type === 'rational') {
       return this.fraction;
+    } else if (this.type === 'symbolic') {
+      // If symbolic is actually rational, return exact value
+      const rational = this.symbolic.toRationalFraction();
+      if (rational) return rational;
+      // Otherwise approximate
+      return new Fraction(this.symbolic.toFloat());
     }
     // Approximate irrational as fraction
     return new Fraction(this.float);
@@ -81,17 +381,34 @@ export class MusicValue {
   /**
    * Get fraction components for compatibility with existing code
    */
-  get s() { return this.type === 'rational' ? this.fraction.s : (this.float < 0 ? -1 : this.float > 0 ? 1 : 0); }
-  get n() { return this.type === 'rational' ? this.fraction.n : 0; }
-  get d() { return this.type === 'rational' ? this.fraction.d : 1; }
+  get s() {
+    if (this.type === 'rational') return this.fraction.s;
+    if (this.type === 'symbolic') {
+      const f = this.symbolic.toFloat();
+      return f < 0 ? -1 : f > 0 ? 1 : 0;
+    }
+    return this.float < 0 ? -1 : this.float > 0 ? 1 : 0;
+  }
+  get n() {
+    if (this.type === 'rational') return this.fraction.n;
+    return 0;
+  }
+  get d() {
+    if (this.type === 'rational') return this.fraction.d;
+    return 1;
+  }
 
   /**
    * Add two values
+   * Note: Addition of different symbolic forms falls back to irrational
    */
   add(other) {
     if (this.type === 'rational' && other.type === 'rational') {
       return MusicValue.rational(this.fraction.add(other.fraction));
     }
+    // Symbolic addition is only preserved for same-form values
+    // For now, fall back to irrational for mixed/symbolic addition
+    // TODO: Could optimize for same-symbolic-form addition (e.g., 2*2^(1/12) + 3*2^(1/12) = 5*2^(1/12))
     return MusicValue.irrational(this.toFloat() + other.toFloat());
   }
 
@@ -107,26 +424,64 @@ export class MusicValue {
 
   /**
    * Multiply two values
+   * Preserves symbolic form when possible
    */
   mul(other) {
+    // Both rational: stay rational
     if (this.type === 'rational' && other.type === 'rational') {
       return MusicValue.rational(this.fraction.mul(other.fraction));
     }
+
+    // Any symbolic involved: combine symbolically
+    if (this.type === 'symbolic' || other.type === 'symbolic') {
+      const aSymbolic = this.toSymbolic();
+      const bSymbolic = other.toSymbolic();
+      const result = aSymbolic.mul(bSymbolic);
+
+      // Check if result is actually rational
+      if (result.isRational()) {
+        const rational = result.toRationalFraction();
+        if (rational) return MusicValue.rational(rational);
+      }
+
+      return MusicValue.symbolic(result);
+    }
+
+    // Rational * irrational or irrational * irrational: fall back to f64
     return MusicValue.irrational(this.toFloat() * other.toFloat());
   }
 
   /**
    * Divide two values
+   * Preserves symbolic form when possible
    */
   div(other) {
+    // Both rational: stay rational
     if (this.type === 'rational' && other.type === 'rational') {
       return MusicValue.rational(this.fraction.div(other.fraction));
     }
+
     const divisor = other.toFloat();
     if (divisor === 0) {
       // Match Fraction behavior: return 1 for division by zero
       return MusicValue.fromND(1, 1);
     }
+
+    // Any symbolic involved: divide symbolically
+    if (this.type === 'symbolic' || other.type === 'symbolic') {
+      const aSymbolic = this.toSymbolic();
+      const bSymbolic = other.toSymbolic();
+      const result = aSymbolic.div(bSymbolic);
+
+      // Check if result is actually rational
+      if (result.isRational()) {
+        const rational = result.toRationalFraction();
+        if (rational) return MusicValue.rational(rational);
+      }
+
+      return MusicValue.symbolic(result);
+    }
+
     return MusicValue.irrational(this.toFloat() / divisor);
   }
 
@@ -137,20 +492,47 @@ export class MusicValue {
     if (this.type === 'rational') {
       return MusicValue.rational(this.fraction.neg());
     }
+    if (this.type === 'symbolic') {
+      return MusicValue.symbolic(this.symbolic.mulRational(new Fraction(-1)));
+    }
     return MusicValue.irrational(-this.float);
   }
 
   /**
    * Power operation - the key to TET support
-   * May produce irrational result (corruption)
+   * Returns symbolic result to preserve algebraic structure
    */
   pow(exponent) {
+    // Both rational: try for rational result first
     if (this.type === 'rational' && exponent.type === 'rational') {
       const result = tryRationalPower(this.fraction, exponent.fraction);
       if (result) {
         return MusicValue.rational(result);
       }
+      // Irrational result: return symbolic to preserve base^exp structure
+      // Only create symbolic for positive integer bases
+      const baseVal = this.fraction.valueOf();
+      if (Number.isInteger(baseVal) && baseVal > 0) {
+        return MusicValue.symbolic(SymbolicPower.fromPower(baseVal, exponent.fraction));
+      }
+      // Non-integer or negative base: fall back to irrational
+      return MusicValue.irrational(Math.pow(this.toFloat(), exponent.toFloat()));
     }
+
+    // Symbolic base with rational exponent: raise symbolic to power
+    if (this.type === 'symbolic' && exponent.type === 'rational') {
+      const result = this.symbolic.pow(exponent.fraction);
+
+      // Check if result is actually rational
+      if (result.isRational()) {
+        const rational = result.toRationalFraction();
+        if (rational) return MusicValue.rational(rational);
+      }
+
+      return MusicValue.symbolic(result);
+    }
+
+    // Fall back to irrational for other cases
     return MusicValue.irrational(Math.pow(this.toFloat(), exponent.toFloat()));
   }
 

@@ -282,25 +282,30 @@ function parseAtomic(s) {
     return mkAnchorAtom(mkMeasureAnchor(ref));
   }
 
-  // 3) Fraction literal (new Fraction(...))
+  // 3) POW expression: new Fraction(BASE).pow(new Fraction(num, den))
+  // Important for multi-base TET support (e.g., 2^(1/12), 3^(1/13))
+  const pow = tryParsePowExpression(str);
+  if (pow) return pow;
+
+  // 4) Fraction literal (new Fraction(...))
   const frac = tryParseFractionLiteral(str);
   if (frac) return mkCoeffAtom(frac);
 
-  // 4) Bare numeric literal (e.g., 1.5, 0.25, 2)
+  // 5) Bare numeric literal (e.g., 1.5, 0.25, 2)
   const bareNum = tryParseBareNumeric(str);
   if (bareNum) return mkCoeffAtom(bareNum);
 
-  // 5) Known variable references
+  // 6) Known variable references
   const vref = tryParseKnownVariableRef(str);
   if (vref) return mkAnchorAtom(vref);
 
-  // 6) Parenthesized nested sum or other expressions: keep opaque (we do not distribute)
+  // 7) Parenthesized nested sum or other expressions: keep opaque (we do not distribute)
   if (startsWithParen(str) && endsWithParen(str)) {
     // If the inner contains .add/.sub at top-level, keep opaque
     return mkOpaqueAtom(s);
   }
 
-  // 7) Fallback to opaque
+  // 8) Fallback to opaque
   return mkOpaqueAtom(s);
 }
 
@@ -393,6 +398,7 @@ function tryPromoteMeasureUnit(prod) {
 function normalizeForKind(sumAst, kind) {
   // We must:
   // - collapse anchors order deterministically
+  // - merge like-base POW anchors (base^a * base^b = base^(a+b))
   // - group like terms (same anchor key sequence)
   // - keep all refs intact
   const grouped = new Map();
@@ -409,8 +415,11 @@ function normalizeForKind(sumAst, kind) {
       continue;
     }
 
+    // Merge like-base POW anchors before sorting
+    const mergedAnchors = mergeLikeBasePowAnchors(t.anchors);
+
     // Sort anchors deterministically by type+key to stabilize emissions
-    const sortedAnchors = [...t.anchors].sort((a, b) => {
+    const sortedAnchors = [...mergedAnchors].sort((a, b) => {
       const ka = a.type + ':' + a.key;
       const kb = b.type + ':' + b.key;
       return ka < kb ? -1 : ka > kb ? 1 : 0;
@@ -437,6 +446,63 @@ function normalizeForKind(sumAst, kind) {
   }
 
   return { ok: true, terms };
+}
+
+/**
+ * Merge POW anchors with the same base by adding their exponents.
+ * e.g., 2^(1/12) * 2^(1/12) = 2^(2/12) = 2^(1/6)
+ * Non-POW anchors are passed through unchanged.
+ * @param {Array} anchors - Array of anchor objects
+ * @returns {Array} - Array with like-base POW anchors merged
+ */
+function mergeLikeBasePowAnchors(anchors) {
+  const powByBase = new Map(); // base -> {expNum, expDen}
+  const nonPow = [];
+
+  for (const anchor of anchors) {
+    if (anchor.type === 'POW') {
+      const base = anchor.base;
+      if (powByBase.has(base)) {
+        // Add exponents: a/b + c/d = (ad + bc) / bd
+        const existing = powByBase.get(base);
+        const newNum = existing.expNum * anchor.expDen + anchor.expNum * existing.expDen;
+        const newDen = existing.expDen * anchor.expDen;
+        const g = gcd(Math.abs(newNum), newDen);
+        powByBase.set(base, {
+          expNum: newNum / g,
+          expDen: newDen / g
+        });
+      } else {
+        powByBase.set(base, {
+          expNum: anchor.expNum,
+          expDen: anchor.expDen
+        });
+      }
+    } else {
+      nonPow.push(anchor);
+    }
+  }
+
+  // Convert merged POW entries back to anchors
+  const mergedPow = [];
+  for (const [base, exp] of powByBase.entries()) {
+    // Skip if exponent is zero (base^0 = 1)
+    if (exp.expNum === 0) continue;
+
+    // Check if result is a rational integer power (expDen divides expNum evenly for integer bases)
+    // e.g., 2^(12/12) = 2^1 = 2, which is rational
+    if (exp.expDen === 1) {
+      // This is an integer power; we could convert to coefficient,
+      // but for now keep as POW anchor for consistency
+    }
+
+    mergedPow.push(mkPowAnchor(base, exp.expNum, exp.expDen));
+  }
+
+  // Sort merged POW anchors by base for deterministic output
+  mergedPow.sort((a, b) => a.base - b.base);
+
+  return [...mergedPow, ...nonPow];
 }
 
 function emitExpression(sumAst, kind) {
@@ -582,6 +648,38 @@ function mkOpaqueAnchor(original) {
   };
 }
 
+/**
+ * Create a POW anchor for power expressions like new Fraction(base).pow(new Fraction(expNum, expDen))
+ * Supports arbitrary positive integer bases for multi-base TET support
+ * @param {number} base - Positive integer base (2, 3, etc.)
+ * @param {number} expNum - Exponent numerator
+ * @param {number} expDen - Exponent denominator
+ */
+function mkPowAnchor(base, expNum, expDen) {
+  // Simplify the exponent fraction
+  const g = gcd(Math.abs(expNum), expDen);
+  const simpNum = expNum / g;
+  const simpDen = expDen / g;
+
+  return {
+    type: 'POW',
+    key: `POW:${base}:${simpNum}/${simpDen}`,
+    base,
+    expNum: simpNum,
+    expDen: simpDen,
+    emit: () => simpDen === 1
+      ? `new Fraction(${base}).pow(new Fraction(${simpNum}))`
+      : `new Fraction(${base}).pow(new Fraction(${simpNum}, ${simpDen}))`
+  };
+}
+
+/**
+ * GCD helper for fraction simplification
+ */
+function gcd(a, b) {
+  return b === 0 ? a : gcd(b, a % b);
+}
+
 function mkCoeffAtom(frac) {
   return { kind: 'coeff', frac };
 }
@@ -647,6 +745,29 @@ function parseRefArg(s) {
   if (m) return { kind: 'note', id: parseInt(m[1], 10) };
   // Fallback to base
   return { kind: 'base' };
+}
+
+/**
+ * Try to parse a POW expression like new Fraction(BASE).pow(new Fraction(num, den))
+ * Supports arbitrary positive integer bases for multi-base TET (e.g., 2^(1/12), 3^(1/13))
+ * @param {string} s - Expression string to parse
+ * @returns {object|null} - Anchor atom or null if not a POW expression
+ */
+function tryParsePowExpression(s) {
+  // Pattern: new Fraction(BASE).pow(new Fraction(num)) or new Fraction(BASE).pow(new Fraction(num, den))
+  const m = s.match(/^new\s*Fraction\s*\(\s*(\d+)\s*\)\.pow\s*\(\s*new\s*Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
+  if (!m) return null;
+
+  const base = parseInt(m[1], 10);
+  const expNum = parseInt(m[2], 10);
+  const expDen = m[3] ? parseInt(m[3], 10) : 1;
+
+  // Validate: base must be positive integer >= 2
+  if (base < 2 || !Number.isInteger(base)) return null;
+  // Validate: denominator must be positive
+  if (expDen <= 0) return null;
+
+  return mkAnchorAtom(mkPowAnchor(base, expNum, expDen));
 }
 
 // =============== Fraction literal parsing ===============

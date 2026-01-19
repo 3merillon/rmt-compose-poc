@@ -1,22 +1,213 @@
-//! Numeric value type supporting both rational and irrational numbers
+//! Numeric value type supporting rational, irrational, and symbolic numbers
 //!
-//! Provides a Value enum that can hold either an exact rational (Fraction)
-//! or an irrational approximation (f64). This enables TET scale support
-//! via expressions like 2^(1/12) while preserving exact rational arithmetic
-//! when possible.
+//! Provides a Value enum that can hold:
+//! - Rational: exact rational (Fraction)
+//! - Irrational: f64 approximation (legacy)
+//! - Symbolic: algebraic structure preserving base^exponent form
+//!
+//! This enables multi-base TET scale support via expressions like 2^(1/12), 3^(1/13)
+//! while preserving exact rational arithmetic and symbolic form when possible.
 
 use crate::fraction::Fraction;
 use num_traits::ToPrimitive;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-/// Represents either a rational or irrational numeric value
+// ============================================================================
+// SymbolicPower - preserves algebraic structure of power expressions
+// ============================================================================
+
+/// A single power term: base^exponent where base is a positive integer
+#[derive(Clone, Debug)]
+pub struct PowerTerm {
+    /// Positive integer base (2, 3, 5, etc.)
+    pub base: u32,
+    /// Rational exponent
+    pub exponent: Fraction,
+}
+
+/// Represents an irrational value preserving its algebraic structure:
+/// value = coefficient × base₁^exp₁ × base₂^exp₂ × ... × baseₙ^expₙ
+///
+/// This enables mathematical operations like combining like-base powers:
+/// 2^(1/12) × 2^(1/12) = 2^(1/6)
+#[derive(Clone, Debug)]
+pub struct SymbolicPower {
+    /// Rational coefficient
+    pub coefficient: Fraction,
+    /// Array of power terms (base is positive integer)
+    pub powers: Vec<PowerTerm>,
+}
+
+impl SymbolicPower {
+    /// Create a new SymbolicPower
+    pub fn new(coefficient: Fraction, powers: Vec<PowerTerm>) -> Self {
+        SymbolicPower { coefficient, powers }
+    }
+
+    /// Create from a single base^exponent
+    pub fn from_power(base: u32, exponent: Fraction) -> Self {
+        SymbolicPower {
+            coefficient: Fraction::new(1, 1),
+            powers: vec![PowerTerm { base, exponent }],
+        }
+    }
+
+    /// Create from just a rational coefficient (no power terms)
+    pub fn from_rational(frac: Fraction) -> Self {
+        SymbolicPower {
+            coefficient: frac,
+            powers: vec![],
+        }
+    }
+
+    /// Convert to f64 for audio playback/rendering
+    pub fn to_f64(&self) -> f64 {
+        let mut result = self.coefficient.to_f64();
+        for p in &self.powers {
+            result *= (p.base as f64).powf(p.exponent.to_f64());
+        }
+        result
+    }
+
+    /// Check if this is purely rational (no irrational power terms)
+    pub fn is_rational(&self) -> bool {
+        self.powers.is_empty() || self.powers.iter().all(|p| p.exponent.d() == 1)
+    }
+
+    /// If rational, convert to Fraction; otherwise return None
+    pub fn to_rational_fraction(&self) -> Option<Fraction> {
+        if !self.is_rational() {
+            return None;
+        }
+
+        let mut result = self.coefficient.clone();
+        for p in &self.powers {
+            // exp.d() is 1, so this is an integer power
+            let int_exp = p.exponent.s() * (p.exponent.n() as i32);
+            if int_exp >= 0 {
+                let base_pow = (p.base as i64).pow(int_exp as u32);
+                result = result.mul(&Fraction::new(base_pow as i32, 1));
+            } else {
+                let base_pow = (p.base as i64).pow((-int_exp) as u32);
+                result = result.div(&Fraction::new(base_pow as i32, 1));
+            }
+        }
+        Some(result)
+    }
+
+    /// Normalize: sort powers by base, remove zero exponents
+    pub fn normalize(mut self) -> Self {
+        // Filter out zero exponents
+        self.powers.retain(|p| p.exponent.n() != 0);
+        // Sort by base
+        self.powers.sort_by_key(|p| p.base);
+        self
+    }
+
+    /// Multiply two SymbolicPower values
+    /// Combines like-base powers: base^a × base^b = base^(a+b)
+    pub fn mul(&self, other: &SymbolicPower) -> SymbolicPower {
+        let new_coeff = self.coefficient.mul(&other.coefficient);
+
+        // Merge power terms, combining like bases
+        let mut power_map: std::collections::HashMap<u32, Fraction> = std::collections::HashMap::new();
+
+        for p in &self.powers {
+            power_map.insert(p.base, p.exponent.clone());
+        }
+
+        for p in &other.powers {
+            if let Some(existing) = power_map.get_mut(&p.base) {
+                *existing = existing.add(&p.exponent);
+            } else {
+                power_map.insert(p.base, p.exponent.clone());
+            }
+        }
+
+        // Filter out zero exponents
+        let new_powers: Vec<PowerTerm> = power_map
+            .into_iter()
+            .filter(|(_, exp)| exp.n() != 0)
+            .map(|(base, exponent)| PowerTerm { base, exponent })
+            .collect();
+
+        SymbolicPower::new(new_coeff, new_powers).normalize()
+    }
+
+    /// Divide by another SymbolicPower
+    /// base^a ÷ base^b = base^(a-b)
+    pub fn div(&self, other: &SymbolicPower) -> SymbolicPower {
+        let new_coeff = self.coefficient.div(&other.coefficient);
+
+        let mut power_map: std::collections::HashMap<u32, Fraction> = std::collections::HashMap::new();
+
+        for p in &self.powers {
+            power_map.insert(p.base, p.exponent.clone());
+        }
+
+        for p in &other.powers {
+            if let Some(existing) = power_map.get_mut(&p.base) {
+                *existing = existing.sub(&p.exponent);
+            } else {
+                // Subtracting: 1 / base^exp = base^(-exp)
+                power_map.insert(p.base, p.exponent.neg());
+            }
+        }
+
+        let new_powers: Vec<PowerTerm> = power_map
+            .into_iter()
+            .filter(|(_, exp)| exp.n() != 0)
+            .map(|(base, exponent)| PowerTerm { base, exponent })
+            .collect();
+
+        SymbolicPower::new(new_coeff, new_powers).normalize()
+    }
+
+    /// Raise to a rational power
+    /// (coeff × base^exp)^n = coeff^n × base^(exp×n)
+    pub fn pow(&self, exponent: &Fraction) -> SymbolicPower {
+        // Try to compute coefficient^exp as rational
+        let new_coeff = if let Some(result) = try_rational_power(&self.coefficient, exponent) {
+            result
+        } else {
+            Fraction::from_f64(self.coefficient.to_f64().powf(exponent.to_f64()))
+        };
+
+        let new_powers: Vec<PowerTerm> = self
+            .powers
+            .iter()
+            .map(|p| PowerTerm {
+                base: p.base,
+                exponent: p.exponent.mul(exponent),
+            })
+            .collect();
+
+        SymbolicPower::new(new_coeff, new_powers).normalize()
+    }
+
+    /// Multiply by a rational Fraction
+    pub fn mul_rational(&self, frac: &Fraction) -> SymbolicPower {
+        SymbolicPower::new(
+            self.coefficient.mul(frac),
+            self.powers.clone(),
+        )
+    }
+}
+
+// ============================================================================
+// Value enum - the main numeric type
+// ============================================================================
+
+/// Represents either a rational, irrational, or symbolic numeric value
 #[derive(Clone)]
 pub enum Value {
     /// Exact rational number (no precision loss)
     Rational(Fraction),
-    /// Irrational number (f64 approximation)
+    /// Irrational number (f64 approximation) - legacy
     Irrational(f64),
+    /// Symbolic power expression (preserves algebraic structure)
+    Symbolic(SymbolicPower),
 }
 
 impl Value {
@@ -30,14 +221,19 @@ impl Value {
         Value::Irrational(v)
     }
 
+    /// Create a symbolic value from a SymbolicPower
+    pub fn symbolic(sp: SymbolicPower) -> Value {
+        Value::Symbolic(sp)
+    }
+
     /// Create from a Fraction
     pub fn from_fraction(f: Fraction) -> Value {
         Value::Rational(f)
     }
 
-    /// Check if this value is corrupted (irrational)
+    /// Check if this value is corrupted (irrational or symbolic)
     pub fn is_corrupted(&self) -> bool {
-        matches!(self, Value::Irrational(_))
+        matches!(self, Value::Irrational(_) | Value::Symbolic(_))
     }
 
     /// Check if this value is rational (not corrupted)
@@ -45,27 +241,60 @@ impl Value {
         matches!(self, Value::Rational(_))
     }
 
+    /// Check if this value is symbolic
+    pub fn is_symbolic(&self) -> bool {
+        matches!(self, Value::Symbolic(_))
+    }
+
+    /// Convert to SymbolicPower (converts rational/irrational to symbolic form)
+    pub fn to_symbolic(&self) -> SymbolicPower {
+        match self {
+            Value::Symbolic(sp) => sp.clone(),
+            Value::Rational(f) => SymbolicPower::from_rational(f.clone()),
+            Value::Irrational(v) => SymbolicPower::from_rational(Fraction::from_f64(*v)),
+        }
+    }
+
     /// Convert to f64 for audio playback
     pub fn to_f64(&self) -> f64 {
         match self {
             Value::Rational(f) => f.to_f64(),
             Value::Irrational(v) => *v,
+            Value::Symbolic(sp) => sp.to_f64(),
         }
     }
 
-    /// Try to get the underlying Fraction (returns None if irrational)
+    /// Try to get the underlying Fraction (returns None if irrational/symbolic)
     pub fn as_fraction(&self) -> Option<&Fraction> {
         match self {
             Value::Rational(f) => Some(f),
             Value::Irrational(_) => None,
+            Value::Symbolic(_) => None,
+        }
+    }
+
+    /// Convert to Fraction (approximates irrational/symbolic values)
+    pub fn to_fraction(&self) -> Fraction {
+        match self {
+            Value::Rational(f) => f.clone(),
+            Value::Irrational(v) => Fraction::from_f64(*v),
+            Value::Symbolic(sp) => {
+                // If symbolic is actually rational, return exact value
+                if let Some(rational) = sp.to_rational_fraction() {
+                    rational
+                } else {
+                    Fraction::from_f64(sp.to_f64())
+                }
+            }
         }
     }
 
     /// Add two values
+    /// Note: Addition of different symbolic forms falls back to irrational
     pub fn add(&self, other: &Value) -> Value {
         match (self, other) {
             (Value::Rational(a), Value::Rational(b)) => Value::Rational(a.add(b)),
-            // Any irrational operand corrupts the result
+            // Symbolic addition is complex - fall back to irrational for now
             _ => Value::Irrational(self.to_f64() + other.to_f64()),
         }
     }
@@ -79,21 +308,78 @@ impl Value {
     }
 
     /// Multiply two values
+    /// Preserves symbolic form when possible
     pub fn mul(&self, other: &Value) -> Value {
         match (self, other) {
+            // Both rational: stay rational
             (Value::Rational(a), Value::Rational(b)) => Value::Rational(a.mul(b)),
+
+            // Any symbolic involved: combine symbolically
+            (Value::Symbolic(a), Value::Symbolic(b)) => {
+                let result = a.mul(b);
+                if result.is_rational() {
+                    if let Some(rational) = result.to_rational_fraction() {
+                        return Value::Rational(rational);
+                    }
+                }
+                Value::Symbolic(result)
+            }
+            (Value::Symbolic(sp), Value::Rational(f)) | (Value::Rational(f), Value::Symbolic(sp)) => {
+                let result = sp.mul_rational(f);
+                if result.is_rational() {
+                    if let Some(rational) = result.to_rational_fraction() {
+                        return Value::Rational(rational);
+                    }
+                }
+                Value::Symbolic(result)
+            }
+
+            // Rational * irrational or irrational * irrational: fall back to f64
             _ => Value::Irrational(self.to_f64() * other.to_f64()),
         }
     }
 
     /// Divide two values
+    /// Preserves symbolic form when possible
     pub fn div(&self, other: &Value) -> Value {
         match (self, other) {
+            // Both rational: stay rational
             (Value::Rational(a), Value::Rational(b)) => Value::Rational(a.div(b)),
+
+            // Any symbolic involved: divide symbolically
+            (Value::Symbolic(a), Value::Symbolic(b)) => {
+                let result = a.div(b);
+                if result.is_rational() {
+                    if let Some(rational) = result.to_rational_fraction() {
+                        return Value::Rational(rational);
+                    }
+                }
+                Value::Symbolic(result)
+            }
+            (Value::Symbolic(sp), Value::Rational(f)) => {
+                let result = sp.mul_rational(&f.inverse());
+                if result.is_rational() {
+                    if let Some(rational) = result.to_rational_fraction() {
+                        return Value::Rational(rational);
+                    }
+                }
+                Value::Symbolic(result)
+            }
+            (Value::Rational(f), Value::Symbolic(sp)) => {
+                let num = SymbolicPower::from_rational(f.clone());
+                let result = num.div(sp);
+                if result.is_rational() {
+                    if let Some(rational) = result.to_rational_fraction() {
+                        return Value::Rational(rational);
+                    }
+                }
+                Value::Symbolic(result)
+            }
+
+            // Fall back to f64
             _ => {
                 let divisor = other.to_f64();
                 if divisor == 0.0 {
-                    // Match Fraction behavior: return 1 for division by zero
                     Value::Rational(Fraction::new(1, 1))
                 } else {
                     Value::Irrational(self.to_f64() / divisor)
@@ -107,27 +393,42 @@ impl Value {
         match self {
             Value::Rational(f) => Value::Rational(f.neg()),
             Value::Irrational(v) => Value::Irrational(-v),
+            Value::Symbolic(sp) => Value::Symbolic(sp.mul_rational(&Fraction::new(-1, 1))),
         }
     }
 
     /// Power operation - the key to TET support
     ///
-    /// Attempts to preserve rationality when possible:
+    /// Returns symbolic result to preserve algebraic structure for positive integer bases:
     /// - 2^(2/1) = 4 (rational)
-    /// - 2^(1/12) = irrational (corrupted)
+    /// - 2^(1/12) = symbolic (preserves base and exponent)
     /// - 4^(1/2) = 2 (rational, perfect square root)
     pub fn pow(&self, exponent: &Value) -> Value {
         match (self, exponent) {
             (Value::Rational(base), Value::Rational(exp)) => {
                 // Check if result can be rational
                 if let Some(result) = try_rational_power(base, exp) {
-                    Value::Rational(result)
-                } else {
-                    // Irrational result (e.g., 2^(1/12))
-                    Value::Irrational(base.to_f64().powf(exp.to_f64()))
+                    return Value::Rational(result);
                 }
+                // Irrational result: return symbolic for positive integer bases
+                let base_val = base.to_f64();
+                if base_val > 0.0 && base_val == base_val.floor() && base_val <= (u32::MAX as f64) {
+                    return Value::Symbolic(SymbolicPower::from_power(base_val as u32, exp.clone()));
+                }
+                // Non-integer or negative base: fall back to irrational
+                Value::Irrational(base.to_f64().powf(exp.to_f64()))
             }
-            // Any irrational input -> irrational output
+            // Symbolic base with rational exponent: raise symbolic to power
+            (Value::Symbolic(sp), Value::Rational(exp)) => {
+                let result = sp.pow(exp);
+                if result.is_rational() {
+                    if let Some(rational) = result.to_rational_fraction() {
+                        return Value::Rational(rational);
+                    }
+                }
+                Value::Symbolic(result)
+            }
+            // Fall back to irrational for other cases
             _ => Value::Irrational(self.to_f64().powf(exponent.to_f64())),
         }
     }
@@ -137,6 +438,14 @@ impl Value {
         match self {
             Value::Rational(f) => Value::Rational(f.abs()),
             Value::Irrational(v) => Value::Irrational(v.abs()),
+            Value::Symbolic(sp) => {
+                // For symbolic, if coefficient is negative, negate it
+                if sp.coefficient.s() < 0 {
+                    Value::Symbolic(sp.mul_rational(&Fraction::new(-1, 1)))
+                } else {
+                    Value::Symbolic(sp.clone())
+                }
+            }
         }
     }
 
@@ -150,6 +459,10 @@ impl Value {
                 } else {
                     Value::Irrational(1.0 / v)
                 }
+            }
+            Value::Symbolic(sp) => {
+                let one = SymbolicPower::from_rational(Fraction::new(1, 1));
+                Value::Symbolic(one.div(sp))
             }
         }
     }
@@ -273,6 +586,7 @@ impl fmt::Debug for Value {
         match self {
             Value::Rational(frac) => write!(f, "Rational({})", frac),
             Value::Irrational(v) => write!(f, "Irrational({})", v),
+            Value::Symbolic(sp) => write!(f, "Symbolic({:?})", sp),
         }
     }
 }
@@ -282,6 +596,13 @@ impl fmt::Display for Value {
         match self {
             Value::Rational(frac) => write!(f, "{}", frac),
             Value::Irrational(v) => write!(f, "{:.10}", v),
+            Value::Symbolic(sp) => {
+                write!(f, "{}", sp.coefficient)?;
+                for p in &sp.powers {
+                    write!(f, " * {}^({}/{})", p.base, p.exponent.s() * (p.exponent.n() as i32), p.exponent.d())?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -308,6 +629,64 @@ impl From<i32> for Value {
 // Serialization support for WASM interop
 // ============================================================================
 
+/// Simple fraction for serialization (without BigRational overhead)
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct SimpleFraction {
+    pub s: i32,
+    pub n: u32,
+    pub d: u32,
+}
+
+impl SimpleFraction {
+    pub fn from_fraction(f: &Fraction) -> Self {
+        SimpleFraction {
+            s: f.s(),
+            n: f.n(),
+            d: f.d(),
+        }
+    }
+
+    pub fn to_fraction(&self) -> Fraction {
+        Fraction::new(self.s * (self.n as i32), self.d as i32)
+    }
+}
+
+/// Serializable power term for symbolic values
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PowerTermData {
+    pub base: u32,
+    pub exp: SimpleFraction,
+}
+
+/// Serializable symbolic power data
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct SymbolicPowerData {
+    pub coefficient: SimpleFraction,
+    pub powers: Vec<PowerTermData>,
+}
+
+impl SymbolicPowerData {
+    pub fn from_symbolic(sp: &SymbolicPower) -> Self {
+        SymbolicPowerData {
+            coefficient: SimpleFraction::from_fraction(&sp.coefficient),
+            powers: sp.powers.iter().map(|p| PowerTermData {
+                base: p.base,
+                exp: SimpleFraction::from_fraction(&p.exponent),
+            }).collect(),
+        }
+    }
+
+    pub fn to_symbolic(&self) -> SymbolicPower {
+        SymbolicPower {
+            coefficient: self.coefficient.to_fraction(),
+            powers: self.powers.iter().map(|p| PowerTerm {
+                base: p.base,
+                exponent: p.exp.to_fraction(),
+            }).collect(),
+        }
+    }
+}
+
 /// Serializable value data for JS interop
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ValueData {
@@ -320,11 +699,14 @@ pub struct ValueData {
     /// Denominator (for rational)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub d: Option<u32>,
-    /// Float value (for irrational)
+    /// Float value (for irrational/symbolic)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub f: Option<f64>,
-    /// Is this value corrupted (irrational)?
+    /// Is this value corrupted (irrational or symbolic)?
     pub corrupted: bool,
+    /// Symbolic power data (if symbolic)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbolic: Option<SymbolicPowerData>,
 }
 
 impl ValueData {
@@ -337,6 +719,7 @@ impl ValueData {
                 d: Some(frac.d()),
                 f: None,
                 corrupted: false,
+                symbolic: None,
             },
             Value::Irrational(val) => ValueData {
                 s: None,
@@ -344,12 +727,26 @@ impl ValueData {
                 d: None,
                 f: Some(*val),
                 corrupted: true,
+                symbolic: None,
+            },
+            Value::Symbolic(sp) => ValueData {
+                s: None,
+                n: None,
+                d: None,
+                f: Some(sp.to_f64()),  // Include f64 for immediate use
+                corrupted: true,
+                symbolic: Some(SymbolicPowerData::from_symbolic(sp)),
             },
         }
     }
 
     /// Convert to a Value
     pub fn to_value(&self) -> Value {
+        // Check for symbolic first
+        if let Some(symbolic) = &self.symbolic {
+            return Value::Symbolic(symbolic.to_symbolic());
+        }
+        // Then check for corrupted (legacy irrational)
         if self.corrupted {
             Value::Irrational(self.f.unwrap_or(0.0))
         } else if let (Some(s), Some(n), Some(d)) = (self.s, self.n, self.d) {
@@ -379,6 +776,7 @@ impl ValueData {
             d: Some(f.d()),
             f: None,
             corrupted: false,
+            symbolic: None,
         }
     }
 
@@ -402,6 +800,7 @@ impl Default for ValueData {
             d: Some(1),
             f: None,
             corrupted: false,
+            symbolic: None,
         }
     }
 }
@@ -567,5 +966,141 @@ mod tests {
         assert_eq!(integer_nth_root(16, 4), Some(2)); // 4th root of 16
         assert_eq!(integer_nth_root(27, 3), Some(3)); // cube root of 27
         assert_eq!(integer_nth_root(10, 2), None); // sqrt(10) is not integer
+    }
+
+    // ============================================================================
+    // Symbolic power tests
+    // ============================================================================
+
+    #[test]
+    fn test_symbolic_power_creation() {
+        let two = Value::rational(2, 1);
+        let twelfth = Value::rational(1, 12);
+
+        // 2^(1/12) should return symbolic, not irrational
+        let result = two.pow(&twelfth);
+        assert!(result.is_symbolic());
+        assert!(result.is_corrupted());
+
+        // Value should be correct
+        let expected = 2.0_f64.powf(1.0 / 12.0);
+        assert!((result.to_f64() - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_symbolic_like_base_multiplication() {
+        let two = Value::rational(2, 1);
+        let twelfth = Value::rational(1, 12);
+
+        // 2^(1/12) * 2^(1/12) = 2^(1/6)
+        let semi = two.pow(&twelfth);
+        let result = semi.mul(&semi);
+
+        assert!(result.is_symbolic());
+
+        // Verify the exponent was combined: 1/12 + 1/12 = 1/6
+        if let Value::Symbolic(sp) = &result {
+            assert_eq!(sp.powers.len(), 1);
+            assert_eq!(sp.powers[0].base, 2);
+            // exponent should be 1/6
+            assert_eq!(sp.powers[0].exponent.n(), 1);
+            assert_eq!(sp.powers[0].exponent.d(), 6);
+        } else {
+            panic!("Expected symbolic result");
+        }
+
+        // Value should be 2^(1/6)
+        let expected = 2.0_f64.powf(1.0 / 6.0);
+        assert!((result.to_f64() - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_symbolic_multi_base() {
+        let two = Value::rational(2, 1);
+        let three = Value::rational(3, 1);
+        let twelfth = Value::rational(1, 12);
+        let thirteenth = Value::rational(1, 13);
+
+        // 2^(1/12) * 3^(1/13) should produce symbolic with two power terms
+        let a = two.pow(&twelfth);
+        let b = three.pow(&thirteenth);
+        let result = a.mul(&b);
+
+        assert!(result.is_symbolic());
+
+        if let Value::Symbolic(sp) = &result {
+            assert_eq!(sp.powers.len(), 2);
+            // Powers should be sorted by base
+            let bases: Vec<u32> = sp.powers.iter().map(|p| p.base).collect();
+            assert!(bases.contains(&2));
+            assert!(bases.contains(&3));
+        } else {
+            panic!("Expected symbolic result");
+        }
+
+        // Value should be 2^(1/12) * 3^(1/13)
+        let expected = 2.0_f64.powf(1.0 / 12.0) * 3.0_f64.powf(1.0 / 13.0);
+        assert!((result.to_f64() - expected).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_symbolic_cancellation() {
+        let two = Value::rational(2, 1);
+        let twelfth = Value::rational(1, 12);
+        let neg_twelfth = Value::rational(-1, 12);
+
+        // 2^(1/12) * 2^(-1/12) = 1 (should become rational)
+        let a = two.pow(&twelfth);
+        let b = two.pow(&neg_twelfth);
+        let result = a.mul(&b);
+
+        // Should reduce to rational 1
+        assert!(result.is_rational());
+        assert!((result.to_f64() - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_symbolic_data_roundtrip() {
+        let two = Value::rational(2, 1);
+        let twelfth = Value::rational(1, 12);
+
+        let symbolic = two.pow(&twelfth);
+        let data = ValueData::from_value(&symbolic);
+
+        // Should have symbolic data
+        assert!(data.symbolic.is_some());
+        assert!(data.corrupted);
+
+        // Roundtrip should preserve symbolic form
+        let recovered = data.to_value();
+        assert!(recovered.is_symbolic());
+
+        if let (Value::Symbolic(orig), Value::Symbolic(recov)) = (&symbolic, &recovered) {
+            assert_eq!(orig.powers.len(), recov.powers.len());
+            assert_eq!(orig.powers[0].base, recov.powers[0].base);
+            assert!((orig.to_f64() - recov.to_f64()).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_symbolic_rational_multiplication() {
+        let two = Value::rational(2, 1);
+        let twelfth = Value::rational(1, 12);
+        let five = Value::rational(5, 1);
+
+        // 5 * 2^(1/12) should give symbolic with coefficient 5
+        let symbolic = two.pow(&twelfth);
+        let result = five.mul(&symbolic);
+
+        assert!(result.is_symbolic());
+
+        if let Value::Symbolic(sp) = &result {
+            assert_eq!(sp.coefficient.to_f64(), 5.0);
+            assert_eq!(sp.powers.len(), 1);
+            assert_eq!(sp.powers[0].base, 2);
+        }
+
+        let expected = 5.0 * 2.0_f64.powf(1.0 / 12.0);
+        assert!((result.to_f64() - expected).abs() < 1e-10);
     }
 }

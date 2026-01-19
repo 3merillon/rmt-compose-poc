@@ -443,6 +443,17 @@ export class DependencyGraph {
     // Get old dependencies
     const oldDeps = this.dependencies.get(noteId) || new Set();
 
+    // Check if dependencies actually changed - this affects transitive corruption visualization
+    let depsChanged = oldDeps.size !== newDeps.size;
+    if (!depsChanged) {
+      for (const dep of newDeps) {
+        if (!oldDeps.has(dep)) {
+          depsChanged = true;
+          break;
+        }
+      }
+    }
+
     // Remove from inverse index for deps that are no longer referenced
     for (const oldDep of oldDeps) {
       if (!newDeps.has(oldDep)) {
@@ -474,6 +485,13 @@ export class DependencyGraph {
       this.baseNoteDependents.add(noteId);
     } else {
       this.baseNoteDependents.delete(noteId);
+    }
+
+    // Bump corruption epoch when dependencies change, as this affects transitive corruption visualization.
+    // Even if a note's direct corruption flags don't change, changing its dependencies can affect
+    // whether other notes show transitive corruption (hatching visualization).
+    if (depsChanged) {
+      this._corruptionEpoch++;
     }
   }
 
