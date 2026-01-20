@@ -93,8 +93,33 @@ function loadGoogleTranslate() {
   document.head.appendChild(script)
 }
 
+// Clear all googtrans cookies thoroughly
+function clearAllGoogTransCookies() {
+  const hostname = window.location.hostname
+  // Try all possible domain variations
+  const domains = [
+    '',
+    hostname,
+    '.' + hostname,
+    // For subdomains like docs.example.com, also try .example.com
+    hostname.split('.').slice(-2).join('.'),
+    '.' + hostname.split('.').slice(-2).join('.')
+  ]
+
+  domains.forEach(domain => {
+    const domainPart = domain ? `; domain=${domain}` : ''
+    // Clear with various path combinations
+    document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/${domainPart}`
+    document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=${domainPart}`
+    document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 GMT${domainPart}`
+  })
+}
+
 // Trigger translation using Google's combo selector
 function triggerGoogleTranslate(langCode) {
+  // Always clear cookies first to prevent stale state
+  clearAllGoogTransCookies()
+
   const select = document.querySelector('.goog-te-combo')
   if (select) {
     select.value = langCode
@@ -106,53 +131,32 @@ function triggerGoogleTranslate(langCode) {
 
 // Restore to original English
 function restoreToEnglish() {
-  // Method 1: Try using the iframe's restore button
-  const iframe = document.querySelector('.goog-te-banner-frame')
-  if (iframe) {
-    try {
-      const innerDoc = iframe.contentDocument || iframe.contentWindow?.document
-      if (innerDoc) {
-        const restoreButton = innerDoc.querySelector('button.goog-te-banner-cancel') ||
-                              innerDoc.querySelector('.goog-te-button button') ||
-                              innerDoc.querySelector('[id*="restore"]')
-        if (restoreButton) {
-          restoreButton.click()
-          updateUIState(false, null)
-          return
-        }
-      }
-    } catch (e) {
-      // Cross-origin access may fail, continue to fallback
-    }
-  }
+  isOpen.value = false
 
-  // Method 2: Set combo to auto/source language
+  // Clear cookies first - this is critical
+  clearAllGoogTransCookies()
+
+  // Method 1: Try the combo selector with empty value
   const select = document.querySelector('.goog-te-combo')
   if (select) {
-    // Setting empty value or 'en' triggers restore
     select.value = ''
     select.dispatchEvent(new Event('change', { bubbles: true }))
-    updateUIState(false, null)
+
+    // Google Translate sometimes needs a moment, then check if it worked
+    setTimeout(() => {
+      const html = document.documentElement
+      if (html.classList.contains('translated-ltr') || html.classList.contains('translated-rtl')) {
+        // Still translated, force reload
+        window.location.reload()
+      } else {
+        updateUIState(false, null)
+      }
+    }, 300)
     return
   }
 
-  // Method 3: Force reload as last resort (clearing cookies properly)
-  clearAllGoogTransCookies()
+  // Method 2: Force reload as fallback
   window.location.reload()
-}
-
-function clearAllGoogTransCookies() {
-  const hostname = window.location.hostname
-  const paths = ['/', '']
-  const domains = ['', hostname, '.' + hostname]
-
-  paths.forEach(path => {
-    domains.forEach(domain => {
-      const domainPart = domain ? `; domain=${domain}` : ''
-      const pathPart = path ? `; path=${path}` : ''
-      document.cookie = `googtrans=${domainPart}${pathPart}; expires=Thu, 01 Jan 1970 00:00:00 GMT`
-    })
-  })
 }
 
 function updateUIState(translated, lang) {
@@ -163,6 +167,30 @@ function updateUIState(translated, lang) {
 function translateTo(lang) {
   isOpen.value = false
 
+  // If already translated to a different language, we need to restore first then translate
+  const html = document.documentElement
+  const currentlyTranslated = html.classList.contains('translated-ltr') || html.classList.contains('translated-rtl')
+
+  if (currentlyTranslated) {
+    // Clear cookies and restore first
+    clearAllGoogTransCookies()
+
+    const select = document.querySelector('.goog-te-combo')
+    if (select) {
+      // Restore to original
+      select.value = ''
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+
+      // Wait for restore, then translate to new language
+      setTimeout(() => {
+        triggerGoogleTranslate(lang.code)
+        updateUIState(true, lang)
+      }, 500)
+      return
+    }
+  }
+
+  // Not currently translated, just translate directly
   const success = triggerGoogleTranslate(lang.code)
   if (success) {
     updateUIState(true, lang)
