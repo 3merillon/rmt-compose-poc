@@ -21,6 +21,14 @@
   }
 }
 
+/* Enable the nav screen dropdown at the custom breakpoint (768px - 1100px) */
+/* VitePress only enables .VPNavScreen below 768px by default */
+@media (min-width: 768px) and (max-width: 1100px) {
+  .VPNavScreen {
+    display: block !important;
+  }
+}
+
 /* ========================================
    Google Translate Integration Styles
    ======================================== */
