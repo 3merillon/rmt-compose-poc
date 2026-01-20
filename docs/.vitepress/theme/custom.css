@@ -1,8 +1,11 @@
 /* Custom styles for theme extensions */
 
-/* Force mobile/hamburger menu to appear earlier (at 1100px instead of 768px) */
-/* This ensures all nav items remain accessible via the hamburger menu */
-@media (max-width: 1100px) {
+/* ========================================
+   Navbar Responsive Breakpoint Override
+   All navbar elements collapse at 1440px
+   ======================================== */
+
+@media (max-width: 1440px) {
   /* Hide desktop nav menu */
   .VPNavBarMenu {
     display: none !important;
@@ -12,13 +15,44 @@
   .VPNavBarHamburger {
     display: flex !important;
   }
+
+  /* Hide social links (GitHub icon) - they'll be in hamburger menu */
+  .VPNavBarSocialLinks {
+    display: none !important;
+  }
+
+  /* Hide appearance toggle (theme switcher) - it'll be in hamburger menu */
+  .VPNavBarAppearance {
+    display: none !important;
+  }
+
+  /* Hide extra nav items */
+  .VPNavBarExtra {
+    display: none !important;
+  }
+
+  /* Collapse search to icon-only mode */
+  .VPNavBarSearch .DocSearch-Button-Placeholder,
+  .VPNavBarSearch .search-text {
+    display: none !important;
+  }
 }
 
-/* Enable the nav screen dropdown at the custom breakpoint (768px - 1100px) */
+/* Enable the nav screen dropdown at the custom breakpoint (768px - 1440px) */
 /* VitePress only enables .VPNavScreen below 768px by default */
-@media (min-width: 768px) and (max-width: 1100px) {
+@media (min-width: 768px) and (max-width: 1440px) {
   .VPNavScreen {
     display: block !important;
+  }
+
+  /* Ensure social links appear in the hamburger menu */
+  .VPNavScreenSocialLinks {
+    display: flex !important;
+  }
+
+  /* Ensure appearance toggle appears in the hamburger menu */
+  .VPNavScreenAppearance {
+    display: flex !important;
   }
 }
 
@@ -26,36 +60,25 @@
    Google Translate Integration Styles
    ======================================== */
 
-/* Make Google's banner fixed at the very top */
+/* Hide Google's banner frame completely since we use a custom dropdown */
 .goog-te-banner-frame {
-  position: fixed !important;
+  display: none !important;
+}
+
+/* Remove body top margin that Google Translate adds */
+body {
   top: 0 !important;
-  z-index: 9999999 !important;
 }
 
-/* When page is translated, push the fixed navbar down */
-html.translated-ltr .VPNav,
-html.translated-rtl .VPNav {
-  top: 40px !important;
-}
+/* ========================================
+   Search Box Customization
+   ======================================== */
 
-/* Also push down the local nav (sticky header on doc pages) */
-html.translated-ltr .VPLocalNav,
-html.translated-rtl .VPLocalNav {
-  top: 104px !important; /* 64px navbar + 40px translate bar */
-}
-
-/* Push down the sidebar */
-html.translated-ltr .VPSidebar,
-html.translated-rtl .VPSidebar {
-  top: 104px !important;
-  height: calc(100vh - 104px) !important;
-}
-
-/* Adjust scroll padding for anchor links */
-html.translated-ltr,
-html.translated-rtl {
-  scroll-padding-top: 104px !important;
+/* Hide the Ctrl+K shortcut indicator in the search box */
+.VPNavBarSearch .DocSearch-Button-Keys,
+.VPNavBarSearch .search-actions,
+.DocSearch-Button-Key {
+  display: none !important;
 }
 
 
