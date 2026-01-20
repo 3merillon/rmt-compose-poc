@@ -27,7 +27,6 @@
 
 /* Hide the Google Translate top banner/toolbar */
 .goog-te-banner-frame,
-.skiptranslate,
 #goog-gt-tt,
 .goog-te-balloon-frame,
 .goog-tooltip,
@@ -35,18 +34,46 @@
   display: none !important;
 }
 
+/* Hide skiptranslate elements but keep the combo accessible */
+.skiptranslate {
+  position: absolute !important;
+  top: -9999px !important;
+  left: -9999px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Keep the combo functional for programmatic access */
+.goog-te-combo {
+  pointer-events: auto !important;
+}
+
 /* Fix body position shift caused by Google Translate banner */
 body {
   top: 0 !important;
+  position: static !important;
+}
+
+/* Ensure html element isn't shifted */
+html.translated-ltr,
+html.translated-rtl {
+  margin-top: 0 !important;
 }
 
 /* Hide the hidden google_translate_element div */
 #google_translate_element {
-  display: none !important;
+  position: absolute !important;
+  top: -9999px !important;
+  left: -9999px !important;
 }
 
 /* Prevent Google Translate from adding weird highlighting on translated text */
 .goog-text-highlight {
   background-color: transparent !important;
   box-shadow: none !important;
+}
+
+/* Hide Google Translate attribution if it appears */
+.goog-te-gadget {
+  display: none !important;
 }

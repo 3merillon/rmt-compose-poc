@@ -4,6 +4,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 const isOpen = ref(false)
 const selectedLang = ref(null)
 const isTranslated = ref(false)
+const isReady = ref(false)
 
 const languages = [
   // Western Europe
@@ -62,7 +63,9 @@ function loadGoogleTranslate() {
   // Create the google translate element container (hidden)
   const gtDiv = document.createElement('div')
   gtDiv.id = 'google_translate_element'
-  gtDiv.style.display = 'none'
+  gtDiv.style.position = 'absolute'
+  gtDiv.style.top = '-9999px'
+  gtDiv.style.left = '-9999px'
   document.body.appendChild(gtDiv)
 
   // Define the callback
@@ -75,6 +78,11 @@ function loadGoogleTranslate() {
       },
       'google_translate_element'
     )
+    // Mark as ready once initialized
+    setTimeout(() => {
+      isReady.value = true
+      checkTranslationStatus()
+    }, 500)
   }
 
   // Load the script
@@ -85,36 +93,87 @@ function loadGoogleTranslate() {
   document.head.appendChild(script)
 }
 
-// Set translation language via cookie
-function setTranslationCookie(langCode) {
-  // Google Translate uses a cookie to track the selected language
-  // Format: /en/langCode for translating from English to langCode
-  const value = `/en/${langCode}`
-  document.cookie = `googtrans=${value}; path=/`
-  // Also set for the domain without leading dot (for some browsers)
-  document.cookie = `googtrans=${value}; path=/; domain=${window.location.hostname}`
+// Trigger translation using Google's combo selector
+function triggerGoogleTranslate(langCode) {
+  const select = document.querySelector('.goog-te-combo')
+  if (select) {
+    select.value = langCode
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    return true
+  }
+  return false
 }
 
-// Clear translation
-function clearTranslation() {
-  // Remove the googtrans cookie
-  document.cookie = 'googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'
-  document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${window.location.hostname}`
+// Restore to original English
+function restoreToEnglish() {
+  // Method 1: Try using the iframe's restore button
+  const iframe = document.querySelector('.goog-te-banner-frame')
+  if (iframe) {
+    try {
+      const innerDoc = iframe.contentDocument || iframe.contentWindow?.document
+      if (innerDoc) {
+        const restoreButton = innerDoc.querySelector('button.goog-te-banner-cancel') ||
+                              innerDoc.querySelector('.goog-te-button button') ||
+                              innerDoc.querySelector('[id*="restore"]')
+        if (restoreButton) {
+          restoreButton.click()
+          updateUIState(false, null)
+          return
+        }
+      }
+    } catch (e) {
+      // Cross-origin access may fail, continue to fallback
+    }
+  }
 
-  // Reload to show original content
+  // Method 2: Set combo to auto/source language
+  const select = document.querySelector('.goog-te-combo')
+  if (select) {
+    // Setting empty value or 'en' triggers restore
+    select.value = ''
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+    updateUIState(false, null)
+    return
+  }
+
+  // Method 3: Force reload as last resort (clearing cookies properly)
+  clearAllGoogTransCookies()
   window.location.reload()
+}
+
+function clearAllGoogTransCookies() {
+  const hostname = window.location.hostname
+  const paths = ['/', '']
+  const domains = ['', hostname, '.' + hostname]
+
+  paths.forEach(path => {
+    domains.forEach(domain => {
+      const domainPart = domain ? `; domain=${domain}` : ''
+      const pathPart = path ? `; path=${path}` : ''
+      document.cookie = `googtrans=${domainPart}${pathPart}; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+    })
+  })
+}
+
+function updateUIState(translated, lang) {
+  isTranslated.value = translated
+  selectedLang.value = lang
 }
 
 function translateTo(lang) {
-  // Set the cookie for the target language
-  setTranslationCookie(lang.code)
-
-  selectedLang.value = lang
   isOpen.value = false
-  isTranslated.value = true
 
-  // Reload the page to trigger translation
-  window.location.reload()
+  const success = triggerGoogleTranslate(lang.code)
+  if (success) {
+    updateUIState(true, lang)
+  } else {
+    // Retry if Google Translate isn't ready yet
+    setTimeout(() => {
+      if (triggerGoogleTranslate(lang.code)) {
+        updateUIState(true, lang)
+      }
+    }, 1000)
+  }
 }
 
 function toggleDropdown() {
@@ -129,50 +188,60 @@ function closeDropdown(e) {
 
 // Check if page is currently translated
 function checkTranslationStatus() {
-  const cookies = document.cookie.split(';')
-  for (const cookie of cookies) {
-    const [name, value] = cookie.trim().split('=')
-    if (name === 'googtrans' && value && value !== '/en/en') {
-      isTranslated.value = true
-      // Extract language code from cookie value like "/en/fr"
-      const langCode = value.split('/')[2]
-      if (langCode) {
-        selectedLang.value = languages.find(l => l.code === langCode) || { code: langCode, name: langCode }
-      }
-      return
+  const html = document.documentElement
+  const hasTranslatedClass = html.classList.contains('translated-ltr') ||
+                              html.classList.contains('translated-rtl')
+
+  if (hasTranslatedClass) {
+    isTranslated.value = true
+    // Try to determine the language from the combo
+    const select = document.querySelector('.goog-te-combo')
+    if (select && select.value) {
+      const lang = languages.find(l => l.code === select.value)
+      selectedLang.value = lang || { code: select.value, name: select.value }
     }
+  } else {
+    isTranslated.value = false
+    selectedLang.value = null
   }
-  isTranslated.value = false
-  selectedLang.value = null
+}
+
+// Watch for translation state changes
+let observer = null
+
+function setupObserver() {
+  observer = new MutationObserver((mutations) => {
+    for (const mutation of mutations) {
+      if (mutation.attributeName === 'class') {
+        checkTranslationStatus()
+        break
+      }
+    }
+  })
+
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ['class']
+  })
 }
 
 onMounted(() => {
   loadGoogleTranslate()
-  checkTranslationStatus()
+  setupObserver()
   document.addEventListener('click', closeDropdown)
 })
 
 onUnmounted(() => {
+  if (observer) {
+    observer.disconnect()
+  }
   document.removeEventListener('click', closeDropdown)
 })
 </script>
 
 <template>
   <div class="translate-container">
-    <!-- Show "Back to English" button when translated -->
-    <button
-      v-if="isTranslated"
-      class="translate-button back-button"
-      @click="clearTranslation"
-      title="Back to English"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M19 12H5M12 19l-7-7 7-7"/>
-      </svg>
-      <span class="translate-label">English</span>
-    </button>
-
-    <!-- Main translate button -->
+    <!-- Main translate button with integrated back option -->
     <button
       class="translate-button"
       :class="{ active: isTranslated }"
@@ -193,6 +262,17 @@ onUnmounted(() => {
     </button>
 
     <div v-if="isOpen" class="translate-dropdown" role="listbox">
+      <!-- Back to English option when translated -->
+      <button
+        v-if="isTranslated"
+        class="translate-option restore-option"
+        role="option"
+        @click="restoreToEnglish"
+      >
+        ← English (Original)
+      </button>
+      <div v-if="isTranslated" class="dropdown-divider"></div>
+
       <button
         v-for="lang in languages"
         :key="lang.code"
@@ -214,7 +294,7 @@ onUnmounted(() => {
   margin-left: 12px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-shrink: 0;
 }
 
 .translate-button {
@@ -230,6 +310,7 @@ onUnmounted(() => {
   font-weight: 500;
   cursor: pointer;
   transition: border-color 0.25s, color 0.25s, background-color 0.25s;
+  white-space: nowrap;
 }
 
 .translate-button:hover {
@@ -241,16 +322,6 @@ onUnmounted(() => {
   border-color: var(--vp-c-brand-1);
   background-color: var(--vp-c-brand-soft);
   color: var(--vp-c-brand-1);
-}
-
-.translate-button.back-button {
-  border-color: var(--vp-c-divider);
-  background: transparent;
-}
-
-.translate-button.back-button:hover {
-  border-color: var(--vp-c-text-2);
-  color: var(--vp-c-text-1);
 }
 
 /* Hide "Translate" text and chevron by default, show only globe icon */
@@ -288,8 +359,8 @@ onUnmounted(() => {
   position: absolute;
   top: calc(100% + 8px);
   right: 0;
-  min-width: 160px;
-  max-height: 320px;
+  min-width: 180px;
+  max-height: 360px;
   overflow-y: auto;
   padding: 8px 0;
   background: var(--vp-c-bg-elv);
@@ -321,5 +392,21 @@ onUnmounted(() => {
   background: var(--vp-c-brand-soft);
   color: var(--vp-c-brand-1);
   font-weight: 600;
+}
+
+.translate-option.restore-option {
+  color: var(--vp-c-text-2);
+  font-weight: 500;
+}
+
+.translate-option.restore-option:hover {
+  color: var(--vp-c-text-1);
+  background: var(--vp-c-bg-soft);
+}
+
+.dropdown-divider {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--vp-c-divider);
 }
 </style>
