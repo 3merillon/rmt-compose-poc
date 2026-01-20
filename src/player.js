@@ -1432,6 +1432,16 @@ if (canvasEl) {
                 return;
               }
             } catch {}
+
+            // Detect if target is a measure bar (has startTime but no frequency/duration)
+            // Measure bars have no frequency, so frequency expressions must anchor to BaseNote
+            const __isMeasureTarget = (n) => {
+              try {
+                return !!(n && n.id !== 0 && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
+              } catch { return false; }
+            };
+            const targetIsMeasure = __isMeasureTarget(targetNote);
+
             let importedModule;
             let filename = null;
             
@@ -1462,9 +1472,12 @@ if (canvasEl) {
             const exprRemapCache = new Map();
 
             // Ensure imported expressions anchor to the actual drop target (requirement)
-            function updateExpression(expr) {
+            // When dropping onto a measure bar: startTime anchors to measure, frequency anchors to BaseNote
+            function updateExpression(expr, exprType = null) {
                 if (typeof expr !== 'string') return expr;
-                const cached = exprRemapCache.get(expr);
+                // Cache key includes expression type for measure bar drops (frequency vs startTime behave differently)
+                const cacheKey = targetIsMeasure ? `${exprType}:${expr}` : expr;
+                const cached = exprRemapCache.get(cacheKey);
                 if (cached) return cached;
 
                 const originalExpr = expr;
@@ -1476,10 +1489,26 @@ if (canvasEl) {
                 if (targetNote.id !== 0 && hasBase) {
                     const anchorId = targetNote.id;
 
-                    // Remap baseNote variable access
-                    expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
-                        return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
-                    });
+                    // When dropping on a measure bar, frequency must anchor to BaseNote (measures have no frequency)
+                    // Only startTime should anchor to the measure bar
+                    if (targetIsMeasure) {
+                        // For frequency expressions: keep BaseNote as frequency anchor
+                        // For startTime expressions: remap to measure bar
+                        // For duration/tempo: remap to measure bar (findTempo walks ancestors properly)
+                        expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
+                            if (varName === 'frequency') {
+                                // Keep frequency anchored to BaseNote
+                                return "module.baseNote.getVariable('frequency')";
+                            }
+                            // startTime, tempo, beatsPerMeasure etc. anchor to measure bar
+                            return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
+                        });
+                    } else {
+                        // Normal note target: remap all baseNote references
+                        expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
+                            return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
+                        });
+                    }
 
                     // Remap common helpers that take baseNote as argument
                     expr = expr.replace(/module\.findTempo\(\s*module\.baseNote\s*\)/g, "module.findTempo(module.getNoteById(" + anchorId + "))");
@@ -1491,10 +1520,23 @@ if (canvasEl) {
                     expr = expr.replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, function(match, p1) {
                         const oldRef = parseInt(p1, 10);
                         if (mapping.hasOwnProperty(oldRef)) {
-                            return "module.getNoteById(" + mapping[oldRef] + ")";
+                            const newId = mapping[oldRef];
+                            // Special case: if remapping to measure bar and this is a frequency reference, use BaseNote instead
+                            if (targetIsMeasure && oldRef === 0 && exprType === 'frequency') {
+                                return "module.baseNote";
+                            }
+                            return "module.getNoteById(" + newId + ")";
                         }
                         return match;
                     });
+
+                    // Second pass: fix any frequency references that ended up pointing to the measure bar
+                    if (targetIsMeasure && exprType === 'frequency') {
+                        const measureId = targetNote.id;
+                        // Replace measure bar frequency references with BaseNote frequency
+                        expr = expr.replace(new RegExp(`module\\.getNoteById\\(\\s*${measureId}\\s*\\)\\.getVariable\\(\\s*'frequency'\\s*\\)`, 'g'),
+                            "module.baseNote.getVariable('frequency')");
+                    }
                 }
 
                 // Canonicalize expression via central simplifier after remapping
@@ -1514,7 +1556,7 @@ if (canvasEl) {
                 } catch (e) {
                     simplified = expr;
                 }
-                exprRemapCache.set(originalExpr, simplified);
+                exprRemapCache.set(cacheKey, simplified);
                 return simplified;
             }
         
@@ -1547,7 +1589,8 @@ if (canvasEl) {
                         const baseKey = key.slice(0, -6);
 
                         // Always canonicalize by type to ensure predictable UI (e.g., duration selector preselect)
-                        let expr = needsRemap ? updateExpression(originalString) : originalString;
+                        // Pass expression type for measure bar drops (frequency needs special handling)
+                        let expr = needsRemap ? updateExpression(originalString, baseKey) : originalString;
                         try {
                             if (baseKey === 'duration') {
                                 expr = simplifyDuration(expr, myModule);
@@ -1574,6 +1617,7 @@ if (canvasEl) {
 
             // Normalize imported measure chains to ensure correct parentage and chaining after a module drop.
             // This prevents cross-chain contamination where dragging a dropped measure would affect unrelated measures.
+            // When dropping onto a measure bar: integrate the first imported measure into the target measure bar's chain.
             (function __normalizeImportedMeasureChains(){
               try {
                 const importedSet = new Set(importedIds.map(Number));
@@ -1609,7 +1653,7 @@ if (canvasEl) {
                 // Roots = imported measures that do NOT reference another imported measure in their startTime
                 const roots = measures.filter(m => (indeg.get(m.id) || 0) === 0);
 
-                // Linearize each root’s chain forward by earliest evaluated start
+                // Linearize each root's chain forward by earliest evaluated start
                 const visitChain = (root) => {
                   const chain = [root.id];
                   let cur = root.id;
@@ -1642,6 +1686,8 @@ if (canvasEl) {
                 // - First element keeps its existing parent anchor (non-measure note or BaseNote).
                 //   We only fix parentId to match that anchor if possible.
                 // - Subsequent measures are anchored to previous measure END via findMeasureLength(prev).
+                // - Special case: if dropping onto a measure bar, integrate the first imported measure
+                //   into the target measure bar's chain (start after the target measure ends).
                 chains.forEach(chain => {
                   if (!Array.isArray(chain) || chain.length === 0) return;
 
@@ -1650,7 +1696,20 @@ if (canvasEl) {
                   const raw0 = (first && first.variables && first.variables.startTimeString) ? first.variables.startTimeString : '';
                   const m0 = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
                   let parentIdForPID = 0;
-                  if (m0) {
+
+                  // Special handling when dropping onto a measure bar:
+                  // Create a separate measure chain that starts at the target measure bar's startTime
+                  // This preserves the dropped module's internal timing while anchoring to the drop point
+                  if (targetIsMeasure) {
+                    // The first imported measure starts at the same time as the target measure bar
+                    // (not after it ends - that would shift all notes by one measure duration)
+                    const targetMeasureId = targetNote.id;
+                    const rawStart = `module.getNoteById(${targetMeasureId}).getVariable('startTime')`;
+                    const simplifiedStart = simplifyStartTime(rawStart, myModule);
+                    first.setVariable('startTimeString', simplifiedStart);
+                    // Parent is the target measure for hierarchy, but this is a separate chain
+                    parentIdForPID = targetMeasureId;
+                  } else if (m0) {
                     const pid = parseInt(m0[1], 10);
                     const pn = myModule.getNoteById(pid);
                     if (pn && !isMeasure(pn)) {
@@ -1666,6 +1725,7 @@ if (canvasEl) {
                   try { first.parentId = parentIdForPID; } catch {}
 
                   // Subsequent measures: start = prev.startTime + findMeasureLength(prev), and parentId = prev.id
+                  // These remain as a separate chain (not integrated into the target measure bar's chain)
                   // Note: We don't call markNoteDirty here - the batch marking below handles all imported notes
                   for (let i = 1; i < chain.length; i++) {
                     const prevId = Number(chain[i - 1]);
