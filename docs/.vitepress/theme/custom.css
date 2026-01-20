@@ -1,12 +1,5 @@
 /* Custom styles for theme extensions */
 
-/* Mobile adjustments for translate widget */
-@media (max-width: 768px) {
-  .translate-container {
-    margin-left: 8px;
-  }
-}
-
 /* Force mobile/hamburger menu to appear earlier (at 1100px instead of 768px) */
 /* This ensures all nav items remain accessible via the hamburger menu */
 @media (max-width: 1100px) {
@@ -33,51 +26,36 @@
    Google Translate Integration Styles
    ======================================== */
 
-/* Hide the Google Translate top banner/toolbar */
-.goog-te-banner-frame,
-#goog-gt-tt,
-.goog-te-balloon-frame,
-.goog-tooltip,
-.goog-tooltip:hover {
-  display: none !important;
-}
-
-/* Hide skiptranslate visually but keep it functional */
-.skiptranslate:not(#google_translate_element) {
-  display: none !important;
-}
-
-/* Keep the google_translate_element functional but invisible */
-#google_translate_element {
+/* Make Google's banner fixed at the very top */
+.goog-te-banner-frame {
   position: fixed !important;
   top: 0 !important;
-  left: 0 !important;
-  width: 1px !important;
-  height: 1px !important;
-  overflow: hidden !important;
-  opacity: 0.01 !important;
-  z-index: -1 !important;
+  z-index: 9999999 !important;
 }
 
-/* Fix body position shift caused by Google Translate banner */
-body {
-  top: 0 !important;
-  position: static !important;
+/* When page is translated, push the fixed navbar down */
+html.translated-ltr .VPNav,
+html.translated-rtl .VPNav {
+  top: 40px !important;
 }
 
-/* Ensure html element isn't shifted */
+/* Also push down the local nav (sticky header on doc pages) */
+html.translated-ltr .VPLocalNav,
+html.translated-rtl .VPLocalNav {
+  top: 104px !important; /* 64px navbar + 40px translate bar */
+}
+
+/* Push down the sidebar */
+html.translated-ltr .VPSidebar,
+html.translated-rtl .VPSidebar {
+  top: 104px !important;
+  height: calc(100vh - 104px) !important;
+}
+
+/* Adjust scroll padding for anchor links */
 html.translated-ltr,
 html.translated-rtl {
-  margin-top: 0 !important;
+  scroll-padding-top: 104px !important;
 }
 
-/* Prevent Google Translate from adding weird highlighting on translated text */
-.goog-text-highlight {
-  background-color: transparent !important;
-  box-shadow: none !important;
-}
 
-/* Hide Google Translate attribution if it appears */
-.goog-te-gadget {
-  display: none !important;
-}
