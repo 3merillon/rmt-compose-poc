@@ -6,6 +6,7 @@ import { eventBus } from '../utils/event-bus.js';
 import Fraction from 'fraction.js';
 import { getModule, setEvaluatedNotes, getInstrumentManager } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
+import { decompileToDSL } from '../dsl/index.js';
 
 // Helpers
 function pauseIfPlaying() {
@@ -67,7 +68,30 @@ function buildEvaluatedDiv(value) {
   return evaluatedDiv;
 }
 
-function buildRawEditor(initialRaw) {
+/**
+ * Convert a raw expression to DSL format for display
+ * @param {string} rawExpr - Raw expression (could be legacy or DSL)
+ * @param {Object} note - The note object (to get binary expression)
+ * @param {string} key - The variable key (frequency, startTime, etc.)
+ * @returns {string} DSL-formatted expression
+ */
+function convertToDSLDisplay(rawExpr, note, key) {
+  if (!rawExpr) return '';
+
+  try {
+    // If note has a compiled binary expression, decompile it to DSL
+    const expr = note?.getExpression?.(key);
+    if (expr && !expr.isEmpty()) {
+      return decompileToDSL(expr);
+    }
+  } catch (e) {
+    // Fall back to raw if decompilation fails
+  }
+
+  return rawExpr;
+}
+
+function buildRawEditor(initialRaw, note = null, key = null) {
   const rawDiv = document.createElement('div');
   rawDiv.className = 'raw-value';
 
@@ -78,7 +102,10 @@ function buildRawEditor(initialRaw) {
   const rawInput = document.createElement('input');
   rawInput.type = 'text';
   rawInput.className = 'raw-value-input';
-  rawInput.value = initialRaw ?? '';
+
+  // Convert to DSL format for display
+  const displayValue = convertToDSLDisplay(initialRaw, note, key);
+  rawInput.value = displayValue ?? '';
 
   const saveButton = document.createElement('button');
   saveButton.className = 'raw-value-save';
@@ -795,7 +822,7 @@ export function createMeasureDurationRow(note, measureId, externalFunctions) {
     }
   } catch {}
 
-  const { rawDiv, rawInput, saveButton } = buildRawEditor(initialRaw);
+  const { rawDiv, rawInput, saveButton } = buildRawEditor(initialRaw, measureNote || moduleInstance?.baseNote, 'beatsPerMeasure');
 
   // Layout: show Save underneath input for this section only
   try {
@@ -1131,8 +1158,8 @@ export function createVariableControls(key, value, note, measureId, externalFunc
     const evaluatedDiv = buildEvaluatedDiv(value);
     variableValueDiv.appendChild(evaluatedDiv);
 
-    // Raw editor
-    const { rawDiv, rawInput, saveButton } = buildRawEditor(value?.raw ?? '');
+    // Raw editor (pass note and key for DSL conversion)
+    const { rawDiv, rawInput, saveButton } = buildRawEditor(value?.raw ?? '', note, key);
     saveButton.addEventListener('click', () => {
       try {
         pauseIfPlaying();

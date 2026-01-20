@@ -3,11 +3,15 @@
  *
  * Handles conversion between the binary module format and the JSON format
  * used for saving/loading modules, maintaining backwards compatibility.
+ *
+ * Supports both DSL format and legacy JavaScript-style format for loading.
+ * Saves in DSL format by default for better readability.
  */
 
 import { BinaryModule, BinaryNote, BinaryExpression } from './binary-note.js';
 import { ExpressionCompiler, ExpressionDecompiler } from './expression-compiler.js';
 import { DependencyGraph } from './dependency-graph.js';
+import { decompileToDSL } from './dsl/index.js';
 
 /**
  * Serializer for converting between binary and JSON formats
@@ -22,11 +26,12 @@ export class ModuleSerializer {
    * Convert a binary module to JSON format
    *
    * @param {BinaryModule} module - The binary module
+   * @param {boolean} useDSL - If true, serialize to DSL format (default: true)
    * @returns {Object} - JSON-serializable object
    */
-  toJSON(module) {
+  toJSON(module, useDSL = true) {
     const result = {
-      baseNote: this.serializeBaseNote(module.baseNote),
+      baseNote: this.serializeBaseNote(module.baseNote, useDSL),
       notes: []
     };
 
@@ -34,7 +39,7 @@ export class ModuleSerializer {
     for (const [id, note] of module.notes) {
       if (id === 0) continue; // Skip base note (serialized separately)
 
-      result.notes.push(this.serializeNote(note));
+      result.notes.push(this.serializeNote(note, useDSL));
     }
 
     return result;
@@ -42,8 +47,10 @@ export class ModuleSerializer {
 
   /**
    * Serialize the base note to JSON
+   * @param {BinaryNote} baseNote - The base note
+   * @param {boolean} useDSL - If true, serialize to DSL format (default: true)
    */
-  serializeBaseNote(baseNote) {
+  serializeBaseNote(baseNote, useDSL = true) {
     const result = {};
 
     // Serialize each expression variable
@@ -51,7 +58,11 @@ export class ModuleSerializer {
     for (const varName of vars) {
       const expr = baseNote.getExpression(varName);
       if (expr && !expr.isEmpty()) {
-        result[varName] = this.decompiler.decompile(expr);
+        if (useDSL) {
+          result[varName] = decompileToDSL(expr);
+        } else {
+          result[varName] = this.decompiler.decompile(expr);
+        }
       }
     }
 
@@ -60,8 +71,10 @@ export class ModuleSerializer {
 
   /**
    * Serialize a note to JSON
+   * @param {BinaryNote} note - The note to serialize
+   * @param {boolean} useDSL - If true, serialize to DSL format (default: true)
    */
-  serializeNote(note) {
+  serializeNote(note, useDSL = true) {
     const result = {
       id: note.id
     };
@@ -71,7 +84,11 @@ export class ModuleSerializer {
     for (const varName of vars) {
       const expr = note.getExpression(varName);
       if (expr && !expr.isEmpty()) {
-        result[varName] = this.decompiler.decompile(expr);
+        if (useDSL) {
+          result[varName] = decompileToDSL(expr);
+        } else {
+          result[varName] = this.decompiler.decompile(expr);
+        }
       }
     }
 
