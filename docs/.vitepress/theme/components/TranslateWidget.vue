@@ -117,9 +117,6 @@ function clearAllGoogTransCookies() {
 
 // Trigger translation using Google's combo selector
 function triggerGoogleTranslate(langCode) {
-  // Always clear cookies first to prevent stale state
-  clearAllGoogTransCookies()
-
   const select = document.querySelector('.goog-te-combo')
   if (select) {
     select.value = langCode
@@ -167,30 +164,7 @@ function updateUIState(translated, lang) {
 function translateTo(lang) {
   isOpen.value = false
 
-  // If already translated to a different language, we need to restore first then translate
-  const html = document.documentElement
-  const currentlyTranslated = html.classList.contains('translated-ltr') || html.classList.contains('translated-rtl')
-
-  if (currentlyTranslated) {
-    // Clear cookies and restore first
-    clearAllGoogTransCookies()
-
-    const select = document.querySelector('.goog-te-combo')
-    if (select) {
-      // Restore to original
-      select.value = ''
-      select.dispatchEvent(new Event('change', { bubbles: true }))
-
-      // Wait for restore, then translate to new language
-      setTimeout(() => {
-        triggerGoogleTranslate(lang.code)
-        updateUIState(true, lang)
-      }, 500)
-      return
-    }
-  }
-
-  // Not currently translated, just translate directly
+  // Directly translate - Google Translate handles switching languages
   const success = triggerGoogleTranslate(lang.code)
   if (success) {
     updateUIState(true, lang)
