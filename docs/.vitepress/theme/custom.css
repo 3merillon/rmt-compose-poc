@@ -1,0 +1,22 @@
+/* Custom styles for theme extensions */
+
+/* Mobile adjustments for translate widget */
+@media (max-width: 768px) {
+  .translate-container {
+    margin-left: 8px;
+  }
+}
+
+/* Force mobile/hamburger menu to appear earlier (at 1100px instead of 768px) */
+/* This ensures all nav items remain accessible via the hamburger menu */
+@media (max-width: 1100px) {
+  /* Hide desktop nav menu */
+  .VPNavBarMenu {
+    display: none !important;
+  }
+
+  /* Show hamburger button */
+  .VPNavBarHamburger {
+    display: flex !important;
+  }
+}
