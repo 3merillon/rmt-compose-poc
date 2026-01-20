@@ -246,7 +246,7 @@ onUnmounted(() => {
 
     <div v-if="isOpen" class="dropdown" role="menu">
       <div class="dropdown-notice">
-        Powered by Google Translate. Translations may contain errors.
+        Powered by Google Translate.<br>Translations may contain errors.
       </div>
       <button
         @click="resetToEnglish"
