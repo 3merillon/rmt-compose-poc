@@ -20,3 +20,33 @@
     display: flex !important;
   }
 }
+
+/* ========================================
+   Google Translate Integration Styles
+   ======================================== */
+
+/* Hide the Google Translate top banner/toolbar */
+.goog-te-banner-frame,
+.skiptranslate,
+#goog-gt-tt,
+.goog-te-balloon-frame,
+.goog-tooltip,
+.goog-tooltip:hover {
+  display: none !important;
+}
+
+/* Fix body position shift caused by Google Translate banner */
+body {
+  top: 0 !important;
+}
+
+/* Hide the hidden google_translate_element div */
+#google_translate_element {
+  display: none !important;
+}
+
+/* Prevent Google Translate from adding weird highlighting on translated text */
+.goog-text-highlight {
+  background-color: transparent !important;
+  box-shadow: none !important;
+}

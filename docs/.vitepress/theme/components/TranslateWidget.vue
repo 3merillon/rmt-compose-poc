@@ -1,10 +1,9 @@
 <script setup>
-import { ref, computed } from 'vue'
-import { useData } from 'vitepress'
+import { ref, onMounted, onUnmounted } from 'vue'
 
-const { page } = useData()
 const isOpen = ref(false)
 const selectedLang = ref(null)
+const isTranslated = ref(false)
 
 const languages = [
   // Western Europe
@@ -56,23 +55,66 @@ const languages = [
   { code: 'he', name: 'עברית' }
 ]
 
-const currentUrl = computed(() => {
-  if (typeof window !== 'undefined') {
-    return window.location.href
+// Load Google Translate script
+function loadGoogleTranslate() {
+  if (document.getElementById('google-translate-script')) return
+
+  // Create the google translate element container (hidden)
+  const gtDiv = document.createElement('div')
+  gtDiv.id = 'google_translate_element'
+  gtDiv.style.display = 'none'
+  document.body.appendChild(gtDiv)
+
+  // Define the callback
+  window.googleTranslateElementInit = () => {
+    new window.google.translate.TranslateElement(
+      {
+        pageLanguage: 'en',
+        autoDisplay: false,
+        layout: window.google.translate.TranslateElement.InlineLayout.SIMPLE
+      },
+      'google_translate_element'
+    )
   }
-  return ''
-})
+
+  // Load the script
+  const script = document.createElement('script')
+  script.id = 'google-translate-script'
+  script.src = '//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit'
+  script.async = true
+  document.head.appendChild(script)
+}
+
+// Set translation language via cookie
+function setTranslationCookie(langCode) {
+  // Google Translate uses a cookie to track the selected language
+  // Format: /en/langCode for translating from English to langCode
+  const value = `/en/${langCode}`
+  document.cookie = `googtrans=${value}; path=/`
+  // Also set for the domain without leading dot (for some browsers)
+  document.cookie = `googtrans=${value}; path=/; domain=${window.location.hostname}`
+}
+
+// Clear translation
+function clearTranslation() {
+  // Remove the googtrans cookie
+  document.cookie = 'googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;'
+  document.cookie = `googtrans=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${window.location.hostname}`
+
+  // Reload to show original content
+  window.location.reload()
+}
 
 function translateTo(lang) {
-  const url = currentUrl.value
-  if (!url) return
-
-  // Use Google Translate URL redirect
-  const translateUrl = `https://translate.google.com/translate?sl=en&tl=${lang.code}&u=${encodeURIComponent(url)}`
-  window.open(translateUrl, '_blank')
+  // Set the cookie for the target language
+  setTranslationCookie(lang.code)
 
   selectedLang.value = lang
   isOpen.value = false
+  isTranslated.value = true
+
+  // Reload the page to trigger translation
+  window.location.reload()
 }
 
 function toggleDropdown() {
@@ -85,27 +127,66 @@ function closeDropdown(e) {
   }
 }
 
-// Close on click outside
-if (typeof window !== 'undefined') {
-  document.addEventListener('click', closeDropdown)
+// Check if page is currently translated
+function checkTranslationStatus() {
+  const cookies = document.cookie.split(';')
+  for (const cookie of cookies) {
+    const [name, value] = cookie.trim().split('=')
+    if (name === 'googtrans' && value && value !== '/en/en') {
+      isTranslated.value = true
+      // Extract language code from cookie value like "/en/fr"
+      const langCode = value.split('/')[2]
+      if (langCode) {
+        selectedLang.value = languages.find(l => l.code === langCode) || { code: langCode, name: langCode }
+      }
+      return
+    }
+  }
+  isTranslated.value = false
+  selectedLang.value = null
 }
+
+onMounted(() => {
+  loadGoogleTranslate()
+  checkTranslationStatus()
+  document.addEventListener('click', closeDropdown)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', closeDropdown)
+})
 </script>
 
 <template>
   <div class="translate-container">
+    <!-- Show "Back to English" button when translated -->
+    <button
+      v-if="isTranslated"
+      class="translate-button back-button"
+      @click="clearTranslation"
+      title="Back to English"
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M19 12H5M12 19l-7-7 7-7"/>
+      </svg>
+      <span class="translate-label">English</span>
+    </button>
+
+    <!-- Main translate button -->
     <button
       class="translate-button"
+      :class="{ active: isTranslated }"
       @click.stop="toggleDropdown"
       :aria-expanded="isOpen"
       aria-haspopup="listbox"
-      title="Translate this page"
+      :title="isTranslated ? `Translated to ${selectedLang?.name}` : 'Translate this page'"
     >
       <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="10"></circle>
         <line x1="2" y1="12" x2="22" y2="12"></line>
         <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
       </svg>
-      <span class="translate-label">Translate</span>
+      <span class="translate-label">{{ isTranslated ? selectedLang?.name : 'Translate' }}</span>
       <svg class="chevron" :class="{ open: isOpen }" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <polyline points="6 9 12 15 18 9"></polyline>
       </svg>
@@ -116,7 +197,9 @@ if (typeof window !== 'undefined') {
         v-for="lang in languages"
         :key="lang.code"
         class="translate-option"
+        :class="{ selected: selectedLang?.code === lang.code }"
         role="option"
+        :aria-selected="selectedLang?.code === lang.code"
         @click="translateTo(lang)"
       >
         {{ lang.name }}
@@ -129,6 +212,9 @@ if (typeof window !== 'undefined') {
 .translate-container {
   position: relative;
   margin-left: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .translate-button {
@@ -143,12 +229,28 @@ if (typeof window !== 'undefined') {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: border-color 0.25s, color 0.25s;
+  transition: border-color 0.25s, color 0.25s, background-color 0.25s;
 }
 
 .translate-button:hover {
   border-color: var(--vp-c-brand-1);
   color: var(--vp-c-brand-1);
+}
+
+.translate-button.active {
+  border-color: var(--vp-c-brand-1);
+  background-color: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+}
+
+.translate-button.back-button {
+  border-color: var(--vp-c-divider);
+  background: transparent;
+}
+
+.translate-button.back-button:hover {
+  border-color: var(--vp-c-text-2);
+  color: var(--vp-c-text-1);
 }
 
 /* Hide "Translate" text and chevron by default, show only globe icon */
@@ -213,5 +315,11 @@ if (typeof window !== 'undefined') {
 .translate-option:hover {
   background: var(--vp-c-bg-soft);
   color: var(--vp-c-brand-1);
+}
+
+.translate-option.selected {
+  background: var(--vp-c-brand-soft);
+  color: var(--vp-c-brand-1);
+  font-weight: 600;
 }
 </style>
