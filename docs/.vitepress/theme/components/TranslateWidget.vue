@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
+import { useData } from 'vitepress'
 
+const { page } = useData()
 const isOpen = ref(false)
-const isTranslated = ref(false)
-const currentLang = ref(null)
+const selectedLang = ref(null)
 
 const languages = [
   // Western Europe
@@ -55,119 +56,22 @@ const languages = [
   { code: 'he', name: 'עברית' }
 ]
 
-onMounted(() => {
-  // Check if we're inside Google Translate iframe
-  checkIfTranslated()
-
-  // Hide Google Translate UI elements
-  hideGoogleTranslateUI()
-
-  // Watch for Google Translate elements being added
-  const observer = new MutationObserver(() => {
-    hideGoogleTranslateUI()
-  })
-  observer.observe(document.body, { childList: true, subtree: true })
+const currentUrl = computed(() => {
+  if (typeof window !== 'undefined') {
+    return window.location.href
+  }
+  return ''
 })
 
-function checkIfTranslated() {
-  if (typeof window === 'undefined') return
-
-  // Check if we're in Google Translate frame (URL contains translate.goog)
-  const isInTranslateFrame = window.location.hostname.includes('translate.goog')
-
-  if (isInTranslateFrame) {
-    isTranslated.value = true
-    // Try to extract the target language from URL
-    const urlParams = new URLSearchParams(window.location.search)
-    const targetLang = urlParams.get('_x_tr_tl')
-    if (targetLang) {
-      currentLang.value = languages.find(l => l.code === targetLang) || { name: targetLang }
-    }
-  }
-}
-
-function hideGoogleTranslateUI() {
-  if (typeof document === 'undefined') return
-
-  // Hide Google Translate banner/bar
-  const style = document.createElement('style')
-  style.id = 'hide-google-translate-ui'
-  if (!document.getElementById('hide-google-translate-ui')) {
-    style.textContent = `
-      /* Hide Google Translate top bar */
-      .goog-te-banner-frame,
-      .skiptranslate,
-      #goog-gt-tt,
-      .goog-te-balloon-frame,
-      .goog-te-menu-frame,
-      .goog-te-spinner-pos,
-      div[id^="goog-gt-"],
-      .VIpgJd-ZVi9od-ORHb-OEVmcd,
-      .VIpgJd-ZVi9od-xl07Ob-OEVmcd,
-      .VIpgJd-ZVi9od-SmfZ-OEVmcd,
-      .VIpgJd-ZVi9od-aZ2wEe-OEVmcd,
-      body > .skiptranslate,
-      .goog-te-gadget {
-        display: none !important;
-        visibility: hidden !important;
-        height: 0 !important;
-        opacity: 0 !important;
-      }
-
-      /* Reset body position that Google Translate modifies */
-      body {
-        top: 0 !important;
-        position: static !important;
-      }
-
-      /* Hide the floating Google Translate widget */
-      .goog-te-gadget-simple,
-      .goog-te-gadget-icon,
-      #google_translate_element,
-      .translated-ltr,
-      .translated-rtl {
-        display: none !important;
-      }
-    `
-    document.head.appendChild(style)
-  }
-
-  // Remove body top offset that Google adds
-  document.body.style.top = '0px'
-}
-
-function getOriginalUrl() {
-  if (typeof window === 'undefined') return ''
-
-  // Extract original URL from Google Translate URL
-  // Format: https://docs-rmt-world.translate.goog/path?_x_tr_sl=en&_x_tr_tl=fr&_x_tr_hl=en&_x_tr_pto=wapp
-  const hostname = window.location.hostname
-  if (hostname.includes('translate.goog')) {
-    // Convert docs-rmt-world.translate.goog back to docs.rmt.world
-    const originalHost = hostname.replace('.translate.goog', '').replace(/-/g, '.')
-    const path = window.location.pathname
-    return `https://${originalHost}${path}`
-  }
-  return window.location.href
-}
-
-function backToOriginal() {
-  const originalUrl = getOriginalUrl()
-  if (originalUrl) {
-    window.location.href = originalUrl
-  }
-}
-
 function translateTo(lang) {
-  if (typeof window === 'undefined') return
-
-  // Get the current page URL (or original if already translated)
-  let url = getOriginalUrl()
+  const url = currentUrl.value
+  if (!url) return
 
   // Use Google Translate URL redirect
   const translateUrl = `https://translate.google.com/translate?sl=en&tl=${lang.code}&u=${encodeURIComponent(url)}`
-  window.location.href = translateUrl
+  window.open(translateUrl, '_blank')
 
+  selectedLang.value = lang
   isOpen.value = false
 }
 
@@ -189,23 +93,7 @@ if (typeof window !== 'undefined') {
 
 <template>
   <div class="translate-container">
-    <!-- Back to English button (shown when translated) -->
     <button
-      v-if="isTranslated"
-      class="translate-button back-button"
-      @click="backToOriginal"
-      title="Back to English"
-    >
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <line x1="19" y1="12" x2="5" y2="12"></line>
-        <polyline points="12 19 5 12 12 5"></polyline>
-      </svg>
-      <span class="translate-label">English</span>
-    </button>
-
-    <!-- Translate dropdown (shown when not translated) -->
-    <button
-      v-else
       class="translate-button"
       @click.stop="toggleDropdown"
       :aria-expanded="isOpen"
@@ -223,7 +111,7 @@ if (typeof window !== 'undefined') {
       </svg>
     </button>
 
-    <div v-if="isOpen && !isTranslated" class="translate-dropdown" role="listbox">
+    <div v-if="isOpen" class="translate-dropdown" role="listbox">
       <button
         v-for="lang in languages"
         :key="lang.code"
@@ -261,15 +149,6 @@ if (typeof window !== 'undefined') {
 .translate-button:hover {
   border-color: var(--vp-c-brand-1);
   color: var(--vp-c-brand-1);
-}
-
-.back-button {
-  border-color: var(--vp-c-brand-1);
-  color: var(--vp-c-brand-1);
-}
-
-.back-button:hover {
-  background: var(--vp-c-brand-soft);
 }
 
 /* Hide "Translate" text and chevron by default, show only globe icon */
