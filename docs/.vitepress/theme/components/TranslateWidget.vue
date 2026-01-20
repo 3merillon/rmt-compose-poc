@@ -7,24 +7,53 @@ const isOpen = ref(false)
 const selectedLang = ref(null)
 
 const languages = [
+  // Western Europe
+  { code: 'fr', name: 'Français' },
+  { code: 'de', name: 'Deutsch' },
   { code: 'es', name: 'Español' },
+  { code: 'it', name: 'Italiano' },
+  { code: 'pt', name: 'Português' },
+  { code: 'nl', name: 'Nederlands' },
+  { code: 'ca', name: 'Català' },
+  { code: 'gl', name: 'Galego' },
+  { code: 'eu', name: 'Euskara' },
+  // Nordic
+  { code: 'sv', name: 'Svenska' },
+  { code: 'da', name: 'Dansk' },
+  { code: 'no', name: 'Norsk' },
+  { code: 'fi', name: 'Suomi' },
+  { code: 'is', name: 'Íslenska' },
+  // Central/Eastern Europe
+  { code: 'pl', name: 'Polski' },
+  { code: 'cs', name: 'Čeština' },
+  { code: 'sk', name: 'Slovenčina' },
+  { code: 'hu', name: 'Magyar' },
+  { code: 'ro', name: 'Română' },
+  { code: 'bg', name: 'Български' },
+  { code: 'hr', name: 'Hrvatski' },
+  { code: 'sl', name: 'Slovenščina' },
+  { code: 'sr', name: 'Srpski' },
+  { code: 'uk', name: 'Українська' },
+  { code: 'ru', name: 'Русский' },
+  // Baltic
+  { code: 'lt', name: 'Lietuvių' },
+  { code: 'lv', name: 'Latviešu' },
+  { code: 'et', name: 'Eesti' },
+  // Other European
+  { code: 'el', name: 'Ελληνικά' },
+  { code: 'tr', name: 'Türkçe' },
+  // Asia
   { code: 'zh-CN', name: '中文 (简体)' },
   { code: 'zh-TW', name: '中文 (繁體)' },
   { code: 'ja', name: '日本語' },
   { code: 'ko', name: '한국어' },
-  { code: 'fr', name: 'Français' },
-  { code: 'de', name: 'Deutsch' },
-  { code: 'pt', name: 'Português' },
-  { code: 'ru', name: 'Русский' },
-  { code: 'it', name: 'Italiano' },
-  { code: 'ar', name: 'العربية' },
   { code: 'hi', name: 'हिन्दी' },
-  { code: 'nl', name: 'Nederlands' },
-  { code: 'pl', name: 'Polski' },
-  { code: 'tr', name: 'Türkçe' },
-  { code: 'vi', name: 'Tiếng Việt' },
   { code: 'th', name: 'ไทย' },
-  { code: 'id', name: 'Bahasa Indonesia' }
+  { code: 'vi', name: 'Tiếng Việt' },
+  { code: 'id', name: 'Bahasa Indonesia' },
+  // Other
+  { code: 'ar', name: 'العربية' },
+  { code: 'he', name: 'עברית' }
 ]
 
 const currentUrl = computed(() => {
