@@ -42,18 +42,21 @@
   display: none !important;
 }
 
-/* Hide skiptranslate elements but keep the combo accessible */
-.skiptranslate {
-  position: absolute !important;
-  top: -9999px !important;
-  left: -9999px !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
+/* Hide skiptranslate visually but keep it functional */
+.skiptranslate:not(#google_translate_element) {
+  display: none !important;
 }
 
-/* Keep the combo functional for programmatic access */
-.goog-te-combo {
-  pointer-events: auto !important;
+/* Keep the google_translate_element functional but invisible */
+#google_translate_element {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  opacity: 0.01 !important;
+  z-index: -1 !important;
 }
 
 /* Fix body position shift caused by Google Translate banner */
@@ -66,13 +69,6 @@ body {
 html.translated-ltr,
 html.translated-rtl {
   margin-top: 0 !important;
-}
-
-/* Hide the hidden google_translate_element div */
-#google_translate_element {
-  position: absolute !important;
-  top: -9999px !important;
-  left: -9999px !important;
 }
 
 /* Prevent Google Translate from adding weird highlighting on translated text */

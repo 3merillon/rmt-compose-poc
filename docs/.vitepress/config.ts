@@ -27,7 +27,7 @@ export default defineConfig({
   ],
 
   themeConfig: {
-    logo: '/logo.svg',
+    //logo: '/logo.svg',
     siteTitle: 'RMT Compose',
 
     nav: [
