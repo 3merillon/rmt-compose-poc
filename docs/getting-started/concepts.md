@@ -219,10 +219,11 @@ note3.startTime = module.getNoteById(2).getVariable('startTime')
 
 ### Dependency Visualization
 
-When you select a note in the workspace:
+When you select a note in the workspace, colored lines show dependencies based on property type:
 
-- **Blue/cyan lines** point to notes this note **depends on**
-- **Red/orange lines** point to notes that **depend on** this note
+- **Orange lines**: frequency dependencies
+- **Teal/Cyan lines**: startTime dependencies
+- **Purple lines**: duration dependencies
 
 ### Smart Updates
 

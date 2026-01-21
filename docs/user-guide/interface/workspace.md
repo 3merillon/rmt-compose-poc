@@ -6,9 +6,10 @@ The **Workspace** is the main canvas where you view and edit your composition. I
 
 The workspace shows your composition as a 2D grid:
 
-- **Vertical axis (Y)**: Frequency - higher pitches appear higher
+- **Vertical axis (Y)**: Logarithmic frequency - higher pitches appear higher. Because it's logarithmic, equal intervals (like octaves or fifths) always appear as equal distances regardless of register
 - **Horizontal axis (X)**: Time - notes to the right play later
-- **Note rectangles**: Each colored rectangle represents a note
+- **Note rectangles**: Each colored rectangle represents a note with a frequency
+- **Silences**: Notes without frequency (duration only) - used for rests or spacing in sequences. Silences have start time and duration but produce no sound
 - **BaseNote indicator**: Orange circle at the origin point
 - **Measure bars**: Vertical lines dividing time into measures
 - **Octave guides**: Dashed horizontal lines marking octave boundaries
@@ -23,11 +24,12 @@ The workspace shows your composition as a 2D grid:
 ### Zoom
 
 - **Mouse wheel**: Scroll to zoom in/out
-- **Scale controls**: Use the dot in the bottom-left corner to adjust X/Y density independently
+- **Pinch zoom**: On touch devices, pinch with two fingers to zoom
+- **Scale controls**: Use the dot in the bottom-left corner to adjust X/Y density independently. Useful for spacing out note rectangles, or for seeing very short notes that appear too small horizontally due to duration or tempo
 
 ### Reset View
 
-Click the **Reset View** button in the top bar to center the view on the BaseNote.
+Click the **Reset View** button in the top bar to center the origin (BaseNote position) on the screen. This only changes the pan position, not the zoom level. Useful when you've lost sight of the workspace due to excessive panning or zooming.
 
 ::: tip
 Reset View is disabled when playhead tracking is enabled, since tracking controls the view automatically.
@@ -43,9 +45,13 @@ Click on any note rectangle to select it. The selected note is highlighted, and 
 
 When a note is selected:
 - The note rectangle is highlighted
-- Dependency lines appear:
-  - **Blue/cyan lines**: Notes this note depends on
-  - **Red/orange lines**: Notes that depend on this note
+- Dependency lines appear, color-coded by property:
+  - **Orange lines**: Frequency dependencies
+  - **Teal/Cyan lines**: Start time dependencies
+  - **Purple lines**: Duration dependencies
+- Line thickness indicates direction:
+  - **Thick lines**: Parent dependencies (what this note depends on)
+  - **Thin lines**: Child dependencies (what depends on this note)
 - The Variable Widget shows editable properties
 
 ### Deselecting
@@ -80,8 +86,8 @@ Measure bars divide time into sections.
 
 ### Viewing Measures
 
-- **Solid vertical lines**: Measure boundaries
-- **Dashed vertical lines**: Beat subdivisions
+- **Dashed vertical lines**: Measure boundaries
+- **Solid vertical lines**: Module start and end boundaries only
 - **Triangles at bottom**: Drag handles for measure positions
 
 ### Editing Measures
@@ -105,18 +111,23 @@ Notes can have custom colors set via the `color` property. Default colors are as
 
 ### Dependency Lines
 
-When a note is selected:
+When a note is selected, dependency lines are color-coded by property type:
 
-| Line Color | Meaning |
-|------------|---------|
-| Blue/Cyan | This note **depends on** the connected note |
-| Red/Orange | The connected note **depends on** this note |
+| Line Color | Property Type |
+|------------|---------------|
+| Orange | **Frequency** dependencies |
+| Teal/Cyan | **Start time** dependencies |
+| Purple | **Duration** dependencies |
+
+Line thickness indicates dependency direction:
+- **Thick lines**: Parent dependencies (notes this note depends on)
+- **Thin lines**: Child dependencies (notes that depend on this note)
 
 ### Playhead
 
 During playback, a vertical line shows the current playback position.
 
-- **Line color**: Typically red or highlighted
+- **Line color**: Orange
 - **Movement**: Moves left-to-right with playback time
 - **Tracking mode**: Keeps the playhead centered (optional)
 
@@ -141,9 +152,9 @@ The workspace uses WebGL2 for rendering:
 WebGL2 is required. If not available, the workspace will not initialize. Most modern browsers support WebGL2 by default.
 :::
 
-## Keyboard Controls
+## Keyboard Shortcuts
 
-While the workspace is focused:
+These shortcuts work anywhere in the app:
 
 | Key | Action |
 |-----|--------|
@@ -152,7 +163,7 @@ While the workspace is focused:
 
 ## Tips
 
-1. **Use Reset View** after zooming out too far - it's faster than panning back
+1. **Use Reset View** if you've lost sight of the workspace - it re-centers the origin on screen
 2. **Watch dependency lines** when editing - they show what will be affected
 3. **Enable tracking** during playback to follow along with long compositions
-4. **Adjust scale controls** to see more notes vertically or horizontally
+4. **Adjust scale controls** to space out notes or see short notes that appear too small

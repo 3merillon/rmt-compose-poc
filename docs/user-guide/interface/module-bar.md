@@ -23,7 +23,6 @@ Located below the top bar, the Module Bar displays:
 
 ### Category Controls
 
-- **Expand/Collapse**: Click a category name to show/hide its modules
 - **Reorder**: Drag categories to change their order
 - **Add Category**: Click the "+" button to create a new category
 - **Delete Category**: Click the red "×" on a category to remove it (and its modules)
@@ -34,28 +33,29 @@ Deleting a category removes all modules within it. This action cannot be undone.
 
 ## Using Modules
 
-### Loading a Module
+### Drag and Drop a Module
 
 1. Find the module you want in the Module Bar
 2. **Drag** the module icon onto the workspace
-3. Release to load the module
+3. Drop it onto a note or measure bar
 
-The current workspace content is replaced with the loaded module.
+The module's dependencies are remapped from its original BaseNote to the drop target:
+- **Drop on a note or BaseNote**: All properties (start time, duration, frequency) are remapped relative to that note
+- **Drop on a measure bar**: Start time and duration are remapped relative to the measure; frequency is remapped relative to the workspace's BaseNote
+- **Drop on a silence**: Not currently supported
 
-### Module Preview
+### Module Tooltip
 
-Hover over a module icon to see:
-- Module name
-- Brief description (if available)
+Hover over a module icon to see its name in a tooltip.
 
 ## Managing Modules
 
-### Adding Modules to the Library
+### Loading Modules into the Library
 
 1. Find the category where you want to add the module
 2. Click the **"+"** icon (add placeholder) in that category
-3. Select a JSON file from your computer
-4. The module appears in the category
+3. Select a JSON module file from your computer
+4. The module appears in the category and can be dragged onto the workspace
 
 ### Removing Modules
 
@@ -85,7 +85,10 @@ The Module Bar state is saved to your browser's LocalStorage:
 - Module positions within categories
 - Custom modules added
 
-**Auto-save interval**: Every 30 seconds
+**Auto-save triggers**:
+- Every 30 seconds
+- When the page is closed/refreshed
+- After any change to the module bar (adding, removing, reordering)
 
 ### Manual Save/Load
 
@@ -103,7 +106,6 @@ The Module Bar can be resized:
 
 1. Find the **pull tab** at the bottom of the Module Bar
 2. Drag up or down to resize
-3. The workspace adjusts accordingly
 
 ## File Locations
 
@@ -150,6 +152,6 @@ To add a module that persists across all users:
 ## Tips
 
 1. **Organize by workflow**: Create categories for different projects or styles
-2. **Use descriptive names**: Clear labels make finding modules easier
+2. **Use descriptive file names**: Module labels are currently derived from file names, so name your JSON files clearly
 3. **Back up regularly**: Use "Save UI" to preserve your library
 4. **Start from presets**: Load an existing module and modify it rather than starting from scratch

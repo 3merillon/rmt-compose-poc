@@ -7,11 +7,13 @@ Learn how to add new notes to your composition.
 ### Method 1: From the Variable Widget
 
 1. **Select** an existing note in the workspace
-2. Open the **Variable Widget**
-3. Find the **"Add Note"** section
-4. Choose an option:
-   - **Add at Start+Duration**: New note starts when the selected note ends
-   - **Add at Same Time**: New note starts at the same time (for building chords)
+2. The **Variable Widget** appears with the **"Add Note / Silence"** section
+3. Choose a type: **Note** or **Silence**
+4. Choose a position:
+   - **At End**: New note starts when the selected note ends (for sequences)
+   - **At Start**: New note starts at the same time as the selected note (for chords)
+5. Optionally edit the pre-filled Frequency, Duration, and Start Time fields
+6. Click **Create Note**
 
 ### Method 2: Load a Module
 
@@ -72,11 +74,9 @@ Every note has these core properties:
 
 ## Default Values
 
-When you add a note via the Variable Widget, it inherits sensible defaults:
+When you add a note via the Variable Widget, it inherits sensible defaults from the selected note:
 
-### Add at Start+Duration
-
-The new note inherits properties from the selected note:
+### At End (default)
 
 ```
 frequency: [selected].f
@@ -85,33 +85,32 @@ duration: [selected].d
 ```
 
 The new note:
-- Starts immediately after the selected note
-- Has the same frequency
-- Has the same duration
+- Starts immediately after the selected note ends
+- Has the same frequency as the selected note
+- Has the same duration as the selected note
 
-### Add at Same Time
-
-The new note inherits properties and gets a frequency 5/4 times the selected note (major third):
+### At Start
 
 ```
-frequency: [selected].f * (5/4)
+frequency: [selected].f
 startTime: [selected].t
 duration: [selected].d
 ```
 
 The new note:
-- Starts at the same time (for chords)
-- Has frequency 5/4 times the selected note (major third)
-- Has the same duration
+- Starts at the same time as the selected note (for building chords)
+- Has the same frequency as the selected note
+- Has the same duration as the selected note
 
 ## Building Sequences
 
 To create a melody (notes playing one after another):
 
-1. Create the first note
-2. Select it and choose **"Add at Start+Duration"**
-3. Edit the new note's frequency
-4. Repeat for each note in the sequence
+1. Select the BaseNote or an existing note
+2. In the Variable Widget, keep position set to **"At End"** (default)
+3. Edit the Frequency field to set the pitch for the new note
+4. Click **Create Note**
+5. Repeat: select the new note and add another
 
 Each note's start time automatically references the previous note's end time.
 
@@ -119,20 +118,20 @@ Each note's start time automatically references the previous note's end time.
 
 To create a chord (notes playing together):
 
-1. Create the root note
-2. Select it and choose **"Add at Same Time"**
-3. Edit the new note's frequency (e.g., 5/4 for major third)
-4. Select the root again and add another note
-5. Edit its frequency (e.g., 3/2 for perfect fifth)
+1. Select the root note
+2. In the Variable Widget, change position to **"At Start"**
+3. Edit the Frequency field (e.g., `[1].f * (5/4)` for a major third above Note 1)
+4. Click **Create Note**
+5. Select the root again and repeat for additional chord tones (e.g., `[1].f * (3/2)` for perfect fifth)
 
-All notes share the same start time.
+All chord notes share the same start time as the root.
 
 ## Note ID Assignment
 
 - IDs are auto-generated sequentially (1, 2, 3, ...)
 - ID 0 is reserved for the **BaseNote**
 - IDs are stable - deleting a note doesn't renumber others
-- References use IDs: `[5].f` (or legacy: `module.getNoteById(5)`)
+- References use IDs: `[5].f` (or legacy: `module.getNoteById(5).getVariable('frequency')`)
 
 ::: warning
 Avoid manually editing note IDs in JSON. Duplicate IDs cause undefined behavior.
@@ -143,4 +142,4 @@ Avoid manually editing note IDs in JSON. Duplicate IDs cause undefined behavior.
 1. **Start from presets**: Load an interval or chord module as a starting point
 2. **Use dependencies**: New notes automatically depend on the selected note
 3. **Build incrementally**: Add one note at a time, test with playback
-4. **Check dependency lines**: Blue lines show what your new note depends on
+4. **Check dependency lines**: Colored lines show dependencies (orange=frequency, teal=startTime, purple=duration)

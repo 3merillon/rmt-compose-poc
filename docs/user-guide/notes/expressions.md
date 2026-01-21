@@ -282,7 +282,7 @@ These are stored as **SymbolicPower** objects, not floats:
 
 | Concept | Description |
 |---------|-------------|
-| **Expression** | The formula (e.g., `baseNote.frequency × 3/2`) |
+| **Expression** | The formula (e.g., `base.f * (3/2)`) |
 | **Value** | The computed result (e.g., `660 Hz`) |
 | **Raw** | The expression text in the Variable Widget |
 | **Evaluated** | The value shown in the Variable Widget |

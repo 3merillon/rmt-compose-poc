@@ -147,6 +147,18 @@ module.getNoteById(3).getVariable('duration')
    - **Piano** (sample)
    - **Violin** (sample)
 
+**Instrument Inheritance:**
+
+Instruments propagate through **frequency dependencies**. If a note doesn't have its own instrument set, it inherits from the note its frequency depends on:
+
+- **BaseNote** → Sets the default instrument for all notes that depend on it
+- **Note with own instrument** → Overrides inheritance; its dependents inherit from it
+- **Note without own instrument** → Inherits from its frequency parent
+
+Example: If BaseNote uses "Piano" and Note 1's frequency is `base.f * (3/2)`, Note 1 inherits "Piano". If you set Note 1 to "Violin", any notes whose frequency depends on Note 1 will inherit "Violin".
+
+To reset a note to use inherited instrument, click **"Use Inherited"** in the instrument section.
+
 ### Changing Color
 
 1. Find the **color** field
@@ -194,17 +206,36 @@ Useful for "flattening" a module before sharing.
 3. The note AND all notes that depend on it are removed
 
 ::: danger Check Dependencies First
-Look at the red dependency lines before deleting. Cascade delete can remove many notes.
+Look at the dependency lines before deleting. Cascade delete can remove many notes.
 :::
 
-### Pre-Delete Preparation
+### Liberate Dependencies
 
-To delete a note that others depend on without losing those notes:
+**"Liberate Dependencies"** rewrites all notes that depend on the selected note to bypass it, substituting the selected note's expressions directly into the dependent notes. This is useful for:
+
+- **Moving a note independently**: After liberating, you can move or edit the note without affecting notes that previously depended on it
+- **Breaking dependency chains**: Remove a note from the middle of a chain while preserving the chain's behavior
+- **Pre-delete preparation**: Liberate first, then delete safely
+
+**How it works:**
+
+If Note 2's startTime is `[1].t + [1].d` (depends on Note 1), and Note 1's expressions are:
+- startTime: `base.t`
+- duration: `beat(base)`
+
+After liberating Note 1, Note 2's startTime becomes `base.t + beat(base)` - the references to Note 1 are replaced with Note 1's actual expressions, bypassing Note 1 in the dependency chain.
+
+::: info Edge Case
+If the liberated note has a raw value (no expression) for a property, that raw value will be substituted directly. For example, if Note 1's duration is just `1` (a constant), dependents will get `1` substituted in.
+:::
 
 1. Select the note
 2. Click **"Liberate Dependencies"**
-3. Dependent notes now have their own independent values
-4. Delete the note safely
+3. Dependent notes now reference whatever the liberated note referenced (bypassing it in the dependency chain)
+
+::: tip
+"Delete and Keep Dependencies" performs the same operation automatically during deletion. Use "Liberate Dependencies" when you want to keep the note but break its dependent relationships.
+:::
 
 ## Undo/Redo
 

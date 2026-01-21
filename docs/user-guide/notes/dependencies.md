@@ -25,18 +25,24 @@ In this example:
 
 ## Visualizing Dependencies
 
-When you select a note, dependency lines appear:
+When you select a note, dependency lines appear, color-coded by which property is affected:
 
-| Line Color | Meaning |
-|------------|---------|
-| **Blue/Cyan** | Notes this note **depends on** |
-| **Red/Orange** | Notes that **depend on** this note |
+| Line Color | Property Affected |
+|------------|-------------------|
+| **Orange** | Frequency dependencies |
+| **Teal/Cyan** | Start time dependencies |
+| **Purple** | Duration dependencies |
+
+### Line Thickness
+
+- **Thick lines** → Connect to **parent** notes (notes the selected note depends on)
+- **Thin lines** → Connect to **child** notes (notes that depend on the selected note)
 
 ### Example
 
 If you select Note 3:
-- **Blue lines** point to Notes 1 and 2 (Note 3 references them)
-- **Red lines** point to Notes 4 and 5 (they reference Note 3)
+- **Thick orange line** to Note 1 means Note 3's frequency depends on Note 1
+- **Thin teal lines** to Notes 4 and 5 mean their start times depend on Note 3
 
 ## Property-Specific Dependencies
 
@@ -147,18 +153,18 @@ Use this to "freeze" a note's value or simplify complex chains.
 
 ### Liberate Dependencies
 
-Converts other notes' references to *this* note into raw values:
+Rewrites other notes' references to bypass *this* note, substituting the liberated note's expressions directly:
 
-**Before:**
+**Before:** Note 3 references Note 2, and Note 2's frequency is `base.f * (3/2)`
 ```
-// Note 3 references Note 2
+// Note 3's frequency
 [2].f * (5/4)
 ```
 
-**After:**
+**After:** Note 3 now references what Note 2 referenced (bypassing Note 2)
 ```
-// Note 3 has the computed value directly
-825
+// Note 3's frequency - Note 2's expression substituted in
+base.f * (3/2) * (5/4)
 ```
 
 <details>
@@ -168,12 +174,12 @@ Converts other notes' references to *this* note into raw values:
 // Before
 module.getNoteById(2).getVariable('frequency').mul(new Fraction(5, 4))
 
-// After
-new Fraction(825)
+// After - Note 2's expression substituted
+module.baseNote.getVariable('frequency').mul(new Fraction(3, 2)).mul(new Fraction(5, 4))
 ```
 </details>
 
-Use this before deleting a note that others depend on.
+Use this to move/edit a note without affecting its dependents, or before deleting a note.
 
 ## Circular Dependencies
 
@@ -220,39 +226,53 @@ BaseNote (root)
 
 Each note starts when the previous ends:
 
-```javascript
-note2.startTime = note1.startTime + note1.duration
-note3.startTime = note2.startTime + note2.duration
-note4.startTime = note3.startTime + note3.duration
+```
+// Note 2 starts when Note 1 ends
+[1].t + [1].d
+
+// Note 3 starts when Note 2 ends
+[2].t + [2].d
+
+// Note 4 starts when Note 3 ends
+[3].t + [3].d
 ```
 
 ### Chord Stack
 
 All notes share the same start time:
 
-```javascript
-note2.startTime = note1.startTime
-note3.startTime = note1.startTime
-note4.startTime = note1.startTime
+```
+// Notes 2, 3, 4 all start at the same time as Note 1
+[1].t
 ```
 
 ### Parallel Motion
 
 Notes maintain the same interval:
 
-```javascript
-note2.frequency = note1.frequency × 5/4  // Third above
-note3.frequency = note1.frequency × 3/2  // Fifth above
-// Moving note1 moves all three in parallel
+```
+// Note 2: Third above Note 1
+[1].f * (5/4)
+
+// Note 3: Fifth above Note 1
+[1].f * (3/2)
+
+// Moving Note 1 moves all three in parallel
 ```
 
 ### Relative Transposition
 
 One note is the reference, others follow:
 
-```javascript
-rootNote.frequency = baseNote × someInterval
-third.frequency = rootNote × 5/4
-fifth.frequency = rootNote × 3/2
-// Changing rootNote's interval changes the whole chord
+```
+// Root note: some interval above BaseNote
+base.f * (9/8)
+
+// Third: major third above root (Note 1)
+[1].f * (5/4)
+
+// Fifth: perfect fifth above root (Note 1)
+[1].f * (3/2)
+
+// Changing the root's interval changes the whole chord
 ```
