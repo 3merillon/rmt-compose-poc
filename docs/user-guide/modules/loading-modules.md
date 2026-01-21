@@ -1,86 +1,88 @@
 # Loading Modules
 
-Learn how to import modules into your workspace.
+Learn how to replace the workspace with a module from a file.
 
-## Methods of Loading
+::: danger Security Warning
+**Only load modules from sources you trust.** Module expressions are executed as code when loaded. A malicious module could potentially access browser data or perform unwanted actions. Never load modules from unknown or untrusted sources.
+:::
 
-### Method 1: Drag from Module Bar
+## Loading from Menu
 
-The quickest way to load a module:
+### Load from File
 
-1. Open the **Module Bar** (below the top bar)
-2. Find the module you want
-3. **Drag** it onto the workspace
-4. Release to load
+Load a module JSON file from your computer:
 
-### Method 2: Load from File
-
-Load a module from your computer:
-
-1. Click the **Menu** (☰) in the top bar
-2. Select **Load Module**
-3. Click **Load from file**
+1. Click the **Menu** button (plus/minus icon) in the top bar
+2. Click **Load Module** to expand the dropdown
+3. Click **Load Module from file…**
 4. Select a JSON file from your computer
-5. The module loads into the workspace
+5. The **entire workspace is replaced** with the module contents
 
-### Method 3: Reset to Default
+::: warning
+Loading a module **replaces everything** in the workspace. All existing notes are removed. Save your current work first if needed!
+:::
 
-Load the built-in default module:
+### Reset Default Module
 
-1. Click the **Menu** (☰)
-2. Select **Load Module**
-3. Click **Reset to Default Module**
+Reset to the built-in default module (Bach's Neverending Canon):
 
-## Built-in Modules
+1. Click the **Menu** button (plus/minus icon) in the top bar
+2. Click **Load Module** to expand the dropdown
+3. Click **Reset Default Module**
+4. The workspace is replaced with the default module
 
-RMT Compose includes several categories of preset modules:
+## Loading into Module Bar
 
-### Intervals
+You can add module files to the Module Bar for quick access:
 
-Simple two-note intervals:
-- **octave** - 2:1 ratio
-- **5th** - 3:2 (perfect fifth)
-- **4th** - 4:3 (perfect fourth)
-- **major 3rd** - 5:4
-- **minor 3rd** - 6/5
+1. Expand the **Module Bar** (drag the pull tab below the top bar)
+2. Find the category where you want to add the module
+3. Click the **+** placeholder at the end of that category
+4. Select a JSON file from your computer
+5. The module appears in that category
 
-### Chords
+Modules added this way are saved in your browser's local storage and persist across sessions.
 
-Common chord voicings:
-- **major** - Major triad (1, 5/4, 3/2)
-- **minor** - Minor triad (1, 6/5, 3/2)
-
-### Melodies
-
-Example sequences and scales:
-- **TET-12** - Chromatic scale in 12-TET
-- **TET-19** - 19-TET scale
-- **TET-31** - 31-TET scale
-- **BP-13** - Bohlen-Pierce scale
-- Various melodic examples
-
-### Custom
-
-Your personal module library (initially empty).
+See [Module Bar](../interface/module-bar) for more details on organizing and using the Module Bar.
 
 ## What Happens When You Load
 
-When you load a module:
+When you load a module via the menu:
 
-1. **Current workspace is replaced** - All existing notes are removed
+1. **Current workspace is cleared** - All existing notes are removed
 2. **BaseNote is set** - From the module's baseNote definition
 3. **Notes are created** - From the module's notes array
 4. **Expressions are compiled** - To binary bytecode
 5. **Dependencies are calculated** - The dependency graph is built
 6. **Rendering updates** - The workspace displays the new content
 
-::: warning
-Loading a module replaces everything in the workspace. Save your current work first if needed!
-:::
-
 ## Module File Format
 
 Modules are JSON files with this structure:
+
+```json
+{
+  "baseNote": {
+    "frequency": "440",
+    "startTime": "0",
+    "tempo": "120",
+    "beatsPerMeasure": "4"
+  },
+  "notes": [
+    {
+      "id": 1,
+      "frequency": "base.f * (3/2)",
+      "startTime": "base.t",
+      "duration": "beat(base)",
+      "color": "rgba(255, 100, 100, 0.7)",
+      "instrument": "sine-wave"
+    }
+  ]
+}
+```
+
+<details>
+<summary>Legacy JavaScript syntax (also supported)</summary>
 
 ```json
 {
@@ -93,15 +95,16 @@ Modules are JSON files with this structure:
   "notes": [
     {
       "id": 1,
-      "frequency": "...",
-      "startTime": "...",
-      "duration": "...",
-      "color": "rgba(...)",
+      "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
+      "startTime": "module.baseNote.getVariable('startTime')",
+      "duration": "new Fraction(60).div(module.findTempo(module.baseNote))",
+      "color": "rgba(255, 100, 100, 0.7)",
       "instrument": "sine-wave"
     }
   ]
 }
 ```
+</details>
 
 See [Module Format](./module-format) for complete schema documentation.
 
@@ -128,7 +131,7 @@ See [Module Format](./module-format) for complete schema documentation.
 
 ## Tips
 
-1. **Preview before loading** - Read the module name and description
-2. **Save first** - Export your current work before loading a new module
-3. **Start from presets** - Load a built-in module and modify it
-4. **Use the Module Bar** - It's faster than file loading for common modules
+1. **Save first** - Export your current work before loading a new module
+2. **Start from saves** - Load a previously saved module or one from the default set, then modify it
+3. **Load vs Drop** - Menu loading replaces the workspace; dragging from Module Bar integrates into it
+4. **Trust the source** - Only load modules from people or sources you trust

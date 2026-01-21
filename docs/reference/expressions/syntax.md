@@ -4,258 +4,260 @@ Complete reference for the RMT Compose expression language.
 
 ## Overview
 
-Expressions are JavaScript-like formulas that define note properties. They compile to binary bytecode for efficient evaluation.
+Expressions are formulas that define note properties. RMT Compose supports two syntax styles:
 
-## Constants
+1. **DSL Syntax** (Recommended) - Concise, mathematical notation
+2. **Legacy Syntax** - JavaScript-like method chaining
 
-### Integer
+Both compile to the same binary bytecode for efficient evaluation. The DSL syntax is recommended for new compositions.
 
-```javascript
-new Fraction(440)    // 440/1
-new Fraction(0)      // 0/1
-new Fraction(-5)     // -5/1
+---
+
+## DSL Syntax (Recommended)
+
+### Constants
+
+```
+440           # Integer (440/1)
+(3/2)         # Fraction (3 divided by 2)
+(1/12)        # Fraction for TET intervals
+(-5/4)        # Negative fraction
 ```
 
-### Fraction
+### Note References
 
-```javascript
-new Fraction(3, 2)   // 3/2
-new Fraction(5, 4)   // 5/4
-new Fraction(-1, 4)  // -1/4
+```
+[1].f         # Frequency of note 1
+[1].t         # Start time of note 1
+[1].d         # Duration of note 1
+[1].tempo     # Tempo of note 1
+[1].bpm       # Beats per measure of note 1
+[1].ml        # Measure length of note 1
+
+base.f        # BaseNote frequency (same as [0].f)
+base.t        # BaseNote start time
+base.d        # BaseNote duration
 ```
 
-### Large Numbers
+**Property shortcuts:**
+| Short | Full | Meaning |
+|-------|------|---------|
+| `f` | `frequency` | Pitch in Hz |
+| `t`, `s` | `startTime` | When note begins |
+| `d` | `duration` | How long note plays |
+| `tempo` | `tempo` | Beats per minute |
+| `bpm` | `beatsPerMeasure` | Time signature numerator |
+| `ml` | `measureLength` | Length of measure in seconds |
 
-For very large or precise values:
+### Operators
 
-```javascript
-new Fraction(123456789, 987654321)
+```
+a + b         # Addition
+a - b         # Subtraction
+a * b         # Multiplication
+a / b         # Division
+a ^ b         # Power (e.g., 2^(1/12))
+-a            # Negation
 ```
 
-Arbitrary precision is supported via BigInt internally.
+**Precedence (highest to lowest):**
+1. Parentheses `()`
+2. Power `^` (right-associative)
+3. Multiply/Divide `*`, `/`
+4. Add/Subtract `+`, `-`
+5. Negation `-`
 
-## References
+### Helper Functions
 
-### BaseNote Reference
+```
+tempo([1])    # Get tempo for note 1
+tempo(base)   # Get tempo for baseNote
+measure([1])  # Get measure length for note 1
+beat([1])     # Get beat duration (60 / tempo)
+beat(base)    # Beat duration from baseNote tempo
+```
+
+### Examples
+
+```
+# Perfect fifth (just intonation)
+base.f * (3/2)
+
+# 12-TET perfect fifth (7 semitones)
+base.f * 2^(7/12)
+
+# Start when note 1 ends
+[1].t + [1].d
+
+# Two measures after note 5
+[5].t + measure([5]) * 2
+
+# Quarter note duration
+beat(base) * (1/4)
+
+# Octave below note 3
+[3].f / 2
+```
+
+---
+
+## Legacy Syntax
+
+The legacy JavaScript-like syntax is still fully supported for backwards compatibility.
+
+### Constants
+
+```javascript
+new Fraction(440)       // 440/1
+new Fraction(3, 2)      // 3/2
+new Fraction(-1, 4)     // -1/4
+```
+
+### References
 
 ```javascript
 module.baseNote.getVariable('frequency')
-module.baseNote.getVariable('startTime')
-module.baseNote.getVariable('duration')
-module.baseNote.getVariable('tempo')
-module.baseNote.getVariable('beatsPerMeasure')
+module.getNoteById(1).getVariable('startTime')
+module.getNoteById(5).getVariable('duration')
 ```
 
-### Note Reference
+### Operations
 
 ```javascript
-module.getNoteById(1).getVariable('frequency')
-module.getNoteById(5).getVariable('startTime')
-module.getNoteById(10).getVariable('duration')
+a.add(b)     // Addition
+a.sub(b)     // Subtraction
+a.mul(b)     // Multiplication
+a.div(b)     // Division
+a.pow(b)     // Power
+a.neg()      // Negation
 ```
 
-The note ID must be a positive integer matching an existing note.
-
-## Arithmetic Operations
-
-### Addition
-
-```javascript
-a.add(b)
-
-// Examples
-new Fraction(1).add(new Fraction(2))  // 3
-module.baseNote.getVariable('startTime').add(new Fraction(1))
-```
-
-### Subtraction
-
-```javascript
-a.sub(b)
-
-// Examples
-new Fraction(5).sub(new Fraction(2))  // 3
-module.getNoteById(3).getVariable('startTime').sub(new Fraction(0.5))
-```
-
-### Multiplication
-
-```javascript
-a.mul(b)
-
-// Examples
-new Fraction(3).mul(new Fraction(2))  // 6
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))  // Fifth
-```
-
-### Division
-
-```javascript
-a.div(b)
-
-// Examples
-new Fraction(6).div(new Fraction(2))  // 3
-new Fraction(60).div(module.findTempo(module.baseNote))  // Beat duration
-```
-
-### Negation
-
-```javascript
-a.neg()
-
-// Examples
-new Fraction(5).neg()  // -5
-```
-
-### Power
-
-```javascript
-a.pow(b)
-
-// Examples
-new Fraction(2).pow(new Fraction(3))     // 8 (2³)
-new Fraction(2).pow(new Fraction(1, 2))  // √2 ≈ 1.414
-new Fraction(2).pow(new Fraction(1, 12)) // 12-TET semitone
-```
-
-::: warning
-Non-integer exponents produce irrational results (SymbolicPower). These display with the **≈** prefix.
-:::
-
-## Lookup Functions
-
-### Find Tempo
+### Lookup Functions
 
 ```javascript
 module.findTempo(module.baseNote)
-```
-
-Walks the inheritance chain to find the tempo value. Usually returns BaseNote's tempo.
-
-### Find Measure Length
-
-```javascript
+module.findTempo(module.getNoteById(1))
 module.findMeasureLength(module.baseNote)
 ```
 
-Computes measure duration based on tempo and beatsPerMeasure.
-
-## Chaining Operations
-
-Operations can be chained:
+### Chaining
 
 ```javascript
 module.baseNote.getVariable('frequency')
   .mul(new Fraction(3, 2))
   .mul(new Fraction(5, 4))
-
-// Equivalent to: baseFreq × 3/2 × 5/4 = baseFreq × 15/8
 ```
 
-## Precedence
+---
 
-Standard mathematical precedence applies:
+## Syntax Comparison
 
-1. Parentheses (implicit in method chaining)
-2. Power (`.pow()`)
-3. Negation (`.neg()`)
-4. Multiplication/Division (`.mul()`, `.div()`)
-5. Addition/Subtraction (`.add()`, `.sub()`)
+| Task | DSL Syntax | Legacy Syntax |
+|------|------------|---------------|
+| Perfect fifth | `base.f * (3/2)` | `module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))` |
+| Note end time | `[1].t + [1].d` | `module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))` |
+| Beat duration | `beat(base)` | `new Fraction(60).div(module.findTempo(module.baseNote))` |
+| 12-TET semitone | `2^(1/12)` | `new Fraction(2).pow(new Fraction(1, 12))` |
+| Measure length | `measure([1])` | `module.findMeasureLength(module.getNoteById(1))` |
+
+---
 
 ## Common Patterns
 
-### Relative Frequency
+### Frequency Expressions
 
-```javascript
-// Perfect fifth above BaseNote
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
+```
+# Just intonation intervals
+base.f * (3/2)        # Perfect fifth
+base.f * (5/4)        # Major third
+base.f * (4/3)        # Perfect fourth
 
-// Major third above another note
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
+# 12-TET intervals
+base.f * 2^(1/12)     # Semitone
+base.f * 2^(7/12)     # Perfect fifth
+base.f * 2^(4/12)     # Major third
 
-// Octave below
-module.baseNote.getVariable('frequency').div(new Fraction(2))
+# Relative to another note
+[5].f * (3/2)         # Fifth above note 5
+[3].f / 2             # Octave below note 3
 ```
 
-### Sequential Timing
+### Timing Expressions
 
-```javascript
-// Start when previous note ends
-module.getNoteById(prev).getVariable('startTime')
-  .add(module.getNoteById(prev).getVariable('duration'))
+```
+# Sequential notes
+[1].t + [1].d         # Start when note 1 ends
+[3].t + [3].d + (1/4) # Quarter second after note 3 ends
+
+# Measure-relative
+base.t + measure(base)     # One measure after start
+[5].t + measure([5]) * 2   # Two measures after note 5
 ```
 
-### Beat-Relative Duration
+### Duration Expressions
 
-```javascript
-// One beat
-new Fraction(60).div(module.findTempo(module.baseNote))
+```
+# Beat-relative durations
+beat(base)            # One beat
+beat(base) * 2        # Two beats (half note)
+beat(base) * (1/2)    # Half beat (eighth note)
+beat(base) * (1/4)    # Quarter beat (sixteenth note)
 
-// Two beats
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
-
-// Half beat
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
+# Fixed durations
+(1/2)                 # Half second
+1                     # One second
 ```
 
-### TET Intervals
-
-```javascript
-// 12-TET semitone
-new Fraction(2).pow(new Fraction(1, 12))
-
-// 12-TET major third (4 semitones)
-new Fraction(2).pow(new Fraction(4, 12))
-
-// Simplified: 4/12 = 1/3
-new Fraction(2).pow(new Fraction(1, 3))
-```
+---
 
 ## Error Conditions
 
-### Syntax Errors
+### Self-Reference
 
-```javascript
-// Missing parenthesis
-new Fraction(3, 2.mul()  // Error
+Expressions cannot reference the note being edited:
 
-// Unknown method
-new Fraction(3).multiply(2)  // Error (should be .mul())
-
-// Invalid fraction
-new Fraction(3.5, 2)  // Error (must be integers)
 ```
-
-### Reference Errors
-
-```javascript
-// Non-existent note
-module.getNoteById(999).getVariable('frequency')  // Error
-
-// Invalid variable name
-module.baseNote.getVariable('pitch')  // Error (should be 'frequency')
+# On note 5 - ERROR!
+[5].f * 2             # Cannot reference self
 ```
 
 ### Circular Dependencies
 
-```javascript
-// Note 1 references Note 2
-note1.frequency = module.getNoteById(2).getVariable('frequency')
-
-// Note 2 references Note 1 - Error!
-note2.frequency = module.getNoteById(1).getVariable('frequency')
 ```
+# Note 1 references Note 2
+[2].f
+
+# Note 2 references Note 1 - ERROR!
+[1].f
+```
+
+### Invalid Property
+
+```
+[1].x                 # Error: unknown property 'x'
+[1].pitch             # Error: use 'f' or 'frequency'
+```
+
+### Division by Zero
+
+```
+(5/0)                 # Error: division by zero
+```
+
+---
 
 ## Best Practices
 
-1. **Use meaningful references**: Reference notes by their role, not arbitrary IDs
-2. **Keep expressions readable**: Break complex expressions into multiple notes
-3. **Simplify fractions**: Use `new Fraction(1, 2)` not `new Fraction(2, 4)`
-4. **Test incrementally**: Verify each expression before building on it
-5. **Use BaseNote for transposition**: Reference BaseNote for root-relative notes
+1. **Use DSL syntax** for new compositions - it's more readable
+2. **Use meaningful note IDs** - consider which notes reference each other
+3. **Keep expressions simple** - break complex calculations into multiple notes
+4. **Test incrementally** - verify each expression before building on it
+5. **Use BaseNote for transposition** - reference `base.f` for root-relative notes
+
+---
 
 ## See Also
 
-- [Fraction API](./fraction-api) - Complete Fraction.js reference
+- [Fraction API](./fraction-api) - Fraction.js reference
 - [Module API](./module-api) - Module methods
 - [Operators](./operators) - Arithmetic details

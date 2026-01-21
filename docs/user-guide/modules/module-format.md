@@ -57,6 +57,21 @@ The `baseNote` object provides default values for the module.
 ```json
 {
   "baseNote": {
+    "frequency": "440",
+    "startTime": "0",
+    "tempo": "120",
+    "beatsPerMeasure": "4",
+    "instrument": "sine-wave"
+  }
+}
+```
+
+<details>
+<summary>Legacy JavaScript syntax (also supported)</summary>
+
+```json
+{
+  "baseNote": {
     "frequency": "new Fraction(440)",
     "startTime": "new Fraction(0)",
     "tempo": "new Fraction(120)",
@@ -65,6 +80,7 @@ The `baseNote` object provides default values for the module.
   }
 }
 ```
+</details>
 
 ## Note Properties
 
@@ -84,6 +100,20 @@ Each note in the `notes` array has these properties:
 ```json
 {
   "id": 1,
+  "frequency": "base.f * (3/2)",
+  "startTime": "base.t",
+  "duration": "60 / tempo(base)",
+  "color": "rgba(255, 100, 100, 0.7)",
+  "instrument": "sine-wave"
+}
+```
+
+<details>
+<summary>Legacy JavaScript syntax (also supported)</summary>
+
+```json
+{
+  "id": 1,
   "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
   "startTime": "module.baseNote.getVariable('startTime')",
   "duration": "new Fraction(60).div(module.findTempo(module.baseNote))",
@@ -91,65 +121,107 @@ Each note in the `notes` array has these properties:
   "instrument": "sine-wave"
 }
 ```
+</details>
 
 ## Expression Format
 
-Expressions are JavaScript-like strings that get compiled to bytecode.
+Expressions are DSL strings that get compiled to bytecode. The modern DSL format is recommended, but legacy JavaScript syntax is also supported.
 
 ### Constants
 
-```javascript
+```
 // Integer
-"new Fraction(440)"
+"440"
 
 // Fraction
-"new Fraction(3, 2)"
+"3/2"
 
 // Negative
+"-1/4"
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+"new Fraction(440)"
+"new Fraction(3, 2)"
 "new Fraction(-1, 4)"
 ```
+</details>
 
 ### References
 
-```javascript
+```
 // BaseNote property
-"module.baseNote.getVariable('frequency')"
+"base.f"
 
 // Other note property
+"[5].t"
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+"module.baseNote.getVariable('frequency')"
 "module.getNoteById(5).getVariable('startTime')"
 ```
+</details>
 
 ### Operations
 
-```javascript
+```
 // Addition
-"a.add(b)"
+"a + b"
 
 // Subtraction
-"a.sub(b)"
+"a - b"
 
 // Multiplication
-"a.mul(b)"
+"a * b"
 
 // Division
-"a.div(b)"
+"a / b"
 
 // Power
-"a.pow(b)"
+"a ^ b"
 
 // Negation
+"-a"
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+"a.add(b)"
+"a.sub(b)"
+"a.mul(b)"
+"a.div(b)"
+"a.pow(b)"
 "a.neg()"
 ```
+</details>
 
 ### Lookup Functions
 
-```javascript
+```
 // Find tempo (walks inheritance chain)
-"module.findTempo(module.baseNote)"
+"tempo(base)"
 
 // Find measure length
+"measure(base)"
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+"module.findTempo(module.baseNote)"
 "module.findMeasureLength(module.baseNote)"
 ```
+</details>
 
 ## Measure Properties
 
@@ -165,11 +237,23 @@ Measures define time markers in the composition.
 
 ```json
 {
-  "id": 100,
-  "startTime": "module.baseNote.getVariable('startTime').add(new Fraction(4))",
+  "id": 1,
+  "startTime": "base.t + beat(base) * 4",
+  "beatsPerMeasure": "4"
+}
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```json
+{
+  "id": 1,
+  "startTime": "module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(4)))",
   "beatsPerMeasure": "new Fraction(4)"
 }
 ```
+</details>
 
 ## Color Format
 
@@ -209,11 +293,51 @@ Built-in instruments:
 ## ID Rules
 
 - **BaseNote**: Always ID 0 (implicit, not in notes array)
-- **Notes**: Positive integers (1, 2, 3, ...)
-- **Measures**: Typically 100+ to distinguish from notes
-- **Uniqueness**: All IDs must be unique within the module
+- **Notes and Measures**: Positive integers, assigned sequentially as items are added
+- **Uniqueness**: All IDs must be unique within the module (notes and measures share the same ID space)
+- **Reordering**: Use **Reorder Module** to renumber all IDs sequentially (measures first, then notes)
 
 ## Complete Example
+
+```json
+{
+  "baseNote": {
+    "frequency": "263",
+    "startTime": "0",
+    "tempo": "100",
+    "beatsPerMeasure": "4"
+  },
+  "notes": [
+    {
+      "id": 1,
+      "frequency": "base.f",
+      "startTime": "base.t",
+      "duration": "60 / tempo(base)",
+      "color": "rgba(100, 150, 255, 0.7)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 2,
+      "frequency": "[1].f * (5/4)",
+      "startTime": "[1].t + [1].d",
+      "duration": "60 / tempo(base)",
+      "color": "rgba(255, 150, 100, 0.7)",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 3,
+      "frequency": "[2].f * (6/5)",
+      "startTime": "[2].t + [2].d",
+      "duration": "60 / tempo(base) * 2",
+      "color": "rgba(150, 255, 100, 0.7)",
+      "instrument": "sine-wave"
+    }
+  ]
+}
+```
+
+<details>
+<summary>Legacy JavaScript syntax (also supported)</summary>
 
 ```json
 {
@@ -251,6 +375,7 @@ Built-in instruments:
   ]
 }
 ```
+</details>
 
 ## Validation
 
@@ -279,7 +404,7 @@ When loading a module, RMT Compose validates:
 
 ```json
 {
-  "frequency": "new Fraction(3, 2.mul()"  // Syntax error
+  "frequency": "(3/2 * ("  // Syntax error - missing closing parens
 }
 ```
 
@@ -288,8 +413,8 @@ When loading a module, RMT Compose validates:
 ```json
 {
   "notes": [
-    { "id": 1, "frequency": "module.getNoteById(2).getVariable('frequency')" },
-    { "id": 2, "frequency": "module.getNoteById(1).getVariable('frequency')" }
+    { "id": 1, "frequency": "[2].f" },
+    { "id": 2, "frequency": "[1].f" }
   ]
 }
 ```
@@ -299,7 +424,7 @@ When loading a module, RMT Compose validates:
 ```json
 {
   "notes": [
-    { "id": 1, "frequency": "module.getNoteById(99).getVariable('frequency')" }
+    { "id": 1, "frequency": "[99].f" }
     // Note 99 doesn't exist!
   ]
 }

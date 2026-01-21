@@ -23,12 +23,31 @@
 
 ### Single Step
 
-```javascript
+```
 // One 31-TET step
-new Fraction(2).pow(new Fraction(1, 31))
+2^(1/31)
 ```
 
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(2).pow(new Fraction(1, 31))
+```
+</details>
+
 ### Multiple Steps
+
+```
+// Major third (10 steps in 31-TET)
+2^(10/31)
+
+// Perfect fifth (18 steps in 31-TET)
+2^(18/31)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Major third (10 steps in 31-TET)
@@ -37,15 +56,24 @@ new Fraction(2).pow(new Fraction(10, 31))
 // Perfect fifth (18 steps in 31-TET)
 new Fraction(2).pow(new Fraction(18, 31))
 ```
+</details>
 
 ### Applying to BaseNote
 
-```javascript
+```
 // Note at 10 steps above BaseNote (major third)
+base.f * 2^(10/31)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 module.baseNote.getVariable('frequency').mul(
   new Fraction(2).pow(new Fraction(10, 31))
 )
 ```
+</details>
 
 ## Intervals in 31-TET
 
@@ -157,6 +185,20 @@ Very few physical instruments support 31-TET. RMT Compose is an excellent tool f
 
 ## Example: Major Triad in 31-TET
 
+```
+// Root
+root.frequency = base.f
+
+// Major third (10 steps)
+third.frequency = base.f * 2^(10/31)
+
+// Perfect fifth (18 steps)
+fifth.frequency = base.f * 2^(18/31)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Root
 root.frequency = module.baseNote.getVariable('frequency')
@@ -171,6 +213,7 @@ fifth.frequency = module.baseNote.getVariable('frequency').mul(
   new Fraction(2).pow(new Fraction(18, 31))
 )
 ```
+</details>
 
 This triad sounds remarkably pure compared to 12-TET!
 

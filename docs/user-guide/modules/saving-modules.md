@@ -6,11 +6,9 @@ Learn how to export your compositions as reusable module files.
 
 ### Quick Save
 
-1. Click the **Menu** (☰) in the top bar
+1. Click the **Menu** button (plus/minus icon) in the top bar
 2. Click **Save Module**
 3. A JSON file downloads to your computer
-
-The filename includes a timestamp (e.g., `module-2024-01-15-143022.json`).
 
 ## What Gets Saved
 
@@ -127,6 +125,10 @@ Recipients can load your module via:
 
 No special software or account required - just the JSON file!
 
+::: danger Security Warning
+**Only load modules from sources you trust.** Module expressions are executed as code when loaded. A malicious module could potentially access browser data or perform unwanted actions. Never load modules from unknown or untrusted sources.
+:::
+
 ## Versioning
 
 For modules you iterate on:
@@ -152,4 +154,5 @@ For modules you iterate on:
 2. **Use descriptive names** - You'll thank yourself later
 3. **Keep backups** - Especially for important compositions
 4. **Test after saving** - Load the file to verify it works
-5. **Simplify before sharing** - Use "Evaluate to BaseNote" to reduce dependencies
+5. **Use Reorder Module** - Before sharing, click **Reorder Module** to renumber notes sequentially
+6. **Only share trusted modules** - When sharing, only distribute modules you created or verified yourself

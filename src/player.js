@@ -7,6 +7,8 @@ import { audioEngine } from './player/audio-engine.js';
 import { setModule, setEvaluatedNotes } from './store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpressionByFraction } from './utils/simplify.js';
 import { Workspace } from './renderer/webgl2/workspace.js';
+import { menuBar } from './menu/menu-bar.js';
+import { isDSLSyntax } from './dsl/index.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -821,8 +823,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                         const parentStartTime = suitableParent.getVariable('startTime').valueOf();
                         const parentDuration = suitableParent.getVariable('duration')?.valueOf() || 0;
                         const parentEndTime = parentStartTime + parentDuration;
-                        
-                        if (Math.abs(depStartTime - parentEndTime) < 0.01) {
+
+                        // Only use + duration form when parent has non-zero duration
+                        if (parentDuration > 0 && Math.abs(depStartTime - parentEndTime) < 0.01) {
                             newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(module.getNoteById(${suitableParent.id}).getVariable('duration'))`, myModule);
                         } else {
                             const offset = Math.max(depStartTime, parentStartTime) - parentStartTime;
@@ -1484,6 +1487,31 @@ if (canvasEl) {
 
                 const hasBase = expr.indexOf('module.baseNote') !== -1;
                 const hasIds  = expr.indexOf('getNoteById(') !== -1;
+                // DSL format uses base.t, base.d, base.f, base.tempo, etc.
+                const hasDslBase = /\bbase\.[tdfbm]/.test(expr);
+
+                // Remap DSL base references (base.t, base.d, etc.) to target note
+                if (targetNote.id !== 0 && hasDslBase) {
+                    const anchorId = targetNote.id;
+
+                    if (targetIsMeasure) {
+                        // For frequency expressions (base.f): keep as base.f
+                        // For other properties: remap to [anchorId].x
+                        expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
+                            if (prop === 'f') {
+                                // Keep frequency anchored to BaseNote
+                                return 'base.f';
+                            }
+                            // Remap to target note reference
+                            return `[${anchorId}].${prop}`;
+                        });
+                    } else {
+                        // Normal note target: remap all base.X to [anchorId].X
+                        expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
+                            return `[${anchorId}].${prop}`;
+                        });
+                    }
+                }
 
                 // Remap base-note anchored constructs to the selected target when dropping onto a non-base note.
                 if (targetNote.id !== 0 && hasBase) {
@@ -1539,6 +1567,27 @@ if (canvasEl) {
                     }
                 }
 
+                // Check drop mode - if 'end', add target's duration to startTime expressions
+                // that reference the target note (base references that were remapped)
+                const dropMode = menuBar?.getModuleDropMode?.() || 'start';
+                if (dropMode === 'end' && exprType === 'startTime' && targetNote.id !== 0) {
+                    const anchorId = targetNote.id;
+                    // Check if this expression now references the target note's startTime
+                    // and doesn't already include duration
+                    const refsTargetStart = expr.includes(`getNoteById(${anchorId}).getVariable('startTime')`) ||
+                                            expr.includes(`[${anchorId}].t`);
+                    const alreadyHasDur = expr.includes(`getVariable('duration')`) ||
+                                          expr.includes(`[${anchorId}].d`);
+                    if (refsTargetStart && !alreadyHasDur) {
+                        // Add duration offset - use DSL format if expression is DSL, otherwise legacy
+                        if (/\[\d+\]\.t/.test(expr)) {
+                            expr = expr + ` + [${anchorId}].d`;
+                        } else {
+                            expr = expr + `.add(module.getNoteById(${anchorId}).getVariable('duration'))`;
+                        }
+                    }
+                }
+
                 // Canonicalize expression via central simplifier after remapping
                 let simplified = expr;
                 try {
@@ -1585,7 +1634,10 @@ if (canvasEl) {
                     if (typeof val === 'string' && key.endsWith("String")) {
                         // Remap only when needed; avoid regex if not necessary
                         let originalString = val;
-                        const needsRemap = (originalString.indexOf('module.baseNote') !== -1) || (originalString.indexOf('getNoteById(') !== -1);
+                        // Check for legacy format (module.baseNote) and DSL format (base.t, base.d, etc.)
+                        const needsRemap = (originalString.indexOf('module.baseNote') !== -1) ||
+                                           (originalString.indexOf('getNoteById(') !== -1) ||
+                                           (/\bbase\.[tdfbm]/.test(originalString));
                         const baseKey = key.slice(0, -6);
 
                         // Always canonicalize by type to ensure predictable UI (e.g., duration selector preselect)
@@ -2840,7 +2892,8 @@ function emitStartTimeExprForParentGL(parent, newStartSec) {
     }
 
     let raw;
-    if (hasDur && Math.abs(delta - durSec) < 0.01) {
+    // Only use + duration form when parent has non-zero duration and we're at that exact offset
+    if (hasDur && durSec > 0 && Math.abs(delta - durSec) < 0.01) {
       raw = `${parentRef}.getVariable('startTime').add(${parentRef}.getVariable('duration'))`;
     } else if (delta >= 0) {
       raw = `${parentRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.n}, ${frac.d})))`;
@@ -3129,6 +3182,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 const newFrequency = currentFrequency.mul(new Fraction(factor.n, factor.d));
                 const newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
                 note.setVariable('frequencyString', newRaw);
+            } else if (isDSLSyntax(rawExpression)) {
+                // DSL expression: wrap with DSL multiplication syntax
+                // e.g., base.f -> 2 * base.f (octave up) or (1/2) * base.f (octave down)
+                const factorStr = factor.d === 1 ? `${factor.n}` : `(${factor.n}/${factor.d})`;
+                const wrapped = `${factorStr} * ${rawExpression}`;
+                note.setVariable('frequencyString', wrapped);
             } else if (rawExpression.includes('.pow(')) {
                 // Corrupted note with .pow() - wrap in multiplication to preserve the TET expression
                 // Don't simplify as it would destroy the .pow() expression

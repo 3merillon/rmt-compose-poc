@@ -2,120 +2,222 @@
 
 RMT Compose uses [Fraction.js](https://github.com/rawify/Fraction.js) for arbitrary-precision rational arithmetic. This ensures exact calculations without floating-point rounding errors.
 
+## DSL vs Legacy Syntax
+
+The DSL provides a simplified way to work with fractions:
+
+| DSL | Legacy JavaScript |
+|-----|-------------------|
+| `(3/2)` | `new Fraction(3, 2)` |
+| `440` | `new Fraction(440)` |
+| `a + b` | `a.add(b)` |
+| `a - b` | `a.sub(b)` |
+| `a * b` | `a.mul(b)` |
+| `a / b` | `a.div(b)` |
+| `a ^ b` | `a.pow(b)` |
+
 ## Creating Fractions
 
 ### Integer
+
+```
+440    // 440/1
+0      // 0/1
+-5     // -5/1
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(440)    // 440/1
 new Fraction(0)      // 0/1
 new Fraction(-5)     // -5/1
 ```
+</details>
 
 ### Rational
+
+```
+(3/2)    // 3/2 (perfect fifth)
+(5/4)    // 5/4 (major third)
+(-1/4)   // -1/4
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(3, 2)   // 3/2 (perfect fifth)
 new Fraction(5, 4)   // 5/4 (major third)
 new Fraction(-1, 4)  // -1/4
 ```
+</details>
 
 ### Large Numbers
 
 Arbitrary precision is supported:
 
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 new Fraction(123456789, 987654321)
 new Fraction("355", "113")  // Approximation of pi
 ```
+</details>
 
-## Arithmetic Methods
+## Arithmetic Operations
 
-### add(other)
+### Addition: `+` / `.add()`
 
 Adds two fractions:
+
+```
+(1/2) + (1/3)    // 5/6
+440 + 20         // 460
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(1, 2).add(new Fraction(1, 3))  // 5/6
 new Fraction(440).add(new Fraction(20))      // 460
 ```
+</details>
 
-### sub(other)
+### Subtraction: `-` / `.sub()`
 
 Subtracts fractions:
+
+```
+(3/4) - (1/4)    // 2/4 = 1/2
+5 - 2            // 3
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(3, 4).sub(new Fraction(1, 4))  // 2/4 = 1/2
 new Fraction(5).sub(new Fraction(2))         // 3
 ```
+</details>
 
-### mul(other)
+### Multiplication: `*` / `.mul()`
 
 Multiplies fractions:
+
+```
+(3/2) * (5/4)    // 15/8
+440 * 2          // 880 (octave)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(3, 2).mul(new Fraction(5, 4))  // 15/8
 new Fraction(440).mul(new Fraction(2))       // 880 (octave)
 ```
+</details>
 
-### div(other)
+### Division: `/` / `.div()`
 
 Divides fractions:
+
+```
+(3/2) / 2        // 3/4
+60 / 120         // 1/2 (beat duration)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(3, 2).div(new Fraction(2))     // 3/4
 new Fraction(60).div(new Fraction(120))     // 1/2 (beat duration)
 ```
+</details>
 
-### neg()
+### Negation: `-` (prefix) / `.neg()`
 
 Returns the negation:
+
+```
+-5         // -5
+-(-3/2)    // 3/2
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(5).neg()      // -5
 new Fraction(-3, 2).neg()  // 3/2
 ```
+</details>
 
-### pow(exponent)
+### Power: `^` / `.pow()`
 
 Raises to a power:
+
+```
+2 ^ 3         // 8 (2^3)
+2 ^ (-1)      // 1/2 (2^-1)
+2 ^ (1/12)    // 12-TET semitone (irrational)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(2).pow(new Fraction(3))      // 8 (2^3)
 new Fraction(2).pow(new Fraction(-1))     // 1/2 (2^-1)
 new Fraction(2).pow(new Fraction(1, 12))  // 12-TET semitone (irrational)
 ```
+</details>
 
 ::: warning Irrational Results
 Non-integer exponents produce irrational numbers that cannot be represented as exact fractions. RMT Compose uses [SymbolicPower](/developer/core/symbolic-power) to preserve these algebraically where possible.
 :::
 
-### abs()
+### Absolute Value (Legacy Only)
 
-Returns absolute value:
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(-5, 3).abs()  // 5/3
 ```
+</details>
 
-### inverse()
+### Inverse (Legacy Only)
 
-Returns the reciprocal:
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(3, 2).inverse()  // 2/3
 new Fraction(4).inverse()     // 1/4
 ```
+</details>
 
-### mod(other)
+### Modulo (Legacy Only)
 
-Modulo operation:
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(7).mod(new Fraction(3))  // 1
 ```
+</details>
 
-## Comparison Methods
+## Comparison Methods (Legacy Only)
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ### equals(other)
 
@@ -133,8 +235,12 @@ new Fraction(1, 2).compare(new Fraction(2, 3))  // -1 (less than)
 new Fraction(3, 2).compare(new Fraction(3, 2))  // 0 (equal)
 new Fraction(5, 4).compare(new Fraction(1))     // 1 (greater than)
 ```
+</details>
 
-## Conversion Methods
+## Conversion Methods (Legacy Only)
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ### valueOf()
 
@@ -161,8 +267,12 @@ Returns simplified string:
 ```javascript
 new Fraction(6, 4).toFraction()  // "3/2"
 ```
+</details>
 
-## Properties
+## Properties (Legacy Only)
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ### n (numerator)
 
@@ -182,10 +292,25 @@ new Fraction(3, 2).d  // 2
 new Fraction(3, 2).s   // 1
 new Fraction(-3, 2).s  // -1
 ```
+</details>
 
 ## Common Patterns in RMT Compose
 
 ### Frequency Ratios
+
+```
+// Perfect fifth above base
+base.f * (3/2)
+
+// Octave above
+base.f * 2
+
+// Perfect fourth below
+base.f / (4/3)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Perfect fifth above base
@@ -197,8 +322,23 @@ module.baseNote.getVariable('frequency').mul(new Fraction(2))
 // Perfect fourth below
 module.baseNote.getVariable('frequency').div(new Fraction(4, 3))
 ```
+</details>
 
 ### Beat Calculations
+
+```
+// Duration of one beat at current tempo
+60 / tempo(base)
+
+// Two beats
+60 / tempo(base) * 2
+
+// Half beat (eighth note)
+60 / tempo(base) * (1/2)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Duration of one beat at current tempo
@@ -210,14 +350,24 @@ new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 // Half beat (eighth note)
 new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
 ```
+</details>
 
 ### Sequential Timing
+
+```
+// Start after previous note ends
+[prev].t + [prev].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Start after previous note ends
 module.getNoteById(prev).getVariable('startTime')
   .add(module.getNoteById(prev).getVariable('duration'))
 ```
+</details>
 
 ## See Also
 

@@ -14,9 +14,8 @@ RMT Compose supports keyboard shortcuts for common actions.
 ## Context
 
 These shortcuts work:
-- When the workspace is focused
+- Anywhere in the app
 - When no text input is active
-- At any time during the session
 
 ## History
 
@@ -24,7 +23,7 @@ These shortcuts work:
 
 - **Limit**: Up to 50 states are remembered
 - **What's tracked**: Note additions, deletions, property changes, module loads
-- **What's not tracked**: View changes (pan/zoom), playback state
+- **What's not tracked**: View changes (pan/zoom), playback state, Module Bar changes
 
 ### Redo Stack
 
@@ -49,4 +48,3 @@ Future versions may include:
 | `Ctrl + S` | Save module |
 | `Ctrl + O` | Open module |
 
-Check the [changelog](/about/changelog) for updates on new keyboard shortcuts.

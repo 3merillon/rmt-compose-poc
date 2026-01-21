@@ -3,10 +3,14 @@
  *
  * Compiles text-based expressions (e.g., "module.getNoteById(124).getVariable('startTime').add(new Fraction(1,4))")
  * into compact binary bytecode that can be evaluated without runtime string compilation.
+ *
+ * Also supports the new DSL syntax (e.g., "[124].t + (1/4)") which auto-detects and routes
+ * to the DSL compiler.
  */
 
 import Fraction from 'fraction.js';
 import { BinaryExpression, OP, VAR } from './binary-note.js';
+import { isDSLSyntax, compileDSL, decompileToDSL } from './dsl/index.js';
 
 /**
  * Expression compiler that converts text expressions to binary bytecode
@@ -20,6 +24,9 @@ export class ExpressionCompiler {
   /**
    * Compile a text expression to binary bytecode
    *
+   * Supports both legacy syntax (new Fraction(...).mul(...)) and
+   * the new DSL syntax ([id].f * (3/2)).
+   *
    * @param {string} textExpr - The text expression to compile
    * @param {string} varName - The variable name (for context, e.g., 'startTime')
    * @returns {BinaryExpression} - The compiled binary expression
@@ -31,6 +38,19 @@ export class ExpressionCompiler {
       return this.cache.get(cacheKey).clone();
     }
 
+    // Auto-detect and route to DSL compiler if appropriate
+    if (isDSLSyntax(textExpr)) {
+      try {
+        const binary = compileDSL(textExpr);
+        this.cache.set(cacheKey, binary);
+        return binary.clone();
+      } catch (e) {
+        // If DSL parsing fails, fall through to legacy parser
+        console.warn(`DSL compile failed, trying legacy: ${textExpr}`, e);
+      }
+    }
+
+    // Legacy compilation path
     const binary = new BinaryExpression();
     binary.sourceText = textExpr;
 
@@ -965,3 +985,26 @@ export class ExpressionDecompiler {
 // Export singleton instances for convenience
 export const compiler = new ExpressionCompiler();
 export const decompiler = new ExpressionDecompiler();
+
+/**
+ * DSL Decompiler wrapper
+ *
+ * Decompiles a BinaryExpression to the new DSL syntax format.
+ * Used for auto-converting legacy expressions to DSL display.
+ */
+export class DSLExpressionDecompiler {
+  /**
+   * Decompile binary bytecode to DSL syntax
+   *
+   * @param {BinaryExpression} binary - The binary expression
+   * @returns {string} - The DSL expression
+   */
+  decompile(binary) {
+    return decompileToDSL(binary);
+  }
+}
+
+export const dslDecompiler = new DSLExpressionDecompiler();
+
+// Re-export DSL utilities for convenience
+export { isDSLSyntax, compileDSL, decompileToDSL } from './dsl/index.js';

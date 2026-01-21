@@ -20,9 +20,10 @@ From left to right:
 
 ### Play/Pause Button
 
+A single button that toggles between states:
 - **Play (▶)**: Starts playback from the current position
-- **Pause (⏸)**: Pauses playback at the current position
-- **Resume**: Click Play again to continue from where you paused
+- **Pause (⏸)**: Button transforms to pause icon during playback; click to pause
+- **Resume**: Click the play button again to continue from where you paused
 
 ### Stop Button
 
@@ -32,7 +33,6 @@ From left to right:
 ### Volume Slider
 
 - **Range**: 0 (muted) to 1 (full volume)
-- **Default**: 0.2 (20%)
 - **Real-time**: Adjustments take effect immediately during playback
 
 ::: tip
@@ -68,9 +68,9 @@ Click the **hamburger icon (☰)** to open the main menu.
 |--------|-------------|
 | **Undo** | Undo the last change |
 | **Redo** | Redo the last undone change |
-| **Reorder Module** | Reorganize notes in the current module |
+| **Reorder Module** | Reindex notes by start time (measures first, then notes) |
 | **Save Module** | Export the current module as JSON |
-| **Load Module** | Import a module from file or reset to default |
+| **Load Module** | Import a module from file (replaces current workspace) |
 
 ### Undo/Redo
 
@@ -81,8 +81,7 @@ Click the **hamburger icon (☰)** to open the main menu.
 ### Save Module
 
 1. Click **Save Module**
-2. A JSON file downloads to your computer
-3. The filename includes a timestamp
+2. A JSON file (`module.json`) downloads to your computer
 
 ### Load Module
 
@@ -91,7 +90,7 @@ Opens a submenu with options:
 | Option | Description |
 |--------|-------------|
 | **Load from file** | Opens a file picker to select a JSON module |
-| **Reset to Default Module** | Loads the built-in default composition |
+| **Reset to Default Module** | Loads the built-in default composition (Bach's Neverending Canon) |
 
 ::: warning
 Loading a module replaces the current workspace content. Save your work first if needed!
@@ -131,6 +130,6 @@ These shortcuts work anywhere in the app:
 ## Tips
 
 1. **Use keyboard shortcuts** for undo/redo - it's faster than opening the menu
-2. **Save frequently** - there's no auto-save to the server
+2. **Save to file for backup** - the current module persists in browser storage across reloads, but saving to a file is more secure if you clear browser data
 3. **Enable tracking** for long compositions you want to follow during playback
 4. **Lock when presenting** to avoid accidental edits during demonstrations

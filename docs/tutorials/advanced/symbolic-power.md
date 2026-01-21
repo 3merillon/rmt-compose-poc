@@ -45,6 +45,17 @@ RMT Compose handles this automatically when you chain TET operations.
 
 ### Basic Syntax
 
+```
+// 2 to the power of 1/12
+2^(1/12)
+
+// 3 to the power of 1/13 (Bohlen-Pierce)
+3^(1/13)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // 2 to the power of 1/12
 new Fraction(2).pow(new Fraction(1, 12))
@@ -53,7 +64,22 @@ new Fraction(2).pow(new Fraction(1, 12))
 new Fraction(3).pow(new Fraction(1, 13))
 ```
 
+</details>
+
 ### Chained Operations
+
+```
+// Major third in 12-TET (4 semitones)
+base.f * 2^(4/12)
+
+// Same result, built step by step
+base.f * 2^(1/12) * 2^(1/12) * 2^(1/12) * 2^(1/12)
+```
+
+Both produce exactly `2^(4/12) = 2^(1/3)`.
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Major third in 12-TET (4 semitones)
@@ -68,7 +94,7 @@ module.baseNote.getVariable('frequency')
   .mul(new Fraction(2).pow(new Fraction(1, 12)))
 ```
 
-Both produce exactly `2^(4/12) = 2^(1/3)`.
+</details>
 
 ## Algebraic Rules Applied
 
@@ -78,23 +104,29 @@ When multiplying SymbolicPower values with the same base:
 
 ```
 a^m × a^n = a^(m+n)
-```
 
-```javascript
-// 2^(1/12) × 2^(3/12) = 2^(4/12)
+// Example: 2^(1/12) × 2^(3/12) = 2^(4/12)
+2^(1/12) * 2^(3/12)
 ```
 
 ### Division
 
 ```
 a^m ÷ a^n = a^(m-n)
-```
 
-```javascript
 // Going down a semitone
-frequency.div(new Fraction(2).pow(new Fraction(1, 12)))
+frequency / 2^(1/12)
 // = frequency × 2^(-1/12)
 ```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+frequency.div(new Fraction(2).pow(new Fraction(1, 12)))
+```
+
+</details>
 
 ### Power of Power
 
@@ -110,14 +142,23 @@ frequency.div(new Fraction(2).pow(new Fraction(1, 12)))
 
 SymbolicPower values can multiply with regular fractions:
 
-```javascript
+```
 // 440 × 2^(7/12) = 659.25... Hz (perfect fifth in 12-TET)
-new Fraction(440).mul(new Fraction(2).pow(new Fraction(7, 12)))
+440 * 2^(7/12)
 ```
 
 The system tracks both components:
 - Rational part: 440
 - Irrational part: 2^(7/12)
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(440).mul(new Fraction(2).pow(new Fraction(7, 12)))
+```
+
+</details>
 
 ## The ≈ Display
 
@@ -155,9 +196,9 @@ With SymbolicPower:
 ### Scenario: Transposition
 
 When transposing a melody:
-```javascript
+```
 // Transpose up a major third (4 semitones)
-originalFreq.mul(new Fraction(2).pow(new Fraction(4, 12)))
+originalFreq * 2^(4/12)
 ```
 
 The system preserves relationships:
@@ -167,19 +208,37 @@ And note2 = note1 × 2^(4/12)
 Then note2 = 440 × 2^(7/12)  // Exact!
 ```
 
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+originalFreq.mul(new Fraction(2).pow(new Fraction(4, 12)))
+```
+
+</details>
+
 ## Advanced: Different Bases
 
 ### Bohlen-Pierce (Base 3)
 
-```javascript
+```
 // Tritave (3:1) divided into 13 parts
-new Fraction(3).pow(new Fraction(1, 13))
+3^(1/13)
 ```
 
 SymbolicPower handles any integer base:
 - Base 2: Standard octave-based temperaments
 - Base 3: Tritave-based scales like Bohlen-Pierce
 - Other bases: Experimental tuning systems
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(3).pow(new Fraction(1, 13))
+```
+
+</details>
 
 ### Combining Different Bases
 
@@ -222,6 +281,21 @@ The binary evaluator has specific opcodes for symbolic operations:
 
 ### 12-TET Scale with Perfect Octave
 
+```
+// Root
+frequency: base.f
+
+// Each subsequent note adds one semitone
+// Note N: frequency × 2^(N/12)
+
+// After 12 notes, we get:
+frequency: base.f * 2^(12/12)
+// = baseFreq × 2 (exactly one octave, no drift!)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Root
 frequency: module.baseNote.getVariable('frequency')
@@ -234,6 +308,8 @@ frequency: module.baseNote.getVariable('frequency')
   .mul(new Fraction(2).pow(new Fraction(12, 12)))
 // = baseFreq × 2 (exactly one octave, no drift!)
 ```
+
+</details>
 
 ### Stacking Fifths
 
@@ -249,16 +325,25 @@ frequency: module.baseNote.getVariable('frequency')
 
 Test that 12 semitones = 1 octave:
 
-```javascript
+```
 // Build note 12 semitones up
-const twelveUp = module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(12, 12)))
+base.f * 2^(12/12)
 
 // This simplifies to:
 // baseFreq × 2^1 = baseFreq × 2
 
 // The evaluated value will be exactly 2× the base frequency
 ```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+const twelveUp = module.baseNote.getVariable('frequency')
+  .mul(new Fraction(2).pow(new Fraction(12, 12)))
+```
+
+</details>
 
 ## Limitations
 
@@ -286,13 +371,24 @@ For these cases, the system falls back to high-precision float approximation.
 
 ### Verify Algebraic Simplification
 
-```javascript
+```
 // This should display exactly 2× the base frequency
+frequency: base.f * 2^(1/12) * 2^(1/12) * ... // (repeat 12 times)
+// Or simply:
+frequency: base.f * 2^(12/12)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 frequency: module.baseNote.getVariable('frequency')
   .mul(new Fraction(2).pow(new Fraction(1, 12)))
   .mul(new Fraction(2).pow(new Fraction(1, 12)))
   // ... (repeat 12 times)
 ```
+
+</details>
 
 ## Next Steps
 

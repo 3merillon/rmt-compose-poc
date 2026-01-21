@@ -21,39 +21,67 @@ A major triad consists of:
 | Third | Major third | 5/4 | 1.250 |
 | Fifth | Perfect fifth | 3/2 | 1.500 |
 
-## Step 1: Start Fresh
+## Step 1: Set Up the BaseNote
 
-1. Load the "octave" interval module from the Module Bar
-2. Or reset to default and clear existing notes
+1. Open RMT Compose
+2. Click the **BaseNote** (orange circle)
+3. In the Variable Widget, scroll down to the bottom and click **"Clean Slate"** to remove all notes except the BaseNote
+4. Verify the BaseNote settings are what you want:
+   - **frequency**: e.g. `440` (A4)
+   - **tempo**: e.g. `120` (120 BPM)
 
 ## Step 2: Create the Root
 
-1. Click the **BaseNote**
-2. Click **"Add Note"** > **"Add at Same Time"**
+1. With the BaseNote selected
+2. In **"Add Note / Silence"** section, select **"Note"**, then click **"Create Note"**
 3. Select the new note
 4. Set frequency:
+
+```
+base.f
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.baseNote.getVariable('frequency')
 ```
+</details>
 
 5. Set duration to a whole note:
+
+```
+beat(base) * 4
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(4))
 ```
+</details>
 
 6. Click **Save**
 
 ## Step 3: Create the Third
 
-1. With the root selected, click **"Add Note"** > **"Add at Same Time"**
+1. With the root selected, click **"Create Note"** in **"Add Note / Silence"** (with **"At Start"** selected)
 2. Select the new note
 3. Set frequency (major third = 5/4):
+
+```
+base.f * (5/4)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
 ```
+</details>
 
 4. Keep the same duration and start time
 5. Click **Save**
@@ -61,13 +89,21 @@ module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
 ## Step 4: Create the Fifth
 
 1. Select the root note again
-2. Click **"Add Note"** > **"Add at Same Time"**
+2. Click **"Create Note"** in **"Add Note / Silence"** (with **"At Start"** selected)
 3. Select the new note
 4. Set frequency (perfect fifth = 3/2):
+
+```
+base.f * (3/2)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 ```
+</details>
 
 5. Click **Save**
 
@@ -101,9 +137,17 @@ Compare with [12-TET](/user-guide/tuning/12-tet):
 
 Change the third from major (5/4) to minor (6/5):
 
+```
+base.f * (6/5)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(6, 5))
 ```
+</details>
 
 The chord now sounds sad/dark!
 
@@ -112,9 +156,17 @@ The chord now sounds sad/dark!
 1. Add a fourth note at the same time
 2. Set frequency to 2/1:
 
+```
+base.f * 2
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(2))
 ```
+</details>
 
 This creates a fuller sound.
 
@@ -157,7 +209,7 @@ Other common chords in just intonation:
 
 ## What You Learned
 
-- Creating simultaneous notes using "Add at Same Time"
+- Creating simultaneous notes using "At Start" positioning
 - The ratios that make a major chord
 - How to verify chord structure visually and aurally
 - The difference between major and minor thirds

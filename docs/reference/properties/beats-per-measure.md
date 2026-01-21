@@ -4,13 +4,23 @@ The `beatsPerMeasure` property defines the number of beats in one measure, equiv
 
 ## Default Value
 
-```javascript
-new Fraction(4)  // 4 beats per measure (4/4 time)
+```
+4  // 4 beats per measure (4/4 time)
 ```
 
 ## Expression Examples
 
 ### Common Time Signatures
+
+```
+4   // 4/4 (common time)
+3   // 3/4 (waltz time)
+2   // 2/4 (march time)
+6   // 6/8 (compound duple)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(4)  // 4/4 (common time)
@@ -18,18 +28,27 @@ new Fraction(3)  // 3/4 (waltz time)
 new Fraction(2)  // 2/4 (march time)
 new Fraction(6)  // 6/8 (compound duple)
 ```
+</details>
 
 ### Reference BaseNote
+
+```
+base.bpm
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.baseNote.getVariable('beatsPerMeasure')
 ```
+</details>
 
 ## How It Affects Measure Length
 
 The measure length (in seconds) is calculated as:
 
-```javascript
+```
 measureLength = beatsPerMeasure / tempo * 60
 
 // At 120 BPM with 4 beats per measure:
@@ -37,9 +56,18 @@ measureLength = beatsPerMeasure / tempo * 60
 ```
 
 Access via:
+
+```
+measure(base)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 module.findMeasureLength(module.baseNote)
 ```
+</details>
 
 ## Common Time Signatures
 
@@ -56,6 +84,17 @@ module.findMeasureLength(module.baseNote)
 
 Use `beatsPerMeasure` for measure-aligned timing:
 
+```
+// Start at measure 2
+measure(base) * 2
+
+// Duration of half a measure
+measure(base) * (1/2)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Start at measure 2
 module.findMeasureLength(module.baseNote).mul(new Fraction(2))
@@ -63,6 +102,7 @@ module.findMeasureLength(module.baseNote).mul(new Fraction(2))
 // Duration of half a measure
 module.findMeasureLength(module.baseNote).mul(new Fraction(1, 2))
 ```
+</details>
 
 ## Visualization
 
@@ -76,7 +116,7 @@ To change the time signature for the composition:
 
 1. Click the **BaseNote** (orange circle)
 2. Find **beatsPerMeasure** in the Variable Widget
-3. Set the new value (e.g., `new Fraction(3)` for 3/4 time)
+3. Set the new value (e.g., `3` for 3/4 time)
 
 All measure-relative expressions will automatically update.
 

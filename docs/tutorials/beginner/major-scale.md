@@ -25,115 +25,178 @@ Create an 8-note major scale (Do-Re-Mi-Fa-Sol-La-Ti-Do) using pure ratios.
 | 7 | Ti | 15/8 | 1.875 |
 | 8 | Do | 2/1 | 2.000 |
 
-## Step 1: Start Fresh
+## Step 1: Set Up the BaseNote
 
 1. Open RMT Compose
-2. Click **Menu** (☰) > **Load Module** > **Reset to Default Module**
-3. Or load the "octave" interval module as a starting point
+2. Click the **BaseNote** (orange circle)
+3. In the Variable Widget, scroll down to the bottom and click **"Clean Slate"** to remove all notes except the BaseNote
+4. Verify the BaseNote settings are what you want:
+   - **frequency**: e.g. `440` (A4)
+   - **tempo**: e.g. `120` (120 BPM)
 
-## Step 2: Set Up the BaseNote
+## Step 2: Create the Root (Do)
 
-1. Click the **BaseNote** (orange circle)
-2. In the Variable Widget, verify:
-   - **frequency**: `new Fraction(440)` (A4, but any frequency works)
-   - **tempo**: `new Fraction(120)` (120 BPM)
+1. With the BaseNote selected
+2. In the Variable Widget, find **"Add Note / Silence"** section
+3. Select **"Note"**, then click **"Create Note"**
+4. Select the new note
+5. Set its frequency:
 
-## Step 3: Create the Root (Do)
+```
+base.f
+```
 
-1. Click the BaseNote
-2. Click **"Add Note"** > **"Add at Start+Duration"**
-3. Select the new note
-4. Set its frequency:
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.baseNote.getVariable('frequency')
 ```
+</details>
 
-5. Set its duration to a quarter note:
+6. Set its duration to a quarter note:
+
+```
+beat(base)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(60).div(module.findTempo(module.baseNote))
 ```
+</details>
 
-6. Click **Save**
+7. Click **Save**
 
-## Step 4: Create Re (9/8)
+## Step 3: Create Re (9/8)
 
 1. Select the Do note you just created (Note 1)
-2. Click **"Add Note"** > **"Add at Start+Duration"**
+2. In **"Add Note / Silence"**, keep **"Note"** and **"At End"** selected, click **"Create Note"**
 3. Select the new note (Note 2)
 4. Set its frequency:
+
+```
+base.f * (9/8)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(9, 8))
 ```
+</details>
 
 5. Click **Save**
 
-## Step 5: Create Mi (5/4)
+## Step 4: Create Mi (5/4)
 
 1. Select Note 2
-2. Click **"Add Note"** > **"Add at Start+Duration"**
+2. Click **"Create Note"** (in **"Add Note / Silence"** section)
 3. Select Note 3
 4. Set its frequency:
+
+```
+base.f * (5/4)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
 ```
+</details>
 
 5. Click **Save**
 
-## Step 6: Create Fa (4/3)
+## Step 5: Create Fa (4/3)
 
 1. Select Note 3
 2. Add a new note
 3. Set frequency:
 
+```
+base.f * (4/3)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(4, 3))
 ```
+</details>
 
-## Step 7: Create Sol (3/2)
+## Step 6: Create Sol (3/2)
 
 1. Add note after Fa
 2. Set frequency:
 
+```
+base.f * (3/2)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 ```
+</details>
 
-## Step 8: Create La (5/3)
+## Step 7: Create La (5/3)
 
 1. Add note after Sol
 2. Set frequency:
 
+```
+base.f * (5/3)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(5, 3))
 ```
+</details>
 
-## Step 9: Create Ti (15/8)
+## Step 8: Create Ti (15/8)
 
 1. Add note after La
 2. Set frequency:
 
+```
+base.f * (15/8)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(15, 8))
 ```
+</details>
 
-## Step 10: Create High Do (2/1)
+## Step 9: Create High Do (2/1)
 
 1. Add note after Ti
 2. Set frequency:
 
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(2, 1))
+```
+base.f * 2
 ```
 
-Or simply:
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(2))
 ```
+</details>
 
 ## Verification
 
@@ -172,21 +235,29 @@ Modify your scale to descend from high Do to low Do.
 ### Exercise 2: Change the Root
 
 1. Click the BaseNote
-2. Change frequency to `new Fraction(330)` (E4)
+2. Change frequency to `330` (E4)
 3. Play - the scale is now in E major!
 
 ### Exercise 3: Longer Notes
 
 Change all durations to half notes:
 
+```
+beat(base) * 2
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 ```
+</details>
 
 ## What You Learned
 
 - Major scale intervals as pure ratios
-- Creating sequential notes using "Add at Start+Duration"
+- Creating sequential notes using "At End" positioning
 - How changing BaseNote transposes the entire scale
 - The relationship between tempo and duration
 
