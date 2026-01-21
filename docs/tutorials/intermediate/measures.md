@@ -348,7 +348,7 @@ When notes reference a note with a custom tempo:
 
 ```
 // This note inherits tempo from Note 5 (which has tempo = 140)
-duration: 60 / tempo([5])
+duration: beat([5])
 ```
 
 <details>

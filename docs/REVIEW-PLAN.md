@@ -153,22 +153,22 @@ For each doc page, re-examine relevant source code:
 ### Phase 7: Tutorials - Intermediate
 | # | File | Status | Issues Found |
 |---|------|--------|--------------|
-| 27 | `docs/tutorials/intermediate/dependencies.md` | ⬜ Pending | **KNOWN: "Double-click workspace to create note"** |
-| 28 | `docs/tutorials/intermediate/octaves.md` | ⬜ Pending | |
-| 29 | `docs/tutorials/intermediate/measures.md` | ⬜ Pending | |
-| 30 | `docs/tutorials/intermediate/index.md` | ⬜ Pending | |
+| 27 | `docs/tutorials/intermediate/dependencies.md` | ✅ Complete | None - already had DSL primary + legacy details, correct UI labels |
+| 28 | `docs/tutorials/intermediate/octaves.md` | ✅ Complete | None - DSL syntax correct, uses `beat(base)` |
+| 29 | `docs/tutorials/intermediate/measures.md` | ✅ Complete | Fixed: `60 / tempo([5])` → `beat([5])` |
+| 30 | `docs/tutorials/intermediate/index.md` | ✅ Complete | None - navigation only |
 
-**Note for Phase 7+:** Consider adding tips about the Module Bar **Drop Mode Toggle** where appropriate:
+**Note for Phase 8+:** Consider adding tips about the Module Bar **Drop Mode Toggle** where appropriate:
 - For scale-building tutorials: mention using **"End"** mode to chain modules sequentially
 - For chord-building tutorials: mention using **"Start"** mode to stack modules at the same time
 
 ### Phase 8: Tutorials - Advanced
 | # | File | Status | Issues Found |
 |---|------|--------|--------------|
-| 31 | `docs/tutorials/advanced/complex-dependencies.md` | ⬜ Pending | |
-| 32 | `docs/tutorials/advanced/microtonal.md` | ⬜ Pending | |
-| 33 | `docs/tutorials/advanced/symbolic-power.md` | ⬜ Pending | |
-| 34 | `docs/tutorials/advanced/index.md` | ⬜ Pending | |
+| 31 | `docs/tutorials/advanced/complex-dependencies.md` | ✅ Complete | Fixed: Dependency colors (was Blue/Red, now Orange/Teal/Purple by property with line thickness); Fixed: `60 / tempo(...)` → `beat(...)`; Added Module Bar Drop Mode tips for chords and sequences |
+| 32 | `docs/tutorials/advanced/microtonal.md` | ✅ Complete | Added Module Bar Drop Mode tip for scales and chords |
+| 33 | `docs/tutorials/advanced/symbolic-power.md` | ✅ Complete | None - already had DSL primary + legacy details |
+| 34 | `docs/tutorials/advanced/index.md` | ✅ Complete | None - navigation only |
 
 ### Phase 9: Tutorials - Workflows
 | # | File | Status | Issues Found |

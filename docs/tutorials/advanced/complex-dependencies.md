@@ -206,9 +206,14 @@ When you change a property at the top of a hierarchy, all dependent notes update
 ### Visualizing the Cascade
 
 1. Select the root note
-2. Red lines show all dependents
+2. Dependency lines show all relationships:
+   - **Orange lines**: frequency dependents
+   - **Teal lines**: startTime dependents
+   - **Purple lines**: duration dependents
+   - **Thick lines**: parents (what this note depends on)
+   - **Thin lines**: children (what depends on this note)
 3. Edit the root's frequency
-4. Watch all connected notes update instantly
+4. Watch all connected notes update on save
 
 ## Tempo Hierarchies
 
@@ -220,19 +225,19 @@ Create sections with different tempos by establishing tempo-defining notes:
 // Section A root (Note 10)
 tempo: 120  // Section A at 120 BPM
 startTime: 0
-duration: 60 / 120  // Uses own tempo
+duration: beat([10])  // Uses own tempo
 
 // Section A notes depend on Note 10 for tempo
 startTime: [10].t + [10].d
-duration: 60 / tempo([10])
+duration: beat([10])
 
 // Section B root (Note 20)
 tempo: 80  // Section B at 80 BPM
 startTime: measure([10]) * 8  // After 8 measures of Section A
-duration: 60 / 80
+duration: beat([20])
 
 // Section B notes depend on Note 20 for tempo
-duration: 60 / tempo([20])
+duration: beat([20])
 ```
 
 <details>
@@ -301,11 +306,11 @@ frequency: base.f
 startTime: 0
 duration: 1
 
-// Echo 1 (quieter, delayed)
+// Echo 1 (delayed)
 frequency: [1].f
 startTime: [1].t + (1/4)
 duration: [1].d
-// Note: Volume would be handled by instrument/gain, not shown here
+// Note: Per-note volume isn't implemented yet
 
 // Echo 2 (even more delayed)
 frequency: [1].f
@@ -322,11 +327,11 @@ frequency: module.baseNote.getVariable('frequency')
 startTime: new Fraction(0)
 duration: new Fraction(1)
 
-// Echo 1 (quieter, delayed)
+// Echo 1 (delayed)
 frequency: module.getNoteById(1).getVariable('frequency')
 startTime: module.getNoteById(1).getVariable('startTime').add(new Fraction(1, 4))
 duration: module.getNoteById(1).getVariable('duration')
-// Note: Volume would be handled by instrument/gain, not shown here
+// Note: Per-note volume isn't implemented yet
 
 // Echo 2 (even more delayed)
 frequency: module.getNoteById(1).getVariable('frequency')
@@ -338,7 +343,11 @@ duration: module.getNoteById(1).getVariable('duration')
 
 ## Parallel Voice Leading
 
-Create multiple voices that move together:
+Create multiple voices that move together.
+
+> **Tip**: When building chords from saved modules, use the Module Bar's **"Drop at: Start"** mode to stack notes at the same start time.
+
+
 
 ```
 // Soprano (Note 1)
@@ -395,16 +404,18 @@ duration: module.getNoteById(1).getVariable('duration')
 
 ## Sequential Pattern Generation
 
+> **Tip**: When building scales or sequences from saved modules, use the Module Bar's **"Drop at: End"** mode to chain notes one after another.
+
 ### Rhythmic Sequence
 
 ```
 // Beat 1
 startTime: 0
-duration: 60 / tempo(base)
+duration: beat(base)
 
 // Each subsequent beat references previous
 startTime: [PREV].t + [PREV].d
-duration: 60 / tempo(base)
+duration: beat(base)
 ```
 
 <details>
@@ -451,9 +462,12 @@ frequency: module.getNoteById(PREV).getVariable('frequency')
 
 ### Viewing Dependencies
 
-Click on any note to see:
-- **Blue lines**: Notes this note depends on
-- **Red lines**: Notes that depend on this note
+Click on any note to see dependency lines:
+- **Orange lines**: frequency relationships
+- **Teal lines**: startTime relationships
+- **Purple lines**: duration relationships
+- **Thick lines**: Parents (notes this note depends on)
+- **Thin lines**: Children (notes that depend on this note)
 
 ### Understanding Propagation
 

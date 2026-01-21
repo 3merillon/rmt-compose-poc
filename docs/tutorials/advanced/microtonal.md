@@ -258,6 +258,10 @@ module.baseNote.getVariable('frequency').mul(new Fraction(7, 5))
 
 ## Building a Microtonal Composition
 
+> **Tip**: Use the Module Bar's **"Drop at:"** toggle to speed up composition:
+> - **End mode**: Chain notes sequentially (great for scales and melodies)
+> - **Start mode**: Stack notes at the same time (great for chords)
+
 ### Example: 19-TET Melody
 
 ```
