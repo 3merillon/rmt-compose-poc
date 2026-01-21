@@ -39,7 +39,7 @@ Equal temperament compromises each interval slightly so that:
 
 ## TET Systems in RMT Compose
 
-RMT Compose supports multiple equal temperament systems:
+RMT Compose supports any equal temperament system using integer bases with fractional exponents (e.g., `N^(a/b)`). Some common examples:
 
 | System | Steps per Octave | Step Ratio |
 |--------|-----------------|------------|
@@ -110,15 +110,15 @@ note3.frequency = note2.frequency.mul(new Fraction(2).pow(new Fraction(1, 12)))
 
 ## The ≈ Symbol
 
-Notes with TET frequencies display **≈** before their value:
+Notes with TET frequencies display **≈** before a fractional approximation of the value:
 
 ```
-≈ 1.05946...
+≈ 6236/981
 ```
 
 This indicates:
-- The value is **irrational** (infinite non-repeating decimals)
-- The displayed value is an **approximation**
+- The value is **irrational** (cannot be expressed as an exact fraction)
+- The displayed fraction is an **approximation** of the true value
 - Internally, the value is stored as a **SymbolicPower** (exact algebraic form)
 
 ## SymbolicPower Algebra

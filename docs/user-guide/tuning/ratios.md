@@ -14,7 +14,7 @@ When a string vibrates, it produces a fundamental frequency plus **overtones** a
 | 4th | 4× | C (two octaves) |
 | 5th | 5× | E |
 | 6th | 6× | G |
-| 7th | 7× | B♭ (slightly flat) |
+| 7th | 7× | B♭ |
 | 8th | 8× | C (three octaves) |
 
 Pure ratios capture these natural relationships.
@@ -140,16 +140,16 @@ fifth.frequency = module.baseNote.getVariable('frequency').mul(new Fraction(3, 2
 
 ### Advantages
 
-1. **Resonance**: Pure intervals align with the overtone series, creating clear, ringing sounds
-2. **Exactness**: No rounding or approximation - `3/2` is exactly `3/2`
-3. **Mathematical elegance**: Operations stay exact (`3/2 × 5/4 = 15/8`)
-4. **Flexibility**: Any ratio can be expressed
+1. **Compositional intent**: Pure ratios preserve exactly what you mean - a perfect fifth is `3/2`, not an approximation
+2. **Resonance**: Pure intervals align with the overtone series, creating clear, ringing sounds
+3. **Exactness**: No rounding or approximation - `3/2` is exactly `3/2`
+4. **Mathematical elegance**: Operations stay exact (`3/2 × 5/4 = 15/8`)
+5. **Flexibility**: Any ratio can be expressed
 
-### Limitations
+### Considerations
 
-1. **Wolf intervals**: Some keys sound worse than others
-2. **Modulation**: Changing keys can sound jarring
-3. **Instrument compatibility**: Standard instruments are tuned to 12-TET
+1. **Instrument compatibility**: Standard acoustic instruments are tuned to 12-TET, so pure ratios may not match them exactly
+2. **Rethinking harmony**: Pure ratios require a new understanding of harmonic relationships. Intervals that are conflated in 12-TET become distinct - for example, a minor seventh might be better expressed as a double fourth (`(4/3) * (4/3) = 16/9`) depending on context. This added precision means composers must think carefully about the harmonic meaning of each interval
 
 ## Comparison with Equal Temperament
 

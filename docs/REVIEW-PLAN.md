@@ -135,13 +135,13 @@ For each doc page, re-examine relevant source code:
 ### Phase 5: User Guide - Tuning
 | # | File | Status | Issues Found |
 |---|------|--------|--------------|
-| 17 | `docs/user-guide/tuning/ratios.md` | ⬜ Pending | |
-| 18 | `docs/user-guide/tuning/equal-temperament.md` | ⬜ Pending | |
-| 19 | `docs/user-guide/tuning/12-tet.md` | ⬜ Pending | |
-| 20 | `docs/user-guide/tuning/19-tet.md` | ⬜ Pending | |
-| 21 | `docs/user-guide/tuning/31-tet.md` | ⬜ Pending | |
-| 22 | `docs/user-guide/tuning/bohlen-pierce.md` | ⬜ Pending | |
-| 23 | `docs/user-guide/tuning/custom-tet.md` | ⬜ Pending | |
+| 17 | `docs/user-guide/tuning/ratios.md` | ✅ Complete | None - already had DSL primary + legacy details |
+| 18 | `docs/user-guide/tuning/equal-temperament.md` | ✅ Complete | None - DSL syntax correct, module references accurate |
+| 19 | `docs/user-guide/tuning/12-tet.md` | ✅ Complete | None - DSL syntax correct, module name matches file |
+| 20 | `docs/user-guide/tuning/19-tet.md` | ✅ Complete | None - DSL syntax correct, module name matches file |
+| 21 | `docs/user-guide/tuning/31-tet.md` | ✅ Complete | None - DSL syntax correct, module name matches file |
+| 22 | `docs/user-guide/tuning/bohlen-pierce.md` | ✅ Complete | None - tritave 3^(1/13) syntax correct, BP-13 module exists |
+| 23 | `docs/user-guide/tuning/custom-tet.md` | ✅ Complete | None - DSL syntax and module JSON format accurate |
 
 ### Phase 6: Tutorials - Beginner
 | # | File | Status | Issues Found |
