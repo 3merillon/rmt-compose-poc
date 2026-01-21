@@ -48,7 +48,7 @@ When tracking is enabled:
 ### Pan and Zoom
 
 When tracking is enabled:
-- Manual panning is overridden during playback
+- Horizontal panning is overridden during playback (vertical panning still works)
 - Zooming still works
 - When playback stops, your last manual position is restored
 
@@ -56,7 +56,7 @@ When tracking is enabled:
 
 When you click Stop:
 - Playback stops
-- The view stays at the last playhead position
+- The playhead resets to the beginning (time = 0)
 - Tracking remains enabled for the next play
 
 ## Visual Indicators
@@ -69,7 +69,7 @@ When you click Stop:
 
 ## Tips
 
-1. **Enable before playing** - Turn on tracking before starting playback
-2. **Use zoom first** - Set your desired zoom level, then enable tracking
-3. **Disable to focus** - Turn off tracking when working on a specific section
-4. **Combine with volume** - Lower volume for long playback sessions with tracking
+1. **Disable while editing** - Turn off tracking when making changes to notes
+2. **Enable for full playback** - Turn on tracking when listening through an entire composition
+3. **Use vertical pan** - You can still pan vertically to see different frequency ranges while tracking
+4. **Toggle mid-playback** - You can turn tracking on or off during playback without stopping

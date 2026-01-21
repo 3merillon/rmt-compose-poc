@@ -15,7 +15,7 @@ Generated in real-time using oscillators:
 | `sawtooth-wave` | Sawtooth | Bright, buzzy, string-like |
 | `triangle-wave` | Triangle | Soft, flute-like |
 | `organ` | Complex | Multi-harmonic organ |
-| `vibraphone` | Complex | Bell-like with vibrato |
+| `vibraphone` | Complex | Bell-like, percussive decay |
 
 ### Sample Instruments
 
@@ -54,16 +54,18 @@ If no instrument is specified:
 
 ## Instrument Inheritance
 
-Instruments can be inherited through the dependency chain:
+Instruments are inherited through the frequency dependency chain:
 
-```javascript
-// Note 1 has instrument "piano"
-note1.instrument = "piano"
+1. If the note has an explicit instrument set, use that
+2. Otherwise, follow the frequency expression to find the parent note
+3. Recursively check the parent note's instrument
+4. If no instrument is found in the chain, default to `sine-wave`
 
-// Note 2 doesn't specify instrument
-// If note2 depends on note1, it may inherit "piano"
-note2.instrument = undefined  // Uses inheritance
-```
+For example, if Note 2's frequency is `[1].f * (3/2)` and Note 1 has instrument "piano", Note 2 will inherit "piano" since it depends on Note 1's frequency.
+
+### Propagation on Delete
+
+When using **Delete and Keep Dependencies**, the deleted note's instrument is automatically propagated to any dependent notes that don't have their own explicit instrument set.
 
 ## Synth Instrument Details
 
@@ -105,41 +107,43 @@ Odd harmonics, but softer than square.
 
 ### Organ
 
-Multiple simultaneous oscillators simulating organ drawbars.
+Custom waveform with multiple harmonics (fundamental, 3rd, 4th, 5th, 6th, 8th, 9th) creating a rich, sustained tone.
 
 **Best for:**
 - Full, rich chords
 - Sustained passages
-- Classical organ music
+- Held tones
 
 ### Vibraphone
 
-Bell-like tone with periodic amplitude modulation.
+Custom waveform with strong fundamental, 4th partial, and 10th partial, plus a quick attack and long decay envelope.
 
 **Best for:**
 - Mallet percussion simulation
-- Jazz voicings
-- Ethereal sounds
+- Bell-like tones
+- Percussive accents
 
 ## Sample Instrument Details
 
+Sample instruments use a single audio sample that is pitch-shifted to play different frequencies.
+
 ### Piano
 
-Multi-sampled acoustic piano.
+Single sample (A4 = 440Hz) pitch-shifted for all notes.
 
 **Characteristics:**
-- Velocity-sensitive dynamics
-- Natural decay
-- Realistic timbre
+- Quick attack, natural decay envelope
+- Works best near the sample's native pitch
+- Higher/lower pitches may sound less realistic due to pitch shifting
 
 ### Violin
 
-Sampled bowed strings.
+Single sample (C5 = 523.25Hz) pitch-shifted for all notes.
 
 **Characteristics:**
-- Sustained tone
-- String resonance
-- Expressive capability
+- Slower attack simulating bow contact
+- Special envelope handling for short notes vs sustained notes
+- Subtle swell on longer notes (>0.5s)
 
 ## Mixing Instruments
 
@@ -175,5 +179,3 @@ Planned additions:
 - Custom sample loading
 - FM synthesis
 - Audio effects (reverb, delay)
-
-Check the [changelog](/about/changelog) for updates on new instruments.

@@ -128,9 +128,9 @@ For each doc page, re-examine relevant source code:
 ### Phase 4: User Guide - Playback
 | # | File | Status | Issues Found |
 |---|------|--------|--------------|
-| 14 | `docs/user-guide/playback/transport.md` | ⬜ Pending | |
-| 15 | `docs/user-guide/playback/tracking.md` | ⬜ Pending | |
-| 16 | `docs/user-guide/playback/instruments.md` | ⬜ Pending | |
+| 14 | `docs/user-guide/playback/transport.md` | ✅ Complete | None - accurate (streaming scheduler values 2s/100ms correct, volume default 0.2 correct) |
+| 15 | `docs/user-guide/playback/tracking.md` | ✅ Complete | Fixed: Stop button behavior (was "view stays at last position", now "playhead resets to beginning") |
+| 16 | `docs/user-guide/playback/instruments.md` | ✅ Complete | Fixed: Removed broken /about/changelog link; Rewrote instrument inheritance section to accurately describe frequency dependency chain lookup |
 
 ### Phase 5: User Guide - Tuning
 | # | File | Status | Issues Found |
