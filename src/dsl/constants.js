@@ -130,6 +130,7 @@ export const Precedence = {
   MULTIPLICATIVE: 2, // * /
   UNARY: 3,         // - (negation)
   POWER: 4,         // ^
+  ATOMIC: 5,        // literals, references - never need parentheses
 };
 
 /**

@@ -5,6 +5,8 @@
 import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import Fraction from 'fraction.js';
+import { isDSLSyntax, compileDSL, decompileToDSL } from '../dsl/index.js';
+import { BinaryEvaluator } from '../binary-evaluator.js';
 
 function pauseIfPlaying() {
   try {
@@ -26,25 +28,43 @@ function refreshModals(note, measureId = null) {
 }
 
 function fractionLiteral(n, d) {
-  return `new Fraction(${n}, ${d})`;
+  if (d === 1) return `${n}`;
+  return `(${n}/${d})`;
 }
 
-function beatUnitFor(moduleRef) {
-  return `new Fraction(60).div(${moduleRef})`;
+function beatUnitFor(noteRef) {
+  return `beat(${noteRef})`;
 }
 
 function defaultFrequencyFormulaFor(note) {
   if (!note || !note.id) {
-    return `new Fraction(1,1).mul(module.baseNote.getVariable('frequency'))`;
+    return `base.f`;
   }
   // If parent note has no frequency, fallback to base
   try {
     const hasFreq = !!note.getVariable('frequency');
     if (hasFreq) {
-      return `new Fraction(1,1).mul(module.getNoteById(${note.id}).getVariable('frequency'))`;
+      return `[${note.id}].f`;
     }
   } catch {}
-  return `new Fraction(1,1).mul(module.baseNote.getVariable('frequency'))`;
+  return `base.f`;
+}
+
+function getDefaultDuration(note) {
+  // Try to get the duration expression from the parent note and convert to DSL
+  if (note && note.id) {
+    try {
+      // Get the compiled expression and decompile to DSL
+      const expr = note.getExpression?.('duration');
+      if (expr && !expr.isEmpty()) {
+        return decompileToDSL(expr);
+      }
+    } catch {}
+    // Fallback: reference the parent note's duration
+    return `[${note.id}].d`;
+  }
+  // Default to beat(base)
+  return `beat(base)`;
 }
 
 function sectionHeader(text) {
@@ -106,7 +126,7 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
         fromNote = module.baseNote;
         const newMeasure = module.addNote({
           startTime: () => module.baseNote.getVariable('startTime'),
-          startTimeString: "module.baseNote.getVariable('startTime')"
+          startTimeString: "base.t"
         });
         newMeasure.parentId = module.baseNote.id;
         newMeasures.push(newMeasure);
@@ -242,9 +262,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   posToggle.appendChild(atEndLabel);
   addSection.appendChild(posToggle);
 
-  const moduleRefForTempo = isBase
-    ? "module.baseNote.getVariable('tempo')"
-    : "module.findTempo(module.baseNote)";
+  const noteRefForTempo = "base";
 
   // Frequency row (hidden for silence)
   const freqRow = labeledRow('Frequency');
@@ -258,7 +276,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   freqInput.type = 'text';
   freqInput.className = 'raw-value-input';
   freqInput.value = isBase
-    ? `new Fraction(1,1).mul(module.baseNote.getVariable('frequency'))`
+    ? `base.f`
     : defaultFrequencyFormulaFor(note);
 
   freqRaw.appendChild(freqInput);
@@ -278,8 +296,8 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   durInput.type = 'text';
   durInput.className = 'raw-value-input';
   durInput.value = isBase
-    ? `${beatUnitFor(moduleRefForTempo)}`
-    : (note?.variables?.durationString || `new Fraction(1,1)`);
+    ? `${beatUnitFor(noteRefForTempo)}`
+    : getDefaultDuration(note);
 
   durRaw.appendChild(durInput);
   durRow.value.appendChild(durEval);
@@ -300,17 +318,13 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
 
   function updateStartTimeFormula() {
     if (isBase) {
-      stInput.value = `module.baseNote.getVariable('startTime')`;
+      stInput.value = `base.t`;
       return;
     }
     const parentId = note?.id ?? 0;
-    const base = parentId === 0
-      ? `module.baseNote.getVariable('startTime')`
-      : `module.getNoteById(${parentId}).getVariable('startTime')`;
-    const durRef = parentId === 0
-      ? `module.baseNote.getVariable('duration')`
-      : `module.getNoteById(${parentId}).getVariable('duration')`;
-    stInput.value = atStartRadio.checked ? base : `(${base}).add(${durRef})`;
+    const startRef = parentId === 0 ? `base.t` : `[${parentId}].t`;
+    const durRef = parentId === 0 ? `base.d` : `[${parentId}].d`;
+    stInput.value = atStartRadio.checked ? startRef : `${startRef} + ${durRef}`;
   }
 
   updateStartTimeFormula();
@@ -325,10 +339,20 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   // Live "evaluated" preview for inputs (best-effort)
   function safeEval(expr) {
     try {
-      // eslint-disable-next-line no-new-func
-      const fn = new Function('module', 'Fraction', `return ${expr};`);
-      const res = fn(getModule(), Fraction);
-      return (res && typeof res.toFraction === 'function') ? res.toFraction() : String(res);
+      const module = getModule();
+      if (isDSLSyntax(expr)) {
+        // Evaluate DSL expression
+        const binary = compileDSL(expr);
+        const evaluator = new BinaryEvaluator(module);
+        const result = evaluator.evaluate(binary, module.baseNote);
+        return result.toFraction();
+      } else {
+        // Legacy evaluation
+        // eslint-disable-next-line no-new-func
+        const fn = new Function('module', 'Fraction', `return ${expr};`);
+        const res = fn(module, Fraction);
+        return (res && typeof res.toFraction === 'function') ? res.toFraction() : String(res);
+      }
     } catch {
       return 'Invalid';
     }
@@ -425,9 +449,6 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       const evaluated = module.evaluateModule();
       setEvaluatedNotes(evaluated);
 
-      // Select the newly created note so dependency highlights and GL selection are correct immediately
-      try { eventBus?.emit?.('player:selectNote', { noteId: newNote.id }); } catch {}
-
       if (typeof externalFunctions.updateVisualNotes === 'function') {
         externalFunctions.updateVisualNotes(evaluated);
       }
@@ -436,10 +457,17 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       }
       try { eventBus?.emit?.('player:invalidateModuleEndTimeCache'); } catch {}
 
-      const newElem = document.querySelector(`.note-content[data-note-id="${newNote.id}"]`);
-      if (newElem) {
+      // Select the newly created note so dependency highlights and GL selection are correct immediately
+      try { eventBus?.emit?.('player:selectNote', { noteId: newNote.id }); } catch {}
+
+      // Refresh modals to show the new note - use setTimeout to ensure DOM is updated
+      setTimeout(() => {
+        const newElem = document.querySelector(`.note-content[data-note-id="${newNote.id}"]`);
         refreshModals(newNote, null);
-      }
+        if (newElem) {
+          newElem.classList.add('selected');
+        }
+      }, 0);
 
       // History snapshot
       try {
