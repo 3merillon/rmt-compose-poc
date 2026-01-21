@@ -33,11 +33,30 @@ Deleting a category removes all modules within it. This action cannot be undone.
 
 ## Using Modules
 
+### Drop Mode Toggle
+
+At the top of the Module Bar, you'll find a **Drop at:** toggle with two options:
+
+| Mode | Description |
+|------|-------------|
+| **Start** | Module notes are placed at the **beginning** of the target note |
+| **End** | Module notes are placed at the **end** of the target note |
+
+This toggle controls where module notes land when dropped onto a note:
+
+- **Start mode**: Notes referencing `base.t` are remapped to start at the target note's start time (`[target].t`)
+- **End mode**: Notes referencing `base.t` are remapped to start at the target note's end (`[target].t + [target].d`)
+
+::: tip
+Use **End** mode to chain modules sequentially—drop a module onto the last note and it will appear right after it.
+:::
+
 ### Drag and Drop a Module
 
-1. Find the module you want in the Module Bar
-2. **Drag** the module icon onto the workspace
-3. Drop it onto a note or measure bar
+1. Select the desired **drop mode** (Start or End) using the toggle
+2. Find the module you want in the Module Bar
+3. **Drag** the module icon onto the workspace
+4. Drop it onto a note or measure bar
 
 The module's dependencies are remapped from its original BaseNote to the drop target:
 - **Drop on a note or BaseNote**: All properties (start time, duration, frequency) are remapped relative to that note
