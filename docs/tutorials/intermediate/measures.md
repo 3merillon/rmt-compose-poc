@@ -33,18 +33,20 @@ The fundamental formula:
 seconds = beats × (60 / tempo)
 ```
 
-In expression form:
+In expression form, use the `beat()` helper for cleaner code:
 
 ```
-// One beat at current tempo
-60 / tempo(base)
+// One beat at current tempo (preferred)
+beat(base)
 
 // Two beats
-2 * (60 / tempo(base))
+beat(base) * 2
 
 // Half beat
-(1/2) * (60 / tempo(base))
+beat(base) * (1/2)
 ```
+
+The `beat(base)` helper is equivalent to `60 / tempo(base)`.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
@@ -54,10 +56,10 @@ In expression form:
 new Fraction(60).div(module.findTempo(module.baseNote))
 
 // Two beats
-new Fraction(2).mul(new Fraction(60).div(module.findTempo(module.baseNote)))
+new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 
 // Half beat
-new Fraction(1, 2).mul(new Fraction(60).div(module.findTempo(module.baseNote)))
+new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
 ```
 
 </details>
@@ -67,31 +69,31 @@ new Fraction(1, 2).mul(new Fraction(60).div(module.findTempo(module.baseNote)))
 ### Whole Note (4 beats)
 
 ```
-duration: 4 * (60 / tempo(base))
+duration: beat(base) * 4
 ```
 
 ### Half Note (2 beats)
 
 ```
-duration: 2 * (60 / tempo(base))
+duration: beat(base) * 2
 ```
 
 ### Quarter Note (1 beat)
 
 ```
-duration: 60 / tempo(base)
+duration: beat(base)
 ```
 
 ### Eighth Note (1/2 beat)
 
 ```
-duration: (1/2) * (60 / tempo(base))
+duration: beat(base) * (1/2)
 ```
 
 ### Sixteenth Note (1/4 beat)
 
 ```
-duration: (1/4) * (60 / tempo(base))
+duration: beat(base) * (1/4)
 ```
 
 <details>
@@ -99,19 +101,19 @@ duration: (1/4) * (60 / tempo(base))
 
 ```javascript
 // Whole Note (4 beats)
-duration: new Fraction(4).mul(new Fraction(60).div(module.findTempo(module.baseNote)))
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(4))
 
 // Half Note (2 beats)
-duration: new Fraction(2).mul(new Fraction(60).div(module.findTempo(module.baseNote)))
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 
 // Quarter Note (1 beat)
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 // Eighth Note (1/2 beat)
-duration: new Fraction(1, 2).mul(new Fraction(60).div(module.findTempo(module.baseNote)))
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
 
 // Sixteenth Note (1/4 beat)
-duration: new Fraction(1, 4).mul(new Fraction(60).div(module.findTempo(module.baseNote)))
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 4))
 ```
 
 </details>
@@ -191,7 +193,7 @@ Position a note at beat 3 of measure 2:
 ```
 // Measure 2 starts at one measure length
 // Beat 3 is 2 beats into the measure (0-indexed)
-startTime: measure(base) + 2 * (60 / tempo(base))
+startTime: measure(base) + beat(base) * 2
 ```
 
 <details>
@@ -199,7 +201,7 @@ startTime: measure(base) + 2 * (60 / tempo(base))
 
 ```javascript
 startTime: module.findMeasureLength(module.baseNote)
-  .add(new Fraction(2).mul(new Fraction(60).div(module.findTempo(module.baseNote))))
+  .add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2)))
 ```
 
 </details>
@@ -216,20 +218,20 @@ Build a simple kick-snare pattern:
 // 1 beat at 120 BPM = 60/120 = 0.5 seconds
 
 // Kick on beat 1 (measure 1)
-startTime: 0
-duration: 60 / tempo(base)
+startTime: base.t
+duration: beat(base)
 
 // Snare on beat 3 (measure 1)
-startTime: 2 * (60 / tempo(base))
-duration: 60 / tempo(base)
+startTime: base.t + beat(base) * 2
+duration: beat(base)
 
 // Kick on beat 1 (measure 2)
-startTime: measure(base)
-duration: 60 / tempo(base)
+startTime: base.t + measure(base)
+duration: beat(base)
 
 // Snare on beat 3 (measure 2)
-startTime: measure(base) + 2 * (60 / tempo(base))
-duration: 60 / tempo(base)
+startTime: base.t + measure(base) + beat(base) * 2
+duration: beat(base)
 ```
 
 <details>
@@ -243,20 +245,21 @@ duration: 60 / tempo(base)
 // 1 beat at 120 BPM = 60/120 = 0.5 seconds
 
 // Kick on beat 1 (measure 1)
-startTime: new Fraction(0)
+startTime: module.baseNote.getVariable('startTime')
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 // Snare on beat 3 (measure 1)
-startTime: new Fraction(2).mul(new Fraction(60).div(module.findTempo(module.baseNote)))
+startTime: module.baseNote.getVariable('startTime')
+  .add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2)))
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 // Kick on beat 1 (measure 2)
-startTime: module.findMeasureLength(module.baseNote)
+startTime: module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 // Snare on beat 3 (measure 2)
-startTime: module.findMeasureLength(module.baseNote)
-  .add(new Fraction(2).mul(new Fraction(60).div(module.findTempo(module.baseNote))))
+startTime: module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))
+  .add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2)))
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
 ```
 
@@ -268,23 +271,23 @@ duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 ```
 // Note 1: Beat 1
-startTime: 0
-duration: 60 / tempo(base)
+startTime: base.t
+duration: beat(base)
 
 // Note 2: Beat 2 (starts after Note 1)
 startTime: [1].t + [1].d
-duration: 60 / tempo(base)
+duration: beat(base)
 
 // Note 3: Beat 3 (starts after Note 2)
 startTime: [2].t + [2].d
-duration: 60 / tempo(base)
+duration: beat(base)
 ```
 
 ### Mixed Rhythms
 
 ```
 // Half note (2 beats)
-duration: 2 * (60 / tempo(base))
+duration: beat(base) * 2
 
 // Followed by two quarter notes (1 beat each)
 // ...chain as above
@@ -295,7 +298,7 @@ duration: 2 * (60 / tempo(base))
 
 ```javascript
 // Note 1: Beat 1
-startTime: new Fraction(0)
+startTime: module.baseNote.getVariable('startTime')
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 // Note 2: Beat 2 (starts after Note 1)
@@ -309,7 +312,7 @@ startTime: module.getNoteById(2).getVariable('startTime')
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 // Half note (2 beats)
-duration: new Fraction(2).mul(new Fraction(60).div(module.findTempo(module.baseNote)))
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 ```
 
 </details>
@@ -323,8 +326,8 @@ You can set a different tempo for a note, and all notes that depend on it will i
 ```
 // Note at new tempo section
 tempo: 140  // New tempo: 140 BPM
-startTime: measure(base) * 4  // Starts at measure 5
-duration: 60 / 140  // Uses its own tempo
+startTime: base.t + measure(base) * 4  // Starts at measure 5
+duration: beat(base)  // Uses inherited tempo
 ```
 
 <details>
@@ -333,8 +336,8 @@ duration: 60 / 140  // Uses its own tempo
 ```javascript
 // Note at new tempo section
 tempo: new Fraction(140)  // New tempo: 140 BPM
-startTime: module.findMeasureLength(module.baseNote).mul(new Fraction(4))  // Starts at measure 5
-duration: new Fraction(60).div(new Fraction(140))  // Uses its own tempo
+startTime: module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote).mul(new Fraction(4)))  // Starts at measure 5
+duration: new Fraction(60).div(module.findTempo(module.baseNote))  // Uses inherited tempo
 ```
 
 </details>
@@ -413,8 +416,8 @@ Build a composition with verse and chorus at different tempos:
 // Verse root note (inherits BaseNote tempo)
 // ID: 1
 frequency: base.f
-startTime: 0
-duration: 60 / tempo(base)
+startTime: base.t
+duration: beat(base)
 
 // More verse notes depend on Note 1...
 
@@ -422,12 +425,12 @@ duration: 60 / tempo(base)
 // ID: 10
 frequency: base.f
 tempo: 120  // Faster chorus!
-startTime: measure(base) * 8  // After 8 measures of verse
-duration: 60 / 120
+startTime: base.t + measure(base) * 8  // After 8 measures of verse
+duration: beat([10])  // Uses its own tempo
 
 // Chorus notes depend on Note 10 and use its tempo
 startTime: [10].t + [10].d
-duration: 60 / tempo([10])  // Uses 120 BPM
+duration: beat([10])  // Uses 120 BPM
 ```
 
 <details>
@@ -439,7 +442,7 @@ duration: 60 / tempo([10])  // Uses 120 BPM
 // Verse root note (inherits BaseNote tempo)
 // ID: 1
 frequency: module.baseNote.getVariable('frequency')
-startTime: new Fraction(0)
+startTime: module.baseNote.getVariable('startTime')
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 // More verse notes depend on Note 1...
@@ -448,8 +451,8 @@ duration: new Fraction(60).div(module.findTempo(module.baseNote))
 // ID: 10
 frequency: module.baseNote.getVariable('frequency')
 tempo: new Fraction(120)  // Faster chorus!
-startTime: module.findMeasureLength(module.baseNote).mul(new Fraction(8))  // After 8 measures of verse
-duration: new Fraction(60).div(new Fraction(120))
+startTime: module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote).mul(new Fraction(8)))  // After 8 measures of verse
+duration: new Fraction(60).div(module.findTempo(module.getNoteById(10)))  // Uses its own tempo
 
 // Chorus notes depend on Note 10 and use its tempo
 startTime: module.getNoteById(10).getVariable('startTime')
@@ -465,13 +468,13 @@ At 60 BPM (1 beat = 1 second):
 
 | Note Type | Beats | Duration Expression |
 |-----------|-------|---------------------|
-| Whole | 4 | `4 * (60 / tempo(base))` |
-| Half | 2 | `2 * (60 / tempo(base))` |
-| Quarter | 1 | `60 / tempo(base)` |
-| Eighth | 1/2 | `(1/2) * (60 / tempo(base))` |
-| Sixteenth | 1/4 | `(1/4) * (60 / tempo(base))` |
-| Triplet eighth | 1/3 | `(1/3) * (60 / tempo(base))` |
-| Dotted quarter | 1.5 | `(3/2) * (60 / tempo(base))` |
+| Whole | 4 | `beat(base) * 4` |
+| Half | 2 | `beat(base) * 2` |
+| Quarter | 1 | `beat(base)` |
+| Eighth | 1/2 | `beat(base) * (1/2)` |
+| Sixteenth | 1/4 | `beat(base) * (1/4)` |
+| Triplet eighth | 1/3 | `beat(base) * (1/3)` |
+| Dotted quarter | 1.5 | `beat(base) * (3/2)` |
 
 ## Tips for Rhythmic Composition
 
@@ -489,7 +492,7 @@ For complex pieces, position notes by measure and beat rather than absolute time
 
 ```
 // Measure 3, Beat 2
-startTime: measure(base) * 2 + 1 * (60 / tempo(base))  // Measures 1-2 + 1 beat
+startTime: base.t + measure(base) * 2 + beat(base)  // Measures 1-2 + 1 beat
 ```
 
 <details>
@@ -497,8 +500,9 @@ startTime: measure(base) * 2 + 1 * (60 / tempo(base))  // Measures 1-2 + 1 beat
 
 ```javascript
 // Measure 3, Beat 2
-startTime: module.findMeasureLength(module.baseNote).mul(new Fraction(2))  // Measures 1-2
-  .add(new Fraction(1).mul(new Fraction(60).div(module.findTempo(module.baseNote))))  // + 1 beat
+startTime: module.baseNote.getVariable('startTime')
+  .add(module.findMeasureLength(module.baseNote).mul(new Fraction(2)))  // Measures 1-2
+  .add(new Fraction(60).div(module.findTempo(module.baseNote)))  // + 1 beat
 ```
 
 </details>

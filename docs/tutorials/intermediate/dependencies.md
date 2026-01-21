@@ -47,13 +47,14 @@ Note 3: frequency = Note1.frequency × 2
 
 ### Step 1: Create the Root Note
 
-1. Double-click the workspace to create a note
-2. In the frequency field, enter:
-   ```
-   base.f
-   ```
-3. Set startTime: `0`
-4. Set duration: `1`
+1. Click the **BaseNote** (orange circle) to select it
+2. In the Variable Widget, find **"Add Note / Silence"** section
+3. Select **"Note"**, then click **"Create Note"**
+4. Select the new note and set:
+   - Frequency: `base.f`
+   - StartTime: `base.t`
+   - Duration: `beat(base)`
+5. Click **Save**
 
 This note inherits from BaseNote (440 Hz by default).
 
@@ -62,24 +63,21 @@ This note inherits from BaseNote (440 Hz by default).
 
 ```javascript
 frequency: module.baseNote.getVariable('frequency')
-startTime: new Fraction(0)
-duration: new Fraction(1)
+startTime: module.baseNote.getVariable('startTime')
+duration: new Fraction(60).div(module.findTempo(module.baseNote))
 ```
 
 </details>
 
 ### Step 2: Create a Dependent Note
 
-1. Create a second note
-2. For frequency, reference Note 1 (assuming ID is 1):
-   ```
-   [1].f * (3/2)
-   ```
-3. For startTime, chain to Note 1's end:
-   ```
-   [1].t + [1].d
-   ```
-4. Duration: `1`
+1. Select Note 1
+2. In **"Add Note / Silence"**, keep **"Note"** and **"At End"** selected, click **"Create Note"**
+3. Select the new note and set:
+   - Frequency (perfect fifth): `[1].f * (3/2)`
+   - StartTime (chains automatically with "At End"): `[1].t + [1].d`
+   - Duration: `beat(base)`
+4. Click **Save**
 
 Now Note 2 plays a perfect fifth above Note 1, starting right after it ends.
 
@@ -89,7 +87,7 @@ Now Note 2 plays a perfect fifth above Note 1, starting right after it ends.
 ```javascript
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
 startTime: module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))
-duration: new Fraction(1)
+duration: new Fraction(60).div(module.findTempo(module.baseNote))
 ```
 
 </details>
@@ -124,18 +122,23 @@ module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVari
 ### Visual Feedback
 
 1. Select a note by clicking on it
-2. **Blue lines** show notes this note depends on (parents)
-3. **Red lines** show notes that depend on this note (children)
+2. Dependency lines are colored by property type:
+   - **Orange lines**: frequency dependencies
+   - **Teal lines**: startTime dependencies
+   - **Purple lines**: duration dependencies
+3. Line thickness indicates direction:
+   - **Thick lines**: parent dependencies (what the selected note depends on)
+   - **Thin lines**: child dependencies (what depends on the selected note)
 
 ### Understanding the Flow
 
 ```
 BaseNote (440 Hz)
-    ↓ (blue line)
+    ↓ (orange line - frequency dependency)
 Note 1 (440 Hz) - inherits from BaseNote
-    ↓ (blue line)
+    ↓ (orange + teal lines - frequency and timing)
 Note 2 (660 Hz) - depends on Note 1
-    ↓ (blue line)
+    ↓ (orange + teal lines)
 Note 3 (880 Hz) - depends on Note 2
 ```
 
@@ -146,16 +149,18 @@ Build a major scale where each note depends on the previous:
 ```
 // Note 1 (Root)
 frequency: base.f
-startTime: 0
-duration: 1
+startTime: base.t
+duration: beat(base)
 
 // Note 2 (Major Second - 9:8 ratio)
 frequency: [1].f * (9/8)
 startTime: [1].t + [1].d
+duration: beat(base)
 
 // Note 3 (Major Third - 5:4 ratio from root, or 10:9 from Note 2)
 frequency: [1].f * (5/4)
 startTime: [2].t + [2].d
+duration: beat(base)
 
 // Continue the pattern...
 ```
@@ -166,16 +171,18 @@ startTime: [2].t + [2].d
 ```javascript
 // Note 1 (Root)
 frequency: module.baseNote.getVariable('frequency')
-startTime: new Fraction(0)
-duration: new Fraction(1)
+startTime: module.baseNote.getVariable('startTime')
+duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 // Note 2 (Major Second - 9:8 ratio)
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(9, 8))
 startTime: module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))
+duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 // Note 3 (Major Third - 5:4 ratio from root, or 10:9 from Note 2)
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
 startTime: module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))
+duration: new Fraction(60).div(module.findTempo(module.baseNote))
 
 // Continue the pattern...
 ```
@@ -267,22 +274,29 @@ duration: module.getNoteById(3).getVariable('duration')
 
 </details>
 
-### Inherited Duration
+### Shared Duration
 
-Make all notes share a duration:
+You can make multiple notes share the same duration by referencing a common note. This is useful for chord tones or any group of notes that should have identical lengths:
 
 ```
-// All notes reference BaseNote's duration
-duration: base.d
+// Note 1: The "duration master" - set this note's duration
+duration: beat(base) * 2
+
+// Notes 2, 3, 4: All reference Note 1's duration
+duration: [1].d
 ```
 
-Now changing BaseNote's duration affects all notes.
+Now changing Note 1's duration updates all notes that reference it. This creates a single control point for duration across multiple notes.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-duration: module.baseNote.getVariable('duration')
+// Note 1: The "duration master"
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
+
+// Notes 2, 3, 4: All reference Note 1's duration
+duration: module.getNoteById(1).getVariable('duration')
 ```
 
 </details>
@@ -339,11 +353,11 @@ After building your dependencies:
 
 - Check that the dependency expression is correct
 - Verify the referenced note ID exists
-- Look for typos in `getVariable()` property names
+- Look for typos in property shortcuts (use `f`, `t`, `d` for frequency, startTime, duration)
 
 ### Unexpected Values
 
-- Click the note to see both Raw and Evaluated values
+- Click the note to see both Raw and Evaluated values in the Variable Widget
 - Trace the dependency chain to find where values diverge
 - Check for conflicting dependencies
 

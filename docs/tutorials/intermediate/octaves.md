@@ -170,23 +170,23 @@ Play the same note across multiple octaves in sequence:
 ```
 // Note 1: Root
 frequency: base.f
-startTime: 0
-duration: 1/4
+startTime: base.t
+duration: beat(base) * (1/4)
 
 // Note 2: One octave up
 frequency: [1].f * 2
 startTime: [1].t + [1].d
-duration: 1/4
+duration: beat(base) * (1/4)
 
 // Note 3: Two octaves up
 frequency: [2].f * 2
 startTime: [2].t + [2].d
-duration: 1/4
+duration: beat(base) * (1/4)
 
 // Note 4: Back to root
 frequency: [1].f
 startTime: [3].t + [3].d
-duration: 1/4
+duration: beat(base) * (1/4)
 ```
 
 <details>
@@ -195,23 +195,23 @@ duration: 1/4
 ```javascript
 // Note 1: Root
 frequency: module.baseNote.getVariable('frequency')
-startTime: new Fraction(0)
-duration: new Fraction(1, 4)
+startTime: module.baseNote.getVariable('startTime')
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 4))
 
 // Note 2: One octave up
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(2))
 startTime: module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))
-duration: new Fraction(1, 4)
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 4))
 
 // Note 3: Two octaves up
 frequency: module.getNoteById(2).getVariable('frequency').mul(new Fraction(2))
 startTime: module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))
-duration: new Fraction(1, 4)
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 4))
 
 // Note 4: Back to root
 frequency: module.getNoteById(1).getVariable('frequency')
 startTime: module.getNoteById(3).getVariable('startTime').add(module.getNoteById(3).getVariable('duration'))
-duration: new Fraction(1, 4)
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 4))
 ```
 
 </details>
@@ -275,8 +275,8 @@ Build a wide voicing of a C major chord:
 ```
 // C3 (root, low)
 frequency: base.f / 2  // 220 Hz
-startTime: 0
-duration: 2
+startTime: base.t
+duration: beat(base) * 2
 
 // G3 (fifth, mid-low)
 frequency: [1].f * (3/2)  // 330 Hz
@@ -300,8 +300,8 @@ duration: [1].d
 ```javascript
 // C3 (root, low)
 frequency: module.baseNote.getVariable('frequency').div(new Fraction(2))  // 220 Hz
-startTime: new Fraction(0)
-duration: new Fraction(2)
+startTime: module.baseNote.getVariable('startTime')
+duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 
 // G3 (fifth, mid-low)
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))  // 330 Hz
