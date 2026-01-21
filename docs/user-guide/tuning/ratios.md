@@ -52,19 +52,27 @@ Pure ratios capture these natural relationships.
 
 ### Expression Syntax
 
-```javascript
+```
 // Perfect fifth above BaseNote
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
+base.f * (3/2)
 
 // Major third below (divide instead of multiply)
-module.baseNote.getVariable('frequency').div(new Fraction(5, 4))
+base.f / (5/4)
 
 // Chain intervals: fifth + third = major seventh
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(3, 2))
-  .mul(new Fraction(5, 4))
+base.f * (3/2) * (5/4)
 // = 3/2 × 5/4 = 15/8
 ```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
+module.baseNote.getVariable('frequency').div(new Fraction(5, 4))
+module.baseNote.getVariable('frequency').mul(new Fraction(3, 2)).mul(new Fraction(5, 4))
+```
+</details>
 
 ### Building Scales
 
@@ -104,11 +112,21 @@ module.baseNote.getVariable('frequency')
 | Third | 5/4 | Major third |
 | Fifth | 3/2 | Perfect fifth |
 
+```
+root.frequency = base.f
+third.frequency = base.f * (5/4)
+fifth.frequency = base.f * (3/2)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 root.frequency = module.baseNote.getVariable('frequency')
 third.frequency = module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
 fifth.frequency = module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 ```
+</details>
 
 #### Minor Triad
 

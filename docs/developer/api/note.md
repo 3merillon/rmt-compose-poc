@@ -108,19 +108,40 @@ Sets an expression or property.
 
 Example:
 ```javascript
-// Set expression
-note.setVariable('frequency', "module.baseNote.getVariable('frequency').mul(new Fraction(2))")
+// Set expression using DSL syntax
+note.setVariable('frequency', "base.f * 2")
 
 // Set property
 note.setVariable('color', '#ff0000')
 ```
 
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+// Set expression using legacy syntax
+note.setVariable('frequency', "module.baseNote.getVariable('frequency').mul(new Fraction(2))")
+
+// Set property
+note.setVariable('color', '#ff0000')
+```
+</details>
+
 ### getExpressionSource()
+
+```javascript
+const source = note.getExpressionSource(name)
+// → "base.f * (3/2)"
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 const source = note.getExpressionSource(name)
 // → "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))"
 ```
+</details>
 
 Returns the original expression text.
 
@@ -231,6 +252,36 @@ Serializes note with expression source text.
 ```javascript
 // Create via module
 const note = module.addNote({
+  frequency: "base.f * (5/4)",
+  startTime: "0",
+  duration: "60 / tempo(base)"
+})
+
+// Set color
+note.setVariable('color', '#4a90d9')
+
+// Change frequency
+note.setVariable('frequency', "base.f * (3/2)")
+
+// Read values (after evaluation)
+const freq = note.getVariable('frequency')
+console.log(freq.valueOf())  // 660
+
+// Check dependencies
+const deps = note.getAllDependencies()
+console.log(deps.has(0))  // true (references BaseNote)
+
+// Get source
+const source = note.getExpressionSource('frequency')
+console.log(source)  // "base.f * (3/2)"
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+// Create via module
+const note = module.addNote({
   frequency: "module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))",
   startTime: "new Fraction(0)",
   duration: "new Fraction(60).div(module.findTempo(module.baseNote))"
@@ -254,6 +305,7 @@ console.log(deps.has(0))  // true (references BaseNote)
 const source = note.getExpressionSource('frequency')
 console.log(source)  // "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))"
 ```
+</details>
 
 ## See Also
 

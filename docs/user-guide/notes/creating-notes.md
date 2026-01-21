@@ -28,6 +28,24 @@ For advanced users, notes can be added by editing the module JSON:
   "notes": [
     {
       "id": 1,
+      "frequency": "base.f * (3/2)",
+      "startTime": "base.t",
+      "duration": "1",
+      "color": "rgba(255, 100, 100, 0.7)",
+      "instrument": "sine-wave"
+    }
+  ]
+}
+```
+
+<details>
+<summary>Legacy JavaScript syntax (also supported)</summary>
+
+```json
+{
+  "notes": [
+    {
+      "id": 1,
       "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
       "startTime": "module.baseNote.getVariable('startTime')",
       "duration": "new Fraction(1)",
@@ -37,6 +55,7 @@ For advanced users, notes can be added by editing the module JSON:
   ]
 }
 ```
+</details>
 
 ## Note Properties
 
@@ -57,13 +76,12 @@ When you add a note via the Variable Widget, it inherits sensible defaults:
 
 ### Add at Start+Duration
 
-```javascript
-{
-  startTime: selectedNote.startTime + selectedNote.duration,
-  frequency: selectedNote.frequency,
-  duration: selectedNote.duration,
-  instrument: selectedNote.instrument
-}
+The new note inherits properties from the selected note:
+
+```
+frequency: [selected].f
+startTime: [selected].t + [selected].d
+duration: [selected].d
 ```
 
 The new note:
@@ -73,13 +91,12 @@ The new note:
 
 ### Add at Same Time
 
-```javascript
-{
-  startTime: selectedNote.startTime,
-  frequency: selectedNote.frequency.mul(new Fraction(5, 4)),
-  duration: selectedNote.duration,
-  instrument: selectedNote.instrument
-}
+The new note inherits properties and gets a frequency 5/4 times the selected note (major third):
+
+```
+frequency: [selected].f * (5/4)
+startTime: [selected].t
+duration: [selected].d
 ```
 
 The new note:
@@ -115,7 +132,7 @@ All notes share the same start time.
 - IDs are auto-generated sequentially (1, 2, 3, ...)
 - ID 0 is reserved for the **BaseNote**
 - IDs are stable - deleting a note doesn't renumber others
-- References use IDs: `module.getNoteById(5)`
+- References use IDs: `[5].f` (or legacy: `module.getNoteById(5)`)
 
 ::: warning
 Avoid manually editing note IDs in JSON. Duplicate IDs cause undefined behavior.

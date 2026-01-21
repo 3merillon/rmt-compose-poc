@@ -6,9 +6,9 @@
 
 Every note property (frequency, startTime, duration) is computed from an expression. Expressions can be:
 
-- **Constants**: Fixed values like `new Fraction(440)`
-- **References**: Values from other notes like `module.getNoteById(1).getVariable('frequency')`
-- **Computations**: Arithmetic on values like `.mul(new Fraction(3, 2))`
+- **Constants**: Fixed values like `440` or `3/4`
+- **References**: Values from other notes like `[1].f` or `base.f`
+- **Computations**: Arithmetic on values like `* (3/2)`
 
 ## Basic Syntax
 
@@ -16,120 +16,192 @@ Every note property (frequency, startTime, duration) is computed from an express
 
 Fractions represent exact rational numbers:
 
-```javascript
+```
 // Integer (440/1)
-new Fraction(440)
+440
 
 // Fraction (3/2)
-new Fraction(3, 2)
+3/2
 
 // Negative
+-1/4
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(440)
+new Fraction(3, 2)
 new Fraction(-1, 4)
 ```
+</details>
 
 ### Referencing Notes
 
 Access other notes' properties:
 
-```javascript
+```
 // BaseNote's frequency
-module.baseNote.getVariable('frequency')
+base.f
 
 // Note 5's start time
-module.getNoteById(5).getVariable('startTime')
+[5].t
 
 // Note 3's duration
+[3].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+module.baseNote.getVariable('frequency')
+module.getNoteById(5).getVariable('startTime')
 module.getNoteById(3).getVariable('duration')
 ```
+</details>
 
 ### Arithmetic Operations
 
 Perform math on values:
 
-```javascript
+```
 // Addition
-a.add(b)
+a + b
 
 // Subtraction
-a.sub(b)
+a - b
 
 // Multiplication
-a.mul(b)
+a * b
 
 // Division
-a.div(b)
+a / b
 
 // Negation
-a.neg()
+-a
 
 // Power (for TET systems)
+a ^ b
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+a.add(b)
+a.sub(b)
+a.mul(b)
+a.div(b)
+a.neg()
 a.pow(b)
 ```
+</details>
 
 ## Common Patterns
 
 ### Frequency Expressions
 
-```javascript
+```
 // Exact frequency in Hz
-new Fraction(440)
+440
 
 // Relative to BaseNote (perfect fifth)
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
+base.f * (3/2)
 
 // Relative to another note (major third above)
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
+[1].f * (5/4)
 
 // 12-TET semitone (irrational)
-module.baseNote.getVariable('frequency').mul(
-  new Fraction(2).pow(new Fraction(1, 12))
-)
+base.f * 2 ^ (1/12)
 ```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(440)
+module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
+module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
+module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))
+```
+</details>
 
 ### Start Time Expressions
 
-```javascript
+```
 // At the beginning
-new Fraction(0)
+0
 
 // Same time as BaseNote
-module.baseNote.getVariable('startTime')
+base.t
 
 // After Note 3 ends
-module.getNoteById(3).getVariable('startTime')
-  .add(module.getNoteById(3).getVariable('duration'))
+[3].t + [3].d
 
 // 2 beats after BaseNote
+base.t + 2
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(0)
+module.baseNote.getVariable('startTime')
+module.getNoteById(3).getVariable('startTime').add(module.getNoteById(3).getVariable('duration'))
 module.baseNote.getVariable('startTime').add(new Fraction(2))
 ```
+</details>
 
 ### Duration Expressions
 
-```javascript
+```
 // Fixed: 1 beat
-new Fraction(1)
+1
 
 // Tempo-relative: Quarter note
-new Fraction(60).div(module.findTempo(module.baseNote))
+60 / tempo(base)
 
 // Tempo-relative: Half note
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
+60 / tempo(base) * 2
 
 // Same as another note
+[1].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(1)
+new Fraction(60).div(module.findTempo(module.baseNote))
+new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 module.getNoteById(1).getVariable('duration')
 ```
+</details>
 
 ## Module Lookup Functions
 
 Special functions for finding inherited values:
 
-```javascript
+```
 // Find tempo (walks up dependency chain to BaseNote)
-module.findTempo(module.baseNote)
+tempo(base)
 
 // Find measure length
+measure(base)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+module.findTempo(module.baseNote)
 module.findMeasureLength(module.baseNote)
 ```
+</details>
 
 ## Expression Evaluation
 
@@ -154,43 +226,51 @@ The dependency graph determines evaluation order:
 
 Invalid expressions prevent saving:
 
-```javascript
+```
 // Missing parenthesis - ERROR
-new Fraction(3, 2.mul(new Fraction(5, 4))
+(3/2 * (5/4)
 
 // Correct
-new Fraction(3, 2).mul(new Fraction(5, 4))
+(3/2) * (5/4)
 ```
 
 ### Circular Dependencies
 
 Notes cannot depend on each other in a cycle:
 
-```javascript
+```
 // Note A depends on Note B
-noteA.frequency = module.getNoteById(B).getVariable('frequency').mul(...)
+[B].f * (3/2)
 
 // Note B depends on Note A - ERROR!
-noteB.frequency = module.getNoteById(A).getVariable('frequency').mul(...)
+[A].f * (5/4)
 ```
 
 ### Invalid References
 
 Referencing a non-existent note causes an error:
 
-```javascript
+```
 // Note 999 doesn't exist - ERROR
-module.getNoteById(999).getVariable('frequency')
+[999].f
 ```
 
 ## Irrational Values (TET)
 
 Power expressions can produce irrational results:
 
-```javascript
+```
 // 2^(1/12) is irrational
+2 ^ (1/12)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 new Fraction(2).pow(new Fraction(1, 12))
 ```
+</details>
 
 These are stored as **SymbolicPower** objects, not floats:
 

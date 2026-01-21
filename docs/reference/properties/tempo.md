@@ -4,25 +4,43 @@ The `tempo` property defines the speed of the composition in beats per minute (B
 
 ## Default Value
 
-```javascript
-new Fraction(60)  // 60 BPM (one beat per second)
+```
+60  // 60 BPM (one beat per second)
 ```
 
 ## Expression Examples
 
 ### Fixed Tempo
 
+```
+60    // 60 BPM (slow)
+120   // 120 BPM (moderate)
+180   // 180 BPM (fast)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 new Fraction(60)   // 60 BPM (slow)
 new Fraction(120)  // 120 BPM (moderate)
 new Fraction(180)  // 180 BPM (fast)
 ```
+</details>
 
 ### Reference BaseNote Tempo
+
+```
+tempo(base)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.baseNote.getVariable('tempo')
 ```
+</details>
 
 Most notes inherit tempo from the BaseNote rather than defining their own.
 
@@ -30,12 +48,23 @@ Most notes inherit tempo from the BaseNote rather than defining their own.
 
 The tempo is used to calculate beat-relative durations:
 
+```
+// Duration of one beat in seconds
+// At 60 BPM: 60/60 = 1 second
+// At 120 BPM: 60/120 = 0.5 seconds
+60 / tempo(base)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Duration of one beat in seconds
 // At 60 BPM: 60/60 = 1 second
 // At 120 BPM: 60/120 = 0.5 seconds
 new Fraction(60).div(module.findTempo(module.baseNote))
 ```
+</details>
 
 ### Duration Examples at Different Tempos
 
@@ -46,13 +75,21 @@ new Fraction(60).div(module.findTempo(module.baseNote))
 | Quarter (1 beat) | 1s | 0.5s | 0.67s |
 | Eighth (0.5 beats) | 0.5s | 0.25s | 0.33s |
 
-## module.findTempo()
+## tempo() Function
 
-The `findTempo` function walks up the inheritance chain to find the effective tempo:
+The `tempo()` function walks up the inheritance chain to find the effective tempo:
+
+```
+tempo(base)  // Returns tempo from BaseNote
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.findTempo(module.baseNote)  // Returns tempo as Fraction
 ```
+</details>
 
 This allows individual notes to override tempo for tempo changes mid-composition.
 
@@ -60,11 +97,21 @@ This allows individual notes to override tempo for tempo changes mid-composition
 
 Tempo affects measure length:
 
+```
+// measureLength = beatsPerMeasure / tempo * 60
+// At 120 BPM with 4/4 time: 4 / 120 * 60 = 2 seconds
+measure(base)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // measureLength = beatsPerMeasure / tempo * 60
 // At 120 BPM with 4/4 time: 4 / 120 * 60 = 2 seconds
 module.findMeasureLength(module.baseNote)
 ```
+</details>
 
 ## Changing Global Tempo
 
@@ -72,7 +119,7 @@ To change the tempo for the entire composition:
 
 1. Click the **BaseNote** (orange circle)
 2. Find the **tempo** property in the Variable Widget
-3. Change the value (e.g., `new Fraction(120)`)
+3. Change the value (e.g., `120`)
 4. All tempo-relative durations automatically update
 
 ## Tempo Changes Within a Composition
@@ -87,14 +134,14 @@ Tempo affects the visual spacing of beat-relative notes:
 
 ## Common Tempo Values
 
-| Description | BPM | Expression |
-|-------------|-----|------------|
-| Largo | 40-60 | `new Fraction(50)` |
-| Adagio | 66-76 | `new Fraction(70)` |
-| Andante | 76-108 | `new Fraction(90)` |
-| Moderato | 108-120 | `new Fraction(112)` |
-| Allegro | 120-156 | `new Fraction(140)` |
-| Presto | 168-200 | `new Fraction(180)` |
+| Description | BPM | DSL Expression |
+|-------------|-----|----------------|
+| Largo | 40-60 | `50` |
+| Adagio | 66-76 | `70` |
+| Andante | 76-108 | `90` |
+| Moderato | 108-120 | `112` |
+| Allegro | 120-156 | `140` |
+| Presto | 168-200 | `180` |
 
 ## See Also
 

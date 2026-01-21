@@ -6,11 +6,20 @@ Learn how to create musical relationships between notes using expressions that r
 
 In RMT Compose, notes can reference other notes' properties. When you write an expression like:
 
+```
+[1].f
+```
+
+You create a **dependency** - Note 2 depends on Note 1's frequency. When Note 1 changes, Note 2 automatically updates.
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 module.getNoteById(1).getVariable('frequency')
 ```
 
-You create a **dependency** - Note 2 depends on Note 1's frequency. When Note 1 changes, Note 2 automatically updates.
+</details>
 
 ## Why Use Dependencies?
 
@@ -40,32 +49,65 @@ Note 3: frequency = Note1.frequency × 2
 
 1. Double-click the workspace to create a note
 2. In the frequency field, enter:
-   ```javascript
-   module.baseNote.getVariable('frequency')
    ```
-3. Set startTime: `new Fraction(0)`
-4. Set duration: `new Fraction(1)`
+   base.f
+   ```
+3. Set startTime: `0`
+4. Set duration: `1`
 
 This note inherits from BaseNote (440 Hz by default).
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+frequency: module.baseNote.getVariable('frequency')
+startTime: new Fraction(0)
+duration: new Fraction(1)
+```
+
+</details>
 
 ### Step 2: Create a Dependent Note
 
 1. Create a second note
 2. For frequency, reference Note 1 (assuming ID is 1):
-   ```javascript
-   module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
+   ```
+   [1].f * (3/2)
    ```
 3. For startTime, chain to Note 1's end:
-   ```javascript
-   module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))
    ```
-4. Duration: `new Fraction(1)`
+   [1].t + [1].d
+   ```
+4. Duration: `1`
 
 Now Note 2 plays a perfect fifth above Note 1, starting right after it ends.
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
+startTime: module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))
+duration: new Fraction(1)
+```
+
+</details>
 
 ### Step 3: Extend the Chain
 
 Create Note 3 that depends on Note 2:
+
+```
+// Frequency: Perfect fourth above Note 2
+[2].f * (4/3)
+
+// StartTime: After Note 2
+[2].t + [2].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Frequency: Perfect fourth above Note 2
@@ -74,6 +116,8 @@ module.getNoteById(2).getVariable('frequency').mul(new Fraction(4, 3))
 // StartTime: After Note 2
 module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))
 ```
+
+</details>
 
 ## Viewing Dependencies
 
@@ -99,6 +143,26 @@ Note 3 (880 Hz) - depends on Note 2
 
 Build a major scale where each note depends on the previous:
 
+```
+// Note 1 (Root)
+frequency: base.f
+startTime: 0
+duration: 1
+
+// Note 2 (Major Second - 9:8 ratio)
+frequency: [1].f * (9/8)
+startTime: [1].t + [1].d
+
+// Note 3 (Major Third - 5:4 ratio from root, or 10:9 from Note 2)
+frequency: [1].f * (5/4)
+startTime: [2].t + [2].d
+
+// Continue the pattern...
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Note 1 (Root)
 frequency: module.baseNote.getVariable('frequency')
@@ -116,40 +180,81 @@ startTime: module.getNoteById(2).getVariable('startTime').add(module.getNoteById
 // Continue the pattern...
 ```
 
+</details>
+
 ## Timing Dependencies
 
 ### Sequential Notes
 
 Each note starts when the previous ends:
 
+```
+[PREV_ID].t + [PREV_ID].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 module.getNoteById(PREV_ID).getVariable('startTime')
   .add(module.getNoteById(PREV_ID).getVariable('duration'))
 ```
 
+</details>
+
 ### Simultaneous Notes (Chords)
 
 Multiple notes share the same start time:
 
-```javascript
+```
 // All chord notes reference the same start time
+[ROOT_ID].t
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 module.getNoteById(ROOT_ID).getVariable('startTime')
 ```
+
+</details>
 
 ### Offset Timing
 
 Add a delay from a reference:
 
+```
+[1].t + (1/2)  // Half-second offset
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 module.getNoteById(1).getVariable('startTime')
-  .add(new Fraction(1, 2))  // Half-second offset
+  .add(new Fraction(1, 2))
 ```
+
+</details>
 
 ## Complex Dependencies
 
 ### Multi-Property Dependencies
 
 A note can depend on different notes for different properties:
+
+```
+// Frequency from Note 1
+frequency: [1].f * (5/4)
+
+// Timing from Note 3
+startTime: [3].t
+duration: [3].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Frequency from Note 1
@@ -160,16 +265,27 @@ startTime: module.getNoteById(3).getVariable('startTime')
 duration: module.getNoteById(3).getVariable('duration')
 ```
 
+</details>
+
 ### Inherited Duration
 
 Make all notes share a duration:
 
-```javascript
+```
 // All notes reference BaseNote's duration
-duration: module.baseNote.getVariable('duration')
+duration: base.d
 ```
 
 Now changing BaseNote's duration affects all notes.
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+duration: module.baseNote.getVariable('duration')
+```
+
+</details>
 
 ## Avoiding Circular Dependencies
 

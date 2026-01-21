@@ -14,14 +14,45 @@ Basic dependencies link one note to another. Complex dependencies involve:
 
 A single note can depend on different notes for different properties:
 
-```javascript
+```
 // Note 3 depends on Note 1 for frequency, Note 2 for timing
+frequency: [1].f * (5/4)
+startTime: [2].t
+duration: [2].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
 startTime: module.getNoteById(2).getVariable('startTime')
 duration: module.getNoteById(2).getVariable('duration')
 ```
 
+</details>
+
 ### Use Case: Harmony Following Melody
+
+```
+// Melody note (Note 1)
+frequency: base.f * (3/2)
+startTime: 0
+duration: 1
+
+// Harmony note - follows melody timing but uses different pitch
+frequency: [1].f * (5/4)
+startTime: [1].t  // Same timing
+duration: [1].d
+
+// Bass note - same timing as melody, octave below
+frequency: [1].f / 2
+startTime: [1].t
+duration: [1].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Melody note (Note 1)
@@ -40,6 +71,8 @@ startTime: module.getNoteById(1).getVariable('startTime')
 duration: module.getNoteById(1).getVariable('duration')
 ```
 
+</details>
+
 ## Branching Dependencies
 
 Create tree structures where one note feeds multiple branches:
@@ -53,6 +86,31 @@ Create tree structures where one note feeds multiple branches:
 ```
 
 ### Implementation
+
+```
+// Root (Note 1)
+frequency: base.f
+startTime: 0
+duration: 4
+
+// Branch A: Perfect fifth up
+frequency: [1].f * (3/2)
+startTime: [1].t
+duration: 2
+
+// Branch B: Major third up
+frequency: [1].f * (5/4)
+startTime: [1].t + 2
+duration: 2
+
+// Branch C: Octave up
+frequency: [1].f * 2
+startTime: [1].t
+duration: 4
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Root (Note 1)
@@ -76,6 +134,8 @@ startTime: module.getNoteById(1).getVariable('startTime')
 duration: new Fraction(4)
 ```
 
+</details>
+
 ## Diamond Dependencies
 
 A note can depend on multiple notes that share a common ancestor:
@@ -89,6 +149,26 @@ A note can depend on multiple notes that share a common ancestor:
 ```
 
 ### Implementation
+
+```
+// Note 1: Fifth up from base
+frequency: base.f * (3/2)
+startTime: 0
+duration: 2
+
+// Note 2: Third up from base
+frequency: base.f * (5/4)
+startTime: 2
+duration: 2
+
+// Note 3: Combines Note 1's timing with Note 2's pitch relationship
+frequency: [2].f * (3/2)
+startTime: [1].t + [1].d
+duration: 2
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Note 1: Fifth up from base
@@ -107,6 +187,8 @@ startTime: module.getNoteById(1).getVariable('startTime')
   .add(module.getNoteById(1).getVariable('duration'))
 duration: new Fraction(2)
 ```
+
+</details>
 
 ## Cascading Property Changes
 
@@ -132,6 +214,30 @@ When you change a property at the top of a hierarchy, all dependent notes update
 
 Create sections with different tempos by establishing tempo-defining notes:
 
+```
+// BaseNote: tempo = 100 BPM (global default)
+
+// Section A root (Note 10)
+tempo: 120  // Section A at 120 BPM
+startTime: 0
+duration: 60 / 120  // Uses own tempo
+
+// Section A notes depend on Note 10 for tempo
+startTime: [10].t + [10].d
+duration: 60 / tempo([10])
+
+// Section B root (Note 20)
+tempo: 80  // Section B at 80 BPM
+startTime: measure([10]) * 8  // After 8 measures of Section A
+duration: 60 / 80
+
+// Section B notes depend on Note 20 for tempo
+duration: 60 / tempo([20])
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // BaseNote: tempo = 100 BPM (global default)
 
@@ -154,9 +260,24 @@ duration: new Fraction(60).div(new Fraction(80))
 duration: new Fraction(60).div(module.findTempo(module.getNoteById(20)))
 ```
 
+</details>
+
 ## Relative Timing Patterns
 
 ### Call and Response
+
+```
+// Call (Note 1)
+startTime: 0
+duration: 2
+
+// Response (Note 2) - starts after call with a gap
+startTime: [1].t + [1].d + (1/2)  // Half-second gap
+duration: [1].d  // Same duration as call
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Call (Note 1)
@@ -170,7 +291,30 @@ startTime: module.getNoteById(1).getVariable('startTime')
 duration: module.getNoteById(1).getVariable('duration')  // Same duration as call
 ```
 
+</details>
+
 ### Echo Effect
+
+```
+// Original note
+frequency: base.f
+startTime: 0
+duration: 1
+
+// Echo 1 (quieter, delayed)
+frequency: [1].f
+startTime: [1].t + (1/4)
+duration: [1].d
+// Note: Volume would be handled by instrument/gain, not shown here
+
+// Echo 2 (even more delayed)
+frequency: [1].f
+startTime: [1].t + (1/2)
+duration: [1].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Original note
@@ -190,9 +334,38 @@ startTime: module.getNoteById(1).getVariable('startTime').add(new Fraction(1, 2)
 duration: module.getNoteById(1).getVariable('duration')
 ```
 
+</details>
+
 ## Parallel Voice Leading
 
 Create multiple voices that move together:
+
+```
+// Soprano (Note 1)
+frequency: base.f * 2  // 880 Hz
+startTime: 0
+duration: 1
+
+// Alto - always a third below soprano
+frequency: [1].f * (4/5)  // Down major third
+startTime: [1].t
+duration: [1].d
+
+// Tenor - always a fifth below soprano
+frequency: [1].f * (2/3)  // Down perfect fifth
+startTime: [1].t
+duration: [1].d
+
+// Bass - always an octave below soprano
+frequency: [1].f / 2
+startTime: [1].t
+duration: [1].d
+
+// When soprano changes, all voices update maintaining their intervals
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Soprano (Note 1)
@@ -218,9 +391,24 @@ duration: module.getNoteById(1).getVariable('duration')
 // When soprano changes, all voices update maintaining their intervals
 ```
 
+</details>
+
 ## Sequential Pattern Generation
 
 ### Rhythmic Sequence
+
+```
+// Beat 1
+startTime: 0
+duration: 60 / tempo(base)
+
+// Each subsequent beat references previous
+startTime: [PREV].t + [PREV].d
+duration: 60 / tempo(base)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Beat 1
@@ -233,7 +421,20 @@ startTime: module.getNoteById(PREV).getVariable('startTime')
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
 ```
 
+</details>
+
 ### Melodic Sequence (Stepwise)
+
+```
+// Start note
+frequency: base.f
+
+// Each subsequent note is a step higher
+frequency: [PREV].f * (9/8)  // Major second up
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Start note
@@ -243,6 +444,8 @@ frequency: module.baseNote.getVariable('frequency')
 frequency: module.getNoteById(PREV).getVariable('frequency')
   .mul(new Fraction(9, 8))  // Major second up
 ```
+
+</details>
 
 ## Dependency Graph Analysis
 

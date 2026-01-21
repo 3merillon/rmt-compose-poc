@@ -52,35 +52,61 @@ RMT Compose supports multiple equal temperament systems:
 
 ### Basic TET Step
 
-```javascript
+```
 // One 12-TET semitone
-new Fraction(2).pow(new Fraction(1, 12))
+2 ^ (1/12)
 
 // One 19-TET step
-new Fraction(2).pow(new Fraction(1, 19))
+2 ^ (1/19)
 
 // Multiple steps (e.g., 7 semitones = perfect fifth in 12-TET)
+2 ^ (7/12)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(2).pow(new Fraction(1, 12))
+new Fraction(2).pow(new Fraction(1, 19))
 new Fraction(2).pow(new Fraction(7, 12))
 ```
+</details>
 
 ### Applying to a Note
 
-```javascript
-// Frequency: 4 semitones above BaseNote (major third in 12-TET)
-module.baseNote.getVariable('frequency').mul(
-  new Fraction(2).pow(new Fraction(4, 12))
-)
 ```
+// Frequency: 4 semitones above BaseNote (major third in 12-TET)
+base.f * 2 ^ (4/12)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(4, 12)))
+```
+</details>
 
 ### Building a Scale
 
-```javascript
+```
 // Each note is one semitone above the previous
+note1.frequency = base.f
+note2.frequency = [1].f * 2 ^ (1/12)
+note3.frequency = [2].f * 2 ^ (1/12)
+// ... etc
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 note1.frequency = baseNote.frequency
 note2.frequency = note1.frequency.mul(new Fraction(2).pow(new Fraction(1, 12)))
 note3.frequency = note2.frequency.mul(new Fraction(2).pow(new Fraction(1, 12)))
-// ... etc
 ```
+</details>
 
 ## The ≈ Symbol
 
@@ -99,9 +125,9 @@ This indicates:
 
 RMT Compose doesn't collapse TET values to floats. Instead, it preserves the algebraic structure:
 
-```javascript
+```
 // Two semitones:
-2^(1/12) × 2^(1/12) = 2^(2/12) = 2^(1/6)
+2 ^ (1/12) * 2 ^ (1/12) = 2 ^ (2/12) = 2 ^ (1/6)
 
 // Not:
 1.05946... × 1.05946... = 1.12246...

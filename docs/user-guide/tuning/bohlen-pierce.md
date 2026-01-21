@@ -32,12 +32,31 @@ BP explicitly avoids the 2:1 ratio:
 
 ### Single BP Step
 
-```javascript
+```
 // One BP step
-new Fraction(3).pow(new Fraction(1, 13))
+3^(1/13)
 ```
 
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(3).pow(new Fraction(1, 13))
+```
+</details>
+
 ### Multiple Steps
+
+```
+// BP "fifth" (6 steps)
+3^(6/13)
+
+// Full tritave (13 steps)
+3^(13/13)  // = 3
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // BP "fifth" (6 steps)
@@ -46,15 +65,24 @@ new Fraction(3).pow(new Fraction(6, 13))
 // Full tritave (13 steps)
 new Fraction(3).pow(new Fraction(13, 13))  // = 3
 ```
+</details>
 
 ### Applying to BaseNote
 
-```javascript
+```
 // Note at 3 steps above BaseNote
+base.f * 3^(3/13)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 module.baseNote.getVariable('frequency').mul(
   new Fraction(3).pow(new Fraction(3, 13))
 )
 ```
+</details>
 
 ## The BP-13 Scale
 
@@ -111,21 +139,41 @@ Traditional triads don't work in BP (they use 2:1 relationships). Instead:
 
 Steps: 0, 4, 9 (ratios approximately 1:7/5:15/7)
 
+```
+root.frequency = base.f
+third.frequency = base.f * 3^(4/13)
+fifth.frequency = base.f * 3^(9/13)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 root.frequency = baseNote.frequency
 third.frequency = baseNote.frequency.mul(new Fraction(3).pow(new Fraction(4, 13)))
 fifth.frequency = baseNote.frequency.mul(new Fraction(3).pow(new Fraction(9, 13)))
 ```
+</details>
 
 ### BP Minor Triad
 
 Steps: 0, 3, 9 (ratios approximately 1:9/7:15/7)
+
+```
+root.frequency = base.f
+third.frequency = base.f * 3^(3/13)
+fifth.frequency = base.f * 3^(9/13)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 root.frequency = baseNote.frequency
 third.frequency = baseNote.frequency.mul(new Fraction(3).pow(new Fraction(3, 13)))
 fifth.frequency = baseNote.frequency.mul(new Fraction(3).pow(new Fraction(9, 13)))
 ```
+</details>
 
 ## Why Use Bohlen-Pierce?
 
@@ -176,6 +224,19 @@ Very little music exists in BP. You're exploring new territory!
 
 ## Example: BP Scale
 
+```
+// Build a 13-note BP scale
+note1.frequency = base.f
+note2.frequency = [1].f * 3^(1/13)
+note3.frequency = [2].f * 3^(1/13)
+// ... continue for all 13 notes
+note14.frequency = [13].f * 3^(1/13)
+// note14 = 3 × baseNote (tritave)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Build a 13-note BP scale
 note1.frequency = baseNote.frequency
@@ -185,6 +246,7 @@ note3.frequency = note2.frequency.mul(new Fraction(3).pow(new Fraction(1, 13)))
 note14.frequency = note13.frequency.mul(new Fraction(3).pow(new Fraction(1, 13)))
 // note14 = 3 × baseNote (tritave)
 ```
+</details>
 
 ## Next Steps
 

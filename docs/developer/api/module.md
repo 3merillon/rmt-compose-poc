@@ -63,11 +63,23 @@ Returns: The created `Note` object.
 Example:
 ```javascript
 const note = module.addNote({
+  frequency: "base.f * (3/2)",
+  startTime: "0",
+  duration: "1"
+})
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+const note = module.addNote({
   frequency: "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
   startTime: "new Fraction(0)",
   duration: "new Fraction(1)"
 })
 ```
+</details>
 
 ### getNoteById()
 
@@ -229,10 +241,21 @@ Generates measure markers for visualization.
 
 ```javascript
 module.batchSetExpressions([
-  { noteId: 1, property: 'frequency', expression: '...' },
-  { noteId: 2, property: 'startTime', expression: '...' }
+  { noteId: 1, property: 'frequency', expression: 'base.f * (5/4)' },
+  { noteId: 2, property: 'startTime', expression: '[1].t + [1].d' }
 ])
 ```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+module.batchSetExpressions([
+  { noteId: 1, property: 'frequency', expression: "module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))" },
+  { noteId: 2, property: 'startTime', expression: "module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))" }
+])
+```
+</details>
 
 Efficiently updates multiple expressions with single dependency recalculation.
 
@@ -271,6 +294,34 @@ const module = new Module({ tempo: 120 })
 
 // Add notes
 const note1 = module.addNote({
+  frequency: "base.f",
+  startTime: "0",
+  duration: "60 / tempo(base)"
+})
+
+const note2 = module.addNote({
+  frequency: "[1].f * (3/2)",
+  startTime: "[1].t + [1].d",
+  duration: "60 / tempo(base)"
+})
+
+// Evaluate
+const cache = module.evaluateModule()
+
+// Read values
+const freq = cache.get(note1.id).frequency.valueOf()  // 440
+const freq2 = cache.get(note2.id).frequency.valueOf() // 660
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+// Create module
+const module = new Module({ tempo: 120 })
+
+// Add notes
+const note1 = module.addNote({
   frequency: "module.baseNote.getVariable('frequency')",
   startTime: "new Fraction(0)",
   duration: "new Fraction(60).div(module.findTempo(module.baseNote))"
@@ -289,6 +340,7 @@ const cache = module.evaluateModule()
 const freq = cache.get(note1.id).frequency.valueOf()  // 440
 const freq2 = cache.get(note2.id).frequency.valueOf() // 660
 ```
+</details>
 
 ## See Also
 

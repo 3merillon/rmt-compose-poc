@@ -33,6 +33,28 @@ Module Bar
 
 Create notes with the patterns you want to save:
 
+```
+// Example: Major Triad module
+
+// Root
+frequency: base.f
+startTime: 0
+duration: 1
+
+// Major Third
+frequency: [1].f * (5/4)
+startTime: [1].t
+duration: [1].d
+
+// Perfect Fifth
+frequency: [1].f * (3/2)
+startTime: [1].t
+duration: [1].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Example: Major Triad module
 
@@ -51,6 +73,8 @@ frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2)
 startTime: module.getNoteById(1).getVariable('startTime')
 duration: module.getNoteById(1).getVariable('duration')
 ```
+
+</details>
 
 ### Step 2: Save the Module
 
@@ -122,10 +146,28 @@ Templates
 
 Create a reusable scale that can be transposed:
 
-```javascript
+```
 // All notes depend on BaseNote.frequency
 // Transposing is as simple as changing BaseNote
 
+// Note 1: Root (unison)
+frequency: base.f
+
+// Note 2: Second
+frequency: base.f * (9/8)
+
+// Note 3: Third
+frequency: base.f * (5/4)
+
+// ... continue for full scale
+```
+
+**Why this works**: Changing BaseNote's frequency transposes the entire scale.
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 // Note 1: Root (unison)
 frequency: module.baseNote.getVariable('frequency')
 
@@ -134,23 +176,21 @@ frequency: module.baseNote.getVariable('frequency').mul(new Fraction(9, 8))
 
 // Note 3: Third
 frequency: module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
-
-// ... continue for full scale
 ```
 
-**Why this works**: Changing BaseNote's frequency transposes the entire scale.
+</details>
 
 ### Chord Progression Template
 
-```javascript
+```
 // Chord 1: I (root position)
 // Notes 1-3: Triad based on BaseNote
 
 // Chord 2: IV (subdominant)
-// Notes 4-6: Triad based on 4/3 × BaseNote.frequency
+// Notes 4-6: Triad based on base.f * (4/3)
 
 // Chord 3: V (dominant)
-// Notes 7-9: Triad based on 3/2 × BaseNote.frequency
+// Notes 7-9: Triad based on base.f * (3/2)
 
 // Chord 4: I (return to tonic)
 // Notes 10-12: Copy of Chord 1 structure
@@ -158,9 +198,24 @@ frequency: module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
 
 ### Rhythm Template
 
-```javascript
+```
 // Create beat references that other notes can follow
 
+// Beat 1 marker
+startTime: 0
+duration: 60 / tempo(base)
+
+// Beat 2 marker
+startTime: [1].t + [1].d
+duration: 60 / tempo(base)
+
+// ... continue for full measure
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 // Beat 1 marker
 startTime: new Fraction(0)
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
@@ -169,15 +224,26 @@ duration: new Fraction(60).div(module.findTempo(module.baseNote))
 startTime: module.getNoteById(1).getVariable('startTime')
   .add(module.getNoteById(1).getVariable('duration'))
 duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// ... continue for full measure
 ```
+
+</details>
 
 ## Best Practices for Module Design
 
 ### 1. Use BaseNote as the Root
 
 Always reference BaseNote for primary values:
+
+```
+// Good: Inherits from BaseNote (easy to customize)
+frequency: base.f * (...)
+
+// Less flexible: Hard-coded value
+frequency: 440 * (...)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Good: Inherits from BaseNote (easy to customize)
@@ -187,9 +253,22 @@ frequency: module.baseNote.getVariable('frequency').mul(...)
 frequency: new Fraction(440).mul(...)
 ```
 
+</details>
+
 ### 2. Create Self-Contained Dependencies
 
 Modules should work independently:
+
+```
+// Good: Note 2 depends on Note 1 within the same module
+frequency: [1].f * (...)
+
+// Problematic: Depends on external note ID that may not exist
+frequency: [50].f * (...)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Good: Note 2 depends on Note 1 within the same module
@@ -198,6 +277,8 @@ frequency: module.getNoteById(1).getVariable('frequency').mul(...)
 // Problematic: Depends on external note ID that may not exist
 frequency: module.getNoteById(50).getVariable('frequency').mul(...)
 ```
+
+</details>
 
 ### 3. Document Complex Modules
 
@@ -226,6 +307,19 @@ You can load multiple modules into one workspace:
 
 After loading multiple modules, create dependencies between them:
 
+```
+// Module A's note
+frequency: base.f  // ID assigned: 1
+
+// Module B's note (wants to follow Module A)
+// After B loads, find its new ID (e.g., 5)
+// Edit to reference Module A's note:
+frequency: [1].f * (3/2)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Module A's note
 frequency: module.baseNote.getVariable('frequency')  // ID assigned: 1
@@ -235,6 +329,8 @@ frequency: module.baseNote.getVariable('frequency')  // ID assigned: 1
 // Edit to reference Module A's note:
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
 ```
+
+</details>
 
 ## Exporting and Sharing
 
@@ -259,16 +355,16 @@ Modules are saved as JSON:
 {
   "name": "Major Triad (Just)",
   "baseNote": {
-    "frequency": "new Fraction(440)",
-    "startTime": "new Fraction(0)",
-    "duration": "new Fraction(1)"
+    "frequency": "440",
+    "startTime": "0",
+    "duration": "1"
   },
   "notes": [
     {
       "id": 1,
-      "frequency": "module.baseNote.getVariable('frequency')",
-      "startTime": "new Fraction(0)",
-      "duration": "new Fraction(1)"
+      "frequency": "base.f",
+      "startTime": "0",
+      "duration": "1"
     }
   ]
 }

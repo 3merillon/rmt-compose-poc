@@ -6,10 +6,24 @@ RMT Compose allows you to create **custom equal temperament systems** beyond the
 
 Any TET system follows this pattern:
 
-```javascript
+```
 // N-TET: Divide interval I into N equal steps
 // Step ratio = I^(1/N)
 
+// For octave-based TET:
+2^(1/N)
+
+// For tritave-based (like BP):
+3^(1/N)
+
+// For any interval:
+I^(1/N)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 // For octave-based TET:
 new Fraction(2).pow(new Fraction(1, N))
 
@@ -19,6 +33,7 @@ new Fraction(3).pow(new Fraction(1, N))
 // For any interval:
 new Fraction(I).pow(new Fraction(1, N))
 ```
+</details>
 
 ## Creating a Custom TET
 
@@ -31,6 +46,20 @@ new Fraction(I).pow(new Fraction(1, N))
 
 ### Step 2: Write the Step Expression
 
+```
+// Example: 17-TET (17 equal divisions of the octave)
+2^(1/17)
+
+// Example: 53-TET (very close to just intonation)
+2^(1/53)
+
+// Example: 5-TET (pentatonic equal temperament)
+2^(1/5)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Example: 17-TET (17 equal divisions of the octave)
 new Fraction(2).pow(new Fraction(1, 17))
@@ -41,10 +70,22 @@ new Fraction(2).pow(new Fraction(1, 53))
 // Example: 5-TET (pentatonic equal temperament)
 new Fraction(2).pow(new Fraction(1, 5))
 ```
+</details>
 
 ### Step 3: Build the Scale
 
 Each note references the previous:
+
+```
+// 17-TET scale
+note1.frequency = base.f
+note2.frequency = [1].f * 2^(1/17)
+note3.frequency = [2].f * 2^(1/17)
+// ... continue for all 17 notes
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // 17-TET scale
@@ -53,6 +94,7 @@ note2.frequency = note1.frequency.mul(new Fraction(2).pow(new Fraction(1, 17)))
 note3.frequency = note2.frequency.mul(new Fraction(2).pow(new Fraction(1, 17)))
 // ... continue for all 17 notes
 ```
+</details>
 
 ## Interesting TET Systems
 
@@ -64,8 +106,8 @@ note3.frequency = note2.frequency.mul(new Fraction(2).pow(new Fraction(1, 17)))
 | Step size | 240 cents |
 | Character | Indonesian slendro-like |
 
-```javascript
-new Fraction(2).pow(new Fraction(1, 5))
+```
+2^(1/5)
 ```
 
 ### 7-TET (Thai-like)
@@ -76,8 +118,8 @@ new Fraction(2).pow(new Fraction(1, 5))
 | Step size | 171.4 cents |
 | Character | Similar to Thai classical music |
 
-```javascript
-new Fraction(2).pow(new Fraction(1, 7))
+```
+2^(1/7)
 ```
 
 ### 22-TET (Shruti Scale)
@@ -88,8 +130,8 @@ new Fraction(2).pow(new Fraction(1, 7))
 | Step size | 54.5 cents |
 | Character | Close to Indian classical shrutis |
 
-```javascript
-new Fraction(2).pow(new Fraction(1, 22))
+```
+2^(1/22)
 ```
 
 ### 24-TET (Quarter Tones)
@@ -100,8 +142,8 @@ new Fraction(2).pow(new Fraction(1, 22))
 | Step size | 50 cents (quarter tone) |
 | Character | Arabic maqam approximations |
 
-```javascript
-new Fraction(2).pow(new Fraction(1, 24))
+```
+2^(1/24)
 ```
 
 ### 53-TET (Mercator's)
@@ -112,8 +154,8 @@ new Fraction(2).pow(new Fraction(1, 24))
 | Step size | 22.6 cents |
 | Character | Extremely close to just intonation |
 
-```javascript
-new Fraction(2).pow(new Fraction(1, 53))
+```
+2^(1/53)
 ```
 
 53-TET is famous for nearly perfect fifths and thirds!
@@ -126,8 +168,8 @@ new Fraction(2).pow(new Fraction(1, 53))
 | Step size | 16.7 cents |
 | Character | Includes 12-TET as subset, very fine control |
 
-```javascript
-new Fraction(2).pow(new Fraction(1, 72))
+```
+2^(1/72)
 ```
 
 ## Non-Octave Systems
@@ -136,25 +178,49 @@ You can create TET systems based on any interval:
 
 ### 8-EDTri (8 Equal Divisions of the Tritave)
 
-```javascript
+```
 // 8 divisions of the 3:1 tritave
+3^(1/8)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 new Fraction(3).pow(new Fraction(1, 8))
 ```
+</details>
 
 ### 5-ED5 (5 Equal Divisions of the Pentave)
 
-```javascript
+```
 // 5 divisions of the 5:1 "pentave"
+5^(1/5)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 new Fraction(5).pow(new Fraction(1, 5))
 ```
+</details>
 
 ### Golden Ratio TET
 
-```javascript
+```
 // Using phi (≈1.618) as the interval
 // Note: This requires a decimal approximation
+(1618/1000)^(1/7)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 new Fraction(1618, 1000).pow(new Fraction(1, 7))
 ```
+</details>
 
 ## Saving Custom TET Modules
 
@@ -164,6 +230,36 @@ new Fraction(1618, 1000).pow(new Fraction(1, 7))
 4. Add to your Module Bar (see [Module Bar](../interface/module-bar))
 
 ### Example Module JSON
+
+```json
+{
+  "baseNote": {
+    "frequency": "440",
+    "startTime": "0",
+    "tempo": "60",
+    "beatsPerMeasure": "4"
+  },
+  "notes": [
+    {
+      "id": 1,
+      "frequency": "base.f",
+      "startTime": "base.t",
+      "duration": "1",
+      "instrument": "sine-wave"
+    },
+    {
+      "id": 2,
+      "frequency": "[1].f * 2^(1/17)",
+      "startTime": "[1].t + [1].d",
+      "duration": "1",
+      "instrument": "sine-wave"
+    }
+  ]
+}
+```
+
+<details>
+<summary>Legacy JavaScript syntax (also supported)</summary>
 
 ```json
 {
@@ -191,6 +287,7 @@ new Fraction(1618, 1000).pow(new Fraction(1, 7))
   ]
 }
 ```
+</details>
 
 ## Comparing TET Systems
 

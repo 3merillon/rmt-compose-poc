@@ -23,47 +23,74 @@ Time in RMT Compose is based on:
 
 ### Beat Duration Formula
 
-```javascript
+```
 // Duration of one beat in seconds
 beatDuration = 60 / tempo
 
 // In RMT expression:
-new Fraction(60).div(module.findTempo(module.baseNote))
+60 / tempo(base)
 ```
 
 At 120 BPM: 60/120 = 0.5 seconds per beat
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(60).div(module.findTempo(module.baseNote))
+```
+
+</details>
 
 ## Note Duration Reference
 
 | Note | Beats | Expression |
 |------|-------|------------|
-| Whole | 4 | `beatDuration.mul(new Fraction(4))` |
-| Half | 2 | `beatDuration.mul(new Fraction(2))` |
+| Whole | 4 | `beatDuration * 4` |
+| Half | 2 | `beatDuration * 2` |
 | Quarter | 1 | `beatDuration` |
-| Eighth | 0.5 | `beatDuration.mul(new Fraction(1, 2))` |
-| Sixteenth | 0.25 | `beatDuration.mul(new Fraction(1, 4))` |
-| Dotted quarter | 1.5 | `beatDuration.mul(new Fraction(3, 2))` |
-| Triplet | 1/3 | `beatDuration.mul(new Fraction(1, 3))` |
+| Eighth | 0.5 | `beatDuration * (1/2)` |
+| Sixteenth | 0.25 | `beatDuration * (1/4)` |
+| Dotted quarter | 1.5 | `beatDuration * (3/2)` |
+| Triplet | 1/3 | `beatDuration * (1/3)` |
 
 ## Step 1: Set Up
 
 1. Reset to a fresh workspace
 2. Set BaseNote tempo to 120 BPM:
 
+```
+120
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 new Fraction(120)
 ```
+
+</details>
 
 ## Step 2: Create the Beat Duration Helper
 
 First, understand the beat duration expression:
 
-```javascript
+```
 // This expression equals one beat duration
-new Fraction(60).div(module.findTempo(module.baseNote))
+60 / tempo(base)
 ```
 
 We'll use this as the base for all durations.
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(60).div(module.findTempo(module.baseNote))
+```
+
+</details>
 
 ## Step 3: Create a Rhythmic Pattern
 
@@ -72,46 +99,82 @@ Let's create: Quarter - Eighth - Eighth - Half
 ### Note 1: Quarter Note
 
 1. Add a note
-2. Frequency: `module.baseNote.getVariable('frequency')` (root)
-3. StartTime: `new Fraction(0)`
+2. Frequency: `base.f` (root)
+3. StartTime: `0`
 4. Duration (1 beat):
+
+```
+60 / tempo(base)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(60).div(module.findTempo(module.baseNote))
 ```
 
+</details>
+
 ### Note 2: First Eighth Note
 
 1. Add note after Note 1
-2. Frequency: `baseNote × 9/8` (Re)
-3. StartTime: `note1.startTime + note1.duration`
+2. Frequency: `base.f * (9/8)` (Re)
+3. StartTime: `[1].t + [1].d`
 4. Duration (0.5 beats):
+
+```
+60 / tempo(base) * (1/2)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
 ```
+
+</details>
 
 ### Note 3: Second Eighth Note
 
 1. Add note after Note 2
-2. Frequency: `baseNote × 5/4` (Mi)
-3. StartTime: `note2.startTime + note2.duration`
+2. Frequency: `base.f * (5/4)` (Mi)
+3. StartTime: `[2].t + [2].d`
 4. Duration (0.5 beats):
+
+```
+60 / tempo(base) * (1/2)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
 ```
 
+</details>
+
 ### Note 4: Half Note
 
 1. Add note after Note 3
-2. Frequency: `baseNote × 3/2` (Sol)
-3. StartTime: `note3.startTime + note3.duration`
+2. Frequency: `base.f * (3/2)` (Sol)
+3. StartTime: `[3].t + [3].d`
 4. Duration (2 beats):
+
+```
+60 / tempo(base) * 2
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 ```
+
+</details>
 
 ## Verification
 
@@ -145,7 +208,7 @@ Instead of typing expressions, use the Variable Widget shortcuts:
 
 ### Exercise 1: Different Tempo
 
-1. Change BaseNote tempo to `new Fraction(60)` (60 BPM)
+1. Change BaseNote tempo to `60` (60 BPM)
 2. Play - the rhythm is the same but slower!
 3. The relationships are preserved
 
@@ -161,10 +224,19 @@ Create an off-beat accent:
 
 Create triplet rhythm (3 notes in the space of 2):
 
-```javascript
+```
 // Triplet duration (1/3 of a beat)
+60 / tempo(base) * (1/3)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 3))
 ```
+
+</details>
 
 ### Exercise 4: Rest Simulation
 
@@ -177,13 +249,22 @@ Create the effect of a rest:
 
 For complex rhythms, use note references:
 
-```javascript
+```
 // Note 5 starts when Note 4 ends
+[4].t + [4].d
+```
+
+This creates a chain where timing flows automatically.
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 module.getNoteById(4).getVariable('startTime')
   .add(module.getNoteById(4).getVariable('duration'))
 ```
 
-This creates a chain where timing flows automatically.
+</details>
 
 ## Save Your Module
 

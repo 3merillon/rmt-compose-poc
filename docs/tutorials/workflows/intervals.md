@@ -26,25 +26,42 @@ An interval is the distance between two pitches. In RMT Compose, intervals are e
 
 ### Step 1: Create the Reference Note
 
+```
+// Note 1: Reference pitch
+frequency: base.f
+startTime: 0
+duration: 2
+```
+
+### Step 2: Create the Interval Note
+
+```
+// Note 2: Interval above reference
+frequency: [1].f * (3/2)  // Perfect fifth
+startTime: [1].t
+duration: [1].d
+```
+
+### Step 3: Experiment
+
+Change the ratio in Note 2 to hear different intervals. Both notes play simultaneously for direct comparison.
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Note 1: Reference pitch
 frequency: module.baseNote.getVariable('frequency')
 startTime: new Fraction(0)
 duration: new Fraction(2)
-```
 
-### Step 2: Create the Interval Note
-
-```javascript
 // Note 2: Interval above reference
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))  // Perfect fifth
 startTime: module.getNoteById(1).getVariable('startTime')
 duration: module.getNoteById(1).getVariable('duration')
 ```
 
-### Step 3: Experiment
-
-Change the ratio in Note 2 to hear different intervals. Both notes play simultaneously for direct comparison.
+</details>
 
 ## Workflow: Systematic Interval Study
 
@@ -52,18 +69,18 @@ Change the ratio in Note 2 to hear different intervals. Both notes play simultan
 
 Start with the most stable intervals:
 
-```javascript
+```
 // Unison
-.mul(new Fraction(1, 1))
+* (1/1)
 
 // Octave
-.mul(new Fraction(2, 1))
+* 2
 
 // Perfect Fifth
-.mul(new Fraction(3, 2))
+* (3/2)
 
 // Perfect Fourth
-.mul(new Fraction(4, 3))
+* (4/3)
 ```
 
 **Listen for**: Clarity, lack of beating, stability
@@ -72,18 +89,18 @@ Start with the most stable intervals:
 
 Move to pleasing but less stable intervals:
 
-```javascript
+```
 // Major Third
-.mul(new Fraction(5, 4))
+* (5/4)
 
 // Minor Third
-.mul(new Fraction(6, 5))
+* (6/5)
 
 // Major Sixth
-.mul(new Fraction(5, 3))
+* (5/3)
 
 // Minor Sixth
-.mul(new Fraction(8, 5))
+* (8/5)
 ```
 
 **Listen for**: Warmth, color, character differences
@@ -92,21 +109,21 @@ Move to pleasing but less stable intervals:
 
 Explore tension-creating intervals:
 
-```javascript
+```
 // Major Second
-.mul(new Fraction(9, 8))
+* (9/8)
 
 // Minor Second
-.mul(new Fraction(16, 15))
+* (16/15)
 
 // Major Seventh
-.mul(new Fraction(15, 8))
+* (15/8)
 
 // Minor Seventh
-.mul(new Fraction(9, 5))
+* (9/5)
 
 // Tritone
-.mul(new Fraction(45, 32))
+* (45/32)
 ```
 
 **Listen for**: Tension, desire to resolve, roughness
@@ -117,6 +134,17 @@ Explore tension-creating intervals:
 
 Create two interval notes:
 
+```
+// Note 2: Pure major third (5/4)
+frequency: [1].f * (5/4)
+
+// Note 3: 12-TET major third (4 semitones)
+frequency: [1].f * 2^(4/12)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Note 2: Pure major third (5/4)
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
@@ -125,6 +153,8 @@ frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4)
 frequency: module.getNoteById(1).getVariable('frequency')
   .mul(new Fraction(2).pow(new Fraction(4, 12)))
 ```
+
+</details>
 
 ### Listen Carefully
 
@@ -148,6 +178,17 @@ Every interval has an inversion that completes the octave:
 
 ### Exploring Inversions
 
+```
+// Original: Major third above
+frequency: [1].f * (5/4)
+
+// Inversion: Minor sixth below (same pitch class, lower octave)
+frequency: [1].f / (8/5)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Original: Major third above
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
@@ -156,28 +197,30 @@ frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4)
 frequency: module.getNoteById(1).getVariable('frequency').div(new Fraction(8, 5))
 ```
 
+</details>
+
 ## Compound Intervals
 
 Intervals larger than an octave:
 
-```javascript
+```
 // Minor 9th (octave + minor 2nd)
-.mul(new Fraction(32, 15))
+* (32/15)
 
 // Major 9th (octave + major 2nd)
-.mul(new Fraction(9, 4))
+* (9/4)
 
 // Minor 10th (octave + minor 3rd)
-.mul(new Fraction(12, 5))
+* (12/5)
 
 // Major 10th (octave + major 3rd)
-.mul(new Fraction(5, 2))
+* (5/2)
 
 // Perfect 11th (octave + perfect 4th)
-.mul(new Fraction(8, 3))
+* (8/3)
 
 // Perfect 12th (octave + perfect 5th)
-.mul(new Fraction(3, 1))
+* 3
 ```
 
 ## Interval Chains
@@ -186,94 +229,94 @@ Build scales by stacking intervals:
 
 ### Pythagorean Tuning (Stacking Fifths)
 
-```javascript
+```
 // Stack perfect fifths, reduce to one octave
 
 // C (root)
-.mul(new Fraction(1, 1))
+* (1/1)
 
 // G (fifth)
-.mul(new Fraction(3, 2))
+* (3/2)
 
 // D (brought down an octave: 3/2 × 3/2 ÷ 2 = 9/8)
-.mul(new Fraction(9, 8))
+* (9/8)
 
 // A (9/8 × 3/2 = 27/16)
-.mul(new Fraction(27, 16))
+* (27/16)
 
 // E (27/16 × 3/2 ÷ 2 = 81/64)
-.mul(new Fraction(81, 64))
+* (81/64)
 ```
 
 ### Third-Based Tuning (5-Limit)
 
 Use ratios with factors of 2, 3, and 5:
 
-```javascript
+```
 // Major scale using just thirds
 
 // C (root)
-.mul(new Fraction(1, 1))
+* (1/1)
 
 // D (major second: 9/8)
-.mul(new Fraction(9, 8))
+* (9/8)
 
 // E (major third: 5/4)
-.mul(new Fraction(5, 4))
+* (5/4)
 
 // F (perfect fourth: 4/3)
-.mul(new Fraction(4, 3))
+* (4/3)
 
 // G (perfect fifth: 3/2)
-.mul(new Fraction(3, 2))
+* (3/2)
 
 // A (major sixth: 5/3)
-.mul(new Fraction(5, 3))
+* (5/3)
 
 // B (major seventh: 15/8)
-.mul(new Fraction(15, 8))
+* (15/8)
 ```
 
 ## Hearing the Harmonic Series
 
 The harmonic series contains all pure intervals:
 
-```javascript
+```
 // Fundamental
-.mul(new Fraction(1, 1))   // 440 Hz
+* 1   // 440 Hz
 
 // 2nd harmonic (octave)
-.mul(new Fraction(2, 1))   // 880 Hz
+* 2   // 880 Hz
 
 // 3rd harmonic (octave + fifth)
-.mul(new Fraction(3, 1))   // 1320 Hz
+* 3   // 1320 Hz
 
 // 4th harmonic (two octaves)
-.mul(new Fraction(4, 1))   // 1760 Hz
+* 4   // 1760 Hz
 
 // 5th harmonic (two octaves + major third)
-.mul(new Fraction(5, 1))   // 2200 Hz
+* 5   // 2200 Hz
 
 // 6th harmonic (two octaves + fifth)
-.mul(new Fraction(6, 1))   // 2640 Hz
+* 6   // 2640 Hz
 
 // 7th harmonic (two octaves + minor seventh - slightly flat)
-.mul(new Fraction(7, 1))   // 3080 Hz
+* 7   // 3080 Hz
 ```
 
 ### Reducing to One Octave
 
 Bring harmonics into the same octave:
 
-```javascript
+```
 // 3rd harmonic → fifth: 3/2
-.mul(new Fraction(3, 2))
+* (3/2)
 
 // 5th harmonic → major third: 5/4
-.mul(new Fraction(5, 4))
+* (5/4)
 
 // 7th harmonic → harmonic seventh: 7/4
-.mul(new Fraction(7, 4))
+* (7/4)
 ```
 
 ## Interval Quality Exploration
@@ -282,37 +325,37 @@ Bring harmonics into the same octave:
 
 Create a progression from most consonant to most dissonant:
 
-```javascript
+```
 // Most consonant
-.mul(new Fraction(1, 1))   // Unison
-.mul(new Fraction(2, 1))   // Octave
-.mul(new Fraction(3, 2))   // Fifth
-.mul(new Fraction(4, 3))   // Fourth
-.mul(new Fraction(5, 4))   // Major third
-.mul(new Fraction(6, 5))   // Minor third
+* 1        // Unison
+* 2        // Octave
+* (3/2)    // Fifth
+* (4/3)    // Fourth
+* (5/4)    // Major third
+* (6/5)    // Minor third
 
 // More dissonant
-.mul(new Fraction(9, 8))   // Major second
-.mul(new Fraction(16, 15)) // Minor second
-.mul(new Fraction(45, 32)) // Tritone
+* (9/8)    // Major second
+* (16/15)  // Minor second
+* (45/32)  // Tritone
 ```
 
 ### Character Comparison
 
 Compare intervals with similar sizes but different qualities:
 
-```javascript
+```
 // Major vs Minor Third
-.mul(new Fraction(5, 4))   // Major: bright
-.mul(new Fraction(6, 5))   // Minor: dark
+* (5/4)    // Major: bright
+* (6/5)    // Minor: dark
 
 // Major vs Minor Second
-.mul(new Fraction(9, 8))   // Major: open
-.mul(new Fraction(16, 15)) // Minor: tight
+* (9/8)    // Major: open
+* (16/15)  // Minor: tight
 
 // Major vs Minor Seventh
-.mul(new Fraction(15, 8))  // Major: leading
-.mul(new Fraction(9, 5))   // Minor: bluesy
+* (15/8)   // Major: leading
+* (9/5)    // Minor: bluesy
 ```
 
 ## Saving Your Discoveries

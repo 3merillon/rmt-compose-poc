@@ -24,7 +24,36 @@ Benefits:
 
 ## Expression Syntax
 
-### Supported Constructs
+The compiler supports both DSL and legacy JavaScript syntax.
+
+### DSL Syntax (Recommended)
+
+```
+// Constants
+440
+(3/2)
+
+// References
+base.f
+[5].t
+
+// Arithmetic
+a + b
+a - b
+a * b
+a / b
+a ^ b
+-a
+
+// Lookups
+tempo(base)
+measure(base)
+```
+
+### Legacy JavaScript Syntax
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Constants
@@ -47,20 +76,19 @@ module.getNoteById(5).getVariable('startTime')
 module.findTempo(note)
 module.findMeasureLength(note)
 ```
+</details>
 
 ### Grammar (Informal)
 
 ```
-expression := term (('add' | 'sub') term)*
-term       := factor (('mul' | 'div') factor)*
-factor     := base ('pow' base)?
-base       := 'neg'? atom
+expression := term (('add' | 'sub' | '+' | '-') term)*
+term       := factor (('mul' | 'div' | '*' | '/') factor)*
+factor     := base ('pow' | '^') base)?
+base       := ('neg' | '-')? atom
 atom       := constant | reference | lookup | '(' expression ')'
-constant   := 'new Fraction(' integer (',' integer)? ')'
-reference  := 'module.baseNote.getVariable(' string ')'
-           | 'module.getNoteById(' integer ').getVariable(' string ')'
-lookup     := 'module.findTempo(' ... ')'
-           | 'module.findMeasureLength(' ... ')'
+constant   := number | '(' number '/' number ')'
+reference  := 'base.' property | '[' integer '].' property
+lookup     := 'tempo(' ... ')' | 'measure(' ... ')'
 ```
 
 ## Parser Implementation
@@ -228,6 +256,39 @@ decompile(expr) {
       case OP.LOAD_CONST: {
         const num = this.readInt32(expr, pc); pc += 4;
         const den = this.readInt32(expr, pc); pc += 4;
+        stack.push(den === 1 ? `${num}` : `(${num}/${den})`);
+        break;
+      }
+      case OP.ADD: {
+        const b = stack.pop();
+        const a = stack.pop();
+        stack.push(`${a} + ${b}`);
+        break;
+      }
+      // ... more cases
+    }
+  }
+
+  return stack[0];
+}
+```
+
+<details>
+<summary>Legacy decompiler output</summary>
+
+The decompiler can also output legacy JavaScript format:
+
+```javascript
+decompileLegacy(expr) {
+  const stack = [];
+  let pc = 0;
+
+  while (pc < expr.length) {
+    const op = expr[pc++];
+    switch (op) {
+      case OP.LOAD_CONST: {
+        const num = this.readInt32(expr, pc); pc += 4;
+        const den = this.readInt32(expr, pc); pc += 4;
         stack.push(den === 1
           ? `new Fraction(${num})`
           : `new Fraction(${num}, ${den})`);
@@ -246,6 +307,7 @@ decompile(expr) {
   return stack[0];
 }
 ```
+</details>
 
 ## Caching
 
@@ -276,9 +338,9 @@ class ExpressionCompiler {
 
 ```javascript
 try {
-  compiler.compile('new Fraction(3, 2.mul()')
+  compiler.compile('base.f * (3/2')  // Missing closing paren
 } catch (e) {
-  // "Unexpected token at position 18"
+  // "Unexpected token at position 12"
 }
 ```
 
@@ -292,11 +354,19 @@ The compiler validates:
 
 ## Example
 
-### Input
+### Input (DSL)
+
+```
+[1].f * (3/2)
+```
+
+<details>
+<summary>Legacy JavaScript equivalent</summary>
 
 ```javascript
 "module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))"
 ```
+</details>
 
 ### AST
 
@@ -318,8 +388,8 @@ The compiler validates:
 
 ### Decompiled
 
-```javascript
-"module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))"
+```
+[1].f * (3/2)
 ```
 
 Round-trip preserves the expression exactly.

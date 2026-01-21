@@ -6,10 +6,18 @@
 
 When a note's expression references another note, it creates a dependency:
 
-```javascript
-// Note 2's frequency depends on Note 1's frequency
-note2.frequency = module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
 ```
+// Note 2's frequency depends on Note 1's frequency
+[1].f * (5/4)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
+```
+</details>
 
 In this example:
 - Note 2 **depends on** Note 1
@@ -110,18 +118,30 @@ All from one change!
 Simplifies a note's expression to reference only BaseNote:
 
 **Before:**
-```javascript
-module.getNoteById(3).getVariable('frequency').mul(new Fraction(5, 4))
+```
+[3].f * (5/4)
 // Note 3 frequency is: Note 2 × 3/2
 // Note 2 frequency is: Note 1 × 5/4
 // Note 1 frequency is: BaseNote × 3/2
 ```
 
 **After:**
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(45, 16))
+```
+base.f * (45/16)
 // Direct computation: 3/2 × 5/4 × 3/2 × 5/4 = 45/16
 ```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+// Before
+module.getNoteById(3).getVariable('frequency').mul(new Fraction(5, 4))
+
+// After
+module.baseNote.getVariable('frequency').mul(new Fraction(45, 16))
+```
+</details>
 
 Use this to "freeze" a note's value or simplify complex chains.
 
@@ -130,16 +150,28 @@ Use this to "freeze" a note's value or simplify complex chains.
 Converts other notes' references to *this* note into raw values:
 
 **Before:**
-```javascript
+```
 // Note 3 references Note 2
-note3.frequency = module.getNoteById(2).getVariable('frequency').mul(...)
+[2].f * (5/4)
 ```
 
 **After:**
-```javascript
-// Note 3 has the computed value directly
-note3.frequency = new Fraction(825)
 ```
+// Note 3 has the computed value directly
+825
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+// Before
+module.getNoteById(2).getVariable('frequency').mul(new Fraction(5, 4))
+
+// After
+new Fraction(825)
+```
+</details>
 
 Use this before deleting a note that others depend on.
 
@@ -147,12 +179,12 @@ Use this before deleting a note that others depend on.
 
 **Circular dependencies are not allowed.**
 
-```javascript
+```
 // Note A depends on Note B
-noteA.freq = module.getNoteById(B).getVariable('frequency').mul(...)
+[B].f * (3/2)
 
 // Note B depends on Note A - ERROR!
-noteB.freq = module.getNoteById(A).getVariable('frequency').mul(...)
+[A].f * (5/4)
 ```
 
 The app prevents you from creating circular references.

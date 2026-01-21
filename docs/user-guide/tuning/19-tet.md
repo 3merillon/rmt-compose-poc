@@ -23,12 +23,31 @@
 
 ### Single Step
 
-```javascript
+```
 // One 19-TET step
-new Fraction(2).pow(new Fraction(1, 19))
+2^(1/19)
 ```
 
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(2).pow(new Fraction(1, 19))
+```
+</details>
+
 ### Multiple Steps
+
+```
+// Major third (6 steps in 19-TET)
+2^(6/19)
+
+// Perfect fifth (11 steps in 19-TET)
+2^(11/19)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Major third (6 steps in 19-TET)
@@ -37,15 +56,24 @@ new Fraction(2).pow(new Fraction(6, 19))
 // Perfect fifth (11 steps in 19-TET)
 new Fraction(2).pow(new Fraction(11, 19))
 ```
+</details>
 
 ### Applying to BaseNote
 
-```javascript
+```
 // Note at 6 steps above BaseNote (major third)
+base.f * 2^(6/19)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 module.baseNote.getVariable('frequency').mul(
   new Fraction(2).pow(new Fraction(6, 19))
 )
 ```
+</details>
 
 ## Intervals in 19-TET
 
@@ -83,6 +111,16 @@ The thirds are significantly better than 12-TET!
 
 ## Building a 19-TET Scale
 
+```
+// Each note references the previous
+note2.frequency = [1].f * 2^(1/19)
+note3.frequency = [2].f * 2^(1/19)
+// ... continue for all 19 notes
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Each note references the previous
 note2.frequency = note1.frequency.mul(
@@ -93,6 +131,7 @@ note3.frequency = note2.frequency.mul(
 )
 // ... continue for all 19 notes
 ```
+</details>
 
 ## Musical Applications
 

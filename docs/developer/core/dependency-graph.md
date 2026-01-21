@@ -6,10 +6,19 @@ The **Dependency Graph** tracks relationships between notes, enabling O(1) looku
 
 When a note's expression references another note, a dependency is created:
 
+```
+// Note 5 depends on Note 1
+note5.frequency = [1].f * (3/2)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Note 5 depends on Note 1
 note5.frequency = module.getNoteById(1).getVariable('frequency').mul(...)
 ```
+</details>
 
 The dependency graph maintains:
 - **Forward index**: What does a note depend on?

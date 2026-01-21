@@ -48,16 +48,26 @@ Before editing, select a note:
 2. Click on the **Raw** field
 3. Enter a new expression:
 
-```javascript
+```
 // Major third above BaseNote
-module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
+base.f * (5/4)
 
 // Perfect fifth above Note 3
-module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))
+[3].f * (3/2)
 
 // Exact frequency in Hz
+440
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
+module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))
 new Fraction(440)
 ```
+</details>
 
 4. Click **Save**
 
@@ -67,17 +77,26 @@ new Fraction(440)
 2. Click on the **Raw** field
 3. Enter a new expression:
 
-```javascript
+```
 // Start at time 0
-new Fraction(0)
+0
 
 // Start when Note 2 ends
-module.getNoteById(2).getVariable('startTime')
-  .add(module.getNoteById(2).getVariable('duration'))
+[2].t + [2].d
 
 // Start 2 beats after BaseNote
+base.t + 2
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(0)
+module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))
 module.baseNote.getVariable('startTime').add(new Fraction(2))
 ```
+</details>
 
 4. Click **Save**
 
@@ -92,16 +111,26 @@ module.baseNote.getVariable('startTime').add(new Fraction(2))
 2. Click on the **Raw** field
 3. Enter a new expression:
 
-```javascript
+```
 // 1 beat
-new Fraction(1)
+1
 
 // Half note (2 beats) at current tempo
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
+60 / tempo(base) * 2
 
 // Same duration as Note 3
+[3].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(1)
+new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 module.getNoteById(3).getVariable('duration')
 ```
+</details>
 
 4. Click **Save**
 

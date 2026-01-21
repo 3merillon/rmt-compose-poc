@@ -14,7 +14,7 @@
 
 | Step | Note | Semitones | Expression |
 |------|------|-----------|------------|
-| 0 | C | 0 | `new Fraction(1)` |
+| 0 | C | 0 | `1` |
 | 1 | C#/Db | 1 | `2^(1/12)` |
 | 2 | D | 2 | `2^(2/12)` |
 | 3 | D#/Eb | 3 | `2^(3/12)` |
@@ -32,12 +32,34 @@
 
 ### Single Semitone
 
-```javascript
+```
 // One semitone up
-new Fraction(2).pow(new Fraction(1, 12))
+2^(1/12)
 ```
 
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(2).pow(new Fraction(1, 12))
+```
+</details>
+
 ### Multiple Semitones
+
+```
+// Perfect fifth (7 semitones)
+2^(7/12)
+
+// Major third (4 semitones)
+2^(4/12)
+
+// Simplified: 4/12 = 1/3
+2^(1/3)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Perfect fifth (7 semitones)
@@ -49,19 +71,44 @@ new Fraction(2).pow(new Fraction(4, 12))
 // Simplified: 4/12 = 1/3
 new Fraction(2).pow(new Fraction(1, 3))
 ```
+</details>
 
 ### Applying to BaseNote
 
-```javascript
+```
 // Note at 4 semitones above BaseNote
+base.f * 2^(4/12)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 module.baseNote.getVariable('frequency').mul(
   new Fraction(2).pow(new Fraction(4, 12))
 )
 ```
+</details>
 
 ### Building a Chromatic Scale
 
 Each note references the previous:
+
+```
+// Note 1: Root
+note1.frequency = base.f
+
+// Note 2: One semitone up
+note2.frequency = [1].f * 2^(1/12)
+
+// Note 3: One more semitone
+note3.frequency = [2].f * 2^(1/12)
+
+// ... continue for all 12 notes
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Note 1: Root
@@ -79,6 +126,7 @@ note3.frequency = module.getNoteById(2).getVariable('frequency').mul(
 
 // ... continue for all 12 notes
 ```
+</details>
 
 ## Intervals in 12-TET
 
@@ -141,10 +189,18 @@ Standard piano and guitar use 12-TET. If you want your RMT compositions to match
 
 In 12-TET, transposing is simple multiplication:
 
-```javascript
+```
 // Transpose up 5 semitones (perfect fourth)
+originalFreq * 2^(5/12)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 originalFreq.mul(new Fraction(2).pow(new Fraction(5, 12)))
 ```
+</details>
 
 ### MIDI Compatibility
 

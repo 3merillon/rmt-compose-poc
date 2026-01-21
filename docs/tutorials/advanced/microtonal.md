@@ -24,6 +24,20 @@ Standard 12-TET divides the octave into 12 equal parts. Each semitone is exactly
 
 Use exact ratios for pure, beatless intervals:
 
+```
+// Pure major third (5:4)
+base.f * (5/4)
+
+// Pure perfect fifth (3:2)
+base.f * (3/2)
+
+// Pure harmonic seventh (7:4)
+base.f * (7/4)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Pure major third (5:4)
 module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
@@ -35,11 +49,27 @@ module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 module.baseNote.getVariable('frequency').mul(new Fraction(7, 4))
 ```
 
+</details>
+
 ## Alternative Equal Temperaments
 
 ### 19-TET
 
 Divides the octave into 19 equal parts. Better approximation of pure thirds than 12-TET.
+
+```
+// 19-TET semitone
+2^(1/19)
+
+// 19-TET major third (6 steps)
+base.f * 2^(6/19)
+
+// 19-TET perfect fifth (11 steps)
+base.f * 2^(11/19)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // 19-TET semitone
@@ -54,9 +84,25 @@ module.baseNote.getVariable('frequency')
   .mul(new Fraction(2).pow(new Fraction(11, 19)))
 ```
 
+</details>
+
 ### 31-TET
 
 Divides the octave into 31 equal parts. Excellent approximation of many pure intervals.
+
+```
+// 31-TET semitone
+2^(1/31)
+
+// 31-TET major third (10 steps)
+base.f * 2^(10/31)
+
+// 31-TET perfect fifth (18 steps)
+base.f * 2^(18/31)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // 31-TET semitone
@@ -71,9 +117,22 @@ module.baseNote.getVariable('frequency')
   .mul(new Fraction(2).pow(new Fraction(18, 31)))
 ```
 
+</details>
+
 ### 24-TET (Quarter Tones)
 
 Divides the octave into 24 equal parts, adding quarter tones between standard semitones.
+
+```
+// Quarter tone up from A
+base.f * 2^(1/24)
+
+// Standard semitone in 24-TET
+base.f * 2^(2/24)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Quarter tone up from A
@@ -85,9 +144,22 @@ module.baseNote.getVariable('frequency')
   .mul(new Fraction(2).pow(new Fraction(2, 24)))
 ```
 
+</details>
+
 ## Bohlen-Pierce Scale
 
 A unique non-octave scale based on the 3:1 ratio (tritave) divided into 13 equal parts.
+
+```
+// Bohlen-Pierce step
+3^(1/13)
+
+// Example: 5 BP steps above base
+base.f * 3^(5/13)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Bohlen-Pierce step
@@ -97,6 +169,8 @@ new Fraction(3).pow(new Fraction(1, 13))
 module.baseNote.getVariable('frequency')
   .mul(new Fraction(3).pow(new Fraction(5, 13)))
 ```
+
+</details>
 
 ### Why Bohlen-Pierce?
 
@@ -124,6 +198,20 @@ B:  15/8    // Major seventh
 C': 2/1     // Octave
 ```
 
+```
+// E (major third)
+base.f * (5/4)
+
+// G (perfect fifth)
+base.f * (3/2)
+
+// A (major sixth)
+base.f * (5/3)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // E (major third)
 module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
@@ -135,9 +223,25 @@ module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 module.baseNote.getVariable('frequency').mul(new Fraction(5, 3))
 ```
 
+</details>
+
 ### 7-Limit Just Intonation
 
 Adds the seventh harmonic for bluesy intervals:
+
+```
+// Harmonic seventh (flat seventh)
+base.f * (7/4)
+
+// Septimal minor third
+base.f * (7/6)
+
+// Septimal tritone
+base.f * (7/5)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Harmonic seventh (flat seventh)
@@ -150,9 +254,36 @@ module.baseNote.getVariable('frequency').mul(new Fraction(7, 6))
 module.baseNote.getVariable('frequency').mul(new Fraction(7, 5))
 ```
 
+</details>
+
 ## Building a Microtonal Composition
 
 ### Example: 19-TET Melody
+
+```
+// Note 1: Root
+frequency: base.f
+startTime: 0
+duration: 1
+
+// Note 2: 19-TET major second (3 steps)
+frequency: [1].f * 2^(3/19)
+startTime: [1].t + [1].d
+duration: 1
+
+// Note 3: 19-TET major third (6 steps)
+frequency: [1].f * 2^(6/19)
+startTime: [2].t + [2].d
+duration: 1
+
+// Note 4: 19-TET perfect fourth (8 steps)
+frequency: [1].f * 2^(8/19)
+startTime: [3].t + [3].d
+duration: 1
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Note 1: Root
@@ -182,7 +313,34 @@ startTime: module.getNoteById(3).getVariable('startTime')
 duration: new Fraction(1)
 ```
 
+</details>
+
 ### Example: Just Intonation Chord
+
+```
+// Root
+frequency: base.f
+startTime: 0
+duration: 2
+
+// Pure major third
+frequency: [1].f * (5/4)
+startTime: [1].t
+duration: [1].d
+
+// Pure perfect fifth
+frequency: [1].f * (3/2)
+startTime: [1].t
+duration: [1].d
+
+// Harmonic seventh (for a dominant seventh chord)
+frequency: [1].f * (7/4)
+startTime: [1].t
+duration: [1].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Root
@@ -209,6 +367,8 @@ startTime: module.getNoteById(1).getVariable('startTime')
 duration: module.getNoteById(1).getVariable('duration')
 ```
 
+</details>
+
 ## The ≈ Symbol
 
 When you use irrational values (like 2^(1/12)), RMT Compose displays ≈ before the frequency value:
@@ -225,9 +385,9 @@ This indicates the displayed value is an approximation of an algebraically exact
 
 Create the same melody in different tunings:
 
-1. **12-TET version**: Use `new Fraction(2).pow(new Fraction(N, 12))`
+1. **12-TET version**: Use `2^(N/12)`
 2. **Just intonation version**: Use pure ratios like `5/4`, `3/2`
-3. **19-TET version**: Use `new Fraction(2).pow(new Fraction(N, 19))`
+3. **19-TET version**: Use `2^(N/19)`
 
 Compare the sound quality, especially on sustained chords.
 
