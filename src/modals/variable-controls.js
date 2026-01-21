@@ -960,7 +960,7 @@ function buildInstrumentControl(value, note, externalFunctions) {
     cursor: 'pointer',
     userSelect: 'none'
   });
-  dropdownBtn.textContent = String(select.value || (value?.evaluated ?? '') || '');
+  dropdownBtn.textContent = String(value?.evaluated || '');
 
   const menu = document.createElement('div');
   Object.assign(menu.style, {
@@ -1053,7 +1053,7 @@ function buildInstrumentControl(value, note, externalFunctions) {
       try {
         pauseIfPlaying();
         const moduleInstance = getModule();
-        delete note.variables.instrument;
+        note.properties.instrument = null;
         if (moduleInstance?.markNoteDirty) moduleInstance.markNoteDirty(note.id);
         const evaluated = moduleInstance.evaluateModule();
         setEvaluatedNotes(evaluated);

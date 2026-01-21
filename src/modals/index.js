@@ -295,7 +295,7 @@ function collectVariables(note, measureId, moduleInstance) {
             }
         });
 
-        const hasOwnInstrument = note.variables.instrument !== undefined;
+        const hasOwnInstrument = note.properties.instrument != null;
         const inheritedInstrument = module.findInstrument(note);
 
         variables.instrument = {
