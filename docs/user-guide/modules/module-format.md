@@ -237,8 +237,8 @@ Measures define time markers in the composition.
 
 ```json
 {
-  "id": 100,
-  "startTime": "base.t + 4",
+  "id": 1,
+  "startTime": "base.t + beat(base) * 4",
   "beatsPerMeasure": "4"
 }
 ```
@@ -248,8 +248,8 @@ Measures define time markers in the composition.
 
 ```json
 {
-  "id": 100,
-  "startTime": "module.baseNote.getVariable('startTime').add(new Fraction(4))",
+  "id": 1,
+  "startTime": "module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(4)))",
   "beatsPerMeasure": "new Fraction(4)"
 }
 ```
@@ -293,9 +293,9 @@ Built-in instruments:
 ## ID Rules
 
 - **BaseNote**: Always ID 0 (implicit, not in notes array)
-- **Notes**: Positive integers (1, 2, 3, ...)
-- **Measures**: Typically 100+ to distinguish from notes
-- **Uniqueness**: All IDs must be unique within the module
+- **Notes and Measures**: Positive integers, assigned sequentially as items are added
+- **Uniqueness**: All IDs must be unique within the module (notes and measures share the same ID space)
+- **Reordering**: Use **Reorder Module** to renumber all IDs sequentially (measures first, then notes)
 
 ## Complete Example
 

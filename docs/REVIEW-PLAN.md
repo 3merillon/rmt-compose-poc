@@ -120,10 +120,10 @@ For each doc page, re-examine relevant source code:
 ### Phase 3: User Guide - Modules
 | # | File | Status | Issues Found |
 |---|------|--------|--------------|
-| 10 | `docs/user-guide/modules/module-format.md` | ⬜ Pending | |
-| 11 | `docs/user-guide/modules/creating-modules.md` | ⬜ Pending | |
-| 12 | `docs/user-guide/modules/loading-modules.md` | ⬜ Pending | |
-| 13 | `docs/user-guide/modules/saving-modules.md` | ⬜ Pending | |
+| 10 | `docs/user-guide/modules/module-format.md` | ✅ Complete | None - already had DSL primary + legacy in details |
+| 11 | `docs/user-guide/modules/creating-modules.md` | ✅ Complete | Fixed: UI labels ("Add Note / Silence", "At End"/"At Start"); Converted all code blocks to DSL primary + legacy details; Fixed module JSON examples |
+| 12 | `docs/user-guide/modules/loading-modules.md` | ✅ Complete | Fixed: Menu description; Added DSL primary format; Rewrote to distinguish Load (replaces workspace) vs Module Bar drop (integrates); Removed specific category listings (user-organized); Added Bach's Neverending Canon as default; Fixed tips |
+| 13 | `docs/user-guide/modules/saving-modules.md` | ✅ Complete | Fixed: Menu description; Fixed saved format example (now shows DSL); Removed "Evaluate to BaseNote" (doesn't exist), replaced with "Reorder Module" |
 
 ### Phase 4: User Guide - Playback
 | # | File | Status | Issues Found |
@@ -328,6 +328,44 @@ module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 ### 8. Liberate Dependencies Misunderstanding
 **Wrong:** "Liberate Dependencies" converts references to raw computed values
 **Correct:** "Liberate Dependencies" substitutes the liberated note's expressions into dependent notes (bypasses the note in the chain). Example: `[1].t + [1].d` becomes `base.t + beat(base)` if Note 1's expressions were `base.t` and `beat(base)`.
+
+### 9. Module Drop Behavior
+**Wrong:** "Dropping a module replaces the workspace"
+**Correct:** Dropping a module integrates it into the workspace by remapping dependencies:
+- Drop on note/BaseNote: All properties remapped relative to that note
+- Drop on measure bar: Time remapped to measure, frequency to workspace's BaseNote
+- Drop on silence: Not supported
+
+### 10. Add Measure Availability
+**Wrong:** "Add Measure" available on any note
+**Correct:** "Add Measure" only appears on:
+- BaseNote (shows "Add New Measure Chain")
+- Last measure in a chain (shows "Add Measure")
+
+### 11. Delete and Keep Dependencies
+**Wrong:** Keeps dependencies with their original references
+**Correct:** Same as Liberate + Delete - liberates the note first (substitutes expressions into dependents), then deletes it
+
+### 12. Corruption Display (≈ Symbol and Hatching)
+**Wrong:** Directly corrupted shows decimal, transitively corrupted shows fraction
+**Correct:** Both show fractional approximation with ≈ prefix. Visual distinction is via hatching:
+- Directly corrupted (irrational/TET): Crosshatch pattern (X) on note
+- Transitively corrupted: Single diagonal hatch pattern on note
+
+### 13. Variable Widget Positioning
+**Wrong:** Right side, auto-sizing, edge-resizable
+**Correct:** Bottom-left corner, header-draggable only (not edge-resizable), anchored to bottom
+
+### 14. Undo/Redo History Scope
+**What's tracked:** Note additions, deletions, property changes, module loads
+**What's NOT tracked:** View changes (pan/zoom), playback state, Module Bar changes
+
+### 15. Broken Links
+Check for and remove links to non-existent pages like `/about/changelog`
+
+### 16. "Real-time" Claims
+**Wrong:** "Updates in real-time as you type"
+**Correct:** Changes take effect on save, not while typing
 
 ---
 
