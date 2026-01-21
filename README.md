@@ -12,13 +12,26 @@ A production-ready, GL-only composition tool built around rational number relati
 
 ## Overview
 
-The app represents and manipulates musical structures as exact ratios and durations, with support for equal temperament systems (12-TET, 19-TET, 31-TET, Bohlen-Pierce). A WebGL2 interactive Workspace handles all rendering and interactions with a high-performance instanced pipeline. The legacy DOM rendering layer has been removed; the Workspace and its camera are the sole sources of truth for visualization and picking.
+The app represents and manipulates musical structures as exact ratios and durations, with support for equal temperament systems (12-TET, 19-TET, 31-TET, Bohlen-Pierce). A WebGL2 interactive Workspace handles all rendering and interactions with a high-performance instanced pipeline.
+
+### Expression DSL
+
+Note properties (frequency, duration, startTime, tempo) are defined using a concise **Domain-Specific Language (DSL)** that compiles to binary bytecode:
+
+```
+base.f * (3/2)           # Perfect fifth above base note
+[1].t + [1].d            # End time of note 1
+beat(base) * 2           # Two beats duration
+2^(7/12)                 # 12-TET perfect fifth interval
+```
+
+The DSL replaces verbose legacy JavaScript syntax with intuitive mathematical expressions. See the [DSL Syntax](#dsl-expression-syntax) section below for details.
 
 ## Architecture
 
 The app uses a **binary bytecode compilation system** for expression evaluation:
 
-- **Expressions**: All note parameters (frequency, duration, startTime, tempo, etc.) are compiled from text to compact binary bytecode at load time
+- **DSL Compiler**: Expressions written in DSL syntax (e.g., `base.f * (3/2)`) are parsed, validated, and compiled to compact binary bytecode at load time. Legacy JavaScript syntax is auto-detected and supported for backwards compatibility.
 - **Evaluation**: A stack-based VM evaluates bytecode with Fraction pooling to minimize garbage collection during interactive operations
 - **Dependency Tracking**: An inverted index provides O(1) lookup for forward and inverse dependencies, enabling smart drag previews (only notes whose position actually depends on the dragged note are moved)
 - **WASM Optimization**: Optional Rust/WASM core for computationally intensive evaluation operations
@@ -26,9 +39,10 @@ The app uses a **binary bytecode compilation system** for expression evaluation:
 ## Features
 
 - Ratio-first music model
-  - Notes express frequency, duration, and start time as exact expressions (compiled to bytecode backed by Fraction.js)
+  - Notes express frequency, duration, and start time using the DSL (e.g., `base.f * (3/2)`)
+  - Expressions compile to binary bytecode backed by Fraction.js for exact arithmetic
   - Dependency-aware evaluation with O(1) lookup and caching
-  - Property-specific dependency tracking (startTime vs duration)
+  - Property-specific dependency visualization (Orange=frequency, Teal=startTime, Purple=duration)
 
 - Multi-TET system support
   - Built-in support for 12-TET, 19-TET, 31-TET, and Bohlen-Pierce (13-BP) tuning systems
@@ -114,7 +128,10 @@ npm run build:wasm
 ## Module Bar
 
 - Browse example modules by category (Intervals, Chords, Melodies, Custom)
-- Load a module by dragging it from the Module Bar onto the workspace
+- Load a module by dragging it from the Module Bar onto a note or measure in the workspace
+- Use the **Drop Mode Toggle** to control how modules integrate:
+  - **Start**: Module notes start at the target note's start time (ideal for building chords)
+  - **End**: Module notes start at the target note's end time (ideal for building sequences/scales)
 - Load a module from file via the main menu (Main menu > Load Module)
 
 ### Create your own Module Bar items
@@ -128,6 +145,85 @@ npm run build:wasm
 Notes:
 - The default module lives at [public/modules/defaultModule.json](public/modules/defaultModule.json)
 - Other built-in categories follow the same pattern with their own index.json files
+
+## DSL Expression Syntax
+
+The DSL provides a concise, mathematical notation for defining note relationships. It auto-detects and supports both DSL and legacy JavaScript syntax.
+
+### Note References
+
+| Syntax | Description |
+|--------|-------------|
+| `base.f` | BaseNote frequency |
+| `base.t` | BaseNote start time |
+| `[1].f` | Note 1 frequency |
+| `[5].d` | Note 5 duration |
+
+### Property Shortcuts
+
+| Short | Full Name |
+|-------|-----------|
+| `f` | frequency |
+| `t` | startTime |
+| `d` | duration |
+| `tempo` | tempo |
+| `bpm` | beatsPerMeasure |
+| `ml` | measureLength |
+
+### Operators and Literals
+
+```
+(3/2)                    # Fraction literal
+base.f * (3/2)           # Multiplication (perfect fifth)
+[1].t + [1].d            # Addition (end time)
+2^(1/12)                 # Power (12-TET semitone)
+-[1].f                   # Negation
+```
+
+### Built-in Functions
+
+| Function | Description | Example |
+|----------|-------------|---------|
+| `beat(note)` | Duration of one beat (60/tempo) | `beat(base)` |
+| `tempo(note)` | Get tempo value | `tempo([1])` |
+| `measure(note)` | Get measure length | `measure(base)` |
+
+### Common Patterns
+
+```
+# Intervals (frequency relationships)
+base.f * (3/2)           # Perfect fifth (just intonation)
+base.f * (5/4)           # Major third (just intonation)
+base.f * 2^(7/12)        # Perfect fifth (12-TET)
+
+# Timing (sequential notes)
+[1].t + [1].d            # Start after note 1 ends
+base.t                   # Start at same time as base
+
+# Duration
+beat(base)               # One beat
+beat(base) * 2           # Two beats
+beat([1]) * (1/2)        # Half beat relative to note 1
+```
+
+<details>
+<summary>Legacy JavaScript syntax (deprecated)</summary>
+
+The legacy syntax uses method chaining on Fraction objects:
+
+```javascript
+// Perfect fifth
+module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
+
+// Note 1 frequency
+module.getNoteById(1).getVariable('frequency')
+
+// One beat duration
+new Fraction(60).div(module.findTempo(module.baseNote))
+```
+
+Legacy syntax is auto-detected and still supported for backwards compatibility.
+</details>
 
 ## Equal Temperament Systems
 
@@ -146,25 +242,35 @@ Notes with equal temperament frequencies display an **≈** prefix before their 
 ### Creating Custom TET Modules
 To create notes in a TET system, use power expressions for frequency:
 
-| System | Frequency Step Expression |
-|--------|---------------------------|
-| 12-TET | `new Fraction(2).pow(new Fraction(1, 12))` |
-| 19-TET | `new Fraction(2).pow(new Fraction(1, 19))` |
-| 31-TET | `new Fraction(2).pow(new Fraction(1, 31))` |
-| BP-13  | `new Fraction(3).pow(new Fraction(1, 13))` |
+| System | DSL Expression |
+|--------|----------------|
+| 12-TET | `[prev].f * 2^(1/12)` |
+| 19-TET | `[prev].f * 2^(1/19)` |
+| 31-TET | `[prev].f * 2^(1/31)` |
+| BP-13  | `[prev].f * 3^(1/13)` |
 
-Chain the step to move up the scale:
-```json
-"frequency": "previousNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))"
+Example: Chain notes up the 12-TET scale:
 ```
+[1].f * 2^(1/12)         # Note 2: one semitone above note 1
+[2].f * 2^(1/12)         # Note 3: one semitone above note 2
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```json
+"frequency": "module.getNoteById(1).getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))"
+```
+</details>
 
 ## File Structure
 
 ### Core Expression System
+- src/dsl/ - DSL lexer, parser, compiler, and decompiler
 - src/binary-note.js - Binary expression format and bytecode classes
 - src/binary-evaluator.js - Stack-based bytecode interpreter with Fraction pooling
 - src/dependency-graph.js - O(1) dependency tracking with inverted index
-- src/expression-compiler.js - Text-to-bytecode compiler and decompiler
+- src/expression-compiler.js - Expression compiler with DSL/legacy auto-detection
 - src/module-serializer.js - JSON import/export for binary modules
 
 ### Application
