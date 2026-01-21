@@ -21,15 +21,19 @@ A major triad consists of:
 | Third | Major third | 5/4 | 1.250 |
 | Fifth | Perfect fifth | 3/2 | 1.500 |
 
-## Step 1: Start Fresh
+## Step 1: Set Up the BaseNote
 
-1. Load the "octave" interval module from the Module Bar
-2. Or reset to default and clear existing notes
+1. Open RMT Compose
+2. Click the **BaseNote** (orange circle)
+3. In the Variable Widget, scroll down to the bottom and click **"Clean Slate"** to remove all notes except the BaseNote
+4. Verify the BaseNote settings are what you want:
+   - **frequency**: e.g. `440` (A4)
+   - **tempo**: e.g. `120` (120 BPM)
 
 ## Step 2: Create the Root
 
-1. Click the **BaseNote**
-2. In **"Add Note / Silence"** section, select **"Note"** and **"At Start"**, then click **"Create"**
+1. With the BaseNote selected
+2. In **"Add Note / Silence"** section, select **"Note"**, then click **"Create Note"**
 3. Select the new note
 4. Set frequency:
 

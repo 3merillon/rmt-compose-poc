@@ -57,23 +57,14 @@ new Fraction(60).div(module.findTempo(module.baseNote))
 | Dotted quarter | 1.5 | `beat(base) * (3/2)` |
 | Triplet | 1/3 | `beat(base) * (1/3)` |
 
-## Step 1: Set Up
+## Step 1: Set Up the BaseNote
 
-1. Reset to a fresh workspace
-2. Set BaseNote tempo to 120 BPM:
-
-```
-120
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(120)
-```
-
-</details>
+1. Open RMT Compose
+2. Click the **BaseNote** (orange circle)
+3. In the Variable Widget, scroll down to the bottom and click **"Clean Slate"** to remove all notes except the BaseNote
+4. Verify the BaseNote settings are what you want:
+   - **frequency**: e.g. `440` (A4)
+   - **tempo**: e.g. `120` (120 BPM)
 
 ## Step 2: Create the Beat Duration Helper
 
@@ -101,8 +92,8 @@ Let's create: Quarter - Eighth - Eighth - Half
 
 ### Note 1: Quarter Note
 
-1. Add a note (using **"Add Note / Silence"** section in the Variable Widget)
-2. Frequency: `base.f` (root)
+1. With the BaseNote selected, in **"Add Note / Silence"** section, select **"Note"**, click **"Create Note"**
+2. Select the new note and set Frequency: `base.f` (root)
 3. StartTime: `base.t`
 4. Duration (1 beat):
 

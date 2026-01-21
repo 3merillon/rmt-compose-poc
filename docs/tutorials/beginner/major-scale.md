@@ -25,24 +25,20 @@ Create an 8-note major scale (Do-Re-Mi-Fa-Sol-La-Ti-Do) using pure ratios.
 | 7 | Ti | 15/8 | 1.875 |
 | 8 | Do | 2/1 | 2.000 |
 
-## Step 1: Start Fresh
+## Step 1: Set Up the BaseNote
 
 1. Open RMT Compose
-2. Click **Menu** (☰) > **Load Module** > **Reset to Default Module**
-3. Or load the "octave" interval module as a starting point
+2. Click the **BaseNote** (orange circle)
+3. In the Variable Widget, scroll down to the bottom and click **"Clean Slate"** to remove all notes except the BaseNote
+4. Verify the BaseNote settings are what you want:
+   - **frequency**: e.g. `440` (A4)
+   - **tempo**: e.g. `120` (120 BPM)
 
-## Step 2: Set Up the BaseNote
+## Step 2: Create the Root (Do)
 
-1. Click the **BaseNote** (orange circle)
-2. In the Variable Widget, verify:
-   - **frequency**: `440` (A4, but any frequency works)
-   - **tempo**: `120` (120 BPM)
-
-## Step 3: Create the Root (Do)
-
-1. Click the BaseNote
+1. With the BaseNote selected
 2. In the Variable Widget, find **"Add Note / Silence"** section
-3. Select **"Note"** and **"At End"** > click **"Create"**
+3. Select **"Note"**, then click **"Create Note"**
 4. Select the new note
 5. Set its frequency:
 
@@ -74,7 +70,7 @@ new Fraction(60).div(module.findTempo(module.baseNote))
 
 7. Click **Save**
 
-## Step 4: Create Re (9/8)
+## Step 3: Create Re (9/8)
 
 1. Select the Do note you just created (Note 1)
 2. In **"Add Note / Silence"**, keep **"Note"** and **"At End"** selected, click **"Create Note"**
@@ -95,7 +91,7 @@ module.baseNote.getVariable('frequency').mul(new Fraction(9, 8))
 
 5. Click **Save**
 
-## Step 5: Create Mi (5/4)
+## Step 4: Create Mi (5/4)
 
 1. Select Note 2
 2. Click **"Create Note"** (in **"Add Note / Silence"** section)
@@ -116,7 +112,7 @@ module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
 
 5. Click **Save**
 
-## Step 6: Create Fa (4/3)
+## Step 5: Create Fa (4/3)
 
 1. Select Note 3
 2. Add a new note
@@ -134,7 +130,7 @@ module.baseNote.getVariable('frequency').mul(new Fraction(4, 3))
 ```
 </details>
 
-## Step 7: Create Sol (3/2)
+## Step 6: Create Sol (3/2)
 
 1. Add note after Fa
 2. Set frequency:
@@ -151,7 +147,7 @@ module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 ```
 </details>
 
-## Step 8: Create La (5/3)
+## Step 7: Create La (5/3)
 
 1. Add note after Sol
 2. Set frequency:
@@ -168,7 +164,7 @@ module.baseNote.getVariable('frequency').mul(new Fraction(5, 3))
 ```
 </details>
 
-## Step 9: Create Ti (15/8)
+## Step 8: Create Ti (15/8)
 
 1. Add note after La
 2. Set frequency:
@@ -185,7 +181,7 @@ module.baseNote.getVariable('frequency').mul(new Fraction(15, 8))
 ```
 </details>
 
-## Step 10: Create High Do (2/1)
+## Step 9: Create High Do (2/1)
 
 1. Add note after Ti
 2. Set frequency:
