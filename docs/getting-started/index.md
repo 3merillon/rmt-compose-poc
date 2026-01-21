@@ -20,11 +20,11 @@ No installation required - just open in a modern browser with WebGL2 support.
 
 ```bash
 # Clone the repository
-git clone https://github.com/anthropics/rmt-compose.git
-cd rmt-compose
+git clone https://github.com/3merillon/rmt-compose-poc.git
+cd rmt-compose-poc
 
 # Install dependencies
-npm ci
+npm install
 
 # Start development server
 npm run dev

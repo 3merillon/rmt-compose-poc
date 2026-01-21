@@ -15,7 +15,7 @@ In traditional music notation:
 ### RMT Approach
 In relative music theory:
 - BaseNote frequency = any value (e.g., 440 Hz)
-- E5 = BaseNote × 3/2 (a perfect fifth)
+- E5 = `base.f * (3/2)` (a perfect fifth)
 - The relationship is explicit and exact
 
 This means:
@@ -38,6 +38,17 @@ The BaseNote provides default values for:
 
 All other notes can reference BaseNote properties:
 
+```
+// Frequency relative to BaseNote (perfect fifth)
+base.f * (3/2)
+
+// Start time relative to BaseNote + 1
+base.t + 1
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
 ```javascript
 // Frequency relative to BaseNote
 module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
@@ -45,6 +56,7 @@ module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 // Start time relative to BaseNote
 module.baseNote.getVariable('startTime').add(new Fraction(1))
 ```
+</details>
 
 ::: tip Think of it like a guitar capo
 The BaseNote is like placing a capo on a guitar. It sets the foundation, and all other notes are defined relative to it.
@@ -83,7 +95,18 @@ Every note property is defined by an **expression** - a mathematical formula tha
 
 ### Simple Expressions
 
-Constants are written as Fractions:
+Constants are written as numbers or fractions:
+
+```
+// The number 3/4
+3/4
+
+// The number 440
+440
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // The number 3/4
@@ -92,10 +115,22 @@ new Fraction(3, 4)
 // The number 440
 new Fraction(440)
 ```
+</details>
 
 ### Reference Expressions
 
 Notes can reference other notes:
+
+```
+// BaseNote's frequency
+base.f
+
+// Note 5's start time
+[5].t
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // BaseNote's frequency
@@ -104,10 +139,22 @@ module.baseNote.getVariable('frequency')
 // Note 5's start time
 module.getNoteById(5).getVariable('startTime')
 ```
+</details>
 
 ### Arithmetic Expressions
 
 Combine values with operations:
+
+```
+// BaseNote frequency times 3/2 (perfect fifth)
+base.f * (3/2)
+
+// Note 3's end time (start + duration)
+[3].t + [3].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // BaseNote frequency times 3/2 (perfect fifth)
@@ -117,8 +164,21 @@ module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 module.getNoteById(3).getVariable('startTime')
   .add(module.getNoteById(3).getVariable('duration'))
 ```
+</details>
 
 ### Available Operations
+
+| Operation | DSL Syntax | Example |
+|-----------|------------|---------|
+| Add | `+` | `base.f + 100` |
+| Subtract | `-` | `[3].t - (1/4)` |
+| Multiply | `*` | `base.f * (3/2)` |
+| Divide | `/` | `base.d / 2` |
+| Power | `^` | `2 ^ (1/12)` |
+| Negate | `-` (prefix) | `-base.f` |
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 | Operation | Syntax | Example |
 |-----------|--------|---------|
@@ -128,12 +188,24 @@ module.getNoteById(3).getVariable('startTime')
 | Divide | `.div(x)` | `a.div(new Fraction(2))` |
 | Power | `.pow(x)` | `a.pow(new Fraction(1, 12))` |
 | Negate | `.neg()` | `a.neg()` |
+</details>
 
 ## Dependencies
 
 When a note's expression references another note, it creates a **dependency**.
 
 ### Example
+
+```
+// Note 2 depends on Note 1's frequency (major third above)
+[1].f * (5/4)
+
+// Note 3 depends on Note 2's end time (starts when Note 2 ends)
+[2].t + [2].d
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 // Note 2 depends on Note 1's frequency
@@ -143,6 +215,7 @@ note2.frequency = module.getNoteById(1).getVariable('frequency').mul(new Fractio
 note3.startTime = module.getNoteById(2).getVariable('startTime')
                    .add(module.getNoteById(2).getVariable('duration'))
 ```
+</details>
 
 ### Dependency Visualization
 
@@ -171,6 +244,30 @@ A **module** is a collection of notes that form a composition or reusable patter
 ```json
 {
   "baseNote": {
+    "frequency": "440",
+    "startTime": "0",
+    "tempo": "120",
+    "beatsPerMeasure": "4"
+  },
+  "notes": [
+    {
+      "id": 1,
+      "frequency": "base.f * (5/4)",
+      "startTime": "base.t",
+      "duration": "1",
+      "color": "rgba(255, 100, 100, 0.7)",
+      "instrument": "sine-wave"
+    }
+  ]
+}
+```
+
+<details>
+<summary>Legacy JavaScript syntax (also supported)</summary>
+
+```json
+{
+  "baseNote": {
     "frequency": "new Fraction(440)",
     "startTime": "new Fraction(0)",
     "tempo": "new Fraction(120)",
@@ -188,6 +285,7 @@ A **module** is a collection of notes that form a composition or reusable patter
   ]
 }
 ```
+</details>
 
 ### Built-in Categories
 
@@ -214,10 +312,18 @@ Some notes display an **≈** symbol before their frequency. This indicates an *
 
 Equal temperament systems use irrational ratios:
 
-```javascript
+```
 // 12-TET semitone = 2^(1/12) ≈ 1.05946...
+2 ^ (1/12)
+```
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
 new Fraction(2).pow(new Fraction(1, 12))
 ```
+</details>
 
 This value is irrational - it has infinite non-repeating decimals.
 
@@ -225,9 +331,10 @@ This value is irrational - it has infinite non-repeating decimals.
 
 RMT Compose preserves the **algebraic structure** of these expressions:
 
-```javascript
+```
 // Two semitones up: 2^(1/12) × 2^(1/12) = 2^(1/6)
 // Not collapsed to a float, but kept as a symbolic power
+2 ^ (1/12) * 2 ^ (1/12)  // = 2 ^ (1/6)
 ```
 
 The ≈ symbol reminds you that the displayed value is an approximation of this symbolic representation.
@@ -239,7 +346,6 @@ The ≈ symbol reminds you that the displayed value is an approximation of this 
 | Ratios | Exact fractions (3/2) | Irrational powers (2^(7/12)) |
 | Sound | Pure, resonant | Compromise across all keys |
 | Display | No ≈ symbol | Shows ≈ symbol |
-| Transposition | Each key sounds different | All keys sound equal |
 
 ## Summary
 

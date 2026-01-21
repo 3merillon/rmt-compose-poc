@@ -23,14 +23,14 @@ No installation required. Works in any modern browser with WebGL2 support.
 1. **Clone the repository**
 
 ```bash
-git clone https://github.com/anthropics/rmt-compose.git
-cd rmt-compose
+git clone https://github.com/3merillon/rmt-compose-poc.git
+cd rmt-compose-poc
 ```
 
 2. **Install dependencies**
 
 ```bash
-npm ci
+npm install
 ```
 
 3. **Start the development server**
@@ -111,7 +111,7 @@ If WebGL2 is not available, the workspace will not initialize. Most modern brows
 ### Development server won't start
 
 - Ensure Node.js 18+ is installed: `node --version`
-- Delete `node_modules` and reinstall: `rm -rf node_modules && npm ci`
+- Delete `node_modules` and reinstall: `rm -rf node_modules && npm install`
 - Check if port 3000 is already in use
 
 ## Next Steps

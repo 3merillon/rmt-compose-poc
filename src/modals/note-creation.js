@@ -344,7 +344,37 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
         // Evaluate DSL expression
         const binary = compileDSL(expr);
         const evaluator = new BinaryEvaluator(module);
-        const result = evaluator.evaluate(binary, module.baseNote);
+        // Build an eval cache from current module state
+        const evalCache = new Map();
+        // Add baseNote as ID 0
+        const baseNote = module.baseNote;
+        if (baseNote) {
+          evalCache.set(0, {
+            startTime: baseNote.getVariable('startTime'),
+            duration: baseNote.getVariable('duration'),
+            frequency: baseNote.getVariable('frequency'),
+            tempo: baseNote.getVariable('tempo'),
+            beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
+            measureLength: module.findMeasureLength(baseNote)
+          });
+        }
+        // Add other notes
+        for (const id in module.notes) {
+          const noteObj = module.notes[id];
+          if (noteObj) {
+            try {
+              evalCache.set(parseInt(id, 10), {
+                startTime: noteObj.getVariable('startTime'),
+                duration: noteObj.getVariable('duration'),
+                frequency: noteObj.getVariable('frequency'),
+                tempo: module.findTempo(noteObj),
+                beatsPerMeasure: noteObj.getVariable('beatsPerMeasure'),
+                measureLength: module.findMeasureLength(noteObj)
+              });
+            } catch {}
+          }
+        }
+        const result = evaluator.evaluate(binary, evalCache);
         return result.toFraction();
       } else {
         // Legacy evaluation
