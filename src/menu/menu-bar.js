@@ -34,11 +34,11 @@ const menuAPI = (function() {
                         currentCategory: category,
                         isUploaded: icon.getAttribute('data-uploaded') === 'true'
                     };
-                    if (moduleEntry.isUploaded && icon.moduleData) {
+                    if (icon.moduleData) {
                         if (!icon.moduleData.filename) icon.moduleData.filename = filename;
                         moduleEntry.moduleData = icon.moduleData;
+                        moduleEntry.hasData = true;
                     }
-                    if (icon.moduleData) moduleEntry.hasData = true;
                     if (icon.getAttribute('data-load-failed') === 'true') moduleEntry.loadFailed = true;
                     categoryObj.modules.push(moduleEntry);
                 });
@@ -121,7 +121,12 @@ const menuAPI = (function() {
                                     sectionContainer.appendChild(icon);
                                     continue;
                                 }
-                                if (moduleInfo.originalCategory) {
+                                // First try to use embedded moduleData from localStorage
+                                if (moduleInfo.moduleData) {
+                                    moduleData = moduleInfo.moduleData;
+                                }
+                                // Fall back to cache from filesystem if no embedded data
+                                if (!moduleData && moduleInfo.originalCategory) {
                                     const originalKey = `${moduleInfo.originalCategory}/${moduleInfo.name}`;
                                     if (moduleDataCache[originalKey]) moduleData = moduleDataCache[originalKey];
                                 }
