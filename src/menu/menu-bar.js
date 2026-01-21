@@ -11,6 +11,9 @@ const menuAPI = (function() {
     const PULL_TAB_HEIGHT = 16, TOP_BAR_HEIGHT = 50, SAFETY_MARGIN = 10;
     let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0, hasAppliedInitialPadding = false, targetFitHeight = null;
 
+    // Module drop mode: 'start' = drop at target note's start, 'end' = drop at target note's end
+    let moduleDropMode = 'start';
+
     function saveUIStateToLocalStorage() {
         try {
             const uiState = { categories: [], version: "1.0", timestamp: Date.now() };
@@ -1379,7 +1382,61 @@ const menuAPI = (function() {
 
         buttonsContainer.appendChild(createButton('Add Category', '#ffa800', onAddCategory));
         buttonsContainer.appendChild(createButton('Reload Defaults', '#ff0000', showReloadDefaultsConfirmation));
-        return buttonsContainer;
+
+        // Drop mode toggle row (placed above buttons)
+        const dropModeRow = document.createElement('div');
+        Object.assign(dropModeRow.style, {
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
+            marginTop: '18px', marginBottom: '4px', width: '100%', fontFamily: "'Roboto Mono', monospace", fontSize: '12px', color: '#ffa800'
+        });
+
+        const dropModeLabel = document.createElement('span');
+        dropModeLabel.textContent = 'Drop at:';
+
+        const createToggleOption = (text, value) => {
+            const option = document.createElement('span');
+            option.textContent = text;
+            option.dataset.value = value;
+            Object.assign(option.style, {
+                padding: '4px 8px', borderRadius: '3px', cursor: 'pointer',
+                border: '1px solid #ffa800', transition: 'background-color 0.2s, color 0.2s'
+            });
+            const updateStyle = () => {
+                if (moduleDropMode === value) {
+                    option.style.backgroundColor = '#ffa800';
+                    option.style.color = '#151525';
+                } else {
+                    option.style.backgroundColor = 'transparent';
+                    option.style.color = '#ffa800';
+                }
+            };
+            updateStyle();
+            option.addEventListener('click', () => {
+                moduleDropMode = value;
+                dropModeRow.querySelectorAll('span[data-value]').forEach(opt => {
+                    if (opt.dataset.value === moduleDropMode) {
+                        opt.style.backgroundColor = '#ffa800';
+                        opt.style.color = '#151525';
+                    } else {
+                        opt.style.backgroundColor = 'transparent';
+                        opt.style.color = '#ffa800';
+                    }
+                });
+            });
+            return option;
+        };
+
+        dropModeRow.appendChild(dropModeLabel);
+        dropModeRow.appendChild(createToggleOption('Start', 'start'));
+        dropModeRow.appendChild(createToggleOption('End', 'end'));
+
+        // Wrap with toggle above buttons
+        const wrapper = document.createElement('div');
+        Object.assign(wrapper.style, { display: 'flex', flexDirection: 'column', width: '100%' });
+        wrapper.appendChild(dropModeRow);
+        wrapper.appendChild(buttonsContainer);
+
+        return wrapper;
     }
 
     function createSectionSeparator() {
@@ -1602,7 +1659,8 @@ const menuAPI = (function() {
         loadUIState: loadUIState,
         saveUIStateToLocalStorage: saveUIStateToLocalStorage,
         loadUIStateFromLocalStorage: loadUIStateFromLocalStorage,
-        clearUIStateFromLocalStorage: clearUIStateFromLocalStorage
+        clearUIStateFromLocalStorage: clearUIStateFromLocalStorage,
+        getModuleDropMode: () => moduleDropMode
     };
 })();
 

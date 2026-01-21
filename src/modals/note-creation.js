@@ -318,7 +318,8 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
 
   function updateStartTimeFormula() {
     if (isBase) {
-      stInput.value = `base.t`;
+      // For BaseNote: use base.t or base.t + base.d based on radio selection
+      stInput.value = atStartRadio.checked ? `base.t` : `base.t + base.d`;
       return;
     }
     const parentId = note?.id ?? 0;
