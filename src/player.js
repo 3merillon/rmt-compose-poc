@@ -8,6 +8,7 @@ import { setModule, setEvaluatedNotes } from './store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpressionByFraction } from './utils/simplify.js';
 import { Workspace } from './renderer/webgl2/workspace.js';
 import { menuBar } from './menu/menu-bar.js';
+import { isDSLSyntax } from './dsl/index.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -3181,6 +3182,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 const newFrequency = currentFrequency.mul(new Fraction(factor.n, factor.d));
                 const newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
                 note.setVariable('frequencyString', newRaw);
+            } else if (isDSLSyntax(rawExpression)) {
+                // DSL expression: wrap with DSL multiplication syntax
+                // e.g., base.f -> 2 * base.f (octave up) or (1/2) * base.f (octave down)
+                const factorStr = factor.d === 1 ? `${factor.n}` : `(${factor.n}/${factor.d})`;
+                const wrapped = `${factorStr} * ${rawExpression}`;
+                note.setVariable('frequencyString', wrapped);
             } else if (rawExpression.includes('.pow(')) {
                 // Corrupted note with .pow() - wrap in multiplication to preserve the TET expression
                 // Don't simplify as it would destroy the .pow() expression

@@ -29,7 +29,7 @@ A major triad consists of:
 ## Step 2: Create the Root
 
 1. Click the **BaseNote**
-2. Click **"Add Note"** > select **"Note"** and **"At Start"** > **"Create Note"**
+2. In **"Add Note / Silence"** section, select **"Note"** and **"At Start"**, then click **"Create"**
 3. Select the new note
 4. Set frequency:
 
@@ -48,7 +48,7 @@ module.baseNote.getVariable('frequency')
 5. Set duration to a whole note:
 
 ```
-60 / tempo(base) * 4
+beat(base) * 4
 ```
 
 <details>
@@ -63,7 +63,7 @@ new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(4))
 
 ## Step 3: Create the Third
 
-1. With the root selected, click **"Create Note"** (with **"At Start"** selected)
+1. With the root selected, click **"Create Note"** in **"Add Note / Silence"** (with **"At Start"** selected)
 2. Select the new note
 3. Set frequency (major third = 5/4):
 
@@ -85,7 +85,7 @@ module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
 ## Step 4: Create the Fifth
 
 1. Select the root note again
-2. Click **"Create Note"** (with **"At Start"** selected)
+2. Click **"Create Note"** in **"Add Note / Silence"** (with **"At Start"** selected)
 3. Select the new note
 4. Set frequency (perfect fifth = 3/2):
 
@@ -205,7 +205,7 @@ Other common chords in just intonation:
 
 ## What You Learned
 
-- Creating simultaneous notes using "Add at Same Time"
+- Creating simultaneous notes using "At Start" positioning
 - The ratios that make a major chord
 - How to verify chord structure visually and aurally
 - The difference between major and minor thirds

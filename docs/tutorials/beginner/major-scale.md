@@ -41,9 +41,10 @@ Create an 8-note major scale (Do-Re-Mi-Fa-Sol-La-Ti-Do) using pure ratios.
 ## Step 3: Create the Root (Do)
 
 1. Click the BaseNote
-2. Click **"Add Note"** > select **"Note"** and **"At End"** > **"Create Note"**
-3. Select the new note
-4. Set its frequency:
+2. In the Variable Widget, find **"Add Note / Silence"** section
+3. Select **"Note"** and **"At End"** > click **"Create"**
+4. Select the new note
+5. Set its frequency:
 
 ```
 base.f
@@ -57,10 +58,10 @@ module.baseNote.getVariable('frequency')
 ```
 </details>
 
-5. Set its duration to a quarter note:
+6. Set its duration to a quarter note:
 
 ```
-60 / tempo(base)
+beat(base)
 ```
 
 <details>
@@ -71,12 +72,12 @@ new Fraction(60).div(module.findTempo(module.baseNote))
 ```
 </details>
 
-6. Click **Save**
+7. Click **Save**
 
 ## Step 4: Create Re (9/8)
 
 1. Select the Do note you just created (Note 1)
-2. Click **"Create Note"** (with **"At End"** selected)
+2. In **"Add Note / Silence"**, keep **"Note"** and **"At End"** selected, click **"Create Note"**
 3. Select the new note (Note 2)
 4. Set its frequency:
 
@@ -97,7 +98,7 @@ module.baseNote.getVariable('frequency').mul(new Fraction(9, 8))
 ## Step 5: Create Mi (5/4)
 
 1. Select Note 2
-2. Click **"Create Note"**
+2. Click **"Create Note"** (in **"Add Note / Silence"** section)
 3. Select Note 3
 4. Set its frequency:
 
@@ -246,7 +247,7 @@ Modify your scale to descend from high Do to low Do.
 Change all durations to half notes:
 
 ```
-60 / tempo(base) * 2
+beat(base) * 2
 ```
 
 <details>
@@ -260,7 +261,7 @@ new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 ## What You Learned
 
 - Major scale intervals as pure ratios
-- Creating sequential notes using "Add at Start+Duration"
+- Creating sequential notes using "At End" positioning
 - How changing BaseNote transposes the entire scale
 - The relationship between tempo and duration
 

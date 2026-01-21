@@ -146,9 +146,9 @@ For each doc page, re-examine relevant source code:
 ### Phase 6: Tutorials - Beginner
 | # | File | Status | Issues Found |
 |---|------|--------|--------------|
-| 24 | `docs/tutorials/beginner/major-scale.md` | ⬜ Pending | |
-| 25 | `docs/tutorials/beginner/major-triad.md` | ⬜ Pending | |
-| 26 | `docs/tutorials/beginner/rhythm.md` | ⬜ Pending | |
+| 24 | `docs/tutorials/beginner/major-scale.md` | ✅ Complete | Fixed: UI label "Add Note" → "Add Note / Silence"; Fixed: "Add at Start+Duration" → "At End"; Fixed: `60 / tempo(base)` → `beat(base)` |
+| 25 | `docs/tutorials/beginner/major-triad.md` | ✅ Complete | Fixed: UI labels for "Add Note / Silence" section; Fixed: "Add at Same Time" → "At Start"; Fixed: duration expression to use `beat(base)` |
+| 26 | `docs/tutorials/beginner/rhythm.md` | ✅ Complete | Fixed: All `60 / tempo(base)` → `beat(base)`; Fixed: Note duration reference table; Fixed: Duration quick controls description (icon buttons + dot modifiers); Fixed: Step instructions to reference "Add Note / Silence" and position options |
 
 ### Phase 7: Tutorials - Intermediate
 | # | File | Status | Issues Found |
@@ -157,6 +157,10 @@ For each doc page, re-examine relevant source code:
 | 28 | `docs/tutorials/intermediate/octaves.md` | ⬜ Pending | |
 | 29 | `docs/tutorials/intermediate/measures.md` | ⬜ Pending | |
 | 30 | `docs/tutorials/intermediate/index.md` | ⬜ Pending | |
+
+**Note for Phase 7+:** Consider adding tips about the Module Bar **Drop Mode Toggle** where appropriate:
+- For scale-building tutorials: mention using **"End"** mode to chain modules sequentially
+- For chord-building tutorials: mention using **"Start"** mode to stack modules at the same time
 
 ### Phase 8: Tutorials - Advanced
 | # | File | Status | Issues Found |
@@ -366,6 +370,15 @@ Check for and remove links to non-existent pages like `/about/changelog`
 ### 16. "Real-time" Claims
 **Wrong:** "Updates in real-time as you type"
 **Correct:** Changes take effect on save, not while typing
+
+### 17. Module Bar Drop Mode Toggle
+**New feature:** The Module Bar has a "Drop at:" toggle with two modes:
+- **Start**: Module notes are placed at the beginning of the target note (references `base.t` become `[target].t`)
+- **End**: Module notes are placed at the end of the target note (references `base.t` become `[target].t + [target].d`)
+
+**Tutorial tip:**
+- **End mode** is ideal for building **scales** - drop notes sequentially to chain them one after another
+- **Start mode** is ideal for building **chords** - drop notes to stack them at the same start time
 
 ---
 

@@ -27,7 +27,10 @@ Time in RMT Compose is based on:
 // Duration of one beat in seconds
 beatDuration = 60 / tempo
 
-// In RMT expression:
+// In RMT expression (preferred shorthand):
+beat(base)
+
+// Or equivalently:
 60 / tempo(base)
 ```
 
@@ -46,13 +49,13 @@ new Fraction(60).div(module.findTempo(module.baseNote))
 
 | Note | Beats | Expression |
 |------|-------|------------|
-| Whole | 4 | `beatDuration * 4` |
-| Half | 2 | `beatDuration * 2` |
-| Quarter | 1 | `beatDuration` |
-| Eighth | 0.5 | `beatDuration * (1/2)` |
-| Sixteenth | 0.25 | `beatDuration * (1/4)` |
-| Dotted quarter | 1.5 | `beatDuration * (3/2)` |
-| Triplet | 1/3 | `beatDuration * (1/3)` |
+| Whole | 4 | `beat(base) * 4` |
+| Half | 2 | `beat(base) * 2` |
+| Quarter | 1 | `beat(base)` |
+| Eighth | 0.5 | `beat(base) * (1/2)` |
+| Sixteenth | 0.25 | `beat(base) * (1/4)` |
+| Dotted quarter | 1.5 | `beat(base) * (3/2)` |
+| Triplet | 1/3 | `beat(base) * (1/3)` |
 
 ## Step 1: Set Up
 
@@ -78,7 +81,7 @@ First, understand the beat duration expression:
 
 ```
 // This expression equals one beat duration
-60 / tempo(base)
+beat(base)
 ```
 
 We'll use this as the base for all durations.
@@ -98,13 +101,13 @@ Let's create: Quarter - Eighth - Eighth - Half
 
 ### Note 1: Quarter Note
 
-1. Add a note
+1. Add a note (using **"Add Note / Silence"** section in the Variable Widget)
 2. Frequency: `base.f` (root)
-3. StartTime: `0`
+3. StartTime: `base.t`
 4. Duration (1 beat):
 
 ```
-60 / tempo(base)
+beat(base)
 ```
 
 <details>
@@ -118,13 +121,13 @@ new Fraction(60).div(module.findTempo(module.baseNote))
 
 ### Note 2: First Eighth Note
 
-1. Add note after Note 1
+1. Add note after Note 1 (select Note 1, use **"At End"**)
 2. Frequency: `base.f * (9/8)` (Re)
 3. StartTime: `[1].t + [1].d`
 4. Duration (0.5 beats):
 
 ```
-60 / tempo(base) * (1/2)
+beat(base) * (1/2)
 ```
 
 <details>
@@ -138,13 +141,13 @@ new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
 
 ### Note 3: Second Eighth Note
 
-1. Add note after Note 2
+1. Add note after Note 2 (select Note 2, use **"At End"**)
 2. Frequency: `base.f * (5/4)` (Mi)
 3. StartTime: `[2].t + [2].d`
 4. Duration (0.5 beats):
 
 ```
-60 / tempo(base) * (1/2)
+beat(base) * (1/2)
 ```
 
 <details>
@@ -158,13 +161,13 @@ new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
 
 ### Note 4: Half Note
 
-1. Add note after Note 3
+1. Add note after Note 3 (select Note 3, use **"At End"**)
 2. Frequency: `base.f * (3/2)` (Sol)
 3. StartTime: `[3].t + [3].d`
 4. Duration (2 beats):
 
 ```
-60 / tempo(base) * 2
+beat(base) * 2
 ```
 
 <details>
@@ -191,18 +194,20 @@ In the workspace:
 
 ## Using Duration Quick Controls
 
-Instead of typing expressions, use the Variable Widget shortcuts:
+Instead of typing expressions, use the Variable Widget duration presets:
 
 1. Select a note
 2. Find the **duration** row
-3. Click the note-length icons:
-   - 𝅝 = Whole note
-   - 𝅗𝅥 = Half note
-   - ♩ = Quarter note
-   - ♪ = Eighth note
-   - 𝅘𝅥𝅯 = Sixteenth note
+3. Click the note-length icon buttons:
+   - Whole note (4 beats)
+   - Half note (2 beats)
+   - Quarter note (1 beat)
+   - Eighth note (1/2 beat)
+   - Sixteenth note (1/4 beat)
 
-4. Add dots for dotted notes (1.5× or 1.75× duration)
+4. Use the dot buttons (`.` or `..`) for dotted notes:
+   - Single dot = 1.5× duration
+   - Double dot = 1.75× duration
 
 ## Exercises
 
@@ -226,7 +231,7 @@ Create triplet rhythm (3 notes in the space of 2):
 
 ```
 // Triplet duration (1/3 of a beat)
-60 / tempo(base) * (1/3)
+beat(base) * (1/3)
 ```
 
 <details>

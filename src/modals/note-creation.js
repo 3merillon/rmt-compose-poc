@@ -228,39 +228,45 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   modeToggle.appendChild(silenceLabel);
   addSection.appendChild(modeToggle);
 
-  // At start / at end (relative to parent)
-  const posToggle = document.createElement('div');
-  posToggle.style.display = 'flex';
-  posToggle.style.alignItems = 'center';
-  posToggle.style.gap = '10px';
-  posToggle.style.marginBottom = '10px';
+  // At start / at end (relative to parent) - only for non-base notes
+  let posToggle = null;
+  let atStartRadio = null;
+  let atEndRadio = null;
 
-  const atStartRadio = document.createElement('input');
-  atStartRadio.type = 'radio';
-  atStartRadio.name = `addPos${isBase ? 'Base' : ''}`;
-  atStartRadio.value = 'start';
-  atStartRadio.id = `addPos${isBase ? 'Base' : ''}Start`;
+  if (!isBase) {
+    posToggle = document.createElement('div');
+    posToggle.style.display = 'flex';
+    posToggle.style.alignItems = 'center';
+    posToggle.style.gap = '10px';
+    posToggle.style.marginBottom = '10px';
 
-  const atStartLabel = document.createElement('label');
-  atStartLabel.textContent = 'At Start';
-  atStartLabel.htmlFor = atStartRadio.id;
+    atStartRadio = document.createElement('input');
+    atStartRadio.type = 'radio';
+    atStartRadio.name = `addPos`;
+    atStartRadio.value = 'start';
+    atStartRadio.id = `addPosStart`;
 
-  const atEndRadio = document.createElement('input');
-  atEndRadio.type = 'radio';
-  atEndRadio.name = `addPos${isBase ? 'Base' : ''}`;
-  atEndRadio.value = 'end';
-  atEndRadio.id = `addPos${isBase ? 'Base' : ''}End`;
-  atEndRadio.checked = true;
+    const atStartLabel = document.createElement('label');
+    atStartLabel.textContent = 'At Start';
+    atStartLabel.htmlFor = atStartRadio.id;
 
-  const atEndLabel = document.createElement('label');
-  atEndLabel.textContent = 'At End';
-  atEndLabel.htmlFor = atEndRadio.id;
+    atEndRadio = document.createElement('input');
+    atEndRadio.type = 'radio';
+    atEndRadio.name = `addPos`;
+    atEndRadio.value = 'end';
+    atEndRadio.id = `addPosEnd`;
+    atEndRadio.checked = true;
 
-  posToggle.appendChild(atStartRadio);
-  posToggle.appendChild(atStartLabel);
-  posToggle.appendChild(atEndRadio);
-  posToggle.appendChild(atEndLabel);
-  addSection.appendChild(posToggle);
+    const atEndLabel = document.createElement('label');
+    atEndLabel.textContent = 'At End';
+    atEndLabel.htmlFor = atEndRadio.id;
+
+    posToggle.appendChild(atStartRadio);
+    posToggle.appendChild(atStartLabel);
+    posToggle.appendChild(atEndRadio);
+    posToggle.appendChild(atEndLabel);
+    addSection.appendChild(posToggle);
+  }
 
   const noteRefForTempo = "base";
 
@@ -318,8 +324,8 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
 
   function updateStartTimeFormula() {
     if (isBase) {
-      // For BaseNote: use base.t or base.t + base.d based on radio selection
-      stInput.value = atStartRadio.checked ? `base.t` : `base.t + base.d`;
+      // For BaseNote: always use base.t (no At Start/At End toggle)
+      stInput.value = `base.t`;
       return;
     }
     const parentId = note?.id ?? 0;
@@ -329,8 +335,8 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   }
 
   updateStartTimeFormula();
-  atStartRadio.addEventListener('change', updateStartTimeFormula);
-  atEndRadio.addEventListener('change', updateStartTimeFormula);
+  if (atStartRadio) atStartRadio.addEventListener('change', updateStartTimeFormula);
+  if (atEndRadio) atEndRadio.addEventListener('change', updateStartTimeFormula);
 
   stRaw.appendChild(stInput);
   stRow.value.appendChild(stEval);
