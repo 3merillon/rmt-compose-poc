@@ -306,16 +306,16 @@ The harmonic series contains all pure intervals:
 
 ### Reducing to One Octave
 
-Bring harmonics into the same octave:
+Bring harmonics into the same octave by dividing by powers of 2 until the ratio is between 1 and 2:
 
 ```
-// 3rd harmonic → fifth: 3/2
+// 3rd harmonic → fifth: 3 ÷ 2 = 3/2
 * (3/2)
 
-// 5th harmonic → major third: 5/4
+// 5th harmonic → major third: 5 ÷ 4 = 5/4
 * (5/4)
 
-// 7th harmonic → harmonic seventh: 7/4
+// 7th harmonic → harmonic seventh: 7 ÷ 4 = 7/4
 * (7/4)
 ```
 
@@ -357,6 +357,14 @@ Compare intervals with similar sizes but different qualities:
 * (15/8)   // Major: leading
 * (9/5)    // Minor: bluesy
 ```
+
+## Using the Module Bar for Intervals
+
+> **Tip**: The Module Bar's **"Drop at:"** toggle speeds up interval exploration:
+> - **Start mode**: Stack interval notes at the same time for harmonic comparison (chords)
+> - **End mode**: Chain intervals sequentially for melodic comparison (sequences)
+
+When you've saved interval modules to your library, you can quickly drop them onto your workspace to build chords or progressions.
 
 ## Saving Your Discoveries
 

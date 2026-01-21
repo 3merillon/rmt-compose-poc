@@ -173,10 +173,10 @@ For each doc page, re-examine relevant source code:
 ### Phase 9: Tutorials - Workflows
 | # | File | Status | Issues Found |
 |---|------|--------|--------------|
-| 35 | `docs/tutorials/workflows/intervals.md` | ⬜ Pending | |
-| 36 | `docs/tutorials/workflows/module-library.md` | ⬜ Pending | |
-| 37 | `docs/tutorials/workflows/microtonal-experiments.md` | ⬜ Pending | |
-| 38 | `docs/tutorials/workflows/index.md` | ⬜ Pending | |
+| 35 | `docs/tutorials/workflows/intervals.md` | ✅ Complete | Added Module Bar Drop Mode tip for interval exploration |
+| 36 | `docs/tutorials/workflows/module-library.md` | ✅ Complete | Fixed: `60 / tempo(base)` → `beat(base)` in Rhythm Template; Added Module Bar Drop Mode section; **Rewrote** save/load workflow (was wrong UI); Fixed category structure (no nested subcategories); Fixed export/import instructions; Added persistence info |
+| 37 | `docs/tutorials/workflows/microtonal-experiments.md` | ✅ Complete | Added Module Bar Drop Mode tip for experimentation |
+| 38 | `docs/tutorials/workflows/index.md` | ✅ Complete | None - navigation only |
 
 ### Phase 10: Reference - Expressions
 | # | File | Status | Issues Found |

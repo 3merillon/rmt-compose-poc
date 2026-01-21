@@ -440,6 +440,14 @@ Try unusual divisions:
 * 2^(10/17)
 ```
 
+## Using the Module Bar for Experiments
+
+> **Tip**: The Module Bar's **"Drop at:"** toggle speeds up experimentation:
+> - **Start mode**: Stack intervals at the same time for harmonic comparison (chords)
+> - **End mode**: Chain intervals sequentially for melodic comparison (scales)
+
+When you've saved microtonal interval modules, you can quickly drop them to build scales or chords in different tuning systems.
+
 ## Recording Your Experiments
 
 ### Save Successful Discoveries

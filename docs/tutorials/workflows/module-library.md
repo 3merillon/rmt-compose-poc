@@ -78,67 +78,65 @@ duration: module.getNoteById(1).getVariable('duration')
 
 ### Step 2: Save the Module
 
-1. Click **File** in the top bar
-2. Select **Save Module**
-3. Enter a descriptive name: "Major Triad (Just)"
-4. Choose or create a category
-5. Click **Save**
+1. Click the **Menu** button (plus/minus icon) in the top bar
+2. Click **Save Module**
+3. A JSON file downloads to your computer (e.g., `module.json`)
+4. Rename the downloaded file descriptively: `major-triad-just.json`
 
-### Step 3: Test the Module
+### Step 3: Add to Module Bar
 
-1. Clear the workspace
-2. Open the Module Bar
-3. Find your saved module
-4. Drag it onto the workspace
-5. Verify all notes and dependencies load correctly
+1. In the Module Bar, find the category where you want the module (e.g., **Chords**)
+2. Click the **+** placeholder icon in that category
+3. Select your saved JSON file
+4. The module appears in the category
+
+### Step 4: Test the Module
+
+1. Drag the module from the Module Bar onto a note in the workspace
+2. Verify all notes and dependencies load correctly
+3. Play to confirm the sound is correct
 
 ## Organizing Categories
 
-### Suggested Category Structure
+### Default Categories
+
+The Module Bar comes with four built-in categories:
+
+| Category | Description |
+|----------|-------------|
+| **Intervals** | Single intervals (octave, fifth, third, etc.) |
+| **Chords** | Common chord voicings (major, minor, etc.) |
+| **Melodies** | Example sequences including TET scales |
+| **Custom** | Your personal module library |
+
+### Suggested Organization
+
+Since categories are currently flat (no nested subcategories), use naming conventions to organize:
 
 ```
-Scales
-├── Major Scales
-├── Minor Scales
-├── Modes
-├── Pentatonic
-└── Microtonal
+Scales (category)
+├── Major Scale C.json
+├── Major Scale D.json
+├── Minor Scale A.json
+├── Pentatonic C.json
+└── 19-TET Scale.json
 
-Chords
-├── Triads
-├── Seventh Chords
-├── Extended
-└── Clusters
-
-Progressions
-├── Jazz
-├── Classical
-├── Pop
-└── Custom
-
-Rhythms
-├── Basic
-├── Syncopated
-└── Polyrhythmic
-
-TET Systems
-├── 12-TET
-├── 19-TET
-├── 31-TET
-└── Bohlen-Pierce
-
-Templates
-├── Song Structures
-├── Accompaniment
-└── Solo Frameworks
+Chords (category)
+├── Major Triad.json
+├── Minor Triad.json
+├── Major 7th.json
+├── Dominant 7th.json
+└── Diminished.json
 ```
+
+**Tip**: Use descriptive filenames since module names in the Module Bar are derived from filenames.
 
 ### Creating a New Category
 
-1. Open Module Bar settings
-2. Click **Add Category**
-3. Enter category name
-4. Drag modules into the new category
+1. Click the **Add Category** button in the Module Bar
+2. Enter a name for the category (e.g., "My Progressions")
+3. The new category appears in the Module Bar
+4. Drag existing modules into it, or click **+** to upload new ones
 
 ## Building Useful Templates
 
@@ -203,11 +201,11 @@ frequency: module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
 
 // Beat 1 marker
 startTime: 0
-duration: 60 / tempo(base)
+duration: beat(base)
 
 // Beat 2 marker
 startTime: [1].t + [1].d
-duration: 60 / tempo(base)
+duration: beat(base)
 
 // ... continue for full measure
 ```
@@ -295,6 +293,13 @@ Add a description when saving:
 
 ## Combining Modules
 
+### Module Bar Drop Mode
+
+The Module Bar has a **"Drop at:"** toggle that controls how modules integrate:
+
+- **Start mode**: Module notes are placed at the beginning of the target note (references `base.t` become `[target].t`). Ideal for **building chords** - stack modules at the same start time.
+- **End mode**: Module notes are placed at the end of the target note (references `base.t` become `[target].t + [target].d`). Ideal for **building scales** - chain modules sequentially.
+
 ### Drag and Drop
 
 You can load multiple modules into one workspace:
@@ -332,39 +337,60 @@ frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2)
 
 </details>
 
-## Exporting and Sharing
+## Saving and Loading
 
-### Export a Module
+### Save Your Current Workspace as a Module
 
-1. Right-click the module in the Module Bar
-2. Select **Export**
-3. Save the `.json` file
+1. Click **Menu** (plus/minus icon) in the top bar
+2. Click **Save Module**
+3. A JSON file downloads to your computer
+4. Rename it descriptively (e.g., `major-triad-just.json`)
 
-### Import a Module
+### Add a Module to the Module Bar
 
-1. Click **File** → **Import Module**
-2. Select the `.json` file
-3. Choose a category
-4. The module appears in your library
+1. Find the category where you want the module
+2. Click the **+** placeholder icon
+3. Select your JSON file
+4. The module appears and can be dragged onto the workspace
+
+### Save Your Module Bar Layout
+
+To preserve your category organization and uploaded modules:
+
+1. Click **Save UI** in the Module Bar
+2. A `ui-state.json` file downloads
+3. This saves category order, module positions, and uploaded module data
+
+### Restore Your Module Bar Layout
+
+1. Click **Load UI** in the Module Bar
+2. Select a previously saved `ui-state.json` file
+3. Your categories and modules are restored
 
 ### Module File Format
 
-Modules are saved as JSON:
+Modules are saved as JSON with DSL expressions:
 
 ```json
 {
-  "name": "Major Triad (Just)",
   "baseNote": {
     "frequency": "440",
     "startTime": "0",
-    "duration": "1"
+    "tempo": "120",
+    "beatsPerMeasure": "4"
   },
   "notes": [
     {
       "id": 1,
       "frequency": "base.f",
-      "startTime": "0",
-      "duration": "1"
+      "startTime": "base.t",
+      "duration": "beat(base)"
+    },
+    {
+      "id": 2,
+      "frequency": "base.f * (5/4)",
+      "startTime": "[1].t",
+      "duration": "[1].d"
     }
   ]
 }
@@ -374,22 +400,32 @@ Modules are saved as JSON:
 
 ### Updating a Module
 
-1. Load the module
-2. Make changes
-3. Save with the same name (overwrites)
+1. Drag the module onto the workspace
+2. Make your changes
+3. Click **Menu** > **Save Module**
+4. Delete the old version from Module Bar (click the red **×** on the module icon)
+5. Upload the new JSON file to the same category
 
 ### Versioning
 
-For significant changes, consider saving as a new module:
-- "Major Scale v1"
-- "Major Scale v2 (with rhythm)"
+For significant changes, save with version numbers in the filename:
+- `major-scale-v1.json`
+- `major-scale-v2-with-rhythm.json`
 
 ### Cleaning Up
 
-Periodically review your library:
-- Remove duplicates
-- Consolidate similar modules
-- Update outdated patterns
+- Click the red **×** on any module icon to remove it
+- Use **Reload Defaults** to reset to factory modules (warning: removes custom uploads)
+- Use **Save UI** before cleaning to back up your organization
+
+### Persistence
+
+The Module Bar auto-saves to browser localStorage:
+- Every 30 seconds
+- When the page closes
+- After any change (add, remove, reorder)
+
+**Note**: Clearing browser data will lose your Module Bar customizations. Use **Save UI** to create a backup file.
 
 ## Example: Building a Complete Library
 
@@ -439,19 +475,41 @@ Create modules for each pure interval:
 - 31-TET Scale
 - Bohlen-Pierce Scale
 
+## Adding Modules Permanently (Local Development)
+
+To add modules that persist across all users (in the source code):
+
+1. Create your module JSON file
+2. Place it in the appropriate category folder:
+   ```
+   public/modules/custom/my-module.json
+   ```
+3. Edit that category's `index.json` to list your file:
+   ```json
+   [
+     "existing-module.json",
+     "my-module.json"
+   ]
+   ```
+4. Rebuild or refresh the app
+
 ## Tips for Library Growth
 
 ### 1. Save Early, Save Often
 
 Don't wait until something is perfect. Save works-in-progress.
 
-### 2. Name Descriptively
+### 2. Name Files Descriptively
 
-"Chord 1" → "Major 7th (Root Position, Just)"
+Since module names come from filenames:
+- ✓ `major-seventh-chord.json`
+- ✓ `19-TET-scale.json`
+- ✗ `test.json`
+- ✗ `untitled.json`
 
-### 3. Group Related Modules
+### 3. Back Up Regularly
 
-Keep inversions together, related progressions together, etc.
+Use **Save UI** to export your Module Bar configuration before clearing browser data.
 
 ### 4. Experiment
 
@@ -461,5 +519,5 @@ Your library should grow from exploration. Save interesting accidents!
 
 - [Interval Exploration](/tutorials/workflows/intervals) - Systematically study intervals
 - [Microtonal Experiments](/tutorials/workflows/microtonal-experiments) - Build a microtonal collection
-- [Module Format Reference](/reference/properties/module-schema) - Technical module details
+- [Module Bar Reference](/user-guide/interface/module-bar) - Full Module Bar documentation
 
