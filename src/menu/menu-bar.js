@@ -18,7 +18,7 @@ const menuAPI = (function() {
 
     function saveUIStateToLocalStorage() {
         try {
-            const uiState = { categories: [], version: "1.0", timestamp: Date.now() };
+            const uiState = { categories: [], version: "1.0", timestamp: Date.now(), dropMode: moduleDropMode };
             categoryContainers.forEach(container => {
                 if (!container) return;
                 const categoryLabel = container.querySelector('.category-label');
@@ -60,6 +60,7 @@ const menuAPI = (function() {
             const storedState = localStorage.getItem('ui-state');
             if (!storedState) return false;
             const uiState = JSON.parse(storedState);
+            if (uiState.dropMode) moduleDropMode = uiState.dropMode;
             if (!uiState.categories || !Array.isArray(uiState.categories) || uiState.categories.length === 0) return false;
             domCache.iconsContainer.innerHTML = '';
             categoryContainers = [];
@@ -1417,6 +1418,7 @@ const menuAPI = (function() {
             updateStyle();
             option.addEventListener('click', () => {
                 moduleDropMode = value;
+                saveUIStateToLocalStorage();
                 dropModeRow.querySelectorAll('span[data-value]').forEach(opt => {
                     if (opt.dataset.value === moduleDropMode) {
                         opt.style.backgroundColor = '#ffa800';
