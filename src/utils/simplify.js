@@ -15,10 +15,17 @@
  * - Safety-check: evaluate before/after with a module instance; if mismatch, return original.
  */
 import Fraction from 'fraction.js';
+import { ExpressionCompiler } from '../expression-compiler.js';
+import { BinaryEvaluator } from '../binary-evaluator.js';
+import { isDSLSyntax, compileDSL } from '../dsl/index.js';
+import { validateExpressionSyntax } from './safe-expression-validator.js';
+
+// Singleton compiler for safe evaluation
+const safeCompiler = new ExpressionCompiler();
 
 // Memoization caches
 const __simplifyCache = new Map(); // key: kind + '|' + expr
-const __evalFnCache = new Map();   // compile cache for evaluateExpr
+const __evalBinaryCache = new Map(); // compile cache for safe binary evaluation
 
 // =============== Public API ===============
 export function simplifyGeneric(expr, kind, moduleInstance) {
@@ -102,14 +109,72 @@ function safeEquivalent(oldExpr, newExpr, moduleInstance) {
   }
 }
 
+/**
+ * Safely evaluate an expression using binary compilation.
+ * SECURITY: This function DOES NOT use eval() or new Function().
+ */
 function evaluateExpr(expr, moduleInstance) {
-  let f = __evalFnCache.get(expr);
-  if (!f) {
-    // eslint-disable-next-line no-new-func
-    f = new Function('module', 'Fraction', `return (${expr});`);
-    __evalFnCache.set(expr, f);
+  // Check validation first
+  const validation = validateExpressionSyntax(expr);
+  if (!validation.valid) {
+    return null;
   }
-  return f(moduleInstance, Fraction);
+
+  // Get or create compiled binary expression
+  let binary = __evalBinaryCache.get(expr);
+  if (!binary) {
+    try {
+      if (isDSLSyntax(expr)) {
+        binary = compileDSL(expr);
+      } else {
+        binary = safeCompiler.compile(expr);
+      }
+      __evalBinaryCache.set(expr, binary);
+    } catch {
+      return null;
+    }
+  }
+
+  // Build eval cache
+  const evalCache = new Map();
+  if (moduleInstance) {
+    const baseNote = moduleInstance.baseNote;
+    if (baseNote) {
+      try {
+        evalCache.set(0, {
+          startTime: baseNote.getVariable('startTime'),
+          duration: baseNote.getVariable('duration'),
+          frequency: baseNote.getVariable('frequency'),
+          tempo: baseNote.getVariable('tempo'),
+          beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
+          measureLength: moduleInstance.findMeasureLength?.(baseNote)
+        });
+      } catch {}
+    }
+    for (const id in moduleInstance.notes || {}) {
+      const noteObj = moduleInstance.notes[id];
+      if (noteObj) {
+        try {
+          evalCache.set(parseInt(id, 10), {
+            startTime: noteObj.getVariable?.('startTime'),
+            duration: noteObj.getVariable?.('duration'),
+            frequency: noteObj.getVariable?.('frequency'),
+            tempo: moduleInstance.findTempo?.(noteObj),
+            beatsPerMeasure: noteObj.getVariable?.('beatsPerMeasure'),
+            measureLength: moduleInstance.findMeasureLength?.(noteObj)
+          });
+        } catch {}
+      }
+    }
+  }
+
+  // Evaluate using safe binary evaluator
+  try {
+    const evaluator = new BinaryEvaluator(moduleInstance);
+    return evaluator.evaluate(binary, evalCache);
+  } catch {
+    return null;
+  }
 }
 
 function valueOfMaybeFraction(x) {

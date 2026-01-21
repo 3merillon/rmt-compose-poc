@@ -6,7 +6,14 @@ import { eventBus } from '../utils/event-bus.js';
 import Fraction from 'fraction.js';
 import { getModule, setEvaluatedNotes, getInstrumentManager } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
-import { decompileToDSL } from '../dsl/index.js';
+import { decompileToDSL, isDSLSyntax, compileDSL } from '../dsl/index.js';
+import { ExpressionCompiler } from '../expression-compiler.js';
+import { BinaryEvaluator } from '../binary-evaluator.js';
+import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
+import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
+
+// Singleton compiler for safe evaluation
+const safeCompiler = new ExpressionCompiler();
 
 // Helpers
 function pauseIfPlaying() {
@@ -64,7 +71,8 @@ function buildEvaluatedDiv(value) {
     }
   }
 
-  evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${displayValue}`;
+  // SECURITY: Escape displayValue to prevent XSS
+  evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${escapeHtml(displayValue)}`;
   return evaluatedDiv;
 }
 
@@ -404,21 +412,62 @@ function createDurationSelector(rawInput, saveButton, note, value) {
       }
 
       // 3) Final fallback: evaluate raw string directly to seconds and convert to beats
+      // SECURITY: Use safe binary compilation instead of new Function()
       if (!found && raw) {
         try {
           const moduleInstance = getModule();
-          // eslint-disable-next-line no-new-func
-          const fn = new Function('module', 'Fraction', `return (${raw});`);
-          const val = fn(moduleInstance, Fraction);
-          const durationSec = (val && typeof val.valueOf === 'function') ? val.valueOf() : Number(val);
-          const tempoVal = moduleInstance?.findTempo?.(note)?.valueOf?.();
-          if (isFinite(durationSec) && isFinite(tempoVal) && tempoVal > 0) {
-            const beatLen = 60 / tempoVal;
-            const beats = durationSec / beatLen;
-            const frac = new Fraction(beats);
-            mNum = frac.n;
-            mDen = frac.d;
-            found = true;
+          const validation = validateExpressionSyntax(raw);
+          if (validation.valid) {
+            // Compile using safe parser
+            let binary;
+            if (isDSLSyntax(raw)) {
+              binary = compileDSL(raw);
+            } else {
+              binary = safeCompiler.compile(raw);
+            }
+
+            // Build eval cache
+            const evalCache = new Map();
+            const baseNote = moduleInstance?.baseNote;
+            if (baseNote) {
+              evalCache.set(0, {
+                startTime: baseNote.getVariable('startTime'),
+                duration: baseNote.getVariable('duration'),
+                frequency: baseNote.getVariable('frequency'),
+                tempo: baseNote.getVariable('tempo'),
+                beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
+                measureLength: moduleInstance.findMeasureLength?.(baseNote)
+              });
+            }
+            for (const id in moduleInstance?.notes || {}) {
+              const noteObj = moduleInstance.notes[id];
+              if (noteObj) {
+                try {
+                  evalCache.set(parseInt(id, 10), {
+                    startTime: noteObj.getVariable?.('startTime'),
+                    duration: noteObj.getVariable?.('duration'),
+                    frequency: noteObj.getVariable?.('frequency'),
+                    tempo: moduleInstance.findTempo?.(noteObj),
+                    beatsPerMeasure: noteObj.getVariable?.('beatsPerMeasure'),
+                    measureLength: moduleInstance.findMeasureLength?.(noteObj)
+                  });
+                } catch {}
+              }
+            }
+
+            // Evaluate using safe binary evaluator
+            const evaluator = new BinaryEvaluator(moduleInstance);
+            const val = evaluator.evaluate(binary, evalCache);
+            const durationSec = (val && typeof val.valueOf === 'function') ? val.valueOf() : Number(val);
+            const tempoVal = moduleInstance?.findTempo?.(note)?.valueOf?.();
+            if (isFinite(durationSec) && isFinite(tempoVal) && tempoVal > 0) {
+              const beatLen = 60 / tempoVal;
+              const beats = durationSec / beatLen;
+              const frac = new Fraction(beats);
+              mNum = frac.n;
+              mDen = frac.d;
+              found = true;
+            }
           }
         } catch {}
       }
@@ -510,7 +559,10 @@ function createMeasureBeatsSelector(note, measureId, externalFunctions) {
     const beatLen = 60 / tempo;
     const beats = seconds / beatLen;
     const beatsFrac = new Fraction(beats);
-    evalRow.innerHTML = `<span class="value-label">Measure Duration:</span> ${seconds.toFixed(4)}s (${beatsFrac.n}/${beatsFrac.d} beats)`;
+    // SECURITY: Ensure fraction numerator/denominator are valid numbers
+    const safeN = Number.isFinite(Number(beatsFrac.n)) ? beatsFrac.n : 0;
+    const safeD = Number.isFinite(Number(beatsFrac.d)) && Number(beatsFrac.d) !== 0 ? beatsFrac.d : 1;
+    evalRow.innerHTML = `<span class="value-label">Measure Duration:</span> ${seconds.toFixed(4)}s (${safeN}/${safeD} beats)`;
   } catch {
     evalRow.innerHTML = `<span class="value-label">Measure Duration:</span> —`;
   }
@@ -718,9 +770,27 @@ function createMeasureBeatsSelector(note, measureId, externalFunctions) {
     let n = 0, d = 1;
     if (val.includes('/')) {
       const parts = val.split('/');
+      // SECURITY: Validate exactly 2 parts for fraction format
+      if (parts.length !== 2) {
+        console.warn('[RMT Security] Invalid fraction format: expected exactly one "/"');
+        return;
+      }
+      // SECURITY: Pre-validate that parts look like numbers before parsing
+      // Allow integers, decimals, and negative numbers - supports arbitrary precision fractions
+      const numPattern = /^-?\d+(\.\d+)?$/;
+      if (!numPattern.test(parts[0].trim()) || !numPattern.test(parts[1].trim())) {
+        console.warn('[RMT Security] Invalid fraction format: parts must be numeric');
+        return;
+      }
       n = parseFloat(parts[0]);
       d = parseFloat(parts[1]);
     } else {
+      // SECURITY: Pre-validate single number format
+      const numPattern = /^-?\d+(\.\d+)?$/;
+      if (!numPattern.test(val)) {
+        console.warn('[RMT Security] Invalid number format');
+        return;
+      }
       const f = parseFloat(val);
       if (!isNaN(f)) {
         const frac = new Fraction(f);
@@ -879,7 +949,8 @@ function refreshModals(note, measureId) {
     const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
     let clickedEl = null;
     if (effectiveNoteId != null) {
-      clickedEl = document.querySelector(`.note-content[data-note-id="${effectiveNoteId}"], .measure-bar-triangle[data-note-id="${effectiveNoteId}"]`);
+      const escapedId = CSS.escape(String(effectiveNoteId));
+      clickedEl = document.querySelector(`.note-content[data-note-id="${escapedId}"], .measure-bar-triangle[data-note-id="${escapedId}"]`);
     }
     eventBus?.emit?.('modals:requestRefresh', { note, measureId: measureId ?? null, clickedElement: clickedEl });
   } catch (e) {
@@ -908,10 +979,12 @@ function buildInstrumentControl(value, note, externalFunctions) {
   container.style.gap = '8px';
 
   const evaluatedText = document.createElement('div');
+  // SECURITY: Escape instrument name to prevent XSS
+  const instrumentName = escapeHtml(value?.evaluated ?? 'sine-wave');
   if (value?.isInherited) {
-    evaluatedText.innerHTML = `<span class="value-label">Inherited:</span> <span style="color: #aaa;">${value?.evaluated ?? 'sine-wave'}</span>`;
+    evaluatedText.innerHTML = `<span class="value-label">Inherited:</span> <span style="color: #aaa;">${instrumentName}</span>`;
   } else {
-    evaluatedText.innerHTML = `<span class="value-label">Current:</span> ${value?.evaluated ?? 'sine-wave'}`;
+    evaluatedText.innerHTML = `<span class="value-label">Current:</span> ${instrumentName}`;
   }
   container.appendChild(evaluatedText);
 
@@ -1166,8 +1239,11 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         const moduleInstance = getModule();
         const currentNoteId = measureId !== null && measureId !== undefined ? measureId : note.id;
         if (key === 'color') {
-          const newColor = rawInput.value;
-          // accept CSS color string as-is (e.g., '#ff00aa', 'rgba(255,0,0,0.5)')
+          const newColor = validateColorInput(rawInput.value);
+          if (!newColor) {
+            alert('Invalid color format. Use hex (#fff, #ffffff), rgb(), rgba(), hsl(), hsla(), or a named color.');
+            return;
+          }
           note.setVariable('color', newColor);
           const evaluated = moduleInstance.evaluateModule();
           setEvaluatedNotes(evaluated);

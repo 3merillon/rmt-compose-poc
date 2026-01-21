@@ -126,7 +126,7 @@ export function initStackClick() {
       
       stackClickState.currentIndex = nextIndex;
       
-      const nextNoteElement = document.querySelector(`.note-content[data-note-id="${nextNoteId}"]`);
+      const nextNoteElement = document.querySelector(`.note-content[data-note-id="${CSS.escape(String(nextNoteId))}"]`);
       
       if (nextNoteElement) {
         event.preventDefault();
@@ -155,7 +155,7 @@ export function initStackClick() {
         
         const firstNoteId = stackClickState.stackedNotes[0];
         if (firstNoteId !== clickedNoteIdStr) {
-          const firstNoteElement = document.querySelector(`.note-content[data-note-id="${firstNoteId}"]`);
+          const firstNoteElement = document.querySelector(`.note-content[data-note-id="${CSS.escape(String(firstNoteId))}"]`);
           if (firstNoteElement) {
             stackClickState.processingSimulatedClick = true;
             
@@ -280,7 +280,7 @@ export function initStackClick() {
       
       stackClickState.triangleCurrentIndex = nextIndex;
       
-      const nextTriangleElement = document.querySelector(`.measure-bar-triangle[data-note-id="${nextTriangleId}"]`);
+      const nextTriangleElement = document.querySelector(`.measure-bar-triangle[data-note-id="${CSS.escape(String(nextTriangleId))}"]`);
       
       if (nextTriangleElement) {
         event.preventDefault();
@@ -311,7 +311,7 @@ export function initStackClick() {
         
         const firstTriangleId = stackClickState.stackedTriangles[0];
         if (firstTriangleId !== clickedTriangleIdStr) {
-          const firstTriangleElement = document.querySelector(`.measure-bar-triangle[data-note-id="${firstTriangleId}"]`);
+          const firstTriangleElement = document.querySelector(`.measure-bar-triangle[data-note-id="${CSS.escape(String(firstTriangleId))}"]`);
           if (firstTriangleElement) {
             bringTriangleToFront(firstTriangleElement);
             

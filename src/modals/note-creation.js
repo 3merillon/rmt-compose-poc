@@ -7,6 +7,11 @@ import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import Fraction from 'fraction.js';
 import { isDSLSyntax, compileDSL, decompileToDSL } from '../dsl/index.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
+import { ExpressionCompiler } from '../expression-compiler.js';
+import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
+
+// Singleton compiler for safe evaluation
+const safeCompiler = new ExpressionCompiler();
 
 function pauseIfPlaying() {
   try {
@@ -19,7 +24,8 @@ function refreshModals(note, measureId = null) {
     const id = (note && note.id !== undefined) ? note.id : measureId;
     let clickedEl = null;
     if (id != null) {
-      clickedEl = document.querySelector(`.note-content[data-note-id="${id}"], .measure-bar-triangle[data-note-id="${id}"]`);
+      const escapedId = CSS.escape(String(id));
+      clickedEl = document.querySelector(`.note-content[data-note-id="${escapedId}"], .measure-bar-triangle[data-note-id="${escapedId}"]`);
     }
     eventBus?.emit?.('modals:requestRefresh', { note, measureId: measureId ?? null, clickedElement: clickedEl });
   } catch (e) {
@@ -165,7 +171,7 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
       // Focus on last measure added
       const last = newMeasures[newMeasures.length - 1];
       if (last) {
-        const tri = document.querySelector(`.measure-bar-triangle[data-note-id="${last.id}"]`);
+        const tri = document.querySelector(`.measure-bar-triangle[data-note-id="${CSS.escape(String(last.id))}"]`);
         refreshModals(module.getNoteById(parseInt(last.id, 10)), last.id);
         if (tri) tri.classList.add('selected');
       }
@@ -344,52 +350,61 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   addSection.appendChild(stRow.row);
 
   // Live "evaluated" preview for inputs (best-effort)
+  // SECURITY: This function DOES NOT use eval() or new Function().
+  // It uses safe binary compilation and evaluation.
   function safeEval(expr) {
     try {
       const module = getModule();
-      if (isDSLSyntax(expr)) {
-        // Evaluate DSL expression
-        const binary = compileDSL(expr);
-        const evaluator = new BinaryEvaluator(module);
-        // Build an eval cache from current module state
-        const evalCache = new Map();
-        // Add baseNote as ID 0
-        const baseNote = module.baseNote;
-        if (baseNote) {
-          evalCache.set(0, {
-            startTime: baseNote.getVariable('startTime'),
-            duration: baseNote.getVariable('duration'),
-            frequency: baseNote.getVariable('frequency'),
-            tempo: baseNote.getVariable('tempo'),
-            beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
-            measureLength: module.findMeasureLength(baseNote)
-          });
-        }
-        // Add other notes
-        for (const id in module.notes) {
-          const noteObj = module.notes[id];
-          if (noteObj) {
-            try {
-              evalCache.set(parseInt(id, 10), {
-                startTime: noteObj.getVariable('startTime'),
-                duration: noteObj.getVariable('duration'),
-                frequency: noteObj.getVariable('frequency'),
-                tempo: module.findTempo(noteObj),
-                beatsPerMeasure: noteObj.getVariable('beatsPerMeasure'),
-                measureLength: module.findMeasureLength(noteObj)
-              });
-            } catch {}
-          }
-        }
-        const result = evaluator.evaluate(binary, evalCache);
-        return result.toFraction();
-      } else {
-        // Legacy evaluation
-        // eslint-disable-next-line no-new-func
-        const fn = new Function('module', 'Fraction', `return ${expr};`);
-        const res = fn(module, Fraction);
-        return (res && typeof res.toFraction === 'function') ? res.toFraction() : String(res);
+
+      // First validate the expression syntax
+      const validation = validateExpressionSyntax(expr);
+      if (!validation.valid) {
+        return 'Invalid';
       }
+
+      // Compile the expression using safe parser
+      let binary;
+      if (isDSLSyntax(expr)) {
+        binary = compileDSL(expr);
+      } else {
+        binary = safeCompiler.compile(expr);
+      }
+
+      // Build an eval cache from current module state
+      const evalCache = new Map();
+      // Add baseNote as ID 0
+      const baseNote = module.baseNote;
+      if (baseNote) {
+        evalCache.set(0, {
+          startTime: baseNote.getVariable('startTime'),
+          duration: baseNote.getVariable('duration'),
+          frequency: baseNote.getVariable('frequency'),
+          tempo: baseNote.getVariable('tempo'),
+          beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
+          measureLength: module.findMeasureLength(baseNote)
+        });
+      }
+      // Add other notes
+      for (const id in module.notes) {
+        const noteObj = module.notes[id];
+        if (noteObj) {
+          try {
+            evalCache.set(parseInt(id, 10), {
+              startTime: noteObj.getVariable('startTime'),
+              duration: noteObj.getVariable('duration'),
+              frequency: noteObj.getVariable('frequency'),
+              tempo: module.findTempo(noteObj),
+              beatsPerMeasure: noteObj.getVariable('beatsPerMeasure'),
+              measureLength: module.findMeasureLength(noteObj)
+            });
+          } catch {}
+        }
+      }
+
+      // Evaluate using safe binary evaluator
+      const evaluator = new BinaryEvaluator(module);
+      const result = evaluator.evaluate(binary, evalCache);
+      return result.toFraction();
     } catch {
       return 'Invalid';
     }
@@ -446,24 +461,34 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       const dFormula = durInput.value;
       const sFormula = stInput.value;
 
-      const vars = {};
-      vars.startTime = function () {
-        // eslint-disable-next-line no-new-func
-        return new Function('module', 'Fraction', `return ${sFormula};`)(module, Fraction);
-      };
-      vars.startTimeString = sFormula;
+      // SECURITY: We do NOT use new Function() or eval() for expression evaluation.
+      // Instead, we validate expressions and store them as strings.
+      // The module's evaluateModule() will safely evaluate them via binary compilation.
 
-      vars.duration = function () {
-        // eslint-disable-next-line no-new-func
-        return new Function('module', 'Fraction', `return ${dFormula};`)(module, Fraction);
-      };
+      // Validate all expressions first
+      const stValidation = validateExpressionSyntax(sFormula);
+      if (!stValidation.valid) {
+        throw new Error(`Invalid start time expression: ${stValidation.error}`);
+      }
+
+      const durValidation = validateExpressionSyntax(dFormula);
+      if (!durValidation.valid) {
+        throw new Error(`Invalid duration expression: ${durValidation.error}`);
+      }
+
+      if (!isSilence) {
+        const freqValidation = validateExpressionSyntax(fFormula);
+        if (!freqValidation.valid) {
+          throw new Error(`Invalid frequency expression: ${freqValidation.error}`);
+        }
+      }
+
+      // Store expressions as strings - they will be compiled safely later
+      const vars = {};
+      vars.startTimeString = sFormula;
       vars.durationString = dFormula;
 
       if (!isSilence) {
-        vars.frequency = function () {
-          // eslint-disable-next-line no-new-func
-          return new Function('module', 'Fraction', `return ${fFormula};`)(module, Fraction);
-        };
         vars.frequencyString = fFormula;
       }
 
@@ -499,7 +524,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
 
       // Refresh modals to show the new note - use setTimeout to ensure DOM is updated
       setTimeout(() => {
-        const newElem = document.querySelector(`.note-content[data-note-id="${newNote.id}"]`);
+        const newElem = document.querySelector(`.note-content[data-note-id="${CSS.escape(String(newNote.id))}"]`);
         refreshModals(newNote, null);
         if (newElem) {
           newElem.classList.add('selected');

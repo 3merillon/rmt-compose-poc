@@ -1,4 +1,6 @@
 import { eventBus } from '../utils/event-bus.js';
+import { escapeHtml } from '../utils/html-escape.js';
+
 const menuAPI = (function() {
     const domCache = {
         secondTopBar: document.querySelector('.second-top-bar'),
@@ -1123,7 +1125,8 @@ const menuAPI = (function() {
         const modal = document.createElement('div');
         modal.className = 'delete-confirm-modal';
         const message = document.createElement('p');
-        message.innerHTML = `Are you sure you want to <span style='color: #ff0000;'>remove</span> the module "<span style='color: #ffa800;'>${moduleName}</span>" from the menu?`;
+        // SECURITY: Escape moduleName to prevent XSS
+        message.innerHTML = `Are you sure you want to <span style='color: #ff0000;'>remove</span> the module "<span style='color: #ffa800;'>${escapeHtml(moduleName)}</span>" from the menu?`;
         const btnContainer = document.createElement('div');
         btnContainer.className = 'modal-btn-container';
         const yesButton = document.createElement('button');
@@ -1166,7 +1169,8 @@ const menuAPI = (function() {
         const modal = document.createElement('div');
         modal.className = 'delete-confirm-modal';
         const message = document.createElement('p');
-        message.innerHTML = `Are you sure you want to <span style='color: #ff0000;'>remove</span> the category "<span style='color: #ffa800;'>${(categoryName || '').toUpperCase()}</span>" and all its icons from the menu?`;
+        // SECURITY: Escape categoryName to prevent XSS
+        message.innerHTML = `Are you sure you want to <span style='color: #ff0000;'>remove</span> the category "<span style='color: #ffa800;'>${escapeHtml((categoryName || '').toUpperCase())}</span>" and all its icons from the menu?`;
         const btnContainer = document.createElement('div');
         btnContainer.className = 'modal-btn-container';
         const yesButton = document.createElement('button');

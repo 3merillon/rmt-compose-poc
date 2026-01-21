@@ -1,5 +1,11 @@
 import Fraction from 'fraction.js';
 import { isDSLSyntax, validateDSL, compileDSL } from '../dsl/index.js';
+import { ExpressionCompiler } from '../expression-compiler.js';
+import { BinaryEvaluator } from '../binary-evaluator.js';
+import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
+
+// Singleton compiler for safe validation
+const safeCompiler = new ExpressionCompiler();
 
 let dependencyGraphCache = null;
 let lastGraphUpdateTime = 0;
@@ -26,9 +32,9 @@ export function validateExpression(moduleInstance, noteId, expression, variableT
  * Validate DSL expression
  */
 function validateDSLExpression(moduleInstance, noteId, expr, variableType) {
-    // Check for self-reference in DSL: [noteId].
-    const selfRefPattern = new RegExp(`\\[${noteId}\\]\\.`);
-    if (selfRefPattern.test(expr)) {
+    // SECURITY: Check for self-reference using string method instead of dynamic RegExp
+    // This prevents ReDoS if noteId contains regex special characters
+    if (expr.includes(`[${noteId}].`)) {
         throw new Error('Expression cannot reference itself directly');
     }
 
@@ -55,6 +61,9 @@ function validateDSLExpression(moduleInstance, noteId, expr, variableType) {
 
 /**
  * Validate legacy (JavaScript-style) expression
+ *
+ * SECURITY: This function DOES NOT use eval() or new Function().
+ * It validates expressions using safe pattern-based parsing and binary compilation.
  */
 function validateLegacyExpression(moduleInstance, noteId, expr, variableType) {
     if (expr.includes(`getNoteById(${noteId})`)) {
@@ -77,6 +86,12 @@ function validateLegacyExpression(moduleInstance, noteId, expr, variableType) {
         throw new Error('Unbalanced parentheses: missing closing parentheses');
     }
 
+    // Validate expression syntax using safe validator (checks for dangerous patterns)
+    const syntaxValidation = validateExpressionSyntax(expr);
+    if (!syntaxValidation.valid) {
+        throw new Error(syntaxValidation.error);
+    }
+
     // Detect whether expression contains references; if so, we preserve user-authored structure
     const hasRefs =
         /\.getVariable\s*\(/.test(expr) ||
@@ -84,31 +99,30 @@ function validateLegacyExpression(moduleInstance, noteId, expr, variableType) {
         /module\.baseNote/.test(expr);
 
     try {
-        if (variableType === 'duration' &&
-            expr.startsWith('new Fraction(60).div(') &&
-            expr.includes(').mul(new Fraction(')) {
-            const testFunc = new Function('module', 'Fraction', `return (${expr});`);
-            const result = testFunc(moduleInstance, Fraction);
-            if (!(result instanceof Fraction)) {
-                throw new Error('Duration expression must result in a Fraction');
-            }
-            return expr;
+        // Compile expression to binary using safe regex-based parser
+        // This will throw if the expression doesn't match valid patterns
+        const binary = safeCompiler.compile(expr);
+
+        // Evaluate using safe binary evaluator
+        const evaluator = new BinaryEvaluator(moduleInstance);
+        const evalCache = buildEvalCacheForValidation(moduleInstance);
+        const result = evaluator.evaluate(binary, evalCache);
+
+        if (result === undefined || result === null) {
+            throw new Error('Expression resulted in undefined or null');
         }
 
-        const testFunc = new Function('module', 'Fraction', `
-            let result = (${expr});
-            if (result === undefined || result === null) {
-                throw new Error('Expression resulted in undefined or null');
-            }
-            if (typeof result === 'number') {
-                result = new Fraction(result);
-            }
-            if (!(result instanceof Fraction)) {
-                throw new Error('Expression must result in a Fraction or a number');
-            }
-            return result;
-        `);
-        const result = testFunc(moduleInstance, Fraction);
+        // Convert result to Fraction for validation
+        let fracResult;
+        if (result instanceof Fraction) {
+            fracResult = result;
+        } else if (typeof result === 'number') {
+            fracResult = new Fraction(result);
+        } else if (typeof result.valueOf === 'function') {
+            fracResult = new Fraction(result.valueOf());
+        } else {
+            throw new Error('Expression must result in a Fraction or a number');
+        }
 
         if (hasRefs) {
             // Keep dependency-carrying expressions intact
@@ -116,11 +130,61 @@ function validateLegacyExpression(moduleInstance, noteId, expr, variableType) {
         }
 
         // Numeric-only expression: canonicalize to reduced Fraction literal
-        return `new Fraction(${result.n}, ${result.d})`;
+        const s = fracResult.s || 1;
+        const n = fracResult.n || 0;
+        const d = fracResult.d || 1;
+        return `new Fraction(${s * n}, ${d})`;
     } catch (e) {
-        console.error(`Error in expression execution for Note ${noteId}:`, e);
+        console.error(`Error in expression validation for Note ${noteId}:`, e);
         throw new Error(`Invalid expression: ${e.message}`);
     }
+}
+
+/**
+ * Build evaluation cache for validation purposes
+ */
+function buildEvalCacheForValidation(moduleInstance) {
+    const cache = new Map();
+    if (!moduleInstance) return cache;
+
+    // Cache baseNote as ID 0
+    const baseNote = moduleInstance.baseNote;
+    if (baseNote) {
+        try {
+            cache.set(0, {
+                startTime: baseNote.getVariable('startTime'),
+                duration: baseNote.getVariable('duration'),
+                frequency: baseNote.getVariable('frequency'),
+                tempo: baseNote.getVariable('tempo'),
+                beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
+                measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(baseNote) : null
+            });
+        } catch (e) { /* ignore */ }
+    }
+
+    // Cache all notes
+    if (moduleInstance.notes) {
+        for (const id in moduleInstance.notes) {
+            const noteId = parseInt(id, 10);
+            if (isNaN(noteId) || cache.has(noteId)) continue;
+
+            const note = moduleInstance.notes[id];
+            if (!note) continue;
+
+            try {
+                cache.set(noteId, {
+                    startTime: note.getVariable ? note.getVariable('startTime') : null,
+                    duration: note.getVariable ? note.getVariable('duration') : null,
+                    frequency: note.getVariable ? note.getVariable('frequency') : null,
+                    tempo: moduleInstance.findTempo ? moduleInstance.findTempo(note) : null,
+                    beatsPerMeasure: note.getVariable ? note.getVariable('beatsPerMeasure') : null,
+                    measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(note) : null
+                });
+            } catch (e) { /* ignore individual note errors */ }
+        }
+    }
+
+    return cache;
 }
 
 export function detectCircularDependency(moduleInstance, noteId, expression, variableType) {

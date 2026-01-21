@@ -9,6 +9,7 @@ import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpress
 import { Workspace } from './renderer/webgl2/workspace.js';
 import { menuBar } from './menu/menu-bar.js';
 import { isDSLSyntax } from './dsl/index.js';
+import { escapeHtml } from './utils/html-escape.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -1134,7 +1135,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                             if (note) {
                               currentSelectedNote = note;
                               try { syncRendererSelection(); } catch {}
-                              const el = document.querySelector(`.note-content[data-note-id="${note.id}"]`);
+                              const el = document.querySelector(`.note-content[data-note-id="${CSS.escape(String(note.id))}"]`);
                               if (el) {
                                 showNoteVariables(note, el);
                               } else {
@@ -1151,7 +1152,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                               currentSelectedNote = measureNote;
                               try { syncRendererSelection(); } catch {}
                               // Anchor: prefer DOM triangle if present; else body
-                              let anchor = document.querySelector(`.measure-bar-triangle[data-note-id="${tid}"]`);
+                              let anchor = document.querySelector(`.measure-bar-triangle[data-note-id="${CSS.escape(String(tid))}"]`);
                               if (!anchor) anchor = document.body;
                               showNoteVariables(measureNote, anchor, tid);
                               event.stopPropagation();
@@ -3258,7 +3259,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         const triangle = document.createElement('div');
         triangle.className = 'measure-bar-triangle';
         triangle.setAttribute("data-note-id", id);
-        triangle.innerHTML = `<span class="measure-id">[${id}]</span>`;
+        triangle.innerHTML = `<span class="measure-id">[${escapeHtml(String(id))}]</span>`;
         triangle.addEventListener('click', (event) => {
             if (isLocked) {
                 event.preventDefault();
@@ -3984,10 +3985,93 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         });
     }
 
+    /**
+     * SECURITY: Validate module JSON structure to prevent DoS attacks
+     * Checks for reasonable limits on depth, array sizes, and required structure
+     */
+    function validateModuleStructure(data, maxDepth = 20, maxArraySize = 10000) {
+        // Check basic structure requirements
+        if (typeof data !== 'object' || data === null) {
+            console.error('[RMT Security] Module data must be an object');
+            return false;
+        }
+
+        // Must have baseNote object
+        if (typeof data.baseNote !== 'object' || data.baseNote === null) {
+            console.error('[RMT Security] Module must have a baseNote object');
+            return false;
+        }
+
+        // Notes must be an array if present
+        if (data.notes !== undefined) {
+            if (!Array.isArray(data.notes)) {
+                console.error('[RMT Security] Module notes must be an array');
+                return false;
+            }
+            if (data.notes.length > maxArraySize) {
+                console.error('[RMT Security] Module has too many notes:', data.notes.length);
+                return false;
+            }
+        }
+
+        // Check for excessive nesting depth (prevents stack overflow on deeply nested structures)
+        function checkDepth(obj, currentDepth) {
+            if (currentDepth > maxDepth) {
+                return false;
+            }
+            if (typeof obj !== 'object' || obj === null) {
+                return true;
+            }
+            if (Array.isArray(obj)) {
+                if (obj.length > maxArraySize) {
+                    return false;
+                }
+                for (const item of obj) {
+                    if (!checkDepth(item, currentDepth + 1)) {
+                        return false;
+                    }
+                }
+            } else {
+                const keys = Object.keys(obj);
+                if (keys.length > maxArraySize) {
+                    return false;
+                }
+                for (const key of keys) {
+                    if (!checkDepth(obj[key], currentDepth + 1)) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        }
+
+        if (!checkDepth(data, 0)) {
+            console.error('[RMT Security] Module structure is too deeply nested or has oversized arrays');
+            return false;
+        }
+
+        return true;
+    }
+
     function loadModule(file) {
         try {
+            // SECURITY: Enforce file size limit to prevent DoS
+            const MAX_MODULE_SIZE = 3 * 1024 * 1024; // 3MB
+            if (file.size > MAX_MODULE_SIZE) {
+                notify('Module file too large (max 3MB)', 'error');
+                console.error('[RMT Security] Module file exceeds maximum size:', file.size);
+                return;
+            }
+
             file.text().then((fileContent) => {
                 const moduleData = JSON.parse(fileContent);
+
+                // SECURITY: Validate JSON structure to prevent DoS via deeply nested/malformed data
+                if (!validateModuleStructure(moduleData)) {
+                    notify('Invalid module file structure', 'error');
+                    console.error('[RMT Security] Module file failed structure validation');
+                    return;
+                }
                 if (isPlaying || isPaused) {
                     stop(true);
                 }
@@ -5101,13 +5185,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
            if (isVisible) {
              const mNote = myModule.getNoteById(mId);
              // Prefer the triangle of the resized measure as anchor
-             let anchor = document.querySelector(`.measure-bar-triangle[data-note-id="${mId}"]`);
+             let anchor = document.querySelector(`.measure-bar-triangle[data-note-id="${CSS.escape(String(mId))}"]`);
              if (!anchor) {
                // Fallback to current selection anchor or body
+               const selId = currentSelectedNote ? CSS.escape(String(currentSelectedNote.id)) : '-1';
                anchor =
                  document.querySelector(
-                   `.note-content[data-note-id="${currentSelectedNote ? currentSelectedNote.id : -1}"], ` +
-                   `.measure-bar-triangle[data-note-id="${currentSelectedNote ? currentSelectedNote.id : -1}"]`
+                   `.note-content[data-note-id="${selId}"], ` +
+                   `.measure-bar-triangle[data-note-id="${selId}"]`
                  ) || document.body;
              }
              try {

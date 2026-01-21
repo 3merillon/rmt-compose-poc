@@ -2,14 +2,15 @@ import Fraction from 'fraction.js';
 import { createVariableControls, createMeasureDurationRow } from './variable-controls.js';
 import { createAddNoteSection, createAddMeasureSection } from './note-creation.js';
 import { createEvaluateSection, createDeleteSection } from './note-actions.js';
-import { 
-    validateExpression, 
+import {
+    validateExpression,
     detectCircularDependency,
-    invalidateDependencyGraphCache 
+    invalidateDependencyGraphCache
 } from './validation.js';
 import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
+import { escapeHtml } from '../utils/html-escape.js';
 
 const domCache = {
     noteWidget: null,
@@ -174,7 +175,7 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     updateNoteWidgetHeight();
 
     if (!clickedElement && note && note.id !== undefined) {
-        const selElem = document.querySelector(`[data-note-id="${note.id}"]`);
+        const selElem = document.querySelector(`[data-note-id="${CSS.escape(String(note.id))}"]`);
         if (selElem) {
             selElem.classList.add("selected");
         }
@@ -476,8 +477,9 @@ export function showDeleteConfirmation(noteId) {
     modal.className = 'delete-confirm-modal';
 
     const message = document.createElement('p');
-    message.innerHTML = "Are you sure you want to <strong>DELETE</strong> Note[<span class='modal-note-id'>" 
-        + noteId + "</span>] and <span class='modal-delete-all'>DELETE ALL</span> its Dependencies (notes highlighted in red)?";
+    // SECURITY: Escape noteId to prevent XSS
+    message.innerHTML = "Are you sure you want to <strong>DELETE</strong> Note[<span class='modal-note-id'>"
+        + escapeHtml(noteId) + "</span>] and <span class='modal-delete-all'>DELETE ALL</span> its Dependencies (notes highlighted in red)?";
     modal.appendChild(message);
 
     const btnContainer = document.createElement('div');
@@ -522,8 +524,9 @@ export function showDeleteConfirmationKeepDependencies(noteId) {
     modal.className = 'delete-confirm-modal';
 
     const message = document.createElement('p');
-    message.innerHTML = "Are you sure you want to <strong>DELETE</strong> Note[<span class='modal-note-id'>" 
-       + noteId + "</span>] and <span class='modal-keep'>KEEP</span> its Dependencies? Dependent notes will update their references using this note's raw values.";
+    // SECURITY: Escape noteId to prevent XSS
+    message.innerHTML = "Are you sure you want to <strong>DELETE</strong> Note[<span class='modal-note-id'>"
+       + escapeHtml(noteId) + "</span>] and <span class='modal-keep'>KEEP</span> its Dependencies? Dependent notes will update their references using this note's raw values.";
     modal.appendChild(message);
 
     const btnContainer = document.createElement('div');
@@ -1259,7 +1262,7 @@ export function evaluateNoteToBaseNote(noteId) {
         externalFunctions.updateVisualNotes(evaluated);
     }
 
-    const newElem = document.querySelector(`.note-content[data-note-id="${noteId}"]`);
+    const newElem = document.querySelector(`.note-content[data-note-id="${CSS.escape(String(noteId))}"]`);
     if (note && note.id !== 0 && newElem) {
         if (externalFunctions.bringSelectedNoteToFront) {
             externalFunctions.bringSelectedNoteToFront(note, newElem);
@@ -1378,7 +1381,8 @@ export function evaluateEntireModule() {
 
     // Refresh the variable editor if a note is currently selected
     if (currentSelectedNote) {
-        const selectedElem = document.querySelector(`.note-content[data-note-id="${currentSelectedNote.id}"], .base-note-circle[data-note-id="${currentSelectedNote.id}"]`);
+        const escapedSelId = CSS.escape(String(currentSelectedNote.id));
+        const selectedElem = document.querySelector(`.note-content[data-note-id="${escapedSelId}"], .base-note-circle[data-note-id="${escapedSelId}"]`);
         showNoteVariables(currentSelectedNote, selectedElem);
     }
 
@@ -1431,7 +1435,7 @@ export function liberateDependencies(noteId) {
         externalFunctions.updateVisualNotes(evaluated);
     }
 
-    const newElem = document.querySelector(`.note-content[data-note-id="${noteId}"]`);
+    const newElem = document.querySelector(`.note-content[data-note-id="${CSS.escape(String(noteId))}"]`);
     if (currentSelected && currentSelected.id !== 0 && newElem) {
         if (externalFunctions.bringSelectedNoteToFront) {
             externalFunctions.bringSelectedNoteToFront(currentSelected, newElem);
@@ -1454,8 +1458,9 @@ export function showLiberateConfirmation(noteId) {
     modal.className = 'delete-confirm-modal';
 
     const message = document.createElement('p');
+    // SECURITY: Escape noteId to prevent XSS
     message.innerHTML = "Are you sure you want to <strong>LIBERATE</strong> all dependencies from Note[<span style='color:#00ccff'>"
-        + noteId + "</span>]? This will replace all references to this note with raw values.";
+        + escapeHtml(noteId) + "</span>]? This will replace all references to this note with raw values.";
     modal.appendChild(message);
 
     const btnContainer = document.createElement('div');
@@ -1504,8 +1509,9 @@ export function showEvaluateConfirmation(noteId) {
     modal.className = 'delete-confirm-modal';
 
     const message = document.createElement('p');
+    // SECURITY: Escape noteId to prevent XSS
     message.innerHTML = "Are you sure you want to <strong>EVALUATE</strong> Note[<span style='color:#00ffff'>"
-        + noteId + "</span>] to BaseNote? You will <span style='color:#00ffff'>lose all dependencies</span> to notes or measure bars.";
+        + escapeHtml(noteId) + "</span>] to BaseNote? You will <span style='color:#00ffff'>lose all dependencies</span> to notes or measure bars.";
     modal.appendChild(message);
 
     const btnContainer = document.createElement('div');

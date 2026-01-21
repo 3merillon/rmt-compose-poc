@@ -12,6 +12,8 @@ import { BinaryModule, BinaryNote, BinaryExpression } from './binary-note.js';
 import { ExpressionCompiler, ExpressionDecompiler } from './expression-compiler.js';
 import { DependencyGraph } from './dependency-graph.js';
 import { decompileToDSL } from './dsl/index.js';
+import { validateExpressionSyntax } from './utils/safe-expression-validator.js';
+import { validateColorInput } from './utils/html-escape.js';
 
 /**
  * Serializer for converting between binary and JSON formats
@@ -144,6 +146,12 @@ export class ModuleSerializer {
 
     for (const varName of vars) {
       if (data[varName]) {
+        // SECURITY: Validate expression before compilation
+        const validation = validateExpressionSyntax(data[varName]);
+        if (!validation.valid) {
+          console.error(`[Security] Invalid expression for baseNote.${varName}: ${validation.error}`);
+          continue; // Skip invalid expressions
+        }
         const expr = this.compiler.compile(data[varName], varName);
         baseNote.setExpression(varName, expr);
       }
@@ -160,6 +168,12 @@ export class ModuleSerializer {
     const vars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
     for (const varName of vars) {
       if (data[varName]) {
+        // SECURITY: Validate expression before compilation
+        const validation = validateExpressionSyntax(data[varName]);
+        if (!validation.valid) {
+          console.error(`[Security] Invalid expression for note ${data.id}.${varName}: ${validation.error}`);
+          continue; // Skip invalid expressions
+        }
         const expr = this.compiler.compile(data[varName], varName);
         note.setExpression(varName, expr);
       }
@@ -167,7 +181,13 @@ export class ModuleSerializer {
 
     // Load non-expression properties
     if (data.color) {
-      note.color = data.color;
+      // SECURITY: Validate color input to prevent CSS injection
+      const validatedColor = validateColorInput(data.color);
+      if (validatedColor) {
+        note.color = validatedColor;
+      } else {
+        console.warn(`[Security] Invalid color value for note ${data.id}, using default`);
+      }
     }
     if (data.instrument) {
       note.instrument = data.instrument;

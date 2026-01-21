@@ -152,14 +152,16 @@ export class ExpressionCompiler {
     }
 
     // 2. Try baseNote reference: module.baseNote.getVariable('varName')
-    const baseVarMatch = trimmed.match(/^module\.baseNote\.getVariable\s*\(\s*'([^']+)'\s*\)$/);
+    // SECURITY: Use specific pattern for variable names (valid JS identifiers) instead of [^']+
+    const baseVarMatch = trimmed.match(/^module\.baseNote\.getVariable\s*\(\s*'([a-zA-Z_][a-zA-Z0-9_]*)'\s*\)$/);
     if (baseVarMatch) {
       const varName = baseVarMatch[1];
       return { type: 'baseRef', varName };
     }
 
     // 3. Try note reference: module.getNoteById(id).getVariable('varName')
-    const noteVarMatch = trimmed.match(/^module\.getNoteById\s*\(\s*(\d+)\s*\)\.getVariable\s*\(\s*'([^']+)'\s*\)$/);
+    // SECURITY: Use specific pattern for variable names (valid JS identifiers)
+    const noteVarMatch = trimmed.match(/^module\.getNoteById\s*\(\s*(\d+)\s*\)\.getVariable\s*\(\s*'([a-zA-Z_][a-zA-Z0-9_]*)'\s*\)$/);
     if (noteVarMatch) {
       const noteId = parseInt(noteVarMatch[1], 10);
       const varName = noteVarMatch[2];
@@ -608,9 +610,27 @@ export class ExpressionCompiler {
    * Automatically chooses LOAD_CONST for small values or LOAD_CONST_BIG for large values
    */
   emitConstant(binary, num, den) {
+    // SECURITY: Validate input types before processing
+    // Only accept numbers, strings, or bigints - reject objects that could have malicious toString()
+    const validTypes = ['number', 'string', 'bigint'];
+    if (!validTypes.includes(typeof num) || !validTypes.includes(typeof den)) {
+      console.error(`[RMT Security] Invalid type for emitConstant: num=${typeof num}, den=${typeof den}`);
+      throw new Error('Invalid fraction input types');
+    }
+
+    // SECURITY: For string inputs, validate they look like numbers before any conversion
+    if (typeof num === 'string' && !/^-?\d+(\.\d+)?$/.test(num)) {
+      console.error(`[RMT Security] Invalid numeric string for numerator: ${num}`);
+      throw new Error('Invalid numerator format');
+    }
+    if (typeof den === 'string' && !/^-?\d+(\.\d+)?$/.test(den)) {
+      console.error(`[RMT Security] Invalid numeric string for denominator: ${den}`);
+      throw new Error('Invalid denominator format');
+    }
+
     // Check if inputs are integers (as number or string)
-    const numIsInteger = (typeof num === 'string' && /^-?\d+$/.test(num)) || Number.isInteger(num);
-    const denIsInteger = (typeof den === 'string' && /^-?\d+$/.test(den)) || Number.isInteger(den);
+    const numIsInteger = (typeof num === 'string' && /^-?\d+$/.test(num)) || Number.isInteger(num) || typeof num === 'bigint';
+    const denIsInteger = (typeof den === 'string' && /^-?\d+$/.test(den)) || Number.isInteger(den) || typeof den === 'bigint';
 
     // Convert to BigInt for range checking and to handle large values
     let finalNumBig = BigInt(num);

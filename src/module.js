@@ -707,28 +707,39 @@ export class Module {
     const moduleInstance = new Module(baseVars);
 
     // Load notes
+    // SECURITY: Blocked note IDs that could cause prototype pollution
+    const blockedNoteIds = ['__proto__', 'constructor', 'prototype'];
+
     for (const noteData of data.notes) {
-      const noteId = parseInt(noteData.id);
+      const noteId = parseInt(noteData.id, 10);
       const variables = {};
+
+      // SECURITY: Validate note ID to prevent prototype pollution and invalid values
+      if (isNaN(noteId) || !Number.isInteger(noteId) || noteId < 0 || noteId > 100000) {
+        console.warn(`[RMT Security] Invalid note ID: ${noteData.id}, skipping`);
+        continue;
+      }
+
+      // SECURITY: Check for prototype pollution vectors
+      if (blockedNoteIds.includes(String(noteData.id))) {
+        console.error(`[RMT Security] Blocked dangerous note ID: ${noteData.id}`);
+        continue;
+      }
 
       for (const [key, value] of Object.entries(noteData)) {
         if (key === 'id') continue;
         variables[key] = value;
       }
 
-      if (!isNaN(noteId)) {
-        const note = new Note(noteId, variables);
-        note.module = moduleInstance;
-        moduleInstance.notes[noteId] = note;
+      const note = new Note(noteId, variables);
+      note.module = moduleInstance;
+      moduleInstance.notes[noteId] = note;
 
-        // Register dependencies
-        moduleInstance._registerNoteDependencies(note);
+      // Register dependencies
+      moduleInstance._registerNoteDependencies(note);
 
-        if (noteId >= moduleInstance.nextId) {
-          moduleInstance.nextId = noteId + 1;
-        }
-      } else {
-        moduleInstance.addNote(variables);
+      if (noteId >= moduleInstance.nextId) {
+        moduleInstance.nextId = noteId + 1;
       }
     }
 
