@@ -6,7 +6,7 @@
   "homepage": "https://www.rmt.world/",
   "scripts": {
     "dev": "vite",
-    "build": "npm run wasm:build && vite build",
+    "build": "(npm run wasm:build || true) && vite build",
     "preview": "vite preview",
     "wasm:build": "cd rust && wasm-pack build --target web --out-dir pkg",
     "docs:dev": "vitepress dev docs",
