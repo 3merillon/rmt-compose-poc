@@ -2693,8 +2693,14 @@ export class RendererAdapter {
     const startTimeString = note.variables?.startTimeString;
     let parentId = null;
     if (startTimeString) {
-      const m = /getNoteById\(\s*(\d+)\s*\)/.exec(startTimeString);
-      if (m) parentId = parseInt(m[1], 10);
+      // DSL format: [N].t, [N].t + measure([N]), etc.
+      const dsl = /\[(\d+)\]/.exec(startTimeString);
+      if (dsl) parentId = parseInt(dsl[1], 10);
+      // Legacy format: module.getNoteById(N).getVariable('startTime')
+      if (parentId == null) {
+        const legacy = /getNoteById\(\s*(\d+)\s*\)/.exec(startTimeString);
+        if (legacy) parentId = parseInt(legacy[1], 10);
+      }
     }
     if (parentId == null && note.parentId != null) parentId = note.parentId;
     if (parentId == null) return module.baseNote;
