@@ -776,6 +776,7 @@ export class BinaryEvaluator {
    * Read a 16-bit unsigned integer from bytecode (big-endian)
    */
   readUint16(bytecode, offset) {
+    if (offset + 2 > bytecode.length) return 0;
     return (bytecode[offset] << 8) | bytecode[offset + 1];
   }
 
@@ -783,6 +784,7 @@ export class BinaryEvaluator {
    * Read a 32-bit signed integer from bytecode (big-endian)
    */
   readInt32(bytecode, offset) {
+    if (offset + 4 > bytecode.length) return 0;
     const val = (bytecode[offset] << 24) |
                 (bytecode[offset + 1] << 16) |
                 (bytecode[offset + 2] << 8) |
@@ -797,6 +799,7 @@ export class BinaryEvaluator {
    * @returns {{ value: bigint, bytesRead: number }}
    */
   readBigIntSigned(bytecode, offset) {
+    if (offset >= bytecode.length) return { value: 0n, bytesRead: 1 };
     const sign = bytecode[offset];
     const { value: magnitude, bytesRead: magBytes } = this.readBigIntUnsigned(bytecode, offset + 1);
     const value = sign === 0x01 ? -magnitude : magnitude;
@@ -809,18 +812,27 @@ export class BinaryEvaluator {
    * @returns {{ value: bigint, bytesRead: number }}
    */
   readBigIntUnsigned(bytecode, offset) {
+    if (offset + 2 > bytecode.length) return { value: 0n, bytesRead: 2 };
     const len = (bytecode[offset] << 8) | bytecode[offset + 1];
+    // Validate that claimed bytes exist in the buffer
+    const safeLen = Math.min(len, bytecode.length - offset - 2);
     let value = 0n;
-    for (let i = 0; i < len; i++) {
+    for (let i = 0; i < safeLen; i++) {
       value = (value << 8n) | BigInt(bytecode[offset + 2 + i]);
     }
     return { value, bytesRead: 2 + len };
   }
 
+  /** Maximum evaluation stack depth to prevent memory exhaustion from malformed bytecode */
+  static MAX_STACK_DEPTH = 1024;
+
   /**
    * Push a value onto the evaluation stack
    */
   push(value) {
+    if (this.stackTop >= BinaryEvaluator.MAX_STACK_DEPTH) {
+      throw new Error('Expression stack overflow (depth > ' + BinaryEvaluator.MAX_STACK_DEPTH + ')');
+    }
     if (this.stackTop >= this.stack.length) {
       // Expand stack if needed
       const newStack = new Array(this.stack.length * 2);

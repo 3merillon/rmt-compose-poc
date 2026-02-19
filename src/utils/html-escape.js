@@ -92,3 +92,20 @@ export function validateColorInput(color) {
 
     return null; // Invalid color
 }
+
+/**
+ * Validates and sanitizes an instrument name.
+ * Allows any printable characters for custom instrument names but blocks
+ * HTML tags and control characters to prevent injection.
+ * @param {*} name - Instrument name to validate
+ * @returns {string|null} Sanitized name or null if invalid
+ */
+export function validateInstrumentName(name) {
+    if (typeof name !== 'string') return null;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > 255) return null;
+    // Block HTML tags and control characters only
+    if (/<[^>]*>/.test(trimmed)) return null;
+    if (/[\x00-\x1f\x7f]/.test(trimmed)) return null;
+    return trimmed;
+}

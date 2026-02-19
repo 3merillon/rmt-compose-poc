@@ -13,7 +13,7 @@ import { ExpressionCompiler, ExpressionDecompiler } from './expression-compiler.
 import { DependencyGraph } from './dependency-graph.js';
 import { decompileToDSL } from './dsl/index.js';
 import { validateExpressionSyntax } from './utils/safe-expression-validator.js';
-import { validateColorInput } from './utils/html-escape.js';
+import { validateColorInput, validateInstrumentName } from './utils/html-escape.js';
 
 /**
  * Serializer for converting between binary and JSON formats
@@ -190,7 +190,12 @@ export class ModuleSerializer {
       }
     }
     if (data.instrument) {
-      note.instrument = data.instrument;
+      const validatedInstrument = validateInstrumentName(data.instrument);
+      if (validatedInstrument) {
+        note.instrument = validatedInstrument;
+      } else {
+        console.warn(`[Security] Invalid instrument name for note ${data.id}, using default`);
+      }
     }
 
     // Update next ID counter

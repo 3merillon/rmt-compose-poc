@@ -9,7 +9,7 @@ import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpress
 import { Workspace } from './renderer/webgl2/workspace.js';
 import { menuBar } from './menu/menu-bar.js';
 import { isDSLSyntax } from './dsl/index.js';
-import { escapeHtml } from './utils/html-escape.js';
+import { escapeHtml, validateColorInput, validateInstrumentName } from './utils/html-escape.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -1711,7 +1711,9 @@ if (canvasEl) {
                         // Set expression via *String property - Note class handles binary compilation
                         impNote.setVariable(key, expr);
                     } else if (key === 'color') {
-                        impNote.variables.color = impNote.variables.color;
+                        impNote.variables.color = validateColorInput(impNote.variables.color) || null;
+                    } else if (key === 'instrument') {
+                        impNote.variables.instrument = validateInstrumentName(impNote.variables.instrument) || null;
                     }
                 }
                 impNote.module = myModule;
