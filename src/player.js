@@ -1545,6 +1545,26 @@ if (canvasEl) {
                 // DSL format uses base.t, base.d, base.f, base.tempo, etc.
                 const hasDslBase = /\bbase\.[tdfbm]/.test(expr);
 
+                // Remap DSL [N] references FIRST, before base remapping.
+                // This must run before base.X -> [anchorId].X to avoid double-remapping
+                // (base remap creates [anchorId] patterns that would collide with imported IDs).
+                const hasDslIds = /\[\d+\]/.test(expr);
+                if (hasDslIds) {
+                    expr = expr.replace(/\[(\d+)\]/g, function(match, p1) {
+                        const oldRef = parseInt(p1, 10);
+                        if (mapping.hasOwnProperty(oldRef)) {
+                            return '[' + mapping[oldRef] + ']';
+                        }
+                        return match;
+                    });
+
+                    // Second pass for measure bar drops: fix frequency refs pointing to measure
+                    if (targetIsMeasure && exprType === 'frequency') {
+                        const measureId = targetNote.id;
+                        expr = expr.replace(new RegExp(`\\[${measureId}\\]\\.f\\b`, 'g'), 'base.f');
+                    }
+                }
+
                 // Remap DSL base references (base.t, base.d, etc.) to target note
                 if (targetNote.id !== 0 && hasDslBase) {
                     const anchorId = targetNote.id;
@@ -1598,7 +1618,7 @@ if (canvasEl) {
                     expr = expr.replace(/module\.findMeasureLength\(\s*module\.baseNote\s*\)/g, "module.findMeasureLength(module.getNoteById(" + anchorId + "))");
                 }
 
-                // Remap explicit id references using the mapping table (includes 0 -> target id)
+                // Remap explicit legacy id references using the mapping table (includes 0 -> target id)
                 if (hasIds) {
                     expr = expr.replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, function(match, p1) {
                         const oldRef = parseInt(p1, 10);
@@ -1692,7 +1712,8 @@ if (canvasEl) {
                         // Check for legacy format (module.baseNote) and DSL format (base.t, base.d, etc.)
                         const needsRemap = (originalString.indexOf('module.baseNote') !== -1) ||
                                            (originalString.indexOf('getNoteById(') !== -1) ||
-                                           (/\bbase\.[tdfbm]/.test(originalString));
+                                           (/\bbase\.[tdfbm]/.test(originalString)) ||
+                                           (/\[\d+\]/.test(originalString));
                         const baseKey = key.slice(0, -6);
 
                         // Always canonicalize by type to ensure predictable UI (e.g., duration selector preselect)

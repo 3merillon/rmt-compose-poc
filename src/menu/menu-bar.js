@@ -77,7 +77,7 @@ const menuAPI = (function() {
                             if (moduleResponse.ok) {
                                 const moduleData = await moduleResponse.json();
                                 moduleDataCache[`${category}/${filename}`] = moduleData;
-                                moduleDataCache[`${category}/${filename.replace(/\.json$/i, '')}`] = moduleData;
+                                moduleDataCache[`${category}/${filename.replace(/\.(json|rmtb)$/i, '')}`] = moduleData;
                             }
                         } catch (error) {}
                     }
@@ -727,32 +727,54 @@ const menuAPI = (function() {
     function handleFileUpload(category, sectionContainer) {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.json';
+        input.accept = '.json,.rmtb';
         input.style.display = 'none';
         input.addEventListener('change', function(event) {
             const file = event.target.files[0];
             if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    try {
-                        const moduleData = JSON.parse(e.target.result);
-                        const originalFilename = file.name.replace(/\.json$/i, '');
-                        moduleData.filename = originalFilename;
-                        const icon = createModuleIcon(category, originalFilename, moduleData);
-                        icon.setAttribute('data-uploaded', 'true');
-                        icon.setAttribute('data-original-filename', file.name);
-                        const placeholder = sectionContainer.querySelector('.empty-placeholder');
-                        if (placeholder) sectionContainer.removeChild(placeholder);
-                        sectionContainer.appendChild(icon);
-                        ensurePlaceholdersAtEnd();
-                        saveUIStateToLocalStorage();
-                        showNotification(`Module "${originalFilename}" uploaded successfully`, 'success');
-                    } catch (error) {
-                        console.error("Error parsing JSON:", error);
-                        showNotification(`Invalid JSON file: ${error.message}`, 'error');
-                    }
-                };
-                reader.readAsText(file);
+                const isBinary = /\.rmtb$/i.test(file.name);
+                const originalFilename = file.name.replace(/\.(json|rmtb)$/i, '');
+
+                function finishUpload(moduleData) {
+                    moduleData.filename = originalFilename;
+                    const icon = createModuleIcon(category, originalFilename, moduleData);
+                    icon.setAttribute('data-uploaded', 'true');
+                    icon.setAttribute('data-original-filename', file.name);
+                    const placeholder = sectionContainer.querySelector('.empty-placeholder');
+                    if (placeholder) sectionContainer.removeChild(placeholder);
+                    sectionContainer.appendChild(icon);
+                    ensurePlaceholdersAtEnd();
+                    saveUIStateToLocalStorage();
+                    showNotification(`Module "${originalFilename}" uploaded successfully`, 'success');
+                }
+
+                if (isBinary) {
+                    const reader = new FileReader();
+                    reader.onload = async function(e) {
+                        try {
+                            const { deserializeBinaryModule } = await import('../binary-module-format.js');
+                            const mod = deserializeBinaryModule(e.target.result);
+                            const moduleData = mod.createModuleJSON();
+                            finishUpload(moduleData);
+                        } catch (error) {
+                            console.error("Error loading .rmtb:", error);
+                            showNotification(`Invalid .rmtb file: ${error.message}`, 'error');
+                        }
+                    };
+                    reader.readAsArrayBuffer(file);
+                } else {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        try {
+                            const moduleData = JSON.parse(e.target.result);
+                            finishUpload(moduleData);
+                        } catch (error) {
+                            console.error("Error parsing JSON:", error);
+                            showNotification(`Invalid JSON file: ${error.message}`, 'error');
+                        }
+                    };
+                    reader.readAsText(file);
+                }
             }
         });
         document.body.appendChild(input);
@@ -778,7 +800,7 @@ const menuAPI = (function() {
             position: 'relative', border: '1px solid transparent', transition: 'border-color 0.3s, box-shadow 0.3s'
         });
         moduleIcon.setAttribute('draggable', 'true');
-        let displayName = filename.replace(/\.json$/i, '');
+        let displayName = filename.replace(/\.(json|rmtb)$/i, '');
         const textContainer = document.createElement('div');
         Object.assign(textContainer.style, {
             width: '100%', height: '100%', display: 'flex', alignItems: 'center',
@@ -868,7 +890,7 @@ const menuAPI = (function() {
             this.style.opacity = '0.5';
             if (moduleIcon.moduleData) {
                 if (!moduleIcon.moduleData.filename) {
-                    moduleIcon.moduleData.filename = filename.replace(/\.json$/i, '');
+                    moduleIcon.moduleData.filename = filename.replace(/\.(json|rmtb)$/i, '');
                 }
                 const jsonData = JSON.stringify(moduleIcon.moduleData);
                 event.dataTransfer.setData('application/json', jsonData);
