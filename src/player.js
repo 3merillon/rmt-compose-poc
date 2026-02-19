@@ -2291,21 +2291,22 @@ if (canvasEl) {
         });
         const savedStartFunc = draggedNote.variables.startTime;
         draggedNote.variables.startTime = () => newDraggedStart;
-        
-        const moved = [];
-        const tol = new Fraction(1, 10000);
-        affectedIds.forEach(id => {
-            const depNote = myModule.getNoteById(id);
-            if (depNote && typeof depNote.getVariable === 'function') {
-                let newVal = new Fraction(depNote.getVariable('startTime').valueOf());
-                if (newVal.sub(originalValues[id]).abs().compare(tol) > 0) {
-                    moved.push({ note: depNote, newStart: newVal });
+        try {
+            const moved = [];
+            const tol = new Fraction(1, 10000);
+            affectedIds.forEach(id => {
+                const depNote = myModule.getNoteById(id);
+                if (depNote && typeof depNote.getVariable === 'function') {
+                    let newVal = new Fraction(depNote.getVariable('startTime').valueOf());
+                    if (newVal.sub(originalValues[id]).abs().compare(tol) > 0) {
+                        moved.push({ note: depNote, newStart: newVal });
+                    }
                 }
-            }
-        });
-        
-        draggedNote.variables.startTime = savedStartFunc;
-        return moved;
+            });
+            return moved;
+        } finally {
+            draggedNote.variables.startTime = savedStartFunc;
+        }
     }
 // === GL move helpers: parent selection, expression emission, and frequency retargeting ===
 function __isMeasureNoteGL(note) {
@@ -2373,6 +2374,71 @@ function parseFrequencyExpressionLocal(exprText, moduleInstance) {
   if (noteRefMatch) {
     if (debug) console.log('[ParseFreq] -> note direct ref:', noteRefMatch[1]);
     return { algebra: { coeff: new Fraction(1), powers: [] }, noteRef: parseInt(noteRefMatch[1], 10) };
+  }
+
+  // DSL base case: base.f
+  if (/^base\.f$/.test(expr)) {
+    if (debug) console.log('[ParseFreq] -> DSL baseNote ref');
+    return { algebra: { coeff: new Fraction(1), powers: [] }, noteRef: null };
+  }
+
+  // DSL base case: [N].f
+  const dslNoteRef = expr.match(/^\[(\d+)\]\.f$/);
+  if (dslNoteRef) {
+    if (debug) console.log('[ParseFreq] -> DSL note ref:', dslNoteRef[1]);
+    return { algebra: { coeff: new Fraction(1), powers: [] }, noteRef: parseInt(dslNoteRef[1], 10) };
+  }
+
+  // DSL: Find last top-level * operator (lower precedence than ^)
+  {
+    let dslDepth = 0;
+    let lastStarPos = -1;
+    for (let i = 0; i < expr.length; i++) {
+      if (expr[i] === '(') dslDepth++;
+      else if (expr[i] === ')') dslDepth--;
+      else if (dslDepth === 0 && expr[i] === '*') lastStarPos = i;
+    }
+    if (lastStarPos !== -1) {
+      const dslLeft = expr.substring(0, lastStarPos).trim();
+      const dslRight = expr.substring(lastStarPos + 1).trim();
+      const lp = parseFrequencyExpressionLocal(dslLeft, moduleInstance);
+      const rp = parseFrequencyExpressionLocal(dslRight, moduleInstance);
+      if (lp && rp) {
+        const ref = lp.noteRef !== null ? lp.noteRef : rp.noteRef;
+        if (debug) console.log('[ParseFreq] -> DSL * combined, ref=', ref);
+        return {
+          algebra: multiplyAlgebrasLocal(lp.algebra, rp.algebra),
+          noteRef: ref
+        };
+      }
+      if (lp) return lp;
+      if (rp) return rp;
+    }
+  }
+
+  // DSL: power expression B ^ (N/D) or B ^ N
+  const dslPow = expr.match(/^(\d+)\s*\^\s*\(?(-?\d+)\s*(?:\/\s*(\d+))?\)?$/);
+  if (dslPow) {
+    const base = parseInt(dslPow[1], 10);
+    const expNum = parseInt(dslPow[2], 10);
+    const expDen = dslPow[3] ? parseInt(dslPow[3], 10) : 1;
+    if (debug) console.log('[ParseFreq] -> DSL power:', base, '^', expNum + '/' + expDen);
+    return {
+      algebra: { coeff: new Fraction(1), powers: [{ base, expNum, expDen }] },
+      noteRef: null
+    };
+  }
+
+  // DSL: fraction (N/D) or bare integer
+  const dslFrac = expr.match(/^\(?(-?\d+)\s*(?:\/\s*(\d+))?\)?$/);
+  if (dslFrac) {
+    const num = parseInt(dslFrac[1], 10);
+    const den = dslFrac[2] ? parseInt(dslFrac[2], 10) : 1;
+    if (debug) console.log('[ParseFreq] -> DSL fraction:', num + '/' + den);
+    return {
+      algebra: { coeff: new Fraction(num, den), powers: [] },
+      noteRef: null
+    };
   }
 
   // Find the LAST top-level .mul() to handle chained calls correctly

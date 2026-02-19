@@ -1249,7 +1249,7 @@ export class Workspace {
                   // Check if note is a measure
                   const isMeasure = (n) => {
                     try {
-                      return !!(n && n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency);
+                      return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
                     } catch { return false; }
                   };
 
@@ -2246,8 +2246,8 @@ export class Workspace {
       for (const idStr in mod.notes) {
         const n = mod.notes[idStr];
         if (!n) continue;
-        const hasStart = !!n.variables?.startTime;
-        const isMeasure = hasStart && !n.variables?.duration && !n.variables?.frequency;
+        const hasStart = !!(n.hasExpression && n.hasExpression('startTime'));
+        const isMeasure = hasStart && !(n.hasExpression && n.hasExpression('duration')) && !(n.hasExpression && n.hasExpression('frequency'));
         if (!isMeasure) continue;
         try {
           const t = n.getVariable('startTime').valueOf();

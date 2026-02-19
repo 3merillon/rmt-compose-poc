@@ -283,9 +283,11 @@ function deserializeNote(data, view, offset) {
     const sourceText = decoder.decode(data.slice(offset, offset + sourceTextLen));
     offset += sourceTextLen;
 
-    // Forward compatibility: skip unknown variable indices gracefully
+    // Forward compatibility: skip unknown variable indices gracefully.
+    // The FORMAT_VERSION check above prevents cross-version mismatches;
+    // an unknown varIndex here indicates a malformed file, not a future version.
     if (!varName) {
-      console.warn(`[.rmtb] Unknown varIndex ${varIndex} in note ${id}, skipping`);
+      console.warn(`[.rmtb] Unknown varIndex ${varIndex} in note ${id} (expected 0-${VAR_NAMES.length - 1}), skipping expression (sourceText: ${JSON.stringify(sourceText)})`);
       continue;
     }
 
