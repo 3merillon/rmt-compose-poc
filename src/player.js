@@ -123,7 +123,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         generalWidget: document.getElementById('general-widget'),
         loadModuleDropdown: document.getElementById('loadModuleDropdown'),
         loadFromFileItem: document.getElementById('loadFromFileItem'),
-        resetDefaultModuleItem: document.getElementById('resetDefaultModuleItem')
+        resetDefaultModuleItem: document.getElementById('resetDefaultModuleItem'),
+        saveModuleDropdown: document.getElementById('saveModuleDropdown'),
+        saveDSLItem: document.getElementById('saveDSLItem'),
+        saveLegacyItem: document.getElementById('saveLegacyItem'),
+        saveBinaryItem: document.getElementById('saveBinaryItem')
     };
 
     
@@ -627,70 +631,85 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   
     function updateDependentRawExpressions(selectedNoteId, selectedRaw) {
+        // Legacy patterns
         const getVarRegex = new RegExp(
             "(?:module\\.)?getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\.getVariable\\('([^']+)'\\)|targetNote\\.getVariable\\('([^']+)'\\)",
             "g"
         );
-        
         const otherRefRegex = new RegExp(
             "module\\.(?:findTempo|findMeasureLength)\\(\\s*module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\s*\\)",
             "g"
         );
-        
+
+        // DSL patterns: [N].f, [N].t, [N].d, [N].tempo, [N].bpm, [N].ml
+        const dslPropMap = { f: 'frequency', t: 'startTime', d: 'duration', tempo: 'tempo', bpm: 'beatsPerMeasure', ml: 'measureLength' };
+        const dslRefRegex = new RegExp("\\[" + selectedNoteId + "\\]\\.(f|t|d|tempo|bpm|ml)\\b", "g");
+        // DSL helpers: tempo([N]), measure([N]), beat([N])
+        const dslHelperRegex = new RegExp("(tempo|measure|beat)\\(\\s*\\[" + selectedNoteId + "\\]\\s*\\)", "g");
+
         const dependents = myModule.getDependentNotes(selectedNoteId);
         dependents.forEach(depId => {
             const depNote = myModule.getNoteById(depId);
-            if (!depNote) {
-                console.warn("Dependent note", depId, "not found.");
-                return;
-            }
-            
+            if (!depNote) return;
+
             Object.keys(depNote.variables).forEach(key => {
-                if (key.endsWith("String")) {
-                    let rawExp = depNote.variables[key];
-                    if (typeof rawExp !== "string") {
-                        console.warn("Skipping update for key", key, "in dependent note", depId, "as value is not a string:", rawExp);
-                        return;
-                    }
-                    
-                    if (rawExp.includes(`getNoteById(${selectedNoteId})`) || rawExp.includes("targetNote")) {
-                        let newRawExp = rawExp.replace(getVarRegex, (match, g1, g2) => {
-                            const varName = g1 || g2;
-                            let replacement = selectedRaw[varName];
-                            if (replacement === undefined) {
-                                replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
-                                console.warn("No raw value for", varName, "– using default", replacement);
-                            }
-                            return replacement;
-                        });
-                        
-                        newRawExp = newRawExp.replace(otherRefRegex, (match) => {
-                            if (match.includes("findTempo")) {
-                                return "module.findTempo(module.baseNote)";
-                            } else if (match.includes("findMeasureLength")) {
-                                return "module.findMeasureLength(module.baseNote)";
-                            }
-                            return match;
-                        });
-                        
-                        const directRefRegex = new RegExp("module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)", "g");
-                        newRawExp = newRawExp.replace(directRefRegex, "module.baseNote");
-                        
-                        const baseKey = key.slice(0, -6);
-                        let simplifiedExp = newRawExp;
-                        try {
-                            if (baseKey === 'startTime') {
-                                simplifiedExp = simplifyStartTime(newRawExp, myModule);
-                            } else if (baseKey === 'duration') {
-                                simplifiedExp = simplifyDuration(newRawExp, myModule);
-                            } else if (baseKey === 'frequency') {
-                                simplifiedExp = simplifyFrequency(newRawExp, myModule);
-                            }
-                        } catch {}
-                        // Set expression via *String property - Note class handles binary compilation
-                        depNote.setVariable(key, simplifiedExp);
-                    }
+                if (!key.endsWith("String")) return;
+                let rawExp = depNote.variables[key];
+                if (typeof rawExp !== "string") return;
+
+                const hasLegacyRef = rawExp.includes(`getNoteById(${selectedNoteId})`) || rawExp.includes("targetNote");
+                const hasDSLRef = rawExp.includes(`[${selectedNoteId}]`);
+
+                if (!hasLegacyRef && !hasDSLRef) return;
+
+                let newRawExp = rawExp;
+
+                // Legacy substitution
+                if (hasLegacyRef) {
+                    newRawExp = newRawExp.replace(getVarRegex, (match, g1, g2) => {
+                        const varName = g1 || g2;
+                        let replacement = selectedRaw[varName];
+                        if (replacement === undefined) {
+                            replacement = (varName === "frequency") ? "1" : "0";
+                        }
+                        return replacement;
+                    });
+                    newRawExp = newRawExp.replace(otherRefRegex, (match) => {
+                        if (match.includes("findTempo")) return "module.findTempo(module.baseNote)";
+                        if (match.includes("findMeasureLength")) return "module.findMeasureLength(module.baseNote)";
+                        return match;
+                    });
+                    const directRefRegex = new RegExp("module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)", "g");
+                    newRawExp = newRawExp.replace(directRefRegex, "module.baseNote");
                 }
+
+                // DSL substitution
+                if (hasDSLRef) {
+                    newRawExp = newRawExp.replace(dslRefRegex, (match, prop) => {
+                        const varName = dslPropMap[prop];
+                        let replacement = selectedRaw[varName];
+                        if (replacement === undefined) {
+                            replacement = (varName === "frequency") ? "1" : "0";
+                        }
+                        return `(${replacement})`;
+                    });
+                    newRawExp = newRawExp.replace(dslHelperRegex, (match, helper) => {
+                        return `${helper}(base)`;
+                    });
+                }
+
+                const baseKey = key.slice(0, -6);
+                let simplifiedExp = newRawExp;
+                try {
+                    if (baseKey === 'startTime') {
+                        simplifiedExp = simplifyStartTime(newRawExp, myModule);
+                    } else if (baseKey === 'duration') {
+                        simplifiedExp = simplifyDuration(newRawExp, myModule);
+                    } else if (baseKey === 'frequency') {
+                        simplifiedExp = simplifyFrequency(newRawExp, myModule);
+                    }
+                } catch {}
+                depNote.setVariable(key, simplifiedExp);
             });
         });
     }
@@ -700,26 +719,22 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (!selectedNote) return;
         
         let selectedRaw = {};
-        ["startTime", "duration", "frequency"].forEach(varName => {
+        ["startTime", "duration", "frequency", "tempo", "beatsPerMeasure", "measureLength"].forEach(varName => {
             if (selectedNote.variables[varName + "String"]) {
                 selectedRaw[varName] = selectedNote.variables[varName + "String"];
             } else {
                 const frac = selectedNote.getVariable(varName);
-                let fracStr;
                 if (frac == null) {
-                    fracStr = (varName === "frequency") ? "1/1" : "0/1";
+                    selectedRaw[varName] = (varName === "frequency") ? "1" : "0";
                 } else if (frac && typeof frac.toFraction === "function") {
-                    fracStr = frac.toFraction();
+                    const parts = frac.toFraction().split('/');
+                    selectedRaw[varName] = parts.length === 2 ? `(${parts[0]}/${parts[1]})` : parts[0];
                 } else {
-                    fracStr = frac.toString();
+                    selectedRaw[varName] = String(frac);
                 }
-                if (!fracStr.includes("/")) {
-                    fracStr = fracStr + "/1";
-                }
-                selectedRaw[varName] = "new Fraction(" + fracStr + ")";
             }
         });
-        
+
         const selectedNoteInstrument = myModule.findInstrument(selectedNote);
         const directDependents = myModule.getDependentNotes(noteId);
         
@@ -780,10 +795,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     while (currentParent && currentParent.id !== 0) {
                         const parentStartTimeString = currentParent.variables.startTimeString || '';
-                        const parentMatch = parentStartTimeString.match(/module\.getNoteById\((\d+)\)/);
-                        
-                        if (parentMatch) {
-                            const parentId = parseInt(parentMatch[1], 10);
+                        const parentId = __extractNoteIdFromExpr(parentStartTimeString);
+
+                        if (parentId !== null) {
                             const parent = myModule.getNoteById(parentId);
                             
                             if (parent) {
@@ -798,7 +812,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                             } else {
                                 break;
                             }
-                        } else if (parentStartTimeString.includes('module.baseNote')) {
+                        } else if (__exprReferencesBase(parentStartTimeString)) {
                             suitableParent = myModule.baseNote;
                             break;
                         } else {
@@ -884,9 +898,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         const measure = myModule.getNoteById(parseInt(measureId, 10));
         if (!measure) return false;
 
-        // Check if any other measure is a CHAIN LINK to this one (uses findMeasureLength)
+        // Check if any other measure is a CHAIN LINK to this one (uses findMeasureLength/measure())
         // Anchors (measures that start a new chain) don't count - they form their own chains
-        const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+        const legacyPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+        const dslPattern = `measure([${measure.id}])`;
 
         return !Object.values(myModule.notes).some(otherNote => {
             if (otherNote.id === measure.id) return false;
@@ -894,8 +909,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
             const startTimeString = otherNote.variables.startTimeString;
 
-            // Only count chain links (use findMeasureLength), not anchors
-            const isChainLink = startTimeString.includes(linkPattern);
+            const isChainLink = startTimeString.includes(legacyPattern) || startTimeString.includes(dslPattern);
             const isMeasure = otherNote.variables.startTime &&
                               !otherNote.variables.duration &&
                               !otherNote.variables.frequency;
@@ -1195,6 +1209,11 @@ document.addEventListener('DOMContentLoaded', async function() {
                             if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
                                 dd.style.display = 'none';
                             }
+                            const sdd = document.getElementById('saveModuleDropdown');
+                            const sb = domCache && domCache.saveModuleBtn;
+                            if (sdd && sb && !sdd.contains(event.target) && !sb.contains(event.target)) {
+                                sdd.style.display = 'none';
+                            }
                         } catch {}
                       } catch {}
                     };
@@ -1388,7 +1407,42 @@ if (canvasEl) {
 
   
     if (domCache.saveModuleBtn) {
-        domCache.saveModuleBtn.addEventListener('click', saveModule);
+        const toggleSaveDropdown = () => {
+            const dd = domCache.saveModuleDropdown;
+            if (!dd) return;
+            dd.style.display = (dd.style.display === 'none' || dd.style.display === '') ? 'block' : 'none';
+        };
+        const hideSaveDropdown = () => {
+            const dd = domCache.saveModuleDropdown;
+            if (dd) dd.style.display = 'none';
+        };
+
+        domCache.saveModuleBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleSaveDropdown();
+        });
+
+        if (domCache.saveDSLItem) {
+            domCache.saveDSLItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                hideSaveDropdown();
+                saveModule('dsl');
+            });
+        }
+        if (domCache.saveLegacyItem) {
+            domCache.saveLegacyItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                hideSaveDropdown();
+                saveModule('legacy');
+            });
+        }
+        if (domCache.saveBinaryItem) {
+            domCache.saveBinaryItem.addEventListener('click', (e) => {
+                e.stopPropagation();
+                hideSaveDropdown();
+                saveModule('binary');
+            });
+        }
     } else {
         console.error('Save Module button not found!');
     }
@@ -2238,16 +2292,30 @@ function __isMeasureNoteGL(note) {
   } catch { return false; }
 }
 
+// Extract a note ID from an expression string (DSL [N] or legacy getNoteById(N))
+function __extractNoteIdFromExpr(raw) {
+  if (!raw) return null;
+  const dsl = raw.match(/\[(\d+)\]/);
+  if (dsl) return parseInt(dsl[1], 10);
+  const legacy = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+  if (legacy) return parseInt(legacy[1], 10);
+  return null;
+}
+// Check if expression references base note (DSL base.* or legacy module.baseNote)
+function __exprReferencesBase(raw) {
+  if (!raw) return false;
+  return /\bbase\./.test(raw) || raw.includes('module.baseNote');
+}
+
 function __parseParentFromStartTimeStringGL(note) {
   try {
     const raw = note?.variables?.startTimeString || '';
-    const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
-    if (m) {
-      const pid = parseInt(m[1], 10);
-      const p = myModule.getNoteById(pid);
+    const noteId = __extractNoteIdFromExpr(raw);
+    if (noteId !== null) {
+      const p = myModule.getNoteById(noteId);
       return p || myModule.baseNote;
     }
-    if (raw.includes('module.baseNote')) return myModule.baseNote;
+    if (__exprReferencesBase(raw)) return myModule.baseNote;
     if (typeof note.parentId === 'number') {
       const p2 = myModule.getNoteById(note.parentId);
       return p2 || myModule.baseNote;
@@ -2772,15 +2840,15 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
 function __findNextMeasureInChainGL(measure) {
   try {
     if (!__isMeasureNoteGL(measure)) return null;
-    // Only find CHAIN LINKS (measures that use findMeasureLength), not anchors starting new chains
-    const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+    // Only find CHAIN LINKS (measures that use findMeasureLength/measure()), not anchors starting new chains
+    const legacyPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+    const dslPattern = `measure([${measure.id}])`;
     const chainLinks = [];
     for (const id in myModule.notes) {
       const n = myModule.getNoteById(parseInt(id, 10));
       if (!n || !__isMeasureNoteGL(n)) continue;
       const startTimeString = n.variables.startTimeString || '';
-      // Only include chain links (use findMeasureLength), not anchors
-      if (startTimeString.includes(linkPattern)) chainLinks.push(n);
+      if (startTimeString.includes(legacyPattern) || startTimeString.includes(dslPattern)) chainLinks.push(n);
     }
     if (chainLinks.length === 0) return null;
     // Sort by startTime and return earliest (there should typically be only one chain link)
@@ -2831,13 +2899,12 @@ function selectSuitableParentForStartGL(note, newStartSec) {
       let cur = parent;
       while (cur && cur.id !== 0) {
         const raw = cur.variables.startTimeString || '';
-        const m = raw.match(/getNoteById\((\d+)\)/);
-        if (m) {
-          const pid = parseInt(m[1], 10);
+        const pid = __extractNoteIdFromExpr(raw);
+        if (pid !== null) {
           cur = myModule.getNoteById(pid);
           if (cur) chain.push(cur);
           else break;
-        } else if ((raw || '').includes('module.baseNote')) {
+        } else if (__exprReferencesBase(raw)) {
           chain.push(myModule.baseNote);
           break;
         } else {
@@ -2923,11 +2990,10 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
           const isMeasure = __isMeasureNoteGL(anc);
           if (st <= cutoffSec + tol && (!requireFrequency || !isMeasure)) return anc;
           const raw = (anc.variables && anc.variables.startTimeString) || '';
-          const m = raw.match(/getNoteById\((\d+)\)/);
-          if (m) {
-            const pid = parseInt(m[1], 10);
+          const pid = __extractNoteIdFromExpr(raw);
+          if (pid !== null) {
             anc = myModule.getNoteById(pid);
-          } else if ((raw || '').includes('module.baseNote')) {
+          } else if (__exprReferencesBase(raw)) {
             anc = myModule.baseNote;
             break;
           } else {
@@ -2960,29 +3026,33 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
       const fRaw = dep.variables && dep.variables.frequencyString;
       if (!fRaw || typeof fRaw !== 'string') return;
 
-      // Only retarget when the dependent references moved note's frequency
-      const freqRefRe = new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)\\.getVariable\\(\\s*['"]frequency['"]\\s*\\)`);
-      if (!freqRefRe.test(fRaw)) return;
+      // Only retarget when the dependent references moved note's frequency (legacy or DSL)
+      const legacyFreqRefRe = new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)\\.getVariable\\(\\s*['"]frequency['"]\\s*\\)`);
+      const dslFreqRefRe = new RegExp(`\\[${movedId}\\]\\.f\\b`);
+      if (!legacyFreqRefRe.test(fRaw) && !dslFreqRefRe.test(fRaw)) return;
 
       const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
-      // If dependent starts earlier than referenced (moved) note, swap to a valid ancestor at/before depStart
       if (depStart < movedStart - 1e-6) {
-        const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, true); // requireFrequency=true to skip measure bars
+        const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, true);
 
-        // Check for transitive corruption using new helper
         const depTransitivelyCorrupt = depGraph?.isFrequencyTransitivelyCorrupted?.(dep.id);
         const targetCorrupt = replacementTarget?.id !== 0 && depGraph?.isPropertyCorrupted?.(replacementTarget.id, 0x04);
-        const anyCorruption = depTransitivelyCorrupt || movedHasCorruptFreq || targetCorrupt || fRaw.includes('.pow(');
+        const anyCorruption = depTransitivelyCorrupt || movedHasCorruptFreq || targetCorrupt || fRaw.includes('.pow(') || fRaw.includes('^');
 
         let newFreqString;
         if (anyCorruption) {
-          // Use value-based rebuilding to preserve evaluated frequency exactly
           newFreqString = rebuildFrequencyForAnchor(dep, replacementTarget, depGraph);
         } else {
           // Simple reference substitution with simplification for clean cases
-          const parentRef = (replacementTarget && replacementTarget.id === 0) ? "module.baseNote"
-                           : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
-          const replaced = fRaw.replace(new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g'), parentRef);
+          let replaced = fRaw;
+          if (legacyFreqRefRe.test(fRaw)) {
+            const parentRef = (replacementTarget && replacementTarget.id === 0) ? "module.baseNote"
+                             : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
+            replaced = fRaw.replace(new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g'), parentRef);
+          } else {
+            const dslRef = (replacementTarget && replacementTarget.id === 0) ? 'base' : `[${replacementTarget.id}]`;
+            replaced = fRaw.replace(new RegExp(`\\[${movedId}\\]`, 'g'), dslRef);
+          }
           try { newFreqString = simplifyFrequency(replaced, myModule); } catch { newFreqString = replaced; }
         }
 
@@ -3019,15 +3089,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         const tol = 1e-6;
         while (anc && anc.id !== 0) {
           const st = Number(anc.getVariable('startTime').valueOf() || 0);
-          // Skip measure bars when we need frequency (measures have no frequency expression)
           const isMeasure = __isMeasureNoteGL(anc);
           if (st <= cutoffSec + tol && (!requireFrequency || !isMeasure)) return anc;
           const raw = (anc.variables && anc.variables.startTimeString) || '';
-          const m = raw.match(/getNoteById\((\d+)\)/);
-          if (m) {
-            const pid = parseInt(m[1], 10);
+          const pid = __extractNoteIdFromExpr(raw);
+          if (pid !== null) {
             anc = myModule.getNoteById(pid);
-          } else if ((raw || '').includes('module.baseNote')) {
+          } else if (__exprReferencesBase(raw)) {
             anc = myModule.baseNote;
             break;
           } else {
@@ -3052,53 +3120,85 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
       if (!(depStart < movedStart - 1e-6)) return;
 
-      // For startTime/duration, measure bars are valid (they have startTime)
       const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, false);
       const parentRef = (replacementTarget && replacementTarget.id === 0)
         ? "module.baseNote"
         : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
+      const dslParentRef = (replacementTarget && replacementTarget.id === 0)
+        ? null
+        : (replacementTarget ? `[${replacementTarget.id}]` : null);
 
-      const noteRefRegex = new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g');
+      const legacyRefRegex = new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g');
+      const dslRefRegex = new RegExp(`\\[${movedId}\\]`, 'g');
 
       let changed = false;
 
       // startTimeString
       try {
         const sRaw = dep.variables && dep.variables.startTimeString;
-        if (typeof sRaw === 'string' && noteRefRegex.test(sRaw)) {
-          const replacedS = sRaw.replace(noteRefRegex, parentRef);
-          let simplifiedS;
-          try { simplifiedS = simplifyStartTime(replacedS, myModule); } catch { simplifiedS = replacedS; }
-          dep.setVariable('startTimeString', simplifiedS);
-          changed = true;
+        if (typeof sRaw === 'string') {
+          let replacedS = null;
+          if (legacyRefRegex.test(sRaw)) {
+            legacyRefRegex.lastIndex = 0;
+            replacedS = sRaw.replace(legacyRefRegex, parentRef);
+          } else if (dslRefRegex.test(sRaw)) {
+            dslRefRegex.lastIndex = 0;
+            replacedS = dslParentRef ? sRaw.replace(dslRefRegex, dslParentRef) : sRaw.replace(dslRefRegex, 'base');
+          }
+          if (replacedS) {
+            let simplifiedS;
+            try { simplifiedS = simplifyStartTime(replacedS, myModule); } catch { simplifiedS = replacedS; }
+            dep.setVariable('startTimeString', simplifiedS);
+            changed = true;
+          }
         }
       } catch {}
 
       // durationString
       try {
         const dRaw = dep.variables && dep.variables.durationString;
-        if (typeof dRaw === 'string' && noteRefRegex.test(dRaw)) {
-          const replacedD = dRaw.replace(noteRefRegex, parentRef);
-          let simplifiedD;
-          try { simplifiedD = simplifyDuration(replacedD, myModule); } catch { simplifiedD = replacedD; }
-          dep.setVariable('durationString', simplifiedD);
-          changed = true;
+        if (typeof dRaw === 'string') {
+          let replacedD = null;
+          if (legacyRefRegex.test(dRaw)) {
+            legacyRefRegex.lastIndex = 0;
+            replacedD = dRaw.replace(legacyRefRegex, parentRef);
+          } else if (dslRefRegex.test(dRaw)) {
+            dslRefRegex.lastIndex = 0;
+            replacedD = dslParentRef ? dRaw.replace(dslRefRegex, dslParentRef) : dRaw.replace(dslRefRegex, 'base');
+          }
+          if (replacedD) {
+            let simplifiedD;
+            try { simplifiedD = simplifyDuration(replacedD, myModule); } catch { simplifiedD = replacedD; }
+            dep.setVariable('durationString', simplifiedD);
+            changed = true;
+          }
         }
       } catch {}
 
       // frequencyString (generic path; frequency-specific pass may already handle this)
-      // Skip notes with .pow() - their expressions should be preserved as-is
+      // Skip notes with .pow() or ^ - their expressions should be preserved as-is
       try {
         const fRaw = dep.variables && dep.variables.frequencyString;
-        if (typeof fRaw === 'string' && !fRaw.includes('.pow(') && noteRefRegex.test(fRaw)) {
-          // For frequency references, we need an ancestor that HAS frequency (not a measure bar)
-          const freqReplacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, true); // requireFrequency=true
+        const hasPow = fRaw && (fRaw.includes('.pow(') || fRaw.includes('^'));
+        const hasRef = fRaw && (legacyRefRegex.test(fRaw) || (legacyRefRegex.lastIndex = 0, dslRefRegex.test(fRaw)));
+        legacyRefRegex.lastIndex = 0; dslRefRegex.lastIndex = 0;
+        if (typeof fRaw === 'string' && !hasPow && hasRef) {
+          const freqReplacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, true);
           const freqParentRef = (freqReplacementTarget && freqReplacementTarget.id === 0)
             ? "module.baseNote"
             : (freqReplacementTarget ? `module.getNoteById(${freqReplacementTarget.id})` : "module.baseNote");
-          const replacedF = fRaw.replace(noteRefRegex, freqParentRef);
+          const freqDslRef = (freqReplacementTarget && freqReplacementTarget.id === 0)
+            ? null
+            : (freqReplacementTarget ? `[${freqReplacementTarget.id}]` : null);
+          let replacedF;
+          if (legacyRefRegex.test(fRaw)) {
+            legacyRefRegex.lastIndex = 0;
+            replacedF = fRaw.replace(legacyRefRegex, freqParentRef);
+          } else {
+            dslRefRegex.lastIndex = 0;
+            replacedF = freqDslRef ? fRaw.replace(dslRefRegex, freqDslRef) : fRaw.replace(dslRefRegex, 'base');
+          }
           let simplifiedF;
-          // Check if corruption is involved - skip simplification if so
           const depGraph = myModule._dependencyGraph;
           const movedHasCorruptFreq = depGraph &&
             typeof depGraph.isPropertyCorrupted === 'function' &&
@@ -3630,6 +3730,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
                 dd.style.display = 'none';
             }
+            // Close Save Module dropdown when clicking outside
+            const sdd = document.getElementById('saveModuleDropdown');
+            const sb = domCache.saveModuleBtn;
+            if (sdd && sb && !sdd.contains(event.target) && !sb.contains(event.target)) {
+                sdd.style.display = 'none';
+            }
         }
         isDragging = false;
     });
@@ -3679,6 +3785,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             const lb = domCache.loadModuleBtn;
             if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
                 dd.style.display = 'none';
+            }
+            const sdd = document.getElementById('saveModuleDropdown');
+            const sb = domCache.saveModuleBtn;
+            if (sdd && sb && !sdd.contains(event.target) && !sb.contains(event.target)) {
+                sdd.style.display = 'none';
             }
         }
         isDragging = false;
@@ -4063,48 +4174,54 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 return;
             }
 
-            file.text().then((fileContent) => {
-                const moduleData = JSON.parse(fileContent);
+            const isBinary = file.name.endsWith('.rmtb');
 
-                // SECURITY: Validate JSON structure to prevent DoS via deeply nested/malformed data
-                if (!validateModuleStructure(moduleData)) {
-                    notify('Invalid module file structure', 'error');
-                    console.error('[RMT Security] Module file failed structure validation');
-                    return;
+            const dataPromise = isBinary ? file.arrayBuffer() : file.text();
+            dataPromise.then(async (fileContent) => {
+                let newModule;
+                if (isBinary) {
+                    const { deserializeBinaryModule } = await import('./binary-module-format.js');
+                    newModule = deserializeBinaryModule(fileContent);
+                } else {
+                    const moduleData = JSON.parse(fileContent);
+
+                    // SECURITY: Validate JSON structure to prevent DoS via deeply nested/malformed data
+                    if (!validateModuleStructure(moduleData)) {
+                        notify('Invalid module file structure', 'error');
+                        console.error('[RMT Security] Module file failed structure validation');
+                        return;
+                    }
+                    newModule = await Module.loadFromJSON(moduleData);
                 }
+
                 if (isPlaying || isPaused) {
                     stop(true);
                 }
-                
-                
+
                 cleanupCurrentModule();
-                
-                Module.loadFromJSON(moduleData).then(newModule => {
-                    if (newModule.baseNote) {
-                        // Ensure canonical id for base note; otherwise use module-defined base note values as-is
-                        newModule.baseNote.id = 0;
-                    }
 
-                    myModule = newModule;
-                    setModule(newModule, { skipBackgroundEval: true });
+                if (newModule.baseNote) {
+                    newModule.baseNote.id = 0;
+                }
 
-                    // loadFromJSON already calls invalidateAll(), no need to mark dirty again
-                    initializeModule();
-                    invalidateModuleEndTimeCache();
-                    
-                    updateBaseNoteFraction();
-                    updateBaseNotePosition();
-                    try { captureSnapshot('Load Module'); } catch {}
-                    notify('Module loaded successfully', 'success');
-                    
-                }).catch((error) => {
-                    console.error('Error loading module:', error);
-                    const errorMsg = document.createElement('div');
-                    errorMsg.className = 'error-message';
-                    errorMsg.textContent = `Error loading module: ${error.message}`;
-                    document.body.appendChild(errorMsg);
-                    setTimeout(() => errorMsg.remove(), 3000);
-                });
+                myModule = newModule;
+                setModule(newModule, { skipBackgroundEval: true });
+
+                initializeModule();
+                invalidateModuleEndTimeCache();
+
+                updateBaseNoteFraction();
+                updateBaseNotePosition();
+                try { captureSnapshot('Load Module'); } catch {}
+                notify('Module loaded successfully', 'success');
+
+            }).catch((error) => {
+                console.error('Error loading module:', error);
+                const errorMsg = document.createElement('div');
+                errorMsg.className = 'error-message';
+                errorMsg.textContent = `Error loading module: ${error.message}`;
+                document.body.appendChild(errorMsg);
+                setTimeout(() => errorMsg.remove(), 3000);
             });
         } catch (error) {
             console.error('Error reading module file:', error);
@@ -4164,12 +4281,19 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         return myModule.createModuleJSON();
     }
 
-    function saveModule() {
-        myModule.exportOrderedModule().then(orderedJSONString => {
-            const blob = new Blob([orderedJSONString], { type: 'application/json' });
+    function saveModule(format = 'dsl') {
+        myModule.exportOrderedModule(format).then(result => {
+            let blob, filename;
+            if (format === 'binary') {
+                blob = new Blob([result], { type: 'application/octet-stream' });
+                filename = 'module.rmtb';
+            } else {
+                blob = new Blob([result], { type: 'application/json' });
+                filename = 'module.json';
+            }
             const a = document.createElement('a');
             a.href = URL.createObjectURL(blob);
-            a.download = 'module.json';
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -4608,16 +4732,17 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               // Now we handle ALL cases including .pow() expressions using value-based rebuilding
               let refNote = null;
               try {
-                const mFreq = fRaw0 && fRaw0.match(/module\.getNoteById\(\s*(\d+)\s*\)\.getVariable\(\s*['"]frequency['"]\s*\)/);
-                if (mFreq) {
-                  const rid = parseInt(mFreq[1], 10);
+                // DSL: [N].f or base.f
+                const dslFreqRef = fRaw0 && fRaw0.match(/\[(\d+)\]\.f/);
+                const legacyFreqRef = fRaw0 && fRaw0.match(/module\.getNoteById\(\s*(\d+)\s*\)\.getVariable\(\s*['"]frequency['"]\s*\)/);
+                if (dslFreqRef) {
+                  const rid = parseInt(dslFreqRef[1], 10);
                   refNote = myModule.getNoteById(rid) || null;
-                } else {
-                  // Also handle explicit BaseNote frequency anchor
-                  const baseMatch = fRaw0 && /module\.baseNote\.getVariable\(\s*['"]frequency['"]\s*\)/.test(fRaw0);
-                  if (baseMatch) {
-                    refNote = myModule.baseNote;
-                  }
+                } else if (legacyFreqRef) {
+                  const rid = parseInt(legacyFreqRef[1], 10);
+                  refNote = myModule.getNoteById(rid) || null;
+                } else if (fRaw0 && (/\bbase\.f/.test(fRaw0) || /module\.baseNote\.getVariable\(\s*['"]frequency['"]\s*\)/.test(fRaw0))) {
+                  refNote = myModule.baseNote;
                 }
               } catch {}
               if (!refNote) {
@@ -4635,15 +4760,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                   let guard = 0;
                   while (anc && anc.id !== 0 && guard++ < 128) {
                     const st = Number(anc.getVariable('startTime')?.valueOf?.() || 0);
-                    // Skip measure bars when we need frequency (measures have no frequency expression)
                     const isMeasure = __isMeasureNoteGL(anc);
                     if (st <= Number(cutoffSec) + tol && (!requireFrequency || !isMeasure)) break;
                     const raw = (anc.variables && anc.variables.startTimeString) || '';
-                    const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-                    if (m) {
-                      const pid = parseInt(m[1], 10);
+                    const pid = __extractNoteIdFromExpr(raw);
+                    if (pid !== null) {
                       anc = myModule.getNoteById(pid) || myModule.baseNote;
-                    } else if ((raw || '').includes('module.baseNote')) {
+                    } else if (__exprReferencesBase(raw)) {
                       anc = myModule.baseNote; break;
                     } else {
                       anc = myModule.baseNote; break;
@@ -4742,20 +4865,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (n && n.variables && n.variables.duration) {
               const dRaw0 = (n.variables && n.variables.durationString) ? n.variables.durationString : null;
 
-              // Prefer an explicit referenced note id inside durationString (e.g., findTempo(getNoteById(id)))
+              // Prefer an explicit referenced note id inside durationString
               let refNote = null;
               try {
-                const mAny = dRaw0 && dRaw0.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
-                if (mAny) {
-                  const rid = parseInt(mAny[1], 10);
-                  refNote = myModule.getNoteById(rid) || null;
-                } else if (dRaw0 && dRaw0.indexOf('module.baseNote') !== -1) {
+                const durRefId = dRaw0 && __extractNoteIdFromExpr(dRaw0);
+                if (durRefId !== null) {
+                  refNote = myModule.getNoteById(durRefId) || null;
+                } else if (dRaw0 && __exprReferencesBase(dRaw0)) {
                   refNote = myModule.baseNote;
                 }
               } catch {}
 
               if (!refNote) {
-                // Fallback: use chosen temporal parent's parent as basis when no explicit ref present
                 const chosenParent = parent;
                 refNote = __parseParentFromStartTimeStringGL(chosenParent) || myModule.baseNote;
               }
@@ -4770,11 +4891,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     const st = Number(anc.getVariable('startTime')?.valueOf?.() || 0);
                     if (st <= Number(cutoffSec) + tol) break;
                     const raw = (anc.variables && anc.variables.startTimeString) || '';
-                    const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-                    if (m) {
-                      const pid = parseInt(m[1], 10);
+                    const pid = __extractNoteIdFromExpr(raw);
+                    if (pid !== null) {
                       anc = myModule.getNoteById(pid) || myModule.baseNote;
-                    } else if ((raw || '').includes('module.baseNote')) {
+                    } else if (__exprReferencesBase(raw)) {
                       anc = myModule.baseNote; break;
                     } else {
                       anc = myModule.baseNote; break;
@@ -4949,13 +5069,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
          const getParentMeasureId = (n) => {
            try {
              const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
-             const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-             if (m) {
-               const pid = parseInt(m[1], 10);
+             const pid = __extractNoteIdFromExpr(raw);
+             if (pid !== null) {
                const pn = myModule.getNoteById(pid);
                return __isMeasure(pn) ? pid : (pid || null);
              }
-             if ((raw || '').includes('module.baseNote')) return 0;
+             if (__exprReferencesBase(raw)) return 0;
            } catch {}
            return null;
          };
@@ -4982,9 +5101,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
              try {
                const n = myModule.getNoteById(Number(depId));
                const expr = (n && n.variables && n.variables.startTimeString) || '';
-               // Chain link pattern: findMeasureLength(module.getNoteById(parentId))
-               const linkPattern = `findMeasureLength(module.getNoteById(${parentId}))`;
-               return expr.includes(linkPattern);
+               const legacyLink = `findMeasureLength(module.getNoteById(${parentId}))`;
+               const dslLink = `measure([${parentId}])`;
+               return expr.includes(legacyLink) || expr.includes(dslLink);
              } catch { return false; }
            };
 
@@ -5021,14 +5140,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
            const findNextChainLink = (m) => {
              const candidates = [];
              try {
-               // Pattern for chain link: findMeasureLength(module.getNoteById(ID))
-               const linkPattern = `findMeasureLength(module.getNoteById(${m.id}))`;
+               // Pattern for chain link: findMeasureLength(getNoteById(ID)) or measure([ID])
+               const legacyLink = `findMeasureLength(module.getNoteById(${m.id}))`;
+               const dslLink = `measure([${m.id}])`;
                for (const id in myModule.notes) {
                  const nn = myModule.getNoteById(Number(id));
                  if (!__isMeasure(nn)) continue;
                  const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
-                 // Only include measures that are CHAIN LINKS (use findMeasureLength), not anchors
-                 if (sts.includes(linkPattern)) candidates.push(nn);
+                 if (sts.includes(legacyLink) || sts.includes(dslLink)) candidates.push(nn);
                }
              } catch {}
              // Sort by startTime and return earliest (there should typically be only one chain link)
@@ -5060,7 +5179,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           // Decide behavior from the anchor encoded in startTimeString.
           try {
             const raw = (note && note.variables && note.variables.startTimeString) ? note.variables.startTimeString : '';
-            const baseAnchored = !!(raw && raw.indexOf('module.baseNote') !== -1);
+            const baseAnchored = !!(raw && __exprReferencesBase(raw));
 
             const isMeasure = (n) => {
               try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
@@ -5069,9 +5188,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
             let parentNote = null;
             if (!baseAnchored) {
-              const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
-              if (m) {
-                const pid = parseInt(m[1], 10);
+              const pid = __extractNoteIdFromExpr(raw);
+              if (pid !== null) {
                 parentNote = myModule.getNoteById(pid) || null;
               } else if (typeof note.parentId === 'number') {
                 parentNote = myModule.getNoteById(note.parentId) || null;

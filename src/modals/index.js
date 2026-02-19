@@ -1404,21 +1404,19 @@ export function liberateDependencies(noteId) {
     }
 
     let selectedRaw = {};
-    ["startTime", "duration", "frequency"].forEach(varName => {
+    ["startTime", "duration", "frequency", "tempo", "beatsPerMeasure", "measureLength"].forEach(varName => {
         if (selectedNote.variables[varName + "String"]) {
             selectedRaw[varName] = selectedNote.variables[varName + "String"];
         } else {
             const frac = selectedNote.getVariable(varName);
-            let fracStr;
             if (frac == null) {
-                fracStr = (varName === "frequency") ? "1/1" : "0/1";
+                selectedRaw[varName] = (varName === "frequency") ? "1" : "0";
             } else if (frac && typeof frac.toFraction === "function") {
-                fracStr = frac.toFraction();
+                const parts = frac.toFraction().split('/');
+                selectedRaw[varName] = parts.length === 2 ? `(${parts[0]}/${parts[1]})` : parts[0];
             } else {
-                fracStr = frac.toString();
+                selectedRaw[varName] = String(frac);
             }
-            if (!fracStr.includes("/")) fracStr = fracStr + "/1";
-            selectedRaw[varName] = "new Fraction(" + fracStr + ")";
         }
     });
 

@@ -3,6 +3,7 @@ import { Note } from './note.js';
 import { DependencyGraph } from './dependency-graph.js';
 import { createEvaluator, createIncrementalEvaluator } from './wasm/evaluator-adapter.js';
 import { compiler, decompiler } from './expression-compiler.js';
+import { decompileToDSL } from './dsl/index.js';
 
 let memoizedModuleEndTime = null;
 let moduleLastModifiedTime = 0;
@@ -39,12 +40,12 @@ export class Module {
 
     // Create base note with default values
     const defaultBaseNoteVariables = {
-      frequency: 'new Fraction(440)',
-      startTime: 'new Fraction(0)',
-      tempo: 'new Fraction(60)',
-      beatsPerMeasure: 'new Fraction(4)',
+      frequency: '440',
+      startTime: '0',
+      tempo: '60',
+      beatsPerMeasure: '4',
       instrument: 'sine-wave',
-      measureLength: "new Fraction(60).div(module.findTempo(module.baseNote)).mul(module.baseNote.getVariable('beatsPerMeasure'))",
+      measureLength: '60 / tempo(base) * base.bpm',
     };
 
     // Merge defaults with provided variables (convert functions to strings if needed)
@@ -644,14 +645,16 @@ export class Module {
     // Check frequency expression for parent reference
     const freqSource = note.getExpressionSource('frequency');
     if (freqSource) {
-      const noteRefMatch = freqSource.match(/module\.getNoteById\((\d+)\)\.getVariable\('frequency'\)/);
+      // Match both legacy (module.getNoteById(N).getVariable('frequency')) and DSL ([N].f) patterns
+      const noteRefMatch = freqSource.match(/module\.getNoteById\((\d+)\)\.getVariable\('frequency'\)/) ||
+                           freqSource.match(/\[(\d+)\]\.f/);
       if (noteRefMatch) {
         const parentId = parseInt(noteRefMatch[1], 10);
         const parentNote = this.getNoteById(parentId);
         if (parentNote) return this.findInstrument(parentNote);
       }
 
-      if (freqSource.includes("module.baseNote.getVariable('frequency')")) {
+      if (freqSource.includes("module.baseNote.getVariable('frequency')") || freqSource.includes('base.f')) {
         return this.findInstrument(this.baseNote);
       }
     }
@@ -670,9 +673,9 @@ export class Module {
 
       let rawString;
       if (prevNote.id === 0) {
-        rawString = "module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))";
+        rawString = 'base.t + measure(base)';
       } else {
-        rawString = `module.getNoteById(${prevNote.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevNote.id})))`;
+        rawString = `[${prevNote.id}].t + measure([${prevNote.id}])`;
       }
 
       const newNote = this.addNote({
@@ -750,28 +753,36 @@ export class Module {
   }
 
   /**
-   * Export module as ordered JSON
+   * Export module as ordered JSON string
+   * @param {string} format - 'dsl' (default), 'legacy', or 'binary'
+   * @returns {Promise<string|ArrayBuffer>}
    */
-  async exportOrderedModule() {
-    const moduleData = this.createModuleJSON();
+  async exportOrderedModule(format = 'dsl') {
+    if (format === 'binary') {
+      const { serializeBinaryModule } = await import('./binary-module-format.js');
+      return serializeBinaryModule(this);
+    }
+    const useDSL = format !== 'legacy';
+    const moduleData = this.createModuleJSON(useDSL);
     const tempModule = await Module.loadFromJSON(moduleData);
     tempModule.reindexModule();
-    return JSON.stringify(tempModule.createModuleJSON(), null, 2);
+    return JSON.stringify(tempModule.createModuleJSON(useDSL), null, 2);
   }
 
   /**
    * Create JSON representation of module
+   * @param {boolean} useDSL - If true, export expressions in DSL format (default: true)
    */
-  createModuleJSON() {
+  createModuleJSON(useDSL = true) {
     const moduleObj = {};
 
     // Export base note
     const baseObj = {};
     const baseExprs = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
     for (const name of baseExprs) {
-      const source = this.baseNote.getExpressionSource(name);
-      if (source) {
-        baseObj[name] = source;
+      const expr = this.baseNote.getExpression(name);
+      if (expr && !expr.isEmpty()) {
+        baseObj[name] = useDSL ? decompileToDSL(expr) : (expr.sourceText || decompiler.decompile(expr));
       }
     }
     if (this.baseNote.properties.color) baseObj.color = this.baseNote.properties.color;
@@ -785,9 +796,9 @@ export class Module {
 
       const noteObj = { id: note.id };
       for (const name of baseExprs) {
-        const source = note.getExpressionSource(name);
-        if (source) {
-          noteObj[name] = source;
+        const expr = note.getExpression(name);
+        if (expr && !expr.isEmpty()) {
+          noteObj[name] = useDSL ? decompileToDSL(expr) : (expr.sourceText || decompiler.decompile(expr));
         }
       }
       if (note.properties.color) noteObj.color = note.properties.color;
@@ -858,9 +869,10 @@ export class Module {
       }
     }
 
-    // Update expression references
+    // Update expression references (supports both legacy and DSL formats)
     const updateReferences = (exprText) => {
-      return exprText.replace(/(?:module\.)?getNoteById\(\s*(\d+)\s*\)/g, (match, p1) => {
+      // Update legacy format: module.getNoteById(N)
+      let result = exprText.replace(/(?:module\.)?getNoteById\(\s*(\d+)\s*\)/g, (match, p1) => {
         const oldRefId = parseInt(p1, 10);
         if (oldRefId === 0) {
           return 'module.baseNote';
@@ -872,6 +884,17 @@ export class Module {
         }
         return 'module.getNoteById(' + newRefId + ')';
       });
+      // Update DSL format: [N].prop or [N] in helper calls
+      result = result.replace(/\[(\d+)\]/g, (match, p1) => {
+        const oldRefId = parseInt(p1, 10);
+        const newRefId = newMapping[oldRefId];
+        if (typeof newRefId !== 'number') {
+          console.warn('No new mapping found for old id ' + oldRefId);
+          return match;
+        }
+        return '[' + newRefId + ']';
+      });
+      return result;
     };
 
     // Rebuild notes with new IDs

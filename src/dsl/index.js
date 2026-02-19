@@ -31,17 +31,14 @@ export function isDSLSyntax(expr) {
   }
 
   // DSL indicators (check these first)
-  // Note references: [123].f, [0].t
-  if (/^\[[\d]+\]\./.test(trimmed)) return true;
-  // Base reference: base.f
-  if (/^base\./.test(trimmed)) return true;
-  // Fraction literal: (3/2) at start or after operator
-  if (/^\(\s*-?\d+\s*\/\s*-?\d+\s*\)/.test(trimmed)) return true;
-  // Helper functions: tempo(...), measure(...), beat(...)
-  if (/^(tempo|measure|beat)\s*\(/.test(trimmed)) return true;
-  // Contains DSL-style references anywhere
-  if (/\[[\d]+\]\./.test(trimmed)) return true;
+  // Note references: [123].f, [0].t (anywhere in expression)
+  if (/\[[\d]+\]/.test(trimmed)) return true;
+  // Base reference: base.f, base.t, etc. (anywhere)
   if (/\bbase\.[a-z]/.test(trimmed)) return true;
+  // Fraction literal: (3/2) anywhere in expression
+  if (/\(\s*-?\d+\s*\/\s*-?\d+\s*\)/.test(trimmed)) return true;
+  // Helper functions: tempo(...), measure(...), beat(...) anywhere
+  if (/(tempo|measure|beat)\s*\(/.test(trimmed)) return true;
 
   // Legacy indicators
   // new Fraction(...)

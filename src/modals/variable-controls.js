@@ -132,7 +132,7 @@ function buildRawEditor(initialRaw, note = null, key = null) {
 
 // Helper to build canonical duration expression: beatUnit * (n/d)
 function computeDurationExpr(multiplierNum, multiplierDen = 1) {
-  return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${multiplierNum}, ${multiplierDen}))`;
+  return `60 / tempo(base) * (${multiplierNum}/${multiplierDen})`;
 }
 
 // Multiply two rational values and reduce (n1/d1) * (n2/d2)

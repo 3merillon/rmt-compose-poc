@@ -1,1152 +1,1152 @@
 {
   "baseNote": {
-    "frequency": "new Fraction(263)",
-    "startTime": "new Fraction(0)",
-    "tempo": "new Fraction(100)",
-    "beatsPerMeasure": "new Fraction(4)"
+    "frequency": "263",
+    "startTime": "0",
+    "tempo": "100",
+    "beatsPerMeasure": "4"
   },
   "notes": [
     {
       "id": 1,
-      "startTime": "module.baseNote.getVariable('startTime')"
+      "startTime": "base.t"
     },
     {
       "id": 2,
-      "startTime": "module.getNoteById(1).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(1)))"
+      "startTime": "[1].t + measure([1])"
     },
     {
       "id": 3,
-      "startTime": "module.getNoteById(2).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(2)))"
+      "startTime": "[2].t + measure([2])"
     },
     {
       "id": 4,
-      "startTime": "module.getNoteById(3).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(3)))"
+      "startTime": "[3].t + measure([3])"
     },
     {
       "id": 5,
-      "startTime": "module.getNoteById(4).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(4)))"
+      "startTime": "[4].t + measure([4])"
     },
     {
       "id": 6,
-      "startTime": "module.getNoteById(5).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(5)))"
+      "startTime": "[5].t + measure([5])"
     },
     {
       "id": 7,
-      "startTime": "module.getNoteById(6).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(6)))"
+      "startTime": "[6].t + measure([6])"
     },
     {
       "id": 8,
-      "startTime": "module.getNoteById(7).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(7)))"
+      "startTime": "[7].t + measure([7])"
     },
     {
       "id": 9,
-      "startTime": "module.getNoteById(1).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1.5)",
-      "frequency": "new Fraction(1, 1).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[1].t",
+      "duration": "60 / tempo(base) * (3/2)",
+      "frequency": "(1/1) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 10,
-      "startTime": "module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(1, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "base.t + 60 / tempo(base) * (1/4)",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(1/2) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 11,
-      "startTime": "module.getNoteById(10).getVariable('startTime').add(module.getNoteById(10).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(6, 10).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[10].t + [10].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(6/10) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 12,
-      "startTime": "module.getNoteById(11).getVariable('startTime').add(module.getNoteById(11).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[11].t + [11].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 13,
-      "startTime": "module.getNoteById(12).getVariable('startTime').add(module.getNoteById(12).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(2)",
-      "frequency": "new Fraction(1, 1).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[12].t + [12].d",
+      "duration": "60 / tempo(base) * 2",
+      "frequency": "(1/1) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 14,
-      "startTime": "module.getNoteById(9).getVariable('startTime').add(module.getNoteById(9).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(9, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[9].t + [9].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(9/8) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 15,
-      "startTime": "module.getNoteById(14).getVariable('startTime').add(module.getNoteById(14).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(6, 5).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[14].t + [14].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(6/5) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 16,
-      "startTime": "module.getNoteById(15).getVariable('startTime').add(module.getNoteById(15).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(5, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[15].t + [15].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(5/4) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 17,
-      "startTime": "module.getNoteById(16).getVariable('startTime').add(module.getNoteById(16).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(4, 3).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[16].t + [16].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(4/3) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 18,
-      "startTime": "module.getNoteById(13).getVariable('startTime').add(module.getNoteById(13).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(8, 9).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[13].t + [13].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(8/9) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 19,
-      "startTime": "module.getNoteById(17).getVariable('startTime').add(module.getNoteById(17).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(45, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[17].t + [17].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(45/32) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 20,
-      "startTime": "module.getNoteById(18).getVariable('startTime').add(module.getNoteById(18).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[18].t + [18].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 21,
-      "startTime": "module.getNoteById(2).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(2)",
-      "frequency": "new Fraction(3, 2).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[2].t",
+      "duration": "60 / tempo([1]) * 2",
+      "frequency": "(3/2) * [9].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 22,
-      "startTime": "module.getNoteById(2).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(1.25)",
-      "frequency": "new Fraction(9, 10).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[2].t",
+      "duration": "60 / tempo([1]) * (5/4)",
+      "frequency": "(9/10) * [9].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 23,
-      "startTime": "module.getNoteById(2).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.25)"
+      "startTime": "[2].t",
+      "duration": "60 / tempo([1]) * (1/4)"
     },
     {
       "id": 24,
-      "startTime": "module.getNoteById(23).getVariable('startTime').add(module.getNoteById(23).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[23].t + [23].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 25,
-      "startTime": "module.getNoteById(24).getVariable('startTime').add(module.getNoteById(24).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 10).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[24].t + [24].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/10) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 26,
-      "startTime": "module.getNoteById(25).getVariable('startTime').add(module.getNoteById(25).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[25].t + [25].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/8) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 27,
-      "startTime": "module.getNoteById(26).getVariable('startTime').add(module.getNoteById(26).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(2)",
-      "frequency": "new Fraction(3, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[26].t + [26].d",
+      "duration": "60 / tempo(base) * 2",
+      "frequency": "(3/2) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 28,
-      "startTime": "module.getNoteById(22).getVariable('startTime').add(module.getNoteById(22).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(5, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[22].t + [22].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(5/8) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 29,
-      "startTime": "module.getNoteById(28).getVariable('startTime').add(module.getNoteById(28).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[28].t + [28].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/16) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 30,
-      "startTime": "module.getNoteById(29).getVariable('startTime').add(module.getNoteById(29).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(5, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[29].t + [29].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(5/8) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 31,
-      "startTime": "module.getNoteById(21).getVariable('startTime').add(module.getNoteById(21).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(1.25)",
-      "frequency": "new Fraction(8, 5).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[21].t + [21].d",
+      "duration": "60 / tempo([1]) * (5/4)",
+      "frequency": "(8/5) * [9].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 32,
-      "startTime": "module.getNoteById(30).getVariable('startTime').add(module.getNoteById(30).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(2, 3).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[30].t + [30].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(2/3) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 33,
-      "startTime": "module.getNoteById(32).getVariable('startTime').add(module.getNoteById(32).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(1, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[32].t + [32].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(1/2) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 34,
-      "startTime": "module.getNoteById(33).getVariable('startTime').add(module.getNoteById(33).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(2, 3).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[33].t + [33].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(2/3) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 35,
-      "startTime": "module.getNoteById(34).getVariable('startTime').add(module.getNoteById(34).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[34].t + [34].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 36,
-      "startTime": "module.getNoteById(35).getVariable('startTime').add(module.getNoteById(35).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1.5)",
-      "frequency": "new Fraction(4, 5).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[35].t + [35].d",
+      "duration": "60 / tempo(base) * (3/2)",
+      "frequency": "(4/5) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 37,
-      "startTime": "module.getNoteById(27).getVariable('startTime').add(module.getNoteById(27).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(4, 3).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[27].t + [27].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(4/3) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 38,
-      "startTime": "module.getNoteById(31).getVariable('startTime').add(module.getNoteById(31).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.25)",
-      "frequency": "new Fraction(4, 3).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[31].t + [31].d",
+      "duration": "60 / tempo([1]) * (1/4)",
+      "frequency": "(4/3) * [9].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 39,
-      "startTime": "module.getNoteById(38).getVariable('startTime').add(module.getNoteById(38).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.25)",
-      "frequency": "new Fraction(16, 15).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[38].t + [38].d",
+      "duration": "60 / tempo([1]) * (1/4)",
+      "frequency": "(16/15) * [9].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 40,
-      "startTime": "module.getNoteById(37).getVariable('startTime').add(module.getNoteById(37).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(5, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[37].t + [37].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(5/4) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 41,
-      "startTime": "module.getNoteById(39).getVariable('startTime').add(module.getNoteById(39).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.25)",
-      "frequency": "new Fraction(1, 1).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[39].t + [39].d",
+      "duration": "60 / tempo([1]) * (1/4)",
+      "frequency": "(1/1) * [9].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 42,
-      "startTime": "module.getNoteById(3).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1)))",
-      "frequency": "new Fraction(15, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[3].t",
+      "duration": "60 / tempo([1])",
+      "frequency": "(15/16) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 43,
-      "startTime": "module.getNoteById(3).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(1.25)",
-      "frequency": "new Fraction(4, 3).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[3].t",
+      "duration": "60 / tempo([1]) * (5/4)",
+      "frequency": "(4/3) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 44,
-      "startTime": "module.getNoteById(36).getVariable('startTime').add(module.getNoteById(36).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.5)",
-      "frequency": "new Fraction(4, 5).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[36].t + [36].d",
+      "duration": "60 / tempo([1]) * (1/2)",
+      "frequency": "(4/5) * [9].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 45,
-      "startTime": "module.getNoteById(42).getVariable('startTime').add(module.getNoteById(42).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1)))"
+      "startTime": "[42].t + [42].d",
+      "duration": "60 / tempo([1])"
     },
     {
       "id": 46,
-      "startTime": "module.getNoteById(44).getVariable('startTime').add(module.getNoteById(44).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[44].t + [44].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 47,
-      "startTime": "module.getNoteById(43).getVariable('startTime').add(module.getNoteById(43).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(15, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[43].t + [43].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(15/16) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 48,
-      "startTime": "module.getNoteById(46).getVariable('startTime').add(module.getNoteById(46).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(2, 3).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[46].t + [46].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(2/3) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 49,
-      "startTime": "module.getNoteById(47).getVariable('startTime').add(module.getNoteById(47).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[47].t + [47].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 50,
-      "startTime": "module.getNoteById(49).getVariable('startTime').add(module.getNoteById(49).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(15, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[49].t + [49].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(15/16) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 51,
-      "startTime": "module.getNoteById(45).getVariable('startTime').add(module.getNoteById(45).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1)))"
+      "startTime": "[45].t + [45].d",
+      "duration": "60 / tempo([1])"
     },
     {
       "id": 52,
-      "startTime": "module.getNoteById(48).getVariable('startTime').add(module.getNoteById(48).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1.25)",
-      "frequency": "new Fraction(3, 5).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[48].t + [48].d",
+      "duration": "60 / tempo(base) * (5/4)",
+      "frequency": "(3/5) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 53,
-      "startTime": "module.getNoteById(50).getVariable('startTime').add(module.getNoteById(50).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(1, 1).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[50].t + [50].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(1/1) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 54,
-      "startTime": "module.getNoteById(53).getVariable('startTime').add(module.getNoteById(53).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[53].t + [53].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 55,
-      "startTime": "module.getNoteById(54).getVariable('startTime').add(module.getNoteById(54).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(1, 1).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[54].t + [54].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(1/1) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 56,
-      "startTime": "module.getNoteById(55).getVariable('startTime').add(module.getNoteById(55).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[55].t + [55].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/8) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 57,
-      "startTime": "module.getNoteById(51).getVariable('startTime').add(module.getNoteById(51).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(2)",
-      "frequency": "new Fraction(3, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[51].t + [51].d",
+      "duration": "60 / tempo([1]) * 2",
+      "frequency": "(3/2) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 58,
-      "startTime": "module.getNoteById(56).getVariable('startTime').add(module.getNoteById(56).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1.5)",
-      "frequency": "new Fraction(6, 5).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[56].t + [56].d",
+      "duration": "60 / tempo(base) * (3/2)",
+      "frequency": "(6/5) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 59,
-      "startTime": "module.getNoteById(52).getVariable('startTime').add(module.getNoteById(52).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(2, 3).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[52].t + [52].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(2/3) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 60,
-      "startTime": "module.getNoteById(59).getVariable('startTime').add(module.getNoteById(59).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 5).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[59].t + [59].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/5) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 61,
-      "startTime": "module.getNoteById(60).getVariable('startTime').add(module.getNoteById(60).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[60].t + [60].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/16) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 62,
-      "startTime": "module.getNoteById(4).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.5)",
-      "frequency": "new Fraction(1, 2).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[4].t",
+      "duration": "60 / tempo([1]) * (1/2)",
+      "frequency": "(1/2) * [9].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 63,
-      "startTime": "module.getNoteById(62).getVariable('startTime').add(module.getNoteById(62).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(25, 48).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[62].t + [62].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(25/48) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 64,
-      "startTime": "module.getNoteById(58).getVariable('startTime').add(module.getNoteById(58).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(6, 5).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[58].t + [58].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(6/5) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 65,
-      "startTime": "module.getNoteById(57).getVariable('startTime').add(module.getNoteById(57).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2))).mul(2)",
-      "frequency": "new Fraction(45, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[57].t + [57].d",
+      "duration": "60 / tempo([2]) * 2",
+      "frequency": "(45/32) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 66,
-      "startTime": "module.getNoteById(63).getVariable('startTime').add(module.getNoteById(63).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1)",
-      "frequency": "new Fraction(9, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[63].t + [63].d",
+      "duration": "60 / tempo(base) * 1",
+      "frequency": "(9/16) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 67,
-      "startTime": "module.getNoteById(64).getVariable('startTime').add(module.getNoteById(64).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(9, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[64].t + [64].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(9/8) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 68,
-      "startTime": "module.getNoteById(67).getVariable('startTime').add(module.getNoteById(67).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(1, 1).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[67].t + [67].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(1/1) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 69,
-      "startTime": "module.getNoteById(66).getVariable('startTime').add(module.getNoteById(66).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)"
+      "startTime": "[66].t + [66].d",
+      "duration": "60 / tempo(base) * (1/2)"
     },
     {
       "id": 70,
-      "startTime": "module.getNoteById(68).getVariable('startTime').add(module.getNoteById(68).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1.25)",
-      "frequency": "new Fraction(9, 10).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[68].t + [68].d",
+      "duration": "60 / tempo(base) * (5/4)",
+      "frequency": "(9/10) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 71,
-      "startTime": "module.getNoteById(69).getVariable('startTime').add(module.getNoteById(69).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(3, 5).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[69].t + [69].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(3/5) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 72,
-      "startTime": "module.getNoteById(65).getVariable('startTime').add(module.getNoteById(65).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2))).mul(2)",
-      "frequency": "new Fraction(4, 3).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[65].t + [65].d",
+      "duration": "60 / tempo([2]) * 2",
+      "frequency": "(4/3) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 73,
-      "startTime": "module.getNoteById(71).getVariable('startTime').add(module.getNoteById(71).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(9, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[71].t + [71].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(9/16) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 74,
-      "startTime": "module.getNoteById(70).getVariable('startTime').add(module.getNoteById(70).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(1, 1).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[70].t + [70].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(1/1) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 75,
-      "startTime": "module.getNoteById(73).getVariable('startTime').add(module.getNoteById(73).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(1, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[73].t + [73].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(1/2) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 76,
-      "startTime": "module.getNoteById(74).getVariable('startTime').add(module.getNoteById(74).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 10).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[74].t + [74].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/10) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 77,
-      "startTime": "module.getNoteById(76).getVariable('startTime').add(module.getNoteById(76).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[76].t + [76].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 78,
-      "startTime": "module.getNoteById(5).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.5)",
-      "frequency": "new Fraction(15, 32).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[5].t",
+      "duration": "60 / tempo([1]) * (1/2)",
+      "frequency": "(15/32) * [9].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 79,
-      "startTime": "module.getNoteById(5).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.5)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[5].t",
+      "duration": "60 / tempo([1]) * (1/2)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 80,
-      "startTime": "module.getNoteById(78).getVariable('startTime').add(module.getNoteById(78).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(1, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[78].t + [78].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(1/2) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 81,
-      "startTime": "module.getNoteById(79).getVariable('startTime').add(module.getNoteById(79).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(5, 6).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[79].t + [79].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(5/6) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 82,
-      "startTime": "module.getNoteById(80).getVariable('startTime').add(module.getNoteById(80).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(15, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[80].t + [80].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(15/32) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 83,
-      "startTime": "module.getNoteById(72).getVariable('startTime').add(module.getNoteById(72).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2))).mul(2)",
-      "frequency": "new Fraction(5, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[72].t + [72].d",
+      "duration": "60 / tempo([2]) * 2",
+      "frequency": "(5/4) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 84,
-      "startTime": "module.getNoteById(82).getVariable('startTime').add(module.getNoteById(82).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(1, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[82].t + [82].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(1/2) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 85,
-      "startTime": "module.getNoteById(81).getVariable('startTime').add(module.getNoteById(81).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[81].t + [81].d",
+      "duration": "60 / tempo(base) * 1",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 86,
-      "startTime": "module.getNoteById(84).getVariable('startTime').add(module.getNoteById(84).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[84].t + [84].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/16) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 87,
-      "startTime": "module.getNoteById(86).getVariable('startTime').add(module.getNoteById(86).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(1, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[86].t + [86].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(1/2) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 88,
-      "startTime": "module.getNoteById(87).getVariable('startTime').add(module.getNoteById(87).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(4, 9).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[87].t + [87].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(4/9) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 89,
-      "startTime": "module.getNoteById(88).getVariable('startTime').add(module.getNoteById(88).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(5, 12).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[88].t + [88].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(5/12) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 90,
-      "startTime": "module.getNoteById(85).getVariable('startTime').add(module.getNoteById(85).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)"
+      "startTime": "[85].t + [85].d",
+      "duration": "60 / tempo(base) * (1/2)"
     },
     {
       "id": 91,
-      "startTime": "module.getNoteById(89).getVariable('startTime').add(module.getNoteById(89).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[89].t + [89].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/8) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 92,
-      "startTime": "module.getNoteById(91).getVariable('startTime').add(module.getNoteById(91).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(5, 12).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[91].t + [91].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(5/12) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 93,
-      "startTime": "module.getNoteById(90).getVariable('startTime').add(module.getNoteById(90).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(9, 10).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[90].t + [90].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(9/10) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 94,
-      "startTime": "module.getNoteById(92).getVariable('startTime').add(module.getNoteById(92).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(4, 9).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[92].t + [92].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(4/9) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 95,
-      "startTime": "module.getNoteById(83).getVariable('startTime').add(module.getNoteById(83).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2))).mul(2)",
-      "frequency": "new Fraction(6, 5).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[83].t + [83].d",
+      "duration": "60 / tempo([2]) * 2",
+      "frequency": "(6/5) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 96,
-      "startTime": "module.getNoteById(94).getVariable('startTime').add(module.getNoteById(94).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(1, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[94].t + [94].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(1/2) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 97,
-      "startTime": "module.getNoteById(93).getVariable('startTime').add(module.getNoteById(93).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[93].t + [93].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 98,
-      "startTime": "module.getNoteById(96).getVariable('startTime').add(module.getNoteById(96).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(5, 12).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[96].t + [96].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(5/12) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 99,
-      "startTime": "module.getNoteById(98).getVariable('startTime').add(module.getNoteById(98).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(4, 9).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[98].t + [98].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(4/9) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 100,
-      "startTime": "module.getNoteById(97).getVariable('startTime').add(module.getNoteById(97).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[97].t + [97].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 101,
-      "startTime": "module.getNoteById(99).getVariable('startTime').add(module.getNoteById(99).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(1, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[99].t + [99].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(1/2) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 102,
-      "startTime": "module.getNoteById(6).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.5)",
-      "frequency": "new Fraction(9, 16).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[6].t",
+      "duration": "60 / tempo([1]) * (1/2)",
+      "frequency": "(9/16) * [9].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 103,
-      "startTime": "module.getNoteById(6).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.5)",
-      "frequency": "new Fraction(45, 64).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[6].t",
+      "duration": "60 / tempo([1]) * (1/2)",
+      "frequency": "(45/64) * [9].f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 104,
-      "startTime": "module.getNoteById(102).getVariable('startTime').add(module.getNoteById(102).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1)",
-      "frequency": "new Fraction(1, 1).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[102].t + [102].d",
+      "duration": "60 / tempo(base) * 1",
+      "frequency": "(1/1) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 105,
-      "startTime": "module.getNoteById(103).getVariable('startTime').add(module.getNoteById(103).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[103].t + [103].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 106,
-      "startTime": "module.getNoteById(105).getVariable('startTime').add(module.getNoteById(105).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(45, 64).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[105].t + [105].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(45/64) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 107,
-      "startTime": "module.getNoteById(95).getVariable('startTime').add(module.getNoteById(95).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2))).mul(1.5)",
-      "frequency": "new Fraction(9, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[95].t + [95].d",
+      "duration": "60 / tempo([2]) * (3/2)",
+      "frequency": "(9/8) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 108,
-      "startTime": "module.getNoteById(106).getVariable('startTime').add(module.getNoteById(106).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[106].t + [106].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 109,
-      "startTime": "module.getNoteById(108).getVariable('startTime').add(module.getNoteById(108).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[108].t + [108].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 110,
-      "startTime": "module.getNoteById(104).getVariable('startTime').add(module.getNoteById(104).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(8, 9).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[104].t + [104].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(8/9) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 111,
-      "startTime": "module.getNoteById(109).getVariable('startTime').add(module.getNoteById(109).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[109].t + [109].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 112,
-      "startTime": "module.getNoteById(110).getVariable('startTime').add(module.getNoteById(110).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[110].t + [110].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 113,
-      "startTime": "module.getNoteById(111).getVariable('startTime').add(module.getNoteById(111).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 40).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[111].t + [111].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/40) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 114,
-      "startTime": "module.getNoteById(112).getVariable('startTime').add(module.getNoteById(112).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(8, 9).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[112].t + [112].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(8/9) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 115,
-      "startTime": "module.getNoteById(113).getVariable('startTime').add(module.getNoteById(113).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(81, 128).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[113].t + [113].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(81/128) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 116,
-      "startTime": "module.getNoteById(115).getVariable('startTime').add(module.getNoteById(115).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[115].t + [115].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/16) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 117,
-      "startTime": "module.getNoteById(107).getVariable('startTime').add(module.getNoteById(107).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2))).mul(0.5)",
-      "frequency": "new Fraction(25, 24).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[107].t + [107].d",
+      "duration": "60 / tempo([2]) * (1/2)",
+      "frequency": "(25/24) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 118,
-      "startTime": "module.getNoteById(114).getVariable('startTime').add(module.getNoteById(114).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[114].t + [114].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 119,
-      "startTime": "module.getNoteById(116).getVariable('startTime').add(module.getNoteById(116).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(81, 128).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[116].t + [116].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(81/128) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 120,
-      "startTime": "module.getNoteById(119).getVariable('startTime').add(module.getNoteById(119).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 40).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[119].t + [119].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/40) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 121,
-      "startTime": "module.getNoteById(117).getVariable('startTime').add(module.getNoteById(117).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2))).mul(0.5)",
-      "frequency": "new Fraction(8, 9).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[117].t + [117].d",
+      "duration": "60 / tempo([2]) * (1/2)",
+      "frequency": "(8/9) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 122,
-      "startTime": "module.getNoteById(118).getVariable('startTime').add(module.getNoteById(118).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(81, 128).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[118].t + [118].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(81/128) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 123,
-      "startTime": "module.getNoteById(120).getVariable('startTime').add(module.getNoteById(120).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[120].t + [120].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 124,
-      "startTime": "module.getNoteById(123).getVariable('startTime').add(module.getNoteById(123).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(81, 128).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[123].t + [123].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(81/128) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 125,
-      "startTime": "module.getNoteById(121).getVariable('startTime').add(module.getNoteById(121).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2))).mul(0.5)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[121].t + [121].d",
+      "duration": "60 / tempo([2]) * (1/2)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 126,
-      "startTime": "module.getNoteById(122).getVariable('startTime').add(module.getNoteById(122).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[122].t + [122].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 127,
-      "startTime": "module.getNoteById(124).getVariable('startTime').add(module.getNoteById(124).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 40).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[124].t + [124].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/40) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 128,
-      "startTime": "module.getNoteById(126).getVariable('startTime').add(module.getNoteById(126).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[126].t + [126].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 129,
-      "startTime": "module.getNoteById(127).getVariable('startTime').add(module.getNoteById(127).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[127].t + [127].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 130,
-      "startTime": "module.getNoteById(7).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2)))",
-      "frequency": "new Fraction(9, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[7].t",
+      "duration": "60 / tempo([2])",
+      "frequency": "(9/8) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 131,
-      "startTime": "module.getNoteById(7).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.5)",
-      "frequency": "new Fraction(45, 64).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[7].t",
+      "duration": "60 / tempo([1]) * (1/2)",
+      "frequency": "(45/64) * [9].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 132,
-      "startTime": "module.getNoteById(7).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.5)",
-      "frequency": "new Fraction(27, 32).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[7].t",
+      "duration": "60 / tempo([1]) * (1/2)",
+      "frequency": "(27/32) * [9].f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 133,
-      "startTime": "module.getNoteById(131).getVariable('startTime').add(module.getNoteById(131).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[131].t + [131].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 134,
-      "startTime": "module.getNoteById(132).getVariable('startTime').add(module.getNoteById(132).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1)",
-      "frequency": "new Fraction(3, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[132].t + [132].d",
+      "duration": "60 / tempo(base) * 1",
+      "frequency": "(3/2) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 135,
-      "startTime": "module.getNoteById(133).getVariable('startTime').add(module.getNoteById(133).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[133].t + [133].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 136,
-      "startTime": "module.getNoteById(130).getVariable('startTime').add(module.getNoteById(130).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1)))"
+      "startTime": "[130].t + [130].d",
+      "duration": "60 / tempo([1])"
     },
     {
       "id": 137,
-      "startTime": "module.getNoteById(135).getVariable('startTime').add(module.getNoteById(135).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(8, 9).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[135].t + [135].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(8/9) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 138,
-      "startTime": "module.getNoteById(137).getVariable('startTime').add(module.getNoteById(137).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(25, 48).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[137].t + [137].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(25/48) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 139,
-      "startTime": "module.getNoteById(134).getVariable('startTime').add(module.getNoteById(134).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 20).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[134].t + [134].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/20) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 140,
-      "startTime": "module.getNoteById(139).getVariable('startTime').add(module.getNoteById(139).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(81, 64).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[139].t + [139].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(81/64) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 141,
-      "startTime": "module.getNoteById(136).getVariable('startTime').add(module.getNoteById(136).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1)))"
+      "startTime": "[136].t + [136].d",
+      "duration": "60 / tempo([1])"
     },
     {
       "id": 142,
-      "startTime": "module.getNoteById(138).getVariable('startTime').add(module.getNoteById(138).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(1)",
-      "frequency": "new Fraction(9, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[138].t + [138].d",
+      "duration": "60 / tempo(base) * 1",
+      "frequency": "(9/16) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 143,
-      "startTime": "module.getNoteById(140).getVariable('startTime').add(module.getNoteById(140).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(27, 20).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[140].t + [140].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(27/20) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 144,
-      "startTime": "module.getNoteById(143).getVariable('startTime').add(module.getNoteById(143).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(9, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[143].t + [143].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(9/8) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 145,
-      "startTime": "module.getNoteById(141).getVariable('startTime').add(module.getNoteById(141).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(2)",
-      "frequency": "new Fraction(3, 2).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[141].t + [141].d",
+      "duration": "60 / tempo([1]) * 2",
+      "frequency": "(3/2) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 146,
-      "startTime": "module.getNoteById(144).getVariable('startTime').add(module.getNoteById(144).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(15, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[144].t + [144].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(15/16) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 147,
-      "startTime": "module.getNoteById(146).getVariable('startTime').add(module.getNoteById(146).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(81, 64).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[146].t + [146].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(81/64) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 148,
-      "startTime": "module.getNoteById(147).getVariable('startTime').add(module.getNoteById(147).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[147].t + [147].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/8) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 149,
-      "startTime": "module.getNoteById(8).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.5)"
+      "startTime": "[8].t",
+      "duration": "60 / tempo([1]) * (1/2)"
     },
     {
       "id": 150,
-      "startTime": "module.getNoteById(8).getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(1))).mul(0.5)",
-      "frequency": "new Fraction(135, 128).mul(module.getNoteById(9).getVariable('frequency'))",
+      "startTime": "[8].t",
+      "duration": "60 / tempo([1]) * (1/2)",
+      "frequency": "(135/128) * [9].f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 151,
-      "startTime": "module.getNoteById(149).getVariable('startTime').add(module.getNoteById(149).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.75)",
-      "frequency": "new Fraction(9, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[149].t + [149].d",
+      "duration": "60 / tempo(base) * (3/4)",
+      "frequency": "(9/16) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 152,
-      "startTime": "module.getNoteById(150).getVariable('startTime').add(module.getNoteById(150).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 8).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[150].t + [150].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/8) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 153,
-      "startTime": "module.getNoteById(152).getVariable('startTime').add(module.getNoteById(152).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(81, 64).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[152].t + [152].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(81/64) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 154,
-      "startTime": "module.getNoteById(145).getVariable('startTime').add(module.getNoteById(145).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2)))",
-      "frequency": "new Fraction(27, 20).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[145].t + [145].d",
+      "duration": "60 / tempo([2])",
+      "frequency": "(27/20) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 155,
-      "startTime": "module.getNoteById(153).getVariable('startTime').add(module.getNoteById(153).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(27, 20).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[153].t + [153].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(27/20) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 156,
-      "startTime": "module.getNoteById(151).getVariable('startTime').add(module.getNoteById(151).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 40).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[151].t + [151].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/40) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 157,
-      "startTime": "module.getNoteById(156).getVariable('startTime').add(module.getNoteById(156).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(81, 128).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[156].t + [156].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(81/128) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 158,
-      "startTime": "module.getNoteById(155).getVariable('startTime').add(module.getNoteById(155).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.5)",
-      "frequency": "new Fraction(405, 512).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[155].t + [155].d",
+      "duration": "60 / tempo(base) * (1/2)",
+      "frequency": "(405/512) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 159,
-      "startTime": "module.getNoteById(157).getVariable('startTime').add(module.getNoteById(157).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[157].t + [157].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/16) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 160,
-      "startTime": "module.getNoteById(154).getVariable('startTime').add(module.getNoteById(154).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.getNoteById(2))).mul(2)",
-      "frequency": "new Fraction(81, 64).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[154].t + [154].d",
+      "duration": "60 / tempo([2]) * 2",
+      "frequency": "(81/64) * base.f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 161,
-      "startTime": "module.getNoteById(159).getVariable('startTime').add(module.getNoteById(159).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(135, 256).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[159].t + [159].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(135/256) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 162,
-      "startTime": "module.getNoteById(158).getVariable('startTime').add(module.getNoteById(158).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote))",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[158].t + [158].d",
+      "duration": "60 / tempo(base)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,255,0,0.5)"
     },
     {
       "id": 163,
-      "startTime": "module.getNoteById(161).getVariable('startTime').add(module.getNoteById(161).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 16).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[161].t + [161].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/16) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 164,
-      "startTime": "module.getNoteById(163).getVariable('startTime').add(module.getNoteById(163).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(81, 128).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[163].t + [163].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(81/128) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 165,
-      "startTime": "module.getNoteById(164).getVariable('startTime').add(module.getNoteById(164).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 40).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[164].t + [164].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/40) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 166,
-      "startTime": "module.getNoteById(165).getVariable('startTime').add(module.getNoteById(165).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[165].t + [165].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 167,
-      "startTime": "module.getNoteById(166).getVariable('startTime').add(module.getNoteById(166).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(9, 10).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[166].t + [166].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(9/10) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 168,
-      "startTime": "module.getNoteById(167).getVariable('startTime').add(module.getNoteById(167).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(27, 32).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[167].t + [167].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(27/32) * base.f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 169,
-      "startTime": "module.getNoteById(168).getVariable('startTime').add(module.getNoteById(168).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(0.25)",
-      "frequency": "new Fraction(3, 4).mul(module.baseNote.getVariable('frequency'))",
+      "startTime": "[168].t + [168].d",
+      "duration": "60 / tempo(base) * (1/4)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(0,0,255,0.5)"
     }
   ]

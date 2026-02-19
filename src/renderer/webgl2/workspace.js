@@ -14,6 +14,54 @@ import { eventBus } from '../../utils/event-bus.js';
  * CameraController is provided by camera-controller.js
  */
 
+// --- DSL-aware expression parsing helpers (mirror player.js helpers) ---
+
+/** Extract the first referenced note ID from an expression (DSL [N] or legacy getNoteById(N)). Returns number or null. */
+function __wsExtractNoteId(raw) {
+  if (!raw) return null;
+  const dsl = raw.match(/\[(\d+)\]/);
+  if (dsl) return parseInt(dsl[1], 10);
+  const legacy = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+  if (legacy) return parseInt(legacy[1], 10);
+  return null;
+}
+
+/** Check if an expression references the base note (DSL base.* or legacy module.baseNote). */
+function __wsReferencesBase(raw) {
+  if (!raw) return false;
+  return /\bbase\./.test(raw) || raw.includes('module.baseNote');
+}
+
+/** Check if expression is a measure chain link referencing a specific parent ID.
+ *  DSL: measure([parentId]) or legacy: findMeasureLength(module.getNoteById(parentId)) */
+function __wsIsMeasureChainLink(expr, parentId) {
+  if (!expr) return false;
+  // DSL: measure([parentId])
+  if (expr.includes(`measure([${parentId}])`)) return true;
+  // Legacy: findMeasureLength(module.getNoteById(parentId))
+  if (expr.includes(`findMeasureLength(module.getNoteById(${parentId}))`)) return true;
+  return false;
+}
+
+/** Extract the parent ID from a measure chain link expression.
+ *  Returns the parent ID if it's a chain link (measure([N]) or findMeasureLength(getNoteById(N))), else null. */
+function __wsExtractChainLinkParentId(raw) {
+  if (!raw) return null;
+  // DSL: measure([N])
+  const dsl = raw.match(/measure\(\s*\[(\d+)\]\s*\)/);
+  if (dsl) return parseInt(dsl[1], 10);
+  // Legacy: findMeasureLength(module.getNoteById(N))
+  const legacy = raw.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
+  if (legacy) return parseInt(legacy[1], 10);
+  return null;
+}
+
+/** Check if expression references a specific note ID (DSL [id] or legacy getNoteById(id)). */
+function __wsExprReferencesNoteId(expr, noteId) {
+  if (!expr) return false;
+  return expr.includes(`[${noteId}]`) || expr.includes(`getNoteById(${noteId})`);
+}
+
 /**
  * Workspace: hosts a camera and a RendererAdapter instance.
  */
@@ -246,7 +294,7 @@ export class Workspace {
                         const sts = nn.variables?.startTimeString || '';
                         // Include ANY measure that references a seed (both chain links and anchors)
                         for (const sid of out) {
-                          if (sts.includes(`getNoteById(${sid})`)) {
+                          if (__wsExprReferencesNoteId(sts, sid)) {
                             out.add(nid);
                             changed = true;
                             break;
@@ -274,7 +322,12 @@ export class Workspace {
                     };
                     const refersStartOf = (nid, refId) => {
                       const s = getStartTimeStr(nid);
-                      return !!(s && s.includes(`getNoteById(${refId})`) &&
+                      if (!s) return false;
+                      // DSL: [refId].t or [refId].d or measure([refId]) or beat([refId])
+                      if (s.includes(`[${refId}].t`) || s.includes(`[${refId}].d`) ||
+                          s.includes(`measure([${refId}])`) || s.includes(`beat([${refId}])`)) return true;
+                      // Legacy: getNoteById(refId) with getVariable('startTime'/'duration')
+                      return !!(s.includes(`getNoteById(${refId})`) &&
                                 (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
                                  s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`)));
                     };
@@ -583,11 +636,11 @@ export class Workspace {
           // Parse current parent
           let parent0 = null;
           try {
-            if (raw0.includes('module.baseNote')) {
+            if (__wsReferencesBase(raw0)) {
               parent0 = mod?.baseNote || null;
             } else {
-              const m = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (m) parent0 = mod?.getNoteById?.(parseInt(m[1], 10)) || null;
+              const pid0 = __wsExtractNoteId(raw0);
+              if (pid0 !== null) parent0 = mod?.getNoteById?.(pid0) || null;
             }
           } catch {}
           if (!parent0) parent0 = mod?.baseNote || null;
@@ -607,13 +660,12 @@ export class Workspace {
               anc.push({ id: Number(curA.id || 0), startSec: st });
               if (Number(curA.id || 0) === 0) break;
               const rawA = curA?.variables?.startTimeString || '';
-              if (rawA.includes('module.baseNote')) {
+              if (__wsReferencesBase(rawA)) {
                 anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
                 break;
               }
-              const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (mm) {
-                const pid = parseInt(mm[1], 10);
+              const pid = __wsExtractNoteId(rawA);
+              if (pid !== null) {
                 const p = mod?.getNoteById?.(pid);
                 if (!p) break;
                 curA = p;
@@ -962,11 +1014,11 @@ export class Workspace {
             // Parse current parent
             let parent0 = null;
             try {
-              if (raw0.includes('module.baseNote')) {
+              if (__wsReferencesBase(raw0)) {
                 parent0 = mod?.baseNote || null;
               } else {
-                const m = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
-                if (m) parent0 = mod?.getNoteById?.(parseInt(m[1], 10)) || null;
+                const pid0 = __wsExtractNoteId(raw0);
+                if (pid0 !== null) parent0 = mod?.getNoteById?.(pid0) || null;
               }
             } catch {}
             if (!parent0) parent0 = mod?.baseNote || null;
@@ -986,13 +1038,12 @@ export class Workspace {
                 anc.push({ id: Number(curA.id || 0), startSec: st });
                 if (Number(curA.id || 0) === 0) break;
                 const rawA = curA?.variables?.startTimeString || '';
-                if (rawA.includes('module.baseNote')) {
+                if (__wsReferencesBase(rawA)) {
                   anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
                   break;
                 }
-                const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-                if (mm) {
-                  const pid = parseInt(mm[1], 10);
+                const pid = __wsExtractNoteId(rawA);
+                if (pid !== null) {
                   const p = mod?.getNoteById?.(pid);
                   if (!p) break;
                   curA = p;
@@ -1122,7 +1173,7 @@ export class Workspace {
             const mod = this._module;
             const n = mod?.getNoteById?.(Number(noteId));
             const s = n?.variables?.startTimeString || '';
-            if (s && s.includes('module.baseNote')) {
+            if (s && __wsReferencesBase(s)) {
               parentIsBaseNote = true;
             }
           } catch {}
@@ -1186,12 +1237,11 @@ export class Workspace {
                   const parseParent = (n) => {
                     try {
                       const raw = n?.variables?.startTimeString || '';
-                      const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-                      if (m) {
-                        const pid = parseInt(m[1], 10);
+                      const pid = __wsExtractNoteId(raw);
+                      if (pid !== null) {
                         return mod.getNoteById(pid) || mod.baseNote;
                       }
-                      if (raw.includes('module.baseNote')) return mod.baseNote;
+                      if (__wsReferencesBase(raw)) return mod.baseNote;
                     } catch {}
                     return mod.baseNote;
                   };
@@ -1206,14 +1256,13 @@ export class Workspace {
                   // Find next measure in chain (CHAIN LINK only)
                   const findNextInChain = (measure) => {
                     if (!isMeasure(measure)) return null;
-                    const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
                     let best = null;
                     let bestStart = Infinity;
                     for (const id in mod.notes) {
                       const nn = mod.getNoteById(Number(id));
                       if (!isMeasure(nn)) continue;
                       const sts = nn.variables?.startTimeString || '';
-                      if (sts.includes(linkPattern)) {
+                      if (__wsIsMeasureChainLink(sts, measure.id)) {
                         const st = Number(nn.getVariable('startTime')?.valueOf?.() ?? Infinity);
                         if (st < bestStart) {
                           bestStart = st;
@@ -1261,13 +1310,12 @@ export class Workspace {
                     let cur = parent;
                     while (cur && cur.id !== 0) {
                       const raw = cur.variables?.startTimeString || '';
-                      const m = raw.match(/getNoteById\((\d+)\)/);
-                      if (m) {
-                        const pid = parseInt(m[1], 10);
+                      const pid = __wsExtractNoteId(raw);
+                      if (pid !== null) {
                         cur = mod.getNoteById(pid);
                         if (cur) ancestorChain.push(cur);
                         else break;
-                      } else if (raw.includes('module.baseNote')) {
+                      } else if (__wsReferencesBase(raw)) {
                         ancestorChain.push(mod.baseNote);
                         break;
                       } else {
@@ -1963,13 +2011,12 @@ export class Workspace {
       const parseParent = (n) => {
         try {
           const raw = n?.variables?.startTimeString || '';
-          const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
-          if (m) {
-            const pid = parseInt(m[1], 10);
+          const pid = __wsExtractNoteId(raw);
+          if (pid !== null) {
             const p = mod.getNoteById(pid);
             return p || mod.baseNote;
           }
-          if (raw.includes('module.baseNote')) return mod.baseNote;
+          if (__wsReferencesBase(raw)) return mod.baseNote;
           if (typeof n.parentId === 'number') {
             const p2 = mod.getNoteById(n.parentId);
             return p2 || mod.baseNote;
@@ -1982,15 +2029,14 @@ export class Workspace {
       const findNextMeasureInChain = (measure) => {
         try {
           if (!isMeasure(measure)) return null;
-          // Only find CHAIN LINKS (measures that use findMeasureLength), not anchors starting new chains
-          const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+          // Only find CHAIN LINKS (measures that use findMeasureLength/measure()), not anchors starting new chains
           const chainLinks = [];
           for (const id in mod.notes) {
             const nn = mod.getNoteById(Number(id));
             if (!isMeasure(nn)) continue;
             const sts = nn.variables?.startTimeString || '';
-            // Only include chain links (use findMeasureLength), not anchors
-            if (sts.includes(linkPattern)) {
+            // Only include chain links, not anchors
+            if (__wsIsMeasureChainLink(sts, measure.id)) {
               chainLinks.push(nn);
             }
           }
@@ -2092,13 +2138,12 @@ export class Workspace {
                   anc.push({ id: Number(curA.id || 0), startSec: st });
                   if (Number(curA.id || 0) === 0) break;
                   const rawA = curA?.variables?.startTimeString || '';
-                  if (rawA.includes('module.baseNote')) {
+                  if (__wsReferencesBase(rawA)) {
                     anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
                     break;
                   }
-                  const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-                  if (mm) {
-                    const pid = parseInt(mm[1], 10);
+                  const pid = __wsExtractNoteId(rawA);
+                  if (pid !== null) {
                     const p = mod.getNoteById(pid);
                     if (!p) break;
                     curA = p;
@@ -2126,13 +2171,12 @@ export class Workspace {
               arr.push({ id: Number(curA.id || 0), startSec: st });
               if (Number(curA.id || 0) === 0) break;
               const rawA = curA?.variables?.startTimeString || '';
-              if (rawA.includes('module.baseNote')) {
+              if (__wsReferencesBase(rawA)) {
                 arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
                 break;
               }
-              const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (mm) {
-                const pid = parseInt(mm[1], 10);
+              const pid = __wsExtractNoteId(rawA);
+              if (pid !== null) {
                 const p = mod.getNoteById(pid);
                 if (!p) break;
                 curA = p;
@@ -2287,9 +2331,7 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       try {
         const n = mod.getNoteById(Number(depId));
         const expr = (n && n.variables && n.variables.startTimeString) || '';
-        // Chain link pattern: findMeasureLength(module.getNoteById(parentId))
-        const linkPattern = `findMeasureLength(module.getNoteById(${parentId}))`;
-        return expr.includes(linkPattern);
+        return __wsIsMeasureChainLink(expr, parentId);
       } catch { return false; }
     };
 
@@ -2310,14 +2352,13 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     const getChainLinkParentId = (n) => {
       try {
         const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
-        // Check if this is a chain link (uses findMeasureLength)
-        const linkMatch = raw.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
-        if (linkMatch) {
-          const pid = parseInt(linkMatch[1], 10);
+        // Check if this is a chain link (uses findMeasureLength or measure())
+        const pid = __wsExtractChainLinkParentId(raw);
+        if (pid !== null) {
           const pn = mod.getNoteById(pid);
           return isMeasure(pn) ? pid : null;
         }
-        // If no findMeasureLength, this is an anchor (or root) - stop backward walk
+        // If no chain link pattern, this is an anchor (or root) - stop backward walk
         return null;
       } catch {}
       return null;
@@ -2352,14 +2393,12 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     const findNextChainLink = (m) => {
       const candidates = [];
       try {
-        // Pattern for chain link: findMeasureLength(module.getNoteById(ID))
-        const linkPattern = `findMeasureLength(module.getNoteById(${m.id}))`;
         for (const id in mod.notes) {
           const nn = mod.getNoteById(Number(id));
           if (!isMeasure(nn)) continue;
           const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
-          // Only include measures that are CHAIN LINKS (use findMeasureLength), not anchors
-          if (sts.includes(linkPattern)) {
+          // Only include measures that are CHAIN LINKS (use findMeasureLength/measure()), not anchors
+          if (__wsIsMeasureChainLink(sts, m.id)) {
             candidates.push(nn);
           }
         }
@@ -2398,21 +2437,20 @@ function getMeasureChainRole(note) {
   const expr = (note && note.variables && note.variables.startTimeString) || '';
 
   // Root: anchored directly to BaseNote
-  if (expr.includes('module.baseNote')) {
+  if (__wsReferencesBase(expr)) {
     return { role: 'root', parentId: 0 };
   }
 
-  // Check for chain link pattern (uses findMeasureLength)
-  // Pattern: getNoteById(X)...findMeasureLength(getNoteById(X))
-  const linkMatch = expr.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
-  if (linkMatch) {
-    return { role: 'link', parentId: parseInt(linkMatch[1], 10) };
+  // Check for chain link pattern (uses findMeasureLength or measure())
+  const chainLinkPid = __wsExtractChainLinkParentId(expr);
+  if (chainLinkPid !== null) {
+    return { role: 'link', parentId: chainLinkPid };
   }
 
-  // Check for anchor pattern (direct getNoteById reference without findMeasureLength)
-  const anchorMatch = expr.match(/getNoteById\s*\(\s*(\d+)\s*\)/);
-  if (anchorMatch) {
-    return { role: 'anchor', parentId: parseInt(anchorMatch[1], 10) };
+  // Check for anchor pattern (direct note reference without measure chain link)
+  const anchorPid = __wsExtractNoteId(expr);
+  if (anchorPid !== null) {
+    return { role: 'anchor', parentId: anchorPid };
   }
 
   return { role: 'orphan', parentId: null };

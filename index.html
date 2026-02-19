@@ -53,8 +53,13 @@
             <button id="undoBtn" class="module-action-btn" disabled>Undo</button>
             <button id="redoBtn" class="module-action-btn" disabled>Redo</button>
             <button id="reorderModuleBtn" class="module-action-btn" style="background: #add8e6;">Reorder Module</button>
-            <button id="saveModuleBtn" class="module-action-btn">Save Module</button>
-            <input type="file" id="loadModuleInput" accept=".json" style="display: none;">
+            <button id="saveModuleBtn" class="module-action-btn">Save Module ▾</button>
+            <div id="saveModuleDropdown" style="display: none; margin-top: -6px;">
+              <div id="saveDSLItem" class="menu-item">Save as JSON (DSL)</div>
+              <div id="saveLegacyItem" class="menu-item">Save as JSON (Legacy)</div>
+              <div id="saveBinaryItem" class="menu-item">Save as Binary (.rmtb)</div>
+            </div>
+            <input type="file" id="loadModuleInput" accept=".json,.rmtb" style="display: none;">
             <button id="loadModuleBtn" class="module-action-btn">Load Module ▾</button>
             <div id="loadModuleDropdown" style="display: none; margin-top: -6px;">
               <div id="loadFromFileItem" class="menu-item">Load Module from file…</div>
