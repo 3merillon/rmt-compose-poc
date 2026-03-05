@@ -1,5 +1,6 @@
 import { eventBus } from '../utils/event-bus.js';
-import { escapeHtml } from '../utils/html-escape.js';
+import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
+import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
 
 const menuAPI = (function() {
     const domCache = {
@@ -724,6 +725,83 @@ const menuAPI = (function() {
         return placeholder;
     }
 
+    /**
+     * Validate a module JSON object for structure and expression safety.
+     * Returns { valid, errors } where errors is an array of strings.
+     */
+    function validateModuleData(data) {
+        const errors = [];
+        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+
+        if (!data || typeof data !== 'object' || Array.isArray(data)) {
+            return { valid: false, errors: ['Module must be a JSON object'] };
+        }
+        if (!data.baseNote || typeof data.baseNote !== 'object') {
+            return { valid: false, errors: ['Module must have a baseNote object'] };
+        }
+        if (!Array.isArray(data.notes)) {
+            return { valid: false, errors: ['Module must have a notes array'] };
+        }
+        if (data.notes.length > 10000) {
+            return { valid: false, errors: ['Module exceeds maximum note count (10000)'] };
+        }
+
+        // Validate baseNote expressions
+        for (const key of Object.keys(data.baseNote)) {
+            if (expressionVars.includes(key)) {
+                const val = data.baseNote[key];
+                if (typeof val === 'string') {
+                    const result = validateExpressionSyntax(val);
+                    if (!result.valid) {
+                        errors.push(`baseNote.${key}: ${result.error}`);
+                    }
+                }
+            } else if (key === 'color') {
+                if (typeof data.baseNote.color === 'string' && !validateColorInput(data.baseNote.color)) {
+                    errors.push('baseNote.color: invalid color value');
+                }
+            }
+        }
+
+        // Validate each note
+        const seenIds = new Set();
+        for (let i = 0; i < data.notes.length; i++) {
+            const note = data.notes[i];
+            if (!note || typeof note !== 'object') {
+                errors.push(`notes[${i}]: must be an object`);
+                continue;
+            }
+            const noteId = parseInt(note.id, 10);
+            if (isNaN(noteId) || noteId < 0 || noteId > 100000) {
+                errors.push(`notes[${i}]: invalid id ${note.id}`);
+                continue;
+            }
+            if (seenIds.has(noteId)) {
+                errors.push(`notes[${i}]: duplicate id ${noteId}`);
+            }
+            seenIds.add(noteId);
+
+            for (const key of Object.keys(note)) {
+                if (key === 'id') continue;
+                if (expressionVars.includes(key)) {
+                    const val = note[key];
+                    if (typeof val === 'string') {
+                        const result = validateExpressionSyntax(val);
+                        if (!result.valid) {
+                            errors.push(`note ${noteId}.${key}: ${result.error}`);
+                        }
+                    }
+                } else if (key === 'color') {
+                    if (typeof note.color === 'string' && !validateColorInput(note.color)) {
+                        errors.push(`note ${noteId}.color: invalid color value`);
+                    }
+                }
+            }
+        }
+
+        return { valid: errors.length === 0, errors };
+    }
+
     function handleFileUpload(category, sectionContainer) {
         const input = document.createElement('input');
         input.type = 'file';
@@ -736,6 +814,18 @@ const menuAPI = (function() {
                 reader.onload = function(e) {
                     try {
                         const moduleData = JSON.parse(e.target.result);
+
+                        // Validate module structure and expression safety
+                        const validation = validateModuleData(moduleData);
+                        if (!validation.valid) {
+                            const errorSummary = validation.errors.length <= 3
+                                ? validation.errors.join('; ')
+                                : validation.errors.slice(0, 3).join('; ') + ` (+${validation.errors.length - 3} more)`;
+                            console.error('[Security] Module validation failed:', validation.errors);
+                            showNotification(`Invalid module: ${errorSummary}`, 'error');
+                            return;
+                        }
+
                         const originalFilename = file.name.replace(/\.json$/i, '');
                         moduleData.filename = originalFilename;
                         const icon = createModuleIcon(category, originalFilename, moduleData);
@@ -746,7 +836,7 @@ const menuAPI = (function() {
                         sectionContainer.appendChild(icon);
                         ensurePlaceholdersAtEnd();
                         saveUIStateToLocalStorage();
-                        showNotification(`Module "${originalFilename}" uploaded successfully`, 'success');
+                        showNotification(`Module "${escapeHtml(originalFilename)}" uploaded successfully`, 'success');
                     } catch (error) {
                         console.error("Error parsing JSON:", error);
                         showNotification(`Invalid JSON file: ${error.message}`, 'error');
@@ -1598,7 +1688,16 @@ const menuAPI = (function() {
                             labelIcon.addEventListener('click', () => handleFileUpload(categoryObj.name, sectionContainer));
                             sectionContainer.appendChild(labelIcon);
                             categoryObj.modules.forEach(moduleInfo => {
-                                const icon = createModuleIcon(categoryObj.name, moduleInfo.name + '.json', moduleInfo.data);
+                                // Validate embedded module data before loading
+                                let safeData = moduleInfo.data;
+                                if (safeData && typeof safeData === 'object') {
+                                    const validation = validateModuleData(safeData);
+                                    if (!validation.valid) {
+                                        console.warn(`[Security] Skipping invalid module "${moduleInfo.name}" from UI state:`, validation.errors);
+                                        safeData = null;
+                                    }
+                                }
+                                const icon = createModuleIcon(categoryObj.name, moduleInfo.name + '.json', safeData);
                                 sectionContainer.appendChild(icon);
                             });
                             const emptyPlaceholder = createEmptyPlaceholder(categoryObj.name);

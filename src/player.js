@@ -1485,55 +1485,92 @@ if (canvasEl) {
                 if (cached) return cached;
 
                 const originalExpr = expr;
+                const exprIsDSL = isDSLSyntax(expr);
 
                 const hasBase = expr.indexOf('module.baseNote') !== -1;
                 const hasIds  = expr.indexOf('getNoteById(') !== -1;
                 // DSL format uses base.t, base.d, base.f, base.tempo, etc.
-                const hasDslBase = /\bbase\.[tdfbm]/.test(expr);
+                const hasDslBase = /\bbase\.([tdfbm]|tempo|bpm|ml)\b/.test(expr);
+                // DSL format uses [id].prop for note references
+                const hasDslIds = /\[\d+\]\./.test(expr);
+                // DSL format uses tempo(base), beat(base), measure(base), tempo([id]), etc.
+                const hasDslHelpers = /\b(tempo|beat|measure)\s*\(/.test(expr);
+
+                // === DSL format remapping ===
 
                 // Remap DSL base references (base.t, base.d, etc.) to target note
                 if (targetNote.id !== 0 && hasDslBase) {
                     const anchorId = targetNote.id;
 
                     if (targetIsMeasure) {
-                        // For frequency expressions (base.f): keep as base.f
-                        // For other properties: remap to [anchorId].x
                         expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
                             if (prop === 'f') {
-                                // Keep frequency anchored to BaseNote
                                 return 'base.f';
                             }
-                            // Remap to target note reference
                             return `[${anchorId}].${prop}`;
                         });
                     } else {
-                        // Normal note target: remap all base.X to [anchorId].X
                         expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
                             return `[${anchorId}].${prop}`;
                         });
                     }
                 }
 
+                // Remap DSL helper functions that reference base: tempo(base), beat(base), measure(base)
+                if (targetNote.id !== 0 && hasDslHelpers) {
+                    const anchorId = targetNote.id;
+                    expr = expr.replace(/\b(tempo|beat|measure)\s*\(\s*base\s*\)/g, function(match, fn) {
+                        return `${fn}([${anchorId}])`;
+                    });
+                }
+
+                // Remap DSL [oldId].prop references using the mapping table
+                if (hasDslIds) {
+                    expr = expr.replace(/\[(\d+)\]\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, idStr, prop) {
+                        const oldRef = parseInt(idStr, 10);
+                        if (mapping.hasOwnProperty(oldRef)) {
+                            const newId = mapping[oldRef];
+                            // Measure bar drop: frequency refs to base note stay as base.f
+                            if (targetIsMeasure && oldRef === 0 && exprType === 'frequency' && prop === 'f') {
+                                return 'base.f';
+                            }
+                            return `[${newId}].${prop}`;
+                        }
+                        return match;
+                    });
+
+                    // Second pass: fix frequency references pointing to measure bar
+                    if (targetIsMeasure && exprType === 'frequency') {
+                        const measureId = targetNote.id;
+                        expr = expr.replace(new RegExp(`\\[${measureId}\\]\\.f\\b`, 'g'), 'base.f');
+                    }
+                }
+
+                // Remap DSL helper functions that reference note IDs: tempo([oldId]), beat([oldId]), measure([oldId])
+                if (hasDslHelpers) {
+                    expr = expr.replace(/\b(tempo|beat|measure)\s*\(\s*\[(\d+)\]\s*\)/g, function(match, fn, idStr) {
+                        const oldRef = parseInt(idStr, 10);
+                        if (mapping.hasOwnProperty(oldRef)) {
+                            return `${fn}([${mapping[oldRef]}])`;
+                        }
+                        return match;
+                    });
+                }
+
+                // === Legacy format remapping ===
+
                 // Remap base-note anchored constructs to the selected target when dropping onto a non-base note.
                 if (targetNote.id !== 0 && hasBase) {
                     const anchorId = targetNote.id;
 
-                    // When dropping on a measure bar, frequency must anchor to BaseNote (measures have no frequency)
-                    // Only startTime should anchor to the measure bar
                     if (targetIsMeasure) {
-                        // For frequency expressions: keep BaseNote as frequency anchor
-                        // For startTime expressions: remap to measure bar
-                        // For duration/tempo: remap to measure bar (findTempo walks ancestors properly)
                         expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
                             if (varName === 'frequency') {
-                                // Keep frequency anchored to BaseNote
                                 return "module.baseNote.getVariable('frequency')";
                             }
-                            // startTime, tempo, beatsPerMeasure etc. anchor to measure bar
                             return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
                         });
                     } else {
-                        // Normal note target: remap all baseNote references
                         expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
                             return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
                         });
@@ -1550,7 +1587,6 @@ if (canvasEl) {
                         const oldRef = parseInt(p1, 10);
                         if (mapping.hasOwnProperty(oldRef)) {
                             const newId = mapping[oldRef];
-                            // Special case: if remapping to measure bar and this is a frequency reference, use BaseNote instead
                             if (targetIsMeasure && oldRef === 0 && exprType === 'frequency') {
                                 return "module.baseNote";
                             }
@@ -1562,26 +1598,21 @@ if (canvasEl) {
                     // Second pass: fix any frequency references that ended up pointing to the measure bar
                     if (targetIsMeasure && exprType === 'frequency') {
                         const measureId = targetNote.id;
-                        // Replace measure bar frequency references with BaseNote frequency
                         expr = expr.replace(new RegExp(`module\\.getNoteById\\(\\s*${measureId}\\s*\\)\\.getVariable\\(\\s*'frequency'\\s*\\)`, 'g'),
                             "module.baseNote.getVariable('frequency')");
                     }
                 }
 
                 // Check drop mode - if 'end', add target's duration to startTime expressions
-                // that reference the target note (base references that were remapped)
                 const dropMode = menuBar?.getModuleDropMode?.() || 'start';
                 if (dropMode === 'end' && exprType === 'startTime' && targetNote.id !== 0) {
                     const anchorId = targetNote.id;
-                    // Check if this expression now references the target note's startTime
-                    // and doesn't already include duration
                     const refsTargetStart = expr.includes(`getNoteById(${anchorId}).getVariable('startTime')`) ||
                                             expr.includes(`[${anchorId}].t`);
                     const alreadyHasDur = expr.includes(`getVariable('duration')`) ||
                                           expr.includes(`[${anchorId}].d`);
                     if (refsTargetStart && !alreadyHasDur) {
-                        // Add duration offset - use DSL format if expression is DSL, otherwise legacy
-                        if (/\[\d+\]\.t/.test(expr)) {
+                        if (exprIsDSL) {
                             expr = expr + ` + [${anchorId}].d`;
                         } else {
                             expr = expr + `.add(module.getNoteById(${anchorId}).getVariable('duration'))`;
@@ -1590,21 +1621,25 @@ if (canvasEl) {
                 }
 
                 // Canonicalize expression via central simplifier after remapping
+                // Only apply legacy simplifiers to legacy expressions; DSL expressions
+                // use a different syntax that the simplifier does not understand
                 let simplified = expr;
-                try {
-                    const hasStart = /getVariable\(\s*'startTime'\s*\)/.test(expr);
-                    const hasTempo = /findTempo\(/.test(expr);
-                    const hasDurRef = /getVariable\(\s*'duration'\s*\)/.test(expr);
-                    const hasFreqRef = /getVariable\(\s*'frequency'\s*\)/.test(expr);
-                    if (hasStart) {
-                        simplified = simplifyStartTime(expr, myModule);
-                    } else if (hasTempo || hasDurRef) {
-                        simplified = simplifyDuration(expr, myModule);
-                    } else if (hasFreqRef) {
-                        simplified = simplifyFrequency(expr, myModule);
+                if (!exprIsDSL) {
+                    try {
+                        const hasStart = /getVariable\(\s*'startTime'\s*\)/.test(expr);
+                        const hasTempo = /findTempo\(/.test(expr);
+                        const hasDurRef = /getVariable\(\s*'duration'\s*\)/.test(expr);
+                        const hasFreqRef = /getVariable\(\s*'frequency'\s*\)/.test(expr);
+                        if (hasStart) {
+                            simplified = simplifyStartTime(expr, myModule);
+                        } else if (hasTempo || hasDurRef) {
+                            simplified = simplifyDuration(expr, myModule);
+                        } else if (hasFreqRef) {
+                            simplified = simplifyFrequency(expr, myModule);
+                        }
+                    } catch (e) {
+                        simplified = expr;
                     }
-                } catch (e) {
-                    simplified = expr;
                 }
                 exprRemapCache.set(cacheKey, simplified);
                 return simplified;
@@ -1633,26 +1668,30 @@ if (canvasEl) {
                 for (const key in impNote.variables) {
                     const val = impNote.variables[key];
                     if (typeof val === 'string' && key.endsWith("String")) {
-                        // Remap only when needed; avoid regex if not necessary
                         let originalString = val;
-                        // Check for legacy format (module.baseNote) and DSL format (base.t, base.d, etc.)
+                        // Check for legacy format and DSL format references that need remapping
                         const needsRemap = (originalString.indexOf('module.baseNote') !== -1) ||
                                            (originalString.indexOf('getNoteById(') !== -1) ||
-                                           (/\bbase\.[tdfbm]/.test(originalString));
+                                           (/\bbase\.([tdfbm]|tempo|bpm|ml)\b/.test(originalString)) ||
+                                           (/\[\d+\]\./.test(originalString)) ||
+                                           (/\b(tempo|beat|measure)\s*\(/.test(originalString));
                         const baseKey = key.slice(0, -6);
 
-                        // Always canonicalize by type to ensure predictable UI (e.g., duration selector preselect)
                         // Pass expression type for measure bar drops (frequency needs special handling)
                         let expr = needsRemap ? updateExpression(originalString, baseKey) : originalString;
-                        try {
-                            if (baseKey === 'duration') {
-                                expr = simplifyDuration(expr, myModule);
-                            } else if (baseKey === 'startTime') {
-                                expr = simplifyStartTime(expr, myModule);
-                            } else if (baseKey === 'frequency') {
-                                expr = simplifyFrequency(expr, myModule);
-                            }
-                        } catch {}
+
+                        // Only apply legacy simplifiers to non-DSL expressions
+                        if (!isDSLSyntax(expr)) {
+                            try {
+                                if (baseKey === 'duration') {
+                                    expr = simplifyDuration(expr, myModule);
+                                } else if (baseKey === 'startTime') {
+                                    expr = simplifyStartTime(expr, myModule);
+                                } else if (baseKey === 'frequency') {
+                                    expr = simplifyFrequency(expr, myModule);
+                                }
+                            } catch {}
+                        }
 
                         // Set expression via *String property - Note class handles binary compilation
                         impNote.setVariable(key, expr);
@@ -1689,7 +1728,12 @@ if (canvasEl) {
                 measures.forEach(n => { depMap.set(n.id, []); indeg.set(n.id, 0); });
 
                 const refsMeasure = (raw, id) => {
-                  try { return new RegExp(`getNoteById\\(\\s*${id}\\s*\\)`).test(raw || ''); } catch { return false; }
+                  try {
+                    if (!raw) return false;
+                    // Check legacy format: getNoteById(id) and DSL format: [id].
+                    return new RegExp(`getNoteById\\(\\s*${id}\\s*\\)`).test(raw) ||
+                           new RegExp(`\\[${id}\\]\\.`).test(raw);
+                  } catch { return false; }
                 };
 
                 measures.forEach(m => {
@@ -1747,20 +1791,22 @@ if (canvasEl) {
                   // First measure in the imported chain: fix parentId to match anchor in startTimeString
                   const first = myModule.getNoteById(Number(chain[0]));
                   const raw0 = (first && first.variables && first.variables.startTimeString) ? first.variables.startTimeString : '';
-                  const m0 = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
+                  // Match both legacy getNoteById(id) and DSL [id]. references
+                  const m0 = raw0.match(/getNoteById\(\s*(\d+)\s*\)/) || raw0.match(/\[(\d+)\]\./);
                   let parentIdForPID = 0;
 
                   // Special handling when dropping onto a measure bar:
                   // Create a separate measure chain that starts at the target measure bar's startTime
                   // This preserves the dropped module's internal timing while anchoring to the drop point
                   if (targetIsMeasure) {
-                    // The first imported measure starts at the same time as the target measure bar
-                    // (not after it ends - that would shift all notes by one measure duration)
                     const targetMeasureId = targetNote.id;
-                    const rawStart = `module.getNoteById(${targetMeasureId}).getVariable('startTime')`;
-                    const simplifiedStart = simplifyStartTime(rawStart, myModule);
+                    // Use DSL format if the original expression was DSL, otherwise legacy
+                    const exprIsDSL = isDSLSyntax(raw0);
+                    const rawStart = exprIsDSL
+                      ? `[${targetMeasureId}].t`
+                      : `module.getNoteById(${targetMeasureId}).getVariable('startTime')`;
+                    const simplifiedStart = exprIsDSL ? rawStart : simplifyStartTime(rawStart, myModule);
                     first.setVariable('startTimeString', simplifiedStart);
-                    // Parent is the target measure for hierarchy, but this is a separate chain
                     parentIdForPID = targetMeasureId;
                   } else if (m0) {
                     const pid = parseInt(m0[1], 10);
@@ -1770,7 +1816,7 @@ if (canvasEl) {
                     } else {
                       parentIdForPID = 0;
                     }
-                  } else if ((raw0 || '').includes('module.baseNote')) {
+                  } else if ((raw0 || '').includes('module.baseNote') || /\bbase\./.test(raw0)) {
                     parentIdForPID = 0;
                   } else if (targetNote && typeof targetNote.id === 'number') {
                     parentIdForPID = targetNote.id;
@@ -1785,9 +1831,17 @@ if (canvasEl) {
                     const curId  = Number(chain[i]);
                     const curNote = myModule.getNoteById(curId);
                     if (!curNote) continue;
-                    const rawStart = `module.getNoteById(${prevId}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevId})))`;
-                    const simplifiedStart = simplifyStartTime(rawStart, myModule);
-                    curNote.setVariable('startTimeString', simplifiedStart);
+                    // Detect if this note's expression was DSL format
+                    const curRaw = (curNote.variables && curNote.variables.startTimeString) ? curNote.variables.startTimeString : '';
+                    const curIsDSL = isDSLSyntax(curRaw);
+                    let rawStart;
+                    if (curIsDSL) {
+                      rawStart = `[${prevId}].t + measure([${prevId}])`;
+                    } else {
+                      rawStart = `module.getNoteById(${prevId}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevId})))`;
+                      rawStart = simplifyStartTime(rawStart, myModule);
+                    }
+                    curNote.setVariable('startTimeString', rawStart);
                     try { curNote.parentId = prevId; } catch {}
                   }
                 });
