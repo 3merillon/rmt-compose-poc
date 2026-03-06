@@ -53,8 +53,8 @@ export function validateColorInput(color) {
         /^#[0-9a-fA-F]{8}$/,                                           // #ffffffff (with alpha)
         /^rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)$/,         // rgb(255, 0, 0)
         /^rgba\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*[\d.]+\s*\)$/,  // rgba(255, 0, 0, 0.5)
-        /^hsl\(\s*\d{1,3}\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*\)$/,       // hsl(120, 100%, 50%)
-        /^hsla\(\s*\d{1,3}\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+\s*\)$/, // hsla(120, 100%, 50%, 0.5)
+        /^hsl\(\s*[\d.]+\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*\)$/,          // hsl(120, 100%, 50%)
+        /^hsla\(\s*[\d.]+\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+\s*\)$/, // hsla(120, 100%, 50%, 0.5)
     ];
 
     // Named colors whitelist (common CSS color names)

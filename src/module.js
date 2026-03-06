@@ -866,9 +866,21 @@ export class Module {
       }
     }
 
-    // Update expression references
+    // Update expression references (supports both DSL and legacy formats)
     const updateReferences = (exprText) => {
-      return exprText.replace(/(?:module\.)?getNoteById\(\s*(\d+)\s*\)/g, (match, p1) => {
+      // DSL format: [N].prop, beat([N]), measure([N]), tempo([N])
+      let updated = exprText.replace(/\[(\d+)\]/g, (match, p1) => {
+        const oldRefId = parseInt(p1, 10);
+        const newRefId = newMapping[oldRefId];
+        if (typeof newRefId !== 'number') {
+          console.warn('No new mapping found for old id ' + oldRefId);
+          return match;
+        }
+        return '[' + newRefId + ']';
+      });
+
+      // Legacy format: module.getNoteById(N) or getNoteById(N)
+      updated = updated.replace(/(?:module\.)?getNoteById\(\s*(\d+)\s*\)/g, (match, p1) => {
         const oldRefId = parseInt(p1, 10);
         if (oldRefId === 0) {
           return 'module.baseNote';
@@ -880,6 +892,8 @@ export class Module {
         }
         return 'module.getNoteById(' + newRefId + ')';
       });
+
+      return updated;
     };
 
     // Rebuild notes with new IDs
