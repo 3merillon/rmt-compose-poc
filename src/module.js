@@ -3,6 +3,7 @@ import { Note } from './note.js';
 import { DependencyGraph } from './dependency-graph.js';
 import { createEvaluator, createIncrementalEvaluator } from './wasm/evaluator-adapter.js';
 import { compiler, decompiler } from './expression-compiler.js';
+import { isDSLSyntax } from './dsl/index.js';
 
 let memoizedModuleEndTime = null;
 let moduleLastModifiedTime = 0;
@@ -668,8 +669,15 @@ export class Module {
     for (let i = 0; i < n; i++) {
       const prevNote = (i === 0) ? fromNote : this.getNoteById(notesArray[i - 1].id);
 
+      // Detect DSL vs legacy from the previous note's startTime expression
+      const prevRaw = prevNote.variables?.startTimeString || '';
+      const useDSL = isDSLSyntax(prevRaw) || (i === 0 && isDSLSyntax(fromNote.variables?.startTimeString || ''));
+
       let rawString;
-      if (prevNote.id === 0) {
+      if (useDSL) {
+        const pRef = (prevNote.id === 0) ? 'base' : `[${prevNote.id}]`;
+        rawString = `${pRef}.t + measure(${pRef})`;
+      } else if (prevNote.id === 0) {
         rawString = "module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))";
       } else {
         rawString = `module.getNoteById(${prevNote.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevNote.id})))`;

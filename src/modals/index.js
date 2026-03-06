@@ -11,6 +11,7 @@ import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
 import { escapeHtml } from '../utils/html-escape.js';
+import { isDSLSyntax } from '../dsl/index.js';
 
 const domCache = {
     noteWidget: null,
@@ -665,6 +666,9 @@ function removeExcessParentheses(expr) {
 
 function simplifyExpressions(expr) {
     try {
+        // DSL expressions bypass legacy simplification
+        if (isDSLSyntax(expr)) return expr;
+
         // Use centralized simplifier with heuristics to determine kind.
         const moduleInstance = getModule();
         const cleaned = removeExcessParentheses(expr);
@@ -768,7 +772,7 @@ function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
 }
 
 // ===== Feature: Evaluate to BaseNote =====
-// Helper to convert a decimal to a clean Fraction string
+// Helper to convert a decimal to a clean Fraction string (legacy format)
 function toFractionString(value) {
     try {
         const frac = new Fraction(value);
@@ -780,6 +784,20 @@ function toFractionString(value) {
     } catch {
         // Fallback for values that Fraction can't handle cleanly
         return `new Fraction(${value})`;
+    }
+}
+
+// Helper to convert a decimal to a DSL fraction/number string
+function toDSLFractionString(value) {
+    try {
+        const frac = new Fraction(value);
+        const val = frac.s * frac.n;
+        if (frac.d === 1) {
+            return `${val}`;
+        }
+        return `(${val}/${frac.d})`;
+    } catch {
+        return `${value}`;
     }
 }
 
@@ -1049,7 +1067,11 @@ function traceFrequencyToBaseNote(noteId, moduleInstance, visited = new Set()) {
  * Convert a frequency algebra back to an expression string
  * Supports multi-base power terms
  */
-function algebraToExpression(algebra) {
+function algebraToExpression(algebra, useDSL = false) {
+    if (useDSL) {
+        return algebraToExpressionDSL(algebra);
+    }
+
     const parts = [];
 
     // Start with baseNote.frequency
@@ -1083,6 +1105,26 @@ function algebraToExpression(algebra) {
     let result = base;
     for (const part of parts) {
         result = `${result}.mul(${part})`;
+    }
+
+    return result;
+}
+
+function algebraToExpressionDSL(algebra) {
+    let result = 'base.f';
+
+    // Multiply by coefficient if not 1
+    if (!algebra.coeff.equals(1)) {
+        const c = algebra.coeff;
+        const val = c.s * c.n;
+        const fracStr = (c.d === 1) ? `${val}` : `(${val}/${c.d})`;
+        result = `${result} * ${fracStr}`;
+    }
+
+    // Multiply by each power term
+    for (const p of algebra.powers) {
+        const expStr = (p.expDen === 1) ? `${p.expNum}` : `(${p.expNum}/${p.expDen})`;
+        result = `${result} * ${p.base}^${expStr}`;
     }
 
     return result;
@@ -1140,8 +1182,12 @@ function detectTETInterval(ratio) {
 }
 
 // Create a POW-based frequency expression from TET interval
-function createTETFrequencyExpr(interval) {
+function createTETFrequencyExpr(interval, useDSL = false) {
     const { base, numerator, denominator } = interval;
+    if (useDSL) {
+        const expStr = (denominator === 1) ? `${numerator}` : `(${numerator}/${denominator})`;
+        return `base.f * ${base}^${expStr}`;
+    }
     if (denominator === 1) {
         // Simple integer power (e.g., octave)
         return `module.baseNote.getVariable('frequency').mul(new Fraction(${base}).pow(new Fraction(${numerator})))`;
@@ -1150,7 +1196,7 @@ function createTETFrequencyExpr(interval) {
 }
 
 // Create BaseNote-relative expression for startTime
-function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance) {
+function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance, useDSL = false) {
     const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
     const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
     const beatLength = 60 / baseTempo;
@@ -1159,7 +1205,13 @@ function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance) {
     const offsetBeats = offsetSeconds / beatLength;
 
     if (Math.abs(offsetBeats) < 1e-10) {
-        return `module.baseNote.getVariable('startTime')`;
+        return useDSL ? 'base.t' : `module.baseNote.getVariable('startTime')`;
+    }
+
+    if (useDSL) {
+        const fracStr = toDSLFractionString(Math.abs(offsetBeats));
+        const beatMul = (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
+        return offsetBeats >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
     }
 
     const beatsFrac = toFractionString(offsetBeats);
@@ -1167,10 +1219,15 @@ function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance) {
 }
 
 // Create BaseNote-relative expression for duration
-function createBaseNoteDurationExpr(durationSeconds, moduleInstance) {
+function createBaseNoteDurationExpr(durationSeconds, moduleInstance, useDSL = false) {
     const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
     const beatLength = 60 / baseTempo;
     const durationBeats = durationSeconds / beatLength;
+
+    if (useDSL) {
+        const fracStr = toDSLFractionString(durationBeats);
+        return (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
+    }
 
     const beatsFrac = toFractionString(durationBeats);
     return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac})`;
@@ -1178,22 +1235,20 @@ function createBaseNoteDurationExpr(durationSeconds, moduleInstance) {
 
 // Create BaseNote-relative expression for frequency
 // Preserves POW expressions by tracing the dependency chain algebraically
-function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null) {
+function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null, useDSL = false) {
     const baseFreq = moduleInstance.baseNote.getVariable('frequency').valueOf();
     const ratio = frequency / baseFreq;
 
     // If ratio is effectively 1, just reference baseNote directly
     if (Math.abs(ratio - 1) < 1e-10) {
-        return `module.baseNote.getVariable('frequency')`;
+        return useDSL ? 'base.f' : `module.baseNote.getVariable('frequency')`;
     }
 
     // Option 1: Try symbolic chain tracing - this preserves POW expressions exactly
-    // We trust the algebraic tracing since it's mathematically sound.
-    // Note: We can't verify by evaluating because Fraction.pow() returns null for fractional exponents
     if (note) {
         const algebra = traceFrequencyToBaseNote(note.id, moduleInstance);
         if (algebra) {
-            const tracedExpr = algebraToExpression(algebra);
+            const tracedExpr = algebraToExpression(algebra, useDSL);
             return tracedExpr;
         }
     }
@@ -1209,10 +1264,14 @@ function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null) {
     // Option 3: Try to detect TET interval from the ratio (for non-chain cases)
     const tetInterval = detectTETInterval(ratio);
     if (tetInterval) {
-        return createTETFrequencyExpr(tetInterval);
+        return createTETFrequencyExpr(tetInterval, useDSL);
     }
 
     // Option 4: Fallback to fraction approximation
+    if (useDSL) {
+        const fracStr = toDSLFractionString(ratio);
+        return `base.f * ${fracStr}`;
+    }
     const ratioFrac = toFractionString(ratio);
     return `${ratioFrac}.mul(module.baseNote.getVariable('frequency'))`;
 }
@@ -1230,6 +1289,10 @@ export function evaluateNoteToBaseNote(noteId) {
     const variablesToProcess = isMeasureNote ? ['startTime'] : ['startTime', 'duration', 'frequency'];
     let success = true;
 
+    // Detect if the note uses DSL format (check any expression)
+    const anyRaw = note.variables.startTimeString || note.variables.durationString || note.variables.frequencyString || '';
+    const useDSL = isDSLSyntax(anyRaw);
+
     for (const varName of variablesToProcess) {
         if (!note.variables[varName + 'String']) continue;
 
@@ -1242,11 +1305,11 @@ export function evaluateNoteToBaseNote(noteId) {
         // Create the BaseNote-relative expression directly from the value
         let newExpr;
         if (varName === 'startTime') {
-            newExpr = createBaseNoteStartTimeExpr(value, moduleInstance);
+            newExpr = createBaseNoteStartTimeExpr(value, moduleInstance, useDSL);
         } else if (varName === 'duration') {
-            newExpr = createBaseNoteDurationExpr(value, moduleInstance);
+            newExpr = createBaseNoteDurationExpr(value, moduleInstance, useDSL);
         } else if (varName === 'frequency') {
-            newExpr = createBaseNoteFrequencyExpr(value, moduleInstance, note);
+            newExpr = createBaseNoteFrequencyExpr(value, moduleInstance, note, useDSL);
         }
 
         if (newExpr) {
@@ -1297,6 +1360,10 @@ export function evaluateEntireModule() {
         const note = moduleInstance.getNoteById(noteId);
         if (!note) continue;
 
+        // Detect if this note uses DSL format
+        const anyRaw = note.variables.startTimeString || note.variables.durationString || note.variables.frequencyString || '';
+        const useDSL = isDSLSyntax(anyRaw);
+
         // Check if this is a measure note (only has startTime)
         const isMeasureNote = note.hasExpression('startTime') &&
                               !note.hasExpression('duration') &&
@@ -1312,7 +1379,11 @@ export function evaluateEntireModule() {
 
                 let expr;
                 if (Math.abs(offsetBeats) < 1e-10) {
-                    expr = `module.baseNote.getVariable('startTime')`;
+                    expr = useDSL ? 'base.t' : `module.baseNote.getVariable('startTime')`;
+                } else if (useDSL) {
+                    const fracStr = toDSLFractionString(Math.abs(offsetBeats));
+                    const beatMul = (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
+                    expr = offsetBeats >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
                 } else {
                     const beatsFrac = toFractionString(offsetBeats);
                     expr = `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac}))`;
@@ -1330,9 +1401,9 @@ export function evaluateEntireModule() {
 
                 let expr;
                 if (Math.abs(beats - baseBeats) < 1e-10) {
-                    expr = `module.baseNote.getVariable('beatsPerMeasure')`;
+                    expr = useDSL ? 'base.bpm' : `module.baseNote.getVariable('beatsPerMeasure')`;
                 } else {
-                    const beatsFrac = toFractionString(beats);
+                    const beatsFrac = useDSL ? toDSLFractionString(beats) : toFractionString(beats);
                     expr = beatsFrac;
                 }
                 updates.push({ noteId, varName: 'beatsPerMeasure', expr });
@@ -1346,8 +1417,14 @@ export function evaluateEntireModule() {
                 if (currentValue != null) {
                     const durationSeconds = currentValue.valueOf();
                     const durationBeats = durationSeconds / beatLength;
-                    const beatsFrac = toFractionString(durationBeats);
-                    const expr = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac})`;
+                    let expr;
+                    if (useDSL) {
+                        const fracStr = toDSLFractionString(durationBeats);
+                        expr = (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
+                    } else {
+                        const beatsFrac = toFractionString(durationBeats);
+                        expr = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac})`;
+                    }
                     updates.push({ noteId, varName: 'duration', expr });
                 }
             }
@@ -1356,7 +1433,7 @@ export function evaluateEntireModule() {
                 const currentValue = note.getVariable('frequency');
                 if (currentValue != null) {
                     const frequency = currentValue.valueOf();
-                    const expr = createBaseNoteFrequencyExpr(frequency, moduleInstance, note);
+                    const expr = createBaseNoteFrequencyExpr(frequency, moduleInstance, note, useDSL);
                     updates.push({ noteId, varName: 'frequency', expr });
                 }
             }

@@ -131,7 +131,13 @@ function buildRawEditor(initialRaw, note = null, key = null) {
 }
 
 // Helper to build canonical duration expression: beatUnit * (n/d)
-function computeDurationExpr(multiplierNum, multiplierDen = 1) {
+function computeDurationExpr(multiplierNum, multiplierDen = 1, useDSL = false) {
+  if (useDSL) {
+    if (multiplierNum === 1 && multiplierDen === 1) return 'beat(base)';
+    return (multiplierDen === 1)
+      ? `beat(base) * ${multiplierNum}`
+      : `beat(base) * (${multiplierNum}/${multiplierDen})`;
+  }
   return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${multiplierNum}, ${multiplierDen}))`;
 }
 
@@ -250,7 +256,8 @@ function createDurationSelector(rawInput, saveButton, note, value) {
       const mod = dotPicks[selectedDotIdx];
       [n, d] = mulFrac(n, d, mod.n, mod.d);
     }
-    const expr = computeDurationExpr(n, d);
+    const noteUseDSL = isDSLSyntax(note?.variables?.durationString || '');
+    const expr = computeDurationExpr(n, d, noteUseDSL);
     rawInput.value = expr;
     try {
       saveButton.style.display = 'inline-block';
@@ -386,6 +393,23 @@ function createDurationSelector(rawInput, saveButton, note, value) {
       } catch {}
 
       // 2) Fall back to raw string parsing if evaluation path wasn't available yet
+      if (!found && isDSLSyntax(raw)) {
+        // DSL format: beat(base) * (n/d) or beat([id]) * (n/d) or beat(base) * n or bare beat(...)
+        const dslFracMatch = raw.match(/\bbeat\s*\([^)]*\)\s*\*\s*\(\s*(\d+)\s*\/\s*(\d+)\s*\)/);
+        if (dslFracMatch) {
+          mNum = parseInt(dslFracMatch[1]); mDen = parseInt(dslFracMatch[2]); found = true;
+        } else {
+          const dslIntMatch = raw.match(/\bbeat\s*\([^)]*\)\s*\*\s*(\d+)\s*$/);
+          if (dslIntMatch) {
+            mNum = parseInt(dslIntMatch[1]); mDen = 1; found = true;
+          } else {
+            const dslBeatOnly = raw.match(/^\s*beat\s*\([^)]*\)\s*$/);
+            if (dslBeatOnly) {
+              mNum = 1; mDen = 1; found = true;
+            }
+          }
+        }
+      }
       if (!found) {
         const fracMatch = raw.match(/\.mul\s*\(\s*new\s+Fraction\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)\s*\)/);
         if (fracMatch) {
