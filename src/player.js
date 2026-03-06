@@ -1563,32 +1563,9 @@ if (canvasEl) {
                 const hasDslHelpers = /\b(tempo|beat|measure)\s*\(/.test(expr);
 
                 // === DSL format remapping ===
-
-                // Remap DSL base references (base.t, base.d, etc.) to target note
-                if (targetNote.id !== 0 && hasDslBase) {
-                    const anchorId = targetNote.id;
-
-                    if (targetIsMeasure) {
-                        expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
-                            if (prop === 'f') {
-                                return 'base.f';
-                            }
-                            return `[${anchorId}].${prop}`;
-                        });
-                    } else {
-                        expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
-                            return `[${anchorId}].${prop}`;
-                        });
-                    }
-                }
-
-                // Remap DSL helper functions that reference base: tempo(base), beat(base), measure(base)
-                if (targetNote.id !== 0 && hasDslHelpers) {
-                    const anchorId = targetNote.id;
-                    expr = expr.replace(/\b(tempo|beat|measure)\s*\(\s*base\s*\)/g, function(match, fn) {
-                        return `${fn}([${anchorId}])`;
-                    });
-                }
+                // IMPORTANT: ID remaps MUST run before base→target remaps.
+                // Otherwise base.t → [targetId].t gets re-remapped by the ID
+                // remap when targetId collides with a source note ID.
 
                 // Remap DSL [oldId].prop references using the mapping table
                 if (hasDslIds) {
@@ -1623,29 +1600,36 @@ if (canvasEl) {
                     });
                 }
 
-                // === Legacy format remapping ===
-
-                // Remap base-note anchored constructs to the selected target when dropping onto a non-base note.
-                if (targetNote.id !== 0 && hasBase) {
+                // Remap DSL base references (base.t, base.d, etc.) to target note
+                // (runs after ID remaps so [targetId] refs won't be re-remapped)
+                if (targetNote.id !== 0 && hasDslBase) {
                     const anchorId = targetNote.id;
 
                     if (targetIsMeasure) {
-                        expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
-                            if (varName === 'frequency') {
-                                return "module.baseNote.getVariable('frequency')";
+                        expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
+                            if (prop === 'f') {
+                                return 'base.f';
                             }
-                            return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
+                            return `[${anchorId}].${prop}`;
                         });
                     } else {
-                        expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
-                            return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
+                        expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
+                            return `[${anchorId}].${prop}`;
                         });
                     }
-
-                    // Remap common helpers that take baseNote as argument
-                    expr = expr.replace(/module\.findTempo\(\s*module\.baseNote\s*\)/g, "module.findTempo(module.getNoteById(" + anchorId + "))");
-                    expr = expr.replace(/module\.findMeasureLength\(\s*module\.baseNote\s*\)/g, "module.findMeasureLength(module.getNoteById(" + anchorId + "))");
                 }
+
+                // Remap DSL helper functions that reference base: tempo(base), beat(base), measure(base)
+                // (runs after helper ID remaps so [targetId] refs won't be re-remapped)
+                if (targetNote.id !== 0 && hasDslHelpers) {
+                    const anchorId = targetNote.id;
+                    expr = expr.replace(/\b(tempo|beat|measure)\s*\(\s*base\s*\)/g, function(match, fn) {
+                        return `${fn}([${anchorId}])`;
+                    });
+                }
+
+                // === Legacy format remapping ===
+                // IMPORTANT: Same ordering principle — ID remaps before base remaps.
 
                 // Remap explicit id references using the mapping table (includes 0 -> target id)
                 if (hasIds) {
@@ -1667,6 +1651,29 @@ if (canvasEl) {
                         expr = expr.replace(new RegExp(`module\\.getNoteById\\(\\s*${measureId}\\s*\\)\\.getVariable\\(\\s*'frequency'\\s*\\)`, 'g'),
                             "module.baseNote.getVariable('frequency')");
                     }
+                }
+
+                // Remap base-note anchored constructs to the selected target when dropping onto a non-base note.
+                // (runs after ID remaps so getNoteById(targetId) refs won't be re-remapped)
+                if (targetNote.id !== 0 && hasBase) {
+                    const anchorId = targetNote.id;
+
+                    if (targetIsMeasure) {
+                        expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
+                            if (varName === 'frequency') {
+                                return "module.baseNote.getVariable('frequency')";
+                            }
+                            return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
+                        });
+                    } else {
+                        expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
+                            return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
+                        });
+                    }
+
+                    // Remap common helpers that take baseNote as argument
+                    expr = expr.replace(/module\.findTempo\(\s*module\.baseNote\s*\)/g, "module.findTempo(module.getNoteById(" + anchorId + "))");
+                    expr = expr.replace(/module\.findMeasureLength\(\s*module\.baseNote\s*\)/g, "module.findMeasureLength(module.getNoteById(" + anchorId + "))");
                 }
 
                 // Check drop mode - if 'end', add target's duration to startTime expressions
