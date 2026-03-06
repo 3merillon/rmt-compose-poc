@@ -24,7 +24,7 @@ export async function initWasm() {
   try {
     // Dynamic import of the WASM module
     // This path will be resolved by Vite
-    const wasm = await import('../../rust/pkg/rmt_core.js');
+    const wasm = await import('./rmt_core.js');
 
     // Initialize the WASM module (calls the start function)
     await wasm.default();
