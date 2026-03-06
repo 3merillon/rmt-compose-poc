@@ -163,7 +163,17 @@ export class Workspace {
         // If no note subregion hit, allow measure-triangle dragging via mixed pick
         if (!subHit || !subHit.id) {
           try {
-            const mixedTop = this.pickAt(e.clientX, e.clientY, 3);
+            let mixedTop = this.pickAt(e.clientX, e.clientY, 3);
+            // If a different measure is currently selected and also under the pointer, prefer it.
+            // pickAt returns the top-most triangle, but the user may have stack-clicked to select a lower one.
+            if (mixedTop && mixedTop.type === 'measure' && this.renderer?._lastSelectedNoteId != null) {
+              const selId = Number(this.renderer._lastSelectedNoteId);
+              if (selId !== Number(mixedTop.id)) {
+                const allHits = this.pickStackAt(e.clientX, e.clientY, 3);
+                const selHit = allHits?.find(h => h.type === 'measure' && Number(h.id) === selId);
+                if (selHit) mixedTop = selHit;
+              }
+            }
             if (mixedTop && mixedTop.type === 'measure' && mixedTop.id != null) {
               const measureId = Number(mixedTop.id);
               const xScale = this.renderer.currentXScaleFactor || 1.0;

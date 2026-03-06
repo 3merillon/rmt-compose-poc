@@ -5347,53 +5347,7 @@ gl.bufferData(gl.ARRAY_BUFFER, this.measureTriPosSize, gl.DYNAMIC_DRAW);
 gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, count);
 gl.bindVertexArray(null);
 
-// Selected measure triangle strong outline (2px) on top
-try {
-  if (this._lastSelectedNoteId != null && this._measureTriIds && this.measureTriPosSize && this.measureTriOutlineProgram) {
-    const selId = Number(this._lastSelectedNoteId);
-    const idx = this._measureTriIds.indexOf ? this._measureTriIds.indexOf(selId) : -1;
-    if (idx >= 0) {
-      const o = idx * 4;
-      const left = this.measureTriPosSize[o + 0];
-      const top  = this.measureTriPosSize[o + 1];
-      const w    = this.measureTriPosSize[o + 2];
-      const h    = this.measureTriPosSize[o + 3];
-      // Inflate by 2 CSS px for a visible outline
-      const inflate = 2.0;
-      const arrSel = new Float32Array([left - inflate, top - inflate, w + 2 * inflate, h + 2 * inflate]);
-
-      gl.useProgram(this.measureTriOutlineProgram);
-      const Uto2 = (this._uniforms && this._uniforms.measureTriOutline) ? this._uniforms.measureTriOutline : null;
-      const uVPto2 = Uto2 ? Uto2.u_viewport : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_viewport');
-      const uColSel = Uto2 ? Uto2.u_color : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_color');
-      if (uVPto2) gl.uniform2f(uVPto2, vpW, vpH);
-      if (uColSel) gl.uniform4f(uColSel, 1.0, 1.0, 1.0, 1.0);
-      // Apply drag mask for selected if moving (and not preview-baked)
-      {
-        const uDX = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragCssX');
-        const uMask = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragMask');
-        const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
-        if (uDX) gl.uniform1f(uDX, dxCss);
-const movingSel = !!(this._dragActive && this._dragMovingIds && this._dragMovingIds.has(selId) && !(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, selId)));
-if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
-      }
-
-      gl.bindVertexArray(this.measureTriVAO);
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, arrSel, gl.DYNAMIC_DRAW);
-      // Upload zero drag flag for single-instance draw to avoid double-offset
-      // (shader adds both a_dragFlag and u_dragMask; we use u_dragMask for single draws)
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriDragFlagBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0.0]), gl.DYNAMIC_DRAW);
-      // Invalidate flags cache so next frame re-uploads full flags array
-      this._lastTriFlagsKey = null;
-      gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 1);
-      gl.bindVertexArray(null);
-    }
-  }
-} catch {}
-
-// Dependency/dependent measure outlines and hover
+// Dependency/dependent measure outlines and hover (drawn first so selected outline renders on top)
 try {
   if (this.measureTriOutlineProgram && this._measureTriIds && this._measureTriIds.length) {
     // Ensure the correct program is bound before setting any uniforms to avoid
@@ -5477,6 +5431,52 @@ try {
       const id = Number(this._hoveredMeasureId);
       const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
       drawTriOutlineAtIndex(idx, [1.0, 1.0, 1.0, 0.6], this.measureTriPosSizeOutline);
+    }
+  }
+} catch {}
+
+// Selected measure triangle strong outline (2px) on top of dependency/dependent outlines
+try {
+  if (this._lastSelectedNoteId != null && this._measureTriIds && this.measureTriPosSize && this.measureTriOutlineProgram) {
+    const selId = Number(this._lastSelectedNoteId);
+    const idx = this._measureTriIds.indexOf ? this._measureTriIds.indexOf(selId) : -1;
+    if (idx >= 0) {
+      const o = idx * 4;
+      const left = this.measureTriPosSize[o + 0];
+      const top  = this.measureTriPosSize[o + 1];
+      const w    = this.measureTriPosSize[o + 2];
+      const h    = this.measureTriPosSize[o + 3];
+      // Inflate by 2 CSS px for a visible outline
+      const inflate = 2.0;
+      const arrSel = new Float32Array([left - inflate, top - inflate, w + 2 * inflate, h + 2 * inflate]);
+
+      gl.useProgram(this.measureTriOutlineProgram);
+      const Uto2 = (this._uniforms && this._uniforms.measureTriOutline) ? this._uniforms.measureTriOutline : null;
+      const uVPto2 = Uto2 ? Uto2.u_viewport : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_viewport');
+      const uColSel = Uto2 ? Uto2.u_color : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_color');
+      if (uVPto2) gl.uniform2f(uVPto2, vpW, vpH);
+      if (uColSel) gl.uniform4f(uColSel, 1.0, 1.0, 1.0, 1.0);
+      // Apply drag mask for selected if moving (and not preview-baked)
+      {
+        const uDX = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragCssX');
+        const uMask = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragMask');
+        const dxCss = (this._dragActive ? ((this.matrix[0] || 0) * (this._dragOffsetX || 0)) : 0.0);
+        if (uDX) gl.uniform1f(uDX, dxCss);
+const movingSel = !!(this._dragActive && this._dragMovingIds && this._dragMovingIds.has(selId) && !(this._measurePreview && Object.prototype.hasOwnProperty.call(this._measurePreview, selId)));
+if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
+      }
+
+      gl.bindVertexArray(this.measureTriVAO);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriPosSizeBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, arrSel, gl.DYNAMIC_DRAW);
+      // Upload zero drag flag for single-instance draw to avoid double-offset
+      // (shader adds both a_dragFlag and u_dragMask; we use u_dragMask for single draws)
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.measureTriDragFlagBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0.0]), gl.DYNAMIC_DRAW);
+      // Invalidate flags cache so next frame re-uploads full flags array
+      this._lastTriFlagsKey = null;
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 3, 1);
+      gl.bindVertexArray(null);
     }
   }
 } catch {}
