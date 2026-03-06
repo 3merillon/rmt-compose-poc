@@ -645,15 +645,30 @@ export class Module {
     // Check frequency expression for parent reference
     const freqSource = note.getExpressionSource('frequency');
     if (freqSource) {
-      const noteRefMatch = freqSource.match(/module\.getNoteById\((\d+)\)\.getVariable\('frequency'\)/);
-      if (noteRefMatch) {
-        const parentId = parseInt(noteRefMatch[1], 10);
-        const parentNote = this.getNoteById(parentId);
-        if (parentNote) return this.findInstrument(parentNote);
-      }
+      if (isDSLSyntax(freqSource)) {
+        // DSL format: [N].f for note references, base.f for base note
+        const dslNoteRef = freqSource.match(/\[(\d+)\]\.f/);
+        if (dslNoteRef) {
+          const parentId = parseInt(dslNoteRef[1], 10);
+          const parentNote = this.getNoteById(parentId);
+          if (parentNote) return this.findInstrument(parentNote);
+        }
 
-      if (freqSource.includes("module.baseNote.getVariable('frequency')")) {
-        return this.findInstrument(this.baseNote);
+        if (freqSource.includes('base.f')) {
+          return this.findInstrument(this.baseNote);
+        }
+      } else {
+        // Legacy format
+        const noteRefMatch = freqSource.match(/module\.getNoteById\((\d+)\)\.getVariable\('frequency'\)/);
+        if (noteRefMatch) {
+          const parentId = parseInt(noteRefMatch[1], 10);
+          const parentNote = this.getNoteById(parentId);
+          if (parentNote) return this.findInstrument(parentNote);
+        }
+
+        if (freqSource.includes("module.baseNote.getVariable('frequency')")) {
+          return this.findInstrument(this.baseNote);
+        }
       }
     }
 
