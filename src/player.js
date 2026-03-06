@@ -627,16 +627,24 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   
     function updateDependentRawExpressions(selectedNoteId, selectedRaw) {
+        // Legacy patterns
         const getVarRegex = new RegExp(
             "(?:module\\.)?getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\.getVariable\\('([^']+)'\\)|targetNote\\.getVariable\\('([^']+)'\\)",
             "g"
         );
-        
         const otherRefRegex = new RegExp(
             "module\\.(?:findTempo|findMeasureLength)\\(\\s*module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\s*\\)",
             "g"
         );
-        
+
+        // DSL shortname → variable name mapping
+        const dslShortToVar = { t: 'startTime', d: 'duration', f: 'frequency' };
+
+        // DSL patterns for [N].t, [N].d, [N].f
+        const dslVarRegex = new RegExp("\\[" + selectedNoteId + "\\]\\.(t|d|f)\\b", "g");
+        // DSL helper patterns: beat([N]), tempo([N]), measure([N])
+        const dslHelperRegex = new RegExp("\\b(beat|tempo|measure)\\s*\\(\\s*\\[" + selectedNoteId + "\\]\\s*\\)", "g");
+
         const dependents = myModule.getDependentNotes(selectedNoteId);
         dependents.forEach(depId => {
             const depNote = myModule.getNoteById(depId);
@@ -644,7 +652,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 console.warn("Dependent note", depId, "not found.");
                 return;
             }
-            
+
             Object.keys(depNote.variables).forEach(key => {
                 if (key.endsWith("String")) {
                     let rawExp = depNote.variables[key];
@@ -652,41 +660,74 @@ document.addEventListener('DOMContentLoaded', async function() {
                         console.warn("Skipping update for key", key, "in dependent note", depId, "as value is not a string:", rawExp);
                         return;
                     }
-                    
-                    if (rawExp.includes(`getNoteById(${selectedNoteId})`) || rawExp.includes("targetNote")) {
-                        let newRawExp = rawExp.replace(getVarRegex, (match, g1, g2) => {
-                            const varName = g1 || g2;
-                            let replacement = selectedRaw[varName];
-                            if (replacement === undefined) {
-                                replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
-                                console.warn("No raw value for", varName, "– using default", replacement);
-                            }
-                            return replacement;
-                        });
-                        
-                        newRawExp = newRawExp.replace(otherRefRegex, (match) => {
-                            if (match.includes("findTempo")) {
-                                return "module.findTempo(module.baseNote)";
-                            } else if (match.includes("findMeasureLength")) {
-                                return "module.findMeasureLength(module.baseNote)";
-                            }
-                            return match;
-                        });
-                        
-                        const directRefRegex = new RegExp("module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)", "g");
-                        newRawExp = newRawExp.replace(directRefRegex, "module.baseNote");
-                        
+
+                    const hasLegacyRef = rawExp.includes(`getNoteById(${selectedNoteId})`) || rawExp.includes("targetNote");
+                    const hasDSLRef = new RegExp("\\[" + selectedNoteId + "\\]").test(rawExp);
+
+                    if (hasLegacyRef || hasDSLRef) {
+                        let newRawExp = rawExp;
+                        const expIsDSL = isDSLSyntax(rawExp);
+
+                        if (expIsDSL) {
+                            // DSL substitution: replace [N].t/d/f with the selected note's own expression
+                            // This rewires the dependency chain around the liberated note
+                            newRawExp = newRawExp.replace(dslVarRegex, (match, shortName) => {
+                                const varName = dslShortToVar[shortName];
+                                const noteExpr = selectedRaw[varName];
+                                if (noteExpr === undefined) {
+                                    return (varName === 'frequency') ? '1' : '0';
+                                }
+                                // Wrap in parens to preserve operator precedence
+                                return `(${noteExpr})`;
+                            });
+                            // Replace beat([N]) → beat(parent) where parent is from the selected note's own expression
+                            newRawExp = newRawExp.replace(dslHelperRegex, (match, fn) => {
+                                // Find which note the selected note references for tempo/beat/measure
+                                const selStartRaw = selectedRaw['startTime'] || '';
+                                // Extract the parent ref from the selected note's startTime expression
+                                const dslRefM = selStartRaw.match(/\[(\d+)\]\./);
+                                const dslBaseM = !dslRefM && (/\bbase\./.test(selStartRaw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(selStartRaw));
+                                if (dslRefM) {
+                                    return `${fn}([${dslRefM[1]}])`;
+                                }
+                                return `${fn}(base)`;
+                            });
+                        } else {
+                            // Legacy substitution
+                            newRawExp = newRawExp.replace(getVarRegex, (match, g1, g2) => {
+                                const varName = g1 || g2;
+                                let replacement = selectedRaw[varName];
+                                if (replacement === undefined) {
+                                    replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
+                                    console.warn("No raw value for", varName, "– using default", replacement);
+                                }
+                                return replacement;
+                            });
+                            newRawExp = newRawExp.replace(otherRefRegex, (match) => {
+                                if (match.includes("findTempo")) {
+                                    return "module.findTempo(module.baseNote)";
+                                } else if (match.includes("findMeasureLength")) {
+                                    return "module.findMeasureLength(module.baseNote)";
+                                }
+                                return match;
+                            });
+                            const directRefRegex = new RegExp("module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)", "g");
+                            newRawExp = newRawExp.replace(directRefRegex, "module.baseNote");
+                        }
+
                         const baseKey = key.slice(0, -6);
                         let simplifiedExp = newRawExp;
-                        try {
-                            if (baseKey === 'startTime') {
-                                simplifiedExp = simplifyStartTime(newRawExp, myModule);
-                            } else if (baseKey === 'duration') {
-                                simplifiedExp = simplifyDuration(newRawExp, myModule);
-                            } else if (baseKey === 'frequency') {
-                                simplifiedExp = simplifyFrequency(newRawExp, myModule);
-                            }
-                        } catch {}
+                        if (!expIsDSL) {
+                            try {
+                                if (baseKey === 'startTime') {
+                                    simplifiedExp = simplifyStartTime(newRawExp, myModule);
+                                } else if (baseKey === 'duration') {
+                                    simplifiedExp = simplifyDuration(newRawExp, myModule);
+                                } else if (baseKey === 'frequency') {
+                                    simplifiedExp = simplifyFrequency(newRawExp, myModule);
+                                }
+                            } catch {}
+                        }
                         // Set expression via *String property - Note class handles binary compilation
                         depNote.setVariable(key, simplifiedExp);
                     }
