@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "export RUSTUP_HOME=/rust CARGO_HOME=/rust && export PATH=\"/rust/bin:$PATH\" && which wasm-pack || cargo install wasm-pack && npm run build",
+  "buildCommand": "vite build",
   "outputDirectory": "dist",
   "framework": "vite"
 }
