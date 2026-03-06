@@ -246,7 +246,7 @@ export class Workspace {
                         const sts = nn.variables?.startTimeString || '';
                         // Include ANY measure that references a seed (both chain links and anchors)
                         for (const sid of out) {
-                          if (sts.includes(`getNoteById(${sid})`)) {
+                          if (sts.includes(`getNoteById(${sid})`) || sts.includes(`[${sid}]`) || sts.includes(`measure([${sid}])`)) {
                             out.add(nid);
                             changed = true;
                             break;
@@ -274,9 +274,15 @@ export class Workspace {
                     };
                     const refersStartOf = (nid, refId) => {
                       const s = getStartTimeStr(nid);
-                      return !!(s && s.includes(`getNoteById(${refId})`) &&
-                                (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
-                                 s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`)));
+                      if (!s) return false;
+                      // Legacy
+                      if (s.includes(`getNoteById(${refId})`) &&
+                          (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
+                           s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`))) return true;
+                      // DSL: [refId].t, [refId].d, beat([refId]), measure([refId])
+                      if (s.includes(`[${refId}].t`) || s.includes(`[${refId}].d`) ||
+                          s.includes(`beat([${refId}])`) || s.includes(`measure([${refId}])`)) return true;
+                      return false;
                     };
                     const closureStartRefs = (seedSet) => {
                       const affected = new Set(seedSet);
@@ -580,7 +586,7 @@ export class Workspace {
           const mod = this._module;
           const n0 = mod?.getNoteById?.(Number(id));
           const raw0 = n0?.variables?.startTimeString || '';
-          // Parse current parent
+          // Parse current parent (legacy + DSL)
           let parent0 = null;
           try {
             if (raw0.includes('module.baseNote')) {
@@ -588,6 +594,18 @@ export class Workspace {
             } else {
               const m = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
               if (m) parent0 = mod?.getNoteById?.(parseInt(m[1], 10)) || null;
+            }
+            // DSL fallback
+            if (!parent0) {
+              const dm = raw0.match(/\[(\d+)\]\./);
+              if (dm) parent0 = mod?.getNoteById?.(parseInt(dm[1], 10)) || null;
+              if (!parent0) {
+                const dh = raw0.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
+                if (dh) parent0 = mod?.getNoteById?.(parseInt(dh[1], 10)) || null;
+              }
+              if (!parent0 && (/\bbase\./.test(raw0) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw0))) {
+                parent0 = mod?.baseNote || null;
+              }
             }
           } catch {}
           if (!parent0) parent0 = mod?.baseNote || null;
@@ -597,7 +615,7 @@ export class Workspace {
             catch { return false; }
           };
 
-          // Build ancestor chain from current parent up to BaseNote
+          // Build ancestor chain from current parent up to BaseNote (legacy + DSL)
           const anc = [];
           try {
             let curA = parent0;
@@ -613,12 +631,22 @@ export class Workspace {
               }
               const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
               if (mm) {
-                const pid = parseInt(mm[1], 10);
-                const p = mod?.getNoteById?.(pid);
-                if (!p) break;
-                curA = p;
+                curA = mod?.getNoteById?.(parseInt(mm[1], 10));
+                if (!curA) break;
               } else {
-                break;
+                const dslM = rawA.match(/\[(\d+)\]\./);
+                const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
+                const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
+                if (dslId >= 0) {
+                  if (dslId === 0) { anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                  curA = mod?.getNoteById?.(dslId);
+                  if (!curA) break;
+                } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
+                  anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                  break;
+                } else {
+                  break;
+                }
               }
             }
           } catch {}
@@ -959,7 +987,7 @@ export class Workspace {
             const mod = this._module;
             const n0 = mod?.getNoteById?.(Number(noteId));
             const raw0 = n0?.variables?.startTimeString || '';
-            // Parse current parent
+            // Parse current parent (legacy + DSL)
             let parent0 = null;
             try {
               if (raw0.includes('module.baseNote')) {
@@ -967,6 +995,17 @@ export class Workspace {
               } else {
                 const m = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
                 if (m) parent0 = mod?.getNoteById?.(parseInt(m[1], 10)) || null;
+              }
+              if (!parent0) {
+                const dm = raw0.match(/\[(\d+)\]\./);
+                if (dm) parent0 = mod?.getNoteById?.(parseInt(dm[1], 10)) || null;
+                if (!parent0) {
+                  const dh = raw0.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
+                  if (dh) parent0 = mod?.getNoteById?.(parseInt(dh[1], 10)) || null;
+                }
+                if (!parent0 && (/\bbase\./.test(raw0) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw0))) {
+                  parent0 = mod?.baseNote || null;
+                }
               }
             } catch {}
             if (!parent0) parent0 = mod?.baseNote || null;
@@ -976,7 +1015,7 @@ export class Workspace {
               catch { return false; }
             };
 
-            // Build ancestor chain
+            // Build ancestor chain (legacy + DSL)
             const anc = [];
             try {
               let curA = parent0;
@@ -992,12 +1031,22 @@ export class Workspace {
                 }
                 const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
                 if (mm) {
-                  const pid = parseInt(mm[1], 10);
-                  const p = mod?.getNoteById?.(pid);
-                  if (!p) break;
-                  curA = p;
+                  curA = mod?.getNoteById?.(parseInt(mm[1], 10));
+                  if (!curA) break;
                 } else {
-                  break;
+                  const dslM = rawA.match(/\[(\d+)\]\./);
+                  const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
+                  const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
+                  if (dslId >= 0) {
+                    if (dslId === 0) { anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                    curA = mod?.getNoteById?.(dslId);
+                    if (!curA) break;
+                  } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
+                    anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                    break;
+                  } else {
+                    break;
+                  }
                 }
               }
             } catch {}
@@ -1122,8 +1171,11 @@ export class Workspace {
             const mod = this._module;
             const n = mod?.getNoteById?.(Number(noteId));
             const s = n?.variables?.startTimeString || '';
-            if (s && s.includes('module.baseNote')) {
-              parentIsBaseNote = true;
+            if (s && (s.includes('module.baseNote') || /\bbase\./.test(s) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(s))) {
+              // Also ensure no note-specific ref precedes the base ref
+              if (!(/\[\d+\]\./.test(s)) && !(/getNoteById\(\s*\d+\s*\)/.test(s))) {
+                parentIsBaseNote = true;
+              }
             }
           } catch {}
           // Compute left bound:
@@ -1182,16 +1234,20 @@ export class Workspace {
                 const note = mod?.getNoteById?.(Number(noteId));
 
                 if (note && mod) {
-                  // Parse current parent from startTimeString
+                  // Parse current parent from startTimeString (legacy + DSL)
                   const parseParent = (n) => {
                     try {
                       const raw = n?.variables?.startTimeString || '';
+                      // Legacy
                       const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-                      if (m) {
-                        const pid = parseInt(m[1], 10);
-                        return mod.getNoteById(pid) || mod.baseNote;
-                      }
+                      if (m) return mod.getNoteById(parseInt(m[1], 10)) || mod.baseNote;
                       if (raw.includes('module.baseNote')) return mod.baseNote;
+                      // DSL
+                      const dslM = raw.match(/\[(\d+)\]\./);
+                      if (dslM) return mod.getNoteById(parseInt(dslM[1], 10)) || mod.baseNote;
+                      const dslH = raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
+                      if (dslH) return mod.getNoteById(parseInt(dslH[1], 10)) || mod.baseNote;
+                      if (/\bbase\./.test(raw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return mod.baseNote;
                     } catch {}
                     return mod.baseNote;
                   };
@@ -1203,17 +1259,18 @@ export class Workspace {
                     } catch { return false; }
                   };
 
-                  // Find next measure in chain (CHAIN LINK only)
+                  // Find next measure in chain (CHAIN LINK only, legacy + DSL)
                   const findNextInChain = (measure) => {
                     if (!isMeasure(measure)) return null;
-                    const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+                    const legacyLink = `findMeasureLength(module.getNoteById(${measure.id}))`;
+                    const dslLink = `measure([${measure.id}])`;
                     let best = null;
                     let bestStart = Infinity;
                     for (const id in mod.notes) {
                       const nn = mod.getNoteById(Number(id));
                       if (!isMeasure(nn)) continue;
                       const sts = nn.variables?.startTimeString || '';
-                      if (sts.includes(linkPattern)) {
+                      if (sts.includes(legacyLink) || sts.includes(dslLink)) {
                         const st = Number(nn.getVariable('startTime')?.valueOf?.() ?? Infinity);
                         if (st < bestStart) {
                           bestStart = st;
@@ -1256,22 +1313,35 @@ export class Workspace {
                     }
                     prospectiveParent = Number(parent?.id ?? 0);
                   } else if (startSec < parentStart - tol) {
-                    // Backward drag: climb ancestor chain
+                    // Backward drag: climb ancestor chain (legacy + DSL)
                     let ancestorChain = [];
                     let cur = parent;
                     while (cur && cur.id !== 0) {
                       const raw = cur.variables?.startTimeString || '';
+                      // Legacy
                       const m = raw.match(/getNoteById\((\d+)\)/);
                       if (m) {
-                        const pid = parseInt(m[1], 10);
-                        cur = mod.getNoteById(pid);
+                        cur = mod.getNoteById(parseInt(m[1], 10));
                         if (cur) ancestorChain.push(cur);
                         else break;
                       } else if (raw.includes('module.baseNote')) {
                         ancestorChain.push(mod.baseNote);
                         break;
+                      // DSL
                       } else {
-                        break;
+                        const dslM = raw.match(/\[(\d+)\]\./);
+                        const dslH = !dslM && raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
+                        const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
+                        if (dslId > 0) {
+                          cur = mod.getNoteById(dslId);
+                          if (cur) ancestorChain.push(cur);
+                          else break;
+                        } else if (dslId === 0 || /\bbase\./.test(raw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) {
+                          ancestorChain.push(mod.baseNote);
+                          break;
+                        } else {
+                          break;
+                        }
                       }
                     }
                     if (ancestorChain.length === 0 || ancestorChain[ancestorChain.length - 1]?.id !== 0) {
@@ -1963,6 +2033,7 @@ export class Workspace {
       const parseParent = (n) => {
         try {
           const raw = n?.variables?.startTimeString || '';
+          // Legacy: module.getNoteById(N)
           const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
           if (m) {
             const pid = parseInt(m[1], 10);
@@ -1970,6 +2041,21 @@ export class Workspace {
             return p || mod.baseNote;
           }
           if (raw.includes('module.baseNote')) return mod.baseNote;
+          // DSL: [N].t or [N].d or beat([N]) etc.
+          const dslM = raw.match(/\[(\d+)\]\./);
+          if (dslM) {
+            const pid = parseInt(dslM[1], 10);
+            const p = mod.getNoteById(pid);
+            return p || mod.baseNote;
+          }
+          // DSL: beat([N]) / tempo([N]) / measure([N])
+          const dslHelper = raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
+          if (dslHelper) {
+            const pid = parseInt(dslHelper[1], 10);
+            const p = mod.getNoteById(pid);
+            return p || mod.baseNote;
+          }
+          if (/\bbase\./.test(raw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return mod.baseNote;
           if (typeof n.parentId === 'number') {
             const p2 = mod.getNoteById(n.parentId);
             return p2 || mod.baseNote;
@@ -1978,24 +2064,22 @@ export class Workspace {
         return mod.baseNote;
       };
 
-      // Helper: next measure in chain (CHAIN LINK that uses findMeasureLength, not anchors)
+      // Helper: next measure in chain (CHAIN LINK that uses findMeasureLength/measure(), not anchors)
       const findNextMeasureInChain = (measure) => {
         try {
           if (!isMeasure(measure)) return null;
-          // Only find CHAIN LINKS (measures that use findMeasureLength), not anchors starting new chains
-          const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+          const legacyLink = `findMeasureLength(module.getNoteById(${measure.id}))`;
+          const dslLink = `measure([${measure.id}])`;
           const chainLinks = [];
           for (const id in mod.notes) {
             const nn = mod.getNoteById(Number(id));
             if (!isMeasure(nn)) continue;
             const sts = nn.variables?.startTimeString || '';
-            // Only include chain links (use findMeasureLength), not anchors
-            if (sts.includes(linkPattern)) {
+            if (sts.includes(legacyLink) || sts.includes(dslLink)) {
               chainLinks.push(nn);
             }
           }
           if (!chainLinks.length) return null;
-          // Sort by startTime and return earliest (there should typically be only one chain link)
           chainLinks.sort((a, b) => {
             const aStart = a.getVariable('startTime');
             const bStart = b.getVariable('startTime');
@@ -2092,18 +2176,30 @@ export class Workspace {
                   anc.push({ id: Number(curA.id || 0), startSec: st });
                   if (Number(curA.id || 0) === 0) break;
                   const rawA = curA?.variables?.startTimeString || '';
+                  // Legacy
                   if (rawA.includes('module.baseNote')) {
                     anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
                     break;
                   }
                   const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
                   if (mm) {
-                    const pid = parseInt(mm[1], 10);
-                    const p = mod.getNoteById(pid);
-                    if (!p) break;
-                    curA = p;
+                    curA = mod.getNoteById(parseInt(mm[1], 10));
+                    if (!curA) break;
+                  // DSL
                   } else {
-                    break;
+                    const dslM = rawA.match(/\[(\d+)\]\./);
+                    const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
+                    const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
+                    if (dslId >= 0) {
+                      if (dslId === 0) { anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                      curA = mod.getNoteById(dslId);
+                      if (!curA) break;
+                    } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
+                      anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                      break;
+                    } else {
+                      break;
+                    }
                   }
                 }
                 if (this._interaction) this._interaction.cachedAncestorChain = anc;
@@ -2126,18 +2222,30 @@ export class Workspace {
               arr.push({ id: Number(curA.id || 0), startSec: st });
               if (Number(curA.id || 0) === 0) break;
               const rawA = curA?.variables?.startTimeString || '';
+              // Legacy
               if (rawA.includes('module.baseNote')) {
                 arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
                 break;
               }
               const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
               if (mm) {
-                const pid = parseInt(mm[1], 10);
-                const p = mod.getNoteById(pid);
-                if (!p) break;
-                curA = p;
+                curA = mod.getNoteById(parseInt(mm[1], 10));
+                if (!curA) break;
+              // DSL
               } else {
-                break;
+                const dslM = rawA.match(/\[(\d+)\]\./);
+                const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
+                const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
+                if (dslId >= 0) {
+                  if (dslId === 0) { arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                  curA = mod.getNoteById(dslId);
+                  if (!curA) break;
+                } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
+                  arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                  break;
+                } else {
+                  break;
+                }
               }
             }
             if (this._interaction) this._interaction.cachedAncestorChain = arr;
@@ -2282,14 +2390,14 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       } catch { return 0; }
     };
 
-    // Check if a dependent is a chain link (uses findMeasureLength) vs an anchor (starts new chain)
+    // Check if a dependent is a chain link (uses findMeasureLength/measure()) vs an anchor (starts new chain)
     const isChainLinkById = (depId, parentId) => {
       try {
         const n = mod.getNoteById(Number(depId));
         const expr = (n && n.variables && n.variables.startTimeString) || '';
-        // Chain link pattern: findMeasureLength(module.getNoteById(parentId))
-        const linkPattern = `findMeasureLength(module.getNoteById(${parentId}))`;
-        return expr.includes(linkPattern);
+        const legacyLink = `findMeasureLength(module.getNoteById(${parentId}))`;
+        const dslLink = `measure([${parentId}])`;
+        return expr.includes(legacyLink) || expr.includes(dslLink);
       } catch { return false; }
     };
 
@@ -2305,15 +2413,22 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       catch { return false; }
     };
 
-    // Get the parent measure id ONLY if this note is a CHAIN LINK (uses findMeasureLength)
-    // If it's an anchor (no findMeasureLength), return null to stop backward walk
+    // Get the parent measure id ONLY if this note is a CHAIN LINK (uses findMeasureLength/measure())
+    // If it's an anchor (no findMeasureLength/measure()), return null to stop backward walk
     const getChainLinkParentId = (n) => {
       try {
         const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
-        // Check if this is a chain link (uses findMeasureLength)
+        // Legacy chain link: findMeasureLength(module.getNoteById(N))
         const linkMatch = raw.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
         if (linkMatch) {
           const pid = parseInt(linkMatch[1], 10);
+          const pn = mod.getNoteById(pid);
+          return isMeasure(pn) ? pid : null;
+        }
+        // DSL chain link: measure([N])
+        const dslMatch = raw.match(/\bmeasure\s*\(\s*\[(\d+)\]\s*\)/);
+        if (dslMatch) {
+          const pid = parseInt(dslMatch[1], 10);
           const pn = mod.getNoteById(pid);
           return isMeasure(pn) ? pid : null;
         }
@@ -2352,14 +2467,13 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     const findNextChainLink = (m) => {
       const candidates = [];
       try {
-        // Pattern for chain link: findMeasureLength(module.getNoteById(ID))
-        const linkPattern = `findMeasureLength(module.getNoteById(${m.id}))`;
+        const legacyLink = `findMeasureLength(module.getNoteById(${m.id}))`;
+        const dslLink = `measure([${m.id}])`;
         for (const id in mod.notes) {
           const nn = mod.getNoteById(Number(id));
           if (!isMeasure(nn)) continue;
           const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
-          // Only include measures that are CHAIN LINKS (use findMeasureLength), not anchors
-          if (sts.includes(linkPattern)) {
+          if (sts.includes(legacyLink) || sts.includes(dslLink)) {
             candidates.push(nn);
           }
         }
@@ -2397,22 +2511,31 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
 function getMeasureChainRole(note) {
   const expr = (note && note.variables && note.variables.startTimeString) || '';
 
-  // Root: anchored directly to BaseNote
-  if (expr.includes('module.baseNote')) {
+  // Root: anchored directly to BaseNote (legacy or DSL)
+  if (expr.includes('module.baseNote') ||
+      (/\bbase\./.test(expr) && !/\[\d+\]\./.test(expr)) ||
+      (/\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(expr) && !/\[\d+\]/.test(expr))) {
     return { role: 'root', parentId: 0 };
   }
 
-  // Check for chain link pattern (uses findMeasureLength)
-  // Pattern: getNoteById(X)...findMeasureLength(getNoteById(X))
+  // Check for chain link pattern (uses findMeasureLength or DSL measure())
   const linkMatch = expr.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
   if (linkMatch) {
     return { role: 'link', parentId: parseInt(linkMatch[1], 10) };
   }
+  const dslLinkMatch = expr.match(/\bmeasure\s*\(\s*\[(\d+)\]\s*\)/);
+  if (dslLinkMatch) {
+    return { role: 'link', parentId: parseInt(dslLinkMatch[1], 10) };
+  }
 
-  // Check for anchor pattern (direct getNoteById reference without findMeasureLength)
+  // Check for anchor pattern (direct getNoteById or DSL [N] reference without findMeasureLength/measure())
   const anchorMatch = expr.match(/getNoteById\s*\(\s*(\d+)\s*\)/);
   if (anchorMatch) {
     return { role: 'anchor', parentId: parseInt(anchorMatch[1], 10) };
+  }
+  const dslAnchorMatch = expr.match(/\[(\d+)\]\./);
+  if (dslAnchorMatch) {
+    return { role: 'anchor', parentId: parseInt(dslAnchorMatch[1], 10) };
   }
 
   return { role: 'orphan', parentId: null };

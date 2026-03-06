@@ -2285,6 +2285,60 @@ if (canvasEl) {
         return moved;
     }
 // === GL move helpers: parent selection, expression emission, and frequency retargeting ===
+
+// Shared helper: extract the first referenced note ID from a raw expression string (legacy or DSL).
+// Returns the numeric note ID, or 0 for baseNote, or -1 if no reference found.
+function __extractNoteRefFromRaw(raw) {
+  if (!raw) return -1;
+  // Legacy: module.getNoteById(N)
+  const legacyMatch = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
+  if (legacyMatch) return parseInt(legacyMatch[1], 10);
+  // Legacy: module.baseNote
+  if (raw.includes('module.baseNote')) return 0;
+  // DSL: [N].prop
+  const dslMatch = raw.match(/\[(\d+)\]\./);
+  if (dslMatch) return parseInt(dslMatch[1], 10);
+  // DSL: base.prop
+  if (/\bbase\./.test(raw)) return 0;
+  // DSL helpers: beat([N]), tempo([N]), measure([N])
+  const dslHelperMatch = raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
+  if (dslHelperMatch) return parseInt(dslHelperMatch[1], 10);
+  // DSL helpers: beat(base), tempo(base), measure(base)
+  if (/\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return 0;
+  return -1;
+}
+
+// Shared helper: check if a raw expression references a specific note ID (legacy or DSL).
+function __rawReferencesNoteId(raw, noteId) {
+  if (!raw || typeof raw !== 'string') return false;
+  // Legacy
+  if (new RegExp(`module\\.getNoteById\\(\\s*${noteId}\\s*\\)`).test(raw)) return true;
+  // DSL: [noteId].prop
+  if (new RegExp(`\\[${noteId}\\]\\.`).test(raw)) return true;
+  // DSL helpers: beat([noteId]), tempo([noteId]), measure([noteId])
+  if (new RegExp(`\\b(?:beat|tempo|measure)\\s*\\(\\s*\\[${noteId}\\]\\s*\\)`).test(raw)) return true;
+  return false;
+}
+
+// Shared helper: check if a raw expression references baseNote (legacy or DSL).
+function __rawReferencesBase(raw) {
+  if (!raw || typeof raw !== 'string') return false;
+  if (raw.includes('module.baseNote')) return true;
+  if (/\bbase\./.test(raw)) return true;
+  if (/\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return true;
+  return false;
+}
+
+// Shared helper: check if a frequency expression references a specific note's frequency (legacy or DSL).
+function __freqReferencesNoteId(fRaw, noteId) {
+  if (!fRaw || typeof fRaw !== 'string') return false;
+  // Legacy: module.getNoteById(N).getVariable('frequency')
+  if (new RegExp(`module\\.getNoteById\\(\\s*${noteId}\\s*\\)\\.getVariable\\(\\s*['"]frequency['"]\\s*\\)`).test(fRaw)) return true;
+  // DSL: [N].f
+  if (new RegExp(`\\[${noteId}\\]\\.f\\b`).test(fRaw)) return true;
+  return false;
+}
+
 function __isMeasureNoteGL(note) {
   try {
     // Use hasExpression instead of getVariable to avoid dependency on evaluation cache
@@ -2295,19 +2349,107 @@ function __isMeasureNoteGL(note) {
 function __parseParentFromStartTimeStringGL(note) {
   try {
     const raw = note?.variables?.startTimeString || '';
-    const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
-    if (m) {
-      const pid = parseInt(m[1], 10);
-      const p = myModule.getNoteById(pid);
+    const ref = __extractNoteRefFromRaw(raw);
+    if (ref > 0) {
+      const p = myModule.getNoteById(ref);
       return p || myModule.baseNote;
     }
-    if (raw.includes('module.baseNote')) return myModule.baseNote;
+    if (ref === 0) return myModule.baseNote;
     if (typeof note.parentId === 'number') {
       const p2 = myModule.getNoteById(note.parentId);
       return p2 || myModule.baseNote;
     }
   } catch {}
   return myModule.baseNote;
+}
+
+/**
+ * Parse a DSL frequency expression into algebra + noteRef.
+ * DSL examples: "base.f", "[3].f", "(3/2) * [1].f", "[1].f * 2 ^ (1/12) * 3 ^ (-1/13)"
+ */
+function __parseDSLFrequencyExpression(expr, debug) {
+  // Tokenize: split by top-level * that aren't inside parens
+  const tokens = [];
+  let depth = 0, start = 0;
+  for (let i = 0; i < expr.length; i++) {
+    if (expr[i] === '(') depth++;
+    else if (expr[i] === ')') depth--;
+    else if (depth === 0 && expr[i] === '*') {
+      // Check it's not part of ** (not used in DSL, but safe)
+      if (expr[i + 1] !== '*' && (i === 0 || expr[i - 1] !== '*')) {
+        tokens.push(expr.substring(start, i).trim());
+        start = i + 1;
+      }
+    }
+  }
+  tokens.push(expr.substring(start).trim());
+
+  let noteRef = undefined; // undefined = not found yet, null = base
+  let coeff = new Fraction(1);
+  const powers = [];
+
+  const gcdLocal = (a, b) => b === 0 ? Math.abs(a) : gcdLocal(b, a % b);
+
+  for (const tok of tokens) {
+    // Note reference: base.f or [N].f
+    if (/^base\.f$/.test(tok)) {
+      noteRef = null;
+      continue;
+    }
+    const nRef = tok.match(/^\[(\d+)\]\.f$/);
+    if (nRef) {
+      noteRef = parseInt(nRef[1], 10);
+      continue;
+    }
+
+    // Power: N ^ (a/b) or N ^ a or N ^ (-a/b)
+    const powMatch = tok.match(/^(\d+)\s*\^\s*\(?\s*(-?\d+)\s*(?:\/\s*(\d+))?\s*\)?$/);
+    if (powMatch) {
+      const base = parseInt(powMatch[1], 10);
+      const expNum = parseInt(powMatch[2], 10);
+      const expDen = powMatch[3] ? parseInt(powMatch[3], 10) : 1;
+      // Merge with existing power of same base
+      const existing = powers.find(p => p.base === base);
+      if (existing) {
+        const newNum = existing.expNum * expDen + expNum * existing.expDen;
+        const newDen = existing.expDen * expDen;
+        const g = gcdLocal(Math.abs(newNum), newDen);
+        existing.expNum = newNum / g;
+        existing.expDen = newDen / g;
+        if (existing.expNum === 0) {
+          const idx = powers.indexOf(existing);
+          powers.splice(idx, 1);
+        }
+      } else if (expNum !== 0) {
+        powers.push({ base, expNum, expDen });
+      }
+      continue;
+    }
+
+    // Fraction coefficient: (a/b) or just a number
+    const fracMatch = tok.match(/^\(?\s*(-?\d+)\s*\/\s*(\d+)\s*\)?$/);
+    if (fracMatch) {
+      coeff = coeff.mul(new Fraction(parseInt(fracMatch[1], 10), parseInt(fracMatch[2], 10)));
+      continue;
+    }
+    const numMatch = tok.match(/^(-?\d+)$/);
+    if (numMatch) {
+      coeff = coeff.mul(new Fraction(parseInt(numMatch[1], 10)));
+      continue;
+    }
+
+    // Unknown token - can't parse
+    if (debug) console.log('[ParseFreq DSL] unknown token:', tok);
+    return null;
+  }
+
+  if (noteRef === undefined) {
+    if (debug) console.log('[ParseFreq DSL] no note ref found');
+    return null;
+  }
+
+  if (debug) console.log('[ParseFreq DSL] ->', { coeff: coeff.valueOf(), powers, noteRef });
+  return { algebra: { coeff, powers }, noteRef };
 }
 
 /**
@@ -2324,6 +2466,11 @@ function parseFrequencyExpressionLocal(exprText, moduleInstance) {
   const expr = exprText.trim();
 
   if (debug) console.log('[ParseFreq] Input:', expr);
+
+  // DSL format parsing
+  if (isDSLSyntax(expr)) {
+    return __parseDSLFrequencyExpression(expr, debug);
+  }
 
   // Base case: direct baseNote reference
   if (/^module\.baseNote\.getVariable\s*\(\s*['"]frequency['"]\s*\)$/.test(expr)) {
@@ -2582,7 +2729,28 @@ function divideAlgebrasLocal(a, b) {
 /**
  * Convert algebra to expression string relative to an anchor
  */
-function algebraToExpressionLocal(algebra, anchorRef) {
+function algebraToExpressionLocal(algebra, anchorRef, useDSL) {
+  if (useDSL) {
+    // DSL output: "(coeff) * anchorRef * base ^ (n/d) * ..."
+    const parts = [];
+
+    if (!algebra.coeff.equals(1)) {
+      const c = algebra.coeff;
+      const val = c.s * c.n;
+      parts.push(c.d === 1 ? `${val}` : `(${val}/${c.d})`);
+    }
+
+    parts.push(anchorRef); // e.g. "base.f" or "[3].f"
+
+    for (const p of algebra.powers) {
+      const expStr = p.expDen === 1 ? `${p.expNum}` : `(${p.expNum}/${p.expDen})`;
+      parts.push(`${p.base} ^ ${expStr}`);
+    }
+
+    return parts.join(' * ');
+  }
+
+  // Legacy output
   const parts = [];
   let base = `${anchorRef}.getVariable('frequency')`;
 
@@ -2646,7 +2814,10 @@ function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
     }
     if (debug) console.log('[AlgebraRebuild] Parsed:', JSON.stringify(parsed, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
 
-    const anchorRef = newAnchor.id === 0 ? "module.baseNote" : `module.getNoteById(${newAnchor.id})`;
+    const exprIsDSL = isDSLSyntax(exprText);
+    const anchorRef = exprIsDSL
+      ? (newAnchor.id === 0 ? 'base.f' : `[${newAnchor.id}].f`)
+      : (newAnchor.id === 0 ? "module.baseNote" : `module.getNoteById(${newAnchor.id})`);
 
     // Get the old reference's algebra relative to baseNote
     const oldRefId = parsed.noteRef;  // null means baseNote
@@ -2677,7 +2848,7 @@ function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
     if (debug) console.log('[AlgebraRebuild] newRelativeAlgebra:', JSON.stringify(newRelativeAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
 
     // Generate the new expression
-    const result = algebraToExpressionLocal(newRelativeAlgebra, anchorRef);
+    const result = algebraToExpressionLocal(newRelativeAlgebra, anchorRef, exprIsDSL);
     if (debug) console.log('[AlgebraRebuild] Result:', result);
     return result;
   } catch (e) {
@@ -2696,9 +2867,11 @@ function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
  * @param {Object} depGraph - The dependency graph for corruption checks
  * @returns {string|null} - New expression string, or null if cannot be rebuilt
  */
-function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
+function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
   try {
-    const anchorRef = newAnchor.id === 0 ? "module.baseNote" : `module.getNoteById(${newAnchor.id})`;
+    const anchorRef = useDSL
+      ? (newAnchor.id === 0 ? 'base.f' : `[${newAnchor.id}].f`)
+      : (newAnchor.id === 0 ? "module.baseNote" : `module.getNoteById(${newAnchor.id})`);
 
     const noteFreq = note.getVariable('frequency');
     const anchorFreq = newAnchor.getVariable('frequency');
@@ -2713,7 +2886,7 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
 
     // If ratio is 1, just reference anchor directly
     if (Math.abs(ratio - 1) < 1e-9) {
-      return `${anchorRef}.getVariable('frequency')`;
+      return useDSL ? anchorRef : `${anchorRef}.getVariable('frequency')`;
     }
 
     // Check if corruption is involved
@@ -2752,12 +2925,17 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
             if (simpDen === 1) {
               // Integer power of base
               if (simpNum === 0) {
-                return `${anchorRef}.getVariable('frequency')`;
+                return useDSL ? anchorRef : `${anchorRef}.getVariable('frequency')`;
               }
               const multiplier = Math.pow(config.base, simpNum);
-              return `new Fraction(${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
+              return useDSL
+                ? `${multiplier} * ${anchorRef}`
+                : `new Fraction(${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
             }
-            return `${anchorRef}.getVariable('frequency').mul(new Fraction(${config.base}).pow(new Fraction(${simpNum}, ${simpDen})))`;
+            const expStr = `(${simpNum}/${simpDen})`;
+            return useDSL
+              ? `${anchorRef} * ${config.base} ^ ${expStr}`
+              : `${anchorRef}.getVariable('frequency').mul(new Fraction(${config.base}).pow(new Fraction(${simpNum}, ${simpDen})))`;
           }
         }
       }
@@ -2781,19 +2959,36 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
             const simpTetNum = tetPart / g;
             const simpTetDen = defaultDenom / g;
 
-            let expr = `${anchorRef}.getVariable('frequency')`;
-
-            if (simpTetDen === 1) {
-              if (simpTetNum !== 0) {
-                const tetMult = Math.pow(base, simpTetNum);
-                expr = `new Fraction(${tetMult}).mul(${expr})`;
+            let expr;
+            if (useDSL) {
+              const parts = [];
+              if (remainingFrac.n !== remainingFrac.d) {
+                parts.push(remainingFrac.d === 1 ? `${remainingFrac.n}` : `(${remainingFrac.n}/${remainingFrac.d})`);
               }
+              parts.push(anchorRef);
+              if (simpTetDen === 1) {
+                if (simpTetNum !== 0) {
+                  parts.push(`${Math.pow(base, simpTetNum)}`);
+                }
+              } else {
+                parts.push(`${base} ^ (${simpTetNum}/${simpTetDen})`);
+              }
+              expr = parts.join(' * ');
             } else {
-              expr = `${expr}.mul(new Fraction(${base}).pow(new Fraction(${simpTetNum}, ${simpTetDen})))`;
-            }
+              expr = `${anchorRef}.getVariable('frequency')`;
 
-            if (remainingFrac.n !== remainingFrac.d) {
-              expr = `new Fraction(${remainingFrac.n}, ${remainingFrac.d}).mul(${expr})`;
+              if (simpTetDen === 1) {
+                if (simpTetNum !== 0) {
+                  const tetMult = Math.pow(base, simpTetNum);
+                  expr = `new Fraction(${tetMult}).mul(${expr})`;
+                }
+              } else {
+                expr = `${expr}.mul(new Fraction(${base}).pow(new Fraction(${simpTetNum}, ${simpTetDen})))`;
+              }
+
+              if (remainingFrac.n !== remainingFrac.d) {
+                expr = `new Fraction(${remainingFrac.n}, ${remainingFrac.d}).mul(${expr})`;
+              }
             }
 
             return expr;
@@ -2806,6 +3001,9 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
       const semitones = log2Ratio * 12;
       const tetPart = Math.round(semitones);
       const g = gcd(Math.abs(tetPart), 12);
+      if (useDSL) {
+        return `${anchorRef} * 2 ^ (${tetPart / g}/${12 / g})`;
+      }
       return `${anchorRef}.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(${tetPart / g}, ${12 / g})))`;
     }
 
@@ -2814,11 +3012,18 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
       const ratioFrac = new Fraction(ratio);
       // Verify precision
       if (Math.abs(ratioFrac.valueOf() - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-9) {
+        if (useDSL) {
+          const fracStr = ratioFrac.d === 1 ? `${ratioFrac.n}` : `(${ratioFrac.n}/${ratioFrac.d})`;
+          return `${fracStr} * ${anchorRef}`;
+        }
         return `new Fraction(${ratioFrac.n}, ${ratioFrac.d}).mul(${anchorRef}.getVariable('frequency'))`;
       }
     } catch {}
 
     // Fallback: use float (shouldn't happen often)
+    if (useDSL) {
+      return `${ratio} * ${anchorRef}`;
+    }
     return `new Fraction(${ratio}).mul(${anchorRef}.getVariable('frequency'))`;
   } catch { return null; }
 }
@@ -2826,15 +3031,16 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
 function __findNextMeasureInChainGL(measure) {
   try {
     if (!__isMeasureNoteGL(measure)) return null;
-    // Only find CHAIN LINKS (measures that use findMeasureLength), not anchors starting new chains
-    const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+    // Only find CHAIN LINKS (measures that use findMeasureLength/measure()), not anchors starting new chains
+    const legacyLinkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
+    const dslLinkPattern = `measure([${measure.id}])`;
     const chainLinks = [];
     for (const id in myModule.notes) {
       const n = myModule.getNoteById(parseInt(id, 10));
       if (!n || !__isMeasureNoteGL(n)) continue;
       const startTimeString = n.variables.startTimeString || '';
-      // Only include chain links (use findMeasureLength), not anchors
-      if (startTimeString.includes(linkPattern)) chainLinks.push(n);
+      // Only include chain links (use findMeasureLength or measure()), not anchors
+      if (startTimeString.includes(legacyLinkPattern) || startTimeString.includes(dslLinkPattern)) chainLinks.push(n);
     }
     if (chainLinks.length === 0) return null;
     // Sort by startTime and return earliest (there should typically be only one chain link)
@@ -2885,13 +3091,12 @@ function selectSuitableParentForStartGL(note, newStartSec) {
       let cur = parent;
       while (cur && cur.id !== 0) {
         const raw = cur.variables.startTimeString || '';
-        const m = raw.match(/getNoteById\((\d+)\)/);
-        if (m) {
-          const pid = parseInt(m[1], 10);
-          cur = myModule.getNoteById(pid);
+        const ref = __extractNoteRefFromRaw(raw);
+        if (ref > 0) {
+          cur = myModule.getNoteById(ref);
           if (cur) chain.push(cur);
           else break;
-        } else if ((raw || '').includes('module.baseNote')) {
+        } else if (ref === 0) {
           chain.push(myModule.baseNote);
           break;
         } else {
@@ -2921,11 +3126,14 @@ function selectSuitableParentForStartGL(note, newStartSec) {
   }
 }
 
-function emitStartTimeExprForParentGL(parent, newStartSec) {
+function emitStartTimeExprForParentGL(parent, newStartSec, note) {
   try {
+    // Detect whether the note currently uses DSL format
+    const noteRaw = note?.variables?.startTimeString || '';
+    const useDSL = isDSLSyntax(noteRaw);
+
     const parentStart = Number(parent.getVariable('startTime').valueOf() || 0);
     let delta = newStartSec - parentStart;
-    const parentRef = (parent.id === 0) ? "module.baseNote" : `module.getNoteById(${parent.id})`;
 
     // Check alignment to parent end (duration)
     let hasDur = false, durSec = 0;
@@ -2946,8 +3154,29 @@ function emitStartTimeExprForParentGL(parent, newStartSec) {
       frac = new Fraction(Math.round(Math.abs(offsetBeats) * 4), 4);
     }
 
+    if (useDSL) {
+      const pRef = (parent.id === 0) ? 'base' : `[${parent.id}]`;
+      const beatRef = (parent.id === 0) ? 'beat(base)' : `beat([${parent.id}])`;
+      let raw;
+      if (hasDur && durSec > 0 && Math.abs(delta - durSec) < 0.01) {
+        raw = `${pRef}.t + ${pRef}.d`;
+      } else if (Math.abs(delta) < 0.001) {
+        raw = `${pRef}.t`;
+      } else {
+        const fracStr = (frac.d === 1) ? `${frac.n}` : `(${frac.n}/${frac.d})`;
+        const beatMul = (frac.n === 1 && frac.d === 1) ? beatRef : `${beatRef} * ${fracStr}`;
+        if (delta >= 0) {
+          raw = `${pRef}.t + ${beatMul}`;
+        } else {
+          raw = `${pRef}.t - ${beatMul}`;
+        }
+      }
+      return raw;
+    }
+
+    // Legacy format
+    const parentRef = (parent.id === 0) ? "module.baseNote" : `module.getNoteById(${parent.id})`;
     let raw;
-    // Only use + duration form when parent has non-zero duration and we're at that exact offset
     if (hasDur && durSec > 0 && Math.abs(delta - durSec) < 0.01) {
       raw = `${parentRef}.getVariable('startTime').add(${parentRef}.getVariable('duration'))`;
     } else if (delta >= 0) {
@@ -2977,15 +3206,13 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
           const isMeasure = __isMeasureNoteGL(anc);
           if (st <= cutoffSec + tol && (!requireFrequency || !isMeasure)) return anc;
           const raw = (anc.variables && anc.variables.startTimeString) || '';
-          const m = raw.match(/getNoteById\((\d+)\)/);
-          if (m) {
-            const pid = parseInt(m[1], 10);
-            anc = myModule.getNoteById(pid);
-          } else if ((raw || '').includes('module.baseNote')) {
+          const ref = __extractNoteRefFromRaw(raw);
+          if (ref > 0) {
+            anc = myModule.getNoteById(ref);
+          } else if (ref === 0) {
             anc = myModule.baseNote;
             break;
           } else {
-            // Unknown chain edge; clamp to base
             anc = myModule.baseNote;
             break;
           }
@@ -3015,8 +3242,8 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
       if (!fRaw || typeof fRaw !== 'string') return;
 
       // Only retarget when the dependent references moved note's frequency
-      const freqRefRe = new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)\\.getVariable\\(\\s*['"]frequency['"]\\s*\\)`);
-      if (!freqRefRe.test(fRaw)) return;
+      if (!__freqReferencesNoteId(fRaw, movedId)) return;
+      const fIsDSL = isDSLSyntax(fRaw);
 
       const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
       // If dependent starts earlier than referenced (moved) note, swap to a valid ancestor at/before depStart
@@ -3026,12 +3253,18 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
         // Check for transitive corruption using new helper
         const depTransitivelyCorrupt = depGraph?.isFrequencyTransitivelyCorrupted?.(dep.id);
         const targetCorrupt = replacementTarget?.id !== 0 && depGraph?.isPropertyCorrupted?.(replacementTarget.id, 0x04);
-        const anyCorruption = depTransitivelyCorrupt || movedHasCorruptFreq || targetCorrupt || fRaw.includes('.pow(');
+        const anyCorruption = depTransitivelyCorrupt || movedHasCorruptFreq || targetCorrupt || fRaw.includes('.pow(') || fRaw.includes('^');
 
         let newFreqString;
         if (anyCorruption) {
           // Use value-based rebuilding to preserve evaluated frequency exactly
-          newFreqString = rebuildFrequencyForAnchor(dep, replacementTarget, depGraph);
+          newFreqString = rebuildFrequencyForAnchor(dep, replacementTarget, depGraph, fIsDSL);
+        } else if (fIsDSL) {
+          // DSL: substitute [movedId].f with new anchor ref
+          const newRef = (replacementTarget && replacementTarget.id === 0) ? 'base.f'
+                         : (replacementTarget ? `[${replacementTarget.id}].f` : 'base.f');
+          const replaced = fRaw.replace(new RegExp(`\\[${movedId}\\]\\.f\\b`, 'g'), newRef);
+          newFreqString = replaced;
         } else {
           // Simple reference substitution with simplification for clean cases
           const parentRef = (replacementTarget && replacementTarget.id === 0) ? "module.baseNote"
@@ -3077,11 +3310,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           const isMeasure = __isMeasureNoteGL(anc);
           if (st <= cutoffSec + tol && (!requireFrequency || !isMeasure)) return anc;
           const raw = (anc.variables && anc.variables.startTimeString) || '';
-          const m = raw.match(/getNoteById\((\d+)\)/);
-          if (m) {
-            const pid = parseInt(m[1], 10);
-            anc = myModule.getNoteById(pid);
-          } else if ((raw || '').includes('module.baseNote')) {
+          const ref = __extractNoteRefFromRaw(raw);
+          if (ref > 0) {
+            anc = myModule.getNoteById(ref);
+          } else if (ref === 0) {
             anc = myModule.baseNote;
             break;
           } else {
@@ -3111,19 +3343,29 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       const parentRef = (replacementTarget && replacementTarget.id === 0)
         ? "module.baseNote"
         : (replacementTarget ? `module.getNoteById(${replacementTarget.id})` : "module.baseNote");
+      const dslParentRef = (replacementTarget && replacementTarget.id === 0)
+        ? 'base' : (replacementTarget ? `[${replacementTarget.id}]` : 'base');
 
       const noteRefRegex = new RegExp(`module\\.getNoteById\\(\\s*${movedId}\\s*\\)`, 'g');
+      const dslNoteRefRegex = new RegExp(`\\[${movedId}\\]`, 'g');
 
       let changed = false;
 
       // startTimeString
       try {
         const sRaw = dep.variables && dep.variables.startTimeString;
-        if (typeof sRaw === 'string' && noteRefRegex.test(sRaw)) {
-          const replacedS = sRaw.replace(noteRefRegex, parentRef);
-          let simplifiedS;
-          try { simplifiedS = simplifyStartTime(replacedS, myModule); } catch { simplifiedS = replacedS; }
-          dep.setVariable('startTimeString', simplifiedS);
+        if (typeof sRaw === 'string' && __rawReferencesNoteId(sRaw, movedId)) {
+          let replacedS;
+          if (isDSLSyntax(sRaw)) {
+            replacedS = sRaw.replace(dslNoteRefRegex, dslParentRef);
+            // Also replace DSL helpers: beat([movedId]) -> beat([newId]) etc.
+            replacedS = replacedS.replace(new RegExp(`(beat|tempo|measure)\\s*\\(\\s*\\[${movedId}\\]\\s*\\)`, 'g'),
+              (_, fn) => `${fn}(${dslParentRef})`);
+          } else {
+            replacedS = sRaw.replace(noteRefRegex, parentRef);
+            try { replacedS = simplifyStartTime(replacedS, myModule); } catch {}
+          }
+          dep.setVariable('startTimeString', replacedS);
           changed = true;
         }
       } catch {}
@@ -3131,26 +3373,39 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       // durationString
       try {
         const dRaw = dep.variables && dep.variables.durationString;
-        if (typeof dRaw === 'string' && noteRefRegex.test(dRaw)) {
-          const replacedD = dRaw.replace(noteRefRegex, parentRef);
-          let simplifiedD;
-          try { simplifiedD = simplifyDuration(replacedD, myModule); } catch { simplifiedD = replacedD; }
-          dep.setVariable('durationString', simplifiedD);
+        if (typeof dRaw === 'string' && __rawReferencesNoteId(dRaw, movedId)) {
+          let replacedD;
+          if (isDSLSyntax(dRaw)) {
+            replacedD = dRaw.replace(dslNoteRefRegex, dslParentRef);
+            replacedD = replacedD.replace(new RegExp(`(beat|tempo|measure)\\s*\\(\\s*\\[${movedId}\\]\\s*\\)`, 'g'),
+              (_, fn) => `${fn}(${dslParentRef})`);
+          } else {
+            replacedD = dRaw.replace(noteRefRegex, parentRef);
+            try { replacedD = simplifyDuration(replacedD, myModule); } catch {}
+          }
+          dep.setVariable('durationString', replacedD);
           changed = true;
         }
       } catch {}
 
       // frequencyString (generic path; frequency-specific pass may already handle this)
-      // Skip notes with .pow() - their expressions should be preserved as-is
+      // Skip notes with .pow() or ^ - their expressions should be preserved as-is
       try {
         const fRaw = dep.variables && dep.variables.frequencyString;
-        if (typeof fRaw === 'string' && !fRaw.includes('.pow(') && noteRefRegex.test(fRaw)) {
+        if (typeof fRaw === 'string' && !fRaw.includes('.pow(') && !fRaw.includes('^') && __rawReferencesNoteId(fRaw, movedId)) {
           // For frequency references, we need an ancestor that HAS frequency (not a measure bar)
           const freqReplacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, true); // requireFrequency=true
-          const freqParentRef = (freqReplacementTarget && freqReplacementTarget.id === 0)
-            ? "module.baseNote"
-            : (freqReplacementTarget ? `module.getNoteById(${freqReplacementTarget.id})` : "module.baseNote");
-          const replacedF = fRaw.replace(noteRefRegex, freqParentRef);
+          let replacedF;
+          if (isDSLSyntax(fRaw)) {
+            const dslFreqRef = (freqReplacementTarget && freqReplacementTarget.id === 0) ? 'base'
+              : (freqReplacementTarget ? `[${freqReplacementTarget.id}]` : 'base');
+            replacedF = fRaw.replace(dslNoteRefRegex, dslFreqRef);
+          } else {
+            const freqParentRef = (freqReplacementTarget && freqReplacementTarget.id === 0)
+              ? "module.baseNote"
+              : (freqReplacementTarget ? `module.getNoteById(${freqReplacementTarget.id})` : "module.baseNote");
+            replacedF = fRaw.replace(noteRefRegex, freqParentRef);
+          }
           let simplifiedF;
           // Check if corruption is involved - skip simplification if so
           const depGraph = myModule._dependencyGraph;
@@ -3164,8 +3419,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             typeof depGraph.isPropertyCorrupted === 'function' &&
             depGraph.isPropertyCorrupted(dep.id, 0x04);
           const corruptionInvolved = movedHasCorruptFreq || targetHasCorruptFreq || depHasCorruptFreq;
-          if (corruptionInvolved) {
-            simplifiedF = replacedF; // Skip simplification, just substitute references
+          if (corruptionInvolved || isDSLSyntax(replacedF)) {
+            simplifiedF = replacedF; // Skip simplification for corruption or DSL
           } else {
             try { simplifiedF = simplifyFrequency(replacedF, myModule); } catch { simplifiedF = replacedF; }
           }
@@ -4634,7 +4889,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           // Legacy-like remapping: select suitable parent and emit relative startTime expression
           const parent = selectSuitableParentForStartGL(n, newStartSec);
-          const raw = emitStartTimeExprForParentGL(parent, newStartSec);
+          const raw = emitStartTimeExprForParentGL(parent, newStartSec, n);
 
           // Minimal guarded trace: enable via window.__RMT_DEBUG_GL_MOVE = true in console
           try {
@@ -4662,6 +4917,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               // Now we handle ALL cases including .pow() expressions using value-based rebuilding
               let refNote = null;
               try {
+                // Legacy: module.getNoteById(N).getVariable('frequency')
                 const mFreq = fRaw0 && fRaw0.match(/module\.getNoteById\(\s*(\d+)\s*\)\.getVariable\(\s*['"]frequency['"]\s*\)/);
                 if (mFreq) {
                   const rid = parseInt(mFreq[1], 10);
@@ -4670,6 +4926,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                   // Also handle explicit BaseNote frequency anchor
                   const baseMatch = fRaw0 && /module\.baseNote\.getVariable\(\s*['"]frequency['"]\s*\)/.test(fRaw0);
                   if (baseMatch) {
+                    refNote = myModule.baseNote;
+                  }
+                }
+                // DSL: [N].f or base.f
+                if (!refNote && fRaw0) {
+                  const dslFreqMatch = fRaw0.match(/\[(\d+)\]\.f\b/);
+                  if (dslFreqMatch) {
+                    refNote = myModule.getNoteById(parseInt(dslFreqMatch[1], 10)) || null;
+                  } else if (/\bbase\.f\b/.test(fRaw0)) {
                     refNote = myModule.baseNote;
                   }
                 }
@@ -4693,11 +4958,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     const isMeasure = __isMeasureNoteGL(anc);
                     if (st <= Number(cutoffSec) + tol && (!requireFrequency || !isMeasure)) break;
                     const raw = (anc.variables && anc.variables.startTimeString) || '';
-                    const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-                    if (m) {
-                      const pid = parseInt(m[1], 10);
-                      anc = myModule.getNoteById(pid) || myModule.baseNote;
-                    } else if ((raw || '').includes('module.baseNote')) {
+                    const ref = __extractNoteRefFromRaw(raw);
+                    if (ref > 0) {
+                      anc = myModule.getNoteById(ref) || myModule.baseNote;
+                    } else if (ref === 0) {
                       anc = myModule.baseNote; break;
                     } else {
                       anc = myModule.baseNote; break;
@@ -4713,7 +4977,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               const depGraph = myModule._dependencyGraph;
               const isTransitivelyCorrupt = depGraph?.isFrequencyTransitivelyCorrupted?.(n.id);
               const anchorIsCorrupt = anchor?.id !== 0 && depGraph?.isPropertyCorrupted?.(anchor.id, 0x04);
-              const corruptionInvolved = isTransitivelyCorrupt || anchorIsCorrupt || (fRaw0 && fRaw0.includes('.pow('));
+              const corruptionInvolved = isTransitivelyCorrupt || anchorIsCorrupt || (fRaw0 && (fRaw0.includes('.pow(') || fRaw0.includes('^')));
 
               if (corruptionInvolved) {
                 // FIRST: Try algebraic preservation - this preserves POW terms exactly
@@ -4722,7 +4986,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
                 // FALLBACK: If algebraic approach fails, use value-based ratio detection
                 if (!newExpr) {
-                  newExpr = rebuildFrequencyForAnchor(n, anchor, depGraph);
+                  const _fIsDSL = fRaw0 && isDSLSyntax(fRaw0);
+                  newExpr = rebuildFrequencyForAnchor(n, anchor, depGraph, _fIsDSL);
                 }
 
                 if (newExpr) {
@@ -4741,21 +5006,37 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                   try { ratio = new Fraction(curVal).div(new Fraction(ancVal)); }
                   catch { ratio = new Fraction(curVal / ancVal); }
 
-                  const anchorRef = (anchor.id === 0) ? "module.baseNote" : `module.getNoteById(${anchor.id})`;
+                  const fIsDSL = fRaw0 && isDSLSyntax(fRaw0);
                   let rawFreq;
-                  try {
-                    const r = (typeof ratio.valueOf === 'function') ? ratio.valueOf() : (ratio.n / ratio.d);
-                    if (Math.abs(r - 1) < 1e-6) {
-                      rawFreq = `${anchorRef}.getVariable('frequency')`;
-                    } else {
-                      rawFreq = `new Fraction(${ratio.n}, ${ratio.d}).mul(${anchorRef}.getVariable('frequency'))`;
+                  if (fIsDSL) {
+                    const aRef = (anchor.id === 0) ? 'base.f' : `[${anchor.id}].f`;
+                    try {
+                      const r = (typeof ratio.valueOf === 'function') ? ratio.valueOf() : (ratio.n / ratio.d);
+                      if (Math.abs(r - 1) < 1e-6) {
+                        rawFreq = aRef;
+                      } else {
+                        const fracStr = ratio.d === 1 ? `${ratio.n}` : `(${ratio.n}/${ratio.d})`;
+                        rawFreq = `${fracStr} * ${aRef}`;
+                      }
+                    } catch {
+                      rawFreq = aRef;
                     }
-                  } catch {
-                    rawFreq = `${anchorRef}.getVariable('frequency')`;
+                  } else {
+                    const anchorRef = (anchor.id === 0) ? "module.baseNote" : `module.getNoteById(${anchor.id})`;
+                    try {
+                      const r = (typeof ratio.valueOf === 'function') ? ratio.valueOf() : (ratio.n / ratio.d);
+                      if (Math.abs(r - 1) < 1e-6) {
+                        rawFreq = `${anchorRef}.getVariable('frequency')`;
+                      } else {
+                        rawFreq = `new Fraction(${ratio.n}, ${ratio.d}).mul(${anchorRef}.getVariable('frequency'))`;
+                      }
+                    } catch {
+                      rawFreq = `${anchorRef}.getVariable('frequency')`;
+                    }
                   }
 
                   let simplifiedF;
-                  try { simplifiedF = simplifyFrequency(rawFreq, myModule); } catch { simplifiedF = rawFreq; }
+                  try { simplifiedF = fIsDSL ? rawFreq : simplifyFrequency(rawFreq, myModule); } catch { simplifiedF = rawFreq; }
                   n.setVariable('frequencyString', simplifiedF);
                 }
               }
@@ -4799,11 +5080,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               // Prefer an explicit referenced note id inside durationString (e.g., findTempo(getNoteById(id)))
               let refNote = null;
               try {
-                const mAny = dRaw0 && dRaw0.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
-                if (mAny) {
-                  const rid = parseInt(mAny[1], 10);
-                  refNote = myModule.getNoteById(rid) || null;
-                } else if (dRaw0 && dRaw0.indexOf('module.baseNote') !== -1) {
+                const dRef = __extractNoteRefFromRaw(dRaw0);
+                if (dRef > 0) {
+                  refNote = myModule.getNoteById(dRef) || null;
+                } else if (dRef === 0) {
                   refNote = myModule.baseNote;
                 }
               } catch {}
@@ -4824,11 +5104,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     const st = Number(anc.getVariable('startTime')?.valueOf?.() || 0);
                     if (st <= Number(cutoffSec) + tol) break;
                     const raw = (anc.variables && anc.variables.startTimeString) || '';
-                    const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-                    if (m) {
-                      const pid = parseInt(m[1], 10);
-                      anc = myModule.getNoteById(pid) || myModule.baseNote;
-                    } else if ((raw || '').includes('module.baseNote')) {
+                    const ref = __extractNoteRefFromRaw(raw);
+                    if (ref > 0) {
+                      anc = myModule.getNoteById(ref) || myModule.baseNote;
+                    } else if (ref === 0) {
                       anc = myModule.baseNote; break;
                     } else {
                       anc = myModule.baseNote; break;
@@ -4853,11 +5132,19 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 let bf;
                 try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
 
-                const anchorRef = (anchorDur.id === 0) ? "module.baseNote" : `module.getNoteById(${anchorDur.id})`;
-                const rawDur = `new Fraction(60).div(module.findTempo(${anchorRef})).mul(new Fraction(${bf.n}, ${bf.d}))`;
+                const dIsDSL = dRaw0 && isDSLSyntax(dRaw0);
+                let rawDur;
+                if (dIsDSL) {
+                  const beatRef = (anchorDur.id === 0) ? 'beat(base)' : `beat([${anchorDur.id}])`;
+                  const fracStr = bf.d === 1 ? `${bf.n}` : `(${bf.n}/${bf.d})`;
+                  rawDur = (bf.n === bf.d) ? beatRef : `${beatRef} * ${fracStr}`;
+                } else {
+                  const anchorRef = (anchorDur.id === 0) ? "module.baseNote" : `module.getNoteById(${anchorDur.id})`;
+                  rawDur = `new Fraction(60).div(module.findTempo(${anchorRef})).mul(new Fraction(${bf.n}, ${bf.d}))`;
+                }
 
                 let simplifiedD;
-                try { simplifiedD = simplifyDuration(rawDur, myModule); } catch { simplifiedD = rawDur; }
+                try { simplifiedD = dIsDSL ? rawDur : simplifyDuration(rawDur, myModule); } catch { simplifiedD = rawDur; }
 
                 n.setVariable('durationString', simplifiedD);
               }
@@ -4931,8 +5218,16 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             beatsFrac = new Fraction(Math.round(snappedBeats * 4), 4);
           }
 
-          const raw = "new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(" + beatsFrac.n + ", " + beatsFrac.d + "))";
-          const simplified = simplifyDuration(raw, myModule);
+          const dRaw = n.variables?.durationString;
+          const dIsD = dRaw && isDSLSyntax(dRaw);
+          let simplified;
+          if (dIsD) {
+            const fracStr = beatsFrac.d === 1 ? `${beatsFrac.n}` : `(${beatsFrac.n}/${beatsFrac.d})`;
+            simplified = (beatsFrac.n === beatsFrac.d) ? 'beat(base)' : `beat(base) * ${fracStr}`;
+          } else {
+            const raw = "new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(" + beatsFrac.n + ", " + beatsFrac.d + "))";
+            simplified = simplifyDuration(raw, myModule);
+          }
 
           n.setVariable('durationString', simplified);
 
@@ -5003,13 +5298,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
          const getParentMeasureId = (n) => {
            try {
              const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
-             const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-             if (m) {
-               const pid = parseInt(m[1], 10);
-               const pn = myModule.getNoteById(pid);
-               return __isMeasure(pn) ? pid : (pid || null);
+             const ref = __extractNoteRefFromRaw(raw);
+             if (ref > 0) {
+               const pn = myModule.getNoteById(ref);
+               return __isMeasure(pn) ? ref : (ref || null);
              }
-             if ((raw || '').includes('module.baseNote')) return 0;
+             if (ref === 0) return 0;
            } catch {}
            return null;
          };
@@ -5167,13 +5461,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                   const base = myModule.baseNote;
                   const baseStart = Number(base.getVariable('startTime')?.valueOf?.() || 0);
                   if (Math.abs(Number(newStartSec) - baseStart) < 1e-6) {
-                    raw2 = "module.baseNote.getVariable('startTime')";
+                    const noteUseDSL = isDSLSyntax(note?.variables?.startTimeString || '');
+                    raw2 = noteUseDSL ? "base.t" : "module.baseNote.getVariable('startTime')";
                   }
                 }
               } catch {}
 
               if (!raw2) {
-                raw2 = emitStartTimeExprForParentGL(cand || myModule.baseNote, Number(newStartSec));
+                raw2 = emitStartTimeExprForParentGL(cand || myModule.baseNote, Number(newStartSec), note);
               }
 
               note.setVariable('startTimeString', raw2);
@@ -5181,13 +5476,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             } else {
               // Fallback heuristics: choose a suitable parent and express relative start.
               const parent = selectSuitableParentForStartGL(note, Number(newStartSec));
-              const raw3 = emitStartTimeExprForParentGL(parent, Number(newStartSec));
+              const raw3 = emitStartTimeExprForParentGL(parent, Number(newStartSec), note);
               note.setVariable('startTimeString', raw3);
               try { myModule.markNoteDirty(note.id); } catch {}
             }
           } catch (e) {
             const parent = selectSuitableParentForStartGL(note, Number(newStartSec));
-            const raw = emitStartTimeExprForParentGL(parent, Number(newStartSec));
+            const raw = emitStartTimeExprForParentGL(parent, Number(newStartSec), note);
             note.setVariable('startTimeString', raw);
             try { myModule.markNoteDirty(note.id); } catch {}
           }
