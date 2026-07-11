@@ -2270,7 +2270,7 @@ export class RendererAdapter {
      const borderPx  = (this._config?.note?.borderPxAtZoom1 ?? 1.0);
      if (uCRb) gl.uniform1f(uCRb, cornerPx * zoomScaleBody);
      if (uBWb) gl.uniform1f(uBWb, borderPx * zoomScaleBody);
-     if (uBCb) gl.uniform4f(uBCb, 0.388, 0.388, 0.388, 1.0); // #636363
+     { const nb = this._noteBorderRgba(); if (uBCb) gl.uniform4f(uBCb, nb[0], nb[1], nb[2], nb[3]); } // themed note border
 
       // Per-zoom CSS scale so shader derives note CSS size robustly (no per-frame size uploads)
       const uSC = U ? U.u_scale : gl.getUniformLocation(prog, 'u_scale');
@@ -6727,8 +6727,8 @@ try {
               { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
               // Match normal border thickness exactly
               { const bw = (this._config?.note?.borderPxAtZoom1 ?? 1.0); if (uBW)  gl.uniform1f(uBW, bw * (this.xScalePxPerWU || 1.0)); }
-              // Match solid border grey (#636363)
-              if (uCol) gl.uniform4f(uCol, 0.388, 0.388, 0.388, 1.0);
+              // Match the themed note border
+              { const nb = this._noteBorderRgba(); if (uCol) gl.uniform4f(uCol, nb[0], nb[1], nb[2], nb[3]); }
               // Scale dash/gap with zoom so dash COUNT remains consistent across zoom
               {
                 const zoomF = Math.max(
@@ -6962,7 +6962,7 @@ try {
           if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
           { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
           { const bw = (this._config?.note?.borderPxAtZoom1 ?? 1.0); if (uBW)  gl.uniform1f(uBW, bw * (this.xScalePxPerWU || 1.0)); }
-          if (uCol) gl.uniform4f(uCol, 0.388, 0.388, 0.388, 1.0);
+          { const nb = this._noteBorderRgba(); if (uCol) gl.uniform4f(uCol, nb[0], nb[1], nb[2], nb[3]); } // themed note border
 
           {
             const zoomF = Math.max(

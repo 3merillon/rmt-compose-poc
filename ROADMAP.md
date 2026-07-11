@@ -260,6 +260,8 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 ## Changelog
 
+- **2026-07-12** — Theme fix: Note-border color now applies to ALL notes + silence rings (main note-body border uniform at renderer ~2273 and silence-ring borders were hardcoded #636363 grey; only the base circle was themed). Dead `borderOnlyProgram` left as-is.
+- **2026-07-12** — Settings polish: fixed slider-hover jitter — the global `input[type=range]` rules briefly resize the thumb on hover, and the input height tracked the thumb, jittering the row/panel. Pinned the settings slider input to a fixed 20px height and made the thumb size + glow constant across rest/hover/active (scoped, higher-specificity overrides).
 - **2026-07-12** — Theme polish: measure-bar vertical lines (dashed `silenceVLineProgram` + solid `solidCssProgram`) now use the themed `measureBar` color (dark in light themes, was invisible white); settings-panel tabs row no longer scrolls (evenly spaced); settings body scrollbar styled like the module-bar scrollbar.
 - **2026-07-12** — Phase 3 COMPLETE: full DOM + GL theming + granular per-color control. Added RGB-component tokens for rgba() forms; migrated hex+rgba across all DOM files; `renderer.setThemeColors` themes base circle, horizontal octave/BaseNote dashed lines (incl. the instanced path), note-ids, measure-ids; 15 per-token color pickers in the Appearance tab. Verified: 4 presets + a fully custom accent/bg override apply to DOM and GL simultaneously.
 - **2026-07-11** — Phase 3 (partial): theme-manager projects presets → `--rmt-*` CSS vars + renderer geometry/playhead config. Migrated styles.css + menu-bar.js color literals to var() form.

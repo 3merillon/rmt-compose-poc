@@ -439,7 +439,22 @@ const SETTINGS_CSS = `
   color:var(--rmt-accent,#ffa800);opacity:.85;}
 .rmt-set-note{margin-top:14px;font-size:11px;color:var(--rmt-text-secondary,#888);font-style:italic;line-height:1.4;}
 .rmt-set-slider-wrap{display:flex;align-items:center;gap:8px;flex:1 1 160px;}
-.rmt-set-slider-wrap input[type=range]{flex:1;min-width:90px;accent-color:var(--rmt-accent,#ffa800);}
+/* Pin the input height so the row/panel can't jitter when the thumb briefly
+   resizes on hover (global input[type=range] rules grow the thumb glow and
+   momentarily reflow the thumb). Keep the thumb size + glow constant across
+   rest/hover/active — higher specificity than the global rules. */
+.rmt-set-slider-wrap input[type=range]{flex:1;min-width:90px;height:20px;margin:0;
+  vertical-align:middle;accent-color:var(--rmt-accent,#ffa800);}
+.rmt-set-slider-wrap input[type=range]::-webkit-slider-thumb{width:12px;height:12px;
+  box-shadow:0 0 4px rgba(var(--rmt-accent-rgb,255,168,0),0.5);transition:none;}
+.rmt-set-slider-wrap input[type=range]:hover::-webkit-slider-thumb,
+.rmt-set-slider-wrap input[type=range]:active::-webkit-slider-thumb{width:12px;height:12px;
+  box-shadow:0 0 4px rgba(var(--rmt-accent-rgb,255,168,0),0.5);}
+.rmt-set-slider-wrap input[type=range]::-moz-range-thumb{width:12px;height:12px;
+  box-shadow:0 0 4px rgba(var(--rmt-accent-rgb,255,168,0),0.5);transition:none;}
+.rmt-set-slider-wrap input[type=range]:hover::-moz-range-thumb,
+.rmt-set-slider-wrap input[type=range]:active::-moz-range-thumb{width:12px;height:12px;
+  box-shadow:0 0 4px rgba(var(--rmt-accent-rgb,255,168,0),0.5);}
 .rmt-set-slider-val{min-width:48px;text-align:right;font-size:12px;color:var(--rmt-text-secondary,#bbb);}
 .rmt-set-number{width:64px;background:var(--rmt-bg,#151525);color:var(--rmt-text-primary,#fff);
   border:1px solid var(--rmt-surface-border,#3a3a4a);border-radius:4px;padding:6px;font-family:inherit;font-size:13px;}
