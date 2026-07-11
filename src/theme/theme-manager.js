@@ -23,17 +23,27 @@ import { settingsStore } from '../settings/settings-store.js';
 import { getPreset } from './presets.js';
 
 /**
- * Parse a #rgb / #rrggbb hex string to a [r,g,b,a] float array in 0..1.
- * Returns null on failure.
+ * Parse a #rgb / #rrggbb hex string to {r,g,b} 0..255 ints. Returns null on
+ * failure.
  */
-function hexToRgba(hex) {
+function hexToRgb255(hex) {
   if (typeof hex !== 'string') return null;
   let h = hex.trim().replace(/^#/, '');
   if (h.length === 3) h = h.split('').map((c) => c + c).join('');
   if (h.length !== 6) return null;
   const n = parseInt(h, 16);
   if (Number.isNaN(n)) return null;
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, 1.0];
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+/**
+ * Parse a #rgb / #rrggbb hex string to a [r,g,b,a] float array in 0..1.
+ * Returns null on failure.
+ */
+function hexToRgba(hex) {
+  const c = hexToRgb255(hex);
+  if (!c) return null;
+  return [c.r / 255, c.g / 255, c.b / 255, 1.0];
 }
 
 // Map theme token keys -> CSS custom property names.
@@ -116,6 +126,15 @@ class ThemeManager {
         const val = tokens[key];
         if (typeof val === 'string') rootStyle.setProperty(cssVar, val);
       }
+      // RGB component triplets for rgba(var(--rmt-*-rgb), A) usages (glows,
+      // scrollbars, translucent bars). Derived from the hex tokens.
+      const setRgb = (cssVar, hex) => {
+        const c = hexToRgb255(hex);
+        if (c) rootStyle.setProperty(cssVar, `${c.r}, ${c.g}, ${c.b}`);
+      };
+      setRgb('--rmt-accent-rgb', tokens.accent);
+      setRgb('--rmt-bg-rgb', tokens.bg);
+      setRgb('--rmt-danger-rgb', tokens.danger);
     } catch (e) {
       console.warn('[theme] CSS var apply failed', e);
     }
@@ -137,6 +156,21 @@ class ThemeManager {
         },
         ...(playRgba ? { playhead: { color: playRgba } } : {}),
       });
+
+      // GL structural colors (base circle, octave/base guide lines, note-id +
+      // measure-id labels) via the renderer's theme-color path.
+      if (tokens && typeof this._renderer.setThemeColors === 'function') {
+        this._renderer.setThemeColors({
+          accent: tokens.accent,
+          noteBorder: tokens.noteBorder,
+          measureBar: tokens.measureBar,
+          selectionRing: tokens.selectionRing,
+          hoverRing: tokens.hoverRing,
+          depFrequency: tokens.depFrequency,
+          depStartTime: tokens.depStartTime,
+          depDuration: tokens.depDuration,
+        });
+      }
       // Geometry affects note rects computed in sync(); re-sync only when it
       // actually changed to avoid needless full rebuilds on color-only edits.
       const geoKey = `${geometry.noteHeightWU}:${geometry.borderPxAtZoom1}:${geometry.roundedCornerPxAtZoom1}`;

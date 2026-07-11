@@ -15,7 +15,24 @@
  */
 
 import { settingsStore } from './settings-store.js';
-import { THEME_PRESETS } from '../theme/presets.js';
+import { THEME_PRESETS, getPreset } from '../theme/presets.js';
+
+// Themeable color tokens exposed as individual pickers (key + friendly label),
+// grouped for readability.
+const COLOR_TOKEN_GROUPS = [
+  { title: 'Interface', tokens: [
+    ['accent', 'Accent'], ['bg', 'Background'], ['surface', 'Panel surface'],
+    ['surfaceBorder', 'Panel border'], ['textPrimary', 'Text'], ['textSecondary', 'Muted text'],
+    ['danger', 'Active / delete'],
+  ]},
+  { title: 'Workspace', tokens: [
+    ['noteBorder', 'Note border'], ['playhead', 'Playhead'], ['measureBar', 'Measure bars'],
+    ['selectionRing', 'Selection ring'], ['hoverRing', 'Hover ring'],
+  ]},
+  { title: 'Dependency highlights', tokens: [
+    ['depFrequency', 'Frequency'], ['depStartTime', 'Start time'], ['depDuration', 'Duration'],
+  ]},
+];
 
 let root = null;
 let currentTab = 'appearance';
@@ -116,15 +133,81 @@ function select(path, options) {
 
 // ---- tab builders -------------------------------------------------------
 
+// Effective color for a token = preset value overlaid with the user's override.
+function effectiveColor(tokenKey) {
+  const appearance = settingsStore.get('appearance') || {};
+  const preset = getPreset(appearance.themeId);
+  const ov = appearance.overrides || {};
+  return (ov[tokenKey] != null ? ov[tokenKey] : preset.tokens[tokenKey]) || '#000000';
+}
+
+// A color-picker row that writes to appearance.overrides.<tokenKey>.
+function colorRow(tokenKey, label) {
+  const wrap = el('div', 'rmt-set-color');
+  const input = el('input');
+  input.type = 'color';
+  input.className = 'rmt-set-color-input';
+  input.value = normalizeHex(effectiveColor(tokenKey));
+  input.addEventListener('input', () => {
+    const overrides = settingsStore.get('appearance.overrides') || {};
+    overrides[tokenKey] = input.value;
+    settingsStore.set('appearance.overrides', overrides);
+  });
+  const hex = el('span', 'rmt-set-color-hex', input.value);
+  input.addEventListener('input', () => { hex.textContent = input.value; });
+  wrap.append(input, hex);
+  return row(label, wrap);
+}
+
+// <input type=color> only accepts #rrggbb; coerce shorthand/other forms.
+function normalizeHex(c) {
+  if (typeof c !== 'string') return '#000000';
+  let h = c.trim();
+  if (/^#([0-9a-f]{3})$/i.test(h)) {
+    h = '#' + h.slice(1).split('').map((x) => x + x).join('');
+  }
+  return /^#([0-9a-f]{6})$/i.test(h) ? h : '#000000';
+}
+
 function buildAppearanceTab(container) {
   const presetOptions = Object.values(THEME_PRESETS).map((p) => [p.id, p.name]);
-  container.appendChild(row('Theme', select('appearance.themeId', presetOptions), 'Color preset for the whole app.'));
+
+  // Preset dropdown — selecting a theme applies its full color set and clears
+  // any per-color overrides so the preset shows cleanly (then tweak below).
+  const presetSel = el('select', 'rmt-set-select');
+  const curId = settingsStore.get('appearance.themeId');
+  for (const [value, labelText] of presetOptions) {
+    const o = el('option', null, labelText); o.value = value;
+    if (value === curId) o.selected = true;
+    presetSel.appendChild(o);
+  }
+  presetSel.addEventListener('change', () => {
+    settingsStore.set('appearance.overrides', {});
+    settingsStore.set('appearance.themeId', presetSel.value);
+    renderTab(); // refresh color pickers to the new preset's values
+  });
+  container.appendChild(row('Theme', presetSel, 'Presets apply a full color set; pick one, then customize below.'));
+
   container.appendChild(row('Note height', slider('appearance.note.heightWU', 8, 60, 1, (v) => `${v} wu`), 'Bar thickness in world units.'));
   container.appendChild(row('Border thickness', slider('appearance.note.borderPxAtZoom1', 0, 6, 0.5, (v) => `${v} px`)));
   container.appendChild(row('Corner radius', slider('appearance.note.roundedCornerPxAtZoom1', 0, 20, 1, (v) => `${v} px`)));
 
-  const note = el('div', 'rmt-set-note', 'Per-color overrides and additional themes appear here once the theme system is enabled.');
-  container.appendChild(note);
+  // Per-token color pickers (write sparse overrides over the active preset).
+  for (const group of COLOR_TOKEN_GROUPS) {
+    container.appendChild(el('div', 'rmt-set-subhead', group.title));
+    for (const [key, label] of group.tokens) {
+      container.appendChild(colorRow(key, label));
+    }
+  }
+
+  const clearBtn = el('button', 'rmt-set-btn', 'Reset colors to theme');
+  clearBtn.addEventListener('click', () => {
+    settingsStore.set('appearance.overrides', {});
+    renderTab();
+  });
+  const clearRow = el('div', 'rmt-set-row');
+  clearRow.appendChild(clearBtn);
+  container.appendChild(clearRow);
 }
 
 function buildArrowsTab(container) {
@@ -334,13 +417,18 @@ const SETTINGS_CSS = `
 .rmt-set-close{background:none;border:none;color:var(--rmt-text-secondary,#aaa);font-size:26px;line-height:1;
   cursor:pointer;padding:0 4px;min-width:44px;min-height:44px;}
 .rmt-set-close:hover{color:var(--rmt-danger,#ff0000);}
-.rmt-set-tabs{display:flex;gap:2px;padding:8px 10px 0;border-bottom:1px solid var(--rmt-surface-border,#3a3a4a);
-  overflow-x:auto;}
-.rmt-set-tab{flex:0 0 auto;background:none;border:none;color:var(--rmt-text-secondary,#aaa);
-  padding:8px 12px;font-size:13px;cursor:pointer;border-bottom:2px solid transparent;
-  min-height:40px;font-family:inherit;}
+/* Tabs: fill the width evenly, never scroll horizontally. */
+.rmt-set-tabs{display:flex;gap:2px;padding:8px 10px 0;border-bottom:1px solid var(--rmt-surface-border,#3a3a4a);}
+.rmt-set-tab{flex:1 1 0;min-width:0;text-align:center;background:none;border:none;color:var(--rmt-text-secondary,#aaa);
+  padding:8px 6px;font-size:13px;cursor:pointer;border-bottom:2px solid transparent;
+  min-height:40px;font-family:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .rmt-set-tab.active{color:var(--rmt-accent,#ffa800);border-bottom-color:var(--rmt-accent,#ffa800);}
-.rmt-set-body{padding:14px 16px;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+/* Body: vertical scroll only, styled like the module-bar scrollbar. */
+.rmt-set-body{padding:14px 16px;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;
+  scrollbar-width:thin;scrollbar-color:rgba(var(--rmt-accent-rgb,255,168,0),0.6) transparent;}
+.rmt-set-body::-webkit-scrollbar{width:8px;background-color:transparent;}
+.rmt-set-body::-webkit-scrollbar-thumb{background-color:rgba(var(--rmt-accent-rgb,255,168,0),0.6);border-radius:4px;}
+.rmt-set-body::-webkit-scrollbar-thumb:hover{background-color:rgba(var(--rmt-accent-rgb,255,168,0),0.8);}
 .rmt-set-tabpanel.rmt-set-tab-dim .rmt-set-ratio,
 .rmt-set-tabpanel.rmt-set-tab-dim .rmt-set-chips{opacity:.45;}
 .rmt-set-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:9px 0;
@@ -362,6 +450,10 @@ const SETTINGS_CSS = `
 .rmt-set-ratio{display:flex;align-items:center;gap:6px;flex:1 1 auto;}
 .rmt-set-ratio-slash{color:var(--rmt-text-secondary,#aaa);font-size:16px;}
 .rmt-set-cents{margin-left:8px;font-size:12px;color:var(--rmt-text-secondary,#bbb);}
+.rmt-set-color{display:flex;align-items:center;gap:8px;flex:0 0 auto;}
+.rmt-set-color-input{width:40px;height:28px;padding:0;border:1px solid var(--rmt-surface-border,#3a3a4a);
+  border-radius:4px;background:none;cursor:pointer;}
+.rmt-set-color-hex{font-size:11px;color:var(--rmt-text-secondary,#bbb);min-width:64px;text-transform:uppercase;}
 .rmt-set-chips{display:flex;flex-wrap:wrap;gap:6px;flex:1 1 100%;}
 .rmt-set-chip{background:var(--rmt-bg,#151525);color:var(--rmt-text-primary,#ddd);
   border:1px solid var(--rmt-surface-border,#3a3a4a);border-radius:14px;padding:6px 10px;font-size:11px;cursor:pointer;

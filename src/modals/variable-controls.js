@@ -162,35 +162,35 @@ function ensureModalsStyleInjected() {
       appearance: none !important;
       -webkit-appearance: none !important;
       background-color: #222 !important;
-      color: #ffa800 !important;
-      border: 1px solid #ffa800 !important;
+      color: var(--rmt-accent, #ffa800) !important;
+      border: 1px solid var(--rmt-accent, #ffa800) !important;
       border-radius: 4px !important;
       color-scheme: dark !important;
     }
     .instrument-select:focus {
       background-color: #222 !important;
-      color: #ffa800 !important;
+      color: var(--rmt-accent, #ffa800) !important;
       outline: none !important;
     }
     .instrument-select option {
       background-color: #222 !important;
-      color: #ffa800 !important;
+      color: var(--rmt-accent, #ffa800) !important;
     }
     .duration-note-lengths .note-btn,
     .duration-note-lengths .dot-btn {
       transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
     }
     .duration-note-lengths .note-btn.selected {
-      background-color: #ff0000 !important;
-      border-color: #ffa800 !important;
+      background-color: var(--rmt-danger, #ff0000) !important;
+      border-color: var(--rmt-accent, #ffa800) !important;
     }
     .duration-note-lengths .note-btn:hover {
-      border-color: #ffa800 !important;
-      box-shadow: 0 0 5px #ffa800;
+      border-color: var(--rmt-accent, #ffa800) !important;
+      box-shadow: 0 0 5px var(--rmt-accent, #ffa800);
     }
     .duration-note-lengths .dot-btn {
       color: #fff;
-      border: 1px solid rgba(255,168,0,0.4);
+      border: 1px solid rgba(var(--rmt-accent-rgb), 0.4);
       background: #444;
       border-radius: 4px;
       width: 26px; height: 26px;
@@ -198,12 +198,12 @@ function ensureModalsStyleInjected() {
       cursor: pointer;
     }
     .duration-note-lengths .dot-btn.selected {
-      background-color: #ff0000 !important;
-      border-color: #ffa800 !important;
+      background-color: var(--rmt-danger, #ff0000) !important;
+      border-color: var(--rmt-accent, #ffa800) !important;
     }
     .duration-note-lengths .dot-btn:hover {
-      border-color: #ffa800 !important;
-      box-shadow: 0 0 5px #ffa800;
+      border-color: var(--rmt-accent, #ffa800) !important;
+      box-shadow: 0 0 5px var(--rmt-accent, #ffa800);
     }
     .duration-note-lengths .dot-btn.selected:hover {
       box-shadow: none !important;
@@ -272,7 +272,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
       if (idx === selectedBaseIdx) btn.classList.add('selected');
       else btn.classList.remove('selected');
       // reset dynamic hover styles
-      btn.style.borderColor = btn.classList.contains('selected') ? '#ffa800' : 'rgba(255,168,0,0.4)';
+      btn.style.borderColor = btn.classList.contains('selected') ? 'var(--rmt-accent, #ffa800)' : 'rgba(var(--rmt-accent-rgb), 0.4)';
       btn.style.boxShadow = 'none';
     });
     dotButtons.forEach((btn, idx) => {
@@ -293,7 +293,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
     btn.className = 'note-btn';
     Object.assign(btn.style, {
       background: '#444',
-      border: '1px solid #ffa800',
+      border: '1px solid var(--rmt-accent, #ffa800)',
       borderRadius: '4px',
       padding: '0',
       cursor: 'pointer',
@@ -312,13 +312,13 @@ function createDurationSelector(rawInput, saveButton, note, value) {
 
     btn.addEventListener('mouseenter', () => {
       if (!btn.classList.contains('selected')) {
-        btn.style.borderColor = '#ffa800';
-        btn.style.boxShadow = '0 0 5px #ffa800';
+        btn.style.borderColor = 'var(--rmt-accent, #ffa800)';
+        btn.style.boxShadow = '0 0 5px var(--rmt-accent, #ffa800)';
       }
     });
     btn.addEventListener('mouseleave', () => {
       if (!btn.classList.contains('selected')) {
-        btn.style.borderColor = '#ffa800';
+        btn.style.borderColor = 'var(--rmt-accent, #ffa800)';
         btn.style.boxShadow = 'none';
       }
     });
@@ -634,7 +634,7 @@ function createMeasureBeatsSelector(note, measureId, externalFunctions) {
     baseButtons.forEach((btn, idx) => {
       if (idx === selectedBaseIdx) btn.classList.add('selected');
       else btn.classList.remove('selected');
-      btn.style.borderColor = btn.classList.contains('selected') ? '#ffa800' : 'rgba(255,168,0,0.4)';
+      btn.style.borderColor = btn.classList.contains('selected') ? 'var(--rmt-accent, #ffa800)' : 'rgba(var(--rmt-accent-rgb), 0.4)';
       btn.style.boxShadow = 'none';
     });
     dotButtons.forEach((btn, idx) => {
@@ -690,7 +690,7 @@ function createMeasureBeatsSelector(note, measureId, externalFunctions) {
     btn.className = 'note-btn';
     Object.assign(btn.style, {
       background: '#444',
-      border: '1px solid #ffa800',
+      border: '1px solid var(--rmt-accent, #ffa800)',
       borderRadius: '4px',
       padding: '0',
       cursor: 'pointer',
@@ -709,13 +709,13 @@ function createMeasureBeatsSelector(note, measureId, externalFunctions) {
 
     btn.addEventListener('mouseenter', () => {
       if (!btn.classList.contains('selected')) {
-        btn.style.borderColor = '#ffa800';
-        btn.style.boxShadow = '0 0 5px #ffa800';
+        btn.style.borderColor = 'var(--rmt-accent, #ffa800)';
+        btn.style.boxShadow = '0 0 5px var(--rmt-accent, #ffa800)';
       }
     });
     btn.addEventListener('mouseleave', () => {
       if (!btn.classList.contains('selected')) {
-        btn.style.borderColor = '#ffa800';
+        btn.style.borderColor = 'var(--rmt-accent, #ffa800)';
         btn.style.boxShadow = 'none';
       }
     });
@@ -774,14 +774,14 @@ function createMeasureBeatsSelector(note, measureId, externalFunctions) {
   Object.assign(customRow.style, { display: 'flex', alignItems: 'center', gap: '6px' });
   const lbl = document.createElement('span');
   lbl.textContent = 'Beats per measure:';
-  Object.assign(lbl.style, { color: '#ffa800' });
+  Object.assign(lbl.style, { color: 'var(--rmt-accent, #ffa800)' });
   const inp = document.createElement('input');
   inp.type = 'text';
   inp.placeholder = 'e.g. 3/2, 5/4, 7/8';
   Object.assign(inp.style, {
     background: '#222',
     color: '#fff',
-    border: '1px solid #ffa800',
+    border: '1px solid var(--rmt-accent, #ffa800)',
     borderRadius: '4px',
     padding: '4px 6px'
   });
@@ -1019,8 +1019,8 @@ function buildInstrumentControl(value, note, externalFunctions) {
   Object.assign(select.style, {
     padding: '4px',
     backgroundColor: '#222',
-    color: '#ffa800',
-    border: '1px solid #ffa800',
+    color: 'var(--rmt-accent, #ffa800)',
+    border: '1px solid var(--rmt-accent, #ffa800)',
     borderRadius: '4px',
     width: '100%',
     marginTop: '5px',
@@ -1050,8 +1050,8 @@ function buildInstrumentControl(value, note, externalFunctions) {
   Object.assign(dropdownBtn.style, {
     padding: '6px 8px',
     backgroundColor: '#222',
-    color: '#ffa800',
-    border: '1px solid #ffa800',
+    color: 'var(--rmt-accent, #ffa800)',
+    border: '1px solid var(--rmt-accent, #ffa800)',
     borderRadius: '4px',
     width: '100%',
     marginTop: '5px',
@@ -1067,15 +1067,15 @@ function buildInstrumentControl(value, note, externalFunctions) {
     left: '0',
     right: '0',
     backgroundColor: '#222',
-    color: '#ffa800',
-    border: '1px solid #ffa800',
+    color: 'var(--rmt-accent, #ffa800)',
+    border: '1px solid var(--rmt-accent, #ffa800)',
     borderRadius: '4px',
     marginTop: '4px',
     zIndex: '99999',
     display: 'none',
     maxHeight: '180px',
     overflowY: 'auto',
-    boxShadow: '0 0 6px rgba(255,168,0,0.3)'
+    boxShadow: '0 0 6px rgba(var(--rmt-accent-rgb), 0.3)'
   });
 
   Array.from(select.options).forEach((opt) => {
@@ -1084,7 +1084,7 @@ function buildInstrumentControl(value, note, externalFunctions) {
     Object.assign(item.style, {
       padding: '6px 8px',
       cursor: 'pointer',
-      borderBottom: '1px solid rgba(255,168,0,0.2)'
+      borderBottom: '1px solid rgba(var(--rmt-accent-rgb), 0.2)'
     });
     item.addEventListener('mouseenter', () => { item.style.backgroundColor = '#333'; });
     item.addEventListener('mouseleave', () => { item.style.backgroundColor = 'transparent'; });
@@ -1207,7 +1207,7 @@ function addFrequencyOctaveButtons(parent, note) {
       height: '26px',
       padding: '0',
       backgroundColor: '#444',
-      border: '1px solid rgba(255,168,0,0.4)',
+      border: '1px solid rgba(var(--rmt-accent-rgb), 0.4)',
       borderRadius: '4px',
       cursor: 'pointer',
       display: 'flex',
@@ -1222,11 +1222,11 @@ function addFrequencyOctaveButtons(parent, note) {
 
     // Harmonized hover effect: orange border + glow like duration icons
     btn.addEventListener('mouseenter', () => {
-      btn.style.borderColor = '#ffa800';
-      btn.style.boxShadow = '0 0 5px #ffa800';
+      btn.style.borderColor = 'var(--rmt-accent, #ffa800)';
+      btn.style.boxShadow = '0 0 5px var(--rmt-accent, #ffa800)';
     });
     btn.addEventListener('mouseleave', () => {
-      btn.style.borderColor = 'rgba(255,168,0,0.4)';
+      btn.style.borderColor = 'rgba(var(--rmt-accent-rgb), 0.4)';
       btn.style.boxShadow = 'none';
     });
 

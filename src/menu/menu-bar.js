@@ -480,7 +480,7 @@ const menuAPI = (function() {
             if (draggedElementType === 'category' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
-                Object.assign(this.style, { border: '1px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(255, 0, 0, 0.1)' });
+                Object.assign(this.style, { border: '1px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.1)' });
             }
         });
         
@@ -552,7 +552,7 @@ const menuAPI = (function() {
                         fontFamily: "'Roboto Mono', monospace", fontSize: '14px', textTransform: 'uppercase',
                         color: 'var(--rmt-accent, #ffa800)', border: '1px solid var(--rmt-accent, #ffa800)', borderRadius: '4px',
                         boxShadow: '0 2px 6px rgba(0,0,0,0.5)', zIndex: '9999', pointerEvents: 'none',
-                        opacity: '0.7', background: 'rgba(21, 21, 37, 0.8)'
+                        opacity: '0.7', background: 'rgba(var(--rmt-bg-rgb), 0.8)'
                     });
                     document.body.appendChild(ghost);
                     draggedElement = thisLabel;
@@ -583,7 +583,7 @@ const menuAPI = (function() {
                     });
                     if (targetLabel && targetLabel !== thisLabel) {
                         targetLabel.classList.add('drag-over');
-                        Object.assign(targetLabel.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(255, 0, 0, 0.1)' });
+                        Object.assign(targetLabel.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.1)' });
                         const indicator = document.getElementById('drag-indicator');
                         if (indicator) indicator.textContent = 'Drop on: ' + targetLabel.getAttribute('data-category');
                     }
@@ -699,7 +699,7 @@ const menuAPI = (function() {
             if (draggedElementType === 'module' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
-                Object.assign(this.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
+                Object.assign(this.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.2)' });
             }
         });
         
@@ -973,7 +973,7 @@ const menuAPI = (function() {
             if (draggedElementType === 'module' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
-                Object.assign(this.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
+                Object.assign(this.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.2)' });
             }
         });
         
@@ -1088,7 +1088,7 @@ const menuAPI = (function() {
                         if (targetIcon && targetIcon !== moduleIcon) {
                             targetIcon.classList.add('drag-over');
                             if (!targetIcon.classList.contains('category-label')) {
-                                Object.assign(targetIcon.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
+                                Object.assign(targetIcon.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.2)' });
                             }
                         }
                         const noteTarget = elemBelow.closest('[data-note-id]');
@@ -1610,14 +1610,14 @@ const menuAPI = (function() {
             .icon { position: relative; }
             .icon > div:first-child { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0; }
             .icon.dragging, .category-label.dragging { opacity: 0.5; }
-            .icon.drag-over, .category-label.drag-over, .empty-placeholder.drag-over { border: 2px dashed var(--rmt-danger, #ff0000) !important; background-color: rgba(255, 0, 0, 0.1); }
+            .icon.drag-over, .category-label.drag-over, .empty-placeholder.drag-over { border: 2px dashed var(--rmt-danger, #ff0000) !important; background-color: rgba(var(--rmt-danger-rgb), 0.1); }
             .icons-wrapper { overflow-y: scroll; overflow-x: hidden; scrollbar-gutter: stable both-edges; }
             .empty-placeholder { display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
-            .empty-placeholder:hover { opacity: 1; border-color: var(--rmt-accent, #ffa800); background-color: rgba(255, 168, 0, 0.1); }
+            .empty-placeholder:hover { opacity: 1; border-color: var(--rmt-accent, #ffa800); background-color: rgba(var(--rmt-accent-rgb), 0.1); }
             .module-delete-btn { position: absolute; top: 1px; right: 1px; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: var(--rmt-danger, #ff0000); background: transparent !important; border-radius: 0; cursor: pointer; z-index: 10; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
-            .module-delete-btn:hover { transform: scale(1.2); color: var(--rmt-danger, #ff0000); text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); background-color: transparent !important; }
+            .module-delete-btn:hover { transform: scale(1.2); color: var(--rmt-danger, #ff0000); text-shadow: 0 0 3px rgba(var(--rmt-danger-rgb), 0.5); background-color: transparent !important; }
             .category-delete-btn { position: absolute; top: 0; right: 0; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: var(--rmt-danger, #ff0000); background: transparent !important; cursor: pointer; z-index: 12; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
-            .category-delete-btn:hover { transform: scale(1.2); color: var(--rmt-danger, #ff0000); text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); }
+            .category-delete-btn:hover { transform: scale(1.2); color: var(--rmt-danger, #ff0000); text-shadow: 0 0 3px rgba(var(--rmt-danger-rgb), 0.5); }
             .empty-placeholder { width: 42px; height: 42px; border: 2px dashed #ffffff; border-radius: 4px; box-sizing: border-box; background: transparent; cursor: pointer; margin: 2px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
             .category-label { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
             .icons-wrapper { -webkit-overflow-scrolling: touch; }
@@ -1742,9 +1742,9 @@ const menuAPI = (function() {
         if (type === 'success') {
             Object.assign(notification.style, { backgroundColor: 'rgba(0, 255, 0, 0.8)', color: '#000' });
         } else if (type === 'error') {
-            Object.assign(notification.style, { backgroundColor: 'rgba(255, 0, 0, 0.8)', color: '#fff' });
+            Object.assign(notification.style, { backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.8)', color: '#fff' });
         } else {
-            Object.assign(notification.style, { backgroundColor: 'rgba(255, 168, 0, 0.8)', color: '#000' });
+            Object.assign(notification.style, { backgroundColor: 'rgba(var(--rmt-accent-rgb), 0.8)', color: '#000' });
         }
         document.body.appendChild(notification);
         setTimeout(() => {

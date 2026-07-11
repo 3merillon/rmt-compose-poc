@@ -13,7 +13,7 @@
 | 0 | Foundations (this doc + perf harness) | `[x]` | — |
 | 1 | Performance Core | `[x]`* | 0.2 |
 | 2 | Settings Infrastructure | `[x]` | — |
-| 3 | Theme System | `[~]` | 2 |
+| 3 | Theme System | `[x]` | 2 |
 | 4 | Arrow Customization | `[x]` | 2 |
 | 5 | Audio Overhaul | `[ ]` | 2 (UI parts) |
 | 6 | Module Library + Content | `[ ]` | 2 (icon size setting) |
@@ -143,18 +143,17 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 ---
 
-## Phase 3 — Theme System   `[~]` (DOM + geometry done; GL colors remain)   Last touched: 2026-07-11 by Claude
+## Phase 3 — Theme System   `[x]`   Last touched: 2026-07-12 by Claude
 
-**Shipped & verified in browser:**
-- [x] `src/theme/theme-manager.js` — resolves preset + overrides + geometry sliders; projects to (1) `--rmt-*` CSS variables on `<html>` and (2) `renderer.setConfig` for note geometry + playhead color. Re-syncs only when geometry changes. Wired in player.js (`themeManager.init({renderer, requestResync})`) + live via `settings:changed appearance.*`.
-- [x] `:root` token block in `public/styles.css` (classic-orange defaults) + migrated the dominant literals to `var(--rmt-*, <fallback>)`: **71× accent, 50× danger, 12× bg in styles.css; 30× accent + 23× danger inline in menu-bar.js**. (CRLF gotcha: the migration script's head/body split failed on `\r\n`, briefly self-referencing the `:root` block — caught and fixed; tokens are literal, no nested-var artifacts.)
-- [x] **Note geometry** (height 8-60 WU / border 0-6px / corner 0-20px) via `setConfig` + re-sync — verified: notes render visibly taller at heightWU 40.
-- [x] **Playhead** themed via `playhead.color` config (hex→RGBA).
-- **Verified**: switching classic-orange → slate-cyan → mono-light updates `--rmt-*` and recolors ALL DOM chrome (top bar, library icons, settings panel, toggles, sliders); reset restores orange; zero console errors; classic-orange is pixel-identical to pre-theme.
+**DONE & verified in browser — full DOM + GL theming with granular per-color control.**
+- [x] `src/theme/theme-manager.js` — resolves preset + overrides + geometry; projects to (1) `--rmt-*` CSS vars incl. RGB-component triplets (`--rmt-accent-rgb` etc.) for `rgba()` alpha forms, (2) `renderer.setConfig` for note geometry + playhead, (3) `renderer.setThemeColors` for GL structural colors. Wired in player.js; live via `settings:changed appearance.*`.
+- [x] Comprehensive CSS migration to `var(--rmt-*, <fallback>)` — **hex AND rgba** across `public/styles.css`, `menu-bar.js`, `variable-controls.js`, `modals/index.js` (scrollbars, glows, translucent backgrounds, note-widget internals). Top/module-bar backgrounds use `--rmt-bg-rgb` so they harmonize. `:root` literal defaults (CRLF gotcha caught twice — tokens literal, no nested-var artifacts).
+- [x] **GL theming** via `renderer.setThemeColors`: base circle + border, **horizontal octave/BaseNote dashed guide lines** (uniform path AND the instanced `_octInstColor` path that actually draws them), note-id glyph+canvas labels, measure-triangle ids, base fraction label. Canvas-textured labels invalidate their cache on color change. Helpers `_accentRgba()/_accentHex()/_noteBorderRgba()`.
+- [x] **Note geometry** (height/border/corner) via setConfig + re-sync.
+- [x] **Granular per-color control**: Appearance tab has **15 color pickers** (Interface/Workspace/Dependency groups) writing sparse `appearance.overrides`; preset dropdown applies a full set + clears overrides; "Reset colors to theme".
+- **Verified**: 4 presets recolor all DOM + themed GL; a custom `#ff00aa` accent + `#101014` bg override applies to DOM and GL simultaneously; reset restores orange; zero console errors; classic-orange pixel-identical to pre-theme.
 
-**Remaining (the risky bit — deferred):**
-- [ ] **GL shader-literal accent colors** → uniforms: base-note circle (#ffa800 canvas fills renderer.js ~6341/7053/7106), octave guides, note-id labels (`vec4(1,0.66,0,1)`), selection/hover rings, dependency-highlight trio (renderer.js:2350-2368). These stay orange under any theme today. Needs per-draw uniform plumbing + a `colors` section in renderer-config (defaults = current literals) — do as a focused pass with screenshot diffing. Note geometry + playhead already prove the config→GL path works.
-- [ ] Appearance tab: per-token color pickers + overrides (the store already supports `appearance.overrides`; the panel currently exposes theme preset + geometry sliders).
+**Not themed (intentional):** note *body* colors are per-note user data. Legacy unused `playheadProgram` shader keeps baked orange (dead path; real playhead is config-driven). Regular-note border grey left neutral (base-circle border is themed).
 
 **Original plan (for reference):**
 
@@ -261,7 +260,9 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 ## Changelog
 
-- **2026-07-11** — Phase 3 (partial): theme-manager projects presets → `--rmt-*` CSS vars + renderer geometry/playhead config. Migrated styles.css + menu-bar.js color literals to var() form. Verified: full DOM re-themes on preset switch, note height/border/corner live-adjust, playhead colors. Remaining: GL shader-literal accents (base circle, guides, id labels, rings) → uniforms; per-token color pickers.
+- **2026-07-12** — Theme polish: measure-bar vertical lines (dashed `silenceVLineProgram` + solid `solidCssProgram`) now use the themed `measureBar` color (dark in light themes, was invisible white); settings-panel tabs row no longer scrolls (evenly spaced); settings body scrollbar styled like the module-bar scrollbar.
+- **2026-07-12** — Phase 3 COMPLETE: full DOM + GL theming + granular per-color control. Added RGB-component tokens for rgba() forms; migrated hex+rgba across all DOM files; `renderer.setThemeColors` themes base circle, horizontal octave/BaseNote dashed lines (incl. the instanced path), note-ids, measure-ids; 15 per-token color pickers in the Appearance tab. Verified: 4 presets + a fully custom accent/bg override apply to DOM and GL simultaneously.
+- **2026-07-11** — Phase 3 (partial): theme-manager projects presets → `--rmt-*` CSS vars + renderer geometry/playhead config. Migrated styles.css + menu-bar.js color literals to var() form.
 - **2026-07-11** — Phase 4 complete: customizable note arrows. `handleOctaveChange` reads the interval from settings (default octave); a renderer `drawNoteArrows` flag gates glyphs/backgrounds/hit-test and the DOM buttons hide when off. Verified: fifth 3/2 applies ×1.5, reciprocal down restores, toggle-off cleanly removes arrows with no ghost hit zones. On-arrow ratio label deferred (cosmetic).
 - **2026-07-11** — Phase 2 complete: settings schema + store (`rmt:settings:v1`, validated, event-driven) + tabbed Settings panel (Appearance/Arrows/Audio/Library) wired into the main menu; theme presets data. Verified in browser (opens, persists, resets, on-brand). Consumers land in Phases 3-6.
 - **2026-07-11** — P1: WASM hot-swap infrastructure built (opt-in via `?evaluator=wasm`), `wasm:sync` tooling, swap verified in Node; activation blocked on a non-deterministic hang inside the Rust PersistentEvaluator (full dossier in Phase 1). A transient page-freeze during development came from the swap being briefly enabled by default — reverted to opt-in; default JS path unchanged and verified responsive in headless Chromium.

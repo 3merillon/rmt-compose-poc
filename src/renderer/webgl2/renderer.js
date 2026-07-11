@@ -289,6 +289,52 @@ export class RendererAdapter {
     } catch {}
   }
 
+  /**
+   * Theme the GL accent/structural colors at runtime (Phase 3 GL theming).
+   * Accepts hex strings; stores both hex and premultiplied-friendly RGBA
+   * arrays for the draw paths. Canvas-textured labels (note ids, octave guide
+   * labels, measure ids) are cached by string key, so we invalidate that
+   * cache and bump the color epoch so they regenerate in the new color.
+   * @param {{accent?:string,noteBorder?:string,measureBar?:string,selectionRing?:string,hoverRing?:string,depFrequency?:string,depStartTime?:string,depDuration?:string}} colors
+   */
+  setThemeColors(colors) {
+    try {
+      if (!colors || typeof colors !== 'object') return;
+      const hexToRgba = (hex, fallback) => {
+        if (typeof hex !== 'string') return fallback;
+        let h = hex.trim().replace(/^#/, '');
+        if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+        if (h.length !== 6) return fallback;
+        const n = parseInt(h, 16);
+        if (Number.isNaN(n)) return fallback;
+        return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, 1.0];
+      };
+      const tc = this._themeColors || (this._themeColors = {});
+      if (colors.accent) { tc.accentHex = colors.accent; tc.accent = hexToRgba(colors.accent, [1.0, 0.66, 0.0, 1.0]); }
+      if (colors.noteBorder) { tc.noteBorderHex = colors.noteBorder; tc.noteBorder = hexToRgba(colors.noteBorder, [0.388, 0.388, 0.388, 1.0]); }
+      if (colors.measureBar) { tc.measureBarHex = colors.measureBar; tc.measureBar = hexToRgba(colors.measureBar, [1, 1, 1, 1]); }
+      if (colors.selectionRing) { tc.selectionRing = hexToRgba(colors.selectionRing, [1.0, 0.66, 0.0, 1.0]); }
+      if (colors.hoverRing) { tc.hoverRing = hexToRgba(colors.hoverRing, [1, 1, 1, 1]); }
+      if (colors.depFrequency) tc.depFrequency = hexToRgba(colors.depFrequency, [1.0, 0.5, 0.0, 1.0]);
+      if (colors.depStartTime) tc.depStartTime = hexToRgba(colors.depStartTime, [0.0, 1.0, 1.0, 1.0]);
+      if (colors.depDuration) tc.depDuration = hexToRgba(colors.depDuration, [0.615, 0.0, 1.0, 1.0]);
+
+      // Canvas-textured labels are cached by string key with no color in it —
+      // clear so they redraw in the new accent.
+      try { if (this._octaveLabelCache && typeof this._octaveLabelCache.clear === 'function') this._octaveLabelCache.clear(); } catch {}
+      // Glyph atlas entries for id/fraction labels may also be color-baked.
+      this._colorEpoch = (this._colorEpoch || 0) + 1;
+      this._viewEpoch = (this._viewEpoch || 0) + 1; // force overlay/label rebuild
+      this.needsRedraw = true;
+    } catch {}
+  }
+
+  // Accent color accessors with safe fallbacks (current #ffa800 values).
+  _accentRgba() { return (this._themeColors && this._themeColors.accent) || [1.0, 0.66, 0.0, 1.0]; }
+  _accentHex() { return (this._themeColors && this._themeColors.accentHex) || '#ffa800'; }
+  _noteBorderRgba() { return (this._themeColors && this._themeColors.noteBorder) || [0.388, 0.388, 0.388, 1.0]; }
+  _measureBarRgb() { return (this._themeColors && this._themeColors.measureBar) || [1.0, 1.0, 1.0, 1.0]; }
+
   // Config helpers (seconds/world X, freq/world Y)
   _cfgSX() { try { return this._config?.scales?.secondsToWorldX ?? 200; } catch { return 200; } }
   _cfgSY() { try { return this._config?.scales?.freqToWorldY ?? 100; } catch { return 100; } }
@@ -1336,12 +1382,13 @@ export class RendererAdapter {
       uniform float u_dashLen;       // dash length in CSS px
       uniform float u_gapLen;        // gap length in CSS px
       uniform float u_alpha;         // overall alpha
+      uniform vec3 u_color;          // themed measure-bar color (default white)
       out vec4 outColor;
       void main() {
         float period = max(1.0, u_dashLen + u_gapLen);
         float m = mod(max(v_css.y, 0.0), period);
         float a = m < u_dashLen ? 1.0 : 0.0;
-        outColor = vec4(1.0, 1.0, 1.0, u_alpha * a);
+        outColor = vec4(u_color, u_alpha * a);
       }
     `;
     this.measureDashProgram = this._createProgram(rectVS2, measureDashFS);
@@ -1357,6 +1404,7 @@ export class RendererAdapter {
         this._uniforms.measureDash.u_dashLen = gl.getUniformLocation(p, 'u_dashLen');
         this._uniforms.measureDash.u_gapLen = gl.getUniformLocation(p, 'u_gapLen');
         this._uniforms.measureDash.u_alpha = gl.getUniformLocation(p, 'u_alpha');
+        this._uniforms.measureDash.u_color = gl.getUniformLocation(p, 'u_color');
       }
     } catch {}
 
@@ -4454,7 +4502,7 @@ export class RendererAdapter {
         if (uVP)  gl.uniform2f(uVP, vpW, vpH);
         if (uDash) gl.uniform1f(uDash, (this._config?.measures?.dashPx ?? 6.0));
         if (uGap)  gl.uniform1f(uGap,  (this._config?.measures?.gapPx  ?? 6.0));
-        if (uCol)  gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.35);
+        { const mb = this._measureBarRgb(); if (uCol) gl.uniform4f(uCol, mb[0], mb[1], mb[2], 0.35); } // themed measure bar
 
         // Build CSS px positions spanning full viewport height from effective measure times
         const triTimesEff = (() => {
@@ -4640,7 +4688,7 @@ const e = startSec + addDx + durSec;
         const uCol = Us ? Us.u_color    : gl.getUniformLocation(this.solidCssProgram, 'u_color');
         const uZ   = Us ? Us.u_z        : gl.getUniformLocation(this.solidCssProgram, 'u_z');
         if (uVP)  gl.uniform2f(uVP, vpW, vpH);
-        if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.8);
+        { const mb = this._measureBarRgb(); if (uCol) gl.uniform4f(uCol, mb[0], mb[1], mb[2], 0.8); } // themed measure bar (solid start/end)
         if (uZ)   gl.uniform1f(uZ, -0.00002);
 
         // Compute effective end using the same unified function (reuse triTimes logic)
@@ -4815,8 +4863,8 @@ const e = startSec + addDx + durSec;
         if (uVPc) gl.uniform2f(uVPc, vpW, vpH);
         // Match note borders: 1 CSS px at zoom=1, scaling with zoom via xScalePxPerWU
         { const bw = (this._config?.note?.borderPxAtZoom1 ?? 1.0); if (uBWc) gl.uniform1f(uBWc, bw * (this.xScalePxPerWU || 1.0)); }
-        if (uFill) gl.uniform4f(uFill, 1.0, 0.66, 0.0, 1.0);          // #ffa800
-        if (uBCol) gl.uniform4f(uBCol, 0.388, 0.388, 0.388, 1.0);     // #636363
+        { const a = this._accentRgba(); if (uFill) gl.uniform4f(uFill, a[0], a[1], a[2], a[3]); }        // themed accent (base circle)
+        { const b = this._noteBorderRgba(); if (uBCol) gl.uniform4f(uBCol, b[0], b[1], b[2], b[3]); }    // themed border
 
         gl.bindVertexArray(this.baseCircleVAO);
         gl.bindBuffer(gl.ARRAY_BUFFER, this.baseCirclePosSizeBuffer);
@@ -5525,7 +5573,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
         x,
         y,
         fontPx: baseFontPx,
-        color: [1.0, 0.66, 0.0, 1.0], // orange for better contrast
+        color: this._accentRgba(), // themed accent (base-note fraction label)
         layerZ: -0.00001,
         scaleX,
         scLeft: triLeft, scTop: triTop, scW: triW, scH: triH
@@ -6340,12 +6388,12 @@ try {
 
           if (this.useGlyphCache) {
             this._deferredGlyphRuns.push({
-              text: idLabel, noteId: id, x: ix, y: iy, fontPx: idFont, color: [1.0, 0.66, 0.0, 1.0], layerZ,
+              text: idLabel, noteId: id, x: ix, y: iy, fontPx: idFont, color: this._accentRgba(), layerZ,
               scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
               rrCx, rrCy, rrHx, rrHy, rrR
             });
           } else {
-            const idEntry = this._createStyledTextTexture(idLabel, idFont, 0, '#ffa800', 'rgba(0,0,0,0)', 0);
+            const idEntry = this._createStyledTextTexture(idLabel, idFont, 0, this._accentHex(), 'rgba(0,0,0,0)', 0);
             if (idEntry && idEntry.tex) {
               this._deferredTextSprites.push({
                 tex: idEntry.tex,
@@ -7060,7 +7108,7 @@ try {
       ctx.clearRect(0, 0, wCss, hCss);
       ctx.font = `${fontPx}px 'Roboto Mono', 'IBM Plex Mono', monospace`;
       ctx.textBaseline = 'top';
-      ctx.fillStyle = '#ffa800';
+      ctx.fillStyle = this._accentHex();
       ctx.shadowColor = 'rgba(0,0,0,0.65)';
       ctx.shadowBlur = 1.0;
       ctx.fillText(label, pad, pad);
@@ -7113,7 +7161,7 @@ try {
       ctx.clearRect(0, 0, wCss, hCss);
       ctx.font = `${fontPx}px 'Roboto Mono', 'IBM Plex Mono', monospace`;
       ctx.textBaseline = 'top';
-      ctx.fillStyle = '#ffa800';
+      ctx.fillStyle = this._accentHex();
       ctx.shadowColor = 'rgba(0,0,0,0.65)';
       ctx.shadowBlur = 1.0;
       ctx.fillText(label, pad, pad);
@@ -8196,7 +8244,7 @@ try {
 
         // Color: primary line more prominent
         const alpha = isPrimary ? 0.9 : 0.35;
-        if (uCol) gl.uniform4f(uCol, 1.0, 0.66, 0.0, alpha); // #ffa800 with alpha
+        { const a = this._accentRgba(); if (uCol) gl.uniform4f(uCol, a[0], a[1], a[2], alpha); } // themed accent (octave/base guide lines)
 
         // Rebind VAO each iteration since label drawing unbinds/changes it
         gl.bindVertexArray(this.octaveLineVAO);
@@ -8635,9 +8683,10 @@ try {
           this._octInstHole[o + 3] = holeH;
 
           const alpha = isPrimary ? 0.9 : 0.35;
-          this._octInstColor[o + 0] = 1.0;
-          this._octInstColor[o + 1] = 0.66;
-          this._octInstColor[o + 2] = 0.0;
+          const ac = this._accentRgba(); // themed accent (horizontal octave/base guide lines)
+          this._octInstColor[o + 0] = ac[0];
+          this._octInstColor[o + 1] = ac[1];
+          this._octInstColor[o + 2] = ac[2];
           this._octInstColor[o + 3] = alpha;
         }
 
