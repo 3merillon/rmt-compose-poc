@@ -1,7 +1,8 @@
 import Fraction from 'fraction.js';
 import { Note } from './note.js';
 import { DependencyGraph } from './dependency-graph.js';
-import { createEvaluator, createIncrementalEvaluator } from './wasm/evaluator-adapter.js';
+import { createEvaluator, createIncrementalEvaluator, isWasmBackedEvaluator, isEvaluatorHotSwapEnabled } from './wasm/evaluator-adapter.js';
+import { onWasmReady } from './wasm/index.js';
 import { compiler, decompiler } from './expression-compiler.js';
 import { isDSLSyntax } from './dsl/index.js';
 
@@ -27,6 +28,9 @@ export class Module {
     // Binary evaluation infrastructure
     // Uses WASM evaluator when available, falls back to JS automatically
     this._dependencyGraph = new DependencyGraph();
+    // Bumped whenever the graph is cleared/rebuilt so cached per-note
+    // registration keys (see _registerNoteDependencies) can't go stale.
+    this._depsRegGeneration = 0;
     this._binaryEvaluator = createEvaluator(this);
     this._incrementalEvaluator = createIncrementalEvaluator(
       this, // Module reference (we use notes Map interface)
@@ -34,9 +38,23 @@ export class Module {
       this._binaryEvaluator
     );
 
+    // WASM init is async and usually loses the race against module creation,
+    // which used to strand every module on the JS fallback for the whole
+    // session. Hot-swap to the WASM evaluator once it becomes available.
+    // Opt-in via ?evaluator=wasm while in-browser verification is pending.
+    // WeakRef so replaced/discarded modules don't leak via the callback.
+    if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)) {
+      const ref = new WeakRef(this);
+      onWasmReady(() => {
+        const mod = ref.deref();
+        if (mod) mod._upgradeEvaluators();
+      });
+    }
+
     // Evaluation cache (Map<noteId, {startTime, duration, ...}>)
     this._evaluationCache = new Map();
     this._dirtyNotes = new Set();
+    this._evaluating = false; // reentrancy guard for evaluateModule()
 
     // Create base note with default values
     const defaultBaseNoteVariables = {
@@ -85,9 +103,57 @@ export class Module {
   }
 
   /**
-   * Register a note's dependencies in the graph
+   * Swap the JS fallback evaluator for the WASM one after async WASM init.
+   * Safe to call at any time between synchronous operations: evaluator refs
+   * are replaced atomically and everything is marked dirty, so the next
+   * evaluateModule() fully re-evaluates on the new engine (values are
+   * identical, so visuals never go stale in between).
+   */
+  _upgradeEvaluators() {
+    try {
+      if (isWasmBackedEvaluator(this._binaryEvaluator)) return; // already upgraded
+      const nextEvaluator = createEvaluator(this);
+      if (!isWasmBackedEvaluator(nextEvaluator)) return; // forced JS or WASM unusable
+      const nextIncremental = createIncrementalEvaluator(
+        this,
+        this._dependencyGraph,
+        nextEvaluator
+      );
+
+      this._binaryEvaluator = nextEvaluator;
+      this._incrementalEvaluator = nextIncremental;
+      this._evaluationCache = new Map();
+      this._incrementalEvaluator.invalidateAll();
+      for (const id of Object.keys(this.notes)) {
+        this._dirtyNotes.add(Number(id));
+      }
+
+      // Warm the new engine off the critical path so the first user action
+      // after the swap doesn't pay the full re-evaluation cost.
+      if (typeof window !== 'undefined') {
+        const warm = () => { try { this.evaluateModule(); } catch {} };
+        (window.requestIdleCallback || ((cb) => setTimeout(cb, 0)))(warm);
+      }
+    } catch (e) {
+      console.warn('WASM evaluator upgrade failed; staying on JS fallback:', e);
+    }
+  }
+
+  /**
+   * Register a note's dependencies in the graph.
+   * Skipped when nothing relevant changed since the last registration:
+   * dependencies derive purely from the note's compiled expressions, so a
+   * note whose expressions (epoch), id, and graph generation are unchanged
+   * is already registered identically. markNoteDirty calls this for every
+   * marked note (e.g., all dependents on an octave change), so the skip
+   * avoids rewriting ~15 graph maps per untouched note.
    */
   _registerNoteDependencies(note) {
+    const regKey = `${this._depsRegGeneration}:${note.id}:${note._depsEpoch || 0}`;
+    if (note._depsRegKey === regKey) {
+      return;
+    }
+
     const allDeps = note.getAllDependencies();
     const refsBase = note.referencesBaseNote();
     this._dependencyGraph._updateDependencies(note.id, allDeps, refsBase);
@@ -103,6 +169,8 @@ export class Module {
     // Register duration-specific dependencies for property-colored visualization
     const durExpr = note.getExpression('duration');
     this._dependencyGraph.registerDurationDependencies(note.id, durExpr);
+
+    note._depsRegKey = regKey;
   }
 
   /**
@@ -260,6 +328,7 @@ export class Module {
         // Fallback: compile directly (for compatibility)
         try {
           note.expressions[baseName] = compiler.compile(expr, baseName);
+          if (typeof note._depsEpoch === 'number') note._depsEpoch++;
           note.lastModifiedTime = Date.now();
         } catch (e) {
           console.warn(`batchSetExpressions: Failed to compile ${baseName} for note ${noteId}:`, e);
@@ -498,19 +567,39 @@ export class Module {
    * Evaluate all dirty notes and return the evaluation cache
    */
   evaluateModule() {
+    if (this._evaluating) {
+      // Reentrant call from an evaluation callback (bytecode CALL ops like
+      // findTempo/getVariable re-enter via getEvaluationCache). Serve the
+      // in-progress cache: topological order guarantees any dependency the
+      // callback needs is already finalized. Recursing here instead used to
+      // re-run the whole dirty set per callback.
+      return this._incrementalEvaluator ? this._incrementalEvaluator.cache : this._evaluationCache;
+    }
+
     if (this._dirtyNotes.size === 0 && this._evaluationCache.size > 0) {
       return this._evaluationCache;
     }
 
-    // Use incremental evaluator
-    const cache = this._incrementalEvaluator.evaluateDirty();
+    // Corruption flags only change for notes that get re-evaluated, so
+    // capture the dirty set before it is cleared and scope the flag update
+    // to it (previously this scanned ALL notes on every evaluation).
+    const dirtyIds = this._dirtyNotes.size > 0 ? Array.from(this._dirtyNotes) : null;
+
+    this._evaluating = true;
+    let cache;
+    try {
+      // Use incremental evaluator
+      cache = this._incrementalEvaluator.evaluateDirty();
+    } finally {
+      this._evaluating = false;
+    }
 
     // Update our cache reference
     this._evaluationCache = cache;
 
     // Update corruption flags in dependency graph after evaluation
     // This enables visual tinting for notes with irrational values (TET scales)
-    this._updateCorruptionFlags(cache);
+    this._updateCorruptionFlags(cache, dirtyIds);
 
     this._dirtyNotes.clear();
 
@@ -520,9 +609,10 @@ export class Module {
   /**
    * Update corruption flags in dependency graph from evaluation cache
    * @param {Map} cache - Evaluation cache with corruptionFlags per note
+   * @param {Array<number>|null} noteIds - IDs to update (null = all notes)
    * @private
    */
-  _updateCorruptionFlags(cache) {
+  _updateCorruptionFlags(cache, noteIds = null) {
     if (!this._dependencyGraph || typeof this._dependencyGraph.setCorruptionFlags !== 'function') {
       return;
     }
@@ -532,10 +622,10 @@ export class Module {
     }
 
     try {
-      // Always iterate through all notes and fetch from cache
-      // This ensures we handle both regular Maps and lazy cache proxies correctly
-      // (Lazy proxies' entries() method only yields locally-cached items, missing WASM-resident data)
-      for (const id of Object.keys(this.notes)) {
+      // Fetch per-id from cache (rather than iterating cache.entries()) so
+      // both regular Maps and lazy WASM cache proxies are handled correctly.
+      const ids = noteIds !== null ? noteIds : Object.keys(this.notes);
+      for (const id of ids) {
         const noteId = Number(id);
         const result = cache.get(noteId);
         if (result && result.corruptionFlags !== undefined) {
@@ -952,6 +1042,7 @@ export class Module {
 
     // Rebuild dependency graph
     this._dependencyGraph.clear();
+    this._depsRegGeneration++; // invalidate cached registration keys (e.g., reused baseNote)
     this._evaluationCache.clear();
     this._dirtyNotes.clear();
 

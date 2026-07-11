@@ -1222,10 +1222,14 @@ export class BinaryEvaluator {
       corruptionFlags: 0, // Track irrational values (TET scales)
     };
 
-    // Create a working cache that includes this note's partial results
-    // This allows expressions within the same note to reference each other
-    // (e.g., measureLength can reference tempo that was just evaluated)
-    const workingCache = new Map(evalCache || []);
+    // Expressions within the same note may reference each other (e.g.,
+    // measureLength references the tempo evaluated just before), so the
+    // cache must contain this note's in-progress result during evaluation.
+    // Write it into the shared cache directly instead of copying the whole
+    // cache per note (the copy made every full evaluation O(N²)): under
+    // topological order all dependencies are final before their dependents
+    // run, and the caller overwrites this same key with the finished result.
+    const workingCache = evalCache || new Map();
     workingCache.set(note.id, result);
 
     // Helper to get expression - supports both Note.expressions and BinaryNote direct properties
@@ -1372,6 +1376,17 @@ export class IncrementalEvaluator {
     }
 
     this.generation++;
+  }
+
+  /**
+   * Mark a note as dirty WITHOUT re-registration/invalidating its bytecode.
+   * Use for dependents whose values changed but bytecode didn't.
+   * (Parity with WasmIncrementalEvaluator.markDirtyOnly — module.js calls this
+   * for baseNote dependents and batch updates; without it those notes were
+   * silently never re-evaluated on the JS path.)
+   */
+  markDirtyOnly(noteId) {
+    this.dirty.add(noteId);
   }
 
   /**

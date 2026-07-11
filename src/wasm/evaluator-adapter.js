@@ -10,13 +10,52 @@ import { getWasm, isWasmAvailable } from './index.js';
 import { WASM_CONFIG, shouldUseWasm } from './config.js';
 import { BinaryEvaluator as JSBinaryEvaluator, IncrementalEvaluator as JSIncrementalEvaluator } from '../binary-evaluator.js';
 
+// Dev/A-B override: ?evaluator=js forces the JS path (and disables the
+// WASM hot-swap in module.js, since createEvaluator keeps returning JS).
+// ?evaluator=wasm opts in to the async evaluator hot-swap (P1) — kept
+// opt-in until the WASM wrapper's in-browser behavior is fully verified,
+// because the wrapper had never actually run in production before the
+// hot-swap existed (module creation always won the race against WASM init).
+const EVALUATOR_PARAM = (() => {
+  try {
+    return typeof location !== 'undefined'
+      ? new URLSearchParams(location.search).get('evaluator')
+      : null;
+  } catch {
+    return null;
+  }
+})();
+
+const FORCE_JS_EVALUATOR = EVALUATOR_PARAM === 'js';
+
+/**
+ * Whether module.js should hot-swap to the WASM evaluator when WASM
+ * finishes initializing. Currently opt-in (?evaluator=wasm); headless
+ * (Node) environments allow it so tests can exercise the swap.
+ */
+export function isEvaluatorHotSwapEnabled() {
+  if (FORCE_JS_EVALUATOR) return false;
+  if (typeof window === 'undefined') return true; // headless tests/benches
+  return EVALUATOR_PARAM === 'wasm';
+}
+
+/**
+ * Check whether an evaluator instance is WASM-backed
+ * @param {Object} evaluator
+ * @returns {boolean}
+ */
+export function isWasmBackedEvaluator(evaluator) {
+  return evaluator instanceof WasmPersistentEvaluatorWrapper ||
+         evaluator instanceof WasmEvaluatorWrapper;
+}
+
 /**
  * Create a binary evaluator using the appropriate implementation
  * @param {Object} module - The module to evaluate
  * @returns {Object} Evaluator instance
  */
 export function createEvaluator(module) {
-  if (shouldUseWasm('evaluator') && isWasmAvailable()) {
+  if (!FORCE_JS_EVALUATOR && shouldUseWasm('evaluator') && isWasmAvailable()) {
     const wasm = getWasm();
     try {
       // Use PersistentEvaluator if available and enabled

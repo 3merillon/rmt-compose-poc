@@ -671,7 +671,9 @@ export class PersistentEvaluator {
         }
     }
     /**
-     * Clear the entire cache
+     * Clear the entire cache and bytecode store
+     * This must clear bytecode_store because when a module is replaced (e.g., after reorder),
+     * notes with the same IDs may have different expressions/bytecode.
      */
     invalidateAll() {
         wasm.persistentevaluator_invalidateAll(this.__wbg_ptr);

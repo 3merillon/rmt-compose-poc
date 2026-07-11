@@ -15,10 +15,29 @@ import { isDSLSyntax, compileDSL, decompileToDSL } from './dsl/index.js';
 /**
  * Expression compiler that converts text expressions to binary bytecode
  */
+// Cap the compile cache. Drag/resize commits generate a fresh fraction
+// string per commit, so an unbounded cache grows without limit over a long
+// session. LRU eviction (Map keeps insertion order) keeps memory bounded
+// while retaining the hot working set.
+const COMPILE_CACHE_MAX = 4000;
+
 export class ExpressionCompiler {
   constructor() {
     // Cache compiled expressions to avoid recompiling
     this.cache = new Map();
+  }
+
+  /**
+   * Store a compiled expression, evicting the oldest entry when over cap.
+   * @private
+   */
+  _cacheSet(key, binary) {
+    if (this.cache.size >= COMPILE_CACHE_MAX && !this.cache.has(key)) {
+      // Evict least-recently-inserted entry (first key in iteration order).
+      const oldest = this.cache.keys().next().value;
+      if (oldest !== undefined) this.cache.delete(oldest);
+    }
+    this.cache.set(key, binary);
   }
 
   /**
@@ -34,15 +53,20 @@ export class ExpressionCompiler {
   compile(textExpr, varName = null) {
     // Check cache
     const cacheKey = textExpr;
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey).clone();
+    const cached = this.cache.has(cacheKey) ? this.cache.get(cacheKey) : null;
+    if (cached) {
+      // Mark as recently used (move to end of insertion order) so churny
+      // one-off expressions are evicted before the stable working set.
+      this.cache.delete(cacheKey);
+      this.cache.set(cacheKey, cached);
+      return cached.clone();
     }
 
     // Auto-detect and route to DSL compiler if appropriate
     if (isDSLSyntax(textExpr)) {
       try {
         const binary = compileDSL(textExpr);
-        this.cache.set(cacheKey, binary);
+        this._cacheSet(cacheKey, binary);
         return binary.clone();
       } catch (e) {
         // If DSL parsing fails, fall through to legacy parser
@@ -66,7 +90,7 @@ export class ExpressionCompiler {
       this.emitConstant(binary, 0, 1);
     }
 
-    this.cache.set(cacheKey, binary);
+    this._cacheSet(cacheKey, binary);
     return binary.clone();
   }
 

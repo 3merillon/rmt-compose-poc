@@ -30,6 +30,12 @@ export class Note {
       instrument: id === 0 ? 'sine-wave' : null,
     };
 
+    // Bumped whenever an expression changes; the module uses it (together
+    // with id and its own graph generation) to skip re-registering unchanged
+    // dependency sets in the graph on every markNoteDirty call.
+    this._depsEpoch = 0;
+    this._depsRegKey = null;
+
     // Initialize from variables (supports both legacy and new formats)
     this._initFromVariables(variables);
   }
@@ -170,6 +176,7 @@ export class Note {
         }
       } else if (value instanceof BinaryExpression) {
         this.expressions[name] = value;
+        this._depsEpoch++;
         this._notifyChange();
       }
       return;
@@ -182,6 +189,7 @@ export class Note {
   _setExpression(name, exprText) {
     try {
       this.expressions[name] = compiler.compile(exprText, name);
+      this._depsEpoch++;
       this._notifyChange();
     } catch (e) {
       console.warn(`Failed to compile expression for ${name}:`, e);
@@ -196,6 +204,7 @@ export class Note {
   _setExpressionSilent(name, exprText) {
     try {
       this.expressions[name] = compiler.compile(exprText, name);
+      this._depsEpoch++;
       this.lastModifiedTime = Date.now();
     } catch (e) {
       console.warn(`Failed to compile expression for ${name}:`, e);
@@ -322,11 +331,18 @@ export class Note {
 
   /**
    * Legacy: Access variables object (for compatibility)
-   * Creates a proxy that maps to the new structure
+   * Returns a proxy that maps to the new structure. The proxy (and the
+   * per-variable function wrappers) are created once per note and cached —
+   * this getter is on hot paths (renderer sync, drag commit, retargeting)
+   * and used to allocate a fresh Proxy on every single access.
    */
   get variables() {
+    if (this._variablesProxy) {
+      return this._variablesProxy;
+    }
     const note = this;
-    return new Proxy({}, {
+    const fnCache = new Map();
+    this._variablesProxy = new Proxy({}, {
       get(target, prop) {
         // Handle *String properties
         if (typeof prop === 'string' && prop.endsWith('String')) {
@@ -345,17 +361,21 @@ export class Note {
           // This is important because legacy code may call .toString() on the function
           // and try to extract the expression from it
           const varName = prop;
-          const fn = function() {
-            return note.getVariable(varName);
-          };
-          // Override toString to return a proper expression string that can be parsed
-          fn.toString = () => {
-            // Return the source expression if available, otherwise return a Fraction wrapper
-            const source = note.getExpressionSource(varName);
-            if (source) return source;
-            // Fallback: return a representation that indicates the variable name
-            return `module.getNoteById(${note.id}).getVariable('${varName}')`;
-          };
+          let fn = fnCache.get(varName);
+          if (!fn) {
+            fn = function() {
+              return note.getVariable(varName);
+            };
+            // Override toString to return a proper expression string that can be parsed
+            fn.toString = () => {
+              // Return the source expression if available, otherwise return a Fraction wrapper
+              const source = note.getExpressionSource(varName);
+              if (source) return source;
+              // Fallback: return a representation that indicates the variable name
+              return `module.getNoteById(${note.id}).getVariable('${varName}')`;
+            };
+            fnCache.set(varName, fn);
+          }
           return fn;
         }
         // Handle properties
@@ -403,5 +423,6 @@ export class Note {
         return undefined;
       }
     });
+    return this._variablesProxy;
   }
 }

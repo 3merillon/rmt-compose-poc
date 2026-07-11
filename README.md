@@ -6,6 +6,7 @@ A production-ready, GL-only composition tool built around rational number relati
 
 - Try it in your browser: https://www.rmt.world/
 - **New to RMT?** Check out the [Documentation](https://docs.rmt.world/) for guides and tutorials
+- **Contributing / continuing development?** See [ROADMAP.md](ROADMAP.md) — the living plan for performance, theming, arrow customization, the audio overhaul, the module-library expansion, and the MIT license migration.
 - Screenshot:
 
 ![RMT Compose screenshot](public/screenshot.png)
@@ -97,11 +98,16 @@ npm run preview
 
 ### WASM Build (Optional)
 
-To build the Rust/WASM core for enhanced performance:
+To build the Rust/WASM core for enhanced performance (also syncs the built
+artifacts into `src/wasm/`, which is the committed copy the app — and the
+Vercel deploy — actually uses):
 
 ```bash
-npm run build:wasm
+npm run wasm:build
 ```
+
+If you rebuilt the Rust crate some other way, sync the artifacts manually with
+`npm run wasm:sync` and commit the updated `src/wasm/rmt_core*` files.
 
 ## Controls and Workflow
 

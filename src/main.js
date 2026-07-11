@@ -77,6 +77,15 @@ async function initApp() {
     } catch (e) {
         console.error('Failed to load or initialize ./menu/index.js', e);
     }
+
+    // Perf harness (dev tool): only loaded with ?perf=1 in the URL
+    try {
+        if (new URLSearchParams(location.search).has('perf')) {
+            await import('./dev/perf-harness.js');
+        }
+    } catch (e) {
+        console.warn('perf harness failed to load', e);
+    }
     
     // Player is imported at top-level to ensure its DOMContentLoaded handler is registered before firing.
 
