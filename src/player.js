@@ -10,6 +10,8 @@ import { Workspace } from './renderer/webgl2/workspace.js';
 import { menuBar } from './menu/menu-bar.js';
 import { isDSLSyntax } from './dsl/index.js';
 import { escapeHtml } from './utils/html-escape.js';
+import { settingsStore } from './settings/settings-store.js';
+import { themeManager } from './theme/theme-manager.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -1100,6 +1102,49 @@ document.addEventListener('DOMContentLoaded', async function() {
                         selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
                     });
                 } catch {}
+
+                // Apply the persisted note-arrows toggle to the renderer, and
+                // keep it in sync with live Settings changes.
+                try {
+                    const applyArrowsEnabled = () => {
+                        try {
+                            const enabled = settingsStore.get('arrows.enabled') !== false;
+                            if (glWorkspace && glWorkspace.renderer) {
+                                glWorkspace.renderer.drawNoteArrows = enabled;
+                                glWorkspace.renderer.needsRedraw = true;
+                            }
+                        } catch {}
+                    };
+                    applyArrowsEnabled();
+                    eventBus.on('settings:changed', ({ path }) => {
+                        if (!path || path === 'arrows' || path.indexOf('arrows.enabled') === 0 || path === '') {
+                            applyArrowsEnabled();
+                        }
+                    });
+                } catch {}
+
+                // Theme system: apply CSS variables + note geometry from
+                // Settings → Appearance, re-syncing the renderer when geometry
+                // (height/border/corner) changes.
+                try {
+                    themeManager.init({
+                        renderer: glWorkspace.renderer,
+                        requestResync: () => {
+                            try {
+                                if (glWorkspace) {
+                                    glWorkspace.sync({
+                                        evaluatedNotes,
+                                        module: myModule,
+                                        xScaleFactor,
+                                        yScaleFactor,
+                                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
+                                    });
+                                }
+                                if (typeof createMeasureBars === 'function') createMeasureBars();
+                            } catch {}
+                        }
+                    });
+                } catch (e) { try { console.warn('theme init failed', e); } catch {} }
 
                 // No DOM viewport; Workspace camera owns zoom/pan
 
@@ -3544,8 +3589,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         const selectedNote = currentSelectedNote;
         const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
 
-        const factor = direction === 'up' ? { n: 2, d: 1 } :
-                       direction === 'down' ? { n: 1, d: 2 } : null;
+        // Arrow interval is user-configurable (Settings → Arrows). Defaults to
+        // the octave (up ×2/1, down ×1/2). When arrows are disabled entirely we
+        // ignore the change (defense in depth behind the UI gating).
+        let arrowsCfg;
+        try { arrowsCfg = settingsStore.get('arrows'); } catch { arrowsCfg = null; }
+        if (arrowsCfg && arrowsCfg.enabled === false) {
+            return;
+        }
+        const upR = (arrowsCfg && arrowsCfg.up) || { n: 2, d: 1 };
+        const downR = (arrowsCfg && arrowsCfg.down) || { n: 1, d: 2 };
+        const factor = direction === 'up' ? { n: upR.n, d: upR.d } :
+                       direction === 'down' ? { n: downR.n, d: downR.d } : null;
         if (!factor) {
             console.error(`Invalid direction: ${direction}`);
             return;

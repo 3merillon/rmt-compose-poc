@@ -10,6 +10,7 @@ import { decompileToDSL, isDSLSyntax, compileDSL } from '../dsl/index.js';
 import { ExpressionCompiler } from '../expression-compiler.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
 import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
+import { settingsStore } from '../settings/settings-store.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
 
 // Singleton compiler for safe evaluation
@@ -1178,12 +1179,27 @@ function buildInstrumentControl(value, note, externalFunctions) {
 }
 
 function addFrequencyOctaveButtons(parent, note) {
+  // Respect the Settings → Arrows toggle: when arrows are disabled, don't
+  // render the note-widget ▲/▼ buttons at all.
+  let arrowsCfg = null;
+  try { arrowsCfg = settingsStore.get('arrows'); } catch { arrowsCfg = null; }
+  if (arrowsCfg && arrowsCfg.enabled === false) {
+    return;
+  }
+  // Build a human-readable interval label for tooltips (e.g. "×3/2" / "×2/3").
+  const fmtRatio = (r) => {
+    if (!r) return '';
+    return r.d === 1 ? `×${r.n}` : `×${r.n}/${r.d}`;
+  };
+  const upLabel = arrowsCfg && arrowsCfg.up ? fmtRatio(arrowsCfg.up) : '×2';
+  const downLabel = arrowsCfg && arrowsCfg.down ? fmtRatio(arrowsCfg.down) : '×1/2';
+
   const container = document.createElement('div');
   container.style.display = 'flex';
   container.style.flexDirection = 'column';
   container.style.marginLeft = 'auto';
 
-  const mkBtn = (cls, text, dir) => {
+  const mkBtn = (cls, text, dir, tip) => {
     const btn = document.createElement('button');
     btn.className = `octave-button ${cls}`;
     Object.assign(btn.style, {
@@ -1202,6 +1218,7 @@ function addFrequencyOctaveButtons(parent, note) {
       marginBottom: cls.includes('up') ? '4px' : '0',
     });
     btn.textContent = text;
+    if (tip) btn.title = tip;
 
     // Harmonized hover effect: orange border + glow like duration icons
     btn.addEventListener('mouseenter', () => {
@@ -1223,8 +1240,8 @@ function addFrequencyOctaveButtons(parent, note) {
     return btn;
   };
 
-  const up = mkBtn('octave-up-widget', '▲', 'up');
-  const down = mkBtn('octave-down-widget', '▼', 'down');
+  const up = mkBtn('octave-up-widget', '▲', 'up', `Transpose up ${upLabel}`);
+  const down = mkBtn('octave-down-widget', '▼', 'down', `Transpose down ${downLabel}`);
 
   container.appendChild(up);
   container.appendChild(down);

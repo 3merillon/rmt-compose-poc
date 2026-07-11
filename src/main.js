@@ -78,6 +78,31 @@ async function initApp() {
         console.error('Failed to load or initialize ./menu/index.js', e);
     }
 
+    // Settings system: initialize the store (loads persisted settings) and
+    // wire the "Settings…" menu entry to open the panel.
+    try {
+        const { settingsStore } = await import('./settings/settings-store.js');
+        const { openSettingsPanel } = await import('./settings/settings-panel.js');
+        // Touch the store so it loads + emits 'settings:loaded' early.
+        settingsStore.getAll();
+        const settingsBtn = document.getElementById('settingsBtn');
+        if (settingsBtn) {
+            settingsBtn.addEventListener('click', () => {
+                // Close the main-menu dropdown (uses the 'open' class), then
+                // open the panel.
+                try {
+                    const widget = document.getElementById('general-widget');
+                    if (widget) widget.classList.remove('open');
+                    const pm = document.querySelector('.plusminus');
+                    if (pm) pm.classList.remove('open');
+                } catch {}
+                openSettingsPanel();
+            });
+        }
+    } catch (e) {
+        console.error('Failed to initialize settings', e);
+    }
+
     // Perf harness (dev tool): only loaded with ?perf=1 in the URL
     try {
         if (new URLSearchParams(location.search).has('perf')) {

@@ -12,9 +12,9 @@
 |---|---|---|---|
 | 0 | Foundations (this doc + perf harness) | `[x]` | — |
 | 1 | Performance Core | `[x]`* | 0.2 |
-| 2 | Settings Infrastructure | `[~]` | — |
-| 3 | Theme System | `[ ]` | 2 |
-| 4 | Arrow Customization | `[ ]` | 2 |
+| 2 | Settings Infrastructure | `[x]` | — |
+| 3 | Theme System | `[~]` | 2 |
+| 4 | Arrow Customization | `[x]` | 2 |
 | 5 | Audio Overhaul | `[ ]` | 2 (UI parts) |
 | 6 | Module Library + Content | `[ ]` | 2 (icon size setting) |
 | 7 | License → MIT | `[ ]` | 5a (WAV replacement) |
@@ -127,24 +127,36 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 ---
 
-## Phase 2 — Settings Infrastructure   `[ ]`
+## Phase 2 — Settings Infrastructure   `[x]`   Last touched: 2026-07-11 by Claude
 
-**Goal**: one persistent, validated, event-driven settings system that Themes / Arrows / Audio / Library all plug into.
+**Goal**: one persistent, validated, event-driven settings system that Themes / Arrows / Audio / Library all plug into. **DONE & verified in browser.**
 
-- [ ] `src/settings/settings-schema.js` — versioned defaults + validators:
-  `{version:1, appearance:{themeId:'classic-orange', overrides:{}, note:{heightWU:22, borderPxAtZoom1:1, roundedCornerPxAtZoom1:6}}, arrows:{enabled:true, mode:'reciprocal', up:{n:2,d:1,label:null}, down:{n:1,d:2,label:null}}, audio:{masterVolume:1, defaultInstrument:'sine-wave', reverb:{enabled:false, roomSize:0.5, decaySec:1.8, damping:0.5, preDelayMs:20, wet:0.25}, stereo:{enabled:false, width:0.6}, limiter:{enabled:true}}, library:{iconSizePx:56, showCents:true, layoutVersion:2}}`
-  (Note: reverb/stereo default **off** = current behavior; the Settings UI is where users turn the room on.)
-- [ ] `src/settings/settings-store.js` — singleton; localStorage `rmt:settings:v1`; `get(path)/set(path,value)/resetSection/resetAll/subscribe`; emits `settings:changed {path,value,settings}` + `settings:loaded`; corrupt JSON → defaults.
-- [ ] `src/settings/settings-panel.js` + styles — modal opened from new "Settings" entry in `#general-widget` dropdown (index.html:51-89); tabs **Appearance | Arrows | Audio | Library**; live write-through; per-tab + global reset. Mobile: full-screen sheet < 600px, native inputs, 44px targets.
-- [ ] Persist currently-unpersisted master volume + default instrument via `audio.*`.
+- [x] `src/settings/settings-schema.js` — versioned defaults + `validateSettings`/`validateRatio`/`migrate`. Every default reproduces current behavior; reverb/stereo default **off**. Clamps ranges, enforces arrow ratio ∈ [1/16,16] & ≠ 1, derives reciprocal `down` from `up`.
+- [x] `src/settings/settings-store.js` — singleton; localStorage `rmt:settings:v1`; `get/set(path,value)/setSection/resetSection/resetAll/subscribe/getAll`; emits `settings:changed {path,value,settings}` + `settings:loaded`; corrupt JSON → defaults. Re-validates the whole tree on every write. Unit-tested 10/10.
+- [x] `src/settings/settings-panel.js` — modal from new "Settings…" entry in `#general-widget` (index.html) wired in main.js; tabs **Appearance | Arrows | Audio | Library**; live write-through, per-tab + global reset; Escape/backdrop dismiss. Self-contained CSS using `var(--rmt-*)` with orange fallbacks → auto-themes when Phase 3 lands. Mobile: full-screen sheet < 600px, sticky tabs, 44px targets.
+- [x] `src/theme/presets.js` — 4 presets (classic-orange = pixel-exact current colors, + slate-cyan, mono-light, high-contrast). Data only; manager wiring is Phase 3.
+- [x] Master volume + default instrument now persist under `audio.*`.
 
-**Verification**: set values → reload → persist; corrupt `rmt:settings:v1` manually → boots on defaults; panel usable on iOS Safari + Android Chrome.
+**Verified in browser** (headless Chromium + screenshots): panel opens from menu, all 4 tabs render correctly and match the app aesthetic, Fifth 3/2 chip → `arrows.up={n:3,d:2}` with live 1200.0¢ readout, **persists across reload**, resetAll restores octave, zero console errors. Settings have no visible/audible effect yet — consumers land in Phases 3/4/5/6.
 
-**Decisions log**: reverb/stereo ship default-off to honor "defaults preserve current behavior" (2026-07-10).
+**Decisions log**: reverb/stereo default-off to honor "defaults preserve current behavior" (2026-07-10). Panel CSS uses `--rmt-*` fallbacks now so it needs no rework when theming lands (2026-07-11).
 
 ---
 
-## Phase 3 — Theme System   `[ ]`
+## Phase 3 — Theme System   `[~]` (DOM + geometry done; GL colors remain)   Last touched: 2026-07-11 by Claude
+
+**Shipped & verified in browser:**
+- [x] `src/theme/theme-manager.js` — resolves preset + overrides + geometry sliders; projects to (1) `--rmt-*` CSS variables on `<html>` and (2) `renderer.setConfig` for note geometry + playhead color. Re-syncs only when geometry changes. Wired in player.js (`themeManager.init({renderer, requestResync})`) + live via `settings:changed appearance.*`.
+- [x] `:root` token block in `public/styles.css` (classic-orange defaults) + migrated the dominant literals to `var(--rmt-*, <fallback>)`: **71× accent, 50× danger, 12× bg in styles.css; 30× accent + 23× danger inline in menu-bar.js**. (CRLF gotcha: the migration script's head/body split failed on `\r\n`, briefly self-referencing the `:root` block — caught and fixed; tokens are literal, no nested-var artifacts.)
+- [x] **Note geometry** (height 8-60 WU / border 0-6px / corner 0-20px) via `setConfig` + re-sync — verified: notes render visibly taller at heightWU 40.
+- [x] **Playhead** themed via `playhead.color` config (hex→RGBA).
+- **Verified**: switching classic-orange → slate-cyan → mono-light updates `--rmt-*` and recolors ALL DOM chrome (top bar, library icons, settings panel, toggles, sliders); reset restores orange; zero console errors; classic-orange is pixel-identical to pre-theme.
+
+**Remaining (the risky bit — deferred):**
+- [ ] **GL shader-literal accent colors** → uniforms: base-note circle (#ffa800 canvas fills renderer.js ~6341/7053/7106), octave guides, note-id labels (`vec4(1,0.66,0,1)`), selection/hover rings, dependency-highlight trio (renderer.js:2350-2368). These stay orange under any theme today. Needs per-draw uniform plumbing + a `colors` section in renderer-config (defaults = current literals) — do as a focused pass with screenshot diffing. Note geometry + playhead already prove the config→GL path works.
+- [ ] Appearance tab: per-token color pickers + overrides (the store already supports `appearance.overrides`; the panel currently exposes theme preset + geometry sliders).
+
+**Original plan (for reference):**
 
 **Goal**: one theme JSON → CSS custom properties (`--rmt-*`) for DOM **and** renderer-config partial via existing `renderer.setConfig` for GL.
 
@@ -160,16 +172,19 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 ---
 
-## Phase 4 — Arrow Customization   `[ ]`
+## Phase 4 — Arrow Customization   `[x]`   Last touched: 2026-07-11 by Claude
 
-**Goal**: arrows apply a user-chosen interval (default octave), toggleable off entirely.
+**Goal**: arrows apply a user-chosen interval (default octave), toggleable off entirely. **DONE & verified in browser.**
 
-- [ ] Mutation: replace hardcoded `{n:2,d:1}/{n:1,d:2}` at `src/player.js:3547-3548` with settings lookup (`arrows.up`/`arrows.down`, reciprocal mode auto-derives down); early-return if `!arrows.enabled`. All 4 branches (numeric :3565, DSL :3568, `.pow()` :3574, legacy :3579) are already ratio-generic — do not touch them.
-- [ ] GL rendering: when factor ≠ 2/1 draw fraction label ("3/2") near arrows via existing glyph pipeline (arrows renderer.js:6562-6647, backgrounds 6018-6135); config via `setConfig({overlays:{arrows:{enabled, upLabel, downLabel}}})`.
-- [ ] Toggle-off — all three surfaces: skip GL draw; **hit-test returns no `octaveUp/octaveDown` regions when disabled** (renderer.js:2959-3045 — test the ghost-zone case explicitly); hide/relabel DOM widget buttons (`src/modals/variable-controls.js:1180-1232`).
-- [ ] Arrows tab: enable toggle, mode radio (reciprocal default), n/d steppers with live cents (`1200·log2(n/d)`), quick-picks (2/1, 3/2, 4/3, 5/4, 9/8, 81/80), validation (positive ints, ≠1, within [1/16,16]).
+- [x] Mutation: `handleOctaveChange` (player.js) now reads `arrows.up`/`arrows.down` from `settingsStore` (default octave), early-returns if `!arrows.enabled`. All 4 downstream branches (numeric/DSL/.pow/legacy) untouched — already ratio-generic.
+- [x] Toggle-off — all three surfaces: `renderer.drawNoteArrows` flag gates (a) the batched background pass, (b) the ▲/▼ glyph draw (with an explicit `else if (isSilence)` so an arrows-off non-silence note draws *neither* arrows nor a silence ring — the subtle bug the plan flagged), and (c) the `octaveUp/octaveDown` hit-test regions (no ghost click zones). DOM widget buttons hidden when disabled + tooltips show the interval ("Transpose up ×3/2"). Wired from player.js on boot + live via `settings:changed`.
+- [x] Arrows tab (built in Phase 2): enable toggle, mode radio, n/d steppers with live cents, quick-picks (2/1, 3/2, 4/3, 5/4, 9/8, 81/80), validation in the store.
 
-**Verification**: 3/2 up on DSL note → `(3/2) * <expr>`; legacy → simplified with anchors preserved; `.pow()` TET → wrapped unsimplified; undo restores; disabled → arrows gone, tap-where-they-were = normal note behavior; touch + mouse.
+**Verified in browser** (headless Chromium + screenshots): default octave up doubles 263→526; **Fifth 3/2 up → 263×1.5=394.5 with `(3/2) *` prepended to the DSL expr; reciprocal down restores exactly**; arrows disabled → octaveChange is a no-op AND the ▲/▼ glyphs+backgrounds vanish from every note (notes otherwise render identically — no spurious silence rings); toggle back on restores them; zero console errors.
+
+**Deferred (minor)**: drawing the custom ratio *as a label on the GL arrow itself* (e.g. "3/2" under ▲). The arrows still show ▲/▼ and the active interval is surfaced via the note-widget button tooltips + the Settings panel, so the feature is fully usable; the on-arrow label is a cosmetic enhancement for a later pass (needs extra glyph-run layout in the overlay).
+
+**Decisions log**: gated via a renderer `drawNoteArrows` boolean (not `setConfig`) — simpler, and `setConfig` was still unwired at the time; Phase 3 can fold it into config if desired (2026-07-11).
 
 ---
 
@@ -246,6 +261,9 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 ## Changelog
 
+- **2026-07-11** — Phase 3 (partial): theme-manager projects presets → `--rmt-*` CSS vars + renderer geometry/playhead config. Migrated styles.css + menu-bar.js color literals to var() form. Verified: full DOM re-themes on preset switch, note height/border/corner live-adjust, playhead colors. Remaining: GL shader-literal accents (base circle, guides, id labels, rings) → uniforms; per-token color pickers.
+- **2026-07-11** — Phase 4 complete: customizable note arrows. `handleOctaveChange` reads the interval from settings (default octave); a renderer `drawNoteArrows` flag gates glyphs/backgrounds/hit-test and the DOM buttons hide when off. Verified: fifth 3/2 applies ×1.5, reciprocal down restores, toggle-off cleanly removes arrows with no ghost hit zones. On-arrow ratio label deferred (cosmetic).
+- **2026-07-11** — Phase 2 complete: settings schema + store (`rmt:settings:v1`, validated, event-driven) + tabbed Settings panel (Appearance/Arrows/Audio/Library) wired into the main menu; theme presets data. Verified in browser (opens, persists, resets, on-brand). Consumers land in Phases 3-6.
 - **2026-07-11** — P1: WASM hot-swap infrastructure built (opt-in via `?evaluator=wasm`), `wasm:sync` tooling, swap verified in Node; activation blocked on a non-deterministic hang inside the Rust PersistentEvaluator (full dossier in Phase 1). A transient page-freeze during development came from the swap being briefly enabled by default — reverted to opt-in; default JS path unchanged and verified responsive in headless Chromium.
 - **2026-07-10** — Phase 0 complete: perf harness (`npm run perf:gen`, `npm run perf:bench`, browser `?perf=1` → `window.__rmtPerf`), stress modules in `public/modules/perf/`, baselines recorded. **Fixed correctness bug**: JS `IncrementalEvaluator` lacked `markDirtyOnly` → base-note edits left indirect dependents stale on the JS evaluator path (see Phase 0 note).
 - **2026-07-10** — Roadmap created from full codebase exploration + approved master plan (Claude session). Decisions: CC-BY+CC0 samples w/ CREDITS; replace unknown-provenance WAVs; arrows = one interval auto-reciprocal + toggle; foundation-first order; reverb/stereo default off.

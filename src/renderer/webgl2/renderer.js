@@ -171,6 +171,11 @@ export class RendererAdapter {
     this.drawMeasureSolids = true;  // start/end vertical offset bars
     this.drawOctaveGuides = true;   // horizontal dotted lines + labels
 
+    // Per-note octave/interval arrows (▲/▼). User-toggleable via Settings →
+    // Arrows. Default true = current behavior. Gates the glyph draw, the
+    // batched background pass, and the octaveUp/octaveDown hit-test regions.
+    this.drawNoteArrows = true;
+
     // Base note fraction (numerator/denominator) rendering
     this.drawBaseFraction = true;
     this._baseFracNum = '1';
@@ -3024,7 +3029,9 @@ export class RendererAdapter {
       }
 
       // 2) Left octave arrow column regions (upper/lower halves)
-      if (!isSilence) {
+      // Gated on drawNoteArrows so disabling arrows also removes their click
+      // zones (otherwise invisible octaveUp/Down hits would remain).
+      if (!isSilence && this.drawNoteArrows) {
         // Match overlay sizing and slight overreach to avoid seam on the left
         const leftInner = -heX + borderCssExact;
         const targetBgWidth = Math.max(10, Math.round(hCss * (this._config?.overlays?.arrowColumnWidthFactor ?? 0.5) - borderCssExact));
@@ -6017,7 +6024,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
 
       // Batched octave arrow backgrounds (upper/lower halves), clipped to inner rounded-rect
       try {
-        if (this.tabMaskProgram && this.rectVAO && this.rectInstanceArrowRegionBuffer && this.instanceCount > 0) {
+        if (this.drawNoteArrows && this.tabMaskProgram && this.rectVAO && this.rectInstanceArrowRegionBuffer && this.instanceCount > 0) {
           const N = this.instanceCount;
           const needUpdateArrows =
             (this._lastArrowEpoch !== this._viewEpoch) ||
@@ -6560,10 +6567,11 @@ try {
         } catch {}
 
         // 3) Octave change arrows (▲ and ▼) with split left backgrounds; arrows centered in their halves
-        if (!isSilence) {
+        if (!isSilence && this.drawNoteArrows) {
           try {
             // Octave arrow backgrounds are drawn in a batched instanced pass above.
             // This per-note block intentionally does not draw backgrounds to avoid per-frame buffer uploads.
+            // (Gated on drawNoteArrows; silence handling stays in the isSilence branch below.)
 
             // Now draw the arrow glyphs centered within their halves
             const arrowFont = this.useGlyphCache ? Math.max(6, Math.round(hCss * 0.35)) : this._clampFontPx(Math.max(6, Math.round(hCss * 0.35))); // slightly smaller
@@ -6645,8 +6653,10 @@ try {
               }
             }
           } catch {}
-        } else {
+        } else if (isSilence) {
           // 3-alt) Silence: no octave arrows. Draw a rounded dashed ring using SDF so corners are rounded and thickness matches normal border.
+          // (Explicit isSilence guard: a non-silence note with arrows disabled
+          // must draw neither arrows nor a silence ring.)
           try {
             if (!batchSilenceRings && this.silenceDashRingProgram && this.rectVAO) {
               gl.useProgram(this.silenceDashRingProgram);

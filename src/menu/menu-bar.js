@@ -120,7 +120,7 @@ const menuAPI = (function() {
                                     Object.assign(icon.style, { background: '#888888', color: '#ffffff' });
                                     icon.setAttribute('data-load-failed', 'true');
                                     const warningIcon = document.createElement('div');
-                                    Object.assign(warningIcon.style, { position: 'absolute', bottom: '2px', left: '2px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#ff0000', zIndex: '5' });
+                                    Object.assign(warningIcon.style, { position: 'absolute', bottom: '2px', left: '2px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'var(--rmt-danger, #ff0000)', zIndex: '5' });
                                     warningIcon.title = 'Module data failed to load';
                                     icon.appendChild(warningIcon);
                                     const textContainer = icon.querySelector('div:first-child');
@@ -459,8 +459,8 @@ const menuAPI = (function() {
         labelIcon.setAttribute('data-category', category);
         Object.assign(labelIcon.style, {
             touchAction: 'none', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '1px solid #ffa800', borderRadius: '4px', padding: '0 8px', textTransform: 'uppercase',
-            fontFamily: "'Roboto Mono', monospace", color: '#ffa800', boxSizing: 'border-box',
+            border: '1px solid var(--rmt-accent, #ffa800)', borderRadius: '4px', padding: '0 8px', textTransform: 'uppercase',
+            fontFamily: "'Roboto Mono', monospace", color: 'var(--rmt-accent, #ffa800)', boxSizing: 'border-box',
             background: 'transparent', cursor: 'pointer', position: 'relative'
         });
         labelIcon.textContent = text;
@@ -480,19 +480,19 @@ const menuAPI = (function() {
             if (draggedElementType === 'category' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
-                Object.assign(this.style, { border: '1px dashed #ff0000', backgroundColor: 'rgba(255, 0, 0, 0.1)' });
+                Object.assign(this.style, { border: '1px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(255, 0, 0, 0.1)' });
             }
         });
         
         labelIcon.addEventListener('dragleave', function() {
             this.classList.remove('drag-over');
-            Object.assign(this.style, { border: '1px solid #ffa800', backgroundColor: 'transparent' });
+            Object.assign(this.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
         });
         
         labelIcon.addEventListener('drop', function(event) {
             event.preventDefault();
             this.classList.remove('drag-over');
-            Object.assign(this.style, { border: '1px solid #ffa800', backgroundColor: 'transparent' });
+            Object.assign(this.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
             if (draggedElementType === 'category' && draggedElement !== this) {
                 const draggedIndex = Array.from(categoryContainers).findIndex(container => 
                     container.querySelector('.category-label') === draggedElement);
@@ -526,7 +526,7 @@ const menuAPI = (function() {
             draggedElement = null;
             draggedElementType = null;
             document.querySelectorAll('.category-label').forEach(label => {
-                Object.assign(label.style, { border: '1px solid #ffa800', backgroundColor: 'transparent' });
+                Object.assign(label.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
             });
         });
 
@@ -550,7 +550,7 @@ const menuAPI = (function() {
                         position: 'fixed', width: 'auto', minWidth: '80px', height: '42px', padding: '0 8px',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontFamily: "'Roboto Mono', monospace", fontSize: '14px', textTransform: 'uppercase',
-                        color: '#ffa800', border: '1px solid #ffa800', borderRadius: '4px',
+                        color: 'var(--rmt-accent, #ffa800)', border: '1px solid var(--rmt-accent, #ffa800)', borderRadius: '4px',
                         boxShadow: '0 2px 6px rgba(0,0,0,0.5)', zIndex: '9999', pointerEvents: 'none',
                         opacity: '0.7', background: 'rgba(21, 21, 37, 0.8)'
                     });
@@ -579,11 +579,11 @@ const menuAPI = (function() {
                     const targetLabel = elemBelow ? elemBelow.closest('.category-label') : null;
                     document.querySelectorAll('.category-label').forEach(label => {
                         label.classList.remove('drag-over');
-                        Object.assign(label.style, { border: '1px solid #ffa800', backgroundColor: 'transparent' });
+                        Object.assign(label.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
                     });
                     if (targetLabel && targetLabel !== thisLabel) {
                         targetLabel.classList.add('drag-over');
-                        Object.assign(targetLabel.style, { border: '2px dashed #ff0000', backgroundColor: 'rgba(255, 0, 0, 0.1)' });
+                        Object.assign(targetLabel.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(255, 0, 0, 0.1)' });
                         const indicator = document.getElementById('drag-indicator');
                         if (indicator) indicator.textContent = 'Drop on: ' + targetLabel.getAttribute('data-category');
                     }
@@ -631,7 +631,7 @@ const menuAPI = (function() {
                 }
                 document.querySelectorAll('.category-label').forEach(label => {
                     label.classList.remove('drag-over');
-                    Object.assign(label.style, { border: '1px solid #ffa800', backgroundColor: 'transparent' });
+                    Object.assign(label.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
                 });
                 thisLabel.classList.remove('dragging');
                 thisLabel.style.opacity = '1';
@@ -653,7 +653,7 @@ const menuAPI = (function() {
         Object.assign(catDelete.style, {
             position: 'absolute', top: '0px', right: '0px', width: '14px', height: '14px',
             lineHeight: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center',
-            color: '#ff0000', background: 'transparent', cursor: 'pointer',
+            color: 'var(--rmt-danger, #ff0000)', background: 'transparent', cursor: 'pointer',
             zIndex: '12', pointerEvents: 'auto', transition: 'transform 0.2s, color 0.2s'
         });
         catDelete.title = 'Delete category';
@@ -699,7 +699,7 @@ const menuAPI = (function() {
             if (draggedElementType === 'module' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
-                Object.assign(this.style, { border: '2px dashed #ff0000', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
+                Object.assign(this.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
             }
         });
         
@@ -864,7 +864,7 @@ const menuAPI = (function() {
             width: '42px', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: "'Roboto Mono', monospace", fontSize: '8px', lineHeight: '1.2', color: '#151525',
             cursor: 'grab', touchAction: 'none', padding: '2px', boxSizing: 'border-box',
-            textAlign: 'center', wordWrap: 'break-word', overflow: 'hidden', background: '#ffa800',
+            textAlign: 'center', wordWrap: 'break-word', overflow: 'hidden', background: 'var(--rmt-accent, #ffa800)',
             position: 'relative', border: '1px solid transparent', transition: 'border-color 0.3s, box-shadow 0.3s'
         });
         moduleIcon.setAttribute('draggable', 'true');
@@ -884,7 +884,7 @@ const menuAPI = (function() {
         Object.assign(deleteButton.style, {
             position: 'absolute', top: '1px', right: '1px', width: '14px', height: '14px',
             lineHeight: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center',
-            color: '#ff0000', background: 'transparent', borderRadius: '0', cursor: 'pointer',
+            color: 'var(--rmt-danger, #ff0000)', background: 'transparent', borderRadius: '0', cursor: 'pointer',
             zIndex: '10', display: 'block', transition: 'transform 0.2s, color 0.2s', pointerEvents: 'auto'
         });
         
@@ -896,7 +896,7 @@ const menuAPI = (function() {
         moduleIcon.appendChild(deleteButton);
         
         moduleIcon.addEventListener('mouseenter', function() {
-            Object.assign(this.style, { borderColor: 'white', boxShadow: '0 0 5px #ffa800' });
+            Object.assign(this.style, { borderColor: 'white', boxShadow: '0 0 5px var(--rmt-accent, #ffa800)' });
             deleteButton.style.transform = 'scale(1.1)';
         });
         
@@ -913,7 +913,7 @@ const menuAPI = (function() {
             const warningIcon = document.createElement('div');
             Object.assign(warningIcon.style, {
                 position: 'absolute', bottom: '2px', left: '2px', width: '10px', height: '10px',
-                borderRadius: '50%', backgroundColor: '#ff0000', zIndex: '5'
+                borderRadius: '50%', backgroundColor: 'var(--rmt-danger, #ff0000)', zIndex: '5'
             });
             warningIcon.title = 'Module data failed to load';
             moduleIcon.appendChild(warningIcon);
@@ -973,13 +973,13 @@ const menuAPI = (function() {
             if (draggedElementType === 'module' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
-                Object.assign(this.style, { border: '2px dashed #ff0000', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
+                Object.assign(this.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
             }
         });
         
         moduleIcon.addEventListener('dragleave', function() {
             this.classList.remove('drag-over');
-            Object.assign(this.style, { border: '1px solid transparent', backgroundColor: '#ffa800' });
+            Object.assign(this.style, { border: '1px solid transparent', backgroundColor: 'var(--rmt-accent, #ffa800)' });
         });
         
         moduleIcon.addEventListener('drop', function(event) {
@@ -1010,7 +1010,7 @@ const menuAPI = (function() {
                 [sourceIcon, targetIcon].forEach(icon => {
                     icon.classList.remove('drag-over');
                     icon.style.border = '1px solid transparent';
-                    icon.style.backgroundColor = '#ffa800';
+                    icon.style.backgroundColor = 'var(--rmt-accent, #ffa800)';
                 });
 
                 saveUIStateToLocalStorage();
@@ -1038,7 +1038,7 @@ const menuAPI = (function() {
                 if (icon.classList.contains('empty-placeholder')) {
                     icon.style.border = '2px dashed #ffffff';
                 } else if (!icon.classList.contains('category-label')) {
-                    Object.assign(icon.style, { border: '1px solid transparent', backgroundColor: '#ffa800' });
+                    Object.assign(icon.style, { border: '1px solid transparent', backgroundColor: 'var(--rmt-accent, #ffa800)' });
                 }
             });
         });
@@ -1064,7 +1064,7 @@ const menuAPI = (function() {
                     Object.assign(ghost.style, {
                         position: 'fixed', width: '42px', height: '42px', display: 'flex',
                         alignItems: 'center', justifyContent: 'center', fontFamily: "'Roboto Mono', monospace",
-                        fontSize: '10px', background: '#ffa800', color: '#151525', borderRadius: '4px',
+                        fontSize: '10px', background: 'var(--rmt-accent, #ffa800)', color: '#151525', borderRadius: '4px',
                         boxShadow: '0 2px 6px rgba(0,0,0,0.5)', zIndex: '9999', pointerEvents: 'none', opacity: '0.5'
                     });
                     document.body.appendChild(ghost);
@@ -1079,7 +1079,7 @@ const menuAPI = (function() {
                             if (el.classList.contains('empty-placeholder')) {
                                 el.style.border = '2px dashed #ffffff';
                             } else {
-                                Object.assign(el.style, { border: '1px solid transparent', backgroundColor: '#ffa800' });
+                                Object.assign(el.style, { border: '1px solid transparent', backgroundColor: 'var(--rmt-accent, #ffa800)' });
                             }
                         }
                     });
@@ -1088,7 +1088,7 @@ const menuAPI = (function() {
                         if (targetIcon && targetIcon !== moduleIcon) {
                             targetIcon.classList.add('drag-over');
                             if (!targetIcon.classList.contains('category-label')) {
-                                Object.assign(targetIcon.style, { border: '2px dashed #ff0000', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
+                                Object.assign(targetIcon.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
                             }
                         }
                         const noteTarget = elemBelow.closest('[data-note-id]');
@@ -1106,7 +1106,7 @@ const menuAPI = (function() {
                         if (el.classList.contains('empty-placeholder')) {
                             el.style.border = '2px dashed #ffffff';
                         } else {
-                            Object.assign(el.style, { border: '1px solid transparent', backgroundColor: '#ffa800' });
+                            Object.assign(el.style, { border: '1px solid transparent', backgroundColor: 'var(--rmt-accent, #ffa800)' });
                         }
                     }
                 });
@@ -1190,12 +1190,12 @@ const menuAPI = (function() {
         const modal = document.createElement('div');
         modal.className = 'delete-confirm-modal';
         const message = document.createElement('p');
-        message.innerHTML = "This will <span style='color: #ff0000;'>remove any changes</span> to the UI, this action is <span style='color: #ff0000;'>irreversible</span>, are you sure you wish to proceed?";
+        message.innerHTML = "This will <span style='color: var(--rmt-danger, #ff0000);'>remove any changes</span> to the UI, this action is <span style='color: var(--rmt-danger, #ff0000);'>irreversible</span>, are you sure you wish to proceed?";
         const btnContainer = document.createElement('div');
         btnContainer.className = 'modal-btn-container';
         const yesButton = document.createElement('button');
         yesButton.textContent = 'Yes, Reload Defaults';
-        Object.assign(yesButton.style, { backgroundColor: '#ff0000', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
+        Object.assign(yesButton.style, { backgroundColor: 'var(--rmt-danger, #ff0000)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
         const cancelButton = document.createElement('button');
         cancelButton.textContent = 'Cancel';
         Object.assign(cancelButton.style, { backgroundColor: '#add8e6', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer' });
@@ -1217,12 +1217,12 @@ const menuAPI = (function() {
         modal.className = 'delete-confirm-modal';
         const message = document.createElement('p');
         // SECURITY: Escape moduleName to prevent XSS
-        message.innerHTML = `Are you sure you want to <span style='color: #ff0000;'>remove</span> the module "<span style='color: #ffa800;'>${escapeHtml(moduleName)}</span>" from the menu?`;
+        message.innerHTML = `Are you sure you want to <span style='color: var(--rmt-danger, #ff0000);'>remove</span> the module "<span style='color: var(--rmt-accent, #ffa800);'>${escapeHtml(moduleName)}</span>" from the menu?`;
         const btnContainer = document.createElement('div');
         btnContainer.className = 'modal-btn-container';
         const yesButton = document.createElement('button');
         yesButton.textContent = 'Yes, Remove';
-        Object.assign(yesButton.style, { backgroundColor: '#ff0000', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
+        Object.assign(yesButton.style, { backgroundColor: 'var(--rmt-danger, #ff0000)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
         const cancelButton = document.createElement('button');
         cancelButton.textContent = 'Cancel';
         Object.assign(cancelButton.style, { backgroundColor: '#add8e6', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer' });
@@ -1261,12 +1261,12 @@ const menuAPI = (function() {
         modal.className = 'delete-confirm-modal';
         const message = document.createElement('p');
         // SECURITY: Escape categoryName to prevent XSS
-        message.innerHTML = `Are you sure you want to <span style='color: #ff0000;'>remove</span> the category "<span style='color: #ffa800;'>${escapeHtml((categoryName || '').toUpperCase())}</span>" and all its icons from the menu?`;
+        message.innerHTML = `Are you sure you want to <span style='color: var(--rmt-danger, #ff0000);'>remove</span> the category "<span style='color: var(--rmt-accent, #ffa800);'>${escapeHtml((categoryName || '').toUpperCase())}</span>" and all its icons from the menu?`;
         const btnContainer = document.createElement('div');
         btnContainer.className = 'modal-btn-container';
         const yesButton = document.createElement('button');
         yesButton.textContent = 'Yes, Remove Category';
-        Object.assign(yesButton.style, { backgroundColor: '#ff0000', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
+        Object.assign(yesButton.style, { backgroundColor: 'var(--rmt-danger, #ff0000)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
         const cancelButton = document.createElement('button');
         cancelButton.textContent = 'Cancel';
         Object.assign(cancelButton.style, { backgroundColor: '#add8e6', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer' });
@@ -1404,7 +1404,7 @@ const menuAPI = (function() {
             });
             button.addEventListener('mouseenter', function() {
                 this.style.backgroundColor = color;
-                this.style.color = color === '#ff0000' ? '#fff' : '#151525';
+                this.style.color = color === 'var(--rmt-danger, #ff0000)' ? '#fff' : '#151525';
             });
             button.addEventListener('mouseleave', function() {
                 this.style.backgroundColor = 'transparent';
@@ -1414,8 +1414,8 @@ const menuAPI = (function() {
             return button;
         };
         
-        buttonsContainer.appendChild(createButton('Save UI', '#ffa800', saveUIState));
-        buttonsContainer.appendChild(createButton('Load UI', '#ffa800', loadUIState));
+        buttonsContainer.appendChild(createButton('Save UI', 'var(--rmt-accent, #ffa800)', saveUIState));
+        buttonsContainer.appendChild(createButton('Load UI', 'var(--rmt-accent, #ffa800)', loadUIState));
 
         const onAddCategory = () => {
             try {
@@ -1475,14 +1475,14 @@ const menuAPI = (function() {
             } catch (e) {}
         };
 
-        buttonsContainer.appendChild(createButton('Add Category', '#ffa800', onAddCategory));
-        buttonsContainer.appendChild(createButton('Reload Defaults', '#ff0000', showReloadDefaultsConfirmation));
+        buttonsContainer.appendChild(createButton('Add Category', 'var(--rmt-accent, #ffa800)', onAddCategory));
+        buttonsContainer.appendChild(createButton('Reload Defaults', 'var(--rmt-danger, #ff0000)', showReloadDefaultsConfirmation));
 
         // Drop mode toggle row (placed above buttons)
         const dropModeRow = document.createElement('div');
         Object.assign(dropModeRow.style, {
             display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-            marginTop: '18px', marginBottom: '4px', width: '100%', fontFamily: "'Roboto Mono', monospace", fontSize: '12px', color: '#ffa800'
+            marginTop: '18px', marginBottom: '4px', width: '100%', fontFamily: "'Roboto Mono', monospace", fontSize: '12px', color: 'var(--rmt-accent, #ffa800)'
         });
 
         const dropModeLabel = document.createElement('span');
@@ -1494,15 +1494,15 @@ const menuAPI = (function() {
             option.dataset.value = value;
             Object.assign(option.style, {
                 padding: '4px 8px', borderRadius: '3px', cursor: 'pointer',
-                border: '1px solid #ffa800', transition: 'background-color 0.2s, color 0.2s'
+                border: '1px solid var(--rmt-accent, #ffa800)', transition: 'background-color 0.2s, color 0.2s'
             });
             const updateStyle = () => {
                 if (moduleDropMode === value) {
-                    option.style.backgroundColor = '#ffa800';
+                    option.style.backgroundColor = 'var(--rmt-accent, #ffa800)';
                     option.style.color = '#151525';
                 } else {
                     option.style.backgroundColor = 'transparent';
-                    option.style.color = '#ffa800';
+                    option.style.color = 'var(--rmt-accent, #ffa800)';
                 }
             };
             updateStyle();
@@ -1511,11 +1511,11 @@ const menuAPI = (function() {
                 saveUIStateToLocalStorage();
                 dropModeRow.querySelectorAll('span[data-value]').forEach(opt => {
                     if (opt.dataset.value === moduleDropMode) {
-                        opt.style.backgroundColor = '#ffa800';
+                        opt.style.backgroundColor = 'var(--rmt-accent, #ffa800)';
                         opt.style.color = '#151525';
                     } else {
                         opt.style.backgroundColor = 'transparent';
-                        opt.style.color = '#ffa800';
+                        opt.style.color = 'var(--rmt-accent, #ffa800)';
                     }
                 });
             });
@@ -1538,7 +1538,7 @@ const menuAPI = (function() {
     function createSectionSeparator() {
         const separator = document.createElement('div');
         separator.classList.add('separator');
-        // Rely on CSS (.separator { height: 1px; border-bottom: 1px dotted #ffa800; })
+        // Rely on CSS (.separator { height: 1px; border-bottom: 1px dotted var(--rmt-accent, #ffa800); })
         // to draw a single line. Do not add a top border here to avoid double lines.
         Object.assign(separator.style, { width: '100%', opacity: '0.3', marginTop: '0px', marginBottom: '0px' });
         return separator;
@@ -1610,14 +1610,14 @@ const menuAPI = (function() {
             .icon { position: relative; }
             .icon > div:first-child { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0; }
             .icon.dragging, .category-label.dragging { opacity: 0.5; }
-            .icon.drag-over, .category-label.drag-over, .empty-placeholder.drag-over { border: 2px dashed #ff0000 !important; background-color: rgba(255, 0, 0, 0.1); }
+            .icon.drag-over, .category-label.drag-over, .empty-placeholder.drag-over { border: 2px dashed var(--rmt-danger, #ff0000) !important; background-color: rgba(255, 0, 0, 0.1); }
             .icons-wrapper { overflow-y: scroll; overflow-x: hidden; scrollbar-gutter: stable both-edges; }
             .empty-placeholder { display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
-            .empty-placeholder:hover { opacity: 1; border-color: #ffa800; background-color: rgba(255, 168, 0, 0.1); }
-            .module-delete-btn { position: absolute; top: 1px; right: 1px; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: #ff0000; background: transparent !important; border-radius: 0; cursor: pointer; z-index: 10; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
-            .module-delete-btn:hover { transform: scale(1.2); color: #ff0000; text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); background-color: transparent !important; }
-            .category-delete-btn { position: absolute; top: 0; right: 0; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: #ff0000; background: transparent !important; cursor: pointer; z-index: 12; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
-            .category-delete-btn:hover { transform: scale(1.2); color: #ff0000; text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); }
+            .empty-placeholder:hover { opacity: 1; border-color: var(--rmt-accent, #ffa800); background-color: rgba(255, 168, 0, 0.1); }
+            .module-delete-btn { position: absolute; top: 1px; right: 1px; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: var(--rmt-danger, #ff0000); background: transparent !important; border-radius: 0; cursor: pointer; z-index: 10; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
+            .module-delete-btn:hover { transform: scale(1.2); color: var(--rmt-danger, #ff0000); text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); background-color: transparent !important; }
+            .category-delete-btn { position: absolute; top: 0; right: 0; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: var(--rmt-danger, #ff0000); background: transparent !important; cursor: pointer; z-index: 12; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
+            .category-delete-btn:hover { transform: scale(1.2); color: var(--rmt-danger, #ff0000); text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); }
             .empty-placeholder { width: 42px; height: 42px; border: 2px dashed #ffffff; border-radius: 4px; box-sizing: border-box; background: transparent; cursor: pointer; margin: 2px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
             .category-label { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
             .icons-wrapper { -webkit-overflow-scrolling: touch; }
