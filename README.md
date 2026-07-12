@@ -310,12 +310,8 @@ Example: Chain notes up the 12-TET scale:
 
 ## License
 
-Relative Music Theory Personal Non-Commercial License (RMT-PNC) v1.0
+Released under the [MIT License](LICENSE.md) © 2026 Cyril Monkewitz.
 
-- Personal, non-commercial use only
-- Private modifications allowed (no distribution or hosting)
-- No redistribution of the app or its assets
-- Outputs (music, audio, video, MIDI, scores) may be shared non-commercially only
-- Public sharing requires attribution: "Made with Relative Music Theory (RMT) - https://cybercyril.com/"
-
-See full terms in LICENSE.md. For commercial licensing, email cyril.monkewitz@gmail.com
+Bundled media assets and dependencies carry their own licenses (fraction.js — MIT;
+VSCO-2 Community Edition samples — CC0; Roboto Mono — Apache-2.0). See
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full list.

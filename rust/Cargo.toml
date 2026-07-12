@@ -3,7 +3,7 @@ name = "rmt-core"
 version = "0.1.0"
 edition = "2021"
 description = "Rust/WASM core for RMT Compose - high-performance expression evaluation"
-license = "LicenseRef-RMT-PNC-1.0"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

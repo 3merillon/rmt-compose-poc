@@ -25,5 +25,5 @@
     "vitepress": "^1.6.4"
   },
   "author": "Cyril Monkewitz",
-  "license": "LicenseRef-RMT-PNC-1.0"
+  "license": "MIT"
 }

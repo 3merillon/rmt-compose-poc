@@ -17,7 +17,7 @@
 | 4 | Arrow Customization | `[x]` | 2 |
 | 5 | Audio Overhaul | `[x]` | 2 (UI parts) |
 | 6 | Module Library + Content | `[ ]` | 2 (icon size setting) |
-| 7 | License → MIT | `[ ]` (unblocked — 5a done: WAVs replaced with CC0 samples) | 5a (WAV replacement) |
+| 7 | License → MIT | `[x]` | 5a (WAV replacement) |
 | 8 | Performance Round 2 | `[ ]` | 0.2 |
 | 9 | Docs Sweep | `[ ]` | incremental per phase |
 
@@ -242,14 +242,16 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 ---
 
-## Phase 7 — License → MIT   `[ ]`   (blocked by 5a)
+## Phase 7 — License → MIT   `[x]`   Last touched: 2026-07-12 by Claude
 
-- [ ] Audit remaining binaries (fonts: Roboto Mono = Apache-2.0 via Google Fonts, fine).
-- [ ] `LICENSE.md` → MIT (© 2026 Cyril Monkewitz); `package.json` `"license":"MIT"`; README §License; `index.html:85-87` footer + `public/license.html` (keep URL alive); `docs/index.md` wording.
-- [ ] `THIRD_PARTY_NOTICES.md`: fraction.js (MIT), Salamander (CC-BY-3.0 attribution), VSCO2 CE (CC0), fonts. Code = MIT; media assets carry listed licenses.
-- [ ] Repo-wide purge of `RMT-PNC`/`LicenseRef` strings. No per-file headers.
+**DONE.** Relicensed the whole project to the **MIT License** (© 2026 Cyril Monkewitz), replacing the previous bespoke personal-use license.
 
-**Verification**: `grep -ri "PNC\|non-commercial\|LicenseRef"` → zero hits; `npm pkg get license` = "MIT".
+- [x] Audited bundled binaries/fonts: app UI font Roboto Mono (Apache-2.0, loaded from Google Fonts at runtime, not redistributed); sampled instruments VSCO-2 CE (CC0); no other shipped binaries carry obligations.
+- [x] MIT text in `LICENSE.md`, `rust/LICENSE.md`, and `public/license.html` (URL kept alive, now renders MIT). License fields set to `MIT` in `package.json`, `package-lock.json`, and `rust/Cargo.toml`. README §License rewritten; `index.html` footer link relabelled "License (MIT)"; docs footer (`docs/.vitepress/config.ts`) + `docs/user-guide/interface/top-bar.md` updated. (`docs/index.md` carries no license wording — the docs-visible string is the VitePress footer.)
+- [x] Added `THIRD_PARTY_NOTICES.md`: fraction.js (MIT), VSCO-2 CE samples (CC0, see `public/samples/CREDITS.md`), Roboto Mono (Apache-2.0), plus a docs-build note (VitePress MIT / Inter OFL). Code = MIT; media assets carry their listed licenses. No per-file headers. **Note:** the earlier plan named Salamander (CC-BY) for the piano, but both instruments ended up sourced from VSCO-2 CE (CC0) in Phase 5a, so there is no attribution obligation.
+- [x] Repo-wide purge of the previous license's identifier tokens — including this document, which was reworded so the verification grep is genuinely clean.
+
+**Verification**: the old license's identifier tokens no longer appear anywhere in the repo; `npm pkg get license` = `"MIT"`. Confirmed 2026-07-12.
 
 ---
 
@@ -273,6 +275,7 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 ## Changelog
 
+- **2026-07-12** — **Phase 7 COMPLETE** (License → MIT). Relicensed the project to the MIT License (© 2026 Cyril Monkewitz), replacing the previous bespoke personal-use license. Rewrote `LICENSE.md`, `rust/LICENSE.md`, and `public/license.html` (URL kept alive) to MIT text; set the `license` field to `MIT` in `package.json`, `package-lock.json`, and `rust/Cargo.toml`; rewrote README §License; relabelled the `index.html` footer link and the docs footer + top-bar reference. Added `THIRD_PARTY_NOTICES.md` (fraction.js MIT; VSCO-2 CE samples CC0; Roboto Mono Apache-2.0; + a VitePress/Inter docs-build note). Media assets keep their own licenses; app + engine code is MIT. This document's Phase 7 section was reworded so no trace of the old license identifier remains anywhere in the repo (`npm pkg get license` → `MIT`).
 - **2026-07-12** — **Phase 5a COMPLETE** (sample replacement → Phase 7 unblocked), verified in browser. Replaced the two unknown-provenance WAVs (both embedded "Downloaded from Samplefocus.com"; violin also "WavePad Trial") with **VSCO2 Community Edition (CC0)** multisamples: `piano` (Upright Nr1, 14 zones) + `violin` (Solo Violin Arco Vib, 15 zones), mono AAC, **1.3 MB** total. New `src/instruments/multisample-instrument.js` (manifest-only fetch at registration, lazy per-zone decode, `prepare(freqs)` zone preload wired into `preparePlayback`, nearest-zone pitch-shift, network-fail oscillator fallback, velocity-ready manifest schema). New reproducible `scripts/build-samples.mjs` (`npm run samples:build`; VSCO-2-CE GitHub tree → download → ffmpeg mono/trim/cap/AAC). Deleted `public/instruments/samples/*.wav`. **Decision (user):** both instruments from VSCO2 CC0 (piano changed from Salamander CC-BY) for a uniform license + no 488 MB build download. Known limitation: no sample looping yet (long held notes cut at the ~3.5 s source cap).
 - **2026-07-12** — **Phase 5b COMPLETE** (Audio signal graph + reverb + synth quality), verified in headless Chromium. New `audio-graph.js` (per-instrument buses, reverb send/return, pitch pan, configured −6/6/12 limiter, single `audio.*` settings consumer) + `reverb.js` (algorithmic OfflineAudioContext IR, decorrelated stereo, damping LP sweep, debounced+token-guarded regen). Rewrote `_scheduleNote` (voice→gain→panner→bus, stop-past-zero). Synth overhaul: shared click-free `applyVoiceEnvelope`, `makeVoice` wrapper (fixes sample onended/disconnect leak), saw/square unison+detune+tracked LP, new `fm-epiano`. Wired the whole Audio tab live (master vol persists via transport slider; reverb/stereo/limiter). Default instrument now reaches inheritance (base note id 0 instrument → null → resolves to `audio.defaultInstrument`). **Decisions this pass (user):** reverb **ON** by default (reverses the earlier default-off call), limiter ON, stereo OFF; "Wet/dry" relabeled "Reverb amount". **15-agent adversarial review** caught + fixed: cancelScheduledValues-without-anchor clicks (pauseFade + setMasterVolume) and an uncancelable pause-fade `stopAll` that raced a quick pause→play. Dev-server note: rapid HMR after edits intermittently strands the module-load boot path (getModule() null) — restart the dev server after a batch of edits before browser-verifying.
 - **2026-07-12** — Theme fix: Note-border color now applies to ALL notes + silence rings (main note-body border uniform at renderer ~2273 and silence-ring borders were hardcoded #636363 grey; only the base circle was themed). Dead `borderOnlyProgram` left as-is.

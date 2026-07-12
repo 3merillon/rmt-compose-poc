@@ -116,7 +116,7 @@ At the bottom of the menu:
 |------|-------------|
 | **Documentation** | Full documentation site (docs.rmt.world) |
 | **Donate** | Support the project (Stripe) |
-| **License** | View the RMT-PNC license |
+| **License** | View the MIT license |
 
 ## Keyboard Shortcuts
 

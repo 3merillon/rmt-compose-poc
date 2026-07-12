@@ -262,7 +262,7 @@ export default defineConfig({
     ],
 
     footer: {
-      message: 'Released under the RMT Personal Non-Commercial License',
+      message: 'Released under the MIT License',
       copyright: 'Copyright 2026-present Cyril Monkewitz'
     },
 
