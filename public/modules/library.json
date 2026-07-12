@@ -1,0 +1,888 @@
+{
+  "version": 2,
+  "sections": [
+    {
+      "id": "intervals",
+      "label": "Intervals",
+      "items": [
+        {
+          "file": "intervals/1-1.json",
+          "name": "Unison",
+          "ratio": "1/1",
+          "cents": 0,
+          "family": "3-limit",
+          "tags": [
+            "P1",
+            "unison",
+            "prime"
+          ]
+        },
+        {
+          "file": "intervals/9-8.json",
+          "name": "Major 2nd",
+          "ratio": "9/8",
+          "cents": 203.91,
+          "family": "3-limit",
+          "tags": [
+            "M2",
+            "whole tone",
+            "pythagorean"
+          ]
+        },
+        {
+          "file": "intervals/32-27.json",
+          "name": "Pythagorean minor 3rd",
+          "ratio": "32/27",
+          "cents": 294.135,
+          "family": "3-limit",
+          "tags": [
+            "m3",
+            "pythagorean"
+          ]
+        },
+        {
+          "file": "intervals/81-64.json",
+          "name": "Pythagorean major 3rd",
+          "ratio": "81/64",
+          "cents": 407.82,
+          "family": "3-limit",
+          "tags": [
+            "M3",
+            "ditone",
+            "pythagorean"
+          ]
+        },
+        {
+          "file": "intervals/4-3.json",
+          "name": "Perfect 4th",
+          "ratio": "4/3",
+          "cents": 498.045,
+          "family": "3-limit",
+          "tags": [
+            "P4",
+            "perfect"
+          ]
+        },
+        {
+          "file": "intervals/729-512.json",
+          "name": "Pythagorean tritone",
+          "ratio": "729/512",
+          "cents": 611.73,
+          "family": "3-limit",
+          "tags": [
+            "tritone",
+            "A4",
+            "pythagorean"
+          ]
+        },
+        {
+          "file": "intervals/3-2.json",
+          "name": "Perfect 5th",
+          "ratio": "3/2",
+          "cents": 701.955,
+          "family": "3-limit",
+          "tags": [
+            "P5",
+            "perfect",
+            "fifth"
+          ]
+        },
+        {
+          "file": "intervals/27-16.json",
+          "name": "Pythagorean major 6th",
+          "ratio": "27/16",
+          "cents": 905.865,
+          "family": "3-limit",
+          "tags": [
+            "M6",
+            "pythagorean"
+          ]
+        },
+        {
+          "file": "intervals/16-9.json",
+          "name": "Pythagorean minor 7th",
+          "ratio": "16/9",
+          "cents": 996.09,
+          "family": "3-limit",
+          "tags": [
+            "m7",
+            "pythagorean"
+          ]
+        },
+        {
+          "file": "intervals/243-128.json",
+          "name": "Pythagorean major 7th",
+          "ratio": "243/128",
+          "cents": 1109.775,
+          "family": "3-limit",
+          "tags": [
+            "M7",
+            "pythagorean"
+          ]
+        },
+        {
+          "file": "intervals/2-1.json",
+          "name": "Octave",
+          "ratio": "2/1",
+          "cents": 1200,
+          "family": "3-limit",
+          "tags": [
+            "P8",
+            "octave"
+          ]
+        },
+        {
+          "file": "intervals/16-15.json",
+          "name": "Just minor 2nd",
+          "ratio": "16/15",
+          "cents": 111.731,
+          "family": "5-limit",
+          "tags": [
+            "m2",
+            "diatonic semitone"
+          ]
+        },
+        {
+          "file": "intervals/10-9.json",
+          "name": "Minor whole tone",
+          "ratio": "10/9",
+          "cents": 182.404,
+          "family": "5-limit",
+          "tags": [
+            "M2",
+            "minor tone"
+          ]
+        },
+        {
+          "file": "intervals/6-5.json",
+          "name": "Just minor 3rd",
+          "ratio": "6/5",
+          "cents": 315.641,
+          "family": "5-limit",
+          "tags": [
+            "m3",
+            "minor third"
+          ]
+        },
+        {
+          "file": "intervals/5-4.json",
+          "name": "Just major 3rd",
+          "ratio": "5/4",
+          "cents": 386.314,
+          "family": "5-limit",
+          "tags": [
+            "M3",
+            "major third"
+          ]
+        },
+        {
+          "file": "intervals/45-32.json",
+          "name": "Just augmented 4th",
+          "ratio": "45/32",
+          "cents": 590.224,
+          "family": "5-limit",
+          "tags": [
+            "A4",
+            "tritone"
+          ]
+        },
+        {
+          "file": "intervals/64-45.json",
+          "name": "Just diminished 5th",
+          "ratio": "64/45",
+          "cents": 609.776,
+          "family": "5-limit",
+          "tags": [
+            "d5",
+            "tritone"
+          ]
+        },
+        {
+          "file": "intervals/8-5.json",
+          "name": "Just minor 6th",
+          "ratio": "8/5",
+          "cents": 813.686,
+          "family": "5-limit",
+          "tags": [
+            "m6"
+          ]
+        },
+        {
+          "file": "intervals/5-3.json",
+          "name": "Just major 6th",
+          "ratio": "5/3",
+          "cents": 884.359,
+          "family": "5-limit",
+          "tags": [
+            "M6"
+          ]
+        },
+        {
+          "file": "intervals/9-5.json",
+          "name": "Just minor 7th",
+          "ratio": "9/5",
+          "cents": 1017.596,
+          "family": "5-limit",
+          "tags": [
+            "m7"
+          ]
+        },
+        {
+          "file": "intervals/15-8.json",
+          "name": "Just major 7th",
+          "ratio": "15/8",
+          "cents": 1088.269,
+          "family": "5-limit",
+          "tags": [
+            "M7"
+          ]
+        },
+        {
+          "file": "intervals/8-7.json",
+          "name": "Septimal whole tone",
+          "ratio": "8/7",
+          "cents": 231.174,
+          "family": "7-limit",
+          "tags": [
+            "supermajor 2nd",
+            "septimal"
+          ]
+        },
+        {
+          "file": "intervals/7-6.json",
+          "name": "Septimal minor 3rd",
+          "ratio": "7/6",
+          "cents": 266.871,
+          "family": "7-limit",
+          "tags": [
+            "subminor 3rd",
+            "septimal"
+          ]
+        },
+        {
+          "file": "intervals/9-7.json",
+          "name": "Septimal major 3rd",
+          "ratio": "9/7",
+          "cents": 435.084,
+          "family": "7-limit",
+          "tags": [
+            "supermajor 3rd",
+            "septimal"
+          ]
+        },
+        {
+          "file": "intervals/7-5.json",
+          "name": "Septimal tritone",
+          "ratio": "7/5",
+          "cents": 582.512,
+          "family": "7-limit",
+          "tags": [
+            "lesser tritone",
+            "septimal"
+          ]
+        },
+        {
+          "file": "intervals/10-7.json",
+          "name": "Septimal tritone (wide)",
+          "ratio": "10/7",
+          "cents": 617.488,
+          "family": "7-limit",
+          "tags": [
+            "greater tritone",
+            "septimal"
+          ]
+        },
+        {
+          "file": "intervals/14-9.json",
+          "name": "Septimal minor 6th",
+          "ratio": "14/9",
+          "cents": 764.916,
+          "family": "7-limit",
+          "tags": [
+            "subminor 6th",
+            "septimal"
+          ]
+        },
+        {
+          "file": "intervals/32-21.json",
+          "name": "Septimal narrow 5th",
+          "ratio": "32/21",
+          "cents": 729.219,
+          "family": "7-limit",
+          "tags": [
+            "septimal",
+            "subfifth"
+          ]
+        },
+        {
+          "file": "intervals/7-4.json",
+          "name": "Harmonic 7th",
+          "ratio": "7/4",
+          "cents": 968.826,
+          "family": "7-limit",
+          "tags": [
+            "septimal minor 7th",
+            "subminor 7th",
+            "septimal"
+          ]
+        },
+        {
+          "file": "intervals/12-7.json",
+          "name": "Septimal major 6th",
+          "ratio": "12/7",
+          "cents": 933.129,
+          "family": "7-limit",
+          "tags": [
+            "supermajor 6th",
+            "septimal"
+          ]
+        },
+        {
+          "file": "intervals/63-32.json",
+          "name": "Septimal major 7th",
+          "ratio": "63/32",
+          "cents": 1172.736,
+          "family": "7-limit",
+          "tags": [
+            "septimal"
+          ]
+        },
+        {
+          "file": "intervals/11-8.json",
+          "name": "Undecimal tritone",
+          "ratio": "11/8",
+          "cents": 551.318,
+          "family": "higher",
+          "tags": [
+            "11-limit",
+            "11th harmonic",
+            "semiaugmented 4th"
+          ]
+        },
+        {
+          "file": "intervals/11-9.json",
+          "name": "Undecimal neutral 3rd",
+          "ratio": "11/9",
+          "cents": 347.408,
+          "family": "higher",
+          "tags": [
+            "11-limit",
+            "neutral third"
+          ]
+        },
+        {
+          "file": "intervals/11-6.json",
+          "name": "Undecimal neutral 7th",
+          "ratio": "11/6",
+          "cents": 1049.363,
+          "family": "higher",
+          "tags": [
+            "11-limit",
+            "neutral seventh"
+          ]
+        },
+        {
+          "file": "intervals/13-8.json",
+          "name": "Tridecimal neutral 6th",
+          "ratio": "13/8",
+          "cents": 840.528,
+          "family": "higher",
+          "tags": [
+            "13-limit",
+            "13th harmonic"
+          ]
+        },
+        {
+          "file": "intervals/13-9.json",
+          "name": "Tridecimal diminished 5th",
+          "ratio": "13/9",
+          "cents": 636.618,
+          "family": "higher",
+          "tags": [
+            "13-limit",
+            "tridecimal"
+          ]
+        },
+        {
+          "file": "intervals/13-12.json",
+          "name": "Tridecimal neutral 2nd",
+          "ratio": "13/12",
+          "cents": 138.573,
+          "family": "higher",
+          "tags": [
+            "13-limit",
+            "neutral second"
+          ]
+        },
+        {
+          "file": "intervals/17-16.json",
+          "name": "17th harmonic",
+          "ratio": "17/16",
+          "cents": 104.955,
+          "family": "higher",
+          "tags": [
+            "17-limit",
+            "minor second"
+          ]
+        },
+        {
+          "file": "intervals/19-16.json",
+          "name": "19th harmonic",
+          "ratio": "19/16",
+          "cents": 297.513,
+          "family": "higher",
+          "tags": [
+            "19-limit",
+            "minor third"
+          ]
+        },
+        {
+          "file": "intervals/23-16.json",
+          "name": "23rd harmonic",
+          "ratio": "23/16",
+          "cents": 628.274,
+          "family": "higher",
+          "tags": [
+            "23-limit"
+          ]
+        },
+        {
+          "file": "intervals/81-80.json",
+          "name": "Syntonic comma",
+          "ratio": "81/80",
+          "cents": 21.506,
+          "family": "comma",
+          "tags": [
+            "comma",
+            "didymus"
+          ]
+        },
+        {
+          "file": "intervals/64-63.json",
+          "name": "Septimal comma",
+          "ratio": "64/63",
+          "cents": 27.264,
+          "family": "comma",
+          "tags": [
+            "comma",
+            "archytas"
+          ]
+        },
+        {
+          "file": "intervals/128-125.json",
+          "name": "Enharmonic diesis",
+          "ratio": "128/125",
+          "cents": 41.059,
+          "family": "comma",
+          "tags": [
+            "diesis",
+            "lesser diesis"
+          ]
+        },
+        {
+          "file": "intervals/531441-524288.json",
+          "name": "Pythagorean comma",
+          "ratio": "531441/524288",
+          "cents": 23.46,
+          "family": "comma",
+          "tags": [
+            "comma",
+            "ditonic"
+          ]
+        },
+        {
+          "file": "intervals/2048-2025.json",
+          "name": "Diaschisma",
+          "ratio": "2048/2025",
+          "cents": 19.553,
+          "family": "comma",
+          "tags": [
+            "comma"
+          ]
+        },
+        {
+          "file": "intervals/32805-32768.json",
+          "name": "Schisma",
+          "ratio": "32805/32768",
+          "cents": 1.954,
+          "family": "comma",
+          "tags": [
+            "comma"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chords",
+      "label": "Chords",
+      "items": [
+        {
+          "file": "chords/major.json",
+          "name": "Major",
+          "ratio": "4:5:6",
+          "family": "chord",
+          "tags": [
+            "triad",
+            "major"
+          ]
+        },
+        {
+          "file": "chords/minor.json",
+          "name": "Minor",
+          "ratio": "10:12:15",
+          "family": "chord",
+          "tags": [
+            "triad",
+            "minor"
+          ]
+        },
+        {
+          "file": "chords/dom7.json",
+          "name": "Dominant 7th",
+          "ratio": "36:45:54:64",
+          "family": "chord",
+          "tags": [
+            "seventh",
+            "dominant"
+          ]
+        },
+        {
+          "file": "chords/harm7.json",
+          "name": "Harmonic 7th",
+          "ratio": "4:5:6:7",
+          "family": "chord",
+          "tags": [
+            "seventh",
+            "septimal",
+            "barbershop",
+            "4:5:6:7"
+          ]
+        },
+        {
+          "file": "chords/min7.json",
+          "name": "Minor 7th",
+          "ratio": "10:12:15:18",
+          "family": "chord",
+          "tags": [
+            "seventh",
+            "minor"
+          ]
+        },
+        {
+          "file": "chords/maj7.json",
+          "name": "Major 7th",
+          "ratio": "8:10:12:15",
+          "family": "chord",
+          "tags": [
+            "seventh",
+            "major"
+          ]
+        },
+        {
+          "file": "chords/dim.json",
+          "name": "Diminished",
+          "ratio": "5:6:7",
+          "family": "chord",
+          "tags": [
+            "triad",
+            "diminished",
+            "septimal"
+          ]
+        },
+        {
+          "file": "chords/aug.json",
+          "name": "Augmented",
+          "ratio": "16:20:25",
+          "family": "chord",
+          "tags": [
+            "triad",
+            "augmented"
+          ]
+        },
+        {
+          "file": "chords/sus4.json",
+          "name": "Sus4",
+          "ratio": "6:8:9",
+          "family": "chord",
+          "tags": [
+            "suspended",
+            "sus4"
+          ]
+        },
+        {
+          "file": "chords/base3.json",
+          "name": "Base-3 chord",
+          "ratio": "3:5:7:9",
+          "family": "chord",
+          "tags": [
+            "rmt",
+            "harmonic",
+            "3:5:7:9",
+            "odd"
+          ]
+        },
+        {
+          "file": "chords/base5.json",
+          "name": "Base-5 chord",
+          "ratio": "5:7:9:11",
+          "family": "chord",
+          "tags": [
+            "rmt",
+            "harmonic",
+            "5:7:9:11",
+            "odd"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "progressions",
+      "label": "Progressions",
+      "items": [
+        {
+          "file": "progressions/V7-I.json",
+          "name": "V7 – I",
+          "family": "progression",
+          "tags": [
+            "progression",
+            "dominant",
+            "authentic"
+          ]
+        },
+        {
+          "file": "progressions/ii-V-I.json",
+          "name": "ii – V – I",
+          "family": "progression",
+          "tags": [
+            "progression",
+            "cadential"
+          ]
+        },
+        {
+          "file": "progressions/I-IV-V-I.json",
+          "name": "I – IV – V – I",
+          "family": "progression",
+          "tags": [
+            "progression",
+            "primary"
+          ]
+        },
+        {
+          "file": "progressions/I-vi-IV-V.json",
+          "name": "I – vi – IV – V",
+          "family": "progression",
+          "tags": [
+            "progression",
+            "doo-wop",
+            "50s"
+          ]
+        },
+        {
+          "file": "progressions/authentic-cadence.json",
+          "name": "Authentic (V–I)",
+          "family": "cadence",
+          "tags": [
+            "cadence",
+            "authentic",
+            "perfect"
+          ]
+        },
+        {
+          "file": "progressions/plagal-cadence.json",
+          "name": "Plagal (IV–I)",
+          "family": "cadence",
+          "tags": [
+            "cadence",
+            "plagal",
+            "amen"
+          ]
+        },
+        {
+          "file": "progressions/deceptive-cadence.json",
+          "name": "Deceptive (V–vi)",
+          "family": "cadence",
+          "tags": [
+            "cadence",
+            "deceptive",
+            "interrupted"
+          ]
+        },
+        {
+          "file": "progressions/half-cadence.json",
+          "name": "Half (I–V)",
+          "family": "cadence",
+          "tags": [
+            "cadence",
+            "half",
+            "imperfect"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "melodies",
+      "label": "Melodies",
+      "items": [
+        {
+          "file": "melodies/ode-to-joy.json",
+          "name": "Ode to Joy",
+          "family": "melody",
+          "tags": [
+            "beethoven",
+            "classical",
+            "major",
+            "public-domain"
+          ]
+        },
+        {
+          "file": "melodies/twinkle.json",
+          "name": "Twinkle Twinkle",
+          "family": "melody",
+          "tags": [
+            "nursery",
+            "major",
+            "public-domain"
+          ]
+        },
+        {
+          "file": "melodies/frere-jacques.json",
+          "name": "Frère Jacques",
+          "family": "melody",
+          "tags": [
+            "canon",
+            "round",
+            "nursery",
+            "major",
+            "public-domain"
+          ]
+        },
+        {
+          "file": "melodies/amazing-grace.json",
+          "name": "Amazing Grace",
+          "family": "melody",
+          "tags": [
+            "hymn",
+            "pentatonic",
+            "major",
+            "public-domain"
+          ]
+        },
+        {
+          "file": "melodies/greensleeves.json",
+          "name": "Greensleeves",
+          "family": "melody",
+          "tags": [
+            "renaissance",
+            "dorian",
+            "minor",
+            "public-domain"
+          ]
+        },
+        {
+          "file": "melodies/bach-minuet.json",
+          "name": "Bach Minuet in G",
+          "family": "melody",
+          "tags": [
+            "bach",
+            "baroque",
+            "classical",
+            "major",
+            "public-domain"
+          ]
+        },
+        {
+          "file": "melodies/scarborough-fair.json",
+          "name": "Scarborough Fair",
+          "family": "melody",
+          "tags": [
+            "folk",
+            "dorian",
+            "minor",
+            "public-domain"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scale-systems",
+      "label": "Scale Systems",
+      "items": [
+        {
+          "file": "scale-systems/TET-12.json",
+          "name": "12-TET",
+          "family": "scale",
+          "tags": [
+            "equal",
+            "12",
+            "chromatic"
+          ]
+        },
+        {
+          "file": "scale-systems/TET-19.json",
+          "name": "19-TET",
+          "family": "scale",
+          "tags": [
+            "equal",
+            "19",
+            "microtonal"
+          ]
+        },
+        {
+          "file": "scale-systems/TET-31.json",
+          "name": "31-TET",
+          "family": "scale",
+          "tags": [
+            "equal",
+            "31",
+            "microtonal"
+          ]
+        },
+        {
+          "file": "scale-systems/BP-13.json",
+          "name": "Bohlen–Pierce",
+          "family": "scale",
+          "tags": [
+            "bohlen-pierce",
+            "13",
+            "tritave",
+            "base-3"
+          ]
+        },
+        {
+          "file": "scale-systems/tesla-9.json",
+          "name": "Tesla 9-EDO",
+          "family": "scale",
+          "tags": [
+            "tesla",
+            "9-edo",
+            "nonatonic",
+            "3-6-9"
+          ]
+        },
+        {
+          "file": "scale-systems/Mixed-Base.json",
+          "name": "Mixed-Base",
+          "family": "scale",
+          "tags": [
+            "mixed",
+            "experimental"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "custom",
+      "label": "Custom",
+      "items": [
+        {
+          "file": "custom/canon base.json",
+          "name": "canon base",
+          "family": "melody",
+          "tags": [
+            "canon"
+          ]
+        }
+      ]
+    }
+  ]
+}

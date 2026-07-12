@@ -10,7 +10,7 @@
       "id": 1,
       "startTime": "base.t",
       "duration": "beat(base) * 2",
-      "frequency": "base.f",
+      "frequency": "(3/2) * base.f",
       "color": "rgba(128,128,128,0.7)"
     },
     {
@@ -25,6 +25,27 @@
       "startTime": "[1].t",
       "duration": "beat(base) * 2",
       "frequency": "(3/2) * [1].f",
+      "color": "rgba(220,60,60,0.7)"
+    },
+    {
+      "id": 4,
+      "startTime": "[1].t + beat(base) * 2",
+      "duration": "beat(base) * 2",
+      "frequency": "(10/9) * [1].f",
+      "color": "rgba(128,128,128,0.7)"
+    },
+    {
+      "id": 5,
+      "startTime": "[4].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(6/5) * [4].f",
+      "color": "rgba(0,180,130,0.7)"
+    },
+    {
+      "id": 6,
+      "startTime": "[4].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(3/2) * [4].f",
       "color": "rgba(220,60,60,0.7)"
     }
   ]

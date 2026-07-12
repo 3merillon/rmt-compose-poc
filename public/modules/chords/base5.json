@@ -17,15 +17,22 @@
       "id": 2,
       "startTime": "[1].t",
       "duration": "beat(base) * 2",
-      "frequency": "(5/4) * [1].f",
-      "color": "rgba(0,200,80,0.7)"
+      "frequency": "(7/5) * [1].f",
+      "color": "rgba(120,120,210,0.7)"
     },
     {
       "id": 3,
       "startTime": "[1].t",
       "duration": "beat(base) * 2",
-      "frequency": "(3/2) * [1].f",
-      "color": "rgba(220,60,60,0.7)"
+      "frequency": "(9/5) * [1].f",
+      "color": "rgba(70,120,230,0.7)"
+    },
+    {
+      "id": 4,
+      "startTime": "[1].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(11/5) * [1].f",
+      "color": "rgba(155,109,255,0.7)"
     }
   ]
 }

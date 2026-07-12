@@ -26,6 +26,13 @@
       "duration": "beat(base) * 2",
       "frequency": "(3/2) * [1].f",
       "color": "rgba(220,60,60,0.7)"
+    },
+    {
+      "id": 4,
+      "startTime": "[1].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(15/8) * [1].f",
+      "color": "rgba(160,90,220,0.7)"
     }
   ]
 }

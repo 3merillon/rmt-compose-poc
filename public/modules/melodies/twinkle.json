@@ -1,0 +1,108 @@
+{
+  "baseNote": {
+    "frequency": "263",
+    "startTime": "0",
+    "tempo": "120",
+    "beatsPerMeasure": "4"
+  },
+  "notes": [
+    {
+      "id": 1,
+      "startTime": "base.t",
+      "duration": "beat(base)",
+      "frequency": "base.f",
+      "color": "rgba(128,128,128,0.75)"
+    },
+    {
+      "id": 2,
+      "startTime": "base.t + beat(base) * (1/1)",
+      "duration": "beat(base)",
+      "frequency": "base.f",
+      "color": "rgba(128,128,128,0.75)"
+    },
+    {
+      "id": 3,
+      "startTime": "base.t + beat(base) * (2/1)",
+      "duration": "beat(base)",
+      "frequency": "(3/2) * base.f",
+      "color": "rgba(210,70,70,0.75)"
+    },
+    {
+      "id": 4,
+      "startTime": "base.t + beat(base) * (3/1)",
+      "duration": "beat(base)",
+      "frequency": "(3/2) * base.f",
+      "color": "rgba(210,70,70,0.75)"
+    },
+    {
+      "id": 5,
+      "startTime": "base.t + beat(base) * (4/1)",
+      "duration": "beat(base)",
+      "frequency": "(5/3) * base.f",
+      "color": "rgba(80,160,180,0.75)"
+    },
+    {
+      "id": 6,
+      "startTime": "base.t + beat(base) * (5/1)",
+      "duration": "beat(base)",
+      "frequency": "(5/3) * base.f",
+      "color": "rgba(80,160,180,0.75)"
+    },
+    {
+      "id": 7,
+      "startTime": "base.t + beat(base) * (6/1)",
+      "duration": "beat(base) * (2/1)",
+      "frequency": "(3/2) * base.f",
+      "color": "rgba(210,70,70,0.75)"
+    },
+    {
+      "id": 8,
+      "startTime": "base.t + beat(base) * (8/1)",
+      "duration": "beat(base)",
+      "frequency": "(4/3) * base.f",
+      "color": "rgba(230,150,40,0.75)"
+    },
+    {
+      "id": 9,
+      "startTime": "base.t + beat(base) * (9/1)",
+      "duration": "beat(base)",
+      "frequency": "(4/3) * base.f",
+      "color": "rgba(230,150,40,0.75)"
+    },
+    {
+      "id": 10,
+      "startTime": "base.t + beat(base) * (10/1)",
+      "duration": "beat(base)",
+      "frequency": "(5/4) * base.f",
+      "color": "rgba(60,190,110,0.75)"
+    },
+    {
+      "id": 11,
+      "startTime": "base.t + beat(base) * (11/1)",
+      "duration": "beat(base)",
+      "frequency": "(5/4) * base.f",
+      "color": "rgba(60,190,110,0.75)"
+    },
+    {
+      "id": 12,
+      "startTime": "base.t + beat(base) * (12/1)",
+      "duration": "beat(base)",
+      "frequency": "(9/8) * base.f",
+      "color": "rgba(90,170,120,0.75)"
+    },
+    {
+      "id": 13,
+      "startTime": "base.t + beat(base) * (13/1)",
+      "duration": "beat(base)",
+      "frequency": "(9/8) * base.f",
+      "color": "rgba(90,170,120,0.75)"
+    },
+    {
+      "id": 14,
+      "startTime": "base.t + beat(base) * (14/1)",
+      "duration": "beat(base) * (2/1)",
+      "frequency": "base.f",
+      "color": "rgba(128,128,128,0.75)"
+    }
+  ]
+}

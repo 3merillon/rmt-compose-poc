@@ -8,6 +8,8 @@
     "dev": "vite",
     "build": "npm run wasm:build && vite build",
     "preview": "vite preview",
+    "test": "node scripts/validate-modules.mjs",
+    "gen:intervals": "node scripts/gen-interval-catalog.mjs",
     "wasm:build": "cd rust && wasm-pack build --target web --out-dir pkg && cd .. && node scripts/sync-wasm.mjs",
     "wasm:sync": "node scripts/sync-wasm.mjs",
     "perf:gen": "node scripts/perf/generate-stress-module.mjs",

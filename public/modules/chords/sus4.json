@@ -17,8 +17,8 @@
       "id": 2,
       "startTime": "[1].t",
       "duration": "beat(base) * 2",
-      "frequency": "(5/4) * [1].f",
-      "color": "rgba(0,200,80,0.7)"
+      "frequency": "(4/3) * [1].f",
+      "color": "rgba(240,150,30,0.7)"
     },
     {
       "id": 3,

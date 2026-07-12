@@ -1,6 +1,8 @@
 import { eventBus } from '../utils/event-bus.js';
 import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
+import { renderModuleIcon } from './icon-factory.js';
+import { settingsStore } from '../settings/settings-store.js';
 
 const menuAPI = (function() {
     const domCache = {
@@ -17,31 +19,216 @@ const menuAPI = (function() {
     // Module drop mode: 'start' = drop at target note's start, 'end' = drop at target note's end
     let moduleDropMode = 'start';
 
+    // === Manifest v2 support (Phase 6.1) ===
+    // The library is described by a single top-level manifest,
+    // public/modules/library.json = { version:2, sections:[{id,label,items:[...]}] }.
+    // Each item = { file, name, ratio?, cents?, family?, tags?, icon? }.
+    // Loaders branch on the manifest: v2 object -> section-driven; missing/legacy
+    // array -> the old per-category index.json path (kept as a fallback).
+    const LIBRARY_VERSION = 2;
+    // Built-in section ids the app ships. Used by the ui-state migration to
+    // decide what to rebuild (built-ins) vs. preserve (user 'custom' + uploads).
+    const BUILTIN_SECTION_IDS = ['intervals', 'chords', 'progressions', 'melodies', 'scale-systems', 'custom'];
+    let libraryManifest = null; // cached parsed library.json (v2), or null if legacy/absent
+
+    // Fetch + validate the top-level v2 manifest.
+    // Returns the manifest object, or null when absent/legacy so callers fall back.
+    async function loadLibraryManifest() {
+        if (libraryManifest) return libraryManifest;
+        try {
+            // no-store: the manifest is the library index and changes as content is
+            // added/removed; a stale HTTP-cached copy would strand users on an old
+            // layout that references deleted module files (404s).
+            const res = await fetch('modules/library.json', { cache: 'no-store' });
+            if (!res.ok) return null;
+            const json = await res.json();
+            if (json && json.version === 2 && Array.isArray(json.sections)) {
+                libraryManifest = json;
+                return json;
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    // Encode each path segment of a manifest-relative module path (handles spaces).
+    function encodeModulePath(path) {
+        return String(path).split('/').map(encodeURIComponent).join('/');
+    }
+
+    // Fetch a module file by its manifest-relative path (e.g. "intervals/5th.json"),
+    // with a spaces->underscores fallback (mirrors the legacy per-file fetch).
+    async function fetchModuleFile(file) {
+        let res = await fetch('modules/' + encodeModulePath(file));
+        if (!res.ok) {
+            const alt = 'modules/' + file.split('/').map(s => s.replace(/\s+/g, '_')).join('/');
+            res = await fetch(alt);
+        }
+        if (!res.ok) throw new Error('Network response not ok for ' + file);
+        return res.json();
+    }
+
+    // === Icon sizing (Phase 6.2 / 6.5) ===
+    function getIconSizePx() {
+        try { const v = settingsStore.get('library.iconSizePx'); if (typeof v === 'number' && v > 0) return v; } catch (e) {}
+        return 56;
+    }
+    function getShowCents() {
+        try { const v = settingsStore.get('library.showCents'); if (typeof v === 'boolean') return v; } catch (e) {}
+        return true;
+    }
+    // Live-apply icon size + cents visibility to every rendered icon/placeholder.
+    function applyIconSizeToAll() {
+        const size = getIconSizePx();
+        const showCents = getShowCents();
+        const radius = Math.round(size * 0.14);
+        document.querySelectorAll('.icons-container .icon').forEach(icon => {
+            icon.style.width = size + 'px';
+            icon.style.height = size + 'px';
+            if (icon.classList.contains('empty-placeholder')) return;
+            icon.style.borderRadius = radius + 'px';
+            const tc = icon.querySelector(':scope > div');
+            if (tc && icon.moduleMeta) {
+                renderModuleIcon(tc, icon.moduleMeta, size, { showCents, name: icon.getAttribute('data-name') });
+            }
+        });
+        try { updateMaxHeight(); } catch (e) {}
+    }
+
+    // === Collapsible sections (Phase 6.5) ===
+    // Collapse hides a section's module icons + trailing placeholder (via a CSS
+    // class), leaving just the label. Height re-fits through the same path as
+    // wrap/unwrap so the pull-tab stays consistent on desktop and mobile.
+    function setSectionCollapsed(container, collapsed) {
+        if (!container) return;
+        container.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+        container.classList.toggle('section-collapsed', !!collapsed);
+        const chevron = container.querySelector('.category-label .category-collapse-chevron');
+        if (chevron) chevron.textContent = collapsed ? '▸' : '▾';
+        // Reclaim space when collapsing (shrink-only, same path as wrap/unwrap).
+        try { adjustHeightToContent(); } catch (e) {}
+    }
+
+    // === Library search (Phase 6.5) ===
+    let currentSearchQuery = '';
+
+    function moduleMatchesQuery(icon, q) {
+        const parts = [];
+        const dn = icon.getAttribute('data-name');
+        if (dn) parts.push(dn);
+        const nameEl = icon.querySelector('div');
+        if (nameEl && nameEl.textContent) parts.push(nameEl.textContent);
+        const meta = icon.moduleMeta;
+        if (meta) {
+            if (meta.ratio) parts.push(String(meta.ratio));
+            if (meta.family) parts.push(String(meta.family));
+            if (meta.cents != null) parts.push(String(meta.cents));
+            if (Array.isArray(meta.tags)) parts.push(meta.tags.join(' '));
+            if (meta.file) parts.push(meta.file);
+        } else {
+            const fn = icon.getAttribute('data-filename');
+            if (fn) parts.push(fn);
+        }
+        return parts.join(' ').toLowerCase().includes(q);
+    }
+
+    // Filter visible modules by name/ratio/tags/family. While searching, matching
+    // modules are shown even inside collapsed sections; empty sections are hidden.
+    function applyModuleSearch(query) {
+        currentSearchQuery = query || '';
+        const q = currentSearchQuery.trim().toLowerCase();
+        const searching = q.length > 0;
+        categoryContainers.forEach(section => {
+            if (!section) return;
+            const label = section.querySelector(':scope > .category-label');
+            const icons = Array.from(section.querySelectorAll(':scope > .icon:not(.empty-placeholder):not(.category-label)'));
+            const placeholder = section.querySelector(':scope > .empty-placeholder');
+            let anyMatch = false;
+            icons.forEach(icon => {
+                const show = !searching || moduleMatchesQuery(icon, q);
+                icon.style.display = show ? '' : 'none';
+                if (show) anyMatch = true;
+            });
+            if (placeholder) placeholder.style.display = searching ? 'none' : '';
+            if (searching) {
+                section.classList.remove('section-collapsed'); // reveal matches regardless of collapse
+                if (label) label.style.display = anyMatch ? '' : 'none';
+                section.style.display = anyMatch ? '' : 'none';
+            } else {
+                if (label) label.style.display = '';
+                section.style.display = '';
+                if (section.getAttribute('data-collapsed') === 'true') section.classList.add('section-collapsed');
+            }
+        });
+        // Don't resize the bar while filtering — just show/hide. Keeps the pull-tab
+        // height stable (filtering to few results shouldn't shrink then strand it small).
+    }
+
+    // Create the sticky search row (rebuilt with the library on each cold load).
+    function createSearchRow() {
+        const row = document.createElement('div');
+        row.className = 'library-search-row';
+        const input = document.createElement('input');
+        input.type = 'search';
+        input.placeholder = 'Search modules — name, ratio, tag…';
+        input.className = 'library-search-input';
+        input.value = currentSearchQuery;
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('autocorrect', 'off');
+        input.setAttribute('spellcheck', 'false');
+        input.addEventListener('input', () => applyModuleSearch(input.value));
+        // Don't let interactions inside the input start a category/module drag.
+        input.addEventListener('pointerdown', (e) => e.stopPropagation());
+        input.addEventListener('mousedown', (e) => e.stopPropagation());
+        row.appendChild(input);
+        return row;
+    }
+
+    // Insert (or re-insert) the search row as the first child of the icons container.
+    function ensureSearchRow() {
+        const iconsContainer = domCache.iconsContainer;
+        if (!iconsContainer) return;
+        const existing = iconsContainer.querySelector(':scope > .library-search-row');
+        if (existing) existing.remove();
+        const row = createSearchRow();
+        iconsContainer.insertBefore(row, iconsContainer.firstChild);
+        // Re-apply an in-flight query to freshly built icons.
+        if (currentSearchQuery.trim()) applyModuleSearch(currentSearchQuery);
+    }
+
     function saveUIStateToLocalStorage() {
         try {
-            const uiState = { categories: [], version: "1.0", timestamp: Date.now(), dropMode: moduleDropMode };
+            const uiState = { categories: [], version: "1.0", libraryVersion: LIBRARY_VERSION, timestamp: Date.now(), dropMode: moduleDropMode };
             categoryContainers.forEach(container => {
                 if (!container) return;
                 const categoryLabel = container.querySelector('.category-label');
                 if (!categoryLabel) return;
                 const category = categoryLabel.getAttribute('data-category');
                 if (!category) return;
+                const labelTextEl = categoryLabel.querySelector('.category-label-text');
+                const labelText = labelTextEl ? labelTextEl.textContent.trim() : (categoryLabel.textContent || '').trim() || category;
                 const moduleIcons = Array.from(container.querySelectorAll('.icon:not(.empty-placeholder):not(.category-label)'));
-                const categoryObj = { name: category, modules: [] };
+                const categoryObj = { name: category, label: labelText, collapsed: container.getAttribute('data-collapsed') === 'true', modules: [] };
                 moduleIcons.forEach(icon => {
                     const textContainer = icon.querySelector('div');
-                    const moduleName = textContainer ? textContainer.textContent.trim() : '';
-                    let filename = icon.getAttribute('data-filename') || moduleName;
-                    if (icon.moduleData && icon.moduleData.filename) filename = icon.moduleData.filename;
+                    const moduleName = icon.getAttribute('data-name') || (textContainer ? textContainer.textContent.trim() : '') || (icon.moduleMeta && icon.moduleMeta.name) || '';
+                    const dataFilename = icon.getAttribute('data-filename') || moduleName;
+                    const file = icon.getAttribute('data-file') || (icon.moduleMeta && icon.moduleMeta.file) || null;
+                    const isUploaded = icon.getAttribute('data-uploaded') === 'true';
                     const moduleEntry = {
                         name: moduleName,
-                        filename: filename,
+                        filename: dataFilename,
+                        file: file,
                         originalCategory: icon.getAttribute('data-original-category') || category,
                         currentCategory: category,
-                        isUploaded: icon.getAttribute('data-uploaded') === 'true'
+                        isUploaded: isUploaded
                     };
-                    if (icon.moduleData) {
-                        if (!icon.moduleData.filename) icon.moduleData.filename = filename;
+                    if (icon.moduleMeta) moduleEntry.meta = icon.moduleMeta;
+                    // Embed full module JSON when there is no re-fetchable `file`
+                    // (uploads, or built-ins carried over from a pre-v2 state without
+                    // a file path). Built-ins with a `file` are re-fetched on rehydrate,
+                    // keeping localStorage small even with a large shipped catalog.
+                    if (icon.moduleData && (isUploaded || !file)) {
+                        if (!icon.moduleData.filename) icon.moduleData.filename = moduleName;
                         moduleEntry.moduleData = icon.moduleData;
                         moduleEntry.hasData = true;
                     }
@@ -56,6 +243,181 @@ const menuAPI = (function() {
         }
     }
 
+    // Normalize a stored ui-state module entry into a common section-state module shape.
+    function normalizeStoredModule(m) {
+        return {
+            name: m.name,
+            filename: m.filename || ((m.name || 'module') + '.json'),
+            file: m.file || null,
+            meta: m.meta || null,
+            moduleData: m.moduleData || null,
+            isUploaded: !!m.isUploaded,
+            loadFailed: !!m.loadFailed,
+            originalCategory: m.originalCategory || null
+        };
+    }
+
+    // Convert a v2 manifest section into a render-ready section-state.
+    function manifestSectionToState(section) {
+        return {
+            id: section.id,
+            label: section.label || section.id,
+            collapsed: false,
+            modules: (section.items || []).map(item => ({
+                name: item.name || item.file.split('/').pop().replace(/\.json$/i, ''),
+                filename: item.file.split('/').pop(),
+                file: item.file,
+                meta: item,
+                moduleData: null,
+                isUploaded: false,
+                loadFailed: false,
+                originalCategory: section.id
+            }))
+        };
+    }
+
+    // Build a section container (label + icons + trailing placeholder) from a
+    // section-state and append it (plus breaker/separator) to the icons container.
+    // Icons fetch their data lazily (same as the cold-load path).
+    function renderSectionState(state, index, count) {
+        const iconsContainer = domCache.iconsContainer;
+        const sectionContainer = document.createElement('div');
+        Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+        categoryContainers.push(sectionContainer);
+        const labelIcon = createLabelIcon(state.label || state.id, state.id);
+        sectionContainer.appendChild(labelIcon);
+        if (state.collapsed) {
+            sectionContainer.setAttribute('data-collapsed', 'true');
+            sectionContainer.classList.add('section-collapsed');
+            const chev = labelIcon.querySelector('.category-collapse-chevron');
+            if (chev) chev.textContent = '▸';
+        }
+
+        for (const m of state.modules) {
+            let icon;
+            if (m.isUploaded && m.moduleData) {
+                if (!m.moduleData.filename) m.moduleData.filename = m.name;
+                icon = createModuleIcon(state.id, m.name, m.moduleData, m.meta || null);
+                icon.setAttribute('data-uploaded', 'true');
+            } else if (m.loadFailed) {
+                icon = createModuleIcon(state.id, m.filename, null, m.meta || null);
+                icon.classList.add('failed-to-load');
+                Object.assign(icon.style, { background: '#888888', color: '#ffffff' });
+                icon.setAttribute('data-load-failed', 'true');
+                const warningIcon = document.createElement('div');
+                Object.assign(warningIcon.style, { position: 'absolute', bottom: '2px', left: '2px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'var(--rmt-danger, #ff0000)', zIndex: '5' });
+                warningIcon.title = 'Module data failed to load';
+                icon.appendChild(warningIcon);
+                const tc = icon.querySelector('div:first-child');
+                if (tc) tc.style.opacity = '0.7';
+            } else {
+                // Built-in / re-fetchable: embedded data if present, else fetch via meta.file.
+                const meta = m.meta || (m.file ? { file: m.file, name: m.name } : null);
+                icon = createModuleIcon(state.id, m.filename, m.moduleData || null, meta);
+            }
+            if (m.originalCategory) icon.setAttribute('data-original-category', m.originalCategory);
+            sectionContainer.appendChild(icon);
+        }
+
+        const emptyPlaceholder = createEmptyPlaceholder(state.id);
+        sectionContainer.appendChild(emptyPlaceholder);
+        iconsContainer.appendChild(sectionContainer);
+        const breaker = document.createElement('div');
+        Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
+        iconsContainer.appendChild(breaker);
+        if (index < count - 1) iconsContainer.appendChild(createSectionSeparator());
+        return sectionContainer;
+    }
+
+    // Migrate a pre-v2 ui-state to v2 section-states: rebuild built-in sections from
+    // the manifest, preserve the user's 'custom' section wholesale + any user-created
+    // sections, and rescue uploads dragged into built-in sections (into custom).
+    function buildMigratedSectionStates(oldState, manifest) {
+        const rescuedUploads = [];
+        const oldCustom = [];
+        const userSections = [];
+        for (const cat of oldState.categories) {
+            const isBuiltin = BUILTIN_SECTION_IDS.includes(cat.name);
+            if (cat.name === 'custom') {
+                for (const m of (cat.modules || [])) oldCustom.push(normalizeStoredModule(m));
+            } else if (!isBuiltin) {
+                userSections.push({ id: cat.name, label: cat.label || cat.name, collapsed: !!cat.collapsed,
+                                    modules: (cat.modules || []).map(normalizeStoredModule) });
+            } else {
+                for (const m of (cat.modules || [])) {
+                    if (m.isUploaded && m.moduleData) rescuedUploads.push(normalizeStoredModule(m));
+                }
+            }
+        }
+        const states = [];
+        for (const section of manifest.sections) {
+            if (section.id === 'custom') continue;
+            states.push(manifestSectionToState(section));
+        }
+        const manifestCustom = manifest.sections.find(s => s.id === 'custom');
+        const customModules = (oldCustom.length
+            ? oldCustom
+            : (manifestCustom ? manifestSectionToState(manifestCustom).modules : []))
+            .concat(rescuedUploads);
+        states.push({ id: 'custom', label: (manifestCustom && manifestCustom.label) || 'Custom', collapsed: false, modules: customModules });
+        for (const us of userSections) states.push(us);
+        return states;
+    }
+
+    // Reconcile a stored v2 layout against the CURRENT manifest so library content
+    // updates take effect without a manual "Reload Defaults":
+    //   - drop stored built-in modules whose file no longer exists in the manifest
+    //     (prevents 404s / failed icons on renamed or removed modules);
+    //   - keep uploads + fileless embedded modules; refresh kept built-ins' meta;
+    //   - append manifest items not present in the stored state to their section
+    //     (creating the section if it is new).
+    function reconcileWithManifest(states, manifest) {
+        if (!manifest) return states;
+        const fileToItem = new Map();
+        for (const section of manifest.sections) {
+            for (const item of (section.items || [])) fileToItem.set(item.file, item);
+        }
+        const presentFiles = new Set();
+        const outStates = states.map((st) => {
+            const modules = [];
+            for (const m of st.modules) {
+                if (m.file && fileToItem.has(m.file)) {
+                    m.meta = fileToItem.get(m.file); // refresh metadata from the manifest
+                    presentFiles.add(m.file);
+                    modules.push(m);
+                } else if (m.isUploaded || (!m.file && m.moduleData)) {
+                    modules.push(m); // user upload / fileless embedded module
+                }
+                // else: built-in whose file was removed/renamed → drop (no 404)
+            }
+            return { ...st, modules };
+        });
+        const stateById = new Map(outStates.map((s) => [s.id, s]));
+        for (const section of manifest.sections) {
+            for (const item of (section.items || [])) {
+                if (presentFiles.has(item.file)) continue;
+                let target = stateById.get(section.id);
+                if (!target) {
+                    target = { id: section.id, label: section.label || section.id, collapsed: false, modules: [] };
+                    stateById.set(section.id, target);
+                    outStates.push(target);
+                }
+                target.modules.push({
+                    name: item.name || item.file.split('/').pop().replace(/\.json$/i, ''),
+                    filename: item.file.split('/').pop(),
+                    file: item.file,
+                    meta: item,
+                    moduleData: null,
+                    isUploaded: false,
+                    loadFailed: false,
+                    originalCategory: section.id,
+                });
+                presentFiles.add(item.file);
+            }
+        }
+        return outStates;
+    }
+
     function loadUIStateFromLocalStorage() {
         try {
             const storedState = localStorage.getItem('ui-state');
@@ -63,121 +425,43 @@ const menuAPI = (function() {
             const uiState = JSON.parse(storedState);
             if (uiState.dropMode) moduleDropMode = uiState.dropMode;
             if (!uiState.categories || !Array.isArray(uiState.categories) || uiState.categories.length === 0) return false;
-            domCache.iconsContainer.innerHTML = '';
-            categoryContainers = [];
-            const moduleDataCache = {};
-            
-            const loadCategoryModules = async (category) => {
-                try {
-                    const response = await fetch(`modules/${category}/index.json`);
-                    if (!response.ok) return;
-                    const moduleList = await response.json();
-                    for (const filename of moduleList) {
-                        try {
-                            const moduleResponse = await fetch(`modules/${category}/${filename}`);
-                            if (moduleResponse.ok) {
-                                const moduleData = await moduleResponse.json();
-                                moduleDataCache[`${category}/${filename}`] = moduleData;
-                                moduleDataCache[`${category}/${filename.replace(/\.json$/i, '')}`] = moduleData;
-                            }
-                        } catch (error) {}
-                    }
-                } catch (error) {}
-            };
-            
-            const defaultCategories = ['intervals', 'chords', 'melodies', 'custom'];
-            const cachePromises = defaultCategories.map(category => loadCategoryModules(category));
-            uiState.categories.forEach(categoryObj => {
-                if (!defaultCategories.includes(categoryObj.name)) {
-                    cachePromises.push(loadCategoryModules(categoryObj.name));
+
+            const needsMigration = uiState.libraryVersion !== LIBRARY_VERSION;
+
+            return loadLibraryManifest().then(manifest => {
+                // Pre-v2 state with no manifest available: let the caller cold-load (legacy).
+                if (needsMigration && !manifest) return false;
+
+                domCache.iconsContainer.innerHTML = '';
+                categoryContainers = [];
+
+                let sectionStates;
+                if (needsMigration) {
+                    sectionStates = buildMigratedSectionStates(uiState, manifest);
+                } else {
+                    sectionStates = uiState.categories.map(cat => ({
+                        id: cat.name,
+                        label: cat.label || cat.name,
+                        collapsed: !!cat.collapsed,
+                        modules: (cat.modules || []).map(normalizeStoredModule)
+                    }));
+                    // Heal a stale stored layout against the current manifest (new/removed content).
+                    sectionStates = reconcileWithManifest(sectionStates, manifest);
                 }
-            });
-            
-            return Promise.all(cachePromises).then(() => {
-                const loadPromises = uiState.categories.map((categoryObj, index) => {
-                    return new Promise((resolve) => {
-                        const sectionContainer = document.createElement('div');
-                        Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
-                        categoryContainers.push(sectionContainer);
-                        const labelIcon = createLabelIcon(categoryObj.name, categoryObj.name);
-                        sectionContainer.appendChild(labelIcon);
-                        
-                        const processModules = async () => {
-                            for (const moduleInfo of categoryObj.modules) {
-                                let moduleData = null;
-                                if (moduleInfo.isUploaded && moduleInfo.moduleData) {
-                                    moduleData = moduleInfo.moduleData;
-                                    const displayName = moduleInfo.name;
-                                    if (!moduleData.filename) moduleData.filename = displayName;
-                                    const icon = createModuleIcon(categoryObj.name, displayName, moduleData);
-                                    icon.setAttribute('data-uploaded', 'true');
-                                    sectionContainer.appendChild(icon);
-                                    continue;
-                                }
-                                if (moduleInfo.loadFailed) {
-                                    const icon = createModuleIcon(categoryObj.name, moduleInfo.name + '.json', null);
-                                    icon.classList.add('failed-to-load');
-                                    Object.assign(icon.style, { background: '#888888', color: '#ffffff' });
-                                    icon.setAttribute('data-load-failed', 'true');
-                                    const warningIcon = document.createElement('div');
-                                    Object.assign(warningIcon.style, { position: 'absolute', bottom: '2px', left: '2px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'var(--rmt-danger, #ff0000)', zIndex: '5' });
-                                    warningIcon.title = 'Module data failed to load';
-                                    icon.appendChild(warningIcon);
-                                    const textContainer = icon.querySelector('div:first-child');
-                                    if (textContainer) textContainer.style.opacity = '0.7';
-                                    sectionContainer.appendChild(icon);
-                                    continue;
-                                }
-                                // First try to use embedded moduleData from localStorage
-                                if (moduleInfo.moduleData) {
-                                    moduleData = moduleInfo.moduleData;
-                                }
-                                // Fall back to cache from filesystem if no embedded data
-                                if (!moduleData && moduleInfo.originalCategory) {
-                                    const originalKey = `${moduleInfo.originalCategory}/${moduleInfo.name}`;
-                                    if (moduleDataCache[originalKey]) moduleData = moduleDataCache[originalKey];
-                                }
-                                if (!moduleData) {
-                                    const currentKey = `${categoryObj.name}/${moduleInfo.name}`;
-                                    if (moduleDataCache[currentKey]) moduleData = moduleDataCache[currentKey];
-                                }
-                                if (!moduleData) {
-                                    for (const category of defaultCategories) {
-                                        const key = `${category}/${moduleInfo.name}`;
-                                        if (moduleDataCache[key]) {
-                                            moduleData = moduleDataCache[key];
-                                            break;
-                                        }
-                                    }
-                                }
-                                const icon = createModuleIcon(categoryObj.name, moduleInfo.name + '.json', moduleData);
-                                if (moduleInfo.originalCategory) icon.setAttribute('data-original-category', moduleInfo.originalCategory);
-                                sectionContainer.appendChild(icon);
-                            }
-                            const emptyPlaceholder = createEmptyPlaceholder(categoryObj.name);
-                            sectionContainer.appendChild(emptyPlaceholder);
-                        };
-                        
-                        processModules().then(resolve);
-                        domCache.iconsContainer.appendChild(sectionContainer);
-                        const breaker = document.createElement('div');
-                        Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-                        domCache.iconsContainer.appendChild(breaker);
-                        if (index < uiState.categories.length - 1) {
-                            domCache.iconsContainer.appendChild(createSectionSeparator());
-                        }
-                    });
-                });
-                
-                return Promise.all(loadPromises).then(() => {
-                    const actionButtons = createActionButtons();
-                    domCache.iconsContainer.appendChild(createSectionSeparator());
-                    domCache.iconsContainer.appendChild(actionButtons);
-                    ensurePlaceholdersAtEnd();
-                    normalizeLayoutSeparators();
-                    updateMaxHeight();
-                    return true;
-                });
+
+                sectionStates.forEach((state, i) => renderSectionState(state, i, sectionStates.length));
+
+                const actionButtons = createActionButtons();
+                domCache.iconsContainer.appendChild(createSectionSeparator());
+                domCache.iconsContainer.appendChild(actionButtons);
+                ensurePlaceholdersAtEnd();
+                normalizeLayoutSeparators();
+                injectLibraryStyle();
+                ensureSearchRow();
+                updateMaxHeight();
+                // Persist the upgraded layout so the migration only runs once.
+                if (needsMigration) { try { saveUIStateToLocalStorage(); } catch (e) {} }
+                return true;
             });
         } catch (error) {
             console.error('Error loading UI state from localStorage:', error);
@@ -212,8 +496,14 @@ const menuAPI = (function() {
         }
         window.addEventListener('resize', updateMaxHeight);
         setupAutoSave();
+        // Live-apply library icon size + cents visibility from Settings.
+        try {
+            settingsStore.subscribe(({ path }) => {
+                if (!path || path.startsWith('library.')) applyIconSizeToAll();
+            });
+        } catch (e) {}
     }
-    
+
     function setupAutoSave() {
         window.addEventListener('beforeunload', saveUIStateToLocalStorage);
         setInterval(saveUIStateToLocalStorage, 30000);
@@ -463,9 +753,35 @@ const menuAPI = (function() {
             fontFamily: "'Roboto Mono', monospace", color: 'var(--rmt-accent, #ffa800)', boxSizing: 'border-box',
             background: 'transparent', cursor: 'pointer', position: 'relative'
         });
-        labelIcon.textContent = text;
+        // Collapse chevron + text kept in dedicated spans so drag/save/read logic
+        // (which reads the label text) ignores the chevron glyph.
+        const chevron = document.createElement('span');
+        chevron.className = 'category-collapse-chevron';
+        chevron.textContent = '▾'; // ▾ expanded
+        Object.assign(chevron.style, {
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: '12px', marginRight: '5px', fontSize: '10px', flex: '0 0 auto',
+            opacity: '0.85', pointerEvents: 'none'
+        });
+        const labelTextSpan = document.createElement('span');
+        labelTextSpan.className = 'category-label-text';
+        labelTextSpan.textContent = text;
+        labelTextSpan.style.pointerEvents = 'none';
+        labelIcon.appendChild(chevron);
+        labelIcon.appendChild(labelTextSpan);
         labelIcon.setAttribute('draggable', 'true');
-        
+
+        // Click / tap toggles collapse. Guarded against the synthetic click that can
+        // follow a touch reorder-drag (see the pointerup handler below).
+        labelIcon.addEventListener('click', function(e) {
+            if (this._suppressClickUntil && Date.now() < this._suppressClickUntil) return;
+            const container = this.parentNode;
+            if (!container) return;
+            const collapsed = container.getAttribute('data-collapsed') === 'true';
+            setSectionCollapsed(container, !collapsed);
+            try { saveUIStateToLocalStorage(); } catch (err) {}
+        });
+
         labelIcon.addEventListener('dragstart', function(event) {
             draggedElement = this;
             draggedElementType = 'category';
@@ -635,6 +951,9 @@ const menuAPI = (function() {
                 });
                 thisLabel.classList.remove('dragging');
                 thisLabel.style.opacity = '1';
+                // Suppress the synthetic click that follows a touch drag so a reorder
+                // doesn't also toggle the section collapse.
+                if (dragStarted) thisLabel._suppressClickUntil = Date.now() + 400;
                 draggedElement = null;
                 draggedElementType = null;
                 document.removeEventListener('pointermove', onPointerMove);
@@ -677,8 +996,9 @@ const menuAPI = (function() {
         const placeholder = document.createElement('div');
         placeholder.classList.add('icon', 'empty-placeholder');
         placeholder.setAttribute('data-category', category);
+        const phSize = getIconSizePx();
         Object.assign(placeholder.style, {
-            width: '42px', height: '42px', border: '2px dashed #ffffff', borderRadius: '4px',
+            width: phSize + 'px', height: phSize + 'px', border: '2px dashed #ffffff', borderRadius: Math.round(phSize * 0.14) + 'px',
             boxSizing: 'border-box', background: 'transparent', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center'
         });
@@ -850,7 +1170,7 @@ const menuAPI = (function() {
         document.body.removeChild(input);
     }
 
-    function createModuleIcon(category, filename, moduleData = null) {
+    function createModuleIcon(category, filename, moduleData = null, meta = null) {
         const moduleIcon = document.createElement('div');
         moduleIcon.classList.add('icon');
         moduleIcon.setAttribute('data-category', category);
@@ -860,23 +1180,41 @@ const menuAPI = (function() {
         const isUploaded = moduleIcon.getAttribute('data-uploaded') === 'true' || /module_-/.test(filename);
         moduleIcon.setAttribute('data-uploaded', isUploaded ? 'true' : 'false');
         moduleIcon.setAttribute('data-filename', filename);
+        // v2 manifest metadata (file path, ratio, cents, family, tags) — stashed on
+        // the icon so ui-state can round-trip it and 6.2 can render richer icons.
+        if (meta) {
+            moduleIcon.moduleMeta = meta;
+            if (meta.file) moduleIcon.setAttribute('data-file', meta.file);
+            if (meta.family) moduleIcon.setAttribute('data-family', meta.family);
+        }
+        const iconSize = getIconSizePx();
+        let displayName = (meta && meta.name) ? meta.name : filename.replace(/\.json$/i, '');
+        moduleIcon.setAttribute('data-name', displayName);
+        // Themed procedural SVG tile when we have manifest metadata; plain text tile
+        // otherwise (legacy / uploaded modules with no family/ratio).
+        const useSvg = !!meta;
         Object.assign(moduleIcon.style, {
-            width: '42px', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: iconSize + 'px', height: iconSize + 'px', display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: "'Roboto Mono', monospace", fontSize: '8px', lineHeight: '1.2', color: '#151525',
-            cursor: 'grab', touchAction: 'none', padding: '2px', boxSizing: 'border-box',
-            textAlign: 'center', wordWrap: 'break-word', overflow: 'hidden', background: 'var(--rmt-accent, #ffa800)',
+            cursor: 'grab', touchAction: 'none', padding: useSvg ? '0' : '2px', boxSizing: 'border-box',
+            textAlign: 'center', wordWrap: 'break-word', overflow: 'hidden',
+            background: useSvg ? 'transparent' : 'var(--rmt-accent, #ffa800)',
+            borderRadius: Math.round(iconSize * 0.14) + 'px',
             position: 'relative', border: '1px solid transparent', transition: 'border-color 0.3s, box-shadow 0.3s'
         });
         moduleIcon.setAttribute('draggable', 'true');
-        let displayName = filename.replace(/\.json$/i, '');
         const textContainer = document.createElement('div');
         Object.assign(textContainer.style, {
             width: '100%', height: '100%', display: 'flex', alignItems: 'center',
             justifyContent: 'center', overflow: 'hidden', padding: '0'
         });
-        textContainer.textContent = displayName;
+        if (useSvg) {
+            renderModuleIcon(textContainer, meta, iconSize, { showCents: getShowCents(), name: displayName });
+        } else {
+            textContainer.textContent = displayName;
+        }
         moduleIcon.appendChild(textContainer);
-        moduleIcon.title = displayName;
+        moduleIcon.title = displayName + (meta && meta.ratio ? `  (${meta.ratio}${meta.cents != null ? `, ${Math.round(meta.cents)}¢` : ''})` : '');
 
         const deleteButton = document.createElement('div');
         deleteButton.className = 'module-delete-btn';
@@ -925,21 +1263,22 @@ const menuAPI = (function() {
         } else if (isUploaded) {
             markAsFailed();
         } else {
-            const encodedFilename = encodeURIComponent(filename);
-            const url = 'modules/' + category + '/' + encodedFilename;
-            fetch(url)
-                .then(response => {
-                    if (!response.ok) {
-                        const altFilename = filename.replace(/\s+/g, '_');
-                        const altUrl = 'modules/' + category + '/' + altFilename;
-                        return fetch(altUrl);
-                    }
-                    return response;
-                })
-                .then(response => {
-                    if (!response.ok) throw new Error('Network response not ok for ' + filename);
-                    return response.json();
-                })
+            // v2: fetch by the manifest file path; legacy: fetch modules/<category>/<filename>.
+            const fetchPromise = (meta && meta.file)
+                ? fetchModuleFile(meta.file)
+                : fetch('modules/' + category + '/' + encodeURIComponent(filename))
+                    .then(response => {
+                        if (!response.ok) {
+                            const altUrl = 'modules/' + category + '/' + filename.replace(/\s+/g, '_');
+                            return fetch(altUrl);
+                        }
+                        return response;
+                    })
+                    .then(response => {
+                        if (!response.ok) throw new Error('Network response not ok for ' + filename);
+                        return response.json();
+                    });
+            fetchPromise
                 .then(data => {
                     data.filename = displayName;
                     moduleIcon.moduleData = data;
@@ -1059,19 +1398,27 @@ const menuAPI = (function() {
                     draggedElementCategory = category;
                     moduleIcon.classList.add('dragging');
                     moduleIcon.style.opacity = '0.5';
+                    const ghostSize = getIconSizePx();
                     ghost = document.createElement('div');
-                    ghost.textContent = displayName;
                     Object.assign(ghost.style, {
-                        position: 'fixed', width: '42px', height: '42px', display: 'flex',
+                        position: 'fixed', width: ghostSize + 'px', height: ghostSize + 'px', display: 'flex',
                         alignItems: 'center', justifyContent: 'center', fontFamily: "'Roboto Mono', monospace",
-                        fontSize: '10px', background: 'var(--rmt-accent, #ffa800)', color: '#151525', borderRadius: '4px',
-                        boxShadow: '0 2px 6px rgba(0,0,0,0.5)', zIndex: '9999', pointerEvents: 'none', opacity: '0.5'
+                        fontSize: '10px', color: '#151525', borderRadius: Math.round(ghostSize * 0.14) + 'px',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.5)', zIndex: '9999', pointerEvents: 'none', opacity: '0.6',
+                        overflow: 'hidden'
                     });
+                    if (moduleIcon.moduleMeta) {
+                        renderModuleIcon(ghost, moduleIcon.moduleMeta, ghostSize, { showCents: getShowCents(), name: displayName });
+                    } else {
+                        ghost.textContent = displayName;
+                        ghost.style.background = 'var(--rmt-accent, #ffa800)';
+                    }
                     document.body.appendChild(ghost);
                 }
                 if (dragStarted && ghost) {
-                    ghost.style.left = (ev.clientX - 21) + 'px';
-                    ghost.style.top = (ev.clientY - 21) + 'px';
+                    const gh = (ghost.offsetWidth || getIconSizePx()) / 2;
+                    ghost.style.left = (ev.clientX - gh) + 'px';
+                    ghost.style.top = (ev.clientY - gh) + 'px';
                     const elemBelow = document.elementFromPoint(ev.clientX, ev.clientY);
                     document.querySelectorAll('.drag-over').forEach(el => {
                         el.classList.remove('drag-over');
@@ -1307,6 +1654,7 @@ const menuAPI = (function() {
     function reloadModuleIcons() {
         domCache.iconsContainer.innerHTML = '';
         categoryContainers = [];
+        libraryManifest = null; // bust the in-memory cache so a fresh manifest is fetched
         clearUIStateFromLocalStorage();
         loadModuleIcons();
     }
@@ -1544,11 +1892,8 @@ const menuAPI = (function() {
         return separator;
     }
 
-    function loadModuleIcons() {
-        const iconsContainer = domCache.iconsContainer;
-        if (!iconsContainer) return;
-        iconsContainer.innerHTML = '';
-        categoryContainers = [];
+    // Ensure the viewport meta opts out of default touch gestures (mobile pan/zoom).
+    function ensureLibraryViewport() {
         const metaTag = document.querySelector('meta[name="viewport"]');
         if (metaTag) {
             const content = metaTag.getAttribute('content');
@@ -1561,6 +1906,50 @@ const menuAPI = (function() {
             newMeta.content = 'width=device-width, initial-scale=1.0, user-scalable=no, touch-action=none';
             document.head.appendChild(newMeta);
         }
+    }
+
+    // Append a section container (label + module icons + trailing placeholder) plus
+    // its breaker and separator to the icons container. Shared by both build paths.
+    function appendSection(iconsContainer, { id, label, buildItems }, index, count) {
+        const sectionContainer = document.createElement('div');
+        Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+        categoryContainers.push(sectionContainer);
+        const labelIcon = createLabelIcon(label || id, id);
+        sectionContainer.appendChild(labelIcon);
+        buildItems(sectionContainer);
+        const emptyPlaceholder = createEmptyPlaceholder(id);
+        sectionContainer.appendChild(emptyPlaceholder);
+        iconsContainer.appendChild(sectionContainer);
+        const breaker = document.createElement('div');
+        Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
+        iconsContainer.appendChild(breaker);
+        if (index < count - 1) iconsContainer.appendChild(createSectionSeparator());
+        return sectionContainer;
+    }
+
+    // v2 path: build sections directly from the manifest (all metadata is inline).
+    function buildSectionsFromManifest(sections) {
+        const iconsContainer = domCache.iconsContainer;
+        sections.forEach((section, index) => {
+            appendSection(iconsContainer, {
+                id: section.id,
+                label: section.label,
+                buildItems: (container) => {
+                    (section.items || []).forEach(item => {
+                        const filename = item.file.split('/').pop();
+                        const icon = createModuleIcon(section.id, filename, null, item);
+                        container.appendChild(icon);
+                    });
+                }
+            }, index, sections.length);
+        });
+        finalizeLibraryLayout();
+    }
+
+    // Legacy path: per-category index.json arrays (kept as a fallback for when
+    // the top-level v2 manifest is missing or itself an Array).
+    function buildSectionsLegacy() {
+        const iconsContainer = domCache.iconsContainer;
         const categories = ['intervals', 'chords', 'melodies', 'custom'];
         categories.forEach((category, index) => {
             const sectionContainer = document.createElement('div');
@@ -1600,12 +1989,40 @@ const menuAPI = (function() {
                 iconsContainer.appendChild(createSectionSeparator());
             }
         });
+        finalizeLibraryLayout();
+    }
+
+    // Append the action buttons + normalize separators. Shared by both build paths.
+    function finalizeLibraryLayout() {
+        const iconsContainer = domCache.iconsContainer;
         const actionButtons = createActionButtons();
         iconsContainer.appendChild(createSectionSeparator());
         iconsContainer.appendChild(actionButtons);
         normalizeLayoutSeparators();
- 
+    }
+
+    function loadModuleIcons() {
+        const iconsContainer = domCache.iconsContainer;
+        if (!iconsContainer) return;
+        iconsContainer.innerHTML = '';
+        categoryContainers = [];
+        ensureLibraryViewport();
+        loadLibraryManifest().then(manifest => {
+            if (manifest) {
+                buildSectionsFromManifest(manifest.sections);
+            } else {
+                buildSectionsLegacy();
+            }
+            injectLibraryStyle();
+            ensureSearchRow();
+            setTimeout(updateMaxHeight, 100);
+        });
+    }
+
+    function injectLibraryStyle() {
+        if (document.getElementById('rmt-library-style')) return;
         const style = document.createElement('style');
+        style.id = 'rmt-library-style';
         style.textContent = `
             .icon { position: relative; }
             .icon > div:first-child { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0; }
@@ -1623,6 +2040,12 @@ const menuAPI = (function() {
             .icons-wrapper { -webkit-overflow-scrolling: touch; }
             .icons-wrapper.dragging { overflow: hidden !important; }
             .buttonsContainer div { display: flex; align-items: center; justify-content: center; text-align: center; }
+            .section-collapsed .icon { display: none !important; }
+            .category-collapse-chevron { line-height: 1; }
+            .library-search-row { flex: 0 0 100%; width: 100%; position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 6px; padding: 2px 2px 8px 2px; margin: 0; background: rgba(var(--rmt-bg-rgb), 0.96); box-sizing: border-box; }
+            .library-search-input { flex: 1 1 auto; min-width: 0; height: 30px; box-sizing: border-box; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.5); color: var(--rmt-text-primary, #ffa800); font-family: 'Roboto Mono', monospace; font-size: 13px; outline: none; -webkit-appearance: none; appearance: none; }
+            .library-search-input::placeholder { color: var(--rmt-text-secondary, rgba(255,168,0,0.5)); }
+            .library-search-input:focus { border-color: var(--rmt-accent, #ffa800); box-shadow: 0 0 0 2px rgba(var(--rmt-accent-rgb), 0.25); }
         `;
         document.head.appendChild(style);
     }
