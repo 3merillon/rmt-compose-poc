@@ -15,58 +15,58 @@
     },
     {
       "id": 2,
-      "startTime": "base.t + beat(base) * 1",
+      "startTime": "[1].t + beat(base)",
       "duration": "beat(base)",
-      "frequency": "(11/9) * base.f",
+      "frequency": "(11/9) * [1].f",
       "color": "rgba(53,196,215,0.75)"
     },
     {
       "id": 3,
-      "startTime": "base.t + beat(base) * 2",
+      "startTime": "[2].t + beat(base)",
       "duration": "beat(base)",
-      "frequency": "(13/9) * base.f",
+      "frequency": "(13/11) * [2].f",
       "color": "rgba(53,196,215,0.75)"
     },
     {
       "id": 4,
-      "startTime": "base.t + beat(base) * 3",
+      "startTime": "[3].t + beat(base)",
       "duration": "beat(base)",
-      "frequency": "(5/3) * base.f",
+      "frequency": "(15/13) * [3].f",
       "color": "rgba(53,196,215,0.75)"
     },
     {
       "id": 5,
-      "startTime": "base.t + beat(base) * 4",
+      "startTime": "[4].t + beat(base)",
       "duration": "beat(base)",
-      "frequency": "(17/9) * base.f",
+      "frequency": "(17/15) * [4].f",
       "color": "rgba(53,196,215,0.75)"
     },
     {
       "id": 6,
-      "startTime": "base.t + beat(base) * 5",
+      "startTime": "[5].t + beat(base)",
       "duration": "beat(base)",
-      "frequency": "(19/9) * base.f",
+      "frequency": "(19/17) * [5].f",
       "color": "rgba(53,196,215,0.75)"
     },
     {
       "id": 7,
-      "startTime": "base.t + beat(base) * 6",
+      "startTime": "[6].t + beat(base)",
       "duration": "beat(base)",
-      "frequency": "(7/3) * base.f",
+      "frequency": "(21/19) * [6].f",
       "color": "rgba(53,196,215,0.75)"
     },
     {
       "id": 8,
-      "startTime": "base.t + beat(base) * 7",
+      "startTime": "[7].t + beat(base)",
       "duration": "beat(base)",
-      "frequency": "(23/9) * base.f",
+      "frequency": "(23/21) * [7].f",
       "color": "rgba(53,196,215,0.75)"
     },
     {
       "id": 9,
-      "startTime": "base.t + beat(base) * 8",
+      "startTime": "[8].t + beat(base)",
       "duration": "beat(base)",
-      "frequency": "(25/9) * base.f",
+      "frequency": "(25/23) * [8].f",
       "color": "rgba(53,196,215,0.75)"
     }
   ]

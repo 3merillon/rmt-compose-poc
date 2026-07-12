@@ -146,25 +146,42 @@ for (const f of SCALE_MOVES) {
   if (existsSync(src)) { copyFileSync(src, dst); unlinkSync(src); console.log('moved scale ->', f); }
 }
 
-// A relational scale from fixed ratios-over-base (each note "(n/d)*base.f",
-// played sequentially). Transposes with base and re-roots onto a drop target.
-function ratioScale(ratios, color, base) {
-  const notes = ratios.map(([n, d], i) => ({
-    id: i + 1,
-    startTime: i === 0 ? 'base.t' : `base.t + beat(base) * ${i}`,
-    duration: 'beat(base)',
-    frequency: (n === 1 && d === 1) ? 'base.f' : `(${n}/${d}) * base.f`,
-    color,
-  }));
+// A CHAINED relational scale: each note is the PREVIOUS note times a step
+// ("(step) * [k-1].f"), like the TET scales — so lifting one note carries every
+// later note with it, and the whole scale is a subtree rooted at note 1 (re-roots
+// onto a drop target; only note 1 touches base). `ratios` are the intended
+// absolute ratios-from-base; consecutive steps are derived exactly.
+function chainedScale(ratios, color, base) {
+  const notes = [];
+  for (let i = 0; i < ratios.length; i++) {
+    const [n, d] = ratios[i];
+    let frequency;
+    if (i === 0) {
+      frequency = (n === 1 && d === 1) ? 'base.f' : `(${n}/${d}) * base.f`;
+    } else {
+      const cur = F(n, d);
+      const prev = F(ratios[i - 1][0], ratios[i - 1][1]);
+      const step = F(cur.n * prev.d, cur.d * prev.n); // cur / prev
+      frequency = (step.n === 1n && step.d === 1n) ? `[${i}].f` : `(${step.n}/${step.d}) * [${i}].f`;
+    }
+    notes.push({
+      id: i + 1,
+      startTime: i === 0 ? 'base.t' : `[${i}].t + beat(base)`,
+      duration: 'beat(base)',
+      frequency,
+      color,
+    });
+  }
   return { baseNote: { ...base }, notes };
 }
 // Tesla's 9-note base-3 scale (cybercyril.com): odd harmonics 9,11,13,15,17,19,21,23,25
-// over the 9th harmonic — i.e. 1, 11/9, 13/9, 5/3, 17/9, 19/9, 7/3, 23/9, 25/9. Base 3 (9=3^2),
-// honoring 3-6-9; ascends ~1.77 octaves (not octave-repeating).
+// over the 9th harmonic — 1, 11/9, 13/9, 5/3, 17/9, 19/9, 7/3, 23/9, 25/9. Base 3 (9=3^2),
+// honoring 3-6-9; ascends ~1.77 octaves (not octave-repeating). Chained, so its
+// steps read as consecutive odd harmonics (11/9, 13/11, 15/13, … 25/23).
 const TESLA = [[1, 1], [11, 9], [13, 9], [5, 3], [17, 9], [19, 9], [7, 3], [23, 9], [25, 9]];
 writeFileSync(
   join(scalesDir, 'tesla-9.json'),
-  JSON.stringify(ratioScale(TESLA, 'rgba(53,196,215,0.75)', { frequency: '263', startTime: '0', tempo: '160', beatsPerMeasure: '4' }), null, 2) + '\n'
+  JSON.stringify(chainedScale(TESLA, 'rgba(53,196,215,0.75)', { frequency: '263', startTime: '0', tempo: '160', beatsPerMeasure: '4' }), null, 2) + '\n'
 );
 
 const scaleItems = [
