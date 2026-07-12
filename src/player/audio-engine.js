@@ -1,5 +1,6 @@
 import Fraction from 'fraction.js';
 import { InstrumentManager } from '../instruments/instrument-manager.js';
+import { AudioGraph } from './audio-graph.js';
 
 export class AudioEngine {
   constructor({ initialVolume = 0.2, rampTime = 0.2 } = {}) {
@@ -7,27 +8,35 @@ export class AudioEngine {
     this.GENERAL_VOLUME_RAMP_TIME = rampTime;
 
     this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    this.generalVolumeGainNode = this.audioContext.createGain();
-    this.compressor = this.audioContext.createDynamicsCompressor();
-    this.generalVolumeGainNode.connect(this.compressor);
-    this.compressor.connect(this.audioContext.destination);
+
+    // The full signal graph (master/limiter, reverb send/return, per-instrument
+    // buses, pitch pan) lives in AudioGraph and is the sole consumer of the
+    // `audio.*` settings. Per-note voices connect into it via getBus().
+    this.graph = new AudioGraph(this.audioContext);
 
     this.instrumentManager = new InstrumentManager(this.audioContext);
 
-    // Track currently scheduled/playing oscillators for pause/stop
-    /** @type {Set<{oscillator:any,gainNode:GainNode}>} */
+    // Track currently scheduled/playing voices for pause/stop.
+    /** @type {Set<{voice:any,gainNode:GainNode,panner:StereoPannerNode|null}>} */
     this.activeOscillators = new Set();
 
     // Streaming playback state
     this._streamingState = null;
+
+    // Pending pause-fade teardown (cancelable so a quick pause→play can't let a
+    // stale timer stopAll() the new playback).
+    this._pauseFadeTimer = null;
+    this._pauseFadeResolve = null;
   }
 
-  // Return nodes so legacy code can alias them without deep coupling
+  // Return nodes so legacy code can alias them without deep coupling.
+  // `generalVolumeGainNode`/`compressor` keys are kept for back-compat and now
+  // alias the graph's master gain + limiter (see app-state.js, player.js).
   nodes() {
     return {
       audioContext: this.audioContext,
-      generalVolumeGainNode: this.generalVolumeGainNode,
-      compressor: this.compressor,
+      generalVolumeGainNode: this.graph.masterGain,
+      compressor: this.graph.limiter,
       instrumentManager: this.instrumentManager
     };
   }
@@ -52,15 +61,8 @@ export class AudioEngine {
   }
 
   setVolume(value) {
-    if (!this.audioContext || !this.generalVolumeGainNode) return;
-    if (this.audioContext.state !== 'running') {
-      this.generalVolumeGainNode.gain.value = value;
-      return;
-    }
-    this.generalVolumeGainNode.gain.linearRampToValueAtTime(
-      value,
-      this.audioContext.currentTime + this.GENERAL_VOLUME_RAMP_TIME
-    );
+    if (!this.audioContext || !this.graph) return;
+    this.graph.setMasterVolume(Number(value));
   }
 
   /**
@@ -92,6 +94,18 @@ export class AudioEngine {
           return instrumentCache.get(note.id);
         };
 
+        // Base-note frequency for pitch-driven stereo pan (note 0 = baseNote).
+        let baseF = null;
+        try {
+          const baseCached = evalCache.get(0);
+          if (baseCached && baseCached.frequency) baseF = baseCached.frequency.valueOf();
+          else if (module.baseNote && typeof module.baseNote.getVariable === 'function') {
+            const bf = module.baseNote.getVariable('frequency');
+            if (bf && typeof bf.valueOf === 'function') baseF = bf.valueOf();
+          }
+        } catch {}
+        if (!(baseF > 0)) baseF = 440;
+
         // Build note data list (no oscillators yet)
         const noteDataList = [];
         for (const id in module.notes) {
@@ -106,13 +120,18 @@ export class AudioEngine {
           if (noteEnd > fromTime && noteStart < moduleEndTime) {
             const adjustedStart = Math.max(0, noteStart - fromTime);
             const adjustedDuration = noteEnd - Math.max(noteStart, fromTime);
+            const freq = cached.frequency ? cached.frequency.valueOf() : null;
 
             noteDataList.push({
               id: note.id,
               startTime: adjustedStart,
               duration: adjustedDuration,
-              frequency: cached.frequency ? cached.frequency.valueOf() : null,
-              instrument: cached.frequency ? getInstrument(note) : null
+              frequency: freq,
+              instrument: freq != null ? getInstrument(note) : null,
+              // Normalized pan position (−1..1) before width scaling; width and
+              // enable are applied live at schedule time so mid-play stereo
+              // changes affect newly-scheduled notes.
+              panPos: freq != null ? this.graph.panPosition(freq, baseF) : null
             });
           }
         }
@@ -224,15 +243,17 @@ export class AudioEngine {
   }
 
   /**
-   * Schedule a single note for playback
+   * Schedule a single note for playback.
+   * Voice chain: source → voiceGain(env) → [StereoPanner] → instrument bus.
    */
   _scheduleNote(noteData, baseStartTime, initialVolume) {
+    const ctx = this.audioContext;
     const start = baseStartTime + noteData.startTime;
     const duration = noteData.duration;
 
-    // Create oscillator and gain node just-in-time
-    const oscillator = this.instrumentManager.createOscillator(noteData.instrument, noteData.frequency);
-    const gainNode = this.audioContext.createGain();
+    // Create the voice (may be a bare OscillatorNode or a wrapper) + envelope.
+    const voice = this.instrumentManager.createOscillator(noteData.instrument, noteData.frequency);
+    const gainNode = ctx.createGain();
 
     try {
       this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, initialVolume);
@@ -240,31 +261,68 @@ export class AudioEngine {
       console.warn('applyEnvelope failed', e);
     }
 
+    // Pitch-driven stereo pan (only when enabled and supported).
+    let panner = null;
+    if (this.graph.stereoEnabled && noteData.panPos != null && typeof ctx.createStereoPanner === 'function') {
+      try {
+        panner = ctx.createStereoPanner();
+        const p = noteData.panPos * this.graph.stereoWidth;
+        panner.pan.value = p < -1 ? -1 : p > 1 ? 1 : p;
+      } catch { panner = null; }
+    }
+
+    const bus = this.graph.getBus(noteData.instrument);
     try {
-      oscillator.connect(gainNode);
-      gainNode.connect(this.generalVolumeGainNode);
+      voice.connect(gainNode);
+      if (panner) {
+        gainNode.connect(panner);
+        panner.connect(bus);
+      } else {
+        gainNode.connect(bus);
+      }
     } catch {}
 
+    // Stop past gain-zero so exponential releases finish cleanly (no click).
+    const RELEASE_TAIL = 0.15;
     try {
-      oscillator.start(start);
-      oscillator.stop(start + duration);
+      voice.start(start);
+      voice.stop(start + duration + RELEASE_TAIL);
     } catch {}
 
-    const entry = { oscillator, gainNode };
+    const entry = { voice, gainNode, panner };
     this.activeOscillators.add(entry);
 
-    // Cleanup on natural end
+    const cleanup = () => {
+      if (!this.activeOscillators.has(entry)) return;
+      this.activeOscillators.delete(entry);
+      try { voice.disconnect(); } catch {}
+      try { gainNode.disconnect(); } catch {}
+      try { panner && panner.disconnect(); } catch {}
+    };
+    // Prefer the node's own 'ended' event; fall back to a timer for wrappers
+    // that don't forward onended.
+    let ended = false;
     try {
-      oscillator.onended = () => {
-        this.activeOscillators.delete(entry);
-      };
+      voice.onended = () => { ended = true; cleanup(); };
     } catch {}
+    const ms = Math.max(0, (start + duration + RELEASE_TAIL - ctx.currentTime) * 1000) + 60;
+    setTimeout(() => { if (!ended) cleanup(); }, ms);
   }
 
   /**
    * Stop the streaming scheduler
    */
   _stopStreaming() {
+    // Cancel any in-flight pause-fade teardown and settle its promise so the
+    // transport state machine (player.js pause().then) doesn't dangle when a
+    // new playback supersedes the fade.
+    if (this._pauseFadeTimer) {
+      clearTimeout(this._pauseFadeTimer);
+      this._pauseFadeTimer = null;
+      const r = this._pauseFadeResolve;
+      this._pauseFadeResolve = null;
+      if (r) { try { r(); } catch {} }
+    }
     if (this._streamingState) {
       this._streamingState.stopped = true;
       if (this._streamingState.timerId) {
@@ -281,30 +339,43 @@ export class AudioEngine {
    */
   pauseFade(rampTime = this.GENERAL_VOLUME_RAMP_TIME) {
     return new Promise((resolve) => {
+      // _stopStreaming() cancels any prior pending fade (and resolves it).
       this._stopStreaming();
       const now = this.audioContext.currentTime;
       for (const entry of this.activeOscillators) {
         try {
-          entry.gainNode.gain.cancelScheduledValues(now);
-          entry.gainNode.gain.linearRampToValueAtTime(0, now + rampTime);
+          const g = entry.gainNode.gain;
+          // Anchor the current value before the fade — cancelScheduledValues
+          // alone leaves a stale past envelope event as the ramp's start point,
+          // which would step the gain down instantly (click) instead of fading.
+          const cur = g.value;
+          g.cancelScheduledValues(now);
+          g.setValueAtTime(cur, now);
+          g.linearRampToValueAtTime(0, now + rampTime);
         } catch {}
       }
-      setTimeout(() => {
+      // Store the teardown so a new playback (which calls _stopStreaming) can
+      // cancel it — otherwise this timer would stopAll() the new notes.
+      this._pauseFadeResolve = resolve;
+      this._pauseFadeTimer = setTimeout(() => {
+        this._pauseFadeTimer = null;
+        this._pauseFadeResolve = null;
         try { this.stopAll(); } finally { resolve(); }
       }, Math.max(0, rampTime * 1000));
     });
   }
 
   /**
-   * Immediately stop and disconnect all active oscillators, clear tracking.
+   * Immediately stop and disconnect all active voices, clear tracking.
    */
   stopAll() {
     this._stopStreaming();
     const now = this.audioContext.currentTime;
     for (const entry of this.activeOscillators) {
-      try { entry.oscillator.stop(now); } catch {}
-      try { entry.oscillator.disconnect(); } catch {}
+      try { entry.voice.stop(now); } catch {}
+      try { entry.voice.disconnect(); } catch {}
       try { entry.gainNode.disconnect(); } catch {}
+      try { entry.panner && entry.panner.disconnect(); } catch {}
     }
     this.activeOscillators.clear();
   }

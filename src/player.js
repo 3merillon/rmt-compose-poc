@@ -1,5 +1,5 @@
 import Fraction from 'fraction.js';
-import { Module, invalidateModuleEndTimeCache as invalidateModuleEndTimeCacheGlobal } from './module.js';
+import { Module, invalidateModuleEndTimeCache as invalidateModuleEndTimeCacheGlobal, setDefaultInstrument } from './module.js';
 import { modals } from './modals/index.js';
 import { updateStackClickSelectedNote } from './stack-click.js';
 import { eventBus } from './utils/event-bus.js';
@@ -1119,6 +1119,63 @@ document.addEventListener('DOMContentLoaded', async function() {
                     eventBus.on('settings:changed', ({ path }) => {
                         if (!path || path === 'arrows' || path.indexOf('arrows.enabled') === 0 || path === '') {
                             applyArrowsEnabled();
+                        }
+                    });
+                } catch {}
+
+                // Master volume: initialize the transport slider from the
+                // persisted setting, keep the two in sync, and apply to the
+                // audio graph. (Previously the slider and the Settings → Audio
+                // master-volume control were disconnected; the graph is now the
+                // single applier via audio.masterVolume.)
+                try {
+                    const syncVolumeUI = (v) => {
+                        try {
+                            if (!(typeof v === 'number') || !isFinite(v)) return;
+                            if (domCache.volumeSlider) domCache.volumeSlider.value = v;
+                            const disp = domCache.volumeSlider &&
+                                domCache.volumeSlider.parentElement &&
+                                domCache.volumeSlider.parentElement.querySelector('span');
+                            if (disp) disp.textContent = String(v);
+                        } catch {}
+                    };
+                    const persistedVol = settingsStore.get('audio.masterVolume');
+                    if (typeof persistedVol === 'number') {
+                        syncVolumeUI(persistedVol);
+                        setVolume(persistedVol);
+                    }
+                    // Persist on release (change fires once at drag end — avoids
+                    // localStorage churn during the drag).
+                    if (domCache.volumeSlider) {
+                        domCache.volumeSlider.addEventListener('change', (e) => {
+                            try { settingsStore.set('audio.masterVolume', parseFloat(e.target.value)); } catch {}
+                        });
+                    }
+                    // Reflect changes made elsewhere (Settings panel / reset).
+                    eventBus.on('settings:changed', ({ path, value, settings }) => {
+                        if (path === 'audio.masterVolume' || path === 'audio' || path === '') {
+                            const v = path === 'audio.masterVolume'
+                                ? value
+                                : (settings && settings.audio && settings.audio.masterVolume);
+                            if (typeof v === 'number') { syncVolumeUI(v); setVolume(v); }
+                        }
+                    });
+                } catch {}
+
+                // Default instrument: notes that don't resolve to an explicit or
+                // inherited instrument use the configured default (was hardcoded
+                // 'sine-wave'). Applies to fresh playbacks after a change.
+                try {
+                    const applyDefaultInstrument = () => {
+                        try {
+                            const di = settingsStore.get('audio.defaultInstrument');
+                            if (typeof di === 'string' && di) setDefaultInstrument(di);
+                        } catch {}
+                    };
+                    applyDefaultInstrument();
+                    eventBus.on('settings:changed', ({ path }) => {
+                        if (path === 'audio.defaultInstrument' || path === 'audio' || path === '') {
+                            applyDefaultInstrument();
                         }
                     });
                 } catch {}

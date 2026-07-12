@@ -14,6 +14,22 @@ export function invalidateModuleEndTimeCache() {
   moduleLastModifiedTime = Date.now();
 }
 
+// Global default instrument for notes that don't resolve to an explicit or
+// inherited instrument (the base note and its parentless descendants). Driven
+// by the `audio.defaultInstrument` setting via setDefaultInstrument() (wired in
+// player.js). Kept as a plain module-level value so module.js stays importable
+// in the Node perf bench without pulling in the browser-only settings store.
+// Defaults to 'sine-wave' → preserves pre-settings behavior.
+let _defaultInstrumentName = 'sine-wave';
+
+export function setDefaultInstrument(name) {
+  if (typeof name === 'string' && name) _defaultInstrumentName = name;
+}
+
+export function getDefaultInstrument() {
+  return _defaultInstrumentName;
+}
+
 /**
  * Module class - Binary-native implementation
  *
@@ -62,7 +78,12 @@ export class Module {
       startTime: 'new Fraction(0)',
       tempo: 'new Fraction(60)',
       beatsPerMeasure: 'new Fraction(4)',
-      instrument: 'sine-wave',
+      // No hardcoded base instrument: with none set, findInstrument() resolves
+      // the base note (and everything inheriting from it) to the global default
+      // instrument (_defaultInstrumentName, default 'sine-wave' → behavior
+      // unchanged at defaults). This is what makes the audio.defaultInstrument
+      // setting reach the common inheriting-note case. A caller/JSON may still
+      // pass an explicit `instrument` to pin the base note's timbre.
       measureLength: "new Fraction(60).div(module.findTempo(module.baseNote)).mul(module.baseNote.getVariable('beatsPerMeasure'))",
     };
 
@@ -724,7 +745,7 @@ export class Module {
   findInstrument(note) {
     if (!note) return 'sine-wave';
     if (!note.hasExpression('frequency') && !note.getVariable('frequency')) {
-      return 'sine-wave';
+      return _defaultInstrumentName;
     }
 
     // Check direct instrument property
@@ -762,7 +783,7 @@ export class Module {
       }
     }
 
-    return 'sine-wave';
+    return _defaultInstrumentName;
   }
 
   /**

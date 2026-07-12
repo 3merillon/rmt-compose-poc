@@ -1,16 +1,10 @@
-import { SynthInstrument } from './instrument-manager.js';
+import { SynthInstrument, makeVoice } from './instrument-manager.js';
 
 export class SineInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'sine-wave';
-    }
-
-    createOscillator(frequency) {
-        const oscillator = this.audioContext.createOscillator();
-        oscillator.type = 'sine';
-        oscillator.frequency.value = frequency;
-        return oscillator;
+        this.waveType = 'sine';
     }
 
     getEnvelopeSettings() {
@@ -27,13 +21,12 @@ export class SquareInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'square-wave';
-    }
-
-    createOscillator(frequency) {
-        const oscillator = this.audioContext.createOscillator();
-        oscillator.type = 'square';
-        oscillator.frequency.value = frequency;
-        return oscillator;
+        this.waveType = 'square';
+        // 3-osc unison (±4¢) + a pitch-tracked lowpass to tame the harshness.
+        this.unisonCount = 3;
+        this.detuneCents = 4;
+        this.filterTrackMul = 12;
+        this.filterQ = 0.7;
     }
 
     getEnvelopeSettings() {
@@ -50,13 +43,11 @@ export class SawtoothInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'sawtooth-wave';
-    }
-
-    createOscillator(frequency) {
-        const oscillator = this.audioContext.createOscillator();
-        oscillator.type = 'sawtooth';
-        oscillator.frequency.value = frequency;
-        return oscillator;
+        this.waveType = 'sawtooth';
+        this.unisonCount = 3;
+        this.detuneCents = 4;
+        this.filterTrackMul = 10;
+        this.filterQ = 0.7;
     }
 
     getEnvelopeSettings() {
@@ -73,13 +64,7 @@ export class TriangleInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'triangle-wave';
-    }
-
-    createOscillator(frequency) {
-        const oscillator = this.audioContext.createOscillator();
-        oscillator.type = 'triangle';
-        oscillator.frequency.value = frequency;
-        return oscillator;
+        this.waveType = 'triangle';
     }
 
     getEnvelopeSettings() {
@@ -103,7 +88,7 @@ export class OrganInstrument extends SynthInstrument {
         const harmonicCount = 10;
         const real = new Float32Array(harmonicCount);
         const imag = new Float32Array(harmonicCount);
-        
+
         real[0] = 0;
         real[1] = 0.8;
         real[2] = 0;
@@ -114,19 +99,12 @@ export class OrganInstrument extends SynthInstrument {
         real[7] = 0;
         real[8] = 0.1;
         real[9] = 0.05;
-        
+
         for (let i = 1; i < harmonicCount; i++) {
             imag[i] = 0.003 * Math.cos(i * 0.7);
         }
-        
-        return this.audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
-    }
 
-    createOscillator(frequency) {
-        const oscillator = this.audioContext.createOscillator();
-        oscillator.setPeriodicWave(this.periodicWave);
-        oscillator.frequency.value = frequency;
-        return oscillator;
+        return this.audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
     }
 
     getEnvelopeSettings() {
@@ -150,7 +128,7 @@ export class VibraphoneInstrument extends SynthInstrument {
         const harmonicCount = 16;
         const real = new Float32Array(harmonicCount);
         const imag = new Float32Array(harmonicCount);
-        
+
         real[0] = 0;
         real[1] = 0.6;
         real[2] = 0.1;
@@ -167,19 +145,12 @@ export class VibraphoneInstrument extends SynthInstrument {
         real[13] = 0.03;
         real[14] = 0.02;
         real[15] = 0.01;
-        
+
         imag[1] = 0.002;
         imag[4] = 0.004;
         imag[10] = 0.003;
-        
-        return this.audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
-    }
 
-    createOscillator(frequency) {
-        const oscillator = this.audioContext.createOscillator();
-        oscillator.setPeriodicWave(this.periodicWave);
-        oscillator.frequency.value = frequency;
-        return oscillator;
+        return this.audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
     }
 
     getEnvelopeSettings() {
@@ -192,11 +163,75 @@ export class VibraphoneInstrument extends SynthInstrument {
     }
 }
 
+/**
+ * 2-operator FM electric piano (Rhodes/DX-ish "tine"). A sine carrier is
+ * frequency-modulated by a sine operator at the same ratio; the modulation
+ * index starts bright and decays over the note onset, giving the characteristic
+ * percussive-then-mellow FM timbre. Scheduling of the index envelope happens in
+ * the voice's start() so it locks to the note's absolute start time.
+ */
+export class FMEPianoInstrument extends SynthInstrument {
+    constructor(audioContext) {
+        super(audioContext);
+        this.name = 'fm-epiano';
+        this.modRatio = 1;       // modulator : carrier frequency ratio
+        this.indexStart = 4;     // deviation = index * modFreq (bright attack)
+        this.indexEnd = 0.6;     // settles to a mellow tone
+        this.indexDecay = 0.28;  // seconds
+    }
+
+    getEnvelopeSettings() {
+        return {
+            attackTimeRatio: 0.005,
+            decayTimeRatio: 0.4,
+            sustainLevel: 0.5,
+            releaseTimeRatio: 0.3
+        };
+    }
+
+    createOscillator(frequency) {
+        const ctx = this.audioContext;
+        const modFreq = frequency * this.modRatio;
+
+        const carrier = ctx.createOscillator();
+        carrier.type = 'sine';
+        carrier.frequency.value = frequency;
+
+        const modulator = ctx.createOscillator();
+        modulator.type = 'sine';
+        modulator.frequency.value = modFreq;
+
+        const modGain = ctx.createGain();
+        modGain.gain.value = this.indexStart * modFreq;
+        modulator.connect(modGain);
+        modGain.connect(carrier.frequency);
+
+        const out = ctx.createGain();
+        carrier.connect(out);
+
+        const scheduleIndex = (when) => {
+            const g = modGain.gain;
+            try {
+                g.cancelScheduledValues(when);
+                g.setValueAtTime(this.indexStart * modFreq, when);
+                g.exponentialRampToValueAtTime(
+                    Math.max(0.0001, this.indexEnd * modFreq),
+                    when + this.indexDecay
+                );
+            } catch {}
+        };
+
+        // Modulator must start/stop with the carrier; makeVoice starts both.
+        return makeVoice([carrier, modulator], out, frequency, scheduleIndex);
+    }
+}
+
 export const SynthInstruments = {
     SineInstrument,
     SquareInstrument,
     SawtoothInstrument,
     TriangleInstrument,
     OrganInstrument,
-    VibraphoneInstrument
+    VibraphoneInstrument,
+    FMEPianoInstrument
 };

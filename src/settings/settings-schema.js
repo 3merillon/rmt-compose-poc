@@ -43,7 +43,9 @@ export function defaultSettings() {
       masterVolume: 1,
       defaultInstrument: 'sine-wave',
       reverb: {
-        enabled: false,
+        // On by default (user decision 2026-07-12): a touch of room ambience is
+        // the nicer out-of-box sound. Stereo stays off; limiter stays on.
+        enabled: true,
         roomSize: 0.5,
         decaySec: 1.8,
         damping: 0.5,

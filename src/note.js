@@ -24,10 +24,16 @@ export class Note {
       measureLength: new BinaryExpression(),
     };
 
-    // Non-expression properties
+    // Non-expression properties.
+    // The base note (id 0) no longer hardcodes 'sine-wave' here: with instrument
+    // left null, module.findInstrument() resolves the base note (and every note
+    // inheriting from it) to the global default instrument (_defaultInstrumentName,
+    // default 'sine-wave' → unchanged behavior), which is what lets the
+    // audio.defaultInstrument setting take effect. An explicitly loaded/edited
+    // instrument still pins it.
     this.properties = {
       color: null,
-      instrument: id === 0 ? 'sine-wave' : null,
+      instrument: null,
     };
 
     // Bumped whenever an expression changes; the module uses it (together

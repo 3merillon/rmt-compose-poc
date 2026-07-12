@@ -48,7 +48,7 @@ const TABS = [
 // Instrument list for the Audio tab default-instrument selector. Kept in sync
 // with the built-in instruments; the audio phase can replace this with a live
 // query if desired.
-const INSTRUMENTS = ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone', 'piano', 'violin'];
+const INSTRUMENTS = ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone', 'fm-epiano', 'piano', 'violin'];
 
 // Quick-pick intervals for the Arrows tab (name, n, d).
 const ARROW_PRESETS = [
@@ -266,18 +266,18 @@ function buildAudioTab(container) {
   container.appendChild(row('Decay', slider('audio.reverb.decaySec', 0.1, 12, 0.1, (v) => `${(+v).toFixed(1)} s`)));
   container.appendChild(row('Damping', slider('audio.reverb.damping', 0, 1, 0.01)));
   container.appendChild(row('Pre-delay', slider('audio.reverb.preDelayMs', 0, 200, 1, (v) => `${v} ms`)));
-  container.appendChild(row('Wet / dry', slider('audio.reverb.wet', 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`)));
+  container.appendChild(row('Reverb amount', slider('audio.reverb.wet', 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`), 'How much reverb is mixed in on top of the dry signal (0% = dry, 100% = fully wet).'));
 
-  const stHeader = el('div', 'rmt-set-subhead', 'Stereo');
+  const stHeader = el('div', 'rmt-set-subhead', 'Stereo width');
   container.appendChild(stHeader);
-  container.appendChild(row('Enable stereo', toggle('audio.stereo.enabled'), 'Pans notes by pitch (low left, high right).'));
-  container.appendChild(row('Width', slider('audio.stereo.width', 0, 1, 0.01)));
+  container.appendChild(row('Spread notes by pitch', toggle('audio.stereo.enabled'), 'Places low notes toward the left speaker and high notes toward the right, as if seated at the instrument. Off = centered (mono-position).'));
+  container.appendChild(row('Amount', slider('audio.stereo.width', 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`)));
 
   const lmHeader = el('div', 'rmt-set-subhead', 'Master');
   container.appendChild(lmHeader);
   container.appendChild(row('Limiter', toggle('audio.limiter.enabled'), 'Gentle output limiting to avoid clipping.'));
 
-  const note = el('div', 'rmt-set-note', 'Reverb and stereo take effect once the audio engine upgrade is enabled.');
+  const note = el('div', 'rmt-set-note', 'Reverb, stereo and the limiter apply live during playback.');
   container.appendChild(note);
 }
 

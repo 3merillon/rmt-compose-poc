@@ -15,7 +15,7 @@
 | 2 | Settings Infrastructure | `[x]` | — |
 | 3 | Theme System | `[x]` | 2 |
 | 4 | Arrow Customization | `[x]` | 2 |
-| 5 | Audio Overhaul | `[ ]` | 2 (UI parts) |
+| 5 | Audio Overhaul | `[~]` (5b done; 5a samples pending) | 2 (UI parts) |
 | 6 | Module Library + Content | `[ ]` | 2 (icon size setting) |
 | 7 | License → MIT | `[ ]` | 5a (WAV replacement) |
 | 8 | Performance Round 2 | `[ ]` | 0.2 |
@@ -199,15 +199,22 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 - [ ] `src/instruments/multisample-instrument.js` — manifest-only fetch at registration (fixes eager WAV fetch sample-instruments.js:7,24); lazy zone decode; preload only zones needed by upcoming notes (hook `preparePlayback`, audio-engine.js:131-138); keep `createOscillator(frequency)` contract.
 - [ ] Register as `piano`/`violin` (same names — saved modules + inheritance keep working). Delete `public/instruments/samples/*.wav`. Add `public/samples/CREDITS.md`.
 
-### 5b Signal graph + room + synth quality
+### 5b Signal graph + room + synth quality   `[x]`   Last touched: 2026-07-12 by Claude
 
-- [ ] `src/player/audio-graph.js`: `voice → voiceGain(env) → StereoPanner → instrument bus → {dry, reverbSend → preDelay → Convolver → wet} → masterGain → configured compressor (threshold −6dB, knee 6, ratio 12) → destination`; rewire `_scheduleNote` (audio-engine.js:229-262); react to `settings:changed audio.*`.
-- [ ] `src/player/reverb.js` — **algorithmic IR** via OfflineAudioContext (stereo decorrelated noise, exp decay `e^(−t·6.91/decaySec)`, damping = tail lowpass sweep, early reflections in `roomSize·80ms`); DelayNode pre-delay (no regen needed); regen debounced 250ms; disabled → send disconnected.
-- [ ] Pitch-driven pan: `pan = clamp(log2(f/baseF)/3, −1, 1) × stereo.width`; StereoPannerNode, skip-if-absent.
-- [ ] Synth quality (`instrument-manager.js:23-37`): absolute attack/release floors (3/15ms) anti-click; exponential decay/release via `setTargetAtTime`; stop oscillators past gain-zero (audio-engine.js:249-251); ±4¢ 3-osc detune for saw/square; per-voice tracked lowpass; one 2-op FM instrument (`fm-epiano`); organ/vibraphone keep waves + new envelope core.
-- [ ] Audio tab: volume, default instrument, reverb params, stereo, limiter — persisted.
+**DONE & verified in headless Chromium (graph structure + OfflineAudioContext click-scan + play-through).**
 
-**Verification**: 169-note canon + piano + reverb on iPhone Safari / Android Chrome / desktop ×3 — no clicks/dropouts; pause fade with natural convolver tail; live param sweeps during playback; legacy saved modules still sound; network-fail mid-load → oscillator fallback (instrument-manager.js:98-101).
+- [x] `src/player/audio-graph.js` (NEW): `voice → voiceGain(env) → StereoPanner → instrument bus → {dry, reverbSend → preDelay → Convolver → reverbReturn(wet)} → masterGain → limiter(−6dB/knee6/ratio12) → destination`. Single consumer of `audio.*` settings (subscribes to `settings:changed`); lazy per-instrument buses; limiter reconnect on toggle. `audio-engine.js` now owns an `AudioGraph`; `_scheduleNote` rewritten (voice→gain→panner→bus, stop-past-zero + robust cleanup); `nodes()` keeps back-compat keys (generalVolumeGainNode=masterGain, compressor=limiter).
+- [x] `src/player/reverb.js` (NEW): algorithmic IR via OfflineAudioContext (stereo **decorrelated** noise → L/R corr ≈ 0, exp decay `e^(−t·ln1000/decaySec)`, damping = tail lowpass sweep + gentle HP, early reflections in `roomSize·80ms`); DelayNode pre-delay (live, no regen); IR regen debounced 250 ms + token-guarded against stale overwrites.
+- [x] Pitch-driven pan `clamp(log2(f/baseF)/3,−1,1) × width`, baseF from evalCache note 0; `panPos` computed in preparePlayback, width/enable applied live at schedule; StereoPanner skip-if-absent.
+- [x] Synth quality: shared `applyVoiceEnvelope` (abs attack/release floors 3/15 ms, exponential decay/release, hard-zero-then-stop → click-free — verified maxJump≈0.007 on sine, clean 0 tails); unified `makeVoice` wrapper contract (fixes the old sample-wrapper onended/disconnect leak); ±4¢ 3-osc unison + pitch-tracked lowpass on saw/square; new `fm-epiano` (2-op FM); organ/vibraphone keep periodic waves + new envelope core.
+- [x] Audio tab wired & live: master volume (transport slider now initializes from + persists to `audio.masterVolume`), default instrument, reverb params, stereo, limiter. Relabeled: "Wet / dry"→"Reverb amount" (0%=dry…100%=wet), "Stereo"→"Stereo width" / "Spread notes by pitch".
+- [x] **Default instrument** actually reaches inheritance: base note (id 0) no longer hardcodes `'sine-wave'` (note.js:30 + module.js) so `findInstrument` resolves it (and everything inheriting) to `_defaultInstrumentName` (default 'sine-wave' → behavior unchanged); `audio.defaultInstrument` drives it via `setDefaultInstrument` (module.js), Node-bench-safe (no settings import in module.js).
+
+**Adversarial review (15-agent workflow) → fixed:** (1) `pauseFade`/`setMasterVolume` `cancelScheduledValues` without a `setValueAtTime(g.value,now)` anchor → click on pause / master-volume change (spec: bare linearRamp interpolates from the stale past event); (2) `pauseFade`'s deferred `stopAll()` was uncancelable → a quick pause→play let the stale timer kill the new playback — now cancel+resolve in `_stopStreaming`.
+
+**Remaining for 5b verification (needs real device):** iPhone Safari / Android Chrome click/dropout check; the offline click-scan + graph asserts are the desktop proxy done so far.
+
+**Verification (5a, pending)**: 169-note canon + piano + reverb on iPhone Safari / Android Chrome / desktop ×3 — no clicks/dropouts; pause fade with natural convolver tail; live param sweeps during playback; legacy saved modules still sound; network-fail mid-load → oscillator fallback.
 
 ---
 
@@ -260,6 +267,7 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 ## Changelog
 
+- **2026-07-12** — **Phase 5b COMPLETE** (Audio signal graph + reverb + synth quality), verified in headless Chromium. New `audio-graph.js` (per-instrument buses, reverb send/return, pitch pan, configured −6/6/12 limiter, single `audio.*` settings consumer) + `reverb.js` (algorithmic OfflineAudioContext IR, decorrelated stereo, damping LP sweep, debounced+token-guarded regen). Rewrote `_scheduleNote` (voice→gain→panner→bus, stop-past-zero). Synth overhaul: shared click-free `applyVoiceEnvelope`, `makeVoice` wrapper (fixes sample onended/disconnect leak), saw/square unison+detune+tracked LP, new `fm-epiano`. Wired the whole Audio tab live (master vol persists via transport slider; reverb/stereo/limiter). Default instrument now reaches inheritance (base note id 0 instrument → null → resolves to `audio.defaultInstrument`). **Decisions this pass (user):** reverb **ON** by default (reverses the earlier default-off call), limiter ON, stereo OFF; "Wet/dry" relabeled "Reverb amount". **15-agent adversarial review** caught + fixed: cancelScheduledValues-without-anchor clicks (pauseFade + setMasterVolume) and an uncancelable pause-fade `stopAll` that raced a quick pause→play. Dev-server note: rapid HMR after edits intermittently strands the module-load boot path (getModule() null) — restart the dev server after a batch of edits before browser-verifying.
 - **2026-07-12** — Theme fix: Note-border color now applies to ALL notes + silence rings (main note-body border uniform at renderer ~2273 and silence-ring borders were hardcoded #636363 grey; only the base circle was themed). Dead `borderOnlyProgram` left as-is.
 - **2026-07-12** — Settings polish: fixed slider-hover jitter — the global `input[type=range]` rules briefly resize the thumb on hover, and the input height tracked the thumb, jittering the row/panel. Pinned the settings slider input to a fixed 20px height and made the thumb size + glow constant across rest/hover/active (scoped, higher-specificity overrides).
 - **2026-07-12** — Theme polish: measure-bar vertical lines (dashed `silenceVLineProgram` + solid `solidCssProgram`) now use the themed `measureBar` color (dark in light themes, was invisible white); settings-panel tabs row no longer scrolls (evenly spaced); settings body scrollbar styled like the module-bar scrollbar.

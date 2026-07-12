@@ -23,7 +23,8 @@ const SynthInstruments = {
     SawtoothInstrument: SynthInstrumentsModule.SawtoothInstrument,
     TriangleInstrument: SynthInstrumentsModule.TriangleInstrument,
     OrganInstrument: SynthInstrumentsModule.OrganInstrument,
-    VibraphoneInstrument: SynthInstrumentsModule.VibraphoneInstrument
+    VibraphoneInstrument: SynthInstrumentsModule.VibraphoneInstrument,
+    FMEPianoInstrument: SynthInstrumentsModule.FMEPianoInstrument
 };
 
 // Create the SampleInstruments object
