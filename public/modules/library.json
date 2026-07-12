@@ -850,13 +850,14 @@
         },
         {
           "file": "scale-systems/tesla-9.json",
-          "name": "Tesla 9-EDO",
+          "name": "Tesla 9",
           "family": "scale",
           "tags": [
             "tesla",
-            "9-edo",
-            "nonatonic",
-            "3-6-9"
+            "base-3",
+            "3-6-9",
+            "odd-harmonics",
+            "9-note"
           ]
         },
         {

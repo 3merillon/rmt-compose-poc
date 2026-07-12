@@ -146,28 +146,33 @@ for (const f of SCALE_MOVES) {
   if (existsSync(src)) { copyFileSync(src, dst); unlinkSync(src); console.log('moved scale ->', f); }
 }
 
-// Tesla 9-EDO: 9 equal divisions of the octave, chained (each step = 2^(1/9)).
-function edoScale(steps, name) {
-  const notes = [{ id: 1, startTime: 'base.t', duration: 'beat(base)', frequency: 'base.f', color: 'rgba(53,196,215,0.75)' }];
-  for (let k = 1; k <= steps; k++) {
-    notes.push({
-      id: k + 1,
-      startTime: `[${k}].t + beat(base)`,
-      duration: 'beat(base)',
-      frequency: `[${k}].f * 2 ^ (1/${steps})`,
-      color: 'rgba(53,196,215,0.75)',
-    });
-  }
-  return { baseNote: { frequency: '263', startTime: '0', tempo: '160', beatsPerMeasure: '4' }, notes };
+// A relational scale from fixed ratios-over-base (each note "(n/d)*base.f",
+// played sequentially). Transposes with base and re-roots onto a drop target.
+function ratioScale(ratios, color, base) {
+  const notes = ratios.map(([n, d], i) => ({
+    id: i + 1,
+    startTime: i === 0 ? 'base.t' : `base.t + beat(base) * ${i}`,
+    duration: 'beat(base)',
+    frequency: (n === 1 && d === 1) ? 'base.f' : `(${n}/${d}) * base.f`,
+    color,
+  }));
+  return { baseNote: { ...base }, notes };
 }
-writeFileSync(join(scalesDir, 'tesla-9.json'), JSON.stringify(edoScale(9, 'Tesla 9'), null, 2) + '\n');
+// Tesla's 9-note base-3 scale (cybercyril.com): odd harmonics 9,11,13,15,17,19,21,23,25
+// over the 9th harmonic — i.e. 1, 11/9, 13/9, 5/3, 17/9, 19/9, 7/3, 23/9, 25/9. Base 3 (9=3^2),
+// honoring 3-6-9; ascends ~1.77 octaves (not octave-repeating).
+const TESLA = [[1, 1], [11, 9], [13, 9], [5, 3], [17, 9], [19, 9], [7, 3], [23, 9], [25, 9]];
+writeFileSync(
+  join(scalesDir, 'tesla-9.json'),
+  JSON.stringify(ratioScale(TESLA, 'rgba(53,196,215,0.75)', { frequency: '263', startTime: '0', tempo: '160', beatsPerMeasure: '4' }), null, 2) + '\n'
+);
 
 const scaleItems = [
   { file: 'scale-systems/TET-12.json', name: '12-TET', family: 'scale', tags: ['equal', '12', 'chromatic'] },
   { file: 'scale-systems/TET-19.json', name: '19-TET', family: 'scale', tags: ['equal', '19', 'microtonal'] },
   { file: 'scale-systems/TET-31.json', name: '31-TET', family: 'scale', tags: ['equal', '31', 'microtonal'] },
   { file: 'scale-systems/BP-13.json', name: 'Bohlen–Pierce', family: 'scale', tags: ['bohlen-pierce', '13', 'tritave', 'base-3'] },
-  { file: 'scale-systems/tesla-9.json', name: 'Tesla 9-EDO', family: 'scale', tags: ['tesla', '9-edo', 'nonatonic', '3-6-9'] },
+  { file: 'scale-systems/tesla-9.json', name: 'Tesla 9', family: 'scale', tags: ['tesla', 'base-3', '3-6-9', 'odd-harmonics', '9-note'] },
   { file: 'scale-systems/Mixed-Base.json', name: 'Mixed-Base', family: 'scale', tags: ['mixed', 'experimental'] },
 ];
 const scaleWanted = new Set(scaleItems.map((s) => s.file.split('/').pop()));
