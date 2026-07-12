@@ -849,15 +849,15 @@
           ]
         },
         {
-          "file": "scale-systems/tesla-9.json",
-          "name": "Tesla 9",
+          "file": "scale-systems/tesla.json",
+          "name": "Tesla",
           "family": "scale",
           "tags": [
             "tesla",
             "base-3",
             "3-6-9",
             "odd-harmonics",
-            "9-note"
+            "81-note"
           ]
         },
         {

@@ -174,14 +174,17 @@ function chainedScale(ratios, color, base) {
   }
   return { baseNote: { ...base }, notes };
 }
-// Tesla's 9-note base-3 scale (cybercyril.com): odd harmonics 9,11,13,15,17,19,21,23,25
-// over the 9th harmonic — 1, 11/9, 13/9, 5/3, 17/9, 19/9, 7/3, 23/9, 25/9. Base 3 (9=3^2),
-// honoring 3-6-9; ascends ~1.77 octaves (not octave-repeating). Chained, so its
-// steps read as consecutive odd harmonics (11/9, 13/11, 15/13, … 25/23).
-const TESLA = [[1, 1], [11, 9], [13, 9], [5, 3], [17, 9], [19, 9], [7, 3], [23, 9], [25, 9]];
+// Tesla's base-3 scale (cybercyril.com): the odd harmonics over the 9th harmonic
+// (9=3^2, honoring 3-6-9). Extended to 81 notes (3^4): odd numbers 9,11,13,…,169
+// over 9 = 1, 11/9, 13/9, 5/3, … 169/9 (~5.1 octaves, not octave-repeating).
+// Chained, so each step is the next odd harmonic over the current (11/9, 13/11,
+// 15/13, … 169/167 ≈ 20.6c) — the steps taper toward unison as the series
+// approaches its limit. Base an octave lower so the ~4900c top stays in range.
+const TESLA_N = 81;
+const TESLA = Array.from({ length: TESLA_N }, (_, i) => [9 + 2 * i, 9]);
 writeFileSync(
-  join(scalesDir, 'tesla-9.json'),
-  JSON.stringify(chainedScale(TESLA, 'rgba(53,196,215,0.75)', { frequency: '263', startTime: '0', tempo: '160', beatsPerMeasure: '4' }), null, 2) + '\n'
+  join(scalesDir, 'tesla.json'),
+  JSON.stringify(chainedScale(TESLA, 'rgba(53,196,215,0.75)', { frequency: '131.5', startTime: '0', tempo: '260', beatsPerMeasure: '4' }), null, 2) + '\n'
 );
 
 const scaleItems = [
@@ -189,7 +192,7 @@ const scaleItems = [
   { file: 'scale-systems/TET-19.json', name: '19-TET', family: 'scale', tags: ['equal', '19', 'microtonal'] },
   { file: 'scale-systems/TET-31.json', name: '31-TET', family: 'scale', tags: ['equal', '31', 'microtonal'] },
   { file: 'scale-systems/BP-13.json', name: 'Bohlen–Pierce', family: 'scale', tags: ['bohlen-pierce', '13', 'tritave', 'base-3'] },
-  { file: 'scale-systems/tesla-9.json', name: 'Tesla 9', family: 'scale', tags: ['tesla', 'base-3', '3-6-9', 'odd-harmonics', '9-note'] },
+  { file: 'scale-systems/tesla.json', name: 'Tesla', family: 'scale', tags: ['tesla', 'base-3', '3-6-9', 'odd-harmonics', '81-note'] },
   { file: 'scale-systems/Mixed-Base.json', name: 'Mixed-Base', family: 'scale', tags: ['mixed', 'experimental'] },
 ];
 const scaleWanted = new Set(scaleItems.map((s) => s.file.split('/').pop()));
@@ -201,6 +204,11 @@ for (const f of readdirSync(melodiesDir)) {
   if (!melWanted.has(f)) { unlinkSync(join(melodiesDir, f)); console.log('unshipped from melodies:', f); }
 }
 writeFileSync(join(melodiesDir, 'index.json'), JSON.stringify([...melWanted], null, 2) + '\n');
+// Remove orphaned scale files (e.g. a renamed tesla-9.json) so the dir matches the manifest.
+for (const f of readdirSync(scalesDir)) {
+  if (f === 'index.json' || !f.endsWith('.json')) continue;
+  if (!scaleWanted.has(f)) { unlinkSync(join(scalesDir, f)); console.log('removed orphan scale:', f); }
+}
 writeFileSync(join(scalesDir, 'index.json'), JSON.stringify([...scaleWanted], null, 2) + '\n');
 
 // ================= patch library.json =================
