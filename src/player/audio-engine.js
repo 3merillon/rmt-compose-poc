@@ -141,15 +141,28 @@ export class AudioEngine {
 
         const t2 = performance.now();
 
-        // Collect unique instruments and wait for samples to load
+        // Collect unique instruments + the frequencies each will play, so
+        // multisample instruments can preload exactly the zones they need.
         const uniqueInstruments = new Set();
+        const freqsByInstrument = new Map();
         noteDataList.forEach(note => {
-          if (note.instrument) uniqueInstruments.add(note.instrument);
+          if (!note.instrument) return;
+          uniqueInstruments.add(note.instrument);
+          if (note.frequency != null) {
+            let list = freqsByInstrument.get(note.instrument);
+            if (!list) { list = []; freqsByInstrument.set(note.instrument, list); }
+            list.push(note.frequency);
+          }
         });
 
         const loadPromises = Array.from(uniqueInstruments).map(instrumentName => {
           const instrument = this.instrumentManager.getInstrument(instrumentName);
-          if (instrument && instrument.type === 'sample' && typeof instrument.waitForLoad === 'function') {
+          if (!instrument) return Promise.resolve();
+          // Multisample instruments preload only the zones the upcoming notes hit.
+          if (typeof instrument.prepare === 'function') {
+            return instrument.prepare(freqsByInstrument.get(instrumentName) || []);
+          }
+          if (instrument.type === 'sample' && typeof instrument.waitForLoad === 'function') {
             return instrument.waitForLoad();
           }
           return Promise.resolve();

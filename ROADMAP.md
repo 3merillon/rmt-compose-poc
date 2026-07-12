@@ -15,9 +15,9 @@
 | 2 | Settings Infrastructure | `[x]` | — |
 | 3 | Theme System | `[x]` | 2 |
 | 4 | Arrow Customization | `[x]` | 2 |
-| 5 | Audio Overhaul | `[~]` (5b done; 5a samples pending) | 2 (UI parts) |
+| 5 | Audio Overhaul | `[x]` | 2 (UI parts) |
 | 6 | Module Library + Content | `[ ]` | 2 (icon size setting) |
-| 7 | License → MIT | `[ ]` | 5a (WAV replacement) |
+| 7 | License → MIT | `[ ]` (unblocked — 5a done: WAVs replaced with CC0 samples) | 5a (WAV replacement) |
 | 8 | Performance Round 2 | `[ ]` | 0.2 |
 | 9 | Docs Sweep | `[ ]` | incremental per phase |
 
@@ -191,13 +191,19 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 **Goal**: high-quality synthesis, real multisampled instruments (open licenses), room/spatial rendering with settings.
 
-### 5a Sample replacement (first — unblocks Phase 7)
+### 5a Sample replacement (unblocks Phase 7)   `[x]`   Last touched: 2026-07-12 by Claude
 
-- [ ] Sources: **Salamander Grand Piano v3** (CC-BY-3.0) → piano; **VSCO2 Community Edition** (CC0) → violin/strings (+ future winds/brass/perc); FluidR3 (MIT) fallback. User approved CC-BY + CC0 with CREDITS file.
-- [ ] Format: AAC `.m4a` ~96–128kbps mono per zone (Safari can't decodeAudioData ogg/opus). `scripts/build-samples.mjs` (ffmpeg, documented): trim/normalize/encode; zones every ~minor 3rd (pitch-shift ≤ ±1.5 st). Piano ~25 zones (2–4MB); strings 8–12.
-- [ ] `public/samples/<name>/manifest.json`: `{schema, name, displayName, license:{id,source,author,url}, gainDb, envelope, zones:[{root, rootHz, lowHz, highHz, url, loop?}]}` (loops pre-baked crossfades).
-- [ ] `src/instruments/multisample-instrument.js` — manifest-only fetch at registration (fixes eager WAV fetch sample-instruments.js:7,24); lazy zone decode; preload only zones needed by upcoming notes (hook `preparePlayback`, audio-engine.js:131-138); keep `createOscillator(frequency)` contract.
-- [ ] Register as `piano`/`violin` (same names — saved modules + inheritance keep working). Delete `public/instruments/samples/*.wav`. Add `public/samples/CREDITS.md`.
+**DONE & verified in browser.** Both instruments now sourced from **VSCO2 Community Edition (CC0)** — user changed the piano source from Salamander (CC-BY) to VSCO2 upright at build time (2026-07-12) to keep a single uniform CC0 license + avoid a 488 MB tarball download; violin unchanged. This keeps the MIT relicense (Phase 7) trivially clean.
+
+- [x] Sources: **VSCO2 CE "Upright Nr1"** → `piano` (14 zones, roots C/G per octave, `mf` layer); **VSCO2 CE "Solo Violin — Arco Vib"** → `violin` (15 zones, roots G/A/C/E per octave, `f` layer). Both CC0. `public/samples/CREDITS.md`.
+- [x] Format: mono AAC `.m4a` ~96 kbps (Safari-safe). `scripts/build-samples.mjs` (`npm run samples:build`, documented, reproducible): resolves exact source files from the VSCO-2-CE GitHub tree, downloads, ffmpeg trims leading silence + caps 3.5 s with a tail fade + downmixes mono + encodes AAC. Total output **1.3 MB**.
+- [x] `public/samples/<name>/manifest.json`: `{schema:1, name, displayName, license, gainDb, envelope, zones:[{root, rootHz, lowHz, highHz, url}]}`. Zone frequency spans are geometric-mean boundaries between adjacent roots. **Velocity-ready:** schema reserves an optional `zones[].velLayers[]` (ignored today) so a future note-dynamics feature adds layers without a migration.
+- [x] `src/instruments/multisample-instrument.js` (NEW): manifest-only fetch at registration (fixes the old eager WAV fetch); lazy per-zone decode; `prepare(freqs)` preloads exactly the zones upcoming notes hit (wired into `preparePlayback`); nearest-zone selection + small pitch-shift + anti-alias filter; **network-fail → sine oscillator fallback**; same voice/`createOscillator` contract.
+- [x] Registered as `piano`/`violin` (unchanged names → saved modules + inheritance keep working). Deleted `public/instruments/samples/*.wav`.
+
+**Verified (headless Chromium, fresh server):** piano+violin register with CC0 license + 14/15 zones; `prepare()` decodes the needed zones; `createOscillator` returns sampled (buffer-backed) voices, not the oscillator fallback, across low/mid/high frequencies; full module plays with `piano` as default (15 active voices); zero console errors.
+
+**Known limitation:** no sample looping yet — a held note longer than its (~3.5 s capped) source plays out then goes silent for the remainder. The manifest reserves a `zones[].loop` field; pre-baked crossfade loops are a later enhancement (matters most for very long sustained violin notes).
 
 ### 5b Signal graph + room + synth quality   `[x]`   Last touched: 2026-07-12 by Claude
 
@@ -267,6 +273,7 @@ Notable: P2 (drop the per-note whole-cache copy) drove the full-eval collapse; P
 
 ## Changelog
 
+- **2026-07-12** — **Phase 5a COMPLETE** (sample replacement → Phase 7 unblocked), verified in browser. Replaced the two unknown-provenance WAVs (both embedded "Downloaded from Samplefocus.com"; violin also "WavePad Trial") with **VSCO2 Community Edition (CC0)** multisamples: `piano` (Upright Nr1, 14 zones) + `violin` (Solo Violin Arco Vib, 15 zones), mono AAC, **1.3 MB** total. New `src/instruments/multisample-instrument.js` (manifest-only fetch at registration, lazy per-zone decode, `prepare(freqs)` zone preload wired into `preparePlayback`, nearest-zone pitch-shift, network-fail oscillator fallback, velocity-ready manifest schema). New reproducible `scripts/build-samples.mjs` (`npm run samples:build`; VSCO-2-CE GitHub tree → download → ffmpeg mono/trim/cap/AAC). Deleted `public/instruments/samples/*.wav`. **Decision (user):** both instruments from VSCO2 CC0 (piano changed from Salamander CC-BY) for a uniform license + no 488 MB build download. Known limitation: no sample looping yet (long held notes cut at the ~3.5 s source cap).
 - **2026-07-12** — **Phase 5b COMPLETE** (Audio signal graph + reverb + synth quality), verified in headless Chromium. New `audio-graph.js` (per-instrument buses, reverb send/return, pitch pan, configured −6/6/12 limiter, single `audio.*` settings consumer) + `reverb.js` (algorithmic OfflineAudioContext IR, decorrelated stereo, damping LP sweep, debounced+token-guarded regen). Rewrote `_scheduleNote` (voice→gain→panner→bus, stop-past-zero). Synth overhaul: shared click-free `applyVoiceEnvelope`, `makeVoice` wrapper (fixes sample onended/disconnect leak), saw/square unison+detune+tracked LP, new `fm-epiano`. Wired the whole Audio tab live (master vol persists via transport slider; reverb/stereo/limiter). Default instrument now reaches inheritance (base note id 0 instrument → null → resolves to `audio.defaultInstrument`). **Decisions this pass (user):** reverb **ON** by default (reverses the earlier default-off call), limiter ON, stereo OFF; "Wet/dry" relabeled "Reverb amount". **15-agent adversarial review** caught + fixed: cancelScheduledValues-without-anchor clicks (pauseFade + setMasterVolume) and an uncancelable pause-fade `stopAll` that raced a quick pause→play. Dev-server note: rapid HMR after edits intermittently strands the module-load boot path (getModule() null) — restart the dev server after a batch of edits before browser-verifying.
 - **2026-07-12** — Theme fix: Note-border color now applies to ALL notes + silence rings (main note-body border uniform at renderer ~2273 and silence-ring borders were hardcoded #636363 grey; only the base circle was themed). Dead `borderOnlyProgram` left as-is.
 - **2026-07-12** — Settings polish: fixed slider-hover jitter — the global `input[type=range]` rules briefly resize the thumb on hover, and the input height tracked the thumb, jittering the row/panel. Pinned the settings slider input to a fixed 20px height and made the thumb size + glow constant across rest/hover/active (scoped, higher-specificity overrides).
