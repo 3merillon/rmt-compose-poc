@@ -1103,6 +1103,15 @@ document.addEventListener('DOMContentLoaded', async function() {
                     });
                 } catch {}
 
+                // Dev perf harness hook: expose workspace/renderer for sync-isolation
+                // + redraw timing. Perf-gated (?perf in the URL) so production is untouched.
+                try {
+                    if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('perf')) {
+                        window.__rmtWorkspace = glWorkspace;
+                        window.__rmtRenderer = glWorkspace.renderer;
+                    }
+                } catch {}
+
                 // Apply the persisted note-arrows toggle to the renderer, and
                 // keep it in sync with live Settings changes.
                 try {
@@ -5050,9 +5059,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           try { syncRendererSelection(); } catch {}
         } catch {}
       });
-      // Persist latest module snapshot on every history capture
-      eventBus.on('history:capture', ({ snapshot }) => {
-        try { localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snapshot)); } catch {}
+      // Persist latest module snapshot on every history capture. Reuse the shared
+      // pre-serialized string when the emitter provided one (Phase 8 dedupe).
+      eventBus.on('history:capture', ({ snapshot, snapshotStr }) => {
+        try {
+          const s = (typeof snapshotStr === 'string') ? snapshotStr : JSON.stringify(snapshot);
+          localStorage.setItem('rmt:moduleSnapshot:v1', s);
+        } catch {}
       });
     } catch (e) {
       console.warn('eventBus subscription failed', e);
@@ -5776,9 +5789,14 @@ function captureSnapshot(label = 'Change') {
       ? myModule.createModuleJSON()
       : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
     if (snap) {
+      // Serialize once and share the string with both the history store and the
+      // localStorage autosave (Phase 8 dedupe: previously each captured module was
+      // JSON.stringify'd 2-3x per user action).
+      let snapStr = null;
+      try { snapStr = JSON.stringify(snap); } catch {}
       // Ensure a baseline exists so the very first user action (color edit, drag) can be undone independently
-      try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
-      eventBus.emit('history:capture', { label, snapshot: snap });
+      try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap, snapshotStr: snapStr }); } catch {}
+      eventBus.emit('history:capture', { label, snapshot: snap, snapshotStr: snapStr });
     }
   } catch (e) {}
 }

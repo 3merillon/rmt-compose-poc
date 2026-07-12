@@ -21,7 +21,7 @@
  * into public/modules/perf/.
  */
 
-import { getModule } from '../store/app-state.js';
+import { getModule, getEvaluatedNotes } from '../store/app-state.js';
 import { eventBus } from '../utils/event-bus.js';
 
 const SNAPSHOT_KEY = 'rmt:moduleSnapshot:v1';
@@ -108,13 +108,95 @@ function measureCommit(iterations = 10, noteId = null) {
   return result;
 }
 
+function requireRenderer() {
+  const r = window.__rmtRenderer;
+  if (!r) throw new Error('[perf] renderer not exposed (need ?perf in URL + GL workspace)');
+  return r;
+}
+
+// Pick the note whose selection lights up the MOST dependency-highlight rings
+// (i.e. the most-connected hub). This is the worst case for the per-instance
+// ring pass (renderer.js drawIdxList) that Phase 8 batches.
+function pickHubNoteId(mod) {
+  let bestId = 0, bestCount = -1;
+  const ids = Object.keys(mod.notes).map(Number);
+  for (const id of ids) {
+    let c = 0;
+    try {
+      const rd = (typeof mod.getDependentNotes === 'function') ? mod.getDependentNotes(id) : [];
+      const d = (typeof mod.getDirectDependencies === 'function') ? mod.getDirectDependencies(id) : [];
+      c = (Array.isArray(rd) ? rd.length : 0) + (Array.isArray(d) ? d.length : 0);
+    } catch {}
+    if (c > bestCount) { bestCount = c; bestId = id; }
+  }
+  return { id: bestId, related: bestCount };
+}
+
+// Time renderer.sync() in isolation (item build + corruption pass + fraction
+// labels + GPU upload). This is the per-commit CPU cost the Phase 8 sync fixes
+// target. Reconstructs sync args from app-state + the renderer's own scale.
+function measureSync(iterations = 20, selectedNoteId = null) {
+  const mod = requireModule();
+  const r = requireRenderer();
+  const ev = getEvaluatedNotes();
+  const args = () => ({
+    evaluatedNotes: ev,
+    module: mod,
+    xScaleFactor: r.currentXScaleFactor || 1.0,
+    yScaleFactor: r.currentYScaleFactor || 1.0,
+    selectedNoteId
+  });
+  // warm up
+  r.sync(args());
+  const samples = [];
+  for (let i = 0; i < iterations; i++) {
+    const t0 = performance.now();
+    r.sync(args());
+    samples.push(performance.now() - t0);
+  }
+  const result = stats(samples);
+  console.table({ [`sync (${noteCount(mod)} notes, sel=${selectedNoteId})`]: result });
+  return result;
+}
+
+// Time a full GL redraw (_render) with a note selected, so the per-instance
+// dependency-ring + measure-tri outline passes are hot. Pass a hub note id to
+// hit the worst case.
+function measureRedraw(iterations = 30, selectedNoteId = null) {
+  const mod = requireModule();
+  const r = requireRenderer();
+  const ev = getEvaluatedNotes();
+  // Ensure the dep-highlight index sets are computed for this selection.
+  r.sync({
+    evaluatedNotes: ev, module: mod,
+    xScaleFactor: r.currentXScaleFactor || 1.0,
+    yScaleFactor: r.currentYScaleFactor || 1.0,
+    selectedNoteId
+  });
+  r.needsRedraw = true; r._render();
+  const samples = [];
+  for (let i = 0; i < iterations; i++) {
+    r.needsRedraw = true;
+    const t0 = performance.now();
+    r._render();
+    samples.push(performance.now() - t0);
+  }
+  const result = stats(samples);
+  console.table({ [`redraw (${noteCount(mod)} notes, sel=${selectedNoteId})`]: result });
+  return result;
+}
+
 function report() {
   const mod = requireModule();
+  const hub = pickHubNoteId(mod);
   const summary = {
     notes: noteCount(mod),
     evaluator: evaluatorName(mod),
     'full eval': measureEval(),
-    'commit e2e': measureCommit()
+    'commit e2e': measureCommit(),
+    'sync (no sel)': (window.__rmtRenderer ? measureSync(20, null) : 'n/a'),
+    [`sync (hub ${hub.id}, ${hub.related} rel)`]: (window.__rmtRenderer ? measureSync(20, hub.id) : 'n/a'),
+    [`redraw (hub ${hub.id})`]: (window.__rmtRenderer ? measureRedraw(30, hub.id) : 'n/a')
   };
   console.log('[perf] summary', summary);
   return summary;
@@ -130,5 +212,33 @@ function getModuleRef() {
   return getModule();
 }
 
-window.__rmtPerf = { loadStress, restoreDefault, measureEval, measureCommit, report, info, getModuleRef };
-console.log('[perf] harness ready: window.__rmtPerf — loadStress(name) | restoreDefault() | measureEval() | measureCommit() | report()');
+// Dev-only escape hatch to drive eventBus flows (octaveChange, undo/redo) from automation.
+function emit(ev, payload) { return eventBus.emit(ev, payload); }
+function noteFreq(id) {
+  // Prefer the evaluated cache (has computed frequencies incl. expression-derived).
+  try {
+    const ev = getEvaluatedNotes();
+    const e = ev && (typeof ev.get === 'function' ? ev.get(Number(id)) : ev[Number(id)]);
+    const f = e && e.frequency;
+    if (f != null) return (typeof f.valueOf === 'function' ? f.valueOf() : Number(f));
+  } catch {}
+  const mod = requireModule();
+  try { return mod.getNoteById(Number(id)).getVariable('frequency').valueOf(); } catch { return null; }
+}
+// Find a note (id !== 0) whose evaluated frequency is a finite number — a safe target
+// for octave-change round-trip tests (skips measure/silence notes).
+function pickFreqNoteId() {
+  const mod = requireModule();
+  const ev = getEvaluatedNotes();
+  const ids = Object.keys(mod.notes).map(Number).filter((id) => id !== 0).sort((a, b) => a - b);
+  for (const id of ids) {
+    const e = ev && (typeof ev.get === 'function' ? ev.get(id) : ev[id]);
+    const f = e && e.frequency;
+    const v = f != null ? (typeof f.valueOf === 'function' ? f.valueOf() : Number(f)) : null;
+    if (v != null && isFinite(v) && v > 0) return id;
+  }
+  return ids[0] ?? null;
+}
+
+window.__rmtPerf = { loadStress, restoreDefault, measureEval, measureCommit, measureSync, measureRedraw, pickHubNoteId: () => pickHubNoteId(requireModule()), report, info, getModuleRef, emit, noteFreq, pickFreqNoteId };
+console.log('[perf] harness ready: window.__rmtPerf — loadStress(name) | restoreDefault() | measureEval() | measureCommit() | measureSync(n,selId) | measureRedraw(n,selId) | report()');

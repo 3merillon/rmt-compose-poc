@@ -739,44 +739,70 @@ export class RendererAdapter {
     try {
       const depGraph = module?.getDependencyGraph?.();
       if (depGraph && this._corruptionType && typeof depGraph.isNoteCorrupted === 'function') {
-        for (let i = 0; i < N; i++) {
-          const noteId = Number(items[i]?.id ?? 0);
-          const isDirectlyCorrupt = depGraph.isNoteCorrupted(noteId);
-
-          if (isDirectlyCorrupt) {
-            // Check if this note's corruption comes from its own bytecode or from dependencies
-            // A note is "directly" corrupted only if it has POW and no corrupted dependencies,
-            // OR if it has POW in its own expressions (not just inherited)
-            // For now, check if any dependency is also corrupted - if so, might be transitive
-            let hasCorruptDependency = false;
-            if (typeof depGraph.getAllDependencies === 'function') {
+        // PERFORMANCE (Phase 8): the old path called getAllDependencies() — a full
+        // transitive BFS — for EVERY note EVERY sync, making this block O(N^2) on deep
+        // dependency chains (measured: ~28ms of a 46ms commit at chain-1000). The corrupt
+        // set is empty in the overwhelmingly common case, and even when non-empty it is
+        // tiny. Compute "has a corrupt note in its dependency closure" for all notes with
+        // ONE multi-source BFS over the *dependents* graph seeded by the corrupt set.
+        // Equivalent because `dependents` is the maintained inverse of `dependencies`:
+        //   i depends (transitively) on corrupt C  <=>  i is a transitive dependent of C.
+        const canFast = typeof depGraph.getCorruptedNotes === 'function'
+          && typeof depGraph.getDependents === 'function';
+        if (canFast) {
+          const corruptSet = depGraph.getCorruptedNotes();
+          if (corruptSet && corruptSet.size > 0) {
+            // hasCorruptDep = { every transitive dependent of any corrupt note }.
+            const hasCorruptDep = new Set();
+            const queue = [];
+            for (const c of corruptSet) queue.push(c);
+            const enqueued = new Set(queue);
+            let qi = 0;
+            while (qi < queue.length) {
+              const cur = queue[qi++];
+              const deps = depGraph.getDependents(cur);
+              if (deps) {
+                for (const d of deps) {
+                  hasCorruptDep.add(d);
+                  if (!enqueued.has(d)) { enqueued.add(d); queue.push(d); }
+                }
+              }
+            }
+            for (let i = 0; i < N; i++) {
+              const noteId = Number(items[i]?.id ?? 0);
+              const isCorrupt = corruptSet.has(noteId);
+              const hcd = hasCorruptDep.has(noteId);
+              // Direct (2.0) = corrupt with no corrupt dependency; transitive (1.0) =
+              // corrupt-with-corrupt-dep OR clean-but-depends-on-corrupt; else 0 (already filled).
+              if (isCorrupt) this._corruptionType[i] = hcd ? 1.0 : 2.0;
+              else if (hcd) this._corruptionType[i] = 1.0;
+            }
+          }
+          // corruptSet empty -> _corruptionType already all-zeros (fill above): no work.
+        } else if (typeof depGraph.getAllDependencies === 'function') {
+          // Fallback for older graph instances lacking the fast-path APIs: exact prior logic.
+          for (let i = 0; i < N; i++) {
+            const noteId = Number(items[i]?.id ?? 0);
+            const isDirectlyCorrupt = depGraph.isNoteCorrupted(noteId);
+            if (isDirectlyCorrupt) {
+              let hasCorruptDependency = false;
               const allDeps = depGraph.getAllDependencies(noteId);
               if (allDeps && allDeps.size > 0) {
                 for (const depId of allDeps) {
-                  if (depGraph.isNoteCorrupted(depId)) {
-                    hasCorruptDependency = true;
-                    break;
-                  }
+                  if (depGraph.isNoteCorrupted(depId)) { hasCorruptDependency = true; break; }
                 }
               }
-            }
-            // If has corrupt dependency, mark as transitive (1.0), else direct (2.0)
-            // This handles the case where a note gets corruption flags from evaluating
-            // an expression that references a corrupt note
-            this._corruptionType[i] = hasCorruptDependency ? 1.0 : 2.0;
-          } else if (typeof depGraph.getAllDependencies === 'function') {
-            // Not directly corrupted, check transitive corruption
-            const allDeps = depGraph.getAllDependencies(noteId);
-            let isTransitive = false;
-            if (allDeps && allDeps.size > 0) {
-              for (const depId of allDeps) {
-                if (depGraph.isNoteCorrupted(depId)) {
-                  isTransitive = true;
-                  break;
+              this._corruptionType[i] = hasCorruptDependency ? 1.0 : 2.0;
+            } else {
+              const allDeps = depGraph.getAllDependencies(noteId);
+              let isTransitive = false;
+              if (allDeps && allDeps.size > 0) {
+                for (const depId of allDeps) {
+                  if (depGraph.isNoteCorrupted(depId)) { isTransitive = true; break; }
                 }
               }
+              this._corruptionType[i] = isTransitive ? 1.0 : 0.0;
             }
-            this._corruptionType[i] = isTransitive ? 1.0 : 0.0;
           }
         }
       }
@@ -1032,8 +1058,15 @@ export class RendererAdapter {
 
       // Ensure all enabled per-instance attribute buffers are large enough for instanceCount draws
       // Provide zero-initialized defaults for region buffers to prevent ANGLE/D3D buffer underruns.
+      // PERFORMANCE (Phase 8): reuse a cached zero buffer instead of allocating a fresh
+      // Float32Array every sync — during drag, sync runs each frame, so this removes a
+      // per-frame ~instanceCount*16-byte allocation (GC churn) with identical GPU behavior
+      // (the cache is only ever read, never written, so it stays all-zeros).
       const instCount = Math.max(0, this.instanceCount | 0);
-      const zeros4 = new Float32Array(instCount * 4);
+      if (!this._zeros4Cache || this._zeros4Cache.length !== instCount * 4) {
+        this._zeros4Cache = new Float32Array(instCount * 4);
+      }
+      const zeros4 = this._zeros4Cache;
       try {
         if (this.rectInstanceTabRegionBuffer) {
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
@@ -2352,30 +2385,65 @@ export class RendererAdapter {
             this._singlePosSizeBuffer = gl.createBuffer();
           }
 
-          for (let i = 0; i < indices.length; i++) {
-            const idx = indices[i];
-            if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
-            const base = idx * 4;
-            const arr = new Float32Array([
-              this.posSize[base + 0],
-              this.posSize[base + 1],
-              this.posSize[base + 2],
-              this.posSize[base + 3]
-            ]);
-            gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
-            gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-            gl.vertexAttribDivisor(1, 1);
-            // Apply drag offset conditionally for moving notes
-            {
-              const uDrag = Us ? Us.u_dragOffset : gl.getUniformLocation(this.selectionRingProgram, 'u_dragOffset');
+          const uDrag = Us ? Us.u_dragOffset : gl.getUniformLocation(this.selectionRingProgram, 'u_dragOffset');
+          if (!this._dragActive) {
+            // PERFORMANCE (Phase 8): when no drag is active, u_dragOffset is (0,0) for
+            // EVERY note, so the whole bucket shares identical uniforms and can be drawn
+            // in ONE instanced call instead of a per-note loop (up to ~N draws + N
+            // bufferData uploads per bucket -> 1 draw + 1 upload). This is the worst-case
+            // path when a highly-connected note is selected and the scene keeps redrawing
+            // (hover, playhead). The selectionRing shader reads ONLY a_posSize (attrib 1)
+            // per instance, so gathering the bucket into one buffer is pixel-identical;
+            // WebGL rasterizes instances in order, so same-color overlap blends the same.
+            if (uDrag) gl.uniform2f(uDrag, 0.0, 0.0);
+            const need = indices.length * 4;
+            if (!this._depRingBatch || this._depRingBatch.length < need) {
+              this._depRingBatch = new Float32Array(Math.max(need, 64));
+            }
+            const batch = this._depRingBatch;
+            let w = 0;
+            for (let i = 0; i < indices.length; i++) {
+              const idx = indices[i];
+              if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
+              const base = idx * 4;
+              const o = w * 4;
+              batch[o + 0] = this.posSize[base + 0];
+              batch[o + 1] = this.posSize[base + 1];
+              batch[o + 2] = this.posSize[base + 2];
+              batch[o + 3] = this.posSize[base + 3];
+              w++;
+            }
+            if (w > 0) {
+              gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
+              gl.bufferData(gl.ARRAY_BUFFER, batch.subarray(0, w * 4), gl.DYNAMIC_DRAW);
+              gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+              gl.vertexAttribDivisor(1, 1);
+              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, w);
+            }
+          } else {
+            // Drag active: per-instance drag offset varies (moving notes vs anchor vs
+            // static), so keep the exact per-instance path for correctness.
+            for (let i = 0; i < indices.length; i++) {
+              const idx = indices[i];
+              if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
+              const base = idx * 4;
+              const arr = new Float32Array([
+                this.posSize[base + 0],
+                this.posSize[base + 1],
+                this.posSize[base + 2],
+                this.posSize[base + 3]
+              ]);
+              gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
+              gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+              gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+              gl.vertexAttribDivisor(1, 1);
               if (uDrag) {
                 const isAnchor = (this._dragAnchorIndex != null) && (idx === (this._dragAnchorIndex | 0));
                 const moving = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !isAnchor);
                 gl.uniform2f(uDrag, moving ? (this._dragOffsetX || 0.0) : 0.0, moving ? (this._dragOffsetW || 0.0) : 0.0);
               }
+              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
             }
-            gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
           }
 
           // Restore instanced buffer for attribute 1
