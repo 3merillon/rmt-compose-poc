@@ -50,6 +50,16 @@ import {
 // without touching anything else.
 const GROUP_ACTIONS = [
   {
+    id: 'copy-to-modules',
+    label: 'Copy to Modules',
+    hint: 'Saves the selection as a module in the library’s Custom section, rooted at its earliest note and keeping the tree intact.',
+    handler: (ctx) => {
+      if (typeof ctx.callbacks.onCopyToModules === 'function') ctx.callbacks.onCopyToModules();
+      // Non-destructive: keep the selection so the user can copy, then keep working
+      // on the same notes.
+    },
+  },
+  {
     id: 'delete-all',
     label: 'Delete all',
     danger: true,
@@ -71,7 +81,7 @@ let placed = false;     // has it been given its first position?
 
 let count = 0;
 // The caller (player.js) owns the selection; we only hold its callbacks.
-const callbacks = { onDeleteAll: null, onClear: null };
+const callbacks = { onDeleteAll: null, onClear: null, onCopyToModules: null };
 
 // ---- public API ---------------------------------------------------------
 
@@ -84,10 +94,12 @@ const callbacks = { onDeleteAll: null, onClear: null };
  * @param {number} o.count          how many notes are selected
  * @param {() => void} o.onDeleteAll  run ONLY after the user confirms the delete
  * @param {() => void} o.onClear    deselect everything (the × / "Clear selection")
+ * @param {() => void} o.onCopyToModules  export the selection to the Custom library
  */
-export function showGroupWidget({ count: n = 0, onDeleteAll = null, onClear = null } = {}) {
+export function showGroupWidget({ count: n = 0, onDeleteAll = null, onClear = null, onCopyToModules = null } = {}) {
   if (!ensureRoot()) return;
 
+  callbacks.onCopyToModules = onCopyToModules;
   callbacks.onDeleteAll = onDeleteAll;
   callbacks.onClear = onClear;
   setCount(n);
@@ -252,13 +264,14 @@ function fitHeight() {
   root.style.maxHeight = Math.max(floor, available) + 'px';
 }
 
-// First show only: bottom-center. Clear of the note widget (bottom-left), the
-// settings panel (top-right) and the lock button (bottom-right corner).
+// First show only: bottom-RIGHT, mirroring the note-variables widget's bottom-left
+// (both inset by MIN_BUFFER). Bottom-center put it straight over the middle of the
+// workspace, on top of the very notes you would then want to shift-click.
 // Afterwards the user's dragged position wins.
 function placeDefault() {
   const w = root.offsetWidth;
   const h = root.offsetHeight;
-  const left = Math.max(MIN_BUFFER, Math.round((window.innerWidth - w) / 2));
+  const left = Math.max(MIN_BUFFER, window.innerWidth - w - MIN_BUFFER);
   const top = Math.max(TOP_HEADER_HEIGHT + MIN_BUFFER, window.innerHeight - h - MIN_BUFFER);
   root.style.left = left + 'px';
   root.style.top = top + 'px';

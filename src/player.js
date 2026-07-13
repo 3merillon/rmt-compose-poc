@@ -4131,6 +4131,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             try {
                 showGroupWidget({
                     count: multiSelection.size,
+                    onCopyToModules: () => copySelectionToModules(),
                     onDeleteAll: () => deleteMultiSelection(),
                     onClear: () => { clearSelection(); }
                 });
@@ -4225,6 +4226,165 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     //            untouched; they inherit the delta for free.
     // Notes OUTSIDE the selection are never touched either: they follow their anchors,
     // exactly as they do for a single-note drag.
+    // Every note id an expression names (DSL `[N]` and legacy `getNoteById(N)`).
+    // __extractNoteRefFromRaw() returns only the FIRST; for export we need all of them,
+    // because an expression is only safe to copy verbatim if EVERY note it names travels
+    // with it.
+    function __extractAllNoteRefsFromRaw(raw) {
+        const out = new Set();
+        if (!raw || typeof raw !== 'string') return out;
+        for (const m of raw.matchAll(/\[(\d+)\]/g)) out.add(parseInt(m[1], 10));
+        for (const m of raw.matchAll(/getNoteById\(\s*(\d+)\s*\)/g)) out.add(parseInt(m[1], 10));
+        return out;
+    }
+
+    // Build a self-contained module JSON from a selection, preserving its tree.
+    //
+    // The copy is ROOTED at the earliest selected note, which lands exactly on the new
+    // module's baseNote (`base.t`). Everything else keeps its offset from that note, so
+    // dropping the module somewhere else reproduces the layout verbatim — which is what
+    // the import path expects, since it maps the module's baseNote onto the drop target.
+    //
+    // WHICH EXPRESSIONS SURVIVE VERBATIM, AND WHICH ARE REBUILT:
+    //
+    //   An expression is copied verbatim (ids renumbered) iff every note it names is also
+    //   in the selection. THAT is what conserves the branching — `[A].t + [A].d` stays
+    //   `[A].t + [A].d`, so the copy keeps the same relationships, not just the same
+    //   coordinates. If it reaches outside the selection the reference would dangle, so
+    //   it is rebuilt from the note's EVALUATED value against the new baseNote instead:
+    //   the note keeps its position/pitch/length even though it lost its anchor.
+    //
+    //   startTime is stricter. A note whose start-anchor chain LEAVES the selection is a
+    //   root and is always rebuilt as `base.t + beat(base) * k`, even when its expression
+    //   names no note at all (e.g. `base.t + beat(base) * 4`). Copied verbatim that would
+    //   pin it to its original absolute time instead of to wherever the module is dropped.
+    //   This is the same MOVER/RIDER split group move uses — a root is a mover.
+    //
+    // The new baseNote is a COPY of the current one (same frequency, tempo, meter), so
+    // `base.f`, `beat(base)` and `tempo(base)` keep meaning exactly what they meant and
+    // pitches survive as ratios rather than as frozen numbers.
+    function buildModuleFromSelection(ids) {
+        const S = new Set([...(ids || [])].map(Number).filter((id) => Number.isFinite(id) && id !== 0));
+        const notes = [...S]
+            .map((id) => myModule.getNoteById(id))
+            .filter((n) => n && !__isMeasureNoteGL(n));
+        if (!notes.length) return null;
+
+        const startOf = (n) => Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
+        notes.sort((a, b) => (startOf(a) - startOf(b)) || (Number(a.id) - Number(b.id)));
+        const t0 = startOf(notes[0]);
+
+        // Renumber 1..N in time order; 0 stays reserved for the baseNote.
+        const idMap = new Map();
+        notes.forEach((n, i) => idMap.set(Number(n.id), i + 1));
+
+        const base = myModule.baseNote;
+        const baseTempo = Number(myModule.findTempo(base)?.valueOf?.() ?? 120) || 120;
+        const beatLen = 60 / baseTempo;
+        const baseFreq = Number(base.getVariable('frequency')?.valueOf?.() ?? 0);
+
+        const frac = (x) => {
+            try { return new Fraction(x); }
+            catch { return new Fraction(Math.round(Number(x) * 1000), 1000); }
+        };
+        const fracStr = (f) => (f.d === 1 ? `${f.n}` : `(${f.n}/${f.d})`);
+
+        const renumber = (raw) => String(raw)
+            .replace(/\[(\d+)\]/g, (m, d) => {
+                const nid = idMap.get(parseInt(d, 10));
+                return nid ? `[${nid}]` : m;
+            })
+            .replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, (m, d) => {
+                const nid = idMap.get(parseInt(d, 10));
+                return nid ? `module.getNoteById(${nid})` : m;
+            });
+
+        // Does this expression name only notes that are coming with us? (base — id 0 — is
+        // always fine: the copy carries its own base.)
+        const selfContained = (raw) => {
+            if (!raw) return false;
+            for (const ref of __extractAllNoteRefsFromRaw(raw)) {
+                if (ref !== 0 && !S.has(ref)) return false;
+            }
+            return true;
+        };
+
+        const outNotes = [];
+        for (const n of notes) {
+            const e = { id: idMap.get(Number(n.id)) };
+            const sRaw = n.variables?.startTimeString || '';
+            const dRaw = n.variables?.durationString || '';
+            const fRaw = n.variables?.frequencyString || '';
+
+            // startTime — verbatim only for a RIDER whose expression stays inside the set.
+            if (__startChainTouchesSetGL(n, S) && selfContained(sRaw)) {
+                e.startTime = renumber(sRaw);
+            } else {
+                const k = frac((startOf(n) - t0) / beatLen);
+                e.startTime = (k.n === 0) ? 'base.t' : `base.t + beat(base) * ${fracStr(k)}`;
+            }
+
+            // duration
+            if (dRaw && selfContained(dRaw)) {
+                e.duration = renumber(dRaw);
+            } else if (n.getVariable('duration') != null) {
+                const durSec = Number(n.getVariable('duration')?.valueOf?.() ?? 0);
+                if (isFinite(durSec) && durSec > 0) {
+                    const beats = frac(durSec / beatLen);
+                    e.duration = (beats.n === beats.d) ? 'beat(base)' : `beat(base) * ${fracStr(beats)}`;
+                }
+            }
+
+            // frequency — silences legitimately have none, so only emit when there is one.
+            if (fRaw && selfContained(fRaw)) {
+                e.frequency = renumber(fRaw);
+            } else if (n.getVariable('frequency') != null) {
+                const f = Number(n.getVariable('frequency')?.valueOf?.() ?? 0);
+                if (isFinite(f) && f > 0 && baseFreq > 0) {
+                    const r = frac(f / baseFreq);
+                    e.frequency = (r.n === r.d) ? 'base.f' : `${fracStr(r)} * base.f`;
+                }
+            }
+
+            if (n.color) e.color = n.color;
+            if (n.instrument) e.instrument = n.instrument;
+            outNotes.push(e);
+        }
+
+        // Copy the current baseNote's own expressions — it is the tree's root, so it can
+        // never reference a note, which makes them safe to reuse as-is. startTime is
+        // forced to 0: the earliest copied note sits ON the base.
+        const baseOut = {};
+        for (const v of ['frequency', 'tempo', 'beatsPerMeasure', 'measureLength']) {
+            const raw = base.variables?.[v + 'String'];
+            if (typeof raw === 'string' && raw.trim()) {
+                baseOut[v] = raw;
+            } else {
+                const val = Number(base.getVariable(v)?.valueOf?.());
+                if (isFinite(val)) baseOut[v] = String(val);
+            }
+        }
+        baseOut.startTime = '0';
+        if (base.instrument) baseOut.instrument = base.instrument;
+
+        return { baseNote: baseOut, notes: outNotes };
+    }
+
+    // Group action: copy the selection into the module library's Custom section.
+    function copySelectionToModules() {
+        try {
+            const data = buildModuleFromSelection(multiSelection);
+            if (!data) return;
+            const n = data.notes.length;
+            const name = menuBar.addCustomModule(`Selection (${n} note${n === 1 ? '' : 's'})`, data);
+            if (name) {
+                try { menuBar.notify(`Copied to Custom modules as "${name}"`, 'success'); } catch {}
+            }
+        } catch (e) {
+            console.warn('copySelectionToModules failed', e);
+        }
+    }
+
     function classifyGroupMoveGL(ids) {
         const movers = [], riders = [];
         for (const raw of ids) {

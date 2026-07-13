@@ -74,6 +74,22 @@ const shoot = async (page, name) => {
 // Warm the pick path the way a user does (hover first), then act.
 const warm = async (page, x, y) => { await page.mouse.move(x, y); await page.waitForTimeout(120); };
 
+// The group widget is a floating panel and can sit on top of the notes we want to
+// click — drag it into a corner first, exactly as a user would. (Without this the
+// test clicks the widget instead of the note, and silently "fails" the toggle.)
+const parkGroupWidget = async (page) => {
+  const open = await page.evaluate(() =>
+    !!document.getElementById('group-widget')?.classList.contains('visible'));
+  if (!open) return;
+  const h = await page.locator('#group-widget .group-widget-header').boundingBox();
+  if (!h) return;
+  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(170, 120, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(200);
+};
+
 // Screen point for a note id, from the SAME buffers the picker uses.
 const pointOfNote = (page, id) => page.evaluate((id) => {
   const R = window.__rmtRenderer;
@@ -297,6 +313,26 @@ console.log('\n== desktop 1280x820 — marquee, shift-click, widget, group drag'
   check('the group widget is a BODY-level sibling of .myspaceapp (or the workspace click handler eats it)',
     widget?.parentIsBody && !widget?.insideWorkspace);
   check('the widget shows the live count', new RegExp(`\\b${sel1.length}\\b`).test(widget?.text || ''), widget?.text);
+
+  // Default placement: bottom-RIGHT, mirroring the note widget's bottom-left. It used to
+  // open bottom-center, straight over the notes you would then want to shift-click.
+  const place = await page.evaluate(() => {
+    const g = document.getElementById('group-widget').getBoundingClientRect();
+    const nwCS = getComputedStyle(document.getElementById('note-widget'));
+    return {
+      right: Math.round(window.innerWidth - g.right),
+      bottom: Math.round(window.innerHeight - g.bottom),
+      left: Math.round(g.left),
+      noteWidgetLeft: nwCS.left, noteWidgetBottom: nwCS.bottom,
+      vw: window.innerWidth,
+    };
+  });
+  console.log('  placement ' + JSON.stringify(place));
+  check('the group widget opens BOTTOM-RIGHT, mirroring the note widget (inset 19px)',
+    place.right === 19 && place.bottom === 19,
+    `inset right=${place.right}px bottom=${place.bottom}px; note widget sits at left=${place.noteWidgetLeft} bottom=${place.noteWidgetBottom}`);
+  check('...so it is clear of the middle of the workspace', place.left > place.vw / 2,
+    `left=${place.left} of ${place.vw}`);
   await shoot(page, '02-group-widget');
 
   // --- clicking inside the widget must NOT clear the selection
@@ -307,6 +343,7 @@ console.log('\n== desktop 1280x820 — marquee, shift-click, widget, group drag'
     `${(await selection(page)).length}/${sel1.length} still selected`);
 
   // --- shift-click REMOVES a selected note
+  await parkGroupWidget(page);          // keep the panel off the notes we are about to click
   const victim = sel1[0];
   const p = await pointOfNote(page, victim);
   await warm(page, p.x, p.y);
@@ -446,6 +483,7 @@ console.log('\n== a one-note selection is a NORMAL selection, however you get th
   await shoot(page, '15-two-selected-group-widget');
 
   // --- 3. shift-click back down to one -> normal note widget returns
+  await parkGroupWidget(page);          // it opens over the notes; move it aside
   await warm(page, pB.x, pB.y);
   await page.keyboard.down('Shift');
   await page.mouse.click(pB.x, pB.y);

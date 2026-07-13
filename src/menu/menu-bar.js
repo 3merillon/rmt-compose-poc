@@ -1256,6 +1256,67 @@ const menuAPI = (function() {
         return { valid: errors.length === 0, errors };
     }
 
+    // Add a module built in-app (today: "Copy to Modules" from a group selection) to the
+    // Custom section. Takes the SAME path an uploaded .json takes — validate, build an
+    // icon carrying moduleData, mark it uploaded, persist to ui-state — because that is
+    // what makes it survive a reload and be draggable back into the workspace.
+    // Returns the final (uniquified) name, or null if it could not be added.
+    function addCustomModule(baseName, moduleData) {
+        try {
+            if (!moduleData) return null;
+
+            const validation = validateModuleData(moduleData);
+            if (!validation.valid) {
+                console.error('[Security] Generated module failed validation:', validation.errors);
+                showNotification(`Could not copy: ${validation.errors.slice(0, 2).join('; ')}`, 'error');
+                return null;
+            }
+
+            const sectionContainer = categoryContainers.find(
+                (c) => c && c.querySelector('.category-label[data-category="custom"]')
+            );
+            if (!sectionContainer) {
+                showNotification('Custom section not found', 'error');
+                return null;
+            }
+
+            // Don't collide with an existing name — the library keys icons by name.
+            const taken = new Set(
+                [...sectionContainer.querySelectorAll('.icon')].map((i) => i.getAttribute('data-name'))
+            );
+            let name = String(baseName || 'Selection').trim() || 'Selection';
+            if (taken.has(name)) {
+                let i = 2;
+                while (taken.has(`${name} ${i}`)) i++;
+                name = `${name} ${i}`;
+            }
+
+            const data = { ...moduleData, filename: name };
+            const icon = createModuleIcon('custom', name, data);
+            icon.setAttribute('data-uploaded', 'true');
+
+            const placeholder = sectionContainer.querySelector('.empty-placeholder');
+            if (placeholder) sectionContainer.removeChild(placeholder);
+            sectionContainer.appendChild(icon);
+            ensurePlaceholdersAtEnd();
+
+            // The Custom section may be collapsed; a copy the user cannot see reads as a
+            // copy that did not happen.
+            try {
+                if (sectionContainer.getAttribute('data-collapsed') === 'true') {
+                    const label = sectionContainer.querySelector('.category-label[data-category="custom"]');
+                    if (label) label.click();
+                }
+            } catch {}
+
+            saveUIStateToLocalStorage();
+            return name;
+        } catch (e) {
+            console.error('addCustomModule failed', e);
+            return null;
+        }
+    }
+
     function handleFileUpload(category, sectionContainer) {
         const input = document.createElement('input');
         input.type = 'file';
@@ -2374,6 +2435,8 @@ const menuAPI = (function() {
         saveUIStateToLocalStorage: saveUIStateToLocalStorage,
         loadUIStateFromLocalStorage: loadUIStateFromLocalStorage,
         clearUIStateFromLocalStorage: clearUIStateFromLocalStorage,
+        addCustomModule: addCustomModule,
+        notify: showNotification,
         getModuleDropMode: () => moduleDropMode
     };
 })();
