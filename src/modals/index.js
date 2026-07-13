@@ -366,6 +366,18 @@ export function updateNoteWidgetHeight() {
     const headerHeight = header.offsetHeight;
     const rect = widget.getBoundingClientRect();
     const PADDING = 5;
+
+    // Measure the CONTENT — not the box we last gave it.
+    //
+    // The last line of this function writes an inline height onto `content`, and
+    // `scrollHeight` can never report less than the box an element already has. So the
+    // measurement could only ever GROW: show the BaseNote (a long variable list, capped
+    // at DEFAULT_OPEN_HEIGHT), then click a Measure (one `startTime` row), and the
+    // widget re-measured the tall box it had just been given itself and kept it — a
+    // single row of content with dead space under it. Clearing the inline height first
+    // lets the element report what it actually needs. Nothing paints between here and
+    // the write below, so this is a measurement, not a flicker.
+    content.style.height = '';
     const widgetDesiredHeight = headerHeight + content.scrollHeight + PADDING;
 
     // Until it is first dragged the widget is bottom-anchored (`bottom: 19px`) and has

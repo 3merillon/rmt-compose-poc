@@ -466,6 +466,113 @@ console.log('\n== desktop 1280x820');
     raised.noteWidget > raised.panel,
     `note widget z=${raised.noteWidget} > panel z=${raised.panel}`);
 
+  // --- 4a. the note widget fits WHICHEVER note kind you click
+  //
+  // The settings panel's bug, in the other panel: updateNoteWidgetHeight() measured
+  // `content.scrollHeight` on an element whose inline height IT had written on the
+  // previous show, and scrollHeight can never report less than the box an element
+  // already has. So the widget kept its high-water mark — show a Note (a long variable
+  // list), click a Measure (one `startTime` row), and you got one row of content with
+  // dead space running out under it.
+  //
+  // `dead` is the measurement that names the bug: the gap between the last row's bottom
+  // and the bottom of the content box. It must never be positive, for any note kind, in
+  // either anchoring mode.
+  const widgetFit = () => page.evaluate(() => {
+    const w = document.getElementById('note-widget');
+    const c = w.querySelector('.note-widget-content');
+    const r = c.getBoundingClientRect();
+    // The bottom of the content INCLUDING the last row's own margin — that margin is part
+    // of the scrollable overflow (and of scrollHeight), so counting only the border box
+    // would report the row's legitimate breathing room as dead space.
+    const kids = [...c.children];
+    const used = kids.length
+      ? Math.max(...kids.map((k) => k.getBoundingClientRect().bottom + parseFloat(getComputedStyle(k).marginBottom)))
+      : r.top;
+    const padBottom = parseFloat(getComputedStyle(c).paddingBottom);
+    return {
+      title: document.getElementById('note-widget-title').textContent,
+      h: Math.round(w.getBoundingClientRect().height),
+      dead: Math.round(r.bottom - padBottom - used),   // >0 = empty space under the last row
+      scrolls: c.scrollHeight > c.clientHeight + 1,
+      dragged: !!w.style.top,
+    };
+  });
+
+  // A point on the canvas that hits a measure triangle / the BaseNote circle and is not
+  // covered by a panel — the two kinds the GL id-buffer pick (findNotePoints) cannot see.
+  const findKind = (kind) => page.evaluate((kind) => {
+    const R = window.__rmtRenderer;
+    for (let y = 90; y < window.innerHeight - 6; y += 3) {
+      for (let x = 12; x < window.innerWidth - 12; x += 3) {
+        const hits = kind === 'measure' ? R.pickTrianglesAt(x, y) : R.pickBaseCircleAt(x, y);
+        if (!hits || !hits.length) continue;
+        const el = document.elementFromPoint(x, y);
+        if (!el || !el.closest('.myspaceapp')) continue;      // a panel is over it
+        return { x, y, id: hits[0].id };
+      }
+    }
+    return null;
+  }, kind);
+
+  const measurePt = await findKind('measure');
+  const basePt = await findKind('base');
+  if (!measurePt || !basePt) throw new Error(`no measure/base point found (measure=${JSON.stringify(measurePt)}, base=${JSON.stringify(basePt)})`);
+
+  // Park the widget as HIGH as the clamp allows, so it has the most room under it. The
+  // DRAGGED branch fits its content with no 300px cap, which is where the bug was
+  // unbounded — and the more room there is, the more dead space a stale height leaves.
+  {
+    const hb = await page.locator('.note-widget-header').boundingBox();
+    await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(300, 40, { steps: 8 });    // clamped to top = 50 + 19
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+  }
+
+  await clickNote(page, behind[0]);
+  const asNote = await widgetFit();
+  await page.mouse.click(measurePt.x, measurePt.y);
+  await page.waitForTimeout(400);
+  const asMeasure = await widgetFit();
+  await page.mouse.click(basePt.x, basePt.y);
+  await page.waitForTimeout(400);
+  const asBase = await widgetFit();
+  await clickNote(page, behind[0]);
+  const asNoteAgain = await widgetFit();
+  console.log(`  widget dragged: note=${JSON.stringify(asNote)}\n                  measure=${JSON.stringify(asMeasure)}\n                  base=${JSON.stringify(asBase)}`);
+
+  check('the widget really did show all three kinds',
+    /^Note /.test(asNote.title) && /^Measure /.test(asMeasure.title) && /^BaseNote/.test(asBase.title),
+    `"${asNote.title}" / "${asMeasure.title}" / "${asBase.title}"`);
+  check('dragged: a Measure SHRINKS the widget instead of keeping the Note\'s height',
+    asMeasure.h < asNote.h, `note=${asNote.h}px -> measure=${asMeasure.h}px`);
+  check('dragged: no note kind ever leaves dead space under the last row',
+    asNote.dead <= 1 && asMeasure.dead <= 1 && asBase.dead <= 1,
+    `dead space: note=${asNote.dead}px, measure=${asMeasure.dead}px, basenote=${asBase.dead}px`);
+  check('dragged: going back to a Note GROWS the widget again (not a one-way ratchet)',
+    asNoteAgain.h === asNote.h, `measure=${asMeasure.h}px -> note=${asNoteAgain.h}px (was ${asNote.h}px)`);
+  await shoot(page, '05a-widget-fits-measure');
+
+  // ...and the same in the UNDRAGGED, bottom-anchored mode, where the widget is a card
+  // capped at 300px and grows UPWARD. Clearing the inline top restores that mode.
+  await page.evaluate(() => { const w = document.getElementById('note-widget'); w.style.top = ''; w.style.left = ''; });
+  await clickNote(page, behind[0]);
+  const cardNote = await widgetFit();
+  await page.mouse.click(measurePt.x, measurePt.y);
+  await page.waitForTimeout(400);
+  const cardMeasure = await widgetFit();
+  console.log(`  widget card: note=${JSON.stringify(cardNote)} measure=${JSON.stringify(cardMeasure)}`);
+  // Every note kind in this module needs MORE than the 300px card (a Measure still
+  // carries its startTime, measure-duration, add-measure and evaluate sections — it is
+  // not one short row), so the card is capped and scrolls for all of them. What must
+  // hold is that the cap is a CAP: it never leaves dead space, and it never sticks.
+  check('card: a fresh widget is the 300px card, capped and scrolling, for every kind',
+    !cardNote.dragged && cardNote.h === 300 && cardNote.scrolls && cardNote.dead <= 1 &&
+    cardMeasure.h === 300 && cardMeasure.scrolls && cardMeasure.dead <= 1,
+    `note h=${cardNote.h}px dead=${cardNote.dead}px, measure h=${cardMeasure.h}px dead=${cardMeasure.dead}px`);
+
   // --- 4b. the "+" main menu is a PEER of the panels, not a popup trapped under them
   //
   // It used to live inside .top-bar, which has a z-index AND a backdrop-filter —
