@@ -82,6 +82,18 @@ export class ExpressionCompiler {
       const ast = this.parse(textExpr);
       this.emitBytecode(ast, binary);
     } catch (e) {
+      // The legacy parser failed. Before giving up, try the DSL compiler: the
+      // routing check above is a regex sniff, not a parse, so it can misclassify
+      // a DSL expression as legacy. Falling straight through to the constant-0
+      // fallback would silently zero the note's value instead.
+      try {
+        const dslBinary = compileDSL(textExpr);
+        this._cacheSet(cacheKey, dslBinary);
+        return dslBinary.clone();
+      } catch {
+        // Not valid DSL either — genuinely unparseable.
+      }
+
       // If parsing fails, create a fallback that returns 0
       console.warn(`Failed to compile expression: ${textExpr}`, e);
       binary.clear();

@@ -57,8 +57,14 @@ export function isDSLSyntax(expr) {
   // module.findTempo(...), module.findMeasureLength(...)
   if (/module\.find(Tempo|MeasureLength)/.test(trimmed)) return false;
 
-  // Simple numbers are valid in both - treat as DSL
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) return true;
+  // Reference-free arithmetic: a bare number ("263"), or numbers combined with
+  // infix operators ("2 * 263", "(1/2) * 263" — what the octave arrows write on
+  // the base note, whose frequency references nothing). Legacy cannot spell
+  // these without `new Fraction(` or a `.mul()`-style chain, and every legacy
+  // marker was ruled out above, so what remains is DSL. Routing these to the
+  // legacy parser makes it fail, and its failure path emits the constant 0
+  // (see ExpressionCompiler.compile), silently zeroing the note.
+  if (/^[-+*\/^().\d\s]+$/.test(trimmed)) return true;
 
   // If no clear indicator, default to legacy for safety
   // This ensures existing expressions work unchanged
