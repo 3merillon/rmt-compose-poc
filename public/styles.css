@@ -241,7 +241,21 @@ html, body {
     margin-right: 36px;
 }
 
+/* No focus ring on the transport/chrome buttons. Chrome raises :focus-visible for a
+   MODIFIER-click (shift-click), so the hidden loop gesture would otherwise leave a
+   white box around the play button every time it is used. */
+button:focus,
+button:focus-visible {
+    outline: none;
+}
+
 #playPauseBtn {
+    /* Long-press is a real gesture on this button (it toggles loop playback), so the
+       touch platform must not answer it with a callout / selection of its own. */
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -304,6 +318,70 @@ html, body {
 .pp.open::after,
 .pp.open span {
     filter: drop-shadow(0 0 10px var(--rmt-danger, #ff0000));
+}
+
+/* ── Loop playback ────────────────────────────────────────────────────────────
+   The hidden mode behind shift-click / long-press on Play (src/player.js,
+   toggleLoop). The same three bars, shrunk to dashes, chasing each other around a
+   lemniscate a third of a lap apart.
+
+   This block MUST stay after the .pp.open rules: .pp.open::before and
+   .pp.looping::before have identical specificity (0,2,1), so source order is the
+   only thing deciding which transform and colour win while both classes are on
+   (looping AND playing — the common case). */
+@supports (offset-path: path("M 0 0")) {
+    .pp.looping::before,
+    .pp.looping::after,
+    .pp.looping span {
+        /* The motion-path transform TRANSLATES the box from where layout put it; it
+           does not place it absolutely. So the box has to sit at the container's
+           origin for the path's coordinates to land where they read, and no
+           translate() may survive in `transform` — a transform is applied after the
+           path placement, in the dash's own rotated frame, and would drag the whole
+           orbit sideways. transform-origin (center, inherited from the base rule) is
+           what offset-anchor pins to the curve. */
+        top: 0;
+        left: 0;
+        offset-path: path("M 10 10 C 11.6 6.6, 14.4 5.4, 17 7 C 19 8.2, 19 11.8, 17 13 C 14.4 14.6, 11.6 13.4, 10 10 C 8.4 6.6, 5.6 5.4, 3 7 C 1 8.2, 1 11.8, 3 13 C 5.6 14.6, 8.4 13.4, 10 10 Z");
+        offset-anchor: 50% 50%;
+        offset-rotate: auto;
+        transform: scaleX(0.3);
+        /* Red, like the pause bars it morphs out of and back into: all three of these
+           are "the transport is running" states, and only the shape distinguishes them. */
+        background-color: var(--rmt-danger, #ff0000);
+        animation: pp-orbit 2.4s linear infinite;
+        /* The base rule's `transition: all` would otherwise catch offset-distance and
+           chase every animated frame, so the dashes crawl toward the target instead of
+           arriving. Keep the 0.5s morph for the shrink, drop it for the orbit. */
+        transition: transform 0.5s ease-in-out, background-color 0.5s ease-in-out;
+    }
+    /* A third of a lap apart. Negative delays start them already spread out. */
+    .pp.looping::before { animation-delay: 0s; }
+    .pp.looping span    { animation-delay: -0.8s; }
+    .pp.looping::after  { animation-delay: -1.6s; }
+
+    .pp.looping:hover::before,
+    .pp.looping:hover::after,
+    .pp.looping:hover span {
+        filter: drop-shadow(0 0 10px var(--rmt-danger, #ff0000));
+    }
+
+    /* Still say "loop" without the motion: three dashes parked around the figure-8. */
+    @media (prefers-reduced-motion: reduce) {
+        .pp.looping::before,
+        .pp.looping::after,
+        .pp.looping span {
+            animation: none;
+        }
+        .pp.looping::before { offset-distance: 0%; }
+        .pp.looping span    { offset-distance: 33.33%; }
+        .pp.looping::after  { offset-distance: 66.67%; }
+    }
+}
+
+@keyframes pp-orbit {
+    from { offset-distance: 0%; }
+    to   { offset-distance: 100%; }
 }
 
 .stop-button:hover .stop span {

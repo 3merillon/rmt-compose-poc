@@ -36,7 +36,22 @@ document.addEventListener('DOMContentLoaded', async function() {
     const INITIAL_VOLUME = 0.2, ATTACK_TIME_RATIO = 0.1, DECAY_TIME_RATIO = 0.1, SUSTAIN_LEVEL = 0.7, RELEASE_TIME_RATIO = 0.2, GENERAL_VOLUME_RAMP_TIME = 0.2, OSCILLATOR_POOL_SIZE = 64, DRAG_THRESHOLD = 5;
     
     let currentTime = 0, playheadTime = 0, isPlaying = false, isPaused = false, isFadingOut = false, totalPausedTime = 0, isTrackingEnabled = false, isDragging = false, dragStartX = 0, dragStartY = 0, isLocked = false, lastSelectedNote = null, originalNoteOrder = new Map();
-    
+
+    // Loop playback — the hidden mode behind shift-click / long-press on Play.
+    // Ephemeral, like isTrackingEnabled and isLocked: never persisted, gone on reload.
+    //
+    // `isLoopEnabled` is the user's armed MODE and survives pause, seek and edits.
+    // `loopPeriod` is the transport's frozen module-end for the playback in flight,
+    // and is the single predicate the playhead uses to decide "wrap instead of stop".
+    // They are deliberately separate: the mode can be armed with nothing playing
+    // (loopPeriod 0), and it stays > 0 through the final pass after the mode is
+    // disarmed — that pass still has to wrap correctly if it started mid-module.
+    let isLoopEnabled = false;   // mode armed → the .looping icon
+    let isLoopDisarming = false; // toggled off; the engine is finishing the current pass
+    let loopEndAudioTime = null; // absolute audioContext time that final pass ends
+    let loopPeriod = 0;          // frozen getModuleEndTime() for the active playback; 0 = don't wrap
+    let playbackBaseTime = 0;    // baseStartTime of the active playback (to arm mid-play)
+
     let stackClickState = { lastClickPosition: null, stackedNotes: [], currentIndex: -1 };
     // Workspace density. The Scale Controls widget and Settings → Scale are two
     // views of these two numbers; `scale.*` in the settings store is the source of
@@ -3903,10 +3918,26 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
             
             if (isPlaying && !isPaused && !isFadingOut) {
-                playheadTime = Math.min(audioContext.currentTime - currentTime + totalPausedTime, moduleEndTime);
-                if (playheadTime >= moduleEndTime) {
-                    stop(false);
-                    return;
+                const elapsed = audioContext.currentTime - currentTime + totalPausedTime;
+                if (loopPeriod > 0) {
+                    // Looping. The audio pump wraps on its own, so the playhead just
+                    // follows the same clock modulo the pass length — it never restarts
+                    // playback, which is what keeps the seam gapless.
+                    if (isLoopDisarming && loopEndAudioTime != null &&
+                        audioContext.currentTime >= loopEndAudioTime) {
+                        // The mode was switched off mid-pass; this is that pass's end.
+                        // Park at the module end and stop, exactly like a normal finish.
+                        playheadTime = moduleEndTime;
+                        stop(false);
+                        return;
+                    }
+                    playheadTime = elapsed <= 0 ? 0 : elapsed % loopPeriod;
+                } else {
+                    playheadTime = Math.min(elapsed, moduleEndTime);
+                    if (playheadTime >= moduleEndTime) {
+                        stop(false);
+                        return;
+                    }
                 }
             }
             
@@ -4374,13 +4405,30 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         if (fromTime === null) {
             fromTime = playheadTime;
         }
-        if (fromTime >= getModuleEndTime()) {
+        const endTime = getModuleEndTime();
+        if (fromTime >= endTime) {
             fromTime = 0;
         }
 
-        preparePlayback(fromTime).then(async (preparedNotes) => {
+        const wantLoop = isLoopEnabled && endTime > 0;
+
+        // The loop body has to be its own note list. preparePlayback(fromTime) offsets
+        // every startTime by fromTime AND truncates a note that straddles fromTime, so
+        // a mid-module list is only valid for the pass it was built for. When starting
+        // from 0 the two are the same list — share the promise rather than evaluating
+        // the module twice.
+        const firstPass = preparePlayback(fromTime);
+        const loopPass = wantLoop
+            ? (fromTime === 0 ? firstPass : preparePlayback(0))
+            : Promise.resolve(null);
+
+        Promise.all([firstPass, loopPass]).then(async ([preparedNotes, loopNotes]) => {
             try {
-                const baseStartTime = audioEngine.play(preparedNotes, { initialVolume: INITIAL_VOLUME });
+                const loop = (wantLoop && loopNotes && loopNotes.length)
+                    ? { period: endTime, notes: loopNotes, firstCycleAudioLength: endTime - fromTime }
+                    : null;
+
+                const baseStartTime = audioEngine.play(preparedNotes, { initialVolume: INITIAL_VOLUME, loop });
 
                 isPlaying = true;
                 isPaused = false;
@@ -4389,8 +4437,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 playheadTime = fromTime;
                 totalPausedTime = 0;
 
+                playbackBaseTime = baseStartTime;
+                // Only wrap if the engine actually armed — it refuses an empty or
+                // degenerate module, and the playhead must agree with it.
+                loopPeriod = audioEngine.isLooping() ? endTime : 0;
+                isLoopDisarming = false;
+                loopEndAudioTime = null;
+
                 domCache.ppElement.classList.remove('loading');
-                domCache.ppElement.classList.add('open');
+                updatePlayIcon();
             } catch (e) {
                 console.error('Playback failed', e);
             }
@@ -4403,8 +4458,23 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         isFadingOut = true;
 
         const currentPauseTime = audioContext.currentTime - currentTime;
-        playheadTime = currentPauseTime + totalPausedTime;
+        let pos = currentPauseTime + totalPausedTime;
+        // Wrap into the module. After the first pass this clock runs past the module
+        // end, and play() treats a fromTime >= end as "start over" — so pausing on
+        // pass 3 and hitting play would silently jump to 0 instead of resuming.
+        if (loopPeriod > 0) pos = pos <= 0 ? 0 : (pos % loopPeriod);
+        playheadTime = pos;
         totalPausedTime += currentPauseTime;
+
+        // Pause leaves the mode entirely. Engaging an endless loop should always be a
+        // deliberate act — shift-click or long-press, every time — never something you
+        // fall back into by pressing play on a transport that happens to still
+        // remember it. (This also means the edit paths that pause playback drop the
+        // loop, which is the same rule and the same reasoning.)
+        isLoopEnabled = false;
+        loopPeriod = 0;
+        isLoopDisarming = false;
+        loopEndAudioTime = null;
 
         audioEngine.pauseFade(GENERAL_VOLUME_RAMP_TIME).then(() => {
             isPlaying = false;
@@ -4414,27 +4484,126 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             isFadingOut = false;
         });
 
-        domCache.ppElement.classList.remove('open');
+        // Pausing a loop drops the orbit and shows the play triangle. The mode stays
+        // armed, so pressing play picks the loop back up where it left off.
+        updatePlayIcon();
     }
 
     function stop(resetPlayhead = true) {
-        if (!isPlaying && !isPaused && playheadTime === 0) return;
-        
+        // Above the early-out below: a real stop must disarm the mode even when the
+        // transport is already parked at 0, or the Stop button stops being an escape
+        // hatch out of loop mode. resetPlayhead === false means a seek or play()'s own
+        // self-restart — a position change, not a mode change — so the mode survives.
+        if (resetPlayhead) {
+            isLoopEnabled = false;
+        }
+        loopPeriod = 0;
+        isLoopDisarming = false;
+        loopEndAudioTime = null;
+
+        if (!isPlaying && !isPaused && playheadTime === 0) {
+            updatePlayIcon();
+            return;
+        }
+
         if (resetPlayhead) {
             playheadTime = 0;
             totalPausedTime = 0;
         }
-        
+
         isPlaying = false;
         isPaused = false;
         isFadingOut = false;
-        
-        domCache.ppElement.classList.remove('open');
-        
+
+        updatePlayIcon();
+
         try { audioEngine.stopAll(); } catch {}
         cleanupAudio();
-        
+
         updatePlayhead();
+    }
+
+    // ── Loop playback ────────────────────────────────────────────────────────────
+    // Hidden mode: shift-click or long-press Play. The three bars of the play icon
+    // shrink to dashes and orbit a lemniscate while it runs.
+
+    // The play button has three states, and all three are derived here from the
+    // transport rather than being poked at each call site — that is what keeps the
+    // transitions between them honest:
+    //
+    //   (none)          stopped / paused  → play triangle
+    //   .open           playing           → red pause bars
+    //   .open .looping  looping           → red dashes orbiting a lemniscate
+    //
+    // .looping tracks LOOP PLAYBACK, not the armed mode. Pausing a loop therefore
+    // shows the ordinary play triangle (you paused — the button should offer play),
+    // while isLoopEnabled quietly survives so hitting play resumes the loop.
+    function updatePlayIcon() {
+        const playing = isPlaying && !isPaused;
+        if (domCache.ppElement) {
+            domCache.ppElement.classList.toggle('open', playing);
+            domCache.ppElement.classList.toggle('looping', isLoopEnabled && playing);
+        }
+        if (domCache.playPauseBtn) {
+            domCache.playPauseBtn.title = isLoopEnabled
+                ? 'Loop playback — shift-click or long-press to exit'
+                : 'Play/Pause';
+        }
+    }
+
+    function toggleLoop() {
+        if (!isLoopEnabled) {
+            isLoopEnabled = true;
+            updatePlayIcon();
+
+            // The gesture is "play this on a loop", not merely "arm a mode" — so from a
+            // stopped or paused transport it starts playing too. play() reads the flag
+            // we just set and hands the loop straight to the engine.
+            if (!isPlaying || isPaused) {
+                play(playheadTime);
+                return;
+            }
+
+            const endTime = getModuleEndTime();
+            if (!(endTime > 0)) return;
+
+            // Arming mid-playback: the engine needs a full-module note list to use as
+            // the loop body, and the rel-time at which the pass in flight ends. Module
+            // time t sits at audioContext time (currentTime + t), so that pass ends
+            // firstLen seconds after the playback's base.
+            preparePlayback(0).then((loopNotes) => {
+                // The user may have toggled off, paused or stopped while we evaluated.
+                if (!isLoopEnabled || !isPlaying || isPaused || isFadingOut) return;
+                const firstLen = (currentTime + endTime) - playbackBaseTime;
+                if (!(firstLen > 0)) return;
+                if (audioEngine.armLoop({ period: endTime, notes: loopNotes, firstCycleAudioLength: firstLen })) {
+                    loopPeriod = endTime;
+                    isLoopDisarming = false;
+                    loopEndAudioTime = null;
+                }
+            }).catch(() => {});
+            return;
+        }
+
+        // Disarm. The icon morphs back to the red pause bars immediately — the toggle
+        // has to register now, not in thirty seconds — while the audio keeps playing
+        // the current pass out to its end and stops there.
+        isLoopEnabled = false;
+        updatePlayIcon();
+
+        if (isPlaying && !isPaused && !isFadingOut && audioEngine.isLooping()) {
+            const endsAt = audioEngine.disarmLoop();
+            if (endsAt != null) {
+                loopEndAudioTime = endsAt;
+                isLoopDisarming = true;
+                // loopPeriod stays set: the final pass may have begun mid-module and
+                // the playhead still has to wrap it.
+                return;
+            }
+        }
+        loopPeriod = 0;
+        isLoopDisarming = false;
+        loopEndAudioTime = null;
     }
 
     function setVolume(value) {
@@ -4699,7 +4868,86 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
         } catch {}
 
-    domCache.playPauseBtn.addEventListener('click', () => {
+    // Play button. A plain click is play/pause; shift-click or a long-press toggles
+    // the hidden loop mode. Same 500 ms / 8 px feel as the workspace's long-press
+    // (Workspace.MARQUEE_LONG_PRESS_MS / _SLOP_PX) so the gesture is learnable.
+    const PP_LONG_PRESS_MS = 500;
+    const PP_LONG_PRESS_SLOP_PX = 8;
+    let ppPressTimer = null;
+    let ppLongPressFired = false;
+
+    function ppCancelLongPress() {
+        if (ppPressTimer) { clearTimeout(ppPressTimer); ppPressTimer = null; }
+    }
+
+    // Swallow the click a long-press leaves behind. The button is still down when the
+    // press fires, so a click is still coming, and #playPauseBtn's own handler would
+    // read it as play/pause — you would toggle the mode and start playback in one
+    // gesture. Capture phase, because that handler must never see the event.
+    function ppSuppressTrailingClick() {
+        const eat = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            clearTimeout(disarm);
+        };
+        document.addEventListener('click', eat, { capture: true, once: true });
+        // If no click ever arrives (pointercancel, released off the button), don't
+        // leave the eater armed to swallow the user's next real click.
+        const disarm = setTimeout(() => {
+            document.removeEventListener('click', eat, { capture: true });
+        }, 700);
+    }
+
+    domCache.playPauseBtn.addEventListener('pointerdown', (event) => {
+        if (event.button != null && event.button !== 0) return;
+        ppCancelLongPress();
+        ppLongPressFired = false;
+
+        const startX = event.clientX, startY = event.clientY;
+
+        const onMove = (e) => {
+            if (Math.abs(e.clientX - startX) > PP_LONG_PRESS_SLOP_PX ||
+                Math.abs(e.clientY - startY) > PP_LONG_PRESS_SLOP_PX) {
+                ppCancelLongPress();
+            }
+        };
+        const onUp = () => {
+            ppCancelLongPress();
+            document.removeEventListener('pointermove', onMove, true);
+            document.removeEventListener('pointerup', onUp, true);
+            document.removeEventListener('pointercancel', onUp, true);
+            if (ppLongPressFired) ppSuppressTrailingClick();
+        };
+        document.addEventListener('pointermove', onMove, true);
+        document.addEventListener('pointerup', onUp, true);
+        document.addEventListener('pointercancel', onUp, true);
+
+        ppPressTimer = setTimeout(() => {
+            ppPressTimer = null;
+            ppLongPressFired = true;
+            // The document-level mouseup/pointerup handlers clear the note selection
+            // for anything not in their allow-list, and the top bar is not in it. The
+            // release that ends this press must not wipe the user's selection.
+            try {
+                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+                if (cont) cont.__rmtSuppressClickUntil = performance.now() + 400;
+            } catch {}
+            toggleLoop();
+        }, PP_LONG_PRESS_MS);
+    });
+
+    // A touch long-press otherwise raises the iOS callout / Android context menu at
+    // ~500 ms — exactly when the gesture fires.
+    domCache.playPauseBtn.addEventListener('contextmenu', (event) => event.preventDefault());
+
+    domCache.playPauseBtn.addEventListener('click', (event) => {
+        // `detail > 0` means a real pointer click. A focused <button> also fires a
+        // synthetic click on Shift+Space (detail === 0), which would otherwise toggle
+        // the mode by accident right after any normal click.
+        if (event.shiftKey && event.detail > 0) {
+            toggleLoop();
+            return;
+        }
         if (isPlaying) {
             pause();
         } else {

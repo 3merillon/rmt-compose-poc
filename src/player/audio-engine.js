@@ -5,6 +5,16 @@ import { AudioGraph } from './audio-graph.js';
 // Short enough to read as instant, long enough that the cut is not a step.
 const DECLICK_FADE = 0.02; // seconds
 
+// Loop guards. A pass shorter than this would let the scheduler spin through
+// hundreds of cycles per lookahead window; a zero/NaN period would spin forever.
+const MIN_LOOP_PERIOD = 0.05; // seconds
+// Backstop only. The pump's own "next pass is past the horizon" break bounds the
+// cycle count at LOOKAHEAD / MIN_LOOP_PERIOD; this is here so that a future bug in
+// that arithmetic degrades into a glitch rather than a hung tab.
+const MAX_CYCLES_PER_BATCH = 64;
+// Float slop when comparing a note's scheduled time against a pass boundary.
+const SEAM_EPS = 1e-6;
+
 export class AudioEngine {
   constructor({ initialVolume = 0.2, rampTime = 0.2 } = {}) {
     this.INITIAL_VOLUME = initialVolume;
@@ -195,11 +205,27 @@ export class AudioEngine {
   /**
    * Schedule and start playback with streaming oscillator creation.
    * Creates oscillators in batches to avoid blocking the main thread.
-   * @param {Array} noteDataList - Note data from preparePlayback
-   * @param {{initialVolume?:number}} options
+   *
+   * LOOPING. With a `loop` descriptor the pump never runs out of notes: when the
+   * current pass is fully scheduled it advances to the next one and keeps going,
+   * so the wrap is just another batch. Nothing is torn down and rebuilt at the
+   * seam — the buses, convolver and limiter in AudioGraph are persistent — so a
+   * note's release and its reverb tail ring on across the boundary exactly as
+   * they would mid-module. That is what makes the loop seamless, and it is why
+   * looping cannot be done by calling play() again from the playhead (that path
+   * re-anchors at currentTime + 0.1 and stopAll()s the tail: a ≥100 ms hole).
+   *
+   * Time is measured two ways here, and mixing them up is the easy bug:
+   *   - `rel`        playback-relative seconds  (ctx.currentTime - baseStartTime)
+   *   - `cycleStart` rel-time at which the current pass begins
+   * A note's absolute start is therefore baseStartTime + cycleStart + startTime.
+   *
+   * @param {Array} noteDataList notes for the FIRST pass (from preparePlayback(fromTime),
+   *   so their startTimes are relative to fromTime and the head note may be truncated)
+   * @param {{initialVolume?:number, loop?:{period:number,notes:Array,firstCycleAudioLength?:number}|null}} options
    * @returns {number} baseStartTime
    */
-  play(noteDataList, { initialVolume = this.INITIAL_VOLUME } = {}) {
+  play(noteDataList, { initialVolume = this.INITIAL_VOLUME, loop = null } = {}) {
     const baseStartTime = this.audioContext.currentTime + 0.1;
 
     // Stop any existing streaming
@@ -210,61 +236,219 @@ export class AudioEngine {
     const LOOKAHEAD = 2.0; // seconds ahead to schedule
     const BATCH_INTERVAL = 100; // ms between batch processing
 
-    let nextIndex = 0;
-    let scheduledUpTo = 0; // audio time we've scheduled up to
-
-    const scheduleNextBatch = () => {
-      if (!this._streamingState || this._streamingState.stopped) return;
-
-      const currentTime = this.audioContext.currentTime;
-      const targetTime = currentTime - baseStartTime + LOOKAHEAD;
-
-      // Schedule all notes that start before targetTime
-      let scheduled = 0;
-      while (nextIndex < noteDataList.length) {
-        const noteData = noteDataList[nextIndex];
-
-        // Stop if this note starts after our target window
-        if (noteData.startTime > targetTime) break;
-
-        // Skip notes without frequency (measure markers)
-        if (noteData.frequency && noteData.instrument) {
-          this._scheduleNote(noteData, baseStartTime, initialVolume);
-        }
-
-        nextIndex++;
-        scheduled++;
-      }
-
-      scheduledUpTo = targetTime;
-
-      // Continue scheduling if there are more notes
-      if (nextIndex < noteDataList.length) {
-        this._streamingState.timerId = setTimeout(scheduleNextBatch, BATCH_INTERVAL);
-      }
-    };
-
-    // Initialize streaming state
-    this._streamingState = {
+    // The pump mutates this in place (disarmLoop() writes to it from outside).
+    const s = {
       stopped: false,
       timerId: null,
-      noteDataList,
-      baseStartTime
+      baseStartTime,
+      initialVolume,
+      list: noteDataList, // notes of the pass currently being scheduled
+      nextIndex: 0,
+      cycle: 0,           // 0 = the initial (possibly partial) pass
+      cycleStart: 0,      // rel-time at which `list`'s pass begins
+      // Loop fields, installed by _applyLoop().
+      looping: false,
+      period: 0,
+      loopNotes: null,
+      firstLen: 0,        // rel-time at which pass 0 ends (period - fromTime)
+      // Set by disarmLoop(): rel-time of the final seam. Nothing at/after it sounds.
+      cutRel: null,
+      loopEndTime: null,  // absolute ctx time of that seam
+      pump: null
     };
+    this._streamingState = s;
+
+    if (loop) this._applyLoop(s, loop);
+
+    const pump = () => {
+      if (this._streamingState !== s || s.stopped) return;
+      s.timerId = null;
+
+      const rel = this.audioContext.currentTime - s.baseStartTime;
+      const targetTime = rel + LOOKAHEAD;
+
+      // `more` = this playback still has notes to schedule at some point.
+      let more = true;
+
+      for (let guard = 0; guard < MAX_CYCLES_PER_BATCH; guard++) {
+        // Drain the current pass up to the lookahead horizon.
+        let horizonReached = false;
+        while (s.nextIndex < s.list.length) {
+          const noteData = s.list[s.nextIndex];
+          const at = s.cycleStart + noteData.startTime;
+
+          // Past the final seam (the loop was disarmed): this note belongs to a pass
+          // that will never sound. Nothing later can sound either — the list is sorted
+          // and every subsequent pass starts later still — so this playback is done.
+          if (s.cutRel != null && at >= s.cutRel - SEAM_EPS) { more = false; break; }
+
+          // Not due yet.
+          if (at > targetTime) { horizonReached = true; break; }
+
+          // Skip notes without frequency (measure markers)
+          if (noteData.frequency && noteData.instrument) {
+            this._scheduleNote(noteData, s.baseStartTime + s.cycleStart, s.initialVolume);
+          }
+          s.nextIndex++;
+        }
+        if (!more || horizonReached) break;
+
+        // The current pass is fully scheduled.
+        if (!s.looping) { more = false; break; }
+
+        // Advance to the next pass. Multiplicative, not `cycleStart += period`: an
+        // accumulator would drift, and it must agree exactly with the test below or a
+        // whole pass lands in the past and every note of it fires at once.
+        const nextStart = s.firstLen + s.cycle * s.period; // start of pass s.cycle + 1
+        if (nextStart > targetTime) break; // beyond the horizon; pick it up next batch
+
+        s.cycle++;
+        s.cycleStart = nextStart;
+        s.list = s.loopNotes;
+        s.nextIndex = 0;
+      }
+
+      // Keep pumping while notes remain in this pass OR more passes are coming. The
+      // pre-loop version stopped the moment the last note was SCHEDULED, which is up
+      // to LOOKAHEAD before it sounds — with a loop that would end playback after
+      // exactly one pass (and immediately, for a module shorter than the lookahead).
+      if (more) s.timerId = setTimeout(pump, BATCH_INTERVAL);
+    };
+    s.pump = pump;
 
     // Start the first batch immediately
-    scheduleNextBatch();
+    pump();
 
     return baseStartTime;
   }
 
   /**
+   * Validate a loop descriptor and install it into a streaming state.
+   *
+   * The validation is not defensive dressing: an empty note list or a zero/NaN
+   * period makes the pump's inner while() a no-op, so every iteration "exhausts"
+   * the pass and advances a cycle. With a NaN period the `nextStart > targetTime`
+   * break never fires either (every comparison with NaN is false), so without this
+   * the tab hangs. A module with no notes DOES reach here (player.js forces
+   * fromTime = 0 when the module is empty).
+   *
+   * @returns {boolean} whether the loop was armed
+   */
+  _applyLoop(s, loop) {
+    if (!s || !loop) return false;
+    const period = Number(loop.period);
+    if (!Number.isFinite(period) || period < MIN_LOOP_PERIOD) return false;
+
+    const notes = loop.notes;
+    if (!Array.isArray(notes) || notes.length === 0) return false;
+    // All-measure-marker modules would schedule nothing, forever.
+    if (!notes.some(n => n && n.frequency && n.instrument)) return false;
+
+    let firstLen = Number(loop.firstCycleAudioLength);
+    if (!Number.isFinite(firstLen) || firstLen <= 0) firstLen = period;
+
+    s.looping = true;
+    s.period = period;
+    s.loopNotes = notes;
+    s.firstLen = firstLen;
+    s.cutRel = null;
+    s.loopEndTime = null;
+    return true;
+  }
+
+  /**
+   * Turn looping on for a playback that is already running (the user armed the mode
+   * mid-module). Safe to call when the pump has already retired.
+   * @returns {boolean} whether the loop was armed
+   */
+  armLoop(loop) {
+    const s = this._streamingState;
+    if (!s || s.stopped) return false;
+    if (!this._applyLoop(s, loop)) return false;
+
+    // The pump may have retired already (a non-looping playback stops rescheduling
+    // as soon as the last note is scheduled). Restart it; pump() is idempotent — it
+    // only ever schedules what is due.
+    if (s.timerId) { clearTimeout(s.timerId); s.timerId = null; }
+    if (s.pump) s.pump();
+    return true;
+  }
+
+  /**
+   * Stop looping, but let the pass in flight finish: playback runs to the next seam
+   * and stops there.
+   *
+   * The lookahead means voices for the NEXT pass may already exist (and for a module
+   * shorter than LOOKAHEAD, voices for several passes). They are cancelled here by
+   * absolute start time rather than by cycle index — the scheduler's cycle counter
+   * runs ahead of the pass you can actually hear, so it is the wrong thing to ask.
+   *
+   * @returns {number|null} absolute ctx time at which the final pass ends
+   */
+  disarmLoop() {
+    const s = this._streamingState;
+    if (!s || s.stopped || !s.looping) return null;
+
+    const rel = this.audioContext.currentTime - s.baseStartTime;
+    const cutRel = this._nextSeamRel(rel, s);
+
+    s.looping = false;
+    s.cutRel = cutRel;
+    s.loopEndTime = s.baseStartTime + cutRel;
+
+    this._cancelScheduledFrom(s.loopEndTime);
+    return s.loopEndTime;
+  }
+
+  isLooping() {
+    const s = this._streamingState;
+    return !!(s && !s.stopped && s.looping);
+  }
+
+  getLoopEndTime() {
+    const s = this._streamingState;
+    return s ? s.loopEndTime : null;
+  }
+
+  /** Playback-relative time of the first pass boundary STRICTLY after `rel`. */
+  _nextSeamRel(rel, s) {
+    if (rel < s.firstLen) return s.firstLen;
+    const k = Math.floor((rel - s.firstLen) / s.period) + 1;
+    return s.firstLen + k * s.period;
+  }
+
+  /**
+   * Cancel every voice scheduled to start at or after `atTime`.
+   *
+   * A voice whose start is still in the future and whose stop is moved to its own
+   * start never produces sound (the same property stopAll() relies on), so this is
+   * silent — no fade needed. Voices already sounding are left alone: their release
+   * and reverb tail are part of the pass that is still playing.
+   */
+  _cancelScheduledFrom(atTime) {
+    for (const entry of Array.from(this.activeOscillators)) {
+      if (!(entry.startTime >= atTime - SEAM_EPS)) continue;
+
+      // Drop it from tracking first: the entry's own cleanup() timer checks
+      // membership and will now bail, leaving this the only teardown.
+      this.activeOscillators.delete(entry);
+      try { entry.voice.stop(entry.startTime); } catch {}
+      try { entry.voice.disconnect(); } catch {}
+      try { entry.gainNode.disconnect(); } catch {}
+      try { entry.panner && entry.panner.disconnect(); } catch {}
+    }
+  }
+
+  /**
    * Schedule a single note for playback.
    * Voice chain: source → voiceGain(env) → [StereoPanner] → instrument bus.
+   *
+   * @param {number} passStartTime absolute ctx time at which this note's PASS begins
+   *   (baseStartTime for a normal playback; baseStartTime + cycleStart when looping)
    */
-  _scheduleNote(noteData, baseStartTime, initialVolume) {
+  _scheduleNote(noteData, passStartTime, initialVolume) {
     const ctx = this.audioContext;
-    const start = baseStartTime + noteData.startTime;
+    const start = passStartTime + noteData.startTime;
     const duration = noteData.duration;
 
     // Create the voice (may be a bare OscillatorNode or a wrapper) + envelope.
@@ -312,7 +496,11 @@ export class AudioEngine {
       voice.stop(start + duration + RELEASE_TAIL);
     } catch {}
 
-    const entry = { voice, gainNode, panner };
+    // `startTime` is what disarmLoop() cancels against — around a loop seam the set
+    // holds voices from two passes at once (the outgoing pass's release tails overlap
+    // the incoming pass's attacks), so "which pass is this voice in" can only be
+    // answered from its own scheduled time.
+    const entry = { voice, gainNode, panner, startTime: start };
     this.activeOscillators.add(entry);
 
     const cleanup = () => {
