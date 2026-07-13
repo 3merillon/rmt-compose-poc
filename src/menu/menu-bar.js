@@ -340,66 +340,126 @@ const menuAPI = (function() {
         return row ? row.offsetHeight : 0;
     }
 
+    // The one description of "what the library looks like right now". Both persistence
+    // paths — the localStorage autosave and the "Save UI" download — serialize exactly
+    // this, so an exported file carries the same fields as a stored state. It has to
+    // carry `meta`: without a family/ratio an icon has no identity to draw, and
+    // rehydrates as the flat accent tile instead of its procedural one.
+    function captureUIState() {
+        const uiState = { categories: [], version: "1.0", libraryVersion: LIBRARY_VERSION, timestamp: Date.now(), dropMode: moduleDropMode };
+        categoryContainers.forEach(container => {
+            if (!container) return;
+            const categoryLabel = container.querySelector('.category-label');
+            if (!categoryLabel) return;
+            const category = categoryLabel.getAttribute('data-category');
+            if (!category) return;
+            const labelTextEl = categoryLabel.querySelector('.category-label-text');
+            const labelText = labelTextEl ? labelTextEl.textContent.trim() : (categoryLabel.textContent || '').trim() || category;
+            const moduleIcons = Array.from(container.querySelectorAll(':scope > .icon:not(.empty-placeholder):not(.category-label)'));
+            const categoryObj = { name: category, label: labelText, collapsed: container.getAttribute('data-collapsed') === 'true', modules: [] };
+            moduleIcons.forEach(icon => {
+                // data-name, never the tile's text: the tile holds an SVG now, so its
+                // textContent reads back as the glyphs of a fraction ("3 2 702¢").
+                const moduleName = icon.getAttribute('data-name')
+                    || (icon.moduleMeta && icon.moduleMeta.name)
+                    || (icon.getAttribute('data-filename') || '').replace(/\.json$/i, '')
+                    || '';
+                const dataFilename = icon.getAttribute('data-filename') || moduleName;
+                const file = icon.getAttribute('data-file') || (icon.moduleMeta && icon.moduleMeta.file) || null;
+                const isUploaded = icon.getAttribute('data-uploaded') === 'true';
+                const moduleEntry = {
+                    name: moduleName,
+                    filename: dataFilename,
+                    file: file,
+                    originalCategory: icon.getAttribute('data-original-category') || category,
+                    currentCategory: category,
+                    isUploaded: isUploaded
+                };
+                if (icon.moduleMeta) moduleEntry.meta = icon.moduleMeta;
+                // Embed full module JSON when there is no re-fetchable `file`
+                // (uploads, or built-ins carried over from a pre-v2 state without
+                // a file path). Built-ins with a `file` are re-fetched on rehydrate,
+                // keeping both localStorage and the exported file small even with a
+                // large shipped catalog.
+                if (icon.moduleData && (isUploaded || !file)) {
+                    if (!icon.moduleData.filename) icon.moduleData.filename = moduleName;
+                    moduleEntry.moduleData = icon.moduleData;
+                    moduleEntry.hasData = true;
+                }
+                if (icon.getAttribute('data-load-failed') === 'true') moduleEntry.loadFailed = true;
+                categoryObj.modules.push(moduleEntry);
+            });
+            uiState.categories.push(categoryObj);
+        });
+        return uiState;
+    }
+
     function saveUIStateToLocalStorage() {
         try {
-            const uiState = { categories: [], version: "1.0", libraryVersion: LIBRARY_VERSION, timestamp: Date.now(), dropMode: moduleDropMode };
-            categoryContainers.forEach(container => {
-                if (!container) return;
-                const categoryLabel = container.querySelector('.category-label');
-                if (!categoryLabel) return;
-                const category = categoryLabel.getAttribute('data-category');
-                if (!category) return;
-                const labelTextEl = categoryLabel.querySelector('.category-label-text');
-                const labelText = labelTextEl ? labelTextEl.textContent.trim() : (categoryLabel.textContent || '').trim() || category;
-                const moduleIcons = Array.from(container.querySelectorAll('.icon:not(.empty-placeholder):not(.category-label)'));
-                const categoryObj = { name: category, label: labelText, collapsed: container.getAttribute('data-collapsed') === 'true', modules: [] };
-                moduleIcons.forEach(icon => {
-                    const textContainer = icon.querySelector('div');
-                    const moduleName = icon.getAttribute('data-name') || (textContainer ? textContainer.textContent.trim() : '') || (icon.moduleMeta && icon.moduleMeta.name) || '';
-                    const dataFilename = icon.getAttribute('data-filename') || moduleName;
-                    const file = icon.getAttribute('data-file') || (icon.moduleMeta && icon.moduleMeta.file) || null;
-                    const isUploaded = icon.getAttribute('data-uploaded') === 'true';
-                    const moduleEntry = {
-                        name: moduleName,
-                        filename: dataFilename,
-                        file: file,
-                        originalCategory: icon.getAttribute('data-original-category') || category,
-                        currentCategory: category,
-                        isUploaded: isUploaded
-                    };
-                    if (icon.moduleMeta) moduleEntry.meta = icon.moduleMeta;
-                    // Embed full module JSON when there is no re-fetchable `file`
-                    // (uploads, or built-ins carried over from a pre-v2 state without
-                    // a file path). Built-ins with a `file` are re-fetched on rehydrate,
-                    // keeping localStorage small even with a large shipped catalog.
-                    if (icon.moduleData && (isUploaded || !file)) {
-                        if (!icon.moduleData.filename) icon.moduleData.filename = moduleName;
-                        moduleEntry.moduleData = icon.moduleData;
-                        moduleEntry.hasData = true;
-                    }
-                    if (icon.getAttribute('data-load-failed') === 'true') moduleEntry.loadFailed = true;
-                    categoryObj.modules.push(moduleEntry);
-                });
-                uiState.categories.push(categoryObj);
-            });
-            localStorage.setItem('ui-state', JSON.stringify(uiState));
+            localStorage.setItem('ui-state', JSON.stringify(captureUIState()));
         } catch (error) {
             console.error('Error saving UI state to localStorage:', error);
         }
     }
 
     // Normalize a stored ui-state module entry into a common section-state module shape.
+    // `data` is the legacy v1 export's key for the embedded module JSON.
     function normalizeStoredModule(m) {
         return {
             name: m.name,
             filename: m.filename || ((m.name || 'module') + '.json'),
             file: m.file || null,
             meta: m.meta || null,
-            moduleData: m.moduleData || null,
+            moduleData: m.moduleData || m.data || null,
             isUploaded: !!m.isUploaded,
             loadFailed: !!m.loadFailed,
             originalCategory: m.originalCategory || null
         };
+    }
+
+    // Index the manifest by file path and by name, so a stored module that lost its
+    // metadata can be matched back to its manifest item.
+    function manifestIndex(manifest) {
+        const byFile = new Map(), byName = new Map();
+        if (!manifest) return { byFile, byName };
+        for (const section of manifest.sections) {
+            for (const item of (section.items || [])) {
+                byFile.set(item.file, item);
+                // First item wins: two manifest entries can share a display name
+                // (e.g. "Harmonic 7th"), and a name-only match cannot tell them apart.
+                const stem = item.file.split('/').pop().replace(/\.json$/i, '');
+                for (const key of [item.name, stem]) {
+                    const k = String(key || '').trim().toLowerCase();
+                    if (k && !byName.has(k)) byName.set(k, item);
+                }
+            }
+        }
+        return { byFile, byName };
+    }
+
+    // Give a stored module its manifest metadata back — the file path, and the family /
+    // ratio / cents / tags the icon is drawn from. Matches on the file path first, then
+    // on the name, which is all a state written by the old exporter kept. Without this,
+    // such a state rehydrates into a library of flat accent tiles, and (because the
+    // autosave then writes those metadata-less icons straight back) stays that way.
+    // Uploads are never healed: a user's module that happens to be called "Major" is
+    // not the built-in Major, and adopting its file would re-fetch over their data.
+    // Returns true if the module now carries real metadata.
+    function healModuleMeta(m, index) {
+        if (m.isUploaded) return false;
+        if (m.meta && m.meta.family) return true;
+        let item = (m.file && index.byFile.get(m.file)) || null;
+        if (!item) {
+            for (const key of [m.name, String(m.filename || '').replace(/\.json$/i, '')]) {
+                const k = String(key || '').trim().toLowerCase();
+                if (k && index.byName.has(k)) { item = index.byName.get(k); break; }
+            }
+        }
+        if (!item) return false;
+        m.meta = item;
+        m.file = item.file;
+        if (!m.name) m.name = item.name;
+        return true;
     }
 
     // Convert a v2 manifest section into a render-ready section-state.
@@ -474,6 +534,7 @@ const menuAPI = (function() {
     // the manifest, preserve the user's 'custom' section wholesale + any user-created
     // sections, and rescue uploads dragged into built-in sections (into custom).
     function buildMigratedSectionStates(oldState, manifest) {
+        const index = manifestIndex(manifest);
         const rescuedUploads = [];
         const oldCustom = [];
         const userSections = [];
@@ -485,28 +546,48 @@ const menuAPI = (function() {
                 userSections.push({ id: cat.name, label: cat.label || cat.name, collapsed: !!cat.collapsed,
                                     modules: (cat.modules || []).map(normalizeStoredModule) });
             } else {
-                for (const m of (cat.modules || [])) {
-                    if (m.isUploaded && m.moduleData) rescuedUploads.push(normalizeStoredModule(m));
+                // The built-in sections are rebuilt from the manifest below, so only user
+                // content in them needs rescuing. A pre-v2 state — and the old exporter —
+                // didn't record `isUploaded`, so treat anything the manifest doesn't
+                // recognise but that carries its own data as the user's, and keep it.
+                for (const raw of (cat.modules || [])) {
+                    const m = normalizeStoredModule(raw);
+                    if (!m.moduleData) continue;
+                    if (m.isUploaded || !healModuleMeta(m, index)) {
+                        m.isUploaded = true;
+                        rescuedUploads.push(m);
+                    }
                 }
             }
         }
+        // Sections the user arranged keep their modules, so let those modules reclaim
+        // their manifest metadata (and file) first. Rebuilding the built-in sections
+        // below then skips what they already hold — otherwise a module the user had
+        // dragged into Custom would be dealt out a second time in its home section.
+        const claimed = new Set();
+        for (const m of oldCustom.concat(...userSections.map(s => s.modules))) {
+            if (healModuleMeta(m, index) && m.file) claimed.add(m.file);
+        }
+        const unclaimed = (state) => ({ ...state, modules: state.modules.filter(m => !claimed.has(m.file)) });
+
         const states = [];
         for (const section of manifest.sections) {
             if (section.id === 'custom') continue;
-            states.push(manifestSectionToState(section));
+            states.push(unclaimed(manifestSectionToState(section)));
         }
         const manifestCustom = manifest.sections.find(s => s.id === 'custom');
         const customModules = (oldCustom.length
             ? oldCustom
-            : (manifestCustom ? manifestSectionToState(manifestCustom).modules : []))
+            : (manifestCustom ? unclaimed(manifestSectionToState(manifestCustom)).modules : []))
             .concat(rescuedUploads);
         states.push({ id: 'custom', label: (manifestCustom && manifestCustom.label) || 'Custom', collapsed: false, modules: customModules });
         for (const us of userSections) states.push(us);
         return states;
     }
 
-    // Reconcile a stored v2 layout against the CURRENT manifest so library content
+    // Reconcile a stored layout against the CURRENT manifest so library content
     // updates take effect without a manual "Reload Defaults":
+    //   - re-derive metadata a lossy writer dropped, so built-ins get their icons back;
     //   - drop stored built-in modules whose file no longer exists in the manifest
     //     (prevents 404s / failed icons on renamed or removed modules);
     //   - keep uploads + fileless embedded modules; refresh kept built-ins' meta;
@@ -514,14 +595,13 @@ const menuAPI = (function() {
     //     (creating the section if it is new).
     function reconcileWithManifest(states, manifest) {
         if (!manifest) return states;
-        const fileToItem = new Map();
-        for (const section of manifest.sections) {
-            for (const item of (section.items || [])) fileToItem.set(item.file, item);
-        }
+        const index = manifestIndex(manifest);
+        const fileToItem = index.byFile;
         const presentFiles = new Set();
         const outStates = states.map((st) => {
             const modules = [];
             for (const m of st.modules) {
+                healModuleMeta(m, index); // no-op once the module already has its metadata
                 if (m.file && fileToItem.has(m.file)) {
                     m.meta = fileToItem.get(m.file); // refresh metadata from the manifest
                     presentFiles.add(m.file);
@@ -559,58 +639,71 @@ const menuAPI = (function() {
         return outStates;
     }
 
+    // The one way a ui-state becomes a library. Boot-time rehydration from localStorage
+    // and the "Load UI" file import both land here, so an imported file gets the same
+    // treatment a stored one does: pre-v2 migration, reconciliation against the current
+    // manifest, metadata healing, and the full post-build layout pass.
+    // Resolves false when the state is unusable, so the caller can cold-load instead.
+    function applyUIState(uiState, { persist = false } = {}) {
+        if (!uiState || !Array.isArray(uiState.categories) || uiState.categories.length === 0) {
+            return Promise.resolve(false);
+        }
+        if (uiState.dropMode === 'start' || uiState.dropMode === 'end') moduleDropMode = uiState.dropMode;
+        const needsMigration = uiState.libraryVersion !== LIBRARY_VERSION;
+
+        return loadLibraryManifest().then(manifest => {
+            // Pre-v2 state with no manifest available: let the caller cold-load (legacy).
+            if (needsMigration && !manifest) return false;
+
+            let sectionStates = needsMigration
+                ? buildMigratedSectionStates(uiState, manifest)
+                : uiState.categories.map(cat => ({
+                      id: cat.name,
+                      label: cat.label || cat.name,
+                      collapsed: !!cat.collapsed,
+                      modules: (cat.modules || []).map(normalizeStoredModule)
+                  }));
+            // Heal the layout against the current manifest: new/removed content, and the
+            // metadata a lossy writer dropped. Safe after a migration too — it only fills
+            // in what is missing.
+            sectionStates = reconcileWithManifest(sectionStates, manifest);
+
+            domCache.iconsContainer.innerHTML = '';
+            categoryContainers = [];
+            sectionStates.forEach((state, i) => renderSectionState(state, i, sectionStates.length));
+
+            const actionButtons = createActionButtons();
+            domCache.iconsContainer.appendChild(createSectionSeparator());
+            domCache.iconsContainer.appendChild(actionButtons);
+            ensurePlaceholdersAtEnd();
+            normalizeLayoutSeparators();
+            injectLibraryStyle();
+            refreshSectionCounts();
+            updateSectionFlow();
+            ensureSearchRow();
+            updateMaxHeight();
+            applyDefaultOpenHeight();
+            // Write the migrated/healed/imported layout back, so the repair happens once
+            // and an import survives the next reload.
+            if (persist || needsMigration) { try { saveUIStateToLocalStorage(); } catch (e) {} }
+            return true;
+        });
+    }
+
     function loadUIStateFromLocalStorage() {
+        let uiState;
         try {
             const storedState = localStorage.getItem('ui-state');
             if (!storedState) return false;
-            const uiState = JSON.parse(storedState);
-            if (uiState.dropMode) moduleDropMode = uiState.dropMode;
-            if (!uiState.categories || !Array.isArray(uiState.categories) || uiState.categories.length === 0) return false;
-
-            const needsMigration = uiState.libraryVersion !== LIBRARY_VERSION;
-
-            return loadLibraryManifest().then(manifest => {
-                // Pre-v2 state with no manifest available: let the caller cold-load (legacy).
-                if (needsMigration && !manifest) return false;
-
-                domCache.iconsContainer.innerHTML = '';
-                categoryContainers = [];
-
-                let sectionStates;
-                if (needsMigration) {
-                    sectionStates = buildMigratedSectionStates(uiState, manifest);
-                } else {
-                    sectionStates = uiState.categories.map(cat => ({
-                        id: cat.name,
-                        label: cat.label || cat.name,
-                        collapsed: !!cat.collapsed,
-                        modules: (cat.modules || []).map(normalizeStoredModule)
-                    }));
-                    // Heal a stale stored layout against the current manifest (new/removed content).
-                    sectionStates = reconcileWithManifest(sectionStates, manifest);
-                }
-
-                sectionStates.forEach((state, i) => renderSectionState(state, i, sectionStates.length));
-
-                const actionButtons = createActionButtons();
-                domCache.iconsContainer.appendChild(createSectionSeparator());
-                domCache.iconsContainer.appendChild(actionButtons);
-                ensurePlaceholdersAtEnd();
-                normalizeLayoutSeparators();
-                injectLibraryStyle();
-                refreshSectionCounts();
-                updateSectionFlow();
-                ensureSearchRow();
-                updateMaxHeight();
-                applyDefaultOpenHeight();
-                // Persist the upgraded layout so the migration only runs once.
-                if (needsMigration) { try { saveUIStateToLocalStorage(); } catch (e) {} }
-                return true;
-            });
+            uiState = JSON.parse(storedState);
         } catch (error) {
             console.error('Error loading UI state from localStorage:', error);
             return false;
         }
+        return applyUIState(uiState).catch(error => {
+            console.error('Error loading UI state from localStorage:', error);
+            return false;
+        });
     }
 
     function clearUIStateFromLocalStorage() {
@@ -1386,9 +1479,11 @@ const menuAPI = (function() {
         const iconSize = getIconSizePx();
         let displayName = (meta && meta.name) ? meta.name : filename.replace(/\.json$/i, '');
         moduleIcon.setAttribute('data-name', displayName);
-        // Themed procedural SVG tile when we have manifest metadata; plain text tile
-        // otherwise (legacy / uploaded modules with no family/ratio).
-        const useSvg = !!meta;
+        // Themed procedural SVG tile when the metadata says what the module IS; plain
+        // text tile otherwise (uploads, and the bare {file, name} stub a restore falls
+        // back to when the manifest is unreachable). Drawing that stub would hue it with
+        // the 'default' family — an amber tile that reads as a module whose icon broke.
+        const useSvg = !!(meta && (meta.family || meta.ratio));
         Object.assign(moduleIcon.style, {
             width: iconSize + 'px', height: iconSize + 'px', display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: "'Roboto Mono', monospace", fontSize: '8px', lineHeight: '1.2', color: '#151525',
@@ -2300,25 +2395,14 @@ const menuAPI = (function() {
         document.head.appendChild(style);
     }
 
+    // "Save UI": download the live layout. The payload is captureUIState() — the same
+    // one the autosave writes — so the file carries everything the library now has
+    // (module metadata, section labels, collapse state, uploads, drop mode) and comes
+    // back through the same restore path.
     function saveUIState() {
         try {
-            const uiState = { categories: [], version: "1.0" };
-            categoryContainers.forEach(container => {
-                if (!container) return;
-                const categoryLabel = container.querySelector('.category-label');
-                if (!categoryLabel) return;
-                const category = categoryLabel.getAttribute('data-category');
-                if (!category) return;
-                const moduleIcons = Array.from(container.querySelectorAll('.icon:not(.empty-placeholder):not(.category-label)'));
-                const categoryObj = { name: category, modules: [] };
-                moduleIcons.forEach(icon => {
-                    const textContainer = icon.querySelector('div');
-                    const moduleName = textContainer ? textContainer.textContent.trim() : '';
-                    const moduleData = icon.moduleData || null;
-                    categoryObj.modules.push({ name: moduleName, data: moduleData });
-                });
-                uiState.categories.push(categoryObj);
-            });
+            const uiState = captureUIState();
+            uiState.exportedAt = new Date().toISOString();
             const jsonString = JSON.stringify(uiState, null, 2);
             const blob = new Blob([jsonString], { type: 'application/json' });
             const a = document.createElement('a');
@@ -2335,6 +2419,26 @@ const menuAPI = (function() {
         }
     }
 
+    // An imported file is untrusted: every module JSON it embeds gets the same check an
+    // uploaded .json does, and a module that fails it is stripped of its data rather
+    // than being allowed to reach the workspace. Returns how many were rejected.
+    function sanitizeImportedState(uiState) {
+        let rejected = 0;
+        for (const cat of uiState.categories) {
+            for (const m of (cat.modules || [])) {
+                const data = m.moduleData || m.data;
+                if (!data || typeof data !== 'object') continue;
+                const validation = validateModuleData(data);
+                if (validation.valid) continue;
+                console.warn(`[Security] Skipping invalid module "${m.name}" from UI state:`, validation.errors);
+                m.moduleData = null;
+                m.data = null;
+                rejected++;
+            }
+        }
+        return rejected;
+    }
+
     function loadUIState() {
         try {
             const fileInput = document.createElement('input');
@@ -2346,51 +2450,38 @@ const menuAPI = (function() {
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = function(e) {
+                    let uiState;
                     try {
-                        const uiState = JSON.parse(e.target.result);
-                        if (!uiState.categories || !Array.isArray(uiState.categories)) {
+                        uiState = JSON.parse(e.target.result);
+                        if (!uiState || !Array.isArray(uiState.categories) || uiState.categories.length === 0) {
                             throw new Error('Invalid UI state format');
                         }
-                        domCache.iconsContainer.innerHTML = '';
-                        categoryContainers = [];
-                        uiState.categories.forEach((categoryObj, index) => {
-                            const sectionContainer = createSectionContainer();
-                            categoryContainers.push(sectionContainer);
-                            const labelIcon = createLabelIcon(categoryObj.name, categoryObj.name);
-                            labelIcon.addEventListener('click', () => handleFileUpload(categoryObj.name, sectionContainer));
-                            sectionContainer.appendChild(labelIcon);
-                            categoryObj.modules.forEach(moduleInfo => {
-                                // Validate embedded module data before loading
-                                let safeData = moduleInfo.data;
-                                if (safeData && typeof safeData === 'object') {
-                                    const validation = validateModuleData(safeData);
-                                    if (!validation.valid) {
-                                        console.warn(`[Security] Skipping invalid module "${moduleInfo.name}" from UI state:`, validation.errors);
-                                        safeData = null;
-                                    }
-                                }
-                                const icon = createModuleIcon(categoryObj.name, moduleInfo.name + '.json', safeData);
-                                sectionContainer.appendChild(icon);
-                            });
-                            const emptyPlaceholder = createEmptyPlaceholder(categoryObj.name);
-                            sectionContainer.appendChild(emptyPlaceholder);
-                            domCache.iconsContainer.appendChild(sectionContainer);
-                            if (index < uiState.categories.length - 1) {
-                                domCache.iconsContainer.appendChild(createSectionSeparator());
-                            }
-                        });
-                        const actionButtons = createActionButtons();
-                        domCache.iconsContainer.appendChild(createSectionSeparator());
-                        domCache.iconsContainer.appendChild(actionButtons);
-                        normalizeLayoutSeparators();
-                        refreshSectionCounts();
-                        updateSectionFlow();
-                        updateMaxHeight();
-                        showNotification('UI state loaded successfully!', 'success');
                     } catch (error) {
                         console.error('Error parsing UI state:', error);
                         showNotification('Error loading UI state: ' + error.message, 'error');
+                        return;
                     }
+                    const rejected = sanitizeImportedState(uiState);
+                    // persist: an import is a deliberate change to the library, so it has
+                    // to outlive the reload — and it must not be left to the autosave,
+                    // which would capture the layout mid-build.
+                    applyUIState(uiState, { persist: true })
+                        .then(ok => {
+                            if (!ok) {
+                                showNotification('Error loading UI state: no sections to restore', 'error');
+                                return;
+                            }
+                            showNotification(
+                                rejected
+                                    ? `UI state loaded — ${rejected} invalid module${rejected > 1 ? 's' : ''} skipped`
+                                    : 'UI state loaded successfully!',
+                                rejected ? 'info' : 'success'
+                            );
+                        })
+                        .catch(error => {
+                            console.error('Error applying UI state:', error);
+                            showNotification('Error loading UI state: ' + error.message, 'error');
+                        });
                 };
                 reader.readAsText(file);
             });
