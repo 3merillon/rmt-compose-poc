@@ -109,7 +109,7 @@ html, body {
 .icons-container {
     display: flex;
     flex-wrap: wrap;
-    padding: 4px 4px 0 4px;
+    padding: 4px;
     gap: 4px;
     align-content: flex-start;
 }

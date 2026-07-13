@@ -14,7 +14,7 @@ const menuAPI = (function() {
     };
 
     const PULL_TAB_HEIGHT = 16, TOP_BAR_HEIGHT = 50, SAFETY_MARGIN = 10;
-    let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0, hasAppliedInitialPadding = false, targetFitHeight = null;
+    let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0, hasAppliedDefaultHeight = false, targetFitHeight = null;
 
     // Module drop mode: 'start' = drop at target note's start, 'end' = drop at target note's end
     let moduleDropMode = 'start';
@@ -76,7 +76,45 @@ const menuAPI = (function() {
         try { const v = settingsStore.get('library.showCents'); if (typeof v === 'boolean') return v; } catch (e) {}
         return true;
     }
-    // Live-apply icon size + cents visibility to every rendered icon/placeholder.
+    // Place the delete × with its centre on the centre of the corner arc (radius r in
+    // from each edge), so a larger icon — which has a larger radius — pushes it inward
+    // rather than letting the rounded corner clip it. Box and glyph scale with the icon;
+    // everything else about the button lives in CSS.
+    function styleDeleteButton(btn, size = getIconSizePx()) {
+        if (!btn) return;
+        const radius = Math.round(size * 0.14);
+        const box = Math.max(14, Math.min(20, Math.round(size * 0.25)));
+        const offset = Math.max(1, radius - Math.round(box / 2));
+        Object.assign(btn.style, {
+            width: box + 'px', height: box + 'px', fontSize: box + 'px',
+            top: offset + 'px', right: offset + 'px'
+        });
+    }
+
+    // Size a section label so it matches the module icons around it: same height,
+    // same corner-radius treatment, with the type and padding scaled to follow.
+    // Called on creation and again from applyIconSizeToAll() when the setting changes.
+    function styleLabelIcon(labelIcon, size = getIconSizePx()) {
+        const fontSize = Math.max(11, Math.min(18, Math.round(size * 0.28)));
+        Object.assign(labelIcon.style, {
+            height: size + 'px',
+            borderRadius: Math.round(size * 0.14) + 'px',
+            padding: '0 ' + Math.max(6, Math.round(size * 0.16)) + 'px',
+            fontSize: fontSize + 'px'
+        });
+        const chevron = labelIcon.querySelector('.category-collapse-chevron');
+        if (chevron) {
+            const chevSize = Math.max(8, Math.round(fontSize * 0.68));
+            Object.assign(chevron.style, {
+                fontSize: chevSize + 'px',
+                width: (chevSize + 2) + 'px',
+                marginRight: Math.max(4, Math.round(fontSize * 0.35)) + 'px'
+            });
+        }
+        styleDeleteButton(labelIcon.querySelector('.category-delete-btn'), size);
+    }
+
+    // Live-apply icon size + cents visibility to every rendered icon/placeholder/label.
     function applyIconSizeToAll() {
         const size = getIconSizePx();
         const showCents = getShowCents();
@@ -86,30 +124,92 @@ const menuAPI = (function() {
             icon.style.height = size + 'px';
             if (icon.classList.contains('empty-placeholder')) return;
             icon.style.borderRadius = radius + 'px';
+            styleDeleteButton(icon.querySelector(':scope > .module-delete-btn'), size);
             const tc = icon.querySelector(':scope > div');
             if (tc && icon.moduleMeta) {
                 renderModuleIcon(tc, icon.moduleMeta, size, { showCents, name: icon.getAttribute('data-name') });
             }
         });
+        // Labels are not .icon elements (icon-only selectors deliberately exclude
+        // them), so they need their own pass to track the setting.
+        document.querySelectorAll('.icons-container .category-label').forEach(label => styleLabelIcon(label, size));
         try { updateMaxHeight(); } catch (e) {}
+    }
+
+    // The module count shown on a collapsed section chip, via `content: attr(data-count)`.
+    // Written as an attribute (not text) so it never lands inside .category-label-text,
+    // which drag/reorder and saveUIState read, and so it can't retrigger the
+    // childList MutationObserver that autosaves.
+    function refreshSectionCounts() {
+        categoryContainers.forEach(section => {
+            if (!section) return;
+            const label = section.querySelector(':scope > .category-label');
+            if (!label) return;
+            const count = String(section.querySelectorAll(':scope > .icon:not(.empty-placeholder)').length);
+            if (label.getAttribute('data-count') !== count) label.setAttribute('data-count', count);
+        });
     }
 
     // === Collapsible sections (Phase 6.5) ===
     // Collapse hides a section's module icons + trailing placeholder (via a CSS
-    // class), leaving just the label. Height re-fits through the same path as
-    // wrap/unwrap so the pull-tab stays consistent on desktop and mobile.
+    // class), leaving just the label chip. The chip stops being a full-width row
+    // (.library-section drops to `flex: 0 0 auto`), and updateSectionFlow() drops
+    // the row-break between consecutive chips so they pack onto shared rows.
+    // Height re-fits through the same path as wrap/unwrap so the pull-tab stays
+    // consistent on desktop and mobile.
     function setSectionCollapsed(container, collapsed) {
         if (!container) return;
         container.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
         container.classList.toggle('section-collapsed', !!collapsed);
         const chevron = container.querySelector('.category-label .category-collapse-chevron');
         if (chevron) chevron.textContent = collapsed ? '▸' : '▾';
+        refreshSectionCounts();
+        updateSectionFlow();
         // Reclaim space when collapsing (shrink-only, same path as wrap/unwrap).
         try { adjustHeightToContent(); } catch (e) {}
     }
 
+    // An expanded section is a full-width flex item, so it always starts its own row;
+    // the dotted separator between sections is likewise full-width. This pass decides
+    // which separators are still wanted:
+    //   - between two collapsed chips: none, so the chips share a row;
+    //   - around a section hidden by search: none, so filtering leaves no blank rows
+    //     or orphan dividers;
+    //   - otherwise exactly one divider per visible section boundary.
+    // Reads only classes and writes only classes, so it is safe to call from the
+    // childList MutationObserver that autosaves.
+    function updateSectionFlow() {
+        const container = domCache.iconsContainer;
+        if (!container) return;
+        const has = (el, cls) => !!el.classList && el.classList.contains(cls);
+
+        let owner = null;   // last visible section seen
+        let run = [];       // separators since that section
+
+        // Keep the last divider of the run, unless the run sits between two chips
+        // (they share a row) or has no visible section above it.
+        const flush = (next) => {
+            const packed = owner && next && has(owner, 'section-collapsed') && has(next, 'section-collapsed');
+            const keep = (owner && !packed) ? run[run.length - 1] : null;
+            for (const el of run) el.classList.toggle('library-hidden', el !== keep);
+            run = [];
+        };
+
+        for (const el of Array.from(container.children)) {
+            if (has(el, 'library-section')) {
+                if (has(el, 'library-hidden')) continue; // its dividers fold into the current run
+                flush(el);
+                owner = el;
+            } else if (has(el, 'separator')) {
+                run.push(el);
+            }
+        }
+        flush(null); // trailing run: keeps the divider above the action buttons
+    }
+
     // === Library search (Phase 6.5) ===
     let currentSearchQuery = '';
+    let heightBeforeSearch = null;
 
     function moduleMatchesQuery(icon, q) {
         const parts = [];
@@ -133,37 +233,54 @@ const menuAPI = (function() {
 
     // Filter visible modules by name/ratio/tags/family. While searching, matching
     // modules are shown even inside collapsed sections; empty sections are hidden.
+    // Visibility is toggled with the .library-hidden class only — never with inline
+    // style.display, which would wipe the .library-section display and drop each
+    // section back to `display: block` (one icon per row).
     function applyModuleSearch(query) {
+        const wasSearching = currentSearchQuery.trim().length > 0;
         currentSearchQuery = query || '';
         const q = currentSearchQuery.trim().toLowerCase();
         const searching = q.length > 0;
+        // Filtering shrinks the content, and the ResizeObserver shrinks the bar to
+        // match — but the bar never auto-grows, so without this the bar would stay
+        // stranded at the results' height once the search is cleared. Remember the
+        // height the search started from and hand it back when it ends.
+        if (searching && !wasSearching) {
+            heightBeforeSearch = parseInt(document.defaultView.getComputedStyle(domCache.secondTopBar).height, 10) || null;
+        }
         categoryContainers.forEach(section => {
             if (!section) return;
-            const label = section.querySelector(':scope > .category-label');
             const icons = Array.from(section.querySelectorAll(':scope > .icon:not(.empty-placeholder):not(.category-label)'));
             const placeholder = section.querySelector(':scope > .empty-placeholder');
             let anyMatch = false;
             icons.forEach(icon => {
                 const show = !searching || moduleMatchesQuery(icon, q);
-                icon.style.display = show ? '' : 'none';
+                icon.classList.toggle('library-hidden', !show);
                 if (show) anyMatch = true;
             });
-            if (placeholder) placeholder.style.display = searching ? 'none' : '';
+            if (placeholder) placeholder.classList.toggle('library-hidden', searching);
             if (searching) {
                 section.classList.remove('section-collapsed'); // reveal matches regardless of collapse
-                if (label) label.style.display = anyMatch ? '' : 'none';
-                section.style.display = anyMatch ? '' : 'none';
+                section.classList.toggle('library-hidden', !anyMatch);
             } else {
-                if (label) label.style.display = '';
-                section.style.display = '';
-                if (section.getAttribute('data-collapsed') === 'true') section.classList.add('section-collapsed');
+                section.classList.remove('library-hidden');
+                // Restore the collapsed state the search temporarily revealed.
+                section.classList.toggle('section-collapsed', section.getAttribute('data-collapsed') === 'true');
             }
         });
-        // Don't resize the bar while filtering — just show/hide. Keeps the pull-tab
-        // height stable (filtering to few results shouldn't shrink then strand it small).
+        refreshSectionCounts();
+        updateSectionFlow();
+        if (!searching && wasSearching && heightBeforeSearch != null) {
+            // Never above the fit height or the max — this restores, it doesn't grow.
+            const restored = Math.min(maxMenuBarHeight, getContentFitHeight(), heightBeforeSearch);
+            domCache.secondTopBar.style.height = Math.max(0, restored) + 'px';
+            heightBeforeSearch = null;
+        }
     }
 
-    // Create the sticky search row (rebuilt with the library on each cold load).
+    // The search row is bar chrome, not library content: it lives in .second-top-bar
+    // above .icons-wrapper, so it survives a library rebuild (which wipes
+    // .icons-container) and does not scroll with the icons.
     function createSearchRow() {
         const row = document.createElement('div');
         row.className = 'library-search-row';
@@ -183,16 +300,42 @@ const menuAPI = (function() {
         return row;
     }
 
-    // Insert (or re-insert) the search row as the first child of the icons container.
+    // The clipping box for the bar's contents (search row + scrolling icons). The clip
+    // cannot live on .second-top-bar itself: the pull-tab hangs below it (bottom: -16px)
+    // and would be clipped away. With it here, dragging the bar shut closes over the
+    // search row exactly as it does over the icons.
+    function ensureLibraryBody() {
+        const bar = domCache.secondTopBar, wrapper = domCache.iconsWrapper;
+        if (!bar || !wrapper) return null;
+        let body = bar.querySelector(':scope > .library-body');
+        if (!body) {
+            body = document.createElement('div');
+            body.className = 'library-body';
+            bar.insertBefore(body, wrapper);
+            body.appendChild(wrapper);
+        }
+        return body;
+    }
+
+    // Create the search row once, above the scrolling icons wrapper. Kept (not
+    // recreated) across library rebuilds so an in-flight query and the input's focus
+    // survive; the query is simply re-applied to the freshly built icons.
     function ensureSearchRow() {
-        const iconsContainer = domCache.iconsContainer;
-        if (!iconsContainer) return;
-        const existing = iconsContainer.querySelector(':scope > .library-search-row');
-        if (existing) existing.remove();
-        const row = createSearchRow();
-        iconsContainer.insertBefore(row, iconsContainer.firstChild);
+        const body = ensureLibraryBody();
+        if (!body) return;
+        // Drop a stale row from the pre-move layout, if one is still in the container.
+        const orphan = domCache.iconsContainer && domCache.iconsContainer.querySelector(':scope > .library-search-row');
+        if (orphan) orphan.remove();
+        if (!body.querySelector(':scope > .library-search-row')) {
+            body.insertBefore(createSearchRow(), body.firstChild);
+        }
         // Re-apply an in-flight query to freshly built icons.
         if (currentSearchQuery.trim()) applyModuleSearch(currentSearchQuery);
+    }
+
+    function getSearchRowHeight() {
+        const row = domCache.secondTopBar ? domCache.secondTopBar.querySelector('.library-search-row') : null;
+        return row ? row.offsetHeight : 0;
     }
 
     function saveUIStateToLocalStorage() {
@@ -281,8 +424,7 @@ const menuAPI = (function() {
     // Icons fetch their data lazily (same as the cold-load path).
     function renderSectionState(state, index, count) {
         const iconsContainer = domCache.iconsContainer;
-        const sectionContainer = document.createElement('div');
-        Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+        const sectionContainer = createSectionContainer();
         categoryContainers.push(sectionContainer);
         const labelIcon = createLabelIcon(state.label || state.id, state.id);
         sectionContainer.appendChild(labelIcon);
@@ -322,9 +464,6 @@ const menuAPI = (function() {
         const emptyPlaceholder = createEmptyPlaceholder(state.id);
         sectionContainer.appendChild(emptyPlaceholder);
         iconsContainer.appendChild(sectionContainer);
-        const breaker = document.createElement('div');
-        Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-        iconsContainer.appendChild(breaker);
         if (index < count - 1) iconsContainer.appendChild(createSectionSeparator());
         return sectionContainer;
     }
@@ -457,8 +596,11 @@ const menuAPI = (function() {
                 ensurePlaceholdersAtEnd();
                 normalizeLayoutSeparators();
                 injectLibraryStyle();
+                refreshSectionCounts();
+                updateSectionFlow();
                 ensureSearchRow();
                 updateMaxHeight();
+                applyDefaultOpenHeight();
                 // Persist the upgraded layout so the migration only runs once.
                 if (needsMigration) { try { saveUIStateToLocalStorage(); } catch (e) {} }
                 return true;
@@ -478,8 +620,12 @@ const menuAPI = (function() {
     }
 
     function init() {
+        // Inject before any section is built: sections get their layout from
+        // .library-section, so the sheet has to exist before they are rendered.
+        injectLibraryStyle();
+        ensureSearchRow(); // bar chrome — must exist before the height math runs
         updateMaxHeight();
-        domCache.secondTopBar.style.height = '50px';
+        domCache.secondTopBar.style.height = '50px'; // replaced by applyDefaultOpenHeight() once the library is built
         setupResizeEvents();
         setupTouchEdgeAutoscroll();
         const loaded = loadUIStateFromLocalStorage();
@@ -509,6 +655,10 @@ const menuAPI = (function() {
         setInterval(saveUIStateToLocalStorage, 30000);
         const onUIChanged = debounce(() => {
             try { saveUIStateToLocalStorage(); } catch (e) {}
+            // Re-derive chip counts + row-breaks after any structural change (reorder,
+            // add/delete). Both only write classes/attributes, which this observer
+            // does not watch, so they cannot re-trigger it.
+            try { refreshSectionCounts(); updateSectionFlow(); } catch (e) {}
             // If content got shorter (e.g., unwrapping on wider screens), shrink bar automatically.
             adjustHeightToContent();
         }, 200);
@@ -531,46 +681,22 @@ const menuAPI = (function() {
         };
     }
 
-    // Keep the first row centered between the top-bar bottom border and the menu separator on initial load only.
-    // When content wraps to multiple rows, revert to fixed padding for predictable spacing.
-    function updateInitialRowPadding() {
+    // Open the bar far enough to show the search row plus the library's first row of
+    // icons — the first thing a user wants to see. Once, on the first build; after that
+    // the height is the user's business (pull-tab), and adjustHeightToContent() only shrinks.
+    function applyDefaultOpenHeight() {
+        if (hasAppliedDefaultHeight) return;
         try {
-            const wrapper = domCache.iconsWrapper;
             const container = domCache.iconsContainer;
-            if (!wrapper || !container) return;
-
-            const available = wrapper.clientHeight; // space between top and separator inside second-top-bar
-            if (available <= 0) return;
-
-            // Collect relevant items that form the first line
-            const items = Array.from(container.children).filter(el => {
-                if (!el.classList) return false;
-                return el.classList.contains('icon') || el.classList.contains('category-label');
-            });
-            if (items.length === 0) return;
-
-            // Determine number of visual rows by unique offsetTop
-            const uniqueTops = Array.from(new Set(items.map(el => el.offsetTop)));
-            const isSingleRow = uniqueTops.length === 1;
-
-            if (!isSingleRow) {
-                // Multi-line: stable fixed spacing
-                container.style.paddingTop = '4px';
-                container.style.paddingBottom = '0px';
-                return;
-            }
-
-            // Single row: center precisely within available height
-            const rowHeight = Math.max(...items.map(el => el.offsetHeight)) || 42;
-            const topPad = Math.max(0, Math.round((available - rowHeight) / 2));
-            const bottomPad = Math.max(0, available - rowHeight - topPad);
-
-            container.style.paddingTop = topPad + 'px';
-            container.style.paddingBottom = bottomPad + 'px';
-            hasAppliedInitialPadding = true;
-        } catch (e) {
-            // no-op: do not break UX if measurements fail during early boot
-        }
+            if (!container || !container.querySelector('.library-section')) return; // not built yet
+            const cs = window.getComputedStyle(container);
+            const padding = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+            const firstRow = getIconSizePx(); // label and icons are both one icon-size tall
+            const target = getSearchRowHeight() + padding + firstRow + getSeparatorHeight();
+            const h = Math.min(maxMenuBarHeight, getContentFitHeight(), target);
+            domCache.secondTopBar.style.height = Math.max(0, h) + 'px';
+            hasAppliedDefaultHeight = true;
+        } catch (e) {}
     }
 
     function updateMaxHeight() {
@@ -580,12 +706,10 @@ const menuAPI = (function() {
         const currentHeight = parseInt(domCache.secondTopBar.style.height || '50', 10);
         if (currentHeight > maxMenuBarHeight) domCache.secondTopBar.style.height = maxMenuBarHeight + 'px';
 
-        // Subtract the separator (including margins) so the wrapper can fully fit content without tiny scrollbars.
-        const sepH = getSeparatorHeight();
-        domCache.iconsWrapper.style.maxHeight = Math.max(0, (maxMenuBarHeight - sepH)) + 'px';
-
-        // After height constraints are applied, set initial row padding precisely.
-        if (!hasAppliedInitialPadding) updateInitialRowPadding();
+        // The search row overlays the top of the wrapper, so the wrapper is inset by its
+        // height and only the separator is subtracted from the wrapper's own max height.
+        domCache.iconsWrapper.style.paddingTop = getSearchRowHeight() + 'px';
+        domCache.iconsWrapper.style.maxHeight = Math.max(0, (maxMenuBarHeight - getSeparatorHeight())) + 'px';
 
         // Auto-shrink to fit current content if window got wider and content unwrapped
         adjustHeightToContent();
@@ -643,9 +767,13 @@ const menuAPI = (function() {
     function getContentHeight() { return domCache.iconsWrapper.scrollHeight; }
     function getMaxHeight() { return Math.min(maxMenuBarHeight, getContentHeight()); }
 
-    // Compute the separator height inside the second top bar, including its vertical margins.
+    // Height of the bar's own chrome separator (index.html), including its vertical
+    // margins. Scoped to a direct child: an unscoped '.separator' resolves in tree
+    // order to the FIRST section separator inside .icons-container, which
+    // updateSectionFlow() may have hidden (offsetHeight 0) — measuring the wrong
+    // element as 0 would understate the pull-tab fit height.
     function getSeparatorHeight() {
-        const sep = domCache.secondTopBar ? domCache.secondTopBar.querySelector('.separator') : null;
+        const sep = domCache.secondTopBar ? domCache.secondTopBar.querySelector(':scope > .separator') : null;
         if (!sep) return 0;
         const h = sep.offsetHeight || 0;
         const cs = window.getComputedStyle(sep);
@@ -653,10 +781,11 @@ const menuAPI = (function() {
         const mt = parseFloat(cs.marginTop) || 0;
         return h + mt + mb;
     }
-    // Compute total height required to show all icons (icons-container content) plus separator.
+    // Height required to show everything: the wrapper's full scroll height (which
+    // already includes the inset for the overlaid search row) plus the separator.
     function getIconsContentHeight() {
-        const container = domCache.iconsContainer;
-        return container ? (container.scrollHeight || 0) : 0;
+        const wrapper = domCache.iconsWrapper;
+        return wrapper ? (wrapper.scrollHeight || 0) : 0;
     }
     function getContentFitHeight() {
         // 1px under exact content height to keep a tiny overflow so the vertical scrollbar remains visible.
@@ -748,10 +877,10 @@ const menuAPI = (function() {
         labelIcon.classList.add('category-label');
         labelIcon.setAttribute('data-category', category);
         Object.assign(labelIcon.style, {
-            touchAction: 'none', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '1px solid var(--rmt-accent, #ffa800)', borderRadius: '4px', padding: '0 8px', textTransform: 'uppercase',
+            touchAction: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '1px solid var(--rmt-accent, #ffa800)', textTransform: 'uppercase',
             fontFamily: "'Roboto Mono', monospace", color: 'var(--rmt-accent, #ffa800)', boxSizing: 'border-box',
-            background: 'transparent', cursor: 'pointer', position: 'relative'
+            background: 'transparent', cursor: 'pointer', position: 'relative', whiteSpace: 'nowrap'
         });
         // Collapse chevron + text kept in dedicated spans so drag/save/read logic
         // (which reads the label text) ignores the chevron glyph.
@@ -760,8 +889,7 @@ const menuAPI = (function() {
         chevron.textContent = '▾'; // ▾ expanded
         Object.assign(chevron.style, {
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: '12px', marginRight: '5px', fontSize: '10px', flex: '0 0 auto',
-            opacity: '0.85', pointerEvents: 'none'
+            flex: '0 0 auto', opacity: '0.85', pointerEvents: 'none'
         });
         const labelTextSpan = document.createElement('span');
         labelTextSpan.className = 'category-label-text';
@@ -829,13 +957,14 @@ const menuAPI = (function() {
                         draggedParent.insertBefore(targetContainer, draggedNext);
                         targetParent.insertBefore(draggedContainer, targetNext);
                     }
-                    [categoryContainers[draggedIndex], categoryContainers[targetIndex]] = 
+                    [categoryContainers[draggedIndex], categoryContainers[targetIndex]] =
                     [categoryContainers[targetIndex], categoryContainers[draggedIndex]];
+                    updateSectionFlow(); // the reorder can change which row-breaks are needed
                     saveUIStateToLocalStorage();
                 }
             }
         });
-        
+
         labelIcon.addEventListener('dragend', function() {
             this.classList.remove('dragging');
             this.style.opacity = '1';
@@ -938,9 +1067,10 @@ const menuAPI = (function() {
                                 draggedParent.insertBefore(targetContainer, draggedNext);
                                 targetParent.insertBefore(draggedContainer, targetNext);
                             }
-                            [categoryContainers[draggedIndex], categoryContainers[targetIndex]] = 
+                            [categoryContainers[draggedIndex], categoryContainers[targetIndex]] =
                             [categoryContainers[targetIndex], categoryContainers[draggedIndex]];
                             ensurePlaceholdersAtEnd();
+                            updateSectionFlow(); // the reorder can change which row-breaks are needed
                             saveUIStateToLocalStorage();
                         }
                     }
@@ -969,12 +1099,6 @@ const menuAPI = (function() {
         const catDelete = document.createElement('div');
         catDelete.className = 'category-delete-btn';
         catDelete.innerHTML = '×';
-        Object.assign(catDelete.style, {
-            position: 'absolute', top: '0px', right: '0px', width: '14px', height: '14px',
-            lineHeight: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center',
-            color: 'var(--rmt-danger, #ff0000)', background: 'transparent', cursor: 'pointer',
-            zIndex: '12', pointerEvents: 'auto', transition: 'transform 0.2s, color 0.2s'
-        });
         catDelete.title = 'Delete category';
         catDelete.addEventListener('click', function(e) {
             e.stopPropagation();
@@ -988,6 +1112,10 @@ const menuAPI = (function() {
             } catch {}
         });
         labelIcon.appendChild(catDelete);
+
+        // Height / radius / type / delete-× placement all scale with the library
+        // icon-size setting; re-applied live by applyIconSizeToAll() when it changes.
+        styleLabelIcon(labelIcon);
 
         return labelIcon;
         }
@@ -1219,13 +1347,8 @@ const menuAPI = (function() {
         const deleteButton = document.createElement('div');
         deleteButton.className = 'module-delete-btn';
         deleteButton.innerHTML = '×';
-        Object.assign(deleteButton.style, {
-            position: 'absolute', top: '1px', right: '1px', width: '14px', height: '14px',
-            lineHeight: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center',
-            color: 'var(--rmt-danger, #ff0000)', background: 'transparent', borderRadius: '0', cursor: 'pointer',
-            zIndex: '10', display: 'block', transition: 'transform 0.2s, color 0.2s', pointerEvents: 'auto'
-        });
-        
+        styleDeleteButton(deleteButton, iconSize);
+
         deleteButton.addEventListener('click', function(e) {
             e.stopPropagation();
             e.preventDefault();
@@ -1233,14 +1356,14 @@ const menuAPI = (function() {
         });
         moduleIcon.appendChild(deleteButton);
         
+        // The × grows only on its own :hover (from its own centre, see CSS). Scaling it
+        // from the icon's hover as well made it twitch as the pointer crossed into it.
         moduleIcon.addEventListener('mouseenter', function() {
             Object.assign(this.style, { borderColor: 'white', boxShadow: '0 0 5px var(--rmt-accent, #ffa800)' });
-            deleteButton.style.transform = 'scale(1.1)';
         });
-        
+
         moduleIcon.addEventListener('mouseleave', function() {
             Object.assign(this.style, { borderColor: 'transparent', boxShadow: 'none' });
-            deleteButton.style.transform = 'scale(1)';
         });
 
         const markAsFailed = () => {
@@ -1622,18 +1745,27 @@ const menuAPI = (function() {
             try {
                 if (sectionContainer && sectionContainer.parentNode) {
                     const container = sectionContainer.parentNode;
-                    const breaker = sectionContainer.nextElementSibling;
-                    const maybeSeparator = breaker && breaker.nextElementSibling && breaker.nextElementSibling.classList && breaker.nextElementSibling.classList.contains('separator') ? breaker.nextElementSibling : null;
+                    // Take the section's own divider with it. For the last section that
+                    // is the divider above the action buttons, so fall back to the one
+                    // above the section instead — never leave two stacked or none.
+                    const next = sectionContainer.nextElementSibling;
+                    const prev = sectionContainer.previousElementSibling;
+                    const isSep = (el) => !!(el && el.classList && el.classList.contains('separator'));
+                    const nextSection = next && next.nextElementSibling;
+                    const divider = (isSep(next) && nextSection && nextSection.classList.contains('library-section'))
+                        ? next
+                        : (isSep(prev) ? prev : (isSep(next) ? next : null));
 
                     container.removeChild(sectionContainer);
-                    if (breaker && breaker.parentNode === container) container.removeChild(breaker);
-                    if (maybeSeparator && maybeSeparator.parentNode === container) container.removeChild(maybeSeparator);
+                    if (divider && divider.parentNode === container) container.removeChild(divider);
 
                     const idx = categoryContainers.indexOf(sectionContainer);
                     if (idx !== -1) categoryContainers.splice(idx, 1);
 
                     ensurePlaceholdersAtEnd();
                     normalizeLayoutSeparators();
+                    refreshSectionCounts();
+                    updateSectionFlow();
                     updateMaxHeight();
                     saveUIStateToLocalStorage();
                 }
@@ -1781,8 +1913,7 @@ const menuAPI = (function() {
                 const iconsContainer = domCache.iconsContainer;
                 if (!iconsContainer) return;
 
-                const sectionContainer = document.createElement('div');
-                Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+                const sectionContainer = createSectionContainer();
                 categoryContainers.push(sectionContainer);
 
                 const labelIcon = createLabelIcon(displayName, slug);
@@ -1791,32 +1922,27 @@ const menuAPI = (function() {
                 const emptyPlaceholder = createEmptyPlaceholder(slug);
                 sectionContainer.appendChild(emptyPlaceholder);
 
-                // Insert before the final separator + action buttons
+                // Insert before the final separator + action buttons, with its own
+                // divider so it is separated from the section above it.
                 const actionButtons = iconsContainer.lastElementChild;
                 const sep = actionButtons && actionButtons.previousElementSibling && actionButtons.previousElementSibling.classList && actionButtons.previousElementSibling.classList.contains('separator')
                     ? actionButtons.previousElementSibling
                     : null;
+                const before = sep || actionButtons;
 
-                if (sep) {
-                    iconsContainer.insertBefore(sectionContainer, sep);
-                    const breaker = document.createElement('div');
-                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-                    iconsContainer.insertBefore(breaker, sep);
-                } else if (actionButtons) {
-                    iconsContainer.insertBefore(sectionContainer, actionButtons);
-                    const breaker = document.createElement('div');
-                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-                    iconsContainer.insertBefore(breaker, actionButtons);
+                if (before) {
+                    iconsContainer.insertBefore(createSectionSeparator(), before);
+                    iconsContainer.insertBefore(sectionContainer, before);
                 } else {
                     // Fallback: append at end
+                    iconsContainer.appendChild(createSectionSeparator());
                     iconsContainer.appendChild(sectionContainer);
-                    const breaker = document.createElement('div');
-                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-                    iconsContainer.appendChild(breaker);
                 }
 
                 ensurePlaceholdersAtEnd();
                 normalizeLayoutSeparators();
+                refreshSectionCounts();
+                updateSectionFlow();
                 saveUIStateToLocalStorage();
                 updateMaxHeight();
                 showNotification(`Category "${displayName}" added`, 'success');
@@ -1883,6 +2009,15 @@ const menuAPI = (function() {
         return wrapper;
     }
 
+    // A section row (label + module icons + trailing placeholder). Layout lives in
+    // .library-section (injectLibraryStyle) rather than inline styles, so code that
+    // shows/hides a section can toggle a class without clobbering `display: flex`.
+    function createSectionContainer() {
+        const sectionContainer = document.createElement('div');
+        sectionContainer.classList.add('library-section');
+        return sectionContainer;
+    }
+
     function createSectionSeparator() {
         const separator = document.createElement('div');
         separator.classList.add('separator');
@@ -1911,8 +2046,7 @@ const menuAPI = (function() {
     // Append a section container (label + module icons + trailing placeholder) plus
     // its breaker and separator to the icons container. Shared by both build paths.
     function appendSection(iconsContainer, { id, label, buildItems }, index, count) {
-        const sectionContainer = document.createElement('div');
-        Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+        const sectionContainer = createSectionContainer();
         categoryContainers.push(sectionContainer);
         const labelIcon = createLabelIcon(label || id, id);
         sectionContainer.appendChild(labelIcon);
@@ -1920,9 +2054,6 @@ const menuAPI = (function() {
         const emptyPlaceholder = createEmptyPlaceholder(id);
         sectionContainer.appendChild(emptyPlaceholder);
         iconsContainer.appendChild(sectionContainer);
-        const breaker = document.createElement('div');
-        Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-        iconsContainer.appendChild(breaker);
         if (index < count - 1) iconsContainer.appendChild(createSectionSeparator());
         return sectionContainer;
     }
@@ -1952,8 +2083,7 @@ const menuAPI = (function() {
         const iconsContainer = domCache.iconsContainer;
         const categories = ['intervals', 'chords', 'melodies', 'custom'];
         categories.forEach((category, index) => {
-            const sectionContainer = document.createElement('div');
-            Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+            const sectionContainer = createSectionContainer();
             categoryContainers.push(sectionContainer);
             const labelIcon = createLabelIcon(category, category);
             sectionContainer.appendChild(labelIcon);
@@ -1982,10 +2112,7 @@ const menuAPI = (function() {
                     }
                 });
             iconsContainer.appendChild(sectionContainer);
-            const breaker = document.createElement('div');
-            Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-            iconsContainer.appendChild(breaker);
-            if (index < categories.length - 1) {
+                if (index < categories.length - 1) {
                 iconsContainer.appendChild(createSectionSeparator());
             }
         });
@@ -1999,6 +2126,8 @@ const menuAPI = (function() {
         iconsContainer.appendChild(createSectionSeparator());
         iconsContainer.appendChild(actionButtons);
         normalizeLayoutSeparators();
+        refreshSectionCounts();
+        updateSectionFlow();
     }
 
     function loadModuleIcons() {
@@ -2015,7 +2144,7 @@ const menuAPI = (function() {
             }
             injectLibraryStyle();
             ensureSearchRow();
-            setTimeout(updateMaxHeight, 100);
+            setTimeout(() => { updateMaxHeight(); applyDefaultOpenHeight(); }, 100);
         });
     }
 
@@ -2029,21 +2158,64 @@ const menuAPI = (function() {
             .icon.dragging, .category-label.dragging { opacity: 0.5; }
             .icon.drag-over, .category-label.drag-over, .empty-placeholder.drag-over { border: 2px dashed var(--rmt-danger, #ff0000) !important; background-color: rgba(var(--rmt-danger-rgb), 0.1); }
             .icons-wrapper { overflow-y: scroll; overflow-x: hidden; scrollbar-gutter: stable both-edges; }
-            .empty-placeholder { display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
+            /* No margin: it would make an expanded row taller than the icons in it, so
+               collapsing a section (which hides the placeholder) would change the row
+               height. Spacing comes from the container/section gap alone. */
+            .empty-placeholder { box-sizing: border-box; background: transparent; cursor: pointer; margin: 0; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
             .empty-placeholder:hover { opacity: 1; border-color: var(--rmt-accent, #ffa800); background-color: rgba(var(--rmt-accent-rgb), 0.1); }
-            .module-delete-btn { position: absolute; top: 1px; right: 1px; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: var(--rmt-danger, #ff0000); background: transparent !important; border-radius: 0; cursor: pointer; z-index: 10; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
-            .module-delete-btn:hover { transform: scale(1.2); color: var(--rmt-danger, #ff0000); text-shadow: 0 0 3px rgba(var(--rmt-danger-rgb), 0.5); background-color: transparent !important; }
-            .category-delete-btn { position: absolute; top: 0; right: 0; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: var(--rmt-danger, #ff0000); background: transparent !important; cursor: pointer; z-index: 12; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
-            .category-delete-btn:hover { transform: scale(1.2); color: var(--rmt-danger, #ff0000); text-shadow: 0 0 3px rgba(var(--rmt-danger-rgb), 0.5); }
-            .empty-placeholder { width: 42px; height: 42px; border: 2px dashed #ffffff; border-radius: 4px; box-sizing: border-box; background: transparent; cursor: pointer; margin: 2px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
+            /* The × is centred on the corner arc's centre (its top/right offsets are set
+               in JS from the icon's corner radius) so it never clips on large icons.
+               Flex-centred with a fixed box + centre transform-origin, so :hover grows it
+               in place instead of nudging it around. */
+            .module-delete-btn, .category-delete-btn {
+                position: absolute; display: flex; align-items: center; justify-content: center;
+                line-height: 1; font-weight: bold; text-align: center; color: var(--rmt-danger, #ff0000);
+                background: transparent !important; border-radius: 0; cursor: pointer; pointer-events: auto;
+                transform-origin: 50% 50%; transition: transform 0.15s ease, text-shadow 0.15s ease;
+            }
+            .module-delete-btn { z-index: 10; }
+            .category-delete-btn { z-index: 12; }
+            .module-delete-btn:hover, .category-delete-btn:hover {
+                transform: scale(1.25); color: var(--rmt-danger, #ff0000);
+                text-shadow: 0 0 3px rgba(var(--rmt-danger-rgb), 0.5); background-color: transparent !important;
+            }
             .category-label { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
             .icons-wrapper { -webkit-overflow-scrolling: touch; }
             .icons-wrapper.dragging { overflow: hidden !important; }
             .buttonsContainer div { display: flex; align-items: center; justify-content: center; text-align: center; }
+            /* Layout of a section lives here, NOT in an inline style: search hides
+               sections with a class, and an inline display would be wiped by a
+               style.display = '' reset (dropping the section to display:block, i.e.
+               one icon per row). */
+            .library-section { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: 0 0 100%; box-sizing: border-box; }
+            /* A collapsed section is just its label chip, so it no longer claims a
+               full row — consecutive chips pack onto shared rows (see updateSectionFlow). */
+            .library-section.section-collapsed { flex: 0 0 auto; }
+            .library-hidden { display: none !important; }
             .section-collapsed .icon { display: none !important; }
             .category-collapse-chevron { line-height: 1; }
-            .library-search-row { flex: 0 0 100%; width: 100%; position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 6px; padding: 2px 2px 8px 2px; margin: 0; background: rgba(var(--rmt-bg-rgb), 0.96); box-sizing: border-box; }
-            .library-search-input { flex: 1 1 auto; min-width: 0; height: 30px; box-sizing: border-box; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.5); color: var(--rmt-text-primary, #ffa800); font-family: 'Roboto Mono', monospace; font-size: 13px; outline: none; -webkit-appearance: none; appearance: none; }
+            /* Module count on a collapsed chip, so it still says what's inside. */
+            .category-label::after { content: attr(data-count); display: none; }
+            .section-collapsed .category-label::after {
+                display: inline-flex; align-items: center; justify-content: center;
+                margin-left: 0.5em; padding: 0 0.4em; min-width: 1.1em; height: 1.4em;
+                border-radius: 999px; font-size: 0.75em; line-height: 1;
+                background: rgba(var(--rmt-accent-rgb), 0.18);
+                border: 1px solid rgba(var(--rmt-accent-rgb), 0.45);
+            }
+            /* Clips the bar's contents so dragging it shut closes over the search row
+               too, without clipping the pull-tab that hangs below the bar. */
+            .library-body { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+            /* Chrome, not content: it overlays the top of the scroll area (which is
+               padded to match) rather than scrolling with it, so it never moves. The row
+               itself is invisible and transparent to the pointer — only the field is
+               there — so a module peeking out beside the field can still be grabbed.
+               z-index sits above the delete × buttons (10/12), or the field would have
+               them punching through it unblurred while the icons behind are frosted. */
+            .library-search-row { position: absolute; top: 0; left: 0; right: 0; z-index: 30; display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 0; box-sizing: border-box; background: transparent; pointer-events: none; }
+            /* The only painted, only clickable part of the row: a compact frosted field.
+               Translucent so icons scrolling under it stay faintly readable. */
+            .library-search-input { pointer-events: auto; flex: 0 1 420px; min-width: 0; height: 30px; box-sizing: border-box; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.62); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); color: var(--rmt-text-primary, #ffa800); font-family: 'Roboto Mono', monospace; font-size: 13px; outline: none; -webkit-appearance: none; appearance: none; }
             .library-search-input::placeholder { color: var(--rmt-text-secondary, rgba(255,168,0,0.5)); }
             .library-search-input:focus { border-color: var(--rmt-accent, #ffa800); box-shadow: 0 0 0 2px rgba(var(--rmt-accent-rgb), 0.25); }
         `;
@@ -2104,8 +2276,7 @@ const menuAPI = (function() {
                         domCache.iconsContainer.innerHTML = '';
                         categoryContainers = [];
                         uiState.categories.forEach((categoryObj, index) => {
-                            const sectionContainer = document.createElement('div');
-                            Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+                            const sectionContainer = createSectionContainer();
                             categoryContainers.push(sectionContainer);
                             const labelIcon = createLabelIcon(categoryObj.name, categoryObj.name);
                             labelIcon.addEventListener('click', () => handleFileUpload(categoryObj.name, sectionContainer));
@@ -2126,9 +2297,6 @@ const menuAPI = (function() {
                             const emptyPlaceholder = createEmptyPlaceholder(categoryObj.name);
                             sectionContainer.appendChild(emptyPlaceholder);
                             domCache.iconsContainer.appendChild(sectionContainer);
-                            const breaker = document.createElement('div');
-                            Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-                            domCache.iconsContainer.appendChild(breaker);
                             if (index < uiState.categories.length - 1) {
                                 domCache.iconsContainer.appendChild(createSectionSeparator());
                             }
@@ -2137,6 +2305,8 @@ const menuAPI = (function() {
                         domCache.iconsContainer.appendChild(createSectionSeparator());
                         domCache.iconsContainer.appendChild(actionButtons);
                         normalizeLayoutSeparators();
+                        refreshSectionCounts();
+                        updateSectionFlow();
                         updateMaxHeight();
                         showNotification('UI state loaded successfully!', 'success');
                     } catch (error) {
