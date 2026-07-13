@@ -3731,11 +3731,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 const newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
                 note.setVariable('frequencyString', newRaw);
             } else if (isDSLSyntax(rawExpression)) {
-                // DSL expression: wrap with DSL multiplication syntax
-                // e.g., base.f -> 2 * base.f (octave up) or (1/2) * base.f (octave down)
-                const factorStr = factor.d === 1 ? `${factor.n}` : `(${factor.n}/${factor.d})`;
-                const wrapped = `${factorStr} * ${rawExpression}`;
-                note.setVariable('frequencyString', wrapped);
+                // Fold the factor into the expression's coefficient instead of
+                // prepending another multiplier, so stepping up and back down
+                // returns to `base.f` rather than `(1/2) * 2 * base.f`. Any power
+                // term (TET) is left alone: the coefficient never enters it.
+                const multiplied = multiplyExpressionByFraction(rawExpression, factor.n, factor.d, 'frequency', myModule);
+                note.setVariable('frequencyString', multiplied);
             } else if (rawExpression.includes('.pow(')) {
                 // Corrupted note with .pow() - wrap in multiplication to preserve the TET expression
                 // Don't simplify as it would destroy the .pow() expression
