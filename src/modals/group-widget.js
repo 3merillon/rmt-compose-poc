@@ -36,6 +36,7 @@ import {
   TOP_HEADER_HEIGHT,
   MIN_BUFFER,
 } from '../utils/draggable-widget.js';
+import { viewportWidth, viewportHeight } from '../utils/viewport.js';
 
 // ---- the action registry ------------------------------------------------
 //
@@ -259,7 +260,7 @@ function onKeydown(e) {
 // only guarantees the HEADER stays on screen, so the header is the floor.
 function fitHeight() {
   if (!root || !isGroupWidgetVisible()) return;
-  const available = window.innerHeight - root.getBoundingClientRect().top - MIN_BUFFER;
+  const available = viewportHeight() - root.getBoundingClientRect().top - MIN_BUFFER;
   const floor = headerEl.offsetHeight;
   root.style.maxHeight = Math.max(floor, available) + 'px';
 }
@@ -271,8 +272,8 @@ function fitHeight() {
 function placeDefault() {
   const w = root.offsetWidth;
   const h = root.offsetHeight;
-  const left = Math.max(MIN_BUFFER, window.innerWidth - w - MIN_BUFFER);
-  const top = Math.max(TOP_HEADER_HEIGHT + MIN_BUFFER, window.innerHeight - h - MIN_BUFFER);
+  const left = Math.max(MIN_BUFFER, viewportWidth() - w - MIN_BUFFER);
+  const top = Math.max(TOP_HEADER_HEIGHT + MIN_BUFFER, viewportHeight() - h - MIN_BUFFER);
   root.style.left = left + 'px';
   root.style.top = top + 'px';
 }

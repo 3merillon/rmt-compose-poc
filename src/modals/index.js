@@ -12,7 +12,8 @@ import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
 import { escapeHtml } from '../utils/html-escape.js';
 import { isDSLSyntax } from '../dsl/index.js';
-import { makeDraggableWidget, MIN_BUFFER } from '../utils/draggable-widget.js';
+import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.js';
+import { viewportHeight } from '../utils/viewport.js';
 
 const domCache = {
     noteWidget: null,
@@ -356,13 +357,21 @@ export function updateNoteWidgetHeight() {
     
     const headerHeight = header.offsetHeight;
     const rect = widget.getBoundingClientRect();
-    const availableSpace = window.innerHeight - rect.top - MIN_BUFFER;
+    const availableSpace = viewportHeight() - rect.top - MIN_BUFFER;
     const contentNaturalHeight = content.scrollHeight;
     const PADDING = 5;
     const widgetDesiredHeight = headerHeight + contentNaturalHeight + PADDING;
     const minInitialHeight = widgetInitiallyOpened ? 40 : 300;
-    const effectiveHeight = Math.max(minInitialHeight, Math.min(availableSpace, widgetDesiredHeight));
-    
+
+    // The band between the bottom of the top bar and the bottom edge — all the room
+    // this widget can ever have. A landscape phone has under 300px of it, so both the
+    // "open at least this tall" floor and the fit-to-content height have to yield to
+    // it: the floor used to win, which is what pushed the widget off the screen.
+    const roomOnScreen = Math.max(headerHeight, viewportHeight() - TOP_HEADER_HEIGHT - 2 * MIN_BUFFER);
+    const floor = Math.min(minInitialHeight, roomOnScreen);
+    const fitted = Math.max(floor, Math.min(availableSpace, widgetDesiredHeight));
+    const effectiveHeight = Math.min(fitted, roomOnScreen);
+
     widget.style.height = effectiveHeight + "px";
     const contentHeight = effectiveHeight - headerHeight - PADDING;
     content.style.height = Math.max(40, contentHeight) + "px";

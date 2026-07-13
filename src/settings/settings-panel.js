@@ -32,6 +32,7 @@ import {
   TOP_HEADER_HEIGHT,
   MIN_BUFFER,
 } from '../utils/draggable-widget.js';
+import { viewportWidth, viewportHeight } from '../utils/viewport.js';
 
 // Themeable color tokens exposed as individual pickers (key + friendly label),
 // grouped for readability.
@@ -74,6 +75,11 @@ const GEAR_SVG = `<svg class="rmt-set-gear" viewBox="0 0 24 24" fill="none" aria
 // Opens clear of the top bar (50px) and the module-library bar below it, so the
 // panel doesn't cover the library the moment it appears.
 const DEFAULT_TOP = 110;
+
+// ...unless the screen is too short to afford that — a landscape phone is about
+// 300px tall. Below this much room, clearing the bars matters less than the panel
+// having somewhere to be.
+const MIN_USEFUL_HEIGHT = 200;
 
 const TABS = [
   { id: 'appearance', label: 'Appearance' },
@@ -442,7 +448,7 @@ function updatePanelHeight() {
   if (!root || !isSettingsPanelOpen()) return;
   const chrome = headerEl.offsetHeight + tabsEl.offsetHeight;
   const desired = chrome + bodyEl.scrollHeight;
-  const available = window.innerHeight - root.getBoundingClientRect().top - MIN_BUFFER;
+  const available = viewportHeight() - root.getBoundingClientRect().top - MIN_BUFFER;
   // Floor is the HEADER alone, not header+tabs: the drag clamp only guarantees
   // the handle stays on screen, so anything taller would hang off the bottom
   // when the panel is parked at the very bottom. (Same floor as the note widget.)
@@ -454,8 +460,11 @@ function updatePanelHeight() {
 // widget (which lives bottom-left). Afterwards the user's dragged position wins.
 function placeDefault() {
   const width = root.offsetWidth;
-  const left = Math.max(MIN_BUFFER, window.innerWidth - width - MIN_BUFFER);
-  const top = Math.max(TOP_HEADER_HEIGHT + MIN_BUFFER, DEFAULT_TOP);
+  const left = Math.max(MIN_BUFFER, viewportWidth() - width - MIN_BUFFER);
+  // DEFAULT_TOP clears both bars, but on a landscape phone the whole screen is barely
+  // taller than that — park it higher rather than open a panel with no room to be in.
+  const roomy = viewportHeight() - MIN_USEFUL_HEIGHT - MIN_BUFFER;
+  const top = Math.max(TOP_HEADER_HEIGHT + MIN_BUFFER, Math.min(DEFAULT_TOP, roomy));
   root.style.left = left + 'px';
   root.style.top = top + 'px';
 }

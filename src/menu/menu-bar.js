@@ -4,6 +4,7 @@ import { validateExpressionSyntax } from '../utils/safe-expression-validator.js'
 import { renderModuleIcon } from './icon-factory.js';
 import { settingsStore } from '../settings/settings-store.js';
 import { pointerOf } from '../utils/draggable-widget.js';
+import { viewportHeight } from '../utils/viewport.js';
 
 const menuAPI = (function() {
     const domCache = {
@@ -703,7 +704,7 @@ const menuAPI = (function() {
     }
 
     function updateMaxHeight() {
-        const windowHeight = window.innerHeight;
+        const windowHeight = viewportHeight();
         const topBarHeight = domCache.topBar ? domCache.topBar.offsetHeight : TOP_BAR_HEIGHT;
         maxMenuBarHeight = windowHeight - topBarHeight - PULL_TAB_HEIGHT - SAFETY_MARGIN;
         const currentHeight = parseInt(domCache.secondTopBar.style.height || '50', 10);

@@ -5,6 +5,7 @@ import { InstrumentManager, SynthInstrument, SampleInstrument } from './instrume
 import * as SynthInstrumentsModule from './instruments/synth-instruments.js';
 import * as SampleInstrumentsModule from './instruments/sample-instruments.js';
 import { initStackClick } from './stack-click.js';
+import { initViewport } from './utils/viewport.js';
 import { eventBus } from './utils/event-bus.js';
 import { modals } from './modals/index.js';
 import { audioEngine } from './player/audio-engine.js';
@@ -34,6 +35,11 @@ try {
     if (e.ctrlKey || e.metaKey) e.preventDefault();
   }, { passive: false, capture: true });
 } catch {}
+
+// Publish --app-width / --app-height before anything lays out. Not inside initApp():
+// that awaits the WASM load, and the chrome would spend those frames sized against
+// the wrong viewport.
+try { initViewport(); } catch (e) {}
 
 // Create the SynthInstruments object with all instrument classes
 const SynthInstruments = {

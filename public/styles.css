@@ -532,7 +532,12 @@ html, body {
     border-bottom: 1px dotted var(--rmt-accent, #ffa800);
     padding: 20px;
     min-width: 250px;
+    /* 100 = the two fixed bars. `vh` is the LARGE viewport — the screen as it would
+       be with the browser's URL bar collapsed — and this app never scrolls, so that
+       bar never collapses and 100vh is permanently taller than the phone. Size to the
+       viewport we actually have instead; the first line is the pre-JS fallback. */
     max-height: calc(100vh - 100px);
+    max-height: calc(var(--app-height, 100dvh) - 100px);
     overflow-y: auto;
     color: var(--rmt-accent, #ffa800);
     transform-origin: top center;

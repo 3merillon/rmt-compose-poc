@@ -16,6 +16,8 @@
  * paying for the same measurements three times a frame.
  */
 
+import { viewportWidth, viewportHeight } from './viewport.js';
+
 // The fixed top bar is 50px tall; floating panels stay below it, and keep a
 // 19px buffer to every viewport edge.
 export const TOP_HEADER_HEIGHT = 50;
@@ -113,13 +115,13 @@ export function makeDraggableWidget({
 
     const { x, y } = pointerOf(e);
 
-    const maxLeft = window.innerWidth - dragWidth - MIN_BUFFER;
+    const maxLeft = viewportWidth() - dragWidth - MIN_BUFFER;
     const newLeft = Math.max(MIN_BUFFER, Math.min(x - dragOffsetX, maxLeft));
 
     // Only the handle has to stay on screen: a panel may hang off the bottom,
     // and onMove() shrinks it to fit.
     const minTop = TOP_HEADER_HEIGHT + MIN_BUFFER;
-    const maxTop = window.innerHeight - dragHandleHeight - MIN_BUFFER;
+    const maxTop = viewportHeight() - dragHandleHeight - MIN_BUFFER;
     const newTop = Math.max(minTop, Math.min(y - dragOffsetY, maxTop));
 
     el.style.left = newLeft + 'px';
@@ -144,17 +146,19 @@ export function makeDraggableWidget({
 
     const handleHeight = handle.getBoundingClientRect().height;
     const rect = el.getBoundingClientRect();
+    const vw = viewportWidth();
+    const vh = viewportHeight();
 
-    const availableHeight = window.innerHeight - TOP_HEADER_HEIGHT + 5;
+    const availableHeight = vh - TOP_HEADER_HEIGHT + 5;
     const maxWidgetHeight = availableHeight - handleHeight;
 
-    const maxLeft = window.innerWidth - rect.width - MIN_BUFFER;
-    const maxTop = window.innerHeight - Math.min(rect.height, maxWidgetHeight) - MIN_BUFFER;
+    const maxLeft = vw - rect.width - MIN_BUFFER;
+    const maxTop = vh - Math.min(rect.height, maxWidgetHeight) - MIN_BUFFER;
 
-    if (rect.right > window.innerWidth - MIN_BUFFER) {
+    if (rect.right > vw - MIN_BUFFER) {
       el.style.left = Math.max(MIN_BUFFER, maxLeft) + 'px';
     }
-    if (rect.bottom > window.innerHeight - MIN_BUFFER) {
+    if (rect.bottom > vh - MIN_BUFFER) {
       el.style.top = Math.max(TOP_HEADER_HEIGHT + MIN_BUFFER, maxTop) + 'px';
     }
     if (rect.top < TOP_HEADER_HEIGHT + MIN_BUFFER) {
