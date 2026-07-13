@@ -4900,6 +4900,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
     domCache.playPauseBtn.addEventListener('pointerdown', (event) => {
         if (event.button != null && event.button !== 0) return;
+
+        // Unlock audio HERE, in the gesture itself. The long-press below starts
+        // playback from a timer, which is not a user gesture, so the resume() buried
+        // in preparePlayback() comes too late for mobile Safari — the first
+        // long-press on a fresh page would toggle the mode and play nothing, while
+        // every long-press after some other tap worked. Must stay synchronous.
+        try { audioEngine.unlock(); } catch {}
+
         ppCancelLongPress();
         ppLongPressFired = false;
 

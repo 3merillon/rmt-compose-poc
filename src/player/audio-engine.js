@@ -73,6 +73,36 @@ export class AudioEngine {
     }
   }
 
+  /**
+   * Unlock audio from inside a user gesture. SYNCHRONOUS on purpose — it must be
+   * callable directly from a pointerdown/click handler, with nothing awaited before
+   * it, or the gesture no longer counts.
+   *
+   * ensureResumed() is not a substitute. Mobile Safari grants audio on TRANSIENT
+   * activation: resume() has to be called from within the gesture's own task, not
+   * merely at some point after the user has touched the page. Anything that starts
+   * playback from a timer (the play button's 500 ms long-press) is therefore too
+   * late by definition, and resumes nothing — which is why the very first long-press
+   * on a freshly loaded page was silent while every one after a normal tap worked.
+   *
+   * The silent one-sample buffer is the second half of the iOS handshake: the
+   * context can report "running" and still stay muted until a source has actually
+   * been started inside a gesture.
+   */
+  unlock() {
+    const ctx = this.audioContext;
+    if (!ctx) return;
+    try { if (ctx.state === 'suspended') ctx.resume(); } catch {}
+    if (this._unlocked) return;
+    this._unlocked = true;
+    try {
+      const src = ctx.createBufferSource();
+      src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      src.connect(ctx.destination);
+      src.start(0);
+    } catch {}
+  }
+
   setVolume(value) {
     if (!this.audioContext || !this.graph) return;
     this.graph.setMasterVolume(Number(value));

@@ -354,6 +354,57 @@ check('stops on its own at the module end', stoppedByItself,
 cls = await ppClasses();
 check('parks on the play triangle', !cls.includes('open') && !cls.includes('looping'), `classes: [${cls}]`);
 
+// ── TEST G — a long-press as the FIRST interaction on a fresh page ──────────────
+// The long-press fires from a setTimeout, which is not a user gesture. Mobile Safari
+// grants audio on TRANSIENT activation, so the resume() inside preparePlayback() is
+// too late by definition: the very first long-press on a freshly loaded page toggled
+// the mode and played silence, while every long-press after some other tap worked.
+// The unlock has to happen in pointerdown. Chromium is more forgiving than Safari
+// here (sticky activation would paper over it), so assert the MECHANISM: the context
+// must already be running while the finger is still down, BEFORE the timer fires.
+console.log('\nTEST G — first-touch long-press unlocks audio in the gesture');
+{
+  const fresh = await browser.newContext({ viewport: { width: 480, height: 900 }, hasTouch: true, isMobile: true });
+  const fp = await fresh.newPage();
+  await fp.addInitScript(() => { try { localStorage.clear(); } catch {} });
+  await fp.goto(`${URL_BASE}?perf=1`, { waitUntil: 'load' });
+  await fp.waitForSelector('#playPauseBtn');
+  await fp.waitForTimeout(1200);
+
+  const state = () => fp.evaluate(async () => {
+    const { audioEngine } = await import('/src/player/audio-engine.js');
+    return { ctx: audioEngine.audioContext.state, unlocked: !!audioEngine._unlocked };
+  });
+
+  const b4 = await state();
+  check('fresh page: audio starts locked', b4.ctx === 'suspended' && !b4.unlocked, JSON.stringify(b4));
+
+  const bx = await fp.$eval('#playPauseBtn', (el) => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await fp.mouse.move(bx.x, bx.y);
+  await fp.mouse.down();
+  await fp.waitForTimeout(150); // finger still down; the 500ms press has NOT fired yet
+  const mid = await state();
+  check('pointerdown unlocked audio before the press fires', mid.ctx === 'running' && mid.unlocked,
+    `${JSON.stringify(mid)} — if this is still suspended, the unlock is not in the gesture and iOS will play silence`);
+
+  await fp.waitForTimeout(600); // let the long-press fire
+  await fp.mouse.up();
+  await fp.waitForTimeout(900);
+  const after = await fp.evaluate(async () => {
+    const { audioEngine } = await import('/src/player/audio-engine.js');
+    const t0 = audioEngine.audioContext.currentTime;
+    await new Promise((r) => setTimeout(r, 350));
+    return {
+      cls: [...document.querySelector('.pp').classList],
+      advanced: audioEngine.audioContext.currentTime - t0 > 0.2,
+      voices: audioEngine.activeOscillators.size,
+    };
+  });
+  check('first-touch long-press → looping', after.cls.includes('looping') && after.cls.includes('open'), `classes: [${after.cls}]`);
+  check('first-touch long-press → AUDIO rolling', after.advanced && after.voices > 0, JSON.stringify(after));
+  await fresh.close();
+}
+
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 
 const failed = checks.filter((c) => !c.pass);
