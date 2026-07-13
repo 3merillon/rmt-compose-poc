@@ -142,6 +142,7 @@ export class RendererAdapter {
     this._arrowDownRegions = null;  // Float32Array(N*4) per instance (lower half)
     // Track last GPU upload epoch for arrow backgrounds to avoid redundant bufferData on every frame
     this._lastArrowUploadEpoch = -1;
+    this._arrowRegionsDirty = true;
 
     // Position epoch to gate dependent overlay uploads (link lines, guides)
     this._posEpoch = 0;
@@ -214,8 +215,39 @@ export class RendererAdapter {
     this._sceneDirty = false;
     this._textDirty = false;
     this._lastTextViewEpoch = -1;
+    // Text runs hold absolute CSS positions, so they go stale when notes MOVE, not just when
+    // their content changes. sync() bumps _posEpoch on every call, so keying the run cache on
+    // it is what makes a drop/move rebuild the labels instead of leaving them at the old spot.
+    this._lastTextPosEpoch = -1;
     this._lastInstanceCount = 0;
     this._glyphRunsCache = null;
+
+    // Drag preview epoch. A drag deliberately does NOT bump _posEpoch (rebuilding link-line
+    // endpoints for thousands of dependents every pointermove is too expensive), and moving
+    // notes are instead shifted on the GPU. But the ANCHOR note is different: its posSize is
+    // rewritten on the CPU each pointermove, so anything derived from absolute positions —
+    // the glyph runs and the dependency-line endpoints — really does go stale while dragging.
+    // This epoch is that invalidation signal. It used to be supplied by accident: _viewEpoch
+    // was bumped on every frame, so everything rebuilt regardless and the "do not bump
+    // _posEpoch" optimisation never actually took effect.
+    this._dragEpoch = 0;
+    this._lastTextDragEpoch = -1;
+    this._lastLinkDragEpoch = -1;
+    // Note-local overlay regions (pull tab, arrow columns) are derived from each note's
+    // posSize width/height. Resizing bakes the anchor's NEW width straight into posSize
+    // without bumping _posEpoch (the resize shifts dependents via _dragOffsetX instead), so
+    // _posEpoch alone does not catch it and the tab/arrows keep the note's old size while the
+    // body stretches. Keying them on the drag epoch — which ticks on every pointermove of a
+    // drag — recomputes them from the live posSize, which is what the old per-frame
+    // _viewEpoch churn was silently doing.
+    this._lastTabDragGeom = -1;
+    this._lastArrowDragGeom = -1;
+    // The regions are a pure function of each note's posSize (width/height) and the zoom,
+    // so a resize — which rewrites posSize.w — must rebuild them. Keying them on _posEpoch
+    // is that dependency; without it the pull tab and arrow columns keep the note's OLD
+    // width while the body stretches. (Previously masked by the per-frame _viewEpoch churn.)
+    this._lastTabPosEpoch = -1;
+    this._lastArrowPosEpoch = -1;
 
     // Divider/draw caching epochs
     this._lastDividerEpoch = -1;
@@ -338,6 +370,14 @@ export class RendererAdapter {
   // Config helpers (seconds/world X, freq/world Y)
   _cfgSX() { try { return this._config?.scales?.secondsToWorldX ?? 200; } catch { return 200; } }
   _cfgSY() { try { return this._config?.scales?.freqToWorldY ?? 100; } catch { return 100; } }
+
+  // World-Y of a frequency's *line* — the axis that octave guides, the BaseNote
+  // circle and dependency-line endpoints are all drawn on. A note's vertical
+  // centre is pinned to this, so note height can change without the note
+  // drifting off its own frequency.
+  _cfgCenterAnchor() { try { return this._config?.note?.centerAnchorWU ?? 10; } catch { return 10; } }
+  _cfgNoteH() { try { return this._config?.note?.heightWU ?? 22; } catch { return 22; } }
+  _noteCenterY(freq) { return this._frequencyToY(freq) + this._cfgCenterAnchor(); }
 
   init(containerEl) {
     if (!containerEl) throw new Error('RendererAdapter.init: containerEl required');
@@ -488,6 +528,19 @@ export class RendererAdapter {
    */
   updateViewportBasis(raw) {
     if (!raw) return;
+
+    // An unchanged basis is a no-op. player.js's rAF loop pushes a camera update on EVERY
+    // frame (to release the tracking X-lock), so without this guard the renderer was
+    // marked dirty and _viewEpoch was bumped 60x a second on a perfectly still canvas —
+    // which both defeated the redraw gate and invalidated every view-keyed cache
+    // (glyph runs, tab/arrow/divider regions, measure bars) every single frame.
+    // Guarding here rather than only at the call site makes it robust to any caller.
+    const m = this.matrix;
+    if (m[0] === raw.a && m[1] === raw.b && m[3] === raw.c &&
+        m[4] === raw.d && m[6] === raw.e && m[7] === raw.f) {
+      return;
+    }
+
     // Update matrix
     this.matrix[0] = raw.a; this.matrix[1] = raw.b; this.matrix[2] = 0;
     this.matrix[3] = raw.c; this.matrix[4] = raw.d; this.matrix[5] = 0;
@@ -526,6 +579,14 @@ export class RendererAdapter {
     this.currentYScaleFactor = yScaleFactor || 1.0;
     // Playhead derives world X at draw-time using currentXScaleFactor
     // Keep a module reference for on-the-fly computations (e.g., link lines during drag)
+    // Loading a different module retires every per-note derived value, so drop the caches
+    // that are keyed by note content rather than by note identity. They are bounded by the
+    // note count within a module, so this is the only place they need to be released.
+    if (this._moduleRef !== module) {
+      this._parsedColorCache = null;
+      this._idColorCache = null;
+      this._fracStrCache = null;
+    }
     this._moduleRef = module;
 
     // Bump position epoch at START of sync to invalidate dependency highlight cache.
@@ -609,6 +670,10 @@ export class RendererAdapter {
 
     // Build list of visible notes (those with startTime and duration)
     const items = [];
+    // Latest end time across playable notes, accumulated here for free because this loop
+    // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
+    // re-derive it with a second full pass over module.notes (~31ms at 100k notes).
+    let maxNoteEndSec = 0;
     for (const idStr in module.notes) {
       const note = module.notes[idStr];
       if (!note) continue;
@@ -644,6 +709,13 @@ export class RendererAdapter {
         const duration = (typeof durationRaw === 'number' && isFinite(durationRaw)) ? durationRaw : null;
         if (startTime === null || duration === null) continue;
 
+        // Module end time follows the COMMITTED geometry (pre-override), and counts only
+        // notes that actually sound — same predicate _computeModuleEndTime used.
+        if (note.hasExpression && note.hasExpression('frequency')) {
+          const end = startTime + duration;
+          if (end > maxNoteEndSec) maxNoteEndSec = end;
+        }
+
         // World coords with optional temp overrides (e.g., dragging/resizing)
         const ov = tempOverrides && tempOverrides[note.id] ? tempOverrides[note.id] : null;
         const startSec = (ov && ov.startSec != null) ? ov.startSec : startTime;
@@ -655,21 +727,25 @@ export class RendererAdapter {
           ? this._frequencyToY(freqVal)
           : this._yForSilence(module, note, evaluatedNotes);
 
-        // Parameterized note height and center alignment
-        const hBase = (this._config?.note?.heightWU ?? 22); // world units
-        const h = hBase;
-        // Apply configured vertical center shift (default -1)
-        y = y + (this._config?.note?.centerShiftWU ?? -1);
+        // Pin the note's vertical CENTRE to its frequency line, then derive the
+        // top-left from the height. At the default height this is identical to the
+        // old fixed -1 shift (anchor 10 - 22/2 = -1); at any other height the note
+        // stays centred on its line instead of drifting off it.
+        const h = this._cfgNoteH(); // world units
+        y = y + this._cfgCenterAnchor() - h * 0.5;
 
         const isSilence = (freqVal == null || !isFinite(Number(freqVal)));
         const baseColor = this._resolveColor(ev, note, module);
         const color = isSilence ? [0.0, 0.0, 0.0, 0.75] : baseColor;
 
-        items.push({ id: note.id, x, y, w, h, color, isSilence });
+        // Carry freqVal so the fraction-label pass below does not have to look the note up in
+        // evaluatedNotes a second time and re-unwrap the Fraction.
+        items.push({ id: note.id, x, y, w, h, color, isSilence, freqVal });
       } catch {
         // Ignore malformed notes
       }
     }
+    this._maxNoteEndSec = maxNoteEndSec;
 
     // PERFORMANCE: Instead of O(n log n) sort, use O(1) swap to move selected note to end
     // This avoids full buffer reallocation on every selection change
@@ -986,33 +1062,36 @@ export class RendererAdapter {
       }
     } catch { this._relDepsIdx = null; this._relRdepsIdx = null; }
  
-    // Compute per-note fraction label strings (relative to base) for overlay rendering
+    // Compute per-note fraction label strings (relative to base) for overlay rendering.
+    // These arrays must stay freshly allocated: _lastNoteFracNumStrs keeps the previous one by
+    // reference to detect content changes, so reusing the array in place would compare it
+    // against itself and text would never be marked dirty.
     this._noteFracNumStrs = new Array(N);
     this._noteFracDenStrs = new Array(N);
     const baseValNum = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
+    const fracCache = this._fracStrCache || (this._fracStrCache = new Map());
     for (let i = 0; i < N; i++) {
-      let id = this._instanceNoteIds ? (this._instanceNoteIds[i] | 0) : i;
       try {
-        // Try evaluated notes first
-        let fnum = null;
-        const ev = getEv(id);
-        const fv = ev && ev.frequency;
-        if (fv != null) {
-          fnum = (typeof fv.valueOf === 'function') ? fv.valueOf() : Number(fv);
-        }
-        // Fallback to raw module variable to avoid transient "silence" at initial load
-        if (!(fnum != null && isFinite(fnum))) {
-          try {
-            const noteObj = (typeof module?.getNoteById === 'function') ? module.getNoteById(id) : (module?.notes && module.notes[id]);
-            const raw = noteObj && noteObj.getVariable && noteObj.getVariable('frequency') && noteObj.getVariable('frequency').valueOf();
-            if (raw != null) fnum = Number(raw);
-          } catch {}
-        }
+        // items[i] is instance i (the selected-note swap above keeps them aligned), and its
+        // freqVal was already resolved in the note loop — including the raw-variable fallback
+        // that avoids a transient "silence" label at initial load. Re-reading evaluatedNotes
+        // here was a second Map lookup plus a Fraction unwrap for every note.
+        const fnum = items[i] ? items[i].freqVal : null;
         if (fnum != null && isFinite(fnum) && baseValNum && isFinite(baseValNum) && baseValNum !== 0) {
+          // The label is a pure function of the frequency ratio, and a piece of music reuses a
+          // small set of ratios across many notes. Memoising skips both the continued-fraction
+          // approximation and two string allocations per note per sync (200k strings at 100k
+          // notes). The ratio already folds in the base frequency, so a base change re-keys.
           const ratio = fnum / baseValNum;
-          const fr = (typeof this._approximateFraction === 'function') ? this._approximateFraction(ratio, 8192, 4) : { n: Math.round(ratio * 1000), d: 1000 };
-          this._noteFracNumStrs[i] = String(fr.n);
-          this._noteFracDenStrs[i] = String(fr.d);
+          let pair = fracCache.get(ratio);
+          if (pair === undefined) {
+            const fr = (typeof this._approximateFraction === 'function') ? this._approximateFraction(ratio, 8192, 4) : { n: Math.round(ratio * 1000), d: 1000 };
+            pair = [String(fr.n), String(fr.d)];
+            if (fracCache.size > 65536) fracCache.clear();
+            fracCache.set(ratio, pair);
+          }
+          this._noteFracNumStrs[i] = pair[0];
+          this._noteFracDenStrs[i] = pair[1];
         } else {
           // Only mark as 'silence' when we truly lack/invalid frequency even after fallback
           this._noteFracNumStrs[i] = 'silence';
@@ -1087,6 +1166,12 @@ export class RendererAdapter {
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowRegionBuffer);
           gl.bufferData(gl.ARRAY_BUFFER, zeros4, gl.DYNAMIC_DRAW);
         }
+        // The lower half has its own buffer and must be resized to the new instance count
+        // alongside the upper one, or an N-instance draw would read past its end.
+        if (this.rectInstanceArrowDownRegionBuffer) {
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowDownRegionBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, zeros4, gl.DYNAMIC_DRAW);
+        }
       } catch {}
       try {
         if (this.rectInstanceDividerRegionBuffer) {
@@ -1103,9 +1188,19 @@ export class RendererAdapter {
     // Using separate _sceneEpoch avoids double-invalidation of dependency highlight cache.
     this._sceneEpoch = (this._sceneEpoch || 0) + 1;
 
-    // Invalidate cached tab/arrow regions after scene changes
+    // Invalidate cached tab/arrow regions after scene changes.
+    // The *upload* epochs must be invalidated alongside the *data* epochs. sync() has just
+    // zeroed the region buffers above, and the arrow pass only re-uploads when
+    // _lastArrowUploadEpoch !== _lastArrowEpoch. Resetting only _lastArrowEpoch let the
+    // rebuild restore it to the very same _viewEpoch the last upload was stamped with, so the
+    // upload was skipped and the zeroed buffers were drawn — arrows vanished after any edit.
+    // This was masked before only because _viewEpoch used to change on every single frame.
     this._lastTabEpoch = -1;
     this._lastArrowEpoch = -1;
+    this._lastArrowUploadEpoch = -1;
+    this._arrowRegionsDirty = true;
+    this._lastDividerEpoch = -1;
+    this._lastDividerUploadEpoch = -1;
 
     // Mark dirty to trigger one-time uploads/draw ordering updates
     this._sceneDirty = true;
@@ -1139,10 +1234,16 @@ export class RendererAdapter {
 
   setPlayhead(timeSec) {
     const t = (typeof timeSec === 'number') ? timeSec : 0;
-    // Store time; compute world X at draw-time from currentXScaleFactor to avoid scale-order pops
-    this.playheadTimeSec = t;
     // Keep legacy world-x in sync for any consumers reading it prior to render
     this.playheadXWorld = t * this._cfgSX() * (this.currentXScaleFactor || 1.0);
+    // player.js calls this from its rAF loop on EVERY frame, playing or not. Marking the
+    // scene dirty unconditionally kept needsRedraw permanently true, which silently
+    // defeated the redraw gate: a completely idle canvas still paid a full per-note
+    // redraw 60x a second. Only a playhead that actually moved changes any pixels.
+    // (_render derives the playhead X from playheadTimeSec at draw time, and the scale
+    // setters mark their own redraws, so nothing else depends on this being sticky.)
+    if (t === this.playheadTimeSec) return;
+    this.playheadTimeSec = t;
     this.needsRedraw = true;
   }
 
@@ -1162,6 +1263,22 @@ export class RendererAdapter {
   setTrackingMode(enabled) {
     try {
       this.trackingMode = !!enabled;
+      this.needsRedraw = true;
+    } catch {}
+  }
+
+  // Public API: show/hide the octave-arrow column.
+  // Use this rather than assigning drawNoteArrows directly: the id label, the fraction and its
+  // divider are all laid out around that column, so toggling it RELAYOUTS them into (or out of)
+  // the reclaimed space. Their cached glyph runs and note-local regions therefore have to be
+  // rebuilt — a bare needsRedraw would just redraw the stale layout.
+  setDrawNoteArrows(enabled) {
+    try {
+      const v = !!enabled;
+      if (this.drawNoteArrows === v) return;
+      this.drawNoteArrows = v;
+      this._textDirty = true;
+      this._viewEpoch = (this._viewEpoch || 0) + 1;
       this.needsRedraw = true;
     } catch {}
   }
@@ -2172,9 +2289,19 @@ export class RendererAdapter {
     gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabInnerBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
 
-    // Dedicated buffer for batched arrow background regions (upper/lower halves)
+    // Dedicated buffers for the batched arrow background regions. The upper and lower
+    // halves get ONE BUFFER EACH on purpose: they were previously drawn from a single
+    // shared buffer that was re-uploaded between the two draws, so the buffer ended each
+    // frame holding the LOWER regions. That was invisible only because the upload ran every
+    // frame; the moment it was correctly skipped, the "upper" draw read the lower regions
+    // and the top arrow band disappeared. Separate buffers make each draw correct
+    // regardless of when uploads happen.
     this.rectInstanceArrowRegionBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowRegionBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+
+    this.rectInstanceArrowDownRegionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowDownRegionBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
 
     // Dedicated buffer for batched fraction divider regions (note-local CSS px band)
@@ -2843,18 +2970,25 @@ export class RendererAdapter {
       const rgba = this._parseAnyColor(c);
       if (rgba) return this._applyCorruptionTint(rgba, note, module);
     }
-    // Check raw variable
-    if (note?.variables?.color) {
-      const col = (typeof note.variables.color === 'function')
-        ? note.variables.color()
-        : note.variables.color;
+    // Raw color source. Read the backing store directly rather than going through
+    // note.variables: that getter returns a Proxy, and trapping one property access per
+    // note per sync cost ~32ms at 100k notes. Note's own proxy handler resolves 'color' to
+    // exactly this field, so the value is identical.
+    const raw = note?.properties?.color;
+    if (raw) {
+      const col = (typeof raw === 'function') ? raw() : raw;
       const rgba = this._parseAnyColor(col);
       if (rgba) return this._applyCorruptionTint(rgba, note, module);
     }
     // Deterministic fallback from note id (hsla)
     const id = Number(note?.id ?? 0);
-    const hue = (id * 137.508) % 360;
-    const rgba = this._hslaToRgba(hue, 70, 60, 0.7);
+    let rgba = this._idColorCache && this._idColorCache.get(id);
+    if (!rgba) {
+      const hue = (id * 137.508) % 360;
+      rgba = this._hslaToRgba(hue, 70, 60, 0.7);
+      if (!this._idColorCache) this._idColorCache = new Map();
+      this._idColorCache.set(id, rgba);
+    }
     return this._applyCorruptionTint(rgba, note, module);
   }
 
@@ -2884,6 +3018,29 @@ export class RendererAdapter {
   }
 
   _parseAnyColor(col) {
+    if (!col) return null;
+
+    // Memoised by source string. Colours are immutable strings on the notes, so re-parsing
+    // them (regex + hsl->rgb) on every sync was ~24ms at 100k notes for a result that never
+    // changes. Callers treat the returned array as read-only (it is copied straight into the
+    // instance colour buffer), so handing back a shared array is safe.
+    if (typeof col === 'string') {
+      let cache = this._parsedColorCache;
+      if (!cache) cache = this._parsedColorCache = new Map();
+      const hit = cache.get(col);
+      if (hit !== undefined) return hit;
+      const parsed = this._parseAnyColorUncached(col);
+      // Distinct colours are bounded by the note count, so this cannot grow without limit for
+      // a given module; the cache is dropped wholesale when the module changes (see sync).
+      // Do NOT evict on a small cap: a module where every note has its own colour would then
+      // overflow and clear on every single sync, re-parsing all of them each time.
+      cache.set(col, parsed);
+      return parsed;
+    }
+    return this._parseAnyColorUncached(col);
+  }
+
+  _parseAnyColorUncached(col) {
     if (!col) return null;
     if (typeof col === 'string') {
       const s = col.trim().toLowerCase();
@@ -3304,36 +3461,55 @@ export class RendererAdapter {
 
       // Build and normalize the instance-index list for the currently moving set
       const idsSet = (noteIds instanceof Set) ? noteIds : new Set(noteIds);
-      // Persist moving ids (numeric) so glyph-atlas drag flags apply immediately, even before overlay is enabled.
-      try {
-        const moving = new Set();
-        for (const id of idsSet) moving.add(Number(id));
-        this._dragMovingIds = moving;
-      } catch { this._dragMovingIds = null; }
 
-      const idxArr = [];
-      if (this._noteIdToIndex && typeof this._noteIdToIndex.get === 'function') {
-        for (const id of idsSet) {
-          const idx = this._noteIdToIndex.get(Number(id));
-          if (idx != null && idx >= 0 && idx < (this.instanceCount || 0)) {
-            idxArr.push(idx | 0);
+      // The moving set is FIXED for the whole drag, but the callers hand us a freshly built Set
+      // on every pointermove. Rebuilding _dragMovingIds and the sorted index list from it each
+      // time meant two Sets plus an array of `size` entries plus an O(n log n) sort PER MOVE.
+      // With a few thousand dependents that is megabytes of garbage per second, and it is the
+      // periodic mid-drag GC hitch: it scales with the dependent count and fires once enough
+      // has been allocated — i.e. "after moving some distance".
+      // Recognise the unchanged set and reuse everything already computed.
+      // Identity against the set WE were handed, tracked separately from _dragMovingIds:
+      // setDragOverlay also writes _dragMovingIds, with different membership (it excludes the
+      // anchor), so comparing against that would silently reuse the wrong set.
+      const sameSet = (noteIds === this._dragPreviewIdsRef) && !!this._dragSetIndices;
+      this._dragPreviewIdsRef = noteIds;
+
+      let changedSet = false;
+      if (!sameSet) {
+        // Persist moving ids (numeric) so glyph-atlas drag flags apply immediately, even before overlay is enabled.
+        try {
+          const moving = new Set();
+          for (const id of idsSet) moving.add(Number(id));
+          this._dragMovingIds = moving;
+        } catch { this._dragMovingIds = null; }
+
+        const idxArr = [];
+        if (this._noteIdToIndex && typeof this._noteIdToIndex.get === 'function') {
+          for (const id of idsSet) {
+            const idx = this._noteIdToIndex.get(Number(id));
+            if (idx != null && idx >= 0 && idx < (this.instanceCount || 0)) {
+              idxArr.push(idx | 0);
+            }
           }
         }
-      }
-      idxArr.sort((a, b) => a - b);
+        idxArr.sort((a, b) => a - b);
 
-      // Compare with previous flagged set; if unchanged, skip rebuilding/uploading flags buffer
-      let changedSet = false;
-      const prev = this._dragSetIndices;
-      if (!prev || prev.length !== idxArr.length) {
-        changedSet = true;
-      } else {
-        for (let i = 0; i < idxArr.length; i++) {
-          if (prev[i] !== idxArr[i]) { changedSet = true; break; }
+        // Compare with previous flagged set; if unchanged, skip rebuilding/uploading flags buffer
+        const prev = this._dragSetIndices;
+        if (!prev || prev.length !== idxArr.length) {
+          changedSet = true;
+        } else {
+          for (let i = 0; i < idxArr.length; i++) {
+            if (prev[i] !== idxArr[i]) { changedSet = true; break; }
+          }
         }
+        this._pendingDragIdxArr = idxArr;
       }
 
       if (changedSet) {
+        // changedSet can only be true on a rebuild, so the freshly built index list is here.
+        const idxArr = this._pendingDragIdxArr || [];
         // Compute end-preview baselines once per moving-set change
         try {
           // Cache moving indices for fast scans
@@ -3387,7 +3563,11 @@ export class RendererAdapter {
       this._dragAnchorIndex = (anchorIdx | 0);
 
       // Only bake CPU pos/size for the anchor when it is actually in the moving set.
-      const anchorIsMoving = (anchorIdx >= 0) && (idxArr.indexOf(anchorIdx) !== -1);
+      // Membership in the set we were HANDED (idsSet) — the index list is derived from exactly
+      // that, so this is equivalent to the old idxArr.indexOf(anchorIdx) scan but O(1).
+      // Deliberately not _dragMovingIds: setDragOverlay overwrites that with a set that omits
+      // the anchor, which would make the anchor stop tracking the cursor.
+      const anchorIsMoving = (anchorIdx >= 0) && anchorId != null && idsSet.has(Number(anchorId));
       if (anchorIsMoving) {
         const base = anchorIdx * 4;
         if (this.posSize && (base + 3) < this.posSize.length) {
@@ -3496,6 +3676,12 @@ export class RendererAdapter {
       // IMPORTANT: Do NOT bump _posEpoch during drag preview.
       // Link-line endpoints rebuilds are expensive with thousands of dependents.
       // We keep overlays in sync via shader uniforms and minimal CPU updates.
+      //
+      // The anchor is the exception: its posSize was just rewritten above, so its glyph runs
+      // and its dependency-line endpoints ARE stale and must be rebuilt. _dragEpoch is that
+      // signal — narrow enough to leave the moving notes on the cheap shader path, but enough
+      // that what the user is actually dragging tracks the cursor.
+      this._dragEpoch = (this._dragEpoch || 0) + 1;
       this.needsRedraw = true;
       return true;
     } catch (err) {
@@ -3514,6 +3700,14 @@ export class RendererAdapter {
       this._dragActive = false;
       // Clear moving set used by glyph-atlas drag flags
       this._dragMovingIds = null;
+      // Drop the identity fast-path state so the next gesture always rebuilds.
+      this._dragPreviewIdsRef = null;
+      this._dragSetIndices = null;
+      this._pendingDragIdxArr = null;
+
+      // Ending the drag restores the anchor's original posSize below, so the glyph runs,
+      // link-line endpoints and note-local regions are all stale again and must rebuild.
+      this._dragEpoch = (this._dragEpoch || 0) + 1;
 
       // Restore original positions in CPU cache (only those we touched)
       if (this._dragOriginalPos && this.posSize) {
@@ -4254,60 +4448,90 @@ export class RendererAdapter {
       this._octaveIndices = []; // cached list of K values (e.g., -8..+8)
     };
 
-    proto._computeModuleEndTime = function (module) {
+    // A note "has" a variable iff it has a non-empty expression for it. `n.variables.x` says
+    // the same thing, but it is a Proxy trap that allocates/looks up a closure on every read;
+    // classifying 100k notes through it cost ~32ms per sync. hasExpression() is the direct
+    // question the Proxy itself asks (see Note's proxy get handler).
+    const hasVar = (n, name) => {
+      try { return !!(n && typeof n.hasExpression === 'function' && n.hasExpression(name)); }
+      catch { return false; }
+    };
+
+    // Measure notes: a startTime and nothing else.
+    proto._collectMeasureNotes = function (module) {
+      const out = [];
+      try {
+        for (const id in module.notes) {
+          const n = module.notes[id];
+          if (!n) continue;
+          if (hasVar(n, 'startTime') && !hasVar(n, 'duration') && !hasVar(n, 'frequency')) out.push(n);
+        }
+      } catch {}
+      return out;
+    };
+
+    proto._computeModuleEndTime = function (module, measureNotes) {
       let measureEnd = 0;
       try {
-        const measureNotes = Object.values(module.notes).filter(n =>
-          n?.variables?.startTime && !n?.variables?.duration && !n?.variables?.frequency
-        );
-        if (measureNotes.length > 0) {
-          measureNotes.sort((a, b) => {
-            const aStart = a.getVariable('startTime');
-            const bStart = b.getVariable('startTime');
-            if (!aStart || !bStart) return 0;
-            return aStart.valueOf() - bStart.valueOf();
-          });
-          const lastMeasure = measureNotes[measureNotes.length - 1];
-          const st = lastMeasure.getVariable('startTime');
-          if (st) {
-            const ml = module.findMeasureLength(lastMeasure);
-            measureEnd = st.add(ml).valueOf();
+        const list = measureNotes || this._collectMeasureNotes(module);
+        if (list.length > 0) {
+          // Only the latest measure matters — a linear max beats sorting the whole list.
+          let lastMeasure = null;
+          let lastVal = -Infinity;
+          for (let i = 0; i < list.length; i++) {
+            const st = list[i].getVariable('startTime');
+            if (!st) continue;
+            const v = st.valueOf();
+            if (v > lastVal) { lastVal = v; lastMeasure = list[i]; }
+          }
+          if (lastMeasure) {
+            const st = lastMeasure.getVariable('startTime');
+            if (st) {
+              const ml = module.findMeasureLength(lastMeasure);
+              measureEnd = st.add(ml).valueOf();
+            }
           }
         }
       } catch {}
-      let lastNoteEnd = 0;
-      try {
-        Object.values(module.notes).forEach(n => {
-          try {
-            if (n?.variables?.startTime && n?.variables?.duration && n?.variables?.frequency) {
-              const s = n.getVariable('startTime').valueOf();
-              const d = n.getVariable('duration').valueOf();
-              lastNoteEnd = Math.max(lastNoteEnd, s + d);
+
+      // sync() already walks every note and has its evaluated startTime/duration in hand, so it
+      // accumulates this max for free. Re-deriving it here meant a second full pass with two
+      // Fraction.valueOf() calls per note (~31ms at 100k). Fall back to the scan if sync()
+      // has not run yet, so this stays correct when called standalone.
+      let lastNoteEnd = this._maxNoteEndSec;
+      if (typeof lastNoteEnd !== 'number' || !isFinite(lastNoteEnd)) {
+        lastNoteEnd = 0;
+        try {
+          for (const id in module.notes) {
+            const n = module.notes[id];
+            if (!n) continue;
+            if (hasVar(n, 'startTime') && hasVar(n, 'duration') && hasVar(n, 'frequency')) {
+              try {
+                const s = n.getVariable('startTime').valueOf();
+                const d = n.getVariable('duration').valueOf();
+                lastNoteEnd = Math.max(lastNoteEnd, s + d);
+              } catch {}
             }
-          } catch {}
-        });
-      } catch {}
+          }
+        } catch {}
+      }
       return Math.max(measureEnd, lastNoteEnd);
     };
 
     proto._syncMeasureBars = function (module) {
       if (!module) return;
 
-      // Collect measure times
+      // Collect measure times. One classification pass, shared with the end-time computation
+      // below — this used to be two independent O(N) scans, both going through the Proxy.
       const times = [];
       times.push(0); // origin
 
-      try {
-        for (const id in module.notes) {
-          const n = module.notes[id];
-          if (!n) continue;
-          if (n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency) {
-            try { times.push(n.getVariable('startTime').valueOf()); } catch {}
-          }
-        }
-      } catch {}
+      const measureNotes = this._collectMeasureNotes(module);
+      for (let i = 0; i < measureNotes.length; i++) {
+        try { times.push(measureNotes[i].getVariable('startTime').valueOf()); } catch {}
+      }
 
-      const endTime = this._computeModuleEndTime(module);
+      const endTime = this._computeModuleEndTime(module, measureNotes);
       this._moduleEndTime = endTime;
       if (endTime > 0) times.push(endTime);
 
@@ -4896,7 +5120,7 @@ const e = startSec + addDx + durSec;
 
         // Circle center in world units (keep consistent with legacy: center x at -30 WU, y at base frequency line)
         const xCenterWorld = -30.0;
-        const yCenterWorld = this._frequencyToY(baseFreq)+10.0;
+        const yCenterWorld = this._noteCenterY(baseFreq);
 
         // World center -> page CSS px
         const sxC = this.matrix[0] * xCenterWorld + this.matrix[3] * yCenterWorld + this.matrix[6];
@@ -5171,7 +5395,7 @@ const vpH2 = Math.max(1, rectCss2.height);
 // BaseNote circle geometry in screen space (CSS px)
 const baseFreq2 = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
 const xCenterWorld2 = -30.0;
-const yCenterWorld2 = this._frequencyToY(baseFreq2) + 10.0;
+const yCenterWorld2 = this._noteCenterY(baseFreq2);
 
 // World center -> page CSS px
 const sxC2 = this.matrix[0] * xCenterWorld2 + this.matrix[3] * yCenterWorld2 + this.matrix[6];
@@ -5607,7 +5831,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
 // Draw triangle labels "[id]" over the triangles (centered, narrow texture) — near bottom edge
 // This pass occurs AFTER triangle outline+fill so text is on top (not darkened by triangle alpha).
 {
-  const reuseTextRuns = !!(this.useGlyphAtlas && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch);
+  const reuseTextRuns = !!(this.useGlyphAtlas && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch && this._lastTextPosEpoch === this._posEpoch && this._lastTextDragEpoch === this._dragEpoch);
   if (!reuseTextRuns) {
     if (!this._deferredGlyphRuns) this._deferredGlyphRuns = [];
     const padX = 2.0;
@@ -5680,7 +5904,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       // BaseNote circle center in screen space (CSS px)
       const baseFreq = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
       const xCenterWorld = -30.0;
-      const yCenterWorld = this._frequencyToY(baseFreq) + 10.0;
+      const yCenterWorld = this._noteCenterY(baseFreq);
 
       // world -> page CSS px
       const sxC = this.matrix[0] * xCenterWorld + this.matrix[3] * yCenterWorld + this.matrix[6];
@@ -5906,6 +6130,19 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
 
       if (!textProg || !this.textVAO || !this.textPosSizeBuffer) return;
 
+      // The note-local overlay regions (pull tab, arrow columns) are a function of each note's
+      // WIDTH and HEIGHT — not of where it sits. A move drag changes no note's width, so they
+      // cannot have changed; only a resize can, and a resize bakes the anchor's new width into
+      // posSize without bumping _posEpoch (it shifts the dependents via _dragOffsetX instead).
+      // Keying on that width, rather than on "a drag happened", means a move drag no longer
+      // recomputes N regions and re-uploads N*4 floats on every single pointermove — which is
+      // what made dragging a note with thousands of dependents hitch.
+      const dragAnchorIdx = (this._dragActive && this._dragAnchorIndex != null && this._dragAnchorIndex >= 0)
+        ? (this._dragAnchorIndex | 0) : -1;
+      const dragGeomSig = (dragAnchorIdx >= 0 && this.posSize && (dragAnchorIdx * 4 + 2) < this.posSize.length)
+        ? (this.posSize[dragAnchorIdx * 4 + 2] + (this._dragOffsetW || 0.0))
+        : -1;
+
       // Batching flags
       const batchDividers = true;
       const batchSilenceRings = true;
@@ -5941,12 +6178,21 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
           // Full rebuild only on view changes or buffer reallocation
           const needInitTabs =
             (this._lastTabEpoch !== this._viewEpoch) ||
+            (this._lastTabPosEpoch !== this._posEpoch) ||
+            (this._lastTabDragGeom !== dragGeomSig) ||
             (!this._tabRegions || this._tabRegions.length !== N * 4) ||
             (!this._tabInnerRegions || this._tabInnerRegions.length !== N * 4);
 
           if (needInitTabs) {
-            const regions = new Float32Array(N * 4);
-            const innerRegions = new Float32Array(N * 4);
+            // Reuse the existing arrays: this rebuilds on every pointermove of a drag, and
+            // minting two Float32Array(N*4) per frame (plus two more for the arrows below) was
+            // ~320KB/frame of garbage at 5k notes. That churn is what produced the occasional
+            // multi-frame GC hitch when dragging a note with thousands of dependents. The loop
+            // writes all four components for every instance, so there is nothing stale to carry.
+            const regions = (this._tabRegions && this._tabRegions.length === N * 4)
+              ? this._tabRegions : new Float32Array(N * 4);
+            const innerRegions = (this._tabInnerRegions && this._tabInnerRegions.length === N * 4)
+              ? this._tabInnerRegions : new Float32Array(N * 4);
 
             const borderCss = Math.max(1, Math.round(1.0 * (this.xScalePxPerWU || 1.0)));
             for (let i = 0; i < N; i++) {
@@ -5993,6 +6239,8 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             }
 
             this._lastTabEpoch = this._viewEpoch;
+            this._lastTabPosEpoch = this._posEpoch;
+            this._lastTabDragGeom = dragGeomSig;
           } else if (this._dragOffsetW !== 0.0 && this._tabRegions && this._tabInnerRegions && this._dragFlags) {
             // Resize preview: update only flagged instances to avoid O(N) work every frame
             const borderCss = Math.max(1, Math.round(1.0 * (this.xScalePxPerWU || 1.0)));
@@ -6117,9 +6365,13 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       // Defer all text sprites (IDs, silence text) to draw AFTER any rings for correct z-order across notes
       this._deferredTextSprites = []; // array of { tex, x, y, w, h, layerZ }
       // Defer glyph-run draws (IDs, digits, arrows). Prefer cached runs if scene text unchanged and view epoch stable.
-      const reuseRuns = !!(this.useGlyphAtlas && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch);
+      const reuseRuns = !!(this.useGlyphAtlas && this._glyphRunsCache && !this._textDirty && this._lastTextViewEpoch === this._viewEpoch && this._lastTextPosEpoch === this._posEpoch && this._lastTextDragEpoch === this._dragEpoch);
       if (reuseRuns) {
-        this._deferredGlyphRuns = this._glyphRunsCache.slice();
+        // Hand the cached list back BY REFERENCE rather than copying it. Every push site
+        // is guarded by this same reuse condition, so a reuse frame cannot mutate it, and
+        // keeping the array identity stable is what lets _flushGlyphRunsAtlas recognise
+        // the run list as unchanged and skip re-expanding + re-uploading every glyph.
+        this._deferredGlyphRuns = this._glyphRunsCache;
         this._textRebuildThisFrame = false;
       } else {
         this._deferredGlyphRuns = [];   // will build below and cache post-flush
@@ -6144,12 +6396,20 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
           const N = this.instanceCount;
           const needUpdateArrows =
             (this._lastArrowEpoch !== this._viewEpoch) ||
+            (this._lastArrowPosEpoch !== this._posEpoch) ||
+            (this._lastArrowDragGeom !== dragGeomSig) ||
             (!this._arrowUpRegions || this._arrowUpRegions.length !== N * 4) ||
             (!this._arrowDownRegions || this._arrowDownRegions.length !== N * 4);
 
           if (needUpdateArrows) {
-            this._arrowUpRegions = new Float32Array(N * 4);
-            this._arrowDownRegions = new Float32Array(N * 4);
+            // Reuse — see the tab-region comment above. Both the silence branch and the normal
+            // branch write all four components per instance, so no stale data survives.
+            if (!this._arrowUpRegions || this._arrowUpRegions.length !== N * 4) {
+              this._arrowUpRegions = new Float32Array(N * 4);
+            }
+            if (!this._arrowDownRegions || this._arrowDownRegions.length !== N * 4) {
+              this._arrowDownRegions = new Float32Array(N * 4);
+            }
 
             const borderCssExact = (this.xScalePxPerWU || 1.0);
             const epsCss = 0.5;
@@ -6194,6 +6454,15 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             }
 
             this._lastArrowEpoch = this._viewEpoch;
+            this._lastArrowPosEpoch = this._posEpoch;
+            this._lastArrowDragGeom = dragGeomSig;
+            // The regions were just recomputed, so the GPU copy is stale, full stop.
+            // Deriving the upload from an epoch PAIR was the bug: _lastArrowEpoch is
+            // stamped with _viewEpoch, which does not change during a drag, so a rebuild
+            // triggered by the drag restored the very same value the last upload was
+            // stamped with and the upload was skipped — leaving the GPU with the note's
+            // ORIGINAL arrow geometry while the body stretched.
+            this._arrowRegionsDirty = true;
           }
 
           const Utb = (this._uniforms && this._uniforms.tabMask) ? this._uniforms.tabMask : null;
@@ -6232,8 +6501,10 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
 
           gl.bindVertexArray(this.rectVAO);
 
-          // Upload arrow regions only when data changed (view epoch or recompute)
-          const mustUploadArrow = (this._lastArrowUploadEpoch !== this._lastArrowEpoch);
+          // Upload arrow regions only when data changed (view epoch or recompute).
+          // Each half has its own buffer, so a skipped upload leaves BOTH halves holding
+          // their own correct regions — see the buffer creation comment.
+          const mustUploadArrow = !!this._arrowRegionsDirty;
 
           // Upper half (lighter)
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.15);
@@ -6246,7 +6517,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
 
           // Lower half (same tint to avoid seam brightness mismatch)
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.15);
-          gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowRegionBuffer);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowDownRegionBuffer);
           if (mustUploadArrow) {
             gl.bufferData(gl.ARRAY_BUFFER, this._arrowDownRegions, gl.DYNAMIC_DRAW);
           }
@@ -6255,7 +6526,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
 
           // Mark successful upload epoch to prevent redundant buffer traffic next frames
           if (mustUploadArrow) {
-            this._lastArrowUploadEpoch = this._lastArrowEpoch;
+            this._arrowRegionsDirty = false;
           }
 
           // Restore attribute 4 to primary tab region buffer for subsequent passes
@@ -6334,8 +6605,14 @@ try {
         if (!regionRect) return;
         if (uBias) gl.uniform1f(uBias, bias);
         if (uCol)  gl.uniform4f(uCol, color[0], color[1], color[2], color[3]);
-        const buf = this.rectInstanceArrowRegionBuffer || this.rectInstanceTabRegionBuffer;
-        gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+        // Dedicated scratch buffer. This single-instance hover overlay used to borrow
+        // rectInstanceArrowRegionBuffer and bufferData a lone 4-float rect into it, which
+        // silently SHRANK the shared arrow-region buffer to 16 bytes. The next frame's
+        // N-instance upper-arrow draw then read past the end and the whole upper arrow band
+        // disappeared. It only ever looked fine because the arrow regions happened to be
+        // re-uploaded every single frame, which repaired the damage before anyone saw it.
+        if (!this._hoverRegionScratchBuffer) this._hoverRegionScratchBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._hoverRegionScratchBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, regionRect, gl.DYNAMIC_DRAW);
         gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
         gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
@@ -6381,6 +6658,20 @@ try {
       // Fast path: during pure-move drags, overlays are moved by shader u_dragOffset.
       // Skip heavy per-note overlay recompute when text runs are cached and no width changes are previewed.
       if (!canSkipPerNote) {
+      // Viewport cull bounds. Every overlay this loop emits for a note — pull tab, octave
+      // arrows, fraction divider, silence band, and all of its text runs — is scissored to
+      // that note's own rect, so a note whose rect lies entirely off-canvas cannot produce
+      // a single pixel and every bit of work for it is wasted. This is why the cull is
+      // exact rather than an approximation, and why the picture stays pixel-identical.
+      // Without it, cost scaled with the size of the MODULE; with it, it scales with what
+      // is actually on screen, which is what makes 100k notes tractable.
+      // Moving notes are offset on the GPU during a drag (u_dragOffset / u_dragCssX) instead
+      // of in posSize, so widen the horizontal test by that offset — otherwise a note dragged
+      // in from off-screen would arrive with no overlays. Drags only shift x/width; frequency
+      // edits go through sync(), so the vertical bound needs no such slack.
+      const cullPadX = 2 + (this._dragActive
+        ? Math.abs((m[0] || 0) * (this._dragOffsetX || 0)) + Math.abs((m[0] || 0) * (this._dragOffsetW || 0))
+        : 0);
       for (let i = 0; i < this.instanceCount; i++) {
         const o = i * 4;
         const so = i * 2;
@@ -6396,6 +6687,9 @@ try {
         const sy = m[1] * xw + m[4] * yw + m[7];
         const left = sx - off.x;
         const top  = sy - off.y;
+
+        if (left + wCss + cullPadX < 0 || left - cullPadX > vpW ||
+            top + hCss + 2 < 0 || top - 2 > vpH) continue;
 
         // Rounded-corner radius in CSS px (matches note body shader) and per-note scissor to clip overlays
         const cornerRadiusCss = Math.min(((this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0) * (this.xScalePxPerWU || 1.0)), wCss * 0.5, hCss * 0.5);
@@ -6426,10 +6720,15 @@ try {
         const innerBarW = Math.max(2, Math.round(hCss * 0.1));
         const innerBarH = Math.max(8, Math.round(hCss * 0.5));
 
-        // Content area for fraction and id label
+        // Content area for fraction and id label.
+        // The octave-arrow column is only reserved when the arrows are actually being drawn:
+        // with arrows turned off there is nothing in that strip, so the id and fraction reclaim
+        // it instead of sitting behind an empty gutter. Note this keys off the drawNoteArrows
+        // setting, NOT off isSilence — a silence note still reserves the column while arrows are
+        // enabled, so it stays aligned with its neighbours (legacy parity).
         const isSilence = (this._noteFracNumStrs && this._noteFracNumStrs[i] === 'silence');
-        // Align silence content as if octave arrow column existed, per legacy parity
-        const contentLeft = (left + arrowsWidth + pad);
+        const arrowsColWidth = this.drawNoteArrows ? arrowsWidth : 0;
+        const contentLeft = (left + arrowsColWidth + pad);
         const contentRight = left + wCss - tabWidth - pad;
         const contentWidth = Math.max(1, contentRight - contentLeft);
 
@@ -6513,7 +6812,7 @@ try {
               if (this.enableSilenceEraseBands) {
                 if (!_silenceEraseRegions) _silenceEraseRegions = new Float32Array(this.instanceCount * 4);
                 const heX_local = 0.5 * wCss;
-                const xL_local = -heX_local + (arrowsWidth + pad);
+                const xL_local = -heX_local + (arrowsColWidth + pad);
                 const xR_local =  heX_local - (tabWidth + pad);
                 // Use a thin band around the vertical center; thickness ~1–2 CSS px depending on zoom
                 const thicknessCss = Math.max(1, Math.round((this.xScalePxPerWU || 1.0)));
@@ -6558,7 +6857,7 @@ try {
               {
                 if (!_dividerRegions) _dividerRegions = new Float32Array(this.instanceCount * 4);
                 const heX_local = 0.5 * wCss;
-                const xL_local = -heX_local + (arrowsWidth + pad) + approxOffset;
+                const xL_local = -heX_local + (arrowsColWidth + pad) + approxOffset;
                 const xR_local = xL_local + dividerW;
                 const yT_local = -thicknessCss * 0.5;
                 const yB_local =  thicknessCss * 0.5;
@@ -6619,7 +6918,7 @@ try {
               {
                 if (!_dividerRegions) _dividerRegions = new Float32Array(this.instanceCount * 4);
                 const heX_local = 0.5 * wCss;
-                const xL_local = -heX_local + (arrowsWidth + pad) + approxOffset;
+                const xL_local = -heX_local + (arrowsColWidth + pad) + approxOffset;
                 const xR_local = xL_local + dividerW;
                 const yT_local = -thicknessCss * 0.5;
                 const yB_local =  thicknessCss * 0.5;
@@ -7511,6 +7810,10 @@ try {
     // Refresh all glyph/word/label caches after fonts load; re-prewarm and request redraw
     proto._refreshGlyphCaches = function () {
       const gl = this.gl;
+      // Text metrics are memoised per (text, fontPx) and are only valid for the font face
+      // they were measured with, so a font swap must drop them along with the glyph textures.
+      try { if (this._runMetricsCache) this._runMetricsCache.clear(); } catch {}
+      try { this._atlasGlyphCache = null; } catch {}
       try {
         if (this._glyphCache) {
           for (const e of this._glyphCache.values()) {
@@ -7533,6 +7836,11 @@ try {
       this._octaveLabelCache = new Map();
       this._glyphCacheInitialized = false;
       try { this._initGlyphCache(); } catch {}
+      // The cached glyph RUNS were laid out with the previous font's metrics, so they must be
+      // rebuilt, not just redrawn — otherwise the new glyphs get positioned with stale widths
+      // and ascents. Requesting a redraw alone was enough only while _viewEpoch churned every
+      // frame and forced a rebuild anyway.
+      this._textDirty = true;
       this.needsRedraw = true;
     };
 
@@ -7569,6 +7877,20 @@ try {
     };
     // Canvas-measured run metrics to mirror DOM text metrics exactly (fixes numerator drift for some digits)
     proto._measureRunMetricsCanvas = function (text, fontPx) {
+      const input = (text != null) ? String(text) : '';
+
+      // Memoised: this is a pure function of (text, fontPx, font-face), but it was being
+      // called from the per-note loop, so it ran two Canvas2D measureText() calls per note
+      // per frame. measureText with actualBoundingBox metrics forces text shaping and is one
+      // of the most expensive 2D ops there is; at 5k notes that alone was ~10k shaping calls
+      // a frame. The font face only changes on load, where _refreshGlyphCaches clears this.
+      const key = fontPx + '|' + input;
+      let cache = this._runMetricsCache;
+      if (!cache) cache = this._runMetricsCache = new Map();
+      const hit = cache.get(key);
+      if (hit !== undefined) return hit;
+
+      let out;
       try {
         if (!this._metricsCanvas) this._metricsCanvas = document.createElement('canvas');
         if (!this._metricsCtx) this._metricsCtx = this._metricsCanvas.getContext('2d');
@@ -7577,7 +7899,6 @@ try {
         ctx.textBaseline = 'alphabetic';
         // Normalize ascent for numeric runs by measuring a canonical digit set,
         // which stabilizes cap-height across digits like 1,2,4,7,9 without per-digit biases.
-        const input = (text != null) ? String(text) : '';
         const canonical = (/^[0-9]+$/.test(input) ? '0123456789' : input);
         const mCanon = ctx.measureText(canonical);
         const asc = Number(mCanon.actualBoundingBoxAscent || fontPx * 0.8);
@@ -7586,10 +7907,16 @@ try {
         const mInput = ctx.measureText(input);
         const width = Math.ceil(mInput.width || 0);
         const height = Math.ceil(asc + desc);
-        return { ascent: asc, descent: desc, width, height };
+        out = { ascent: asc, descent: desc, width, height };
       } catch {
-        return { ascent: fontPx || 0, descent: 0, width: 0, height: fontPx || 0 };
+        out = { ascent: fontPx || 0, descent: 0, width: 0, height: fontPx || 0 };
       }
+
+      // fontPx tracks zoom continuously, so the key space is unbounded over a long
+      // session; drop the whole map rather than let it grow without limit.
+      if (cache.size > 8192) cache.clear();
+      cache.set(key, out);
+      return out;
     };
 
     // Cached full-word texture for "silence" drawn once at base size
@@ -7972,7 +8299,8 @@ try {
     proto._flushGlyphRunsAtlas = function () {
       const gl = this.gl;
       const canvas = this.canvas;
-      if (!gl || !canvas || !this._deferredGlyphRuns || this._deferredGlyphRuns.length === 0) return;
+      const runs = this._deferredGlyphRuns;
+      if (!gl || !canvas || !runs || runs.length === 0) return;
 
       if (!this.atlasTextProgram || !this.atlasVAO || !this._atlas) {
         try { this._initGlyphAtlas(); } catch {}
@@ -7983,36 +8311,80 @@ try {
         return;
       }
 
-      // Count glyphs
-      let glyphCount = 0;
-      for (let i = 0; i < this._deferredGlyphRuns.length; i++) {
-        const r = this._deferredGlyphRuns[i];
-        const t = r && r.text ? String(r.text) : '';
-        glyphCount += t.length;
-      }
-      if (glyphCount === 0) {
-        this._deferredGlyphRuns = [];
-        return;
-      }
-
-      // Allocate instance arrays
-      const posSize = new Float32Array(glyphCount * 4);
-      const uvRect  = new Float32Array(glyphCount * 4);
-      const color   = new Float32Array(glyphCount * 4);
-      const zArr    = new Float32Array(glyphCount * 1);
-      const clip    = new Float32Array(glyphCount * 4);
-      // Rounded-rect interior mask (optional per glyph)
-      const rrCS    = new Float32Array(glyphCount * 4); // (cx, cy, hx, hy)
-      const rrR     = new Float32Array(glyphCount * 1); // radius
+      // The seven per-glyph instance arrays built below are a pure function of the run
+      // list: text, CSS position, colour, depth and clip rect. Dragging does NOT change
+      // any of them — the shader offsets moving glyphs on the GPU via u_dragCssX and
+      // a_dragFlagGlyph (see atlasVS). So whenever the run list is unchanged, the buffers
+      // already on the GPU are still exactly right, and re-expanding every glyph and
+      // re-uploading ~7 arrays is pure waste. It was the single most expensive thing in
+      // the frame: 36 ms at 5k notes, 803 ms at 100k. The identity check on the run list
+      // makes reuse impossible unless the cache was built from this very array.
+      // Identity, not a dirty flag: a rebuild always mints a fresh array, and a reuse frame
+      // always hands back the cached one untouched. So "same array object" is a sound proof
+      // that the expansion on the GPU is still current. (The _textRebuildThisFrame flag is
+      // reset by the caller before we run, so it cannot be used here.)
+      const cached = this._atlasGlyphCache;
+      const canReuse = !!(cached && cached.runs === runs && cached.count > 0);
 
       // Viewport for uniforms
-      const rectCss = canvas.getBoundingClientRect();
+      const rectCss = this._cachedCanvasRect || canvas.getBoundingClientRect();
       const vpW = Math.max(1, rectCss.width);
       const vpH = Math.max(1, rectCss.height);
 
+      let count;
+      if (canReuse) {
+        count = cached.count;
+      } else {
+        count = this._buildAtlasGlyphInstances(runs, vpW, vpH);
+        if (count <= 0) {
+          this._deferredGlyphRuns = [];
+          return;
+        }
+      }
+
+      this._drawAtlasGlyphInstances(count, vpW, vpH, canReuse);
+      this._deferredGlyphRuns = [];
+    };
+
+    // Expand the run list into the per-glyph instance arrays and upload them.
+    // Returns the glyph count. Scratch arrays are reused across frames so a steady
+    // state allocates nothing.
+    proto._buildAtlasGlyphInstances = function (runs, vpW, vpH) {
+      const gl = this.gl;
+
+      // Count glyphs
+      let glyphCount = 0;
+      for (let i = 0; i < runs.length; i++) {
+        const r = runs[i];
+        const t = r && r.text ? String(r.text) : '';
+        glyphCount += t.length;
+      }
+      if (glyphCount === 0) return 0;
+
+      const S = this._atlasScratch || (this._atlasScratch = {});
+      if (!S.cap || S.cap < glyphCount) {
+        const cap = Math.max(64, 1 << (32 - Math.clz32(Math.max(1, glyphCount - 1))));
+        S.cap = cap;
+        S.posSize = new Float32Array(cap * 4);
+        S.uvRect = new Float32Array(cap * 4);
+        S.color = new Float32Array(cap * 4);
+        S.zArr = new Float32Array(cap);
+        S.clip = new Float32Array(cap * 4);
+        S.rrCS = new Float32Array(cap * 4);
+        S.rrR = new Float32Array(cap);
+        S.dragFlags = new Float32Array(cap);
+      }
+      const posSize = S.posSize;
+      const uvRect = S.uvRect;
+      const color = S.color;
+      const zArr = S.zArr;
+      const clip = S.clip;
+      const rrCS = S.rrCS;
+      const rrR = S.rrR;
+
       let gi = 0;
-      for (let i = 0; i < this._deferredGlyphRuns.length; i++) {
-        const r = this._deferredGlyphRuns[i];
+      for (let i = 0; i < runs.length; i++) {
+        const r = runs[i];
         if (!r || !r.text) continue;
         const text = String(r.text);
         const fontPx = Math.max(1, Math.floor(r.fontPx || 12));
@@ -8088,12 +8460,80 @@ try {
       }
 
       const count = gi;
-      if (count <= 0) {
-        this._deferredGlyphRuns = [];
-        return;
+      if (count <= 0) return 0;
+
+      gl.bindVertexArray(this.atlasVAO);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasPosSizeBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, posSize.subarray(0, count * 4), gl.DYNAMIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasUVRectBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, uvRect.subarray(0, count * 4), gl.DYNAMIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasColorBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, color.subarray(0, count * 4), gl.DYNAMIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasZBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, zArr.subarray(0, count), gl.DYNAMIC_DRAW);
+
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasClipRectBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, clip.subarray(0, count * 4), gl.DYNAMIC_DRAW);
+
+      if (this.atlasRRCenterSizeBuffer) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasRRCenterSizeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, rrCS.subarray(0, count * 4), gl.DYNAMIC_DRAW);
+      }
+      if (this.atlasRRRadiusBuffer) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasRRRadiusBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, rrR.subarray(0, count), gl.DYNAMIC_DRAW);
+      }
+      gl.bindVertexArray(null);
+
+      // Force the drag-flag buffer to be re-uploaded: it is sized to `count`, so a
+      // rebuild that changes the glyph count invalidates whatever is on the GPU.
+      this._atlasDragFlagsDirty = true;
+      this._atlasGlyphCache = { runs, count };
+      return count;
+    };
+
+    // Per-glyph drag flags are the ONLY instance data that depends on the drag set, so
+    // they are refreshed independently of the (cached) geometry above.
+    proto._uploadAtlasDragFlags = function (runs, count) {
+      const gl = this.gl;
+      if (!gl || !this.atlasDragFlagBuffer) return;
+
+      const moving = (this._dragActive && this._dragMovingIds && this._dragMovingIds.size)
+        ? this._dragMovingIds : null;
+
+      // Nothing to do when no note is moving now and none was moving last frame — the
+      // buffer already holds all-zeros. The `dirty` flag covers drag end (one final
+      // zeroing upload) and any geometry rebuild that resized the buffer.
+      if (!moving && !this._atlasDragFlagsDirty) return;
+
+      const S = this._atlasScratch;
+      const dragFlags = S.dragFlags;
+      let gi = 0;
+      for (let i = 0; i < runs.length; i++) {
+        const r = runs[i];
+        if (!r || !r.text) continue;
+        const text = String(r.text);
+        const flag = (moving && r.noteId != null && moving.has(Number(r.noteId))) ? 1.0 : 0.0;
+        for (let k = 0; k < text.length; k++) dragFlags[gi++] = flag;
       }
 
-      // Upload and draw
+      gl.bindVertexArray(this.atlasVAO);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasDragFlagBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, dragFlags.subarray(0, count), gl.DYNAMIC_DRAW);
+      gl.bindVertexArray(null);
+
+      // Keep the buffer dirty while dragging so the frame after the drag ends zeroes it.
+      this._atlasDragFlagsDirty = !!moving;
+    };
+
+    proto._drawAtlasGlyphInstances = function (count, vpW, vpH, reused) {
+      const gl = this.gl;
+
+      this._uploadAtlasDragFlags(this._deferredGlyphRuns, count);
+
       gl.useProgram(this.atlasTextProgram);
       const Ua = (this._uniforms && this._uniforms.atlas) ? this._uniforms.atlas : null;
       const uVP = Ua ? Ua.u_viewport : gl.getUniformLocation(this.atlasTextProgram, 'u_viewport');
@@ -8117,59 +8557,12 @@ try {
       gl.bindTexture(gl.TEXTURE_2D, this._atlas.tex);
 
       gl.bindVertexArray(this.atlasVAO);
-
-      // Upload instance buffers
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasPosSizeBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, posSize.subarray(0, count * 4), gl.DYNAMIC_DRAW);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasUVRectBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, uvRect.subarray(0, count * 4), gl.DYNAMIC_DRAW);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasColorBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, color.subarray(0, count * 4), gl.DYNAMIC_DRAW);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasZBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, zArr.subarray(0, count), gl.DYNAMIC_DRAW);
-
-      gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasClipRectBuffer);
-      gl.bufferData(gl.ARRAY_BUFFER, clip.subarray(0, count * 4), gl.DYNAMIC_DRAW);
-
-      // Upload rounded-rect interior mask data
-      if (this.atlasRRCenterSizeBuffer) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasRRCenterSizeBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, rrCS.subarray(0, count * 4), gl.DYNAMIC_DRAW);
-      }
-      if (this.atlasRRRadiusBuffer) {
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasRRRadiusBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, rrR.subarray(0, count), gl.DYNAMIC_DRAW);
-      }
-      // Upload per-glyph drag flags
-      if (this.atlasDragFlagBuffer) {
-        // Build drag flags: 1 for glyphs belonging to moving notes, else 0
-        const dragFlags = new Float32Array(count);
-        let gi2 = 0;
-        const moving = (this._dragActive && this._dragMovingIds && this._dragMovingIds.size) ? this._dragMovingIds : null;
-        for (let i = 0; i < this._deferredGlyphRuns.length; i++) {
-          const r = this._deferredGlyphRuns[i];
-          if (!r || !r.text) continue;
-          const text = String(r.text);
-          const flag = (moving && r.noteId != null && moving.has(Number(r.noteId))) ? 1.0 : 0.0;
-          for (let k = 0; k < text.length; k++) {
-            dragFlags[gi2++] = flag;
-          }
-        }
-        gl.bindBuffer(gl.ARRAY_BUFFER, this.atlasDragFlagBuffer);
-        gl.bufferData(gl.ARRAY_BUFFER, dragFlags.subarray(0, count), gl.DYNAMIC_DRAW);
-      }
-
       gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, count);
 
       gl.bindVertexArray(null);
       gl.bindTexture(gl.TEXTURE_2D, null);
       gl.depthMask(true);
-
-      // Clear queue
-      this._deferredGlyphRuns = [];
+      void reused;
     };
 
     // Draw a glyph run at top-left (x,y) using textProgram and screen-space quads
@@ -8269,7 +8662,7 @@ try {
           : (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
         const freq = ref * Math.pow(2, k);
         // Align to note center: center of 20px legacy row is +10 from top
-        const yWorld = this._frequencyToY(freq) + 10.0;
+        const yWorld = this._noteCenterY(freq);
 
         const localY = worldYToLocalCssY(yWorld);
         // Pixel-fit for crisp 1px lines
@@ -8412,7 +8805,11 @@ try {
         const canvas = this.canvas;
         const list = this._deferredGlyphRuns;
         if (this.useGlyphAtlas && this._textRebuildThisFrame) {
-          try { this._glyphRunsCache = list.slice(); this._textDirty = false; this._lastTextViewEpoch = this._viewEpoch; } catch {}
+          // Keep the array identity (no copy): the freshly-built list becomes the cache, so
+          // subsequent reuse frames hand the very same array to _flushGlyphRunsAtlas and it
+          // can recognise the run list as unchanged. Copying here would mint a new identity
+          // every rebuild and defeat the glyph-instance cache.
+          try { this._glyphRunsCache = list; this._textDirty = false; this._lastTextViewEpoch = this._viewEpoch; this._lastTextPosEpoch = this._posEpoch; this._lastTextDragEpoch = this._dragEpoch; } catch {}
           this._textRebuildThisFrame = false;
         }
         if (this.useGlyphAtlas) {
@@ -8715,7 +9112,7 @@ try {
             ? this._refFreqForGuides
             : (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
           const freq = ref * Math.pow(2, k);
-          const yWorld = this._frequencyToY(freq) + 10.0;
+          const yWorld = this._noteCenterY(freq);
 
           const localY = worldYToLocalCssY(yWorld);
           const yAligned = Math.floor(localY) + 0.5;
@@ -8827,7 +9224,7 @@ try {
             ? this._refFreqForGuides
             : (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
           const freq = ref * Math.pow(2, k);
-          const yWorld = this._frequencyToY(freq) + 10.0;
+          const yWorld = this._noteCenterY(freq);
           const localY = worldYToLocalCssY(yWorld);
           const yAligned = Math.floor(localY) + 0.5;
 
@@ -8879,6 +9276,50 @@ try {
     const proto = RendererAdapter.prototype;
 
     // Initialize link-line program/VAO and default flags lazily
+    // Pooled endpoint writer. The dependency-line endpoints are rebuilt on every pointermove of
+    // a drag (the anchor's centre moves, so every line hanging off it has to be re-laid), and
+    // they used to be accumulated into plain JS arrays and then copied into fresh Float32Arrays.
+    // At 5000 dependents that is a ~20,000-element boxed array plus an 80KB typed array per
+    // property per frame — the garbage that produced the periodic multi-frame GC hitch.
+    // These writers keep one growable Float32Array per bucket and hand out a subarray view, so a
+    // steady-state drag allocates nothing. Views stay valid because a bucket is only rewritten
+    // on a rebuild, and the caller re-reads the view on that same rebuild.
+    proto._linkWriter = function (key) {
+      const pool = this._linkPool || (this._linkPool = new Map());
+      let w = pool.get(key);
+      if (!w) {
+        w = {
+          a: new Float32Array(256),
+          n: 0,
+          _grow(need) {
+            if (need <= this.a.length) return;
+            let cap = this.a.length;
+            while (cap < need) cap *= 2;
+            const na = new Float32Array(cap);
+            na.set(this.a.subarray(0, this.n));
+            this.a = na;
+          },
+          // Endpoints push 4 values (x0,y0,x1,y1); flags push 2 (p0,p1). Both are always
+          // finite numbers, so an undefined 3rd argument unambiguously means the 2-value form.
+          push(v0, v1, v2, v3) {
+            if (v2 === undefined) {
+              this._grow(this.n + 2);
+              this.a[this.n++] = v0; this.a[this.n++] = v1;
+            } else {
+              this._grow(this.n + 4);
+              this.a[this.n++] = v0; this.a[this.n++] = v1;
+              this.a[this.n++] = v2; this.a[this.n++] = v3;
+            }
+          },
+          get length() { return this.n; },
+          view() { return this.n ? this.a.subarray(0, this.n) : null; }
+        };
+        pool.set(key, w);
+      }
+      w.n = 0;
+      return w;
+    };
+
     proto._initLinkLinesPass = function () {
       const gl = this.gl;
       if (!gl) return;
@@ -9025,13 +9466,33 @@ try {
               origDurationSec: (state.origDurationSec != null ? Number(state.origDurationSec) : null)
             }
           : null;
-        // Track moving dependents (ids) when provided to filter link lines during preview
+        // Track moving dependents (ids) when provided to filter link lines during preview.
+        // This is called on every pointermove, and .map() + new Set() over a few thousand
+        // dependents each time is exactly the churn that makes long drags hitch. The moving set
+        // does not change during a drag, so rebuild it only when the caller's array actually
+        // differs (identity first, then a size check).
         if (this._dragOverlay && state && Array.isArray(state.movingIds)) {
-          try {
-            this._dragMovingIds = new Set(state.movingIds.map((v) => Number(v)));
-          } catch { this._dragMovingIds = null; }
+          const ids = state.movingIds;
+          // Identity first (free when the caller reuses its array), then an exact content
+          // check — O(n) Set lookups, but no allocation. A size-only test would be unsound.
+          let unchanged = (ids === this._dragOverlayIdsRef) && !!this._dragMovingIds;
+          if (!unchanged && this._dragMovingIds && this._dragMovingIds.size === ids.length) {
+            unchanged = true;
+            for (let i = 0; i < ids.length; i++) {
+              if (!this._dragMovingIds.has(Number(ids[i]))) { unchanged = false; break; }
+            }
+          }
+          if (!unchanged) {
+            try {
+              const s = new Set();
+              for (let i = 0; i < ids.length; i++) s.add(Number(ids[i]));
+              this._dragMovingIds = s;
+            } catch { this._dragMovingIds = null; }
+          }
+          this._dragOverlayIdsRef = ids;
         } else if (!this._dragOverlay) {
           this._dragMovingIds = null;
+          this._dragOverlayIdsRef = null;
         }
         this.needsRedraw = true;
       } catch {
@@ -9091,7 +9552,7 @@ try {
               // Suppress link lines when BaseNote is selected
               selC = null;
               // Clear endpoints on anchor change to avoid stale lines
-              const __anchorChanged = (this._lastLinkAnchorId !== anchorId) || (this._lastLinkViewEpoch !== this._viewEpoch) || (this._lastLinkPosEpoch !== this._posEpoch) || (this._lastLinkTriDataEpoch !== this._triDataEpoch) || (this._lastLinkProspectiveParentId !== this._prospectiveParentId);
+              const __anchorChanged = (this._lastLinkAnchorId !== anchorId) || (this._lastLinkViewEpoch !== this._viewEpoch) || (this._lastLinkPosEpoch !== this._posEpoch) || (this._lastLinkTriDataEpoch !== this._triDataEpoch) || (this._lastLinkProspectiveParentId !== this._prospectiveParentId) || (this._lastLinkDragEpoch !== this._dragEpoch);
               if (__anchorChanged) {
                 this._linkEndpointsDeps = new Float32Array(0);
                 this._linkEndpointsRdeps = new Float32Array(0);
@@ -9100,6 +9561,7 @@ try {
                 this._lastLinkAnchorId = anchorId;
                 this._lastLinkViewEpoch = this._viewEpoch;
                 this._lastLinkPosEpoch = this._posEpoch;
+                this._lastLinkDragEpoch = this._dragEpoch;
                 this._lastLinkTriDataEpoch = this._triDataEpoch;
                 this._lastLinkProspectiveParentId = this._prospectiveParentId;
               }
@@ -9130,7 +9592,11 @@ try {
           const posChanged    = (this._lastLinkPosEpoch !== this._posEpoch);
           const prosChanged   = (this._lastLinkProspectiveParentId !== this._prospectiveParentId);
           const triChanged    = (this._lastLinkTriDataEpoch !== this._triDataEpoch);
-          const needsRebuild = anchorChanged || viewChanged || posChanged || prosChanged || triChanged;
+          // A drag deliberately does not bump _posEpoch, but it DOES rewrite the anchor's
+          // posSize each pointermove, so the line endpoints hanging off the dragged note are
+          // stale without this. (The moving dependents' ends are shifted on the GPU.)
+          const dragChanged   = (this._lastLinkDragEpoch !== this._dragEpoch);
+          const needsRebuild = anchorChanged || viewChanged || posChanged || prosChanged || triChanged || dragChanged;
 
           if (selC && needsRebuild) {
             const buildEndpoints = (indices) => {
@@ -9152,8 +9618,6 @@ try {
 
             // Prefer live sets for the anchor (dragged or selected) using moduleRef; fallback to cached sets
             // Extend endpoints to cover measure triangles and BaseNote in addition to notes.
-            let depsArr = null;
-            let rdepsArr = null;
             try {
               const mref = this._moduleRef;
               const movingSet = this._dragMovingIds || null;
@@ -9222,7 +9686,7 @@ try {
                 } else {
                   const baseFreq = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
                   const xCenterWorld = -30.0;
-                  const yCenterWorld = this._frequencyToY(baseFreq) + 10.0;
+                  const yCenterWorld = this._noteCenterY(baseFreq);
                   const bc = toLocalCss(xCenterWorld, yCenterWorld);
                   bx = bc.x; by = bc.y;
                 }
@@ -9235,8 +9699,8 @@ try {
 
               // 1) Dependencies (property-colored):
               // Build separate endpoint lists for each property type (what this note's expressions reference)
-              const depsListByProp = { frequency: [], startTime: [], duration: [] };
-              const depsFlagsByProp = { frequency: [], startTime: [], duration: [] };
+              const depsListByProp = { frequency: this._linkWriter('dl:f'), startTime: this._linkWriter('dl:s'), duration: this._linkWriter('dl:d') };
+              const depsFlagsByProp = { frequency: this._linkWriter('df:f'), startTime: this._linkWriter('df:s'), duration: this._linkWriter('df:d') };
 
               // Helper to check if an ID is a measure note (used by both parent chains and children trees)
               const isMeasureNoteId = (id) => {
@@ -9256,7 +9720,7 @@ try {
                   }
                   const baseFreq = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
                   const xCenterWorld = -30.0;
-                  const yCenterWorld = this._frequencyToY(baseFreq) + 10.0;
+                  const yCenterWorld = this._noteCenterY(baseFreq);
                   return toLocalCss(xCenterWorld, yCenterWorld);
                 }
                 if (isMeasureNoteId(numId)) {
@@ -9350,15 +9814,6 @@ try {
                   }
                 }
 
-                // Build combined depsArr for legacy code paths
-                const depsList = [];
-                const depsFlags = [];
-                for (const prop of ['frequency', 'startTime', 'duration']) {
-                  depsList.push(...depsListByProp[prop]);
-                  depsFlags.push(...depsFlagsByProp[prop]);
-                }
-                depsArr = depsList.length ? new Float32Array(depsList) : null;
-                var depsFlagsArr = depsFlags.length ? new Float32Array(depsFlags) : null;
               } else {
                 // Fallback: use old logic, put everything in startTime
                 const buildFromStartString = () => {
@@ -9419,8 +9874,8 @@ try {
                   return out;
                 };
 
-                const depsList = [];
-                const depsFlags = [];
+                const depsList = this._linkWriter('dlfb');
+                const depsFlags = this._linkWriter('dffb');
                 const liveParsed = buildFromStartString();
 
                 if (liveParsed.parsed) {
@@ -9462,30 +9917,37 @@ try {
                 // Put in startTime for fallback
                 depsListByProp.startTime = depsList;
                 depsFlagsByProp.startTime = depsFlags;
-                depsArr = depsList.length ? new Float32Array(depsList) : null;
-                var depsFlagsArr = depsFlags.length ? new Float32Array(depsFlags) : null;
               }
 
               // Store property-colored deps arrays
               var depsArrByProp = {};
               var depsFlagsArrByProp = {};
               for (const prop of ['frequency', 'startTime', 'duration']) {
-                depsArrByProp[prop] = depsListByProp[prop].length ? new Float32Array(depsListByProp[prop]) : null;
-                depsFlagsArrByProp[prop] = depsFlagsByProp[prop].length ? new Float32Array(depsFlagsByProp[prop]) : null;
+                depsArrByProp[prop] = depsListByProp[prop].view();
+                depsFlagsArrByProp[prop] = depsFlagsByProp[prop].view();
               }
 
               // 2) Dependents (property-colored):
               // Build separate endpoint lists for each property type
-              const rdepsListByProp = { frequency: [], startTime: [], duration: [] };
-              const rdepsFlagsByProp = { frequency: [], startTime: [], duration: [] };
-
-              // Also build a combined list for legacy fallback
-              const rdepsList = [];
-              const rdepsFlags = [];
+              const rdepsListByProp = { frequency: this._linkWriter('rl:f'), startTime: this._linkWriter('rl:s'), duration: this._linkWriter('rl:d') };
+              const rdepsFlagsByProp = { frequency: this._linkWriter('rf:f'), startTime: this._linkWriter('rf:s'), duration: this._linkWriter('rf:d') };
 
               if (mref && typeof mref.getChildrenTreeByAllProperties === 'function') {
-                // Use batched tree traversal (single BFS instead of 3 separate calls)
-                const allTrees = mref.getChildrenTreeByAllProperties(Number(anchorId));
+                // Use batched tree traversal (single BFS instead of 3 separate calls).
+                // Cached: this is a pure function of the anchor and the module's dependency
+                // STRUCTURE, and a drag changes neither — it only moves notes. Re-running the
+                // BFS on every pointermove rebuilt an edge object per dependent per property
+                // (tens of thousands of objects per frame with a 5000-dependent hub), which is
+                // what kept triggering GC mid-drag. Both epochs in the key are bumped by sync(),
+                // so any real change to the module still invalidates it.
+                const treeKey = Number(anchorId) + '|' + (this._posEpoch || 0) + '|' + (this._sceneEpoch || 0);
+                let allTrees;
+                if (this._linkTreeCache && this._linkTreeCache.key === treeKey) {
+                  allTrees = this._linkTreeCache.trees;
+                } else {
+                  allTrees = mref.getChildrenTreeByAllProperties(Number(anchorId));
+                  this._linkTreeCache = { key: treeKey, trees: allTrees };
+                }
 
                 for (const prop of ['frequency', 'startTime', 'duration']) {
                   const edges = allTrees.edgesByProperty[prop];
@@ -9612,44 +10074,32 @@ try {
               var rdepsArrByProp = {};
               var rdepsFlagsArrByProp = {};
               for (const prop of ['frequency', 'startTime', 'duration']) {
-                rdepsArrByProp[prop] = rdepsListByProp[prop].length ? new Float32Array(rdepsListByProp[prop]) : null;
-                rdepsFlagsArrByProp[prop] = rdepsFlagsByProp[prop].length ? new Float32Array(rdepsFlagsByProp[prop]) : null;
+                rdepsArrByProp[prop] = rdepsListByProp[prop].view();
+                rdepsFlagsArrByProp[prop] = rdepsFlagsByProp[prop].view();
               }
 
-              // Legacy combined array (for compatibility)
-              for (const prop of ['frequency', 'startTime', 'duration']) {
-                rdepsList.push(...rdepsListByProp[prop]);
-                rdepsFlags.push(...rdepsFlagsByProp[prop]);
-              }
-              rdepsArr = rdepsList.length ? new Float32Array(rdepsList) : null;
-              var rdepsFlagsArr = rdepsFlags.length ? new Float32Array(rdepsFlags) : null;
             } catch {}
 
-            // Upload computed endpoints to GPU (only runs when needsRebuild was true)
-            // Store endpoint arrays (CSS px) for current anchor
-            this._linkEndpointsDeps  = depsArr  || new Float32Array(0);
-            this._linkEndpointsRdeps = rdepsArr || new Float32Array(0);
-            this._linkDepsCount  = Math.max(0, Math.floor(this._linkEndpointsDeps.length  / 4));
-            this._linkRdepsCount = Math.max(0, Math.floor(this._linkEndpointsRdeps.length / 4));
+            // Counts, derived from the per-property arrays that are actually drawn.
+            // The combined deps/rdeps arrays that used to live here were never rendered from —
+            // only the per-property buffers are (see the draw loops below). Building them meant
+            // concatenating boxed JS arrays with push(...spread) and minting four more
+            // Float32Arrays, every pointermove; at 5000 dependents that was hundreds of KB of
+            // garbage per frame and the main source of the GC hitches when dragging a hub note.
+            // Only these two counts were ever read from them, and only as a "is there anything
+            // to draw" gate, so they are summed from the real buffers instead.
+            const countOf = (byProp) => {
+              let n = 0;
+              for (const prop of ['frequency', 'startTime', 'duration']) {
+                const a = byProp && byProp[prop];
+                if (a && a.length) n += Math.floor(a.length / 4);
+              }
+              return n;
+            };
+            this._linkDepsCount  = countOf(depsArrByProp);
+            this._linkRdepsCount = countOf(rdepsArrByProp);
 
-            // Upload to dedicated buffers
             gl.bindVertexArray(this.linkLineVAO);
-            if (this._linkDepsCount > 0) {
-              gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferDeps);
-              gl.bufferData(gl.ARRAY_BUFFER, this._linkEndpointsDeps, gl.DYNAMIC_DRAW);
-              if (depsFlagsArr && this.linkLineFlagsBufferDeps) {
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferDeps);
-                gl.bufferData(gl.ARRAY_BUFFER, depsFlagsArr, gl.DYNAMIC_DRAW);
-              }
-            }
-            if (this._linkRdepsCount > 0) {
-              gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineEndpointsBufferRdeps);
-              gl.bufferData(gl.ARRAY_BUFFER, this._linkEndpointsRdeps, gl.DYNAMIC_DRAW);
-              if (rdepsFlagsArr && this.linkLineFlagsBufferRdeps) {
-                gl.bindBuffer(gl.ARRAY_BUFFER, this.linkLineFlagsBufferRdeps);
-                gl.bufferData(gl.ARRAY_BUFFER, rdepsFlagsArr, gl.DYNAMIC_DRAW);
-              }
-            }
 
             // Upload property-colored rdeps buffers
             for (const prop of ['frequency', 'startTime', 'duration']) {
@@ -9695,6 +10145,7 @@ try {
             this._lastLinkAnchorId = anchorId;
             this._lastLinkViewEpoch = this._viewEpoch;
             this._lastLinkPosEpoch = this._posEpoch;
+            this._lastLinkDragEpoch = this._dragEpoch;
             this._lastLinkProspectiveParentId = this._prospectiveParentId;
             this._lastLinkTriDataEpoch = this._triDataEpoch;
           } // end if (selC && needsRebuild)
@@ -10086,6 +10537,16 @@ try {
     // Hook into render lifecycle: run our pass after the existing overlay stack
     const _prevRender = proto._render;
     proto._render = function () {
+      // Nothing has changed since the last frame, so keep the frame already on screen.
+      // The innermost _render() has always early-returned on this flag, but the passes
+      // layered on top of it (note overlays, measure bars, dependency lines) were called
+      // unconditionally by the wrappers — so an idle frame still paid the full per-note
+      // cost of every one of them. Measured before this gate: 46 ms/frame at 5k notes and
+      // 1034 ms/frame at 100k, with the canvas showing an unchanged picture the whole time.
+      // Every mutation that can affect the image (sync, hover, selection, playhead, camera,
+      // drag, theme, config) sets needsRedraw, and no render pass sets it, so this cannot
+      // drop a frame that matters or spin.
+      if (!this.needsRedraw) return;
       _prevRender.call(this);
       try { this._renderDependencyLinesAndDragOverlay(); } catch {}
     };

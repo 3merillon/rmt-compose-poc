@@ -1470,16 +1470,23 @@ export class Workspace {
               const dxWorld2 = (startSec - this._interaction.origStartSec) * (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200)) * (this.renderer.currentXScaleFactor || 1.0);
               const dwWorld = (durationSec - this._interaction.origDurationSec) * (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200)) * (this.renderer.currentXScaleFactor || 1.0);
               
-              // PERFORMANCE: Use cached dependents instead of building from previewMap
-              const affectedIds = new Set([noteId]);
-              const cachedDeps = this._interaction.cachedDependents;
-              if (cachedDeps && cachedDeps.size > 0) {
-                for (const id of cachedDeps) {
-                  affectedIds.add(Number(id));
+              // PERFORMANCE: Use cached dependents instead of building from previewMap.
+              // Build the affected-id set ONCE per gesture, not once per pointermove: the set
+              // cannot change while dragging, and re-creating a Set of thousands of dependents
+              // on every move was a major source of GC churn (and defeats the renderer's
+              // identity fast-path, which then had to re-derive its index list and re-sort it).
+              let affectedIds = this._interaction.cachedAffectedIds;
+              if (!affectedIds) {
+                affectedIds = new Set([noteId]);
+                const cachedDeps = this._interaction.cachedDependents;
+                if (cachedDeps && cachedDeps.size > 0) {
+                  for (const id of cachedDeps) {
+                    affectedIds.add(Number(id));
+                  }
                 }
+                this._interaction.cachedAffectedIds = affectedIds;
               }
-              
-              
+
               this.renderer.setDragOffsetPreview({
                 dxWorld: dxWorld2,
                 dwWorld,
@@ -1557,12 +1564,17 @@ export class Workspace {
               // GPU path for measure drags:
               // - Shift downstream measures and ALL dependent normal notes via shader drag flags (no per-frame CPU rebuilds)
               // - Triangles/bars pick up movement via Renderer._dragMovingIds; notes via instanced flags
-              let moveIds = new Set();
+              let moveIds;
 
-              // Prefer per-interaction cached closure if available
+              // Prefer per-interaction cached closure if available.
+              // Reuse the cached Set BY REFERENCE rather than copying it: this runs on every
+              // pointermove, and copying a Set of thousands of dependents each time was pure
+              // garbage. Handing the same object back also lets the renderer take its O(1)
+              // identity fast-path instead of re-deriving and re-sorting the index list.
               if (this._interaction && this._interaction.cachedMeasureMovingIds instanceof Set && this._interaction.cachedMeasureMovingIds.size) {
-                try { for (const id of this._interaction.cachedMeasureMovingIds) moveIds.add(Number(id)); } catch {}
+                moveIds = this._interaction.cachedMeasureMovingIds;
               } else {
+                moveIds = new Set();
                 // OPTIMIZED: Use DependencyGraph.getAllStartTimeDependents() for O(V+E) instead of O(n³) regex scanning
                 try {
                   const mod = this._module;
@@ -1599,8 +1611,9 @@ export class Workspace {
                     }
                   }
 
-                  // Persist for rest of the drag to avoid recompute
-                  if (this._interaction) this._interaction.cachedMeasureMovingIds = new Set(moveIds);
+                  // Persist for rest of the drag to avoid recompute. Store the very Set we just
+                  // built (no copy) so subsequent moves hand the same object straight back.
+                  if (this._interaction) this._interaction.cachedMeasureMovingIds = moveIds;
                 } catch {}
               }
 
@@ -1620,12 +1633,20 @@ export class Workspace {
                     (this._interaction.lastClient?.y || 0) - (this._interaction.startClient?.y || 0)
                   );
                   if (movedPx > 2) {
+                    // Materialise the id array once per gesture. Array.from() over thousands of
+                    // dependents on every pointermove was both garbage and enough to defeat the
+                    // renderer's identity check, forcing it to rebuild its moving-id Set too.
+                    let movingIdsArr = this._interaction.cachedMeasureMovingIdsArr;
+                    if (!movingIdsArr || movingIdsArr.length !== moveIds.size) {
+                      movingIdsArr = Array.from(moveIds);
+                      this._interaction.cachedMeasureMovingIdsArr = movingIdsArr;
+                    }
                     this.renderer.setDragOverlay({
                       noteId,
                       type: 'move',
                       dxSec: startDelta,
                       ddurSec: 0,
-                      movingIds: Array.from(moveIds),
+                      movingIds: movingIdsArr,
                       origStartSec: this._interaction.origStartSec,
                       origDurationSec: this._interaction.origDurationSec
                     });

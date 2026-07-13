@@ -1118,9 +1118,13 @@ document.addEventListener('DOMContentLoaded', async function() {
                     const applyArrowsEnabled = () => {
                         try {
                             const enabled = settingsStore.get('arrows.enabled') !== false;
-                            if (glWorkspace && glWorkspace.renderer) {
-                                glWorkspace.renderer.drawNoteArrows = enabled;
-                                glWorkspace.renderer.needsRedraw = true;
+                            const r = glWorkspace && glWorkspace.renderer;
+                            if (r) {
+                                // Setter, not a bare assignment: hiding the arrows frees their
+                                // column and the id/fraction reflow into it, so the cached label
+                                // layout has to be invalidated, not merely redrawn.
+                                if (typeof r.setDrawNoteArrows === 'function') r.setDrawNoteArrows(enabled);
+                                else { r.drawNoteArrows = enabled; r.needsRedraw = true; }
                             }
                         } catch {}
                     };
@@ -3909,12 +3913,16 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 } else {
                 }
             } else {
-                // When tracking is disabled, release X-lock for workspace camera
+                // When tracking is disabled, release X-lock for workspace camera.
+                // Only on the actual transition: this runs every rAF, and pushing a camera
+                // change when nothing moved marked the whole scene dirty 60x a second.
                 if (glWorkspace && glWorkspace.camera) {
                     try {
-                        glWorkspace.camera.lockX = false;
-                        if (typeof glWorkspace.camera.onChange === 'function') {
-                            glWorkspace.camera.onChange();
+                        if (glWorkspace.camera.lockX) {
+                            glWorkspace.camera.lockX = false;
+                            if (typeof glWorkspace.camera.onChange === 'function') {
+                                glWorkspace.camera.onChange();
+                            }
                         }
                     } catch {}
                 }

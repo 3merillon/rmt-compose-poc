@@ -119,11 +119,72 @@ function chordsDense(chordCount) {
   return { baseNote: { ...BASE }, notes };
 }
 
+// Render-scaling shape: N notes laid out as `voices` horizontal voices, each a
+// sequence of independent chains of at most `perChain` notes anchored to base.
+// Dependency depth stays bounded by perChain no matter how large N gets, so
+// evaluation stays tractable and the measurement isolates *render* cost.
+// Notes spread across time and frequency, which is what viewport culling needs.
+function voicesShape(n, perChain = 200, voices = 8) {
+  const notes = [];
+  const chainsTotal = Math.ceil(n / perChain);
+  const chainsPerVoice = Math.ceil(chainsTotal / voices);
+  let id = 0;
+  for (let c = 0; c < chainsTotal && id < n; c++) {
+    const voice = Math.floor(c / chainsPerVoice);
+    const slot = c % chainsPerVoice;
+    // Each chain occupies its own time slot; chains advance by beat/4 per note.
+    const startBeats = slot * Math.ceil(perChain / 4 + 2);
+    const anchorId = id + 1;
+    for (let i = 0; i < perChain && id < n; i++, id++) {
+      const myId = id + 1;
+      notes.push({
+        id: myId,
+        startTime: i === 0
+          ? `base.t + beat(base) * ${startBeats}`
+          : `[${myId - 1}].t + beat(base) / 4`,
+        duration: 'beat(base) / 2',
+        frequency: i === 0
+          ? `${JI[voice % JI.length]} * ${1 << (voice % 4)} * base.f`
+          : `${CYCLE[(i - 1) % CYCLE.length]} * [${myId - 1}].f`,
+        color: color(myId)
+      });
+    }
+    void anchorId;
+  }
+  return { baseNote: { ...BASE }, notes };
+}
+
+// Worst case for DRAGGING: one anchor note that thousands of notes hang off directly, so a
+// single drag moves the whole dependent set every pointermove. This is the shape that makes
+// dragging a measure bar with 5000 dependents hitch. Both startTime AND frequency reference
+// the anchor, so the anchor's dependents really do have to follow it.
+function hub(n) {
+  const notes = [{
+    id: 1, startTime: 'base.t', duration: 'beat(base)', frequency: 'base.f', color: color(1)
+  }];
+  for (let k = 2; k <= n; k++) {
+    const slot = k - 2;
+    notes.push({
+      id: k,
+      startTime: `[1].t + beat(base) * ${(slot % 400) + 1} / 4`,
+      duration: 'beat(base) / 2',
+      frequency: `${JI[slot % JI.length]} * ${1 << (Math.floor(slot / 400) % 4)} * [1].f`,
+      color: color(k)
+    });
+  }
+  return { baseNote: { ...BASE }, notes };
+}
+
 const targets = {
   'chain-1000': chain(1000),
+  'hub-5000': hub(5000),
   'fan-1000': fan(1000),
   'lattice-1000': lattice(10, 100),
-  'chords-dense': chordsDense(200)
+  'chords-dense': chordsDense(200),
+  // Render-scaling ladder (bounded dep depth; see voicesShape).
+  'voices-5000': voicesShape(5000),
+  'voices-20000': voicesShape(20000),
+  'voices-100000': voicesShape(100000)
 };
 
 mkdirSync(outDir, { recursive: true });

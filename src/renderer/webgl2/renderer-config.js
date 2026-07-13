@@ -21,8 +21,12 @@ export const defaultRendererConfig = {
   // Note body visuals (world-space height and vertical alignment, rounded rect in CSS px at zoom=1)
   note: {
     heightWU: 22,
-    // Shift applied to top-left so the visual center matches legacy 20px rows (+1 up)
-    centerShiftWU: -1,
+    // World-Y offset from a frequency to the line it is drawn on (octave guides,
+    // BaseNote circle, dependency-line endpoints). A note's vertical CENTRE sits on
+    // this line and its top-left is derived as (anchor - heightWU/2), so changing
+    // heightWU makes notes thinner/thicker about their frequency instead of
+    // drifting off it. Changing this shifts notes AND their guides together.
+    centerAnchorWU: 10,
     roundedCornerPxAtZoom1: 6,
     borderPxAtZoom1: 1
   },

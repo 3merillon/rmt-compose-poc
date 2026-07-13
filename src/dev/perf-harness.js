@@ -186,6 +186,89 @@ function measureRedraw(iterations = 30, selectedNoteId = null) {
   return result;
 }
 
+// Cost of an IDLE frame — the rAF tick when nothing changed (needsRedraw=false).
+// The base _render() early-returns on !needsRedraw, but the wrapper passes layered
+// on top of it (overlays, measure bars, dependency lines) are not behind that gate,
+// so an idle frame is not necessarily free. This measures what it actually costs.
+function measureIdleFrame(iterations = 60) {
+  const mod = requireModule();
+  const r = requireRenderer();
+  r.needsRedraw = true; r._render(); // settle
+  const samples = [];
+  for (let i = 0; i < iterations; i++) {
+    r.needsRedraw = false;
+    const t0 = performance.now();
+    r._render();
+    samples.push(performance.now() - t0);
+  }
+  const result = stats(samples);
+  console.table({ [`IDLE frame (${noteCount(mod)} notes, needsRedraw=false)`]: result });
+  return result;
+}
+
+// Per-pass breakdown of a full redraw. Wraps each render pass on the renderer
+// instance, drives `iterations` full frames, and reports mean ms per pass so we
+// can see which pass owns the frame instead of guessing.
+const PASSES = [
+  '_renderNoteOverlays',
+  '_renderMeasureBars',
+  '_renderBaseFractionIfMissing',
+  '_flushGlyphRunsAtlas',
+  '_renderDependencyLinesAndDragOverlay',
+  '_renderOctaveGuides'
+];
+
+function profileFrame(iterations = 30, selectedNoteId = null) {
+  const mod = requireModule();
+  const r = requireRenderer();
+  const totals = Object.create(null);
+  const originals = Object.create(null);
+
+  for (const name of PASSES) {
+    if (typeof r[name] !== 'function') continue;
+    const orig = r[name].bind(r);
+    originals[name] = r[name];
+    totals[name] = 0;
+    r[name] = function (...args) {
+      const t0 = performance.now();
+      try { return orig(...args); } finally { totals[name] += performance.now() - t0; }
+    };
+  }
+
+  let total = 0;
+  try {
+    r.sync({
+      evaluatedNotes: getEvaluatedNotes(), module: mod,
+      xScaleFactor: r.currentXScaleFactor || 1.0,
+      yScaleFactor: r.currentYScaleFactor || 1.0,
+      selectedNoteId
+    });
+    r.needsRedraw = true; r._render(); // warm
+    for (const k of Object.keys(totals)) totals[k] = 0;
+
+    for (let i = 0; i < iterations; i++) {
+      r.needsRedraw = true;
+      const t0 = performance.now();
+      r._render();
+      total += performance.now() - t0;
+    }
+  } finally {
+    for (const name of Object.keys(originals)) r[name] = originals[name];
+  }
+
+  const rows = {};
+  let accounted = 0;
+  for (const [name, ms] of Object.entries(totals)) {
+    accounted += ms;
+    rows[name] = { 'ms/frame': +(ms / iterations).toFixed(3) };
+  }
+  rows['(base pass + rest)'] = { 'ms/frame': +((total - accounted) / iterations).toFixed(3) };
+  rows['TOTAL frame'] = { 'ms/frame': +(total / iterations).toFixed(3) };
+  console.table(rows);
+  console.log(`[perf] ${noteCount(mod)} notes — budget is 16.6 ms/frame for 60fps`);
+  return rows;
+}
+
 function report() {
   const mod = requireModule();
   const hub = pickHubNoteId(mod);
@@ -210,6 +293,10 @@ function info() {
 // Debug escape hatch for driving/diagnosing from automation.
 function getModuleRef() {
   return getModule();
+}
+
+function getEvaluatedNotesRef() {
+  return getEvaluatedNotes();
 }
 
 // Dev-only escape hatch to drive eventBus flows (octaveChange, undo/redo) from automation.
@@ -240,5 +327,5 @@ function pickFreqNoteId() {
   return ids[0] ?? null;
 }
 
-window.__rmtPerf = { loadStress, restoreDefault, measureEval, measureCommit, measureSync, measureRedraw, pickHubNoteId: () => pickHubNoteId(requireModule()), report, info, getModuleRef, emit, noteFreq, pickFreqNoteId };
-console.log('[perf] harness ready: window.__rmtPerf — loadStress(name) | restoreDefault() | measureEval() | measureCommit() | measureSync(n,selId) | measureRedraw(n,selId) | report()');
+window.__rmtPerf = { loadStress, restoreDefault, measureEval, measureCommit, measureSync, measureRedraw, measureIdleFrame, profileFrame, pickHubNoteId: () => pickHubNoteId(requireModule()), report, info, getModuleRef, getEvaluatedNotesRef, emit, noteFreq, pickFreqNoteId };
+console.log('[perf] harness ready: window.__rmtPerf — loadStress(name) | restoreDefault() | measureEval() | measureCommit() | measureSync(n,selId) | measureRedraw(n,selId) | measureIdleFrame(n) | profileFrame(n,selId) | report()');
