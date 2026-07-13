@@ -3,6 +3,7 @@ import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
 import { renderModuleIcon } from './icon-factory.js';
 import { settingsStore } from '../settings/settings-store.js';
+import { pointerOf } from '../utils/draggable-widget.js';
 
 const menuAPI = (function() {
     const domCache = {
@@ -733,8 +734,10 @@ const menuAPI = (function() {
     }
 
     function initResize(e) {
+        const y = pointerOf(e).y;
+        if (!Number.isFinite(y)) return;
         isDragging = true;
-        startY = e.clientY || e.touches[0].clientY;
+        startY = y;
         startHeight = parseInt(document.defaultView.getComputedStyle(domCache.secondTopBar).height, 10);
         // Lock the target fit height at drag start so we don't chase layout while dragging
         targetFitHeight = Math.min(maxMenuBarHeight, getContentFitHeight());
@@ -743,7 +746,8 @@ const menuAPI = (function() {
 
     function resize(e) {
         if (!isDragging) return;
-        const clientY = e.clientY || e.touches[0].clientY;
+        const clientY = pointerOf(e).y;
+        if (!Number.isFinite(clientY)) return;
         const deltaY = clientY - startY;
 
         // Clamp to the precomputed fit height so growth stops exactly when all content is visible (with 1px underflow).

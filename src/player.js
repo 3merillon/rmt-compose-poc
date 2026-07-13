@@ -12,6 +12,7 @@ import { isDSLSyntax } from './dsl/index.js';
 import { escapeHtml } from './utils/html-escape.js';
 import { settingsStore } from './settings/settings-store.js';
 import { themeManager } from './theme/theme-manager.js';
+import { showGroupWidget, hideGroupWidget } from './modals/group-widget.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -38,6 +39,14 @@ document.addEventListener('DOMContentLoaded', async function() {
     let xScaleFactor = 1.0, yScaleFactor = 1.0;
     
     let glWorkspace = null;
+
+    // Multi-note selection (marquee / shift-click). Holds note ids, never the base
+    // note (0) — it is not marquee-selectable and must never be group-deletable.
+    // Declared HERE, above the GL bootstrap, on purpose: the bootstrap's sync() call
+    // reads selection state, and a `let` declared further down would be in its TDZ
+    // (which the bootstrap's try/catch would swallow, leaving the highlight dead).
+    const multiSelection = new Set();
+
     // Suppress playhead recentering during X-scale adjustments to avoid 1-frame pop
     let __rmtScalingXActive = false;
     // While dragging/resizing, feed temp overrides each frame so animation loop does not overwrite preview
@@ -738,10 +747,17 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
   
-    function deleteNoteKeepDependencies(noteId) {
+    // Liberate a note's dependents — updateDependentRawExpressions() INLINES this note's
+    // own expressions into theirs, so they keep their evaluated positions — and then
+    // remove the note. Because liberation is substitution, it composes: deleting a whole
+    // group one note at a time gives the same result in any order.
+    //
+    // Deliberately no evaluate/render/snapshot: the caller owns those, so a group delete
+    // batches them and lands as ONE undo entry.
+    function liberateAndRemoveNoteGL(noteId) {
         const selectedNote = myModule.getNoteById(noteId);
-        if (!selectedNote) return;
-        
+        if (!selectedNote) return false;
+
         let selectedRaw = {};
         ["startTime", "duration", "frequency"].forEach(varName => {
             if (selectedNote.variables[varName + "String"]) {
@@ -778,13 +794,18 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (noteId !== 0) {
             delete myModule.notes[noteId];
             delete myModule._evaluationCache[noteId];
-            
+
             const dependents = myModule.getDependentNotes(noteId);
             dependents.forEach(depId => {
                 myModule.markNoteDirty(depId);
             });
         }
-        
+        return true;
+    }
+
+    function deleteNoteKeepDependencies(noteId) {
+        if (!liberateAndRemoveNoteGL(noteId)) return;
+
         evaluatedNotes = myModule.evaluateModule();
         setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
@@ -792,6 +813,36 @@ document.addEventListener('DOMContentLoaded', async function() {
         clearSelection();
         invalidateModuleEndTimeCache();
         try { captureSnapshot(`Delete Note ${noteId} (keep deps)`); } catch {}
+    }
+
+    // GROUP delete. Policy: dependents OUTSIDE the group are LIBERATED, not deleted —
+    // each deleted note's expressions are inlined into whatever still references them,
+    // so those notes keep their positions. Destructive only to what was selected.
+    // The base note can never be a member of the selection, so it can never be deleted.
+    // ONE undo entry.
+    function deleteMultiSelection() {
+        const ids = [...multiSelection]
+            .map(Number)
+            .filter((id) => Number.isFinite(id) && id !== 0 && myModule.getNoteById(id));
+        if (!ids.length) return;
+
+        try { eventBus.emit('player:requestPause'); } catch {}
+
+        for (const id of ids) {
+            try {
+                liberateAndRemoveNoteGL(id);
+            } catch (e) {
+                try { console.warn('group delete failed for note', id, e); } catch {}
+            }
+        }
+
+        evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
+        updateVisualNotes(evaluatedNotes);
+        createMeasureBars();
+        clearSelection();          // drops both the single selection and the group
+        invalidateModuleEndTimeCache();
+        try { captureSnapshot(`Delete ${ids.length} Notes`); } catch {}
     }
 
     function checkAndUpdateDependentNotes(noteId, oldDuration, newDuration) {
@@ -1261,6 +1312,29 @@ document.addEventListener('DOMContentLoaded', async function() {
                           return;
                         }
 
+                        // Shift-click refines the group: toggle the top-most note/measure
+                        // under the pointer in or out of the selection. This MUST run before
+                        // the stack-cycling block below — cycling would fight the toggle,
+                        // advancing the stack index on every shift-click.
+                        if (event.shiftKey && !isLocked) {
+                          try {
+                            // Notes only — shift-clicking a measure bar or the base note
+                            // does nothing (they are not group-selectable).
+                            const hit = (glWorkspace && typeof glWorkspace.pickAt === 'function')
+                              ? glWorkspace.pickAt(event.clientX, event.clientY, 3)
+                              : null;
+                            if (hit && hit.type === 'note' && hit.id != null) {
+                              toggleMultiSelectId(Number(hit.id));
+                            }
+                            // Shift on empty background is a no-op: it must NOT clear the
+                            // group (the user is mid-refinement, and a stray miss would
+                            // throw the whole selection away).
+                          } catch {}
+                          event.stopPropagation();
+                          event.preventDefault();
+                          return;
+                        }
+
                         // GL stack pick: gather all hits top-most first and cycle on repeated clicks (note/measure/base)
                         let targetEntry = null;
                         try {
@@ -1306,6 +1380,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                         if (targetEntry) {
                           const t = targetEntry.type;
                           const tid = Number(targetEntry.id);
+
+                          // A plain (unmodified) click deselects everything, then selects the
+                          // one thing under the pointer — including when a group is live.
+                          try { clearMultiSelection(); } catch {}
 
                           if (t === 'note') {
                             const note = myModule.getNoteById(tid);
@@ -2153,6 +2231,8 @@ if (canvasEl) {
     function clearSelection() {
         modals.clearSelection();
         currentSelectedNote = null;
+        // A plain click clears the group too — "clear" means clear.
+        try { clearMultiSelection(); } catch {}
         // Update WebGL renderer selection ordering
         try { syncRendererSelection(); } catch {}
     }
@@ -3999,6 +4079,166 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
     }
 
+    // ── Multi-note selection ────────────────────────────────────────────────────
+
+    // Open the note widget on a note, GL-only (there is no DOM note element to anchor
+    // to, so we fall back to document.body — showNoteVariables tolerates that).
+    function showNoteVariablesForNote(note) {
+        const anchor = document.querySelector(
+            `.note-content[data-note-id="${CSS.escape(String(note.id))}"], ` +
+            `.measure-bar-triangle[data-note-id="${CSS.escape(String(note.id))}"]`
+        ) || document.body;
+        if (__isMeasureNoteGL(note)) showNoteVariables(note, anchor, note.id);
+        else showNoteVariables(note, anchor);
+    }
+
+    // The single selection and the group are ONE selection with two presentations, not
+    // two independent things. This is the only place that decides which you get:
+    //
+    //   >= 2 notes -> group widget; the note widget is dismissed, because with a group
+    //                 live there is no "current" note for it to describe.
+    //      1 note  -> NOT a group. Normalized back to an ordinary single selection
+    //                 (orange ring + note widget), no matter how you got there — a
+    //                 lone shift-click or a marquee that happened to catch one note.
+    //      0 notes -> neither.
+    //
+    // Every mutation of `multiSelection` ends here.
+    function syncMultiSelection() {
+        // Normalize FIRST, so a one-note group never reaches the renderer as a group
+        // (it would draw a white group ring on top of the orange selection ring).
+        if (multiSelection.size === 1) {
+            const only = myModule.getNoteById([...multiSelection][0]);
+            multiSelection.clear();
+            try { glWorkspace?.renderer?.setMultiSelection?.(multiSelection); } catch {}
+            try { hideGroupWidget(); } catch {}
+            if (only) {
+                currentSelectedNote = only;
+                try { syncRendererSelection(); } catch {}
+                try { showNoteVariablesForNote(only); } catch {}
+                return;
+            }
+        }
+
+        try { glWorkspace?.renderer?.setMultiSelection?.(multiSelection); } catch {}
+        try { glWorkspace?.requestRender?.(); } catch {}
+
+        if (multiSelection.size >= 2) {
+            // modals.clearSelection() (not our own clearSelection()) — we want the note
+            // widget gone without recursing back into the group state we are setting up.
+            try { modals.clearSelection(); } catch {}
+            currentSelectedNote = null;
+            try { syncRendererSelection(); } catch {}
+            try {
+                showGroupWidget({
+                    count: multiSelection.size,
+                    onDeleteAll: () => deleteMultiSelection(),
+                    onClear: () => { clearSelection(); }
+                });
+            } catch {}
+        } else {
+            try { hideGroupWidget(); } catch {}
+        }
+    }
+
+    function clearMultiSelection() {
+        if (multiSelection.size === 0) return;
+        multiSelection.clear();
+        syncMultiSelection();
+    }
+
+    // Is this id eligible for the group? Notes only.
+    //
+    // The base note is excluded for the obvious reason (it must never be group-deletable).
+    // MEASURE BARS are excluded because a measure's startTime IS its link in the measure
+    // chain: a group move can't re-anchor it (that reflows the grid under the whole score)
+    // and can't leave it behind either (the group tears on drop). Supporting them halfway
+    // was worse than not supporting them, so they are out of multi-select entirely — they
+    // are still selectable, movable and deletable on their own, as before.
+    function isGroupSelectable(id) {
+        const n = Number(id);
+        if (!Number.isFinite(n) || n === 0) return false;
+        const note = myModule.getNoteById(n);
+        return !!note && !__isMeasureNoteGL(note);
+    }
+
+    // ids: iterable of note ids. additive => union with the existing set.
+    function setMultiSelectionIds(ids, additive = false) {
+        if (!additive) multiSelection.clear();
+        for (const raw of (ids || [])) {
+            if (isGroupSelectable(raw)) multiSelection.add(Number(raw));
+        }
+        syncMultiSelection();
+    }
+
+    function toggleMultiSelectId(id) {
+        const n = Number(id);
+        if (multiSelection.has(n)) {           // always allow removal
+            multiSelection.delete(n);
+            syncMultiSelection();
+            return;
+        }
+        if (!isGroupSelectable(n)) return;     // measures / base can never join
+
+        // Shift-clicking a note while ANOTHER note is already normally selected has to
+        // promote that note into the group first — otherwise "click one, shift-click a
+        // second" would end up with a group of one (the second), silently dropping the
+        // note the user started from.
+        if (multiSelection.size === 0 && currentSelectedNote
+            && Number(currentSelectedNote.id) !== n
+            && isGroupSelectable(currentSelectedNote.id)) {
+            multiSelection.add(Number(currentSelectedNote.id));
+        }
+
+        multiSelection.add(n);
+        syncMultiSelection();
+    }
+
+    // Walk a note's startTime ANCESTOR chain and report whether it touches `ids`.
+    //
+    // This is the heart of group move. A selected note whose chain reaches another
+    // selected note is a RIDER: that ancestor's move already displaces it by exactly
+    // the same delta, because every link is `[parent].t + offset` and we never touch
+    // the offsets. Applying the delta to a rider as well would DOUBLE-MOVE it.
+    //
+    // It must be the whole chain, not just the direct anchor. Counter-example:
+    // A is selected; X is NOT selected and is anchored to A; M is selected and
+    // anchored to X. M's direct anchor (X) is outside the selection, but X follows A,
+    // so M already rides. Testing only the direct anchor would move M twice.
+    function __startChainTouchesSetGL(note, ids) {
+        let cur = __parseParentFromStartTimeStringGL(note);
+        const seen = new Set();
+        let guard = 0;
+        while (cur && guard++ < 256) {
+            const cid = Number(cur.id);
+            if (ids.has(cid)) return true;
+            if (cid === 0 || seen.has(cid)) return false;     // reached base, or a cycle
+            seen.add(cid);
+            cur = __parseParentFromStartTimeStringGL(cur);
+        }
+        return false;
+    }
+
+    // Partition a selection for a group move:
+    //   MOVERS – no selected note anywhere in their startTime ancestor chain, so
+    //            nothing else displaces them. These get the delta applied.
+    //   RIDERS – anchored (transitively) to a selected note. Left completely
+    //            untouched; they inherit the delta for free.
+    // Notes OUTSIDE the selection are never touched either: they follow their anchors,
+    // exactly as they do for a single-note drag.
+    function classifyGroupMoveGL(ids) {
+        const movers = [], riders = [];
+        for (const raw of ids) {
+            const n = myModule.getNoteById(Number(raw));
+            if (!n || Number(n.id) === 0) continue;
+            // Backstop: measures cannot enter the selection (see isGroupSelectable), but
+            // if one ever did, re-anchoring it would reflow the measure grid.
+            if (__isMeasureNoteGL(n)) continue;
+            if (__startChainTouchesSetGL(n, ids)) riders.push(n);
+            else movers.push(n);
+        }
+        return { movers, riders };
+    }
+
     // Use shared AudioEngine nodes; legacy fallbacks removed
     const { audioContext, generalVolumeGainNode, compressor, instrumentManager } = audioEngine.nodes();
     
@@ -4119,6 +4359,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 suppressClear = !!(cont && cont.__rmtSuppressClickUntil && Math.sign(cont.__rmtSuppressClickUntil - nowTs) === 1);
             } catch {}
             if (!suppressClear &&
+                // A shift-click is a REFINEMENT of the group, never a "clear everything".
+                // Without this it wipes the selection here, and the click handler that
+                // follows then "toggles" into an empty set — leaving exactly the one note
+                // you shift-clicked. (Plain clicks survive this handler only by accident:
+                // it clears, and the click handler immediately re-selects.)
+                !event.shiftKey &&
                 !domCache.noteWidget.contains(event.target) &&
                 !event.target.closest('.note-rect') &&
                 !event.target.closest('#baseNoteCircle') &&
@@ -4128,6 +4374,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // the note selection out from under you (nor must opening it).
                 !event.target.closest('.rmt-set-panel') &&
                 !event.target.closest('#settingsGearBtn') &&
+                // Same for the group-actions widget: clicking its own buttons must
+                // not wipe the very selection those buttons act on.
+                !event.target.closest('#group-widget') &&
                 !event.target.closest('.octave-button')) {
                 clearSelection();
             }
@@ -4174,6 +4423,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 suppressClear = !!(cont && cont.__rmtSuppressClickUntil && Math.sign(cont.__rmtSuppressClickUntil - nowTs) === 1);
             } catch {}
             if (!suppressClear &&
+                // A shift-click is a REFINEMENT of the group, never a "clear everything".
+                // Without this it wipes the selection here, and the click handler that
+                // follows then "toggles" into an empty set — leaving exactly the one note
+                // you shift-clicked. (Plain clicks survive this handler only by accident:
+                // it clears, and the click handler immediately re-selects.)
+                !event.shiftKey &&
                 !domCache.noteWidget.contains(event.target) &&
                 !event.target.closest('.note-rect') &&
                 !event.target.closest('#baseNoteCircle') &&
@@ -4183,6 +4438,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // the note selection out from under you (nor must opening it).
                 !event.target.closest('.rmt-set-panel') &&
                 !event.target.closest('#settingsGearBtn') &&
+                // Same for the group-actions widget: clicking its own buttons must
+                // not wipe the very selection those buttons act on.
+                !event.target.closest('#group-widget') &&
                 !event.target.closest('.octave-button')) {
                 clearSelection();
             }
@@ -5027,14 +5285,17 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
       // GL Workspace: commit handlers for move/resize coming from webgl2/workspace.js
-      eventBus.on('workspace:noteMoveCommit', ({ noteId, newStartSec }) => {
-        try {
-          if (noteId == null || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
-          const n = myModule.getNoteById(Number(noteId));
-          if (!n) return;
-
-          // Pause playback during edit if needed
-          try { eventBus.emit('player:requestPause'); } catch {}
+      // Re-anchor ONE note's startTime — and, to preserve their evaluated values, its
+      // frequency and duration anchors — to a new absolute time. This is the entire
+      // body of the single-note move commit, lifted out verbatim so GROUP move can
+      // reuse the algebra per mover instead of forking it.
+      //
+      // It deliberately does NOT retarget dependents, re-evaluate, re-render or
+      // snapshot. The caller owns those, so a group move can do them ONCE for the
+      // whole batch and land as a single undo entry.
+      function commitNoteStartGL(n, newStartSec) {
+          if (!n || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
+          const noteId = n.id;
 
           // Capture original before remap for debug/validation
           const oldRaw = n.variables.startTimeString || '';
@@ -5306,20 +5567,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           // Ensure evaluation cache sees the edited note
           try { myModule.markNoteDirty(n.id); } catch {}
+      }
 
-          // Retarget dependents that would reference a future-starting note
-          try { retargetDependentStartAndDurationOnTemporalViolationGL(n); } catch {}
-          try { retargetDependentFrequencyOnTemporalViolationGL(n); } catch {}
-
-          evaluatedNotes = myModule.evaluateModule();
-          setEvaluatedNotes(evaluatedNotes);
-          updateVisualNotes(evaluatedNotes);
-          createMeasureBars();
-          invalidateModuleEndTimeCache();
-          try { captureSnapshot("Move Note " + noteId); } catch {}
-          // Keep existing selection; sync renderer selection ordering without changing it
-          try { syncRendererSelection(); } catch {}
-          // Refresh variable modal if visible and selection exists (fallback to document.body when DOM anchor hidden in GL-only mode)
+      // Re-open the note widget on whatever is currently selected (GL-only: there is
+      // no DOM note element, so we fall back to document.body as the anchor).
+      function refreshNoteWidgetForSelection() {
           try {
             const widget = document.getElementById('note-widget');
             const isVisible = !!(widget && widget.classList && widget.classList.contains('visible'));
@@ -5342,8 +5594,110 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               }
             }
           } catch {}
+      }
+
+      eventBus.on('workspace:noteMoveCommit', ({ noteId, newStartSec }) => {
+        try {
+          if (noteId == null || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
+          const n = myModule.getNoteById(Number(noteId));
+          if (!n) return;
+
+          // Pause playback during edit if needed
+          try { eventBus.emit('player:requestPause'); } catch {}
+
+          commitNoteStartGL(n, newStartSec);
+
+          // Retarget dependents that would reference a future-starting note
+          try { retargetDependentStartAndDurationOnTemporalViolationGL(n); } catch {}
+          try { retargetDependentFrequencyOnTemporalViolationGL(n); } catch {}
+
+          evaluatedNotes = myModule.evaluateModule();
+          setEvaluatedNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          invalidateModuleEndTimeCache();
+          try { captureSnapshot("Move Note " + noteId); } catch {}
+          // Keep existing selection; sync renderer selection ordering without changing it
+          try { syncRendererSelection(); } catch {}
+          refreshNoteWidgetForSelection();
         } catch (e) {
           console.warn('workspace:noteMoveCommit failed', e);
+        }
+      });
+
+      // Marquee released: the workspace hands us the ids it crossed. This is the ONLY
+      // writer of the authoritative selection for a marquee — the live highlight during
+      // the drag was just a renderer-side preview.
+      eventBus.on('workspace:marqueeCommit', ({ ids, additive }) => {
+        try {
+          if (isLocked) return;
+          setMultiSelectionIds(Array.isArray(ids) ? ids : [], !!additive);
+        } catch (e) {
+          console.warn('workspace:marqueeCommit failed', e);
+        }
+      });
+
+      // GROUP move. `ids` = the live multi-selection, `deltaSec` = the time delta the
+      // drag resolved to. Lands as ONE undo entry.
+      //
+      // THE RULE — see classifyGroupMoveGL(): apply the delta ONLY to MOVERS (selected
+      // notes with no selected note anywhere in their startTime ancestor chain). RIDERS
+      // (anchored transitively to another selected note) are left completely untouched:
+      // their anchor's move already displaces them by exactly the same delta, because
+      // every link is `[parent].t + offset` and we never rewrite the offsets. Touching
+      // a rider would double-move it.
+      //
+      // Notes OUTSIDE the selection are likewise never rewritten — they follow their
+      // anchors, exactly as they do for a single-note drag. That is the app's semantics,
+      // not an oversight.
+      eventBus.on('workspace:groupMoveCommit', ({ ids, deltaSec }) => {
+        try {
+          if (!Array.isArray(ids) || !ids.length) return;
+          if (typeof deltaSec !== 'number' || !isFinite(deltaSec) || deltaSec === 0) return;
+
+          try { eventBus.emit('player:requestPause'); } catch {}
+
+          const S = new Set(ids.map(Number).filter((v) => Number.isFinite(v) && v !== 0));
+          if (!S.size) return;
+
+          const { movers } = classifyGroupMoveGL(S);
+          if (!movers.length) return;
+
+          // Snapshot every mover's CURRENT start before mutating anything. A mover's
+          // ancestors are static by construction (no selected note in its chain), so
+          // these reads are order-independent — but taking them up front keeps the
+          // batch deterministic regardless of commit order.
+          const baseStart = Number(myModule.baseNote.getVariable('startTime').valueOf() || 0);
+          const plan = movers.map((n) => ({
+            n,
+            newStart: Number(n.getVariable('startTime').valueOf() || 0) + deltaSec
+          }));
+
+          // Never drag the group before the base note: clamp the whole batch by the
+          // same amount so its internal spacing survives.
+          let clamp = 0;
+          for (const p of plan) clamp = Math.max(clamp, baseStart - p.newStart);
+          if (clamp > 0) for (const p of plan) p.newStart += clamp;
+
+          for (const p of plan) commitNoteStartGL(p.n, p.newStart);
+
+          // Same repair pass the single-note move runs, once per mover.
+          for (const p of plan) {
+            try { retargetDependentStartAndDurationOnTemporalViolationGL(p.n); } catch {}
+            try { retargetDependentFrequencyOnTemporalViolationGL(p.n); } catch {}
+          }
+
+          evaluatedNotes = myModule.evaluateModule();
+          setEvaluatedNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          invalidateModuleEndTimeCache();
+          try { captureSnapshot(`Move ${S.size} Notes`); } catch {}
+          try { syncRendererSelection(); } catch {}
+          try { syncMultiSelection(); } catch {}
+          refreshNoteWidgetForSelection();
+        } catch (e) {
+          console.warn('workspace:groupMoveCommit failed', e);
         }
       });
 

@@ -151,9 +151,34 @@ export class Workspace {
         // Disable multi-touch while dragging/resizing to avoid erratic placement
         if (e.pointerType === 'touch') {
           if (this._interaction && this._interaction.active) {
+            // A second finger during a pending marquee means the user actually wants to
+            // pinch-zoom. Give the gesture up rather than fight the camera for it.
+            if (this._interaction.type === 'marquee') {
+              this._endInteraction(false);
+              return;
+            }
             // Ignore additional touch contacts during an active interaction
             try { e.preventDefault(); } catch {}
             return;
+          }
+        }
+
+        // ── Marquee entry ───────────────────────────────────────────────────────
+        // Shift-drag (mouse) or long-press (touch) on EMPTY background rubber-bands a
+        // selection. Group drag is NOT handled here: a note already in the group falls
+        // through to the normal move gesture below, which is then decorated as a group
+        // drag — that way it inherits all the existing snapping and clamping for free.
+        if (!this._pickAny(e.clientX, e.clientY)) {
+          const additive = this._multiSelIds().size > 0;
+          if (e.pointerType !== 'touch' && e.shiftKey) {
+            this._beginMarquee(e, additive);
+            return;
+          }
+          if (e.pointerType === 'touch') {
+            // Arm a long-press, then FALL THROUGH. Until the timer fires this is still
+            // an ordinary single-finger pan; movement, a second finger, or an early
+            // release all cancel it. Pan and pinch-zoom are untouched.
+            this._armMarqueeLongPress(e, additive);
           }
         }
 
@@ -457,6 +482,7 @@ export class Workspace {
             baselineStartSec: null,
             lastPreview: { startSec: 0, durationSec: 0 }
           };
+          this._decorateAsGroupDrag(this._interaction);
 
           // Do NOT gate camera yet; allow pinch if a second touch appears.
           // Attach doc-level listeners to track pointer moves for promotion/cancel.
@@ -591,6 +617,9 @@ export class Workspace {
           // cachedAncestorChain: [{id,startSec}] from current parent up to BaseNote (id 0)
           cachedAncestorChain: null
         };
+        // Grabbing a note that is already in the multi-selection turns this into a GROUP
+        // drag: identical gesture, identical snapping — only the commit differs.
+        this._decorateAsGroupDrag(this._interaction);
         // Seed per-interaction parent/ancestor caches for note drags (move/resize)
         try {
           const mod = this._module;
@@ -897,6 +926,41 @@ export class Workspace {
 
         const { type, noteId } = this._interaction;
         const xScale = this.renderer?.currentXScaleFactor || 1.0;
+
+        // Marquee: rubber-band the rectangle and live-highlight whatever it crosses.
+        if (type === 'marquee') {
+          const st = this._interaction;
+
+          // A second finger mid-marquee means the user wants to pinch. Bail out.
+          if ((this._touchActiveCount || 0) >= 2) {
+            this._endInteraction(false);
+            return;
+          }
+
+          st.lastClient = { x: e.clientX, y: e.clientY };
+          const rect = {
+            x0: st.startClient.x, y0: st.startClient.y,
+            x1: e.clientX,        y1: e.clientY
+          };
+          try { this.renderer?.setMarqueeRect?.(rect); } catch {}
+
+          let ids = [];
+          try {
+            const hits = this.renderer?.pickRect?.(rect.x0, rect.y0, rect.x1, rect.y1) || [];
+            for (const h of hits) {
+              const hid = Number(h && h.id);
+              if (Number.isFinite(hid) && hid !== 0) ids.push(hid);
+            }
+          } catch {}
+          st.marqueeIds = ids;
+
+          // Live preview only — the authoritative set is player.js's, and it is written
+          // once on release (workspace:marqueeCommit).
+          const live = st.marqueeAdditive ? new Set([...st.marqueeBaseIds, ...ids]) : new Set(ids);
+          try { this.renderer?.setMultiSelection?.(live); } catch {}
+          try { if (e.cancelable) e.preventDefault(); } catch {}
+          return;
+        }
 
         // Promotion logic for pending move on touch: prefer pinch (two touches) over dragging.
         if (this._interaction.type === 'movePending') {
@@ -1407,6 +1471,17 @@ export class Workspace {
           // octave: no preview changes
         }
 
+        // GROUP drag: the delta is applied to the WHOLE selection, so the binding
+        // constraint is the EARLIEST note in it, not the one under the pointer. Clamp
+        // here — before the preview and before lastPreview, which the commit reads — so
+        // the ghost stops where the drop will actually land instead of sliding past the
+        // base note and snapping back.
+        if (type === 'move' && this._interaction.groupMode
+            && Number.isFinite(this._interaction.groupMinDeltaSec)) {
+          const minStart = (this._interaction.origStartSec || 0) + this._interaction.groupMinDeltaSec;
+          if (startSec < minStart) startSec = minStart;
+        }
+
         // Save preview
         this._interaction.lastPreview = { startSec, durationSec };
 
@@ -1748,8 +1823,17 @@ export class Workspace {
           const dx = lc.x - (st && st.startClient ? st.startClient.x : 0);
           const dy = lc.y - (st && st.startClient ? st.startClient.y : 0);
           const dist = Math.hypot(dx, dy);
-          movedOk = (dist > 4) && st && st.type !== 'octave';
+          // A marquee ALWAYS suppresses its trailing click, even a tiny one: that click
+          // lands on empty background, and player.js reads a background click as
+          // "clear the selection" — which would instantly wipe the selection we just made.
+          movedOk = !!st && st.type !== 'octave' && (dist > 4 || st.type === 'marquee');
         } catch {}
+        if (st && st.type === 'marquee') {
+          try {
+            const nowTs = (performance && performance.now) ? performance.now() : Date.now();
+            this.containerEl.__rmtSuppressClickUntil = nowTs + 350;
+          } catch {}
+        }
         if (movedOk) {
           const suppressOnce = (ev) => {
             try {
@@ -1804,6 +1888,17 @@ export class Workspace {
       try { if (this.renderer?.clearDragOverlay) this.renderer.clearDragOverlay(); } catch {}
       // Clear prospective parent visualization
       try { if (this.renderer?.setProspectiveParentId) this.renderer.setProspectiveParentId(null); } catch {}
+      // Take the rubber-band rectangle down (on cancel as well as commit)
+      try { this.renderer?.setMarqueeRect?.(null); } catch {}
+      this._cancelMarqueeLongPress();
+      // An ABANDONED marquee (pinch, pointercancel) must not strand its live preview
+      // highlight — restore what was selected before the drag. On commit we leave it
+      // alone: player.js overwrites it from marqueeCommit a moment later.
+      try {
+        if (st && st.type === 'marquee' && !commit) {
+          this.renderer?.setMultiSelection?.(st.marqueeBaseIds || new Set());
+        }
+      } catch {}
 
       // Commit
       try {
@@ -1825,6 +1920,23 @@ export class Workspace {
               eventBus.emit('player:octaveChange', { noteId: st.noteId, direction: st.direction === 'up' ? 'up' : 'down' });
             } else {
               // No-op octave drag: restore authoritative state
+              try { if (this._lastSyncArgs) this.sync(this._lastSyncArgs); } catch {}
+            }
+          } else if (st.type === 'marquee') {
+            // Hand the result to player.js, which owns the authoritative selection.
+            // Emitted even when empty: a shift-drag across nothing should clear.
+            eventBus.emit('workspace:marqueeCommit', {
+              ids: Array.isArray(st.marqueeIds) ? st.marqueeIds : [],
+              additive: !!st.marqueeAdditive
+            });
+          } else if (st.type === 'move' && st.groupMode) {
+            // GROUP move: the grabbed note's resolved start gives the delta; player.js
+            // decides which selected notes actually get it applied (movers vs riders).
+            const startSec = (st.lastPreview?.startSec != null) ? st.lastPreview.startSec : st.origStartSec;
+            const deltaSec = (startSec || 0) - (st.origStartSec || 0);
+            if (Math.abs(deltaSec) > 1e-4) {
+              eventBus.emit('workspace:groupMoveCommit', { ids: st.groupIds || [], deltaSec });
+            } else {
               try { if (this._lastSyncArgs) this.sync(this._lastSyncArgs); } catch {}
             }
           } else if (st.type === 'move') {
@@ -2025,6 +2137,207 @@ export class Workspace {
       return [];
     }
   }
+  // ── Multi-select gestures ───────────────────────────────────────────────────
+  //
+  // Gesture arbitration, in priority order:
+  //
+  //   MOUSE   shift + drag on empty space ....... marquee
+  //           drag a note that is in the group .. group drag
+  //           anything else ..................... unchanged (single note, pan, zoom)
+  //
+  //   TOUCH   2nd finger ........................ ALWAYS wins -> pinch-zoom
+  //           long-press (500ms, <8px travel)
+  //             on empty space .................. marquee
+  //           drag a note that is in the group .. group drag
+  //           drag on empty space ............... unchanged (single-finger pan)
+  //
+  // The long-press is armed but NON-COMMITTAL: until it fires, the gesture is still a
+  // pan, and travel / a second finger / an early release all cancel it. So we never
+  // take a gesture away from the camera on speculation — only once the user has
+  // demonstrably held still.
+  static get MARQUEE_LONG_PRESS_MS() { return 500; }
+  static get MARQUEE_LONG_PRESS_SLOP_PX() { return 8; }
+
+  // The renderer holds the live set (player.js owns the authoritative one and pushes it
+  // down). Reading it here keeps the two in step without a second copy to desync.
+  _multiSelIds() {
+    const s = this.renderer && this.renderer._multiSelIds;
+    return (s instanceof Set) ? s : new Set();
+  }
+
+  // Is there any note/measure/base under this point?
+  _pickAny(clientX, clientY) {
+    try { return this.pickAt(clientX, clientY, 3) || null; } catch { return null; }
+  }
+
+  _attachDocInteractionListeners() {
+    if (!this._onDocPointerMove) {
+      this._onDocPointerMove = (ev) => { try { this._updateInteraction(ev); } catch {} };
+    }
+    if (!this._onDocPointerUp) {
+      this._onDocPointerUp = (ev) => {
+        try {
+          if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+          this._endInteraction(true);
+        } catch {}
+      };
+    }
+    if (!this._onDocPointerCancel) {
+      this._onDocPointerCancel = (ev) => {
+        try {
+          if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+          this._endInteraction(false);
+        } catch {}
+      };
+    }
+    document.addEventListener('pointermove', this._onDocPointerMove, true);
+    document.addEventListener('pointerup', this._onDocPointerUp, true);
+    document.addEventListener('pointercancel', this._onDocPointerCancel, true);
+  }
+
+  _beginMarquee(e, additive = false) {
+    this._cancelMarqueeLongPress();
+
+    // Take the camera out of the gesture for its duration, or we rubber-band and pan at
+    // the same time. _endInteraction restores both, on cancel as well as commit.
+    try { this.camera?.setInputEnabled?.(false); } catch {}
+    try { this.camera?.setSingleFingerPanEnabled?.(false); } catch {}
+
+    this._interaction = {
+      active: true,
+      type: 'marquee',
+      noteId: null,
+      region: null,
+      direction: null,
+      pointerId: e.pointerId,
+      startClient: { x: e.clientX, y: e.clientY },
+      lastClient:  { x: e.clientX, y: e.clientY },
+      marqueeAdditive: !!additive,
+      marqueeBaseIds: additive ? new Set(this._multiSelIds()) : new Set(),
+      marqueeIds: [],
+      lastPreview: { startSec: 0, durationSec: 0 }
+    };
+
+    this._attachDocInteractionListeners();
+
+    try { this.renderer?.setMarqueeRect?.({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY }); } catch {}
+    try { this.containerEl.style.cursor = 'crosshair'; } catch {}
+    // NO preventDefault here. We are called from the pointerdown listener, which is
+    // registered { passive: true } — the call would be ignored and would log
+    // "Unable to preventDefault inside passive event listener invocation" on every
+    // marquee. Checking e.cancelable does not help: it stays true in a passive
+    // listener. The doc-level pointermove we attach IS cancellable, and that is where
+    // suppressing the default (text selection, etc.) actually matters.
+  }
+
+  _armMarqueeLongPress(e, additive = false) {
+    this._cancelMarqueeLongPress();
+
+    const startX = e.clientX, startY = e.clientY, pid = e.pointerId;
+    const slop = Workspace.MARQUEE_LONG_PRESS_SLOP_PX;
+
+    const cancel = () => this._cancelMarqueeLongPress();
+
+    // Any travel beyond the slop means this was a pan, not a press.
+    const onMove = (ev) => {
+      try {
+        if (ev.pointerId != null && ev.pointerId !== pid) return;
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > slop) cancel();
+      } catch {}
+    };
+
+    this._lp = {
+      cancel,
+      onMove,
+      timer: setTimeout(() => {
+        // Fires only if the finger stayed put, stayed down, and stayed alone.
+        try {
+          if ((this._touchActiveCount || 0) >= 2) { cancel(); return; }
+          if (this._interaction && this._interaction.active) { cancel(); return; }
+          const synthetic = { clientX: startX, clientY: startY, pointerId: pid, preventDefault() {} };
+          this._beginMarquee(synthetic, additive);
+        } catch { cancel(); }
+      }, Workspace.MARQUEE_LONG_PRESS_MS)
+    };
+
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('pointerup', cancel, true);
+    document.addEventListener('pointercancel', cancel, true);
+  }
+
+  _cancelMarqueeLongPress() {
+    const lp = this._lp;
+    if (!lp) return;
+    this._lp = null;
+    try { clearTimeout(lp.timer); } catch {}
+    try {
+      document.removeEventListener('pointermove', lp.onMove, true);
+      document.removeEventListener('pointerup', lp.cancel, true);
+      document.removeEventListener('pointercancel', lp.cancel, true);
+    } catch {}
+  }
+
+  // Turn a freshly-built single-note move into a GROUP move, if the grabbed note is in
+  // the selection. Everything about the gesture stays the same — snapping, clamping,
+  // preview — only _endInteraction's commit differs.
+  _decorateAsGroupDrag(st) {
+    try {
+      if (!st || (st.type !== 'move' && st.type !== 'movePending')) return;
+      const sel = this._multiSelIds();
+      if (sel.size < 1 || !sel.has(Number(st.noteId))) return;
+
+      st.groupMode = true;
+      st.groupIds = [...sel];
+
+      // Everything the drag visibly displaces: every selected note, plus everything that
+      // hangs off one by startTime (riders inside the selection, and dependents outside
+      // it — which follow, exactly as they do for a single-note drag). Built ONCE per
+      // gesture; it cannot change mid-drag, and rebuilding a Set of thousands of
+      // dependents on every pointermove was a known source of GC churn.
+      const moving = new Set(st.groupIds.map(Number));
+      try {
+        const graph = this._module?._dependencyGraph;
+        if (graph?.getAllStartTimeDependents) {
+          for (const id of st.groupIds) {
+            for (const d of (graph.getAllStartTimeDependents(Number(id)) || [])) {
+              moving.add(Number(d));
+            }
+          }
+        }
+      } catch {}
+
+      // TWO caches, because the renderer has TWO drag paths that must agree:
+      //   cachedAffectedIds -> setDragOffsetPreview  -> shifts the note RECTS
+      //   cachedDependents  -> setDragOverlay        -> overwrites _dragMovingIds,
+      //                                                 which drives the GLYPH atlas
+      //                                                 (fraction labels, octave arrows)
+      //                                                 and the measure-triangle flags
+      // Seed only the first and the rects move while the labels stay behind — and only
+      // for some grabs, since the default cachedDependents is the GRABBED note's own
+      // dependents, which may or may not overlap the group.
+      // setDragOverlay's set omits the anchor, matching how the single-note path builds it.
+      st.cachedAffectedIds = moving;
+      const deps = new Set(moving);
+      deps.delete(Number(st.noteId));
+      st.cachedDependents = deps;
+
+      // Clamp limit for the PREVIEW. The commit clamps the batch so no mover lands before
+      // the base note; without the same limit here the ghost happily slides past it and
+      // then snaps back on drop.
+      try {
+        const mod = this._module;
+        const baseStart = Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() || 0);
+        let minStart = Infinity;
+        for (const id of st.groupIds) {
+          const n = mod?.getNoteById?.(Number(id));
+          const s = Number(n?.getVariable?.('startTime')?.valueOf?.());
+          if (Number.isFinite(s)) minStart = Math.min(minStart, s);
+        }
+        st.groupMinDeltaSec = Number.isFinite(minStart) ? (baseStart - minStart) : 0;
+      } catch { st.groupMinDeltaSec = 0; }
+    } catch {}
+  }
+
   // Screen (client) -> world helper via camera controller
   screenToWorld(clientX, clientY) {
     if (!this.camera) return { x: 0, y: 0 };

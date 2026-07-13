@@ -39,9 +39,15 @@ export function raiseWidget(el) {
   el.style.zIndex = String(FRONT_Z);
 }
 
-function pointerOf(e) {
+// Touch list must be probed before clientX/clientY: a MouseEvent has no `.touches`,
+// and a coordinate of 0 is falsy, so `e.clientY || e.touches[0].clientY` throws at
+// the viewport edge.
+export function pointerOf(e) {
   if (e.touches && e.touches.length > 0) {
     return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+  if (e.changedTouches && e.changedTouches.length > 0) {
+    return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
   }
   return { x: e.clientX, y: e.clientY };
 }

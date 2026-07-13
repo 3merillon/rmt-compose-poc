@@ -66,7 +66,6 @@
               <div id="loadFromFileItem" class="menu-item">Load Module from file…</div>
               <div id="resetDefaultModuleItem" class="menu-item">Reset Default Module</div>
             </div>
-            <button id="settingsBtn" class="module-action-btn">Settings…</button>
           </div>
           <div class="widget-footer">
             <div class="docs-section">
@@ -111,6 +110,24 @@
       <button class="note-widget-close">×</button>
     </div>
     <div class="note-widget-content"></div>
+  </div>
+  <!--
+    Group-actions widget: shown when SEVERAL notes are selected (marquee /
+    shift-click). Body-level SIBLING of .myspaceapp, exactly like #note-widget
+    above — the workspace's capture-phase click handler clears the note selection
+    on any click that reaches it, so a widget nested inside .myspaceapp would
+    destroy the selection it exists to act on. Its body is rendered by
+    src/modals/group-widget.js from that module's action registry.
+  -->
+  <div id="group-widget" class="group-widget" role="dialog" aria-label="0 notes selected">
+    <div class="group-widget-header">
+      <span class="group-widget-title">
+        <span class="group-widget-count">0</span>
+        <span class="group-widget-label">notes selected</span>
+      </span>
+      <button type="button" class="group-widget-close" aria-label="Clear selection" title="Clear selection">×</button>
+    </div>
+    <div class="group-widget-content"></div>
   </div>
   <button id="lockButton" title="Lock Notes" class="lock-button locked" aria-label="Lock notes" aria-pressed="true">
     <svg class="lock-icon" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">

@@ -16,6 +16,25 @@ import { WASM_CONFIG } from './wasm/config.js';
 
  // Globals are exposed via registerGlobals below to centralize window.* writes
 
+// Desktop-app feel: ctrl/⌘ + wheel must NEVER page-zoom the app.
+//
+// Reaching for a modifier to zoom is a common reflex, and having the browser page-zoom
+// the whole document on that reflex breaks the illusion that this is an application
+// rather than a web page. Over the workspace, the camera turns ctrl+wheel into the SAME
+// app zoom as a plain wheel (see camera-controller); over the UI chrome — top bar, module
+// library, any panel — it does nothing at all.
+//
+// Capture phase at module scope, so it is live before the first frame and beats every
+// other wheel listener. preventDefault() here does NOT stop propagation, so the camera
+// still receives the event and zooms. It fires only for a MODIFIED wheel, so ordinary
+// scrolling (the module library, widget bodies) is untouched. `passive: false` is
+// mandatory: wheel listeners default to passive, where preventDefault is silently ignored.
+try {
+  window.addEventListener('wheel', (e) => {
+    if (e.ctrlKey || e.metaKey) e.preventDefault();
+  }, { passive: false, capture: true });
+} catch {}
+
 // Create the SynthInstruments object with all instrument classes
 const SynthInstruments = {
     SineInstrument: SynthInstrumentsModule.SineInstrument,
@@ -79,30 +98,16 @@ async function initApp() {
         console.error('Failed to load or initialize ./menu/index.js', e);
     }
 
-    // Settings system: initialize the store (loads persisted settings) and
-    // wire the "Settings…" menu entry to open the panel.
+    // Settings system: initialize the store (loads persisted settings) and wire the
+    // top-bar gear. The old "Settings…" entry in the + menu is gone — the gear is
+    // always visible, so the menu entry was a second door to the same room.
     try {
         const { settingsStore } = await import('./settings/settings-store.js');
-        const { openSettingsPanel, toggleSettingsPanel } = await import('./settings/settings-panel.js');
+        const { toggleSettingsPanel } = await import('./settings/settings-panel.js');
         // Touch the store so it loads + emits 'settings:loaded' early.
         settingsStore.getAll();
 
-        const settingsBtn = document.getElementById('settingsBtn');
-        if (settingsBtn) {
-            settingsBtn.addEventListener('click', () => {
-                // Close the main-menu dropdown (uses the 'open' class), then
-                // open the panel.
-                try {
-                    const widget = document.getElementById('general-widget');
-                    if (widget) widget.classList.remove('open');
-                    const pm = document.querySelector('.plusminus');
-                    if (pm) pm.classList.remove('open');
-                } catch {}
-                openSettingsPanel();
-            });
-        }
-
-        // Top-bar gear: same panel, and a second click closes it again.
+        // Top-bar gear: opens the panel, and a second click closes it again.
         const gearBtn = document.getElementById('settingsGearBtn');
         if (gearBtn) {
             gearBtn.addEventListener('click', () => toggleSettingsPanel());

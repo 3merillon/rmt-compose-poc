@@ -269,6 +269,19 @@ export class RendererAdapter {
     this._hoverBase = false;           // true when BaseNote hovered
     this._hoveredMeasureId = null;     // measure note id when hovered
 
+    // Multi-selection (marquee / shift-click). _multiSelIds is the source of truth; the
+    // index array is a derived cache keyed on the id->index Map it was built from.
+    // NOTES ONLY — measure bars are deliberately not selectable: a measure's startTime is
+    // its link in the measure chain, so a group move can neither re-anchor it (that would
+    // reflow the grid under the whole score) nor leave it behind (the group would tear on
+    // drop). See pickRect().
+    this._multiSelIds = null;          // Set<number> of note ids, or null when empty
+    this._multiSelNoteIdx = null;      // instance indices into posSize
+    this._multiSelNoteMapRef = null;   // identity of _noteIdToIndex the note indices came from
+
+    // Rubber-band marquee rectangle in client CSS px, or null when not dragging one
+    this._marqueeRect = null;
+
     // Related highlight indices (notes) and measure ids (computed each sync)
     // Notes:
     //   _relDepsIdx: indices of notes this selected note depends on (direct)
@@ -1229,6 +1242,10 @@ export class RendererAdapter {
     this._textDirty = contentChanged || (this.instanceCount !== this._lastInstanceCount);
     this._lastInstanceCount = this.instanceCount;
 
+    // _noteIdToIndex was just rebuilt above; the cached multi-selection indices refer to the
+    // OLD instance order and would highlight the wrong notes if left alone.
+    try { this._resolveMultiSelIndices(); } catch {}
+
     this.needsRedraw = true;
   }
 
@@ -1362,8 +1379,153 @@ export class RendererAdapter {
     }
   }
 
+  // Public API: set the multi-selection (marquee / additive selection).
+  // Accepts any iterable of note or measure ids; null/empty clears it.
+  // Ids that are not currently present in the scene are skipped silently.
+  setMultiSelection(ids) {
+    try {
+      let next = null;
+      if (ids) {
+        for (const raw of ids) {
+          const id = Number(raw);
+          if (!Number.isFinite(id)) continue;
+          if (!next) next = new Set();
+          next.add(id);
+        }
+      }
+      if (next && next.size === 0) next = null;
+
+      const prev = this._multiSelIds;
+      if (!next && !prev) return;
+      if (next && prev && next.size === prev.size) {
+        let same = true;
+        for (const id of next) { if (!prev.has(id)) { same = false; break; } }
+        if (same) return;
+      }
+
+      this._multiSelIds = next;
+      this._resolveMultiSelIndices();
+      this.needsRedraw = true;
+    } catch {
+      this._multiSelIds = null;
+      this._multiSelNoteIdx = null;
+      this.needsRedraw = true;
+    }
+  }
+
+  // Public API: current multi-selection as an array of ids (empty when none).
+  getMultiSelection() {
+    return this._multiSelIds ? Array.from(this._multiSelIds) : [];
+  }
+
+  // Public API: rubber-band rectangle in CLIENT CSS px ({x0,y0,x1,y1}), or null to hide.
+  setMarqueeRect(rect) {
+    try {
+      if (!rect) {
+        if (!this._marqueeRect) return;
+        this._marqueeRect = null;
+        this.needsRedraw = true;
+        return;
+      }
+      const x0 = Number(rect.x0), y0 = Number(rect.y0);
+      const x1 = Number(rect.x1), y1 = Number(rect.y1);
+      if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) return;
+      const cur = this._marqueeRect;
+      if (cur && cur.x0 === x0 && cur.y0 === y0 && cur.x1 === x1 && cur.y1 === y1) return;
+      this._marqueeRect = { x0, y0, x1, y1 };
+      this.needsRedraw = true;
+    } catch {
+      this._marqueeRect = null;
+      this.needsRedraw = true;
+    }
+  }
+
+  /**
+   * Rectangle pick in CLIENT CSS px. Returns every NOTE whose bounding box INTERSECTS
+   * the rect (containment is not required).
+   *
+   * Notes only. The BaseNote (id 0) and measure bars are deliberately never returned:
+   * a measure's startTime is its link in the measure chain, so a group move can neither
+   * re-anchor it (that reflows the grid under the whole score) nor leave it behind (the
+   * group visibly tears on drop). Half-supporting them was worse than not supporting them.
+   */
+  pickRect(clientX0, clientY0, clientX1, clientY1) {
+    const hits = [];
+    try {
+      const cx0 = Math.min(clientX0, clientX1);
+      const cx1 = Math.max(clientX0, clientX1);
+      const cy0 = Math.min(clientY0, clientY1);
+      const cy1 = Math.max(clientY0, clientY1);
+
+      // Notes live in world units: map the rect corners through the same inverse
+      // affine used for point picking. Y is not guaranteed to increase downward in
+      // world space, so re-normalize after the transform.
+      if (this.posSize && this._instanceNoteIds) {
+        const a = this.screenToWorld(cx0, cy0);
+        const b = this.screenToWorld(cx1, cy1);
+        const wx0 = Math.min(a.x, b.x), wx1 = Math.max(a.x, b.x);
+        const wy0 = Math.min(a.y, b.y), wy1 = Math.max(a.y, b.y);
+
+        const N = Math.min(this._instanceNoteIds.length, this.instanceCount | 0);
+        const ps = this.posSize;
+        for (let i = 0; i < N; i++) {
+          const id = this._instanceNoteIds[i] | 0;
+          if (id === 0) continue;
+          const o = i * 4;
+          const x = ps[o + 0];
+          const y = ps[o + 1];
+          if (x > wx1 || (x + ps[o + 2]) < wx0) continue;
+          if (y > wy1 || (y + ps[o + 3]) < wy0) continue;
+          hits.push({ type: 'note', id });
+        }
+      }
+    } catch {}
+    return hits;
+  }
+
   // ============ Private helpers ============
- 
+
+  /**
+   * Re-derive the multi-selection index caches from _multiSelIds.
+   * MUST run after every rebuild of _noteIdToIndex / _measureTriIdToIndex: sync() mints
+   * brand-new Maps and reorders instances, so a cached index silently starts pointing at a
+   * DIFFERENT note. Ids are stable across syncs; indices are not.
+   */
+  _resolveMultiSelIndices() {
+    const sel = this._multiSelIds;
+    if (!sel || sel.size === 0) {
+      this._multiSelNoteIdx = null;
+      this._multiSelNoteMapRef = this._noteIdToIndex || null;
+      return;
+    }
+    const noteMap = this._noteIdToIndex || null;
+    const noteIdx = [];
+    for (const id of sel) {
+      if (noteMap && noteMap.has(id)) {
+        const i = noteMap.get(id);
+        if (i != null && i >= 0 && i < this.instanceCount) noteIdx.push(i);
+      }
+    }
+    this._multiSelNoteIdx = noteIdx.length ? noteIdx : null;
+    this._multiSelNoteMapRef = noteMap;
+  }
+
+  _ensureMultiSelIndices() {
+    if (!this._multiSelIds || this._multiSelIds.size === 0) return false;
+    if (this._multiSelNoteMapRef !== (this._noteIdToIndex || null)) {
+      this._resolveMultiSelIndices();
+    }
+    return true;
+  }
+
+  _multiSelRingRgba() {
+    return [1.0, 1.0, 1.0, 1.0];
+  }
+
+  _multiSelRingPx() {
+    return (this._config?.selection?.multiRingThicknessPxAtZoom1 ?? 4.0);
+  }
+
   _setAttr4Enabled(flag) {
     try {
       const gl = this.gl;
@@ -2378,6 +2540,121 @@ export class RendererAdapter {
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
   }
 
+  /**
+   * Draw the rounded-rect ring for an arbitrary list of NOTE instance indices in one
+   * instanced call. Hoisted out of _render() so ring passes that are not tied to the
+   * single selected note (dependency rings, multi-selection) can share it.
+   */
+  _drawRingIdxList(indices, rgba, borderPx) {
+    const gl = this.gl;
+    if (!gl || !this.selectionRingProgram) return;
+    if (!indices || !indices.length) return;
+    if (!this.posSize || !this.instanceCount) return;
+
+    const rectCss = this._cachedCanvasRect || (this.canvas ? this.canvas.getBoundingClientRect() : null);
+    if (!rectCss) return;
+    const vpW = Math.max(1, rectCss.width);
+    const vpH = Math.max(1, rectCss.height);
+
+    // Do not write depth to avoid z-fighting; place slightly behind selection ring
+    gl.depthMask(false);
+    gl.useProgram(this.selectionRingProgram);
+    const Us = (this._uniforms && this._uniforms.selectionRing) ? this._uniforms.selectionRing : null;
+    const uMat = Us ? Us.u_matrix       : gl.getUniformLocation(this.selectionRingProgram, 'u_matrix');
+    const uVP  = Us ? Us.u_viewport     : gl.getUniformLocation(this.selectionRingProgram, 'u_viewport');
+    const uOff = Us ? Us.u_offset       : gl.getUniformLocation(this.selectionRingProgram, 'u_offset');
+    const uZ   = Us ? Us.u_layerZ       : gl.getUniformLocation(this.selectionRingProgram, 'u_layerZ');
+    const uSC  = Us ? Us.u_scale        : gl.getUniformLocation(this.selectionRingProgram, 'u_scale');
+    const uCR  = Us ? Us.u_cornerRadius : gl.getUniformLocation(this.selectionRingProgram, 'u_cornerRadius');
+    const uBW  = Us ? Us.u_borderWidth  : gl.getUniformLocation(this.selectionRingProgram, 'u_borderWidth');
+    const uCol = Us ? Us.u_color        : gl.getUniformLocation(this.selectionRingProgram, 'u_color');
+
+    if (uMat) gl.uniformMatrix3fv(uMat, false, this.matrix);
+    if (uVP)  gl.uniform2f(uVP, vpW, vpH);
+    if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
+    if (uZ)   gl.uniform1f(uZ, -0.000025);
+    if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
+    { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
+    // Border thickness (CSS px at zoom=1) per call
+    if (uBW)  gl.uniform1f(uBW, ((borderPx != null ? borderPx : 2.0)) * (this.xScalePxPerWU || 1.0));
+    if (uCol) gl.uniform4f(uCol, rgba[0], rgba[1], rgba[2], rgba[3]);
+
+    gl.bindVertexArray(this.rectVAO);
+    if (!this._singlePosSizeBuffer) {
+      this._singlePosSizeBuffer = gl.createBuffer();
+    }
+
+    const uDrag = Us ? Us.u_dragOffset : gl.getUniformLocation(this.selectionRingProgram, 'u_dragOffset');
+    if (!this._dragActive) {
+      // PERFORMANCE (Phase 8): when no drag is active, u_dragOffset is (0,0) for
+      // EVERY note, so the whole bucket shares identical uniforms and can be drawn
+      // in ONE instanced call instead of a per-note loop (up to ~N draws + N
+      // bufferData uploads per bucket -> 1 draw + 1 upload). This is the worst-case
+      // path when a highly-connected note is selected and the scene keeps redrawing
+      // (hover, playhead). The selectionRing shader reads ONLY a_posSize (attrib 1)
+      // per instance, so gathering the bucket into one buffer is pixel-identical;
+      // WebGL rasterizes instances in order, so same-color overlap blends the same.
+      if (uDrag) gl.uniform2f(uDrag, 0.0, 0.0);
+      const need = indices.length * 4;
+      if (!this._depRingBatch || this._depRingBatch.length < need) {
+        this._depRingBatch = new Float32Array(Math.max(need, 64));
+      }
+      const batch = this._depRingBatch;
+      let w = 0;
+      for (let i = 0; i < indices.length; i++) {
+        const idx = indices[i];
+        if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
+        const base = idx * 4;
+        const o = w * 4;
+        batch[o + 0] = this.posSize[base + 0];
+        batch[o + 1] = this.posSize[base + 1];
+        batch[o + 2] = this.posSize[base + 2];
+        batch[o + 3] = this.posSize[base + 3];
+        w++;
+      }
+      if (w > 0) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, batch.subarray(0, w * 4), gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+        gl.vertexAttribDivisor(1, 1);
+        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, w);
+      }
+    } else {
+      // Drag active: per-instance drag offset varies (moving notes vs anchor vs
+      // static), so keep the exact per-instance path for correctness.
+      for (let i = 0; i < indices.length; i++) {
+        const idx = indices[i];
+        if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
+        const base = idx * 4;
+        const arr = new Float32Array([
+          this.posSize[base + 0],
+          this.posSize[base + 1],
+          this.posSize[base + 2],
+          this.posSize[base + 3]
+        ]);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+        gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+        gl.vertexAttribDivisor(1, 1);
+        if (uDrag) {
+          const isAnchor = (this._dragAnchorIndex != null) && (idx === (this._dragAnchorIndex | 0));
+          const moving = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !isAnchor);
+          gl.uniform2f(uDrag, moving ? (this._dragOffsetX || 0.0) : 0.0, moving ? (this._dragOffsetW || 0.0) : 0.0);
+        }
+        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+      }
+    }
+
+    // Restore instanced buffer for attribute 1
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(1, 1);
+    gl.bindVertexArray(null);
+    // Re-enable attrib 4 for subsequent passes that need it
+    this._setAttr4Enabled(true);
+    gl.depthMask(true);
+  }
+
   _render() {
     const gl = this.gl;
     const canvas = this.canvas;
@@ -2482,107 +2759,6 @@ export class RendererAdapter {
     // Draw related dependency/dependent rings (thin outlines) below selection ring
     try {
       if (this.selectionRingProgram && this._lastSelectedNoteId !== 0) {
-        const drawIdxList = (indices, rgba, borderPx) => {
-          if (!indices || !indices.length) return;
-          // Do not write depth to avoid z-fighting; place slightly behind selection ring
-          gl.depthMask(false);
-          gl.useProgram(this.selectionRingProgram);
-          const Us = (this._uniforms && this._uniforms.selectionRing) ? this._uniforms.selectionRing : null;
-          const uMat = Us ? Us.u_matrix       : gl.getUniformLocation(this.selectionRingProgram, 'u_matrix');
-          const uVP  = Us ? Us.u_viewport     : gl.getUniformLocation(this.selectionRingProgram, 'u_viewport');
-          const uOff = Us ? Us.u_offset       : gl.getUniformLocation(this.selectionRingProgram, 'u_offset');
-          const uZ   = Us ? Us.u_layerZ       : gl.getUniformLocation(this.selectionRingProgram, 'u_layerZ');
-          const uSC  = Us ? Us.u_scale        : gl.getUniformLocation(this.selectionRingProgram, 'u_scale');
-          const uCR  = Us ? Us.u_cornerRadius : gl.getUniformLocation(this.selectionRingProgram, 'u_cornerRadius');
-          const uBW  = Us ? Us.u_borderWidth  : gl.getUniformLocation(this.selectionRingProgram, 'u_borderWidth');
-          const uCol = Us ? Us.u_color        : gl.getUniformLocation(this.selectionRingProgram, 'u_color');
-
-          if (uMat) gl.uniformMatrix3fv(uMat, false, this.matrix);
-          if (uVP)  gl.uniform2f(uVP, vpW, vpH);
-          if (uOff) gl.uniform2f(uOff, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
-          if (uZ)   gl.uniform1f(uZ, -0.000025);
-          if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
-          { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
-          // Border thickness (CSS px at zoom=1) per call
-          if (uBW)  gl.uniform1f(uBW, ((borderPx != null ? borderPx : 2.0)) * (this.xScalePxPerWU || 1.0));
-          if (uCol) gl.uniform4f(uCol, rgba[0], rgba[1], rgba[2], rgba[3]);
-
-          gl.bindVertexArray(this.rectVAO);
-          if (!this._singlePosSizeBuffer) {
-            this._singlePosSizeBuffer = gl.createBuffer();
-          }
-
-          const uDrag = Us ? Us.u_dragOffset : gl.getUniformLocation(this.selectionRingProgram, 'u_dragOffset');
-          if (!this._dragActive) {
-            // PERFORMANCE (Phase 8): when no drag is active, u_dragOffset is (0,0) for
-            // EVERY note, so the whole bucket shares identical uniforms and can be drawn
-            // in ONE instanced call instead of a per-note loop (up to ~N draws + N
-            // bufferData uploads per bucket -> 1 draw + 1 upload). This is the worst-case
-            // path when a highly-connected note is selected and the scene keeps redrawing
-            // (hover, playhead). The selectionRing shader reads ONLY a_posSize (attrib 1)
-            // per instance, so gathering the bucket into one buffer is pixel-identical;
-            // WebGL rasterizes instances in order, so same-color overlap blends the same.
-            if (uDrag) gl.uniform2f(uDrag, 0.0, 0.0);
-            const need = indices.length * 4;
-            if (!this._depRingBatch || this._depRingBatch.length < need) {
-              this._depRingBatch = new Float32Array(Math.max(need, 64));
-            }
-            const batch = this._depRingBatch;
-            let w = 0;
-            for (let i = 0; i < indices.length; i++) {
-              const idx = indices[i];
-              if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
-              const base = idx * 4;
-              const o = w * 4;
-              batch[o + 0] = this.posSize[base + 0];
-              batch[o + 1] = this.posSize[base + 1];
-              batch[o + 2] = this.posSize[base + 2];
-              batch[o + 3] = this.posSize[base + 3];
-              w++;
-            }
-            if (w > 0) {
-              gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
-              gl.bufferData(gl.ARRAY_BUFFER, batch.subarray(0, w * 4), gl.DYNAMIC_DRAW);
-              gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-              gl.vertexAttribDivisor(1, 1);
-              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, w);
-            }
-          } else {
-            // Drag active: per-instance drag offset varies (moving notes vs anchor vs
-            // static), so keep the exact per-instance path for correctness.
-            for (let i = 0; i < indices.length; i++) {
-              const idx = indices[i];
-              if (idx == null || idx < 0 || idx >= this.instanceCount) continue;
-              const base = idx * 4;
-              const arr = new Float32Array([
-                this.posSize[base + 0],
-                this.posSize[base + 1],
-                this.posSize[base + 2],
-                this.posSize[base + 3]
-              ]);
-              gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
-              gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
-              gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-              gl.vertexAttribDivisor(1, 1);
-              if (uDrag) {
-                const isAnchor = (this._dragAnchorIndex != null) && (idx === (this._dragAnchorIndex | 0));
-                const moving = !!(this._dragActive && this._dragFlags && this._dragFlags[idx] === 1.0 && !isAnchor);
-                gl.uniform2f(uDrag, moving ? (this._dragOffsetX || 0.0) : 0.0, moving ? (this._dragOffsetW || 0.0) : 0.0);
-              }
-              gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
-            }
-          }
-
-          // Restore instanced buffer for attribute 1
-          gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
-          gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
-          gl.vertexAttribDivisor(1, 1);
-          gl.bindVertexArray(null);
-          // Re-enable attrib 4 for subsequent passes that need it
-          this._setAttr4Enabled(true);
-          gl.depthMask(true);
-        };
-
         // Property-colored dependency visualization
         // Colors follow the paradigm: which notes would MOVE if this property changes
         // Orange: frequency change would move these notes
@@ -2628,7 +2804,7 @@ export class RendererAdapter {
         for (const prop of ['startTime', 'frequency', 'duration']) {
           const rdepsIdx = this._relRdepsIdxByProperty?.[prop];
           if (rdepsIdx?.length) {
-            drawIdxList(rdepsIdx, HIGHLIGHT_COLORS[prop].rdep, RDEP_THICKNESS);
+            this._drawRingIdxList(rdepsIdx, HIGHLIGHT_COLORS[prop].rdep, RDEP_THICKNESS);
           }
         }
 
@@ -2637,12 +2813,20 @@ export class RendererAdapter {
         for (const prop of ['startTime', 'frequency', 'duration']) {
           const chainIdx = this._relDepsChainIdxByProperty?.[prop];
           if (chainIdx?.length) {
-            drawIdxList(chainIdx, HIGHLIGHT_COLORS[prop].dep, DEP_THICKNESS);
+            this._drawRingIdxList(chainIdx, HIGHLIGHT_COLORS[prop].dep, DEP_THICKNESS);
           }
         }
       }
     } catch {}
- 
+
+    // Multi-selection group ring (notes) — above the dependency rings, below the single
+    // selection ring, so the "current" note keeps its normal ring on top.
+    try {
+      if (this._ensureMultiSelIndices() && this._multiSelNoteIdx) {
+        this._drawRingIdxList(this._multiSelNoteIdx, this._multiSelRingRgba(), this._multiSelRingPx());
+      }
+    } catch {}
+
     // Selection outline for currently selected note (rounded, zoom-aware)
     try {
       if (this.selectionRingProgram && this._lastSelectedNoteId != null && this._noteIdToIndex && typeof this._noteIdToIndex.get === 'function') {
@@ -5779,6 +5963,8 @@ try {
       const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
       drawTriOutlineAtIndex(idx, [1.0, 1.0, 1.0, 0.6], this.measureTriPosSizeOutline);
     }
+
+    // (No multi-selection outline for measures: measures are not group-selectable.)
   }
 } catch {}
 
@@ -10549,6 +10735,152 @@ try {
       if (!this.needsRedraw) return;
       _prevRender.call(this);
       try { this._renderDependencyLinesAndDragOverlay(); } catch {}
+    };
+  } catch {}
+})();
+
+/* Marquee (rubber-band) rectangle — screen-space, drawn last so it sits above every pass. */
+(() => {
+  try {
+    if (typeof RendererAdapter === 'undefined') return;
+    const proto = RendererAdapter.prototype;
+
+    proto._initMarqueePass = function () {
+      const gl = this.gl;
+      if (!gl || this.marqueeProgram) return;
+
+      const vs = `#version 300 es
+        precision highp float;
+        layout(location=0) in vec2 a_unit;      // (0..1) quad
+        uniform vec4 u_rectCss;                 // (x, y, w, h) canvas-local CSS px
+        uniform vec2 u_viewport;                // CSS px
+        out vec2 v_local;                       // CSS px from the rect's top-left
+        void main() {
+          vec2 local = u_rectCss.xy + a_unit * u_rectCss.zw;
+          float ndcX = (local.x / u_viewport.x) * 2.0 - 1.0;
+          float ndcY = 1.0 - (local.y / u_viewport.y) * 2.0;
+          gl_Position = vec4(ndcX, ndcY, 0.0, 1.0);
+          v_local = a_unit * u_rectCss.zw;
+        }
+      `;
+      const fs = `#version 300 es
+        precision highp float;
+        in vec2 v_local;
+        uniform vec2 u_size;        // CSS px
+        uniform float u_borderPx;
+        uniform vec4 u_fill;
+        uniform vec4 u_border;
+        out vec4 outColor;
+        void main() {
+          float dx = min(v_local.x, u_size.x - v_local.x);
+          float dy = min(v_local.y, u_size.y - v_local.y);
+          float d = min(dx, dy);
+          outColor = (d <= u_borderPx) ? u_border : u_fill;
+          if (outColor.a <= 0.0) discard;
+        }
+      `;
+
+      this.marqueeProgram = this._createProgram(vs, fs);
+      if (!this.marqueeProgram) return;
+
+      try {
+        this._uniforms = this._uniforms || {};
+        this._uniforms.marquee = {
+          u_rectCss:  gl.getUniformLocation(this.marqueeProgram, 'u_rectCss'),
+          u_viewport: gl.getUniformLocation(this.marqueeProgram, 'u_viewport'),
+          u_size:     gl.getUniformLocation(this.marqueeProgram, 'u_size'),
+          u_borderPx: gl.getUniformLocation(this.marqueeProgram, 'u_borderPx'),
+          u_fill:     gl.getUniformLocation(this.marqueeProgram, 'u_fill'),
+          u_border:   gl.getUniformLocation(this.marqueeProgram, 'u_border')
+        };
+      } catch {}
+
+      this.marqueeVAO = gl.createVertexArray();
+      gl.bindVertexArray(this.marqueeVAO);
+      this._marqueeUnitBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._marqueeUnitBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), gl.STATIC_DRAW);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+      gl.vertexAttribDivisor(0, 0);
+      gl.bindVertexArray(null);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    };
+
+    proto._renderMarquee = function () {
+      const r = this._marqueeRect;
+      if (!r) return;
+      const gl = this.gl;
+      const canvas = this.canvas;
+      if (!gl || !canvas) return;
+
+      if (!this.marqueeProgram) {
+        this._initMarqueePass();
+        if (!this.marqueeProgram) return;
+      }
+
+      const rectCss = this._cachedCanvasRect || canvas.getBoundingClientRect();
+      const vpW = Math.max(1, rectCss.width);
+      const vpH = Math.max(1, rectCss.height);
+      const offX = this.canvasOffset?.x || 0;
+      const offY = this.canvasOffset?.y || 0;
+
+      const x = Math.min(r.x0, r.x1) - offX;
+      const y = Math.min(r.y0, r.y1) - offY;
+      const w = Math.max(1, Math.abs(r.x1 - r.x0));
+      const h = Math.max(1, Math.abs(r.y1 - r.y0));
+
+      const accent = (this._themeColors && this._themeColors.selectionRing) || this._accentRgba();
+      const border = [accent[0], accent[1], accent[2], 0.95];
+      const fill   = [accent[0], accent[1], accent[2], 0.12];
+
+      gl.useProgram(this.marqueeProgram);
+      const U = (this._uniforms && this._uniforms.marquee) ? this._uniforms.marquee : null;
+      const uRect = U ? U.u_rectCss  : gl.getUniformLocation(this.marqueeProgram, 'u_rectCss');
+      const uVP   = U ? U.u_viewport : gl.getUniformLocation(this.marqueeProgram, 'u_viewport');
+      const uSize = U ? U.u_size     : gl.getUniformLocation(this.marqueeProgram, 'u_size');
+      const uBW   = U ? U.u_borderPx : gl.getUniformLocation(this.marqueeProgram, 'u_borderPx');
+      const uFill = U ? U.u_fill     : gl.getUniformLocation(this.marqueeProgram, 'u_fill');
+      const uBrd  = U ? U.u_border   : gl.getUniformLocation(this.marqueeProgram, 'u_border');
+
+      if (uRect) gl.uniform4f(uRect, x, y, w, h);
+      if (uVP)   gl.uniform2f(uVP, vpW, vpH);
+      if (uSize) gl.uniform2f(uSize, w, h);
+      if (uBW)   gl.uniform1f(uBW, 1.0);
+      if (uFill) gl.uniform4f(uFill, fill[0], fill[1], fill[2], fill[3]);
+      if (uBrd)  gl.uniform4f(uBrd, border[0], border[1], border[2], border[3]);
+
+      // Earlier passes leave premultiplied blending, scissor and depth in arbitrary states;
+      // the marquee is the topmost overlay, so it sets all three explicitly.
+      gl.disable(gl.SCISSOR_TEST);
+      gl.disable(gl.DEPTH_TEST);
+      gl.depthMask(false);
+      gl.enable(gl.BLEND);
+      gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+
+      gl.bindVertexArray(this.marqueeVAO);
+      gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+      gl.bindVertexArray(null);
+
+      gl.enable(gl.DEPTH_TEST);
+      gl.depthMask(true);
+    };
+
+    const _prevInitM = proto.init;
+    proto.init = function (containerEl) {
+      const ok = _prevInitM.call(this, containerEl);
+      try { this._initMarqueePass(); } catch {}
+      return ok;
+    };
+
+    const _prevRenderM = proto._render;
+    proto._render = function () {
+      // Mirror the gate below: when nothing changed the wrapped chain draws nothing and the
+      // previous frame is still on screen, so re-blending the marquee would darken it.
+      const wasDirty = !!this.needsRedraw;
+      _prevRenderM.call(this);
+      if (!wasDirty) return;
+      try { this._renderMarquee(); } catch {}
     };
   } catch {}
 })();

@@ -113,6 +113,35 @@ html, body {
     gap: 4px;
     align-content: flex-start;
 }
+
+/* Touch: an 8px track is far below the ~44px minimum touch target, and with the
+   grid full the icons leave nothing else to grab. Widen the track, inset the thumb
+   inside it (so the grab area grows without the bar looking heavy), and hold the
+   icons off the gutter. `scrollbar-gutter: stable both-edges` mirrors the reserved
+   width on both sides, so the grid stays centred.
+   Must follow the base .icons-container rule: a media query adds no specificity. */
+@media (pointer: coarse) {
+    .icons-wrapper {
+        scrollbar-width: auto;
+    }
+
+    .icons-wrapper::-webkit-scrollbar {
+        width: 18px;
+    }
+
+    .icons-wrapper::-webkit-scrollbar-thumb {
+        background-color: rgba(var(--rmt-accent-rgb), 0.75);
+        border-radius: 9px;
+        border: 5px solid transparent;
+        background-clip: content-box;
+        min-height: 44px;
+    }
+
+    .icons-container {
+        padding: 4px 10px;
+        gap: 8px;
+    }
+}
 .icons-container::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -1886,4 +1915,188 @@ input[type="range"]:active::-moz-range-thumb {
 
 .lock-button:not(.locked) .lock-icon:hover .lock-shackle {
     stroke: var(--rmt-danger, #ff0000);
+}
+
+/* ── Group-actions widget (multi-note selection) ──────────────────────────
+ *
+ * Sibling species of .note-widget: same background, same 1px dotted border and
+ * 5px radius, same 10px header with a move cursor, same × box, same stacking
+ * level (1200/1201, above the menu bars and below the confirm overlays at 2000).
+ * Position is owned by the shared drag helper, which writes inline left/top.
+ *
+ * The one deliberate difference is the accent. A single-note selection is
+ * ORANGE; the multi-selection highlight in the GL canvas is WHITE, and this
+ * widget agrees with it, so you can tell at a glance which selection you are
+ * looking at. White comes from --rmt-text-primary (the token that IS #ffffff in
+ * every preset); the translucent white tints below are literal rgba() because
+ * there is no --rmt-text-primary-rgb triplet to theme them with — and they are
+ * matching a highlight the renderer draws in fixed white anyway.
+ * Destructive actions stay on --rmt-danger, as everywhere else in the app.
+ */
+.group-widget {
+    position: fixed;
+    display: none;
+    flex-direction: column;
+    box-sizing: border-box;
+    /* Same 300px as the note widget, but never wider than the viewport minus the
+       19px buffer the drag clamp keeps — so it stays a floating card on a phone
+       instead of becoming a full-screen sheet. */
+    width: min(300px, calc(100vw - 38px));
+    overflow: hidden;
+    background: rgba(var(--rmt-bg-rgb), 0.88);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+    border: 1px dotted var(--rmt-text-primary, #ffffff);
+    border-radius: 5px;
+    color: var(--rmt-text-primary, #ffffff);
+    font-family: 'Roboto Mono', monospace;
+    z-index: 1200;
+}
+
+.group-widget.visible {
+    display: flex;
+}
+
+/* Header metrics are the note widget's, to the pixel: same padding, same font
+   size on the ×, so the two title bars line up when both are open. */
+.group-widget-header {
+    flex: 0 0 auto;
+    padding: 10px;
+    border-bottom: 1px dotted var(--rmt-text-primary, #ffffff);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: move;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.group-widget-title {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    font-weight: bold;
+}
+
+/* The live count is the whole point of the header — give it the weight. */
+.group-widget-count {
+    font-size: 18px;
+    line-height: 1;
+    color: var(--rmt-text-primary, #ffffff);
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
+.group-widget-label {
+    font-size: 13px;
+    font-weight: normal;
+    color: var(--rmt-text-secondary, #aaaaaa);
+    white-space: nowrap;
+}
+
+.group-widget-close {
+    background: none;
+    border: none;
+    color: var(--rmt-text-primary, #ffffff);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 5px;
+}
+
+.group-widget-close:hover {
+    color: var(--rmt-danger, #ff0000);
+}
+
+.group-widget-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 15px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.5) transparent;
+}
+
+.group-widget-content::-webkit-scrollbar {
+    width: 8px;
+    background-color: transparent;
+}
+
+.group-widget-content::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.5);
+    border-radius: 4px;
+}
+
+.group-widget-content::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.75);
+}
+
+.group-widget-action {
+    margin-bottom: 14px;
+}
+
+.group-widget-action:last-child {
+    margin-bottom: 0;
+}
+
+/* One button per registry entry: full width, 40px minimum for touch. */
+.group-widget-btn {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 40px;
+    padding: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--rmt-text-primary, #ffffff);
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.group-widget-btn:hover {
+    border-color: var(--rmt-text-primary, #ffffff);
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.group-widget-btn-danger {
+    border-color: rgba(var(--rmt-danger-rgb), 0.6);
+    background: rgba(var(--rmt-danger-rgb), 0.12);
+    color: var(--rmt-danger, #ff0000);
+    font-weight: bold;
+}
+
+.group-widget-btn-danger:hover {
+    border-color: var(--rmt-danger, #ff0000);
+    background: var(--rmt-danger, #ff0000);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.5);
+}
+
+/* Consequence of the action above it, in the app's usual muted hint voice. */
+.group-widget-hint {
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--rmt-text-secondary, #aaaaaa);
+}
+
+/* Not an action — the way out. Sits below the actions, behind a dotted rule. */
+.group-widget-clear {
+    margin-top: 14px;
+    border-color: rgba(255, 255, 255, 0.2);
+    background: none;
+    color: var(--rmt-text-secondary, #aaaaaa);
+    font-size: 12px;
+}
+
+.group-widget-clear:hover {
+    border-color: var(--rmt-text-primary, #ffffff);
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--rmt-text-primary, #ffffff);
 }

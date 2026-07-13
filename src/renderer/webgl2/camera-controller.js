@@ -133,10 +133,12 @@ export class CameraController {
         if (!e) return;
         // Suppress camera input when disabled (e.g., during GL note drags)
         if (!this.inputEnabled) return;
-        if (e.ctrlKey || e.metaKey) {
-          // Let browser handle pinch-zoom gesture if any
-          return;
-        }
+        // ctrl/⌘ + wheel is NOT handed to the browser. Reaching for a modifier to zoom is
+        // a normal desktop reflex, and page-zooming the app on that reflex is jarring —
+        // so over the canvas it drives the SAME camera zoom as a plain wheel. (Trackpad
+        // pinch also arrives as ctrl+wheel, which this picks up for free.) The page-zoom
+        // default is killed app-wide in main.js, including over the UI chrome, where
+        // ctrl+wheel then does nothing at all.
         e.preventDefault();
 
         const rect = this.containerEl.getBoundingClientRect();
