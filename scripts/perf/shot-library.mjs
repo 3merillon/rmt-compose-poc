@@ -91,7 +91,14 @@ const measure = () => page.evaluate(() => {
     visibleSeparators: Array.from(c.querySelectorAll('.separator')).filter(vis).length,
     containerScrollW: c.scrollWidth,
     containerClientW: c.clientWidth,
-    searchRowInBar: !!document.querySelector('.second-top-bar > .library-search-row'),
+    toolbarInBar: !!document.querySelector('.second-top-bar .library-toolbar'),
+    // The row's height is the grid's top inset: these two must not drift apart when the
+    // search field folds open or shut.
+    toolbarH: document.querySelector('.library-toolbar')?.offsetHeight ?? null,
+    wrapPadTop: Math.round(parseFloat(getComputedStyle(document.querySelector('.icons-wrapper')).paddingTop)),
+    searchOpen: !!document.querySelector('.library-toolbar.search-open'),
+    historyDisabled: ['.library-undo-btn', '.library-redo-btn']
+      .map((s) => !!document.querySelector(s)?.disabled),
     barH: document.querySelector('.second-top-bar').offsetHeight,
     sections: secRows,
   };
@@ -130,7 +137,7 @@ await shoot('00-default-open');
   await page.waitForTimeout(250);
   const closed = await page.evaluate(() => {
     const bar = document.querySelector('.second-top-bar');
-    const row = document.querySelector('.library-search-row');
+    const row = document.querySelector('.library-toolbar');
     const tabEl = document.querySelector('.pull-tab');
     // Hit-test, not getBoundingClientRect: a clipped element still reports a box.
     const painted = (el) => {
@@ -153,13 +160,13 @@ console.log('sections:', names.map((s) => s.replace(/[▾▸]/g, '').trim()).joi
 
 await shoot('01-expanded');
 
-// Scroll the library: the search row must not move (it is outside the scroll area).
-const beforeScroll = await page.locator('.library-search-row').boundingBox();
+// Scroll the library: the toolbar must not move (it is outside the scroll area).
+const beforeScroll = await page.locator('.library-toolbar').boundingBox();
 await page.evaluate(() => { document.querySelector('.icons-wrapper').scrollTop = 120; });
 await page.waitForTimeout(200);
-const afterScroll = await page.locator('.library-search-row').boundingBox();
+const afterScroll = await page.locator('.library-toolbar').boundingBox();
 await shoot('01b-scrolled');
-console.log('search row y before/after scroll:', beforeScroll.y, afterScroll.y,
+console.log('toolbar y before/after scroll:', beforeScroll.y, afterScroll.y,
   beforeScroll.y === afterScroll.y ? '(fixed)' : '(MOVED!)');
 await page.evaluate(() => { document.querySelector('.icons-wrapper').scrollTop = 0; });
 
@@ -197,14 +204,24 @@ await shoot('06-reexpanded');
 // the search reveals it and that clearing restores the collapse.
 await clickLabel(0);
 await page.waitForTimeout(150);
+
+// The field is folded away behind the magnifier now: unfold it before typing. The row's
+// height must not move when it does — it is the icon grid's top inset (see measure()).
+await page.click('.library-search-toggle');
+await page.waitForTimeout(300);
+await shoot('06b-search-open');
+
 for (const q of ['3', 'maj']) {
   await page.fill('.library-search-input', q);
   await page.waitForTimeout(250);
   await shoot(`07-search-${q}`);
 }
-await page.fill('.library-search-input', '');
-await page.waitForTimeout(250);
-await shoot('08-search-cleared');   // section 0 must be collapsed again
+
+// Closing the field clears the query — a filter still applied behind a folded-away field
+// would be a library silently missing modules. Section 0 must be collapsed again after.
+await page.click('.library-search-toggle');
+await page.waitForTimeout(300);
+await shoot('08-search-cleared');
 await clickLabel(0);                // re-expand for the size sweep
 
 // icon-size sweep: labels must track the icons

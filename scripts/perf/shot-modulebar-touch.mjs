@@ -160,16 +160,31 @@ console.log('\n== mobile 390x844 (touch) — module bar scrollbar');
     thumb.nullProbesDownTrack > 0 || geom.trackTotal >= 32,
     `null probes down the track = ${thumb.nullProbesDownTrack} @x=${thumb.probeX}`);
 
-  // The search row is absolutely positioned across the whole bar, so it does not
-  // automatically respect the wrapper's scrollbar gutter. Left full-bleed, the field's
-  // right edge sits on top of the scrollbar thumb.
+  // The toolbar is absolutely positioned across the whole bar, so it does not
+  // automatically respect the wrapper's scrollbar gutter. Left full-bleed, its right end —
+  // now the undo/redo buttons — would sit on top of the scrollbar thumb.
+  //
+  // The field is folded away behind the magnifier until asked for, so open it before
+  // measuring: closed, it is deliberately a 0-width box.
+  const collapsed = await page.evaluate(() =>
+    Math.round(document.querySelector('.library-search-input').getBoundingClientRect().width));
+  check('the search field starts folded away (no field until the magnifier is tapped)',
+    collapsed <= 2, `collapsed field width = ${collapsed}px`);
+
+  await page.click('.library-search-toggle');
+  await page.waitForTimeout(300);
+
   const search = await page.evaluate(() => {
     const inp = document.querySelector('.library-search-input');
     const wrap = document.querySelector('.icons-wrapper');
     const cont = document.querySelector('.icons-container');
+    const redo = document.querySelector('.library-redo-btn');
+    const toggle = document.querySelector('.library-search-toggle');
     const ir = inp.getBoundingClientRect();
     const wr = wrap.getBoundingClientRect();
     const cr = cont.getBoundingClientRect();
+    const rr = redo.getBoundingClientRect();
+    const tr = toggle.getBoundingClientRect();
     const cs = getComputedStyle(inp);
     const cv = document.createElement('canvas').getContext('2d');
     cv.font = cs.fontSize + ' ' + cs.fontFamily;
@@ -179,21 +194,33 @@ console.log('\n== mobile 390x844 (touch) — module bar scrollbar');
       trackRight: Math.round(wr.right),
       textWidth: Math.ceil(cv.measureText(inp.placeholder).width),
       clipped: inp.scrollWidth > inp.clientWidth + 1,
+      toolbarH: Math.round(document.querySelector('.library-toolbar').getBoundingClientRect().height),
+      wrapPadTop: Math.round(parseFloat(getComputedStyle(wrap).paddingTop)),
+      btnRight: Math.round(rr.right), btnBox: [Math.round(rr.width), Math.round(rr.height)],
+      toggleLeft: Math.round(tr.left),
       vw: window.innerWidth,
     };
   });
   console.log('  ' + JSON.stringify(search));
 
+  check('the undo/redo buttons clear the scrollbar gutter (do not overlap the thumb)',
+    search.btnRight <= search.gutterStartsAt,
+    `rightmost button right=${search.btnRight}, gutter starts at ${search.gutterStartsAt} (track right=${search.trackRight})`);
+  check('the magnifier is inset to match the icon grid',
+    search.toggleLeft >= 18, `left=${search.toggleLeft}`);
   check('the search field clears the scrollbar gutter (does not overlap the thumb)',
     search.right <= search.gutterStartsAt,
-    `field right=${search.right}, gutter starts at ${search.gutterStartsAt} (track right=${search.trackRight})`);
-  check('the search field is inset to match the icon grid',
-    search.left >= 18, `left=${search.left}`);
-  check('...but is still wide enough for its placeholder, with room to spare',
+    `field right=${search.right}, gutter starts at ${search.gutterStartsAt}`);
+  check('the opened field is still wide enough for its placeholder, with room to spare',
     search.width >= search.textWidth + 24 && !search.clipped,
     `width=${search.width}px vs text ${search.textWidth}px + padding; clipped=${search.clipped}`);
   check('...and is no longer full-bleed', search.width < search.vw - 40,
     `${search.width}px in a ${search.vw}px viewport`);
+  // The icon grid's top inset is the toolbar's height, and nothing re-measures it when the
+  // field unfolds — so opening the field must not have changed the row's height.
+  check('the toolbar height still matches the icon grid inset with the field open',
+    search.toolbarH === search.wrapPadTop,
+    `toolbar=${search.toolbarH}px, .icons-wrapper padding-top=${search.wrapPadTop}px`);
 
   const noErrors = !errors.length;
   check('no pageerror on mobile boot', noErrors, errors.join(' | ') || 'clean');

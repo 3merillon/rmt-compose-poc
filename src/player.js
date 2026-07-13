@@ -2169,7 +2169,23 @@ if (canvasEl) {
         // Update WebGL renderer selection ordering
         try { syncRendererSelection(); } catch {}
     }
-      
+
+    // A history restore replaces the module wholesale (cleanupCurrentModule + loadFromJSON),
+    // so every selection the UI is holding points at Note objects that no longer exist. Drop
+    // it before the teardown, or the note widget stays open showing the OLD note's
+    // expression, and committing a field from it writes into a dead note and snapshots the
+    // result. Registered here because clearSelection() is scoped to this closure, and it
+    // runs before the restore handler itself (listeners fire in registration order).
+    //
+    // Every other module-swapping path already clears explicitly; the restore path only ever
+    // got away with it because the mouse Undo lived in the "+" menu, which the global
+    // mouseup treats as "outside" — so the selection was cleared incidentally, a beat before
+    // the click landed. Ctrl+Z never had that accident, and the module bar's Undo does not
+    // either (it is allow-listed, so that using it does not wipe the selection).
+    try {
+        eventBus.on('history:requestRestore', () => { try { clearSelection(); } catch (e) {} });
+    } catch (e) {}
+
     domCache.closeWidgetBtn.addEventListener('click', () => {
         clearSelection();
     });
@@ -4489,6 +4505,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // Same for the group-actions widget: clicking its own buttons must
                 // not wipe the very selection those buttons act on.
                 !event.target.closest('#group-widget') &&
+                // And for the module bar's toolbar (search + undo/redo): it is chrome, like
+                // the settings gear. Reaching for Undo, or for the search field to find a
+                // module to drop, must not drop the selection out from under you first.
+                !event.target.closest('.library-toolbar') &&
                 !event.target.closest('.octave-button')) {
                 clearSelection();
             }
@@ -4550,6 +4570,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // Same for the group-actions widget: clicking its own buttons must
                 // not wipe the very selection those buttons act on.
                 !event.target.closest('#group-widget') &&
+                // And for the module bar's toolbar (search + undo/redo): it is chrome, like
+                // the settings gear. Reaching for Undo, or for the search field to find a
+                // module to drop, must not drop the selection out from under you first.
+                !event.target.closest('.library-toolbar') &&
                 !event.target.closest('.octave-button')) {
                 clearSelection();
             }

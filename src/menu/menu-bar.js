@@ -5,6 +5,7 @@ import { renderModuleIcon } from './icon-factory.js';
 import { settingsStore } from '../settings/settings-store.js';
 import { pointerOf } from '../utils/draggable-widget.js';
 import { viewportHeight } from '../utils/viewport.js';
+import { history } from '../store/history.js';
 
 const menuAPI = (function() {
     const domCache = {
@@ -280,32 +281,162 @@ const menuAPI = (function() {
         }
     }
 
-    // The search row is bar chrome, not library content: it lives in .second-top-bar
-    // above .icons-wrapper, so it survives a library rebuild (which wipes
-    // .icons-container) and does not scroll with the icons.
-    function createSearchRow() {
+    // === Toolbar (search + history) ===
+    // 24x24, stroke-only, currentColor — the idiom the gear and docs icons in index.html
+    // already use, so a button colours its glyph just by setting `color`.
+    function toolIconSVG(paths) {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
+    }
+    const ICON_SEARCH = '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.6 15.6 21 21"/>';
+    const ICON_UNDO = '<path d="M4 9h10a5.5 5.5 0 0 1 0 11h-3"/><path d="M8 5 4 9l4 4"/>';
+    const ICON_REDO = '<path d="M20 9H10a5.5 5.5 0 0 0 0 11h3"/><path d="m16 5 4 4-4 4"/>';
+
+    function createToolButton(cls, label, iconPaths) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'library-tool-btn ' + cls;
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+        btn.innerHTML = toolIconSVG(iconPaths);
+        return btn;
+    }
+
+    function getToolbar() {
+        return domCache.secondTopBar ? domCache.secondTopBar.querySelector('.library-toolbar') : null;
+    }
+
+    let searchOpen = false;
+
+    // Open/close the search field. Closing ALWAYS clears the query: a filter still applied
+    // behind a folded-away field is a library that is silently missing modules, with
+    // nothing on screen to say why. Clearing is also what hands the bar back the height
+    // the search shrank it to (applyModuleSearch's heightBeforeSearch).
+    function setSearchOpen(open, { focus = true } = {}) {
+        const row = getToolbar();
+        if (!row) return;
+        const input = row.querySelector('.library-search-input');
+        const toggle = row.querySelector('.library-search-toggle');
+        searchOpen = !!open;
+        row.classList.toggle('search-open', searchOpen);
+        if (toggle) toggle.setAttribute('aria-expanded', searchOpen ? 'true' : 'false');
+        if (!input) return;
+        // Collapsed it is 0-wide and unpaintable, so keep it out of the tab order too —
+        // otherwise Tab lands on a field nobody can see.
+        input.tabIndex = searchOpen ? 0 : -1;
+        if (searchOpen) {
+            if (focus) input.focus();
+            return;
+        }
+        const hadFocus = document.activeElement === input;
+        input.value = '';
+        if (currentSearchQuery) applyModuleSearch('');
+        // Hand focus back to the magnifier rather than dropping it on <body>: the field the
+        // user was in is gone, and Enter has to be able to bring it back. (Only if the field
+        // actually held focus — a programmatic close must not steal it from elsewhere.)
+        if (hadFocus) {
+            if (toggle) toggle.focus();
+            else input.blur();
+        }
+    }
+
+    // The toolbar is bar chrome, not library content: it lives in .library-body above
+    // .icons-wrapper, so it survives a library rebuild (which wipes .icons-container) and
+    // does not scroll with the icons.
+    //
+    // Left: a magnifier that unfolds the search field — collapsed by default, because a
+    // permanently-open field sat there costing a module row's worth of width to show a
+    // control most sessions never touch. Right: undo/redo, which is the whole point of
+    // putting them here — history without opening the "+" menu, for anyone not using
+    // Ctrl+Z. Both emit the same eventBus events the menu's Undo/Redo buttons do.
+    //
+    // Every control is 30px tall and border-boxed, and the field collapses by WIDTH (never
+    // display/height), so the row's height is a constant 42px. That matters: its height is
+    // .icons-wrapper's top inset and part of the pull-tab's fit height, and neither is
+    // recomputed when the field opens (see getToolbarHeight).
+    function createToolbar() {
         const row = document.createElement('div');
-        row.className = 'library-search-row';
+        row.className = 'library-toolbar';
+
+        const toggle = createToolButton('library-search-toggle', 'Search modules', ICON_SEARCH);
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.addEventListener('click', () => setSearchOpen(!searchOpen));
+        // Keep the focus where it is while the toggle is pressed: without this, mousedown
+        // blurs the field, the blur handler below folds it shut, and the click that follows
+        // reads `searchOpen === false` and immediately reopens what the user just closed.
+        toggle.addEventListener('mousedown', (e) => e.preventDefault());
+
         const input = document.createElement('input');
-        input.type = 'search';
-        input.placeholder = 'Search modules — name, ratio, tag...';
+        // Deliberately NOT type="search": WebKit gives that one a native Escape-to-clear
+        // that resets the value WITHOUT firing `input`, which would leave the library
+        // filtered against a query the field no longer shows. Escape is handled below.
+        input.type = 'text';
+        input.placeholder = 'Search name, ratio, tag…';
         input.className = 'library-search-input';
         input.value = currentSearchQuery;
+        input.tabIndex = -1;
         input.setAttribute('autocomplete', 'off');
         input.setAttribute('autocorrect', 'off');
         input.setAttribute('spellcheck', 'false');
         input.addEventListener('input', () => applyModuleSearch(input.value));
-        // Don't let interactions inside the input start a category/module drag.
-        input.addEventListener('pointerdown', (e) => e.stopPropagation());
-        input.addEventListener('mousedown', (e) => e.stopPropagation());
+        // An empty field that has lost focus is just chrome in the way — fold it back to
+        // the icon. A field with a live query stays open: the library is filtered, and the
+        // query has to remain visible and clearable.
+        input.addEventListener('blur', () => {
+            // The `searchOpen` guard makes this re-entrancy-safe: closing moves focus to the
+            // magnifier, which fires this blur, which would otherwise re-enter setSearchOpen.
+            if (searchOpen && !input.value.trim()) setSearchOpen(false);
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            // Only swallow Escape when this field is the thing it closes — the listener is
+            // on the input, so it can only fire while the field has focus.
+            e.stopPropagation();
+            setSearchOpen(false);
+        });
+
+        const group = document.createElement('div');
+        group.className = 'library-tool-group';
+        const undo = createToolButton('library-undo-btn', 'Undo (Ctrl+Z)', ICON_UNDO);
+        const redo = createToolButton('library-redo-btn', 'Redo (Ctrl+Y)', ICON_REDO);
+        // Born disabled, like their counterparts in index.html: an empty history is the
+        // truth at boot, and syncHistoryButtons() (which needs the row mounted to find
+        // them) only runs once ensureToolbar has inserted it.
+        undo.disabled = true;
+        redo.disabled = true;
+        undo.addEventListener('click', () => { try { eventBus.emit('history:undo'); } catch (e) {} });
+        redo.addEventListener('click', () => { try { eventBus.emit('history:redo'); } catch (e) {} });
+        group.appendChild(undo);
+        group.appendChild(redo);
+
+        row.appendChild(toggle);
         row.appendChild(input);
+        row.appendChild(group);
         return row;
     }
 
-    // The clipping box for the bar's contents (search row + scrolling icons). The clip
+    // Enable/disable from the live stacks. The bus does not replay, and this row is built
+    // during boot — possibly before the module's first snapshot is seeded — so the initial
+    // state is read from the store rather than waited for. `state` is the payload when this
+    // runs as a history:stackChanged subscriber (see init).
+    function syncHistoryButtons(state) {
+        const row = getToolbar();
+        if (!row) return;
+        let canUndo = false, canRedo = false;
+        try {
+            canUndo = state ? !!state.canUndo : history.canUndo();
+            canRedo = state ? !!state.canRedo : history.canRedo();
+        } catch (e) {}
+        const undo = row.querySelector('.library-undo-btn');
+        const redo = row.querySelector('.library-redo-btn');
+        if (undo) undo.disabled = !canUndo;
+        if (redo) redo.disabled = !canRedo;
+    }
+
+    // The clipping box for the bar's contents (toolbar + scrolling icons). The clip
     // cannot live on .second-top-bar itself: the pull-tab hangs below it (bottom: -16px)
     // and would be clipped away. With it here, dragging the bar shut closes over the
-    // search row exactly as it does over the icons.
+    // toolbar exactly as it does over the icons.
     function ensureLibraryBody() {
         const bar = domCache.secondTopBar, wrapper = domCache.iconsWrapper;
         if (!bar || !wrapper) return null;
@@ -319,24 +450,32 @@ const menuAPI = (function() {
         return body;
     }
 
-    // Create the search row once, above the scrolling icons wrapper. Kept (not
-    // recreated) across library rebuilds so an in-flight query and the input's focus
-    // survive; the query is simply re-applied to the freshly built icons.
-    function ensureSearchRow() {
+    // Create the toolbar once, above the scrolling icons wrapper. Kept (not recreated)
+    // across library rebuilds so an in-flight query, the input's focus, and the open/closed
+    // state survive; the query is simply re-applied to the freshly built icons.
+    function ensureToolbar() {
         const body = ensureLibraryBody();
         if (!body) return;
         // Drop a stale row from the pre-move layout, if one is still in the container.
-        const orphan = domCache.iconsContainer && domCache.iconsContainer.querySelector(':scope > .library-search-row');
+        const orphan = domCache.iconsContainer && domCache.iconsContainer.querySelector(':scope > .library-toolbar');
         if (orphan) orphan.remove();
-        if (!body.querySelector(':scope > .library-search-row')) {
-            body.insertBefore(createSearchRow(), body.firstChild);
+        if (!body.querySelector(':scope > .library-toolbar')) {
+            body.insertBefore(createToolbar(), body.firstChild);
         }
+        // Only now that the row is IN the document can syncHistoryButtons find its buttons.
+        // It has to run here and not merely on the next history:stackChanged: the bus does
+        // not replay, and the module's initial snapshot may already have been seeded before
+        // this module ever subscribed.
+        syncHistoryButtons();
         // Re-apply an in-flight query to freshly built icons.
         if (currentSearchQuery.trim()) applyModuleSearch(currentSearchQuery);
     }
 
-    function getSearchRowHeight() {
-        const row = domCache.secondTopBar ? domCache.secondTopBar.querySelector('.library-search-row') : null;
+    // Constant by construction (30px controls + 6px padding top/bottom = 42px), and it has
+    // to stay that way: this is .icons-wrapper's top inset and part of the pull-tab's fit
+    // height, and nothing re-measures it when the search field opens or closes.
+    function getToolbarHeight() {
+        const row = getToolbar();
         return row ? row.offsetHeight : 0;
     }
 
@@ -680,7 +819,7 @@ const menuAPI = (function() {
             injectLibraryStyle();
             refreshSectionCounts();
             updateSectionFlow();
-            ensureSearchRow();
+            ensureToolbar();
             updateMaxHeight();
             applyDefaultOpenHeight();
             // Write the migrated/healed/imported layout back, so the repair happens once
@@ -718,7 +857,10 @@ const menuAPI = (function() {
         // Inject before any section is built: sections get their layout from
         // .library-section, so the sheet has to exist before they are rendered.
         injectLibraryStyle();
-        ensureSearchRow(); // bar chrome — must exist before the height math runs
+        ensureToolbar(); // bar chrome — must exist before the height math runs
+        // One subscription for the life of the page: the toolbar itself is created once
+        // and survives every library rebuild, so its buttons never need re-wiring.
+        try { eventBus.on('history:stackChanged', syncHistoryButtons); } catch (e) {}
         updateMaxHeight();
         domCache.secondTopBar.style.height = '50px'; // replaced by applyDefaultOpenHeight() once the library is built
         setupResizeEvents();
@@ -789,7 +931,7 @@ const menuAPI = (function() {
             const cs = window.getComputedStyle(container);
             const padding = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
             const firstRow = getIconSizePx(); // label and icons are both one icon-size tall
-            const target = getSearchRowHeight() + padding + firstRow + getSeparatorHeight();
+            const target = getToolbarHeight() + padding + firstRow + getSeparatorHeight();
             const h = Math.min(maxMenuBarHeight, getContentFitHeight(), target);
             domCache.secondTopBar.style.height = Math.max(0, h) + 'px';
             hasAppliedDefaultHeight = true;
@@ -803,9 +945,9 @@ const menuAPI = (function() {
         const currentHeight = parseInt(domCache.secondTopBar.style.height || '50', 10);
         if (currentHeight > maxMenuBarHeight) domCache.secondTopBar.style.height = maxMenuBarHeight + 'px';
 
-        // The search row overlays the top of the wrapper, so the wrapper is inset by its
+        // The toolbar overlays the top of the wrapper, so the wrapper is inset by its
         // height and only the separator is subtracted from the wrapper's own max height.
-        domCache.iconsWrapper.style.paddingTop = getSearchRowHeight() + 'px';
+        domCache.iconsWrapper.style.paddingTop = getToolbarHeight() + 'px';
         domCache.iconsWrapper.style.maxHeight = Math.max(0, (maxMenuBarHeight - getSeparatorHeight())) + 'px';
 
         // Auto-shrink to fit current content if window got wider and content unwrapped
@@ -2306,7 +2448,7 @@ const menuAPI = (function() {
                 buildSectionsLegacy();
             }
             injectLibraryStyle();
-            ensureSearchRow();
+            ensureToolbar();
             setTimeout(() => { updateMaxHeight(); applyDefaultOpenHeight(); }, 100);
         });
     }
@@ -2366,30 +2508,69 @@ const menuAPI = (function() {
                 background: rgba(var(--rmt-accent-rgb), 0.18);
                 border: 1px solid rgba(var(--rmt-accent-rgb), 0.45);
             }
-            /* Clips the bar's contents so dragging it shut closes over the search row
+            /* Clips the bar's contents so dragging it shut closes over the toolbar
                too, without clipping the pull-tab that hangs below the bar. */
             .library-body { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
             /* Chrome, not content: it overlays the top of the scroll area (which is
                padded to match) rather than scrolling with it, so it never moves. The row
-               itself is invisible and transparent to the pointer — only the field is
-               there — so a module peeking out beside the field can still be grabbed.
-               z-index sits above the delete × buttons (10/12), or the field would have
-               them punching through it unblurred while the icons behind are frosted. */
-            .library-search-row { position: absolute; top: 0; left: 0; right: 0; z-index: 30; display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 0; box-sizing: border-box; background: transparent; pointer-events: none; }
-            /* The only painted, only clickable part of the row: a compact frosted field.
-               Translucent so icons scrolling under it stay faintly readable. */
-            .library-search-input { pointer-events: auto; flex: 0 1 420px; min-width: 0; height: 30px; box-sizing: border-box; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.62); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); color: var(--rmt-text-primary, #ffa800); font-family: 'Roboto Mono', monospace; font-size: 13px; outline: none; -webkit-appearance: none; appearance: none; }
+               itself is invisible and transparent to the pointer — only its controls are
+               there — so a module peeking out between them can still be grabbed.
+               z-index sits above the delete × buttons (10/12), or the controls would have
+               them punching through unblurred while the icons behind are frosted. */
+            .library-toolbar { position: absolute; top: 0; left: 0; right: 0; z-index: 30; display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 0; box-sizing: border-box; background: transparent; pointer-events: none; }
+            /* Undo/redo, pinned to the right end of the row. Inert itself, like the row:
+               only the buttons inside it take the pointer. */
+            .library-tool-group { margin-left: auto; display: flex; align-items: center; gap: 6px; pointer-events: none; }
+            /* The painted, clickable parts of the row: frosted, translucent so the icons
+               scrolling under them stay faintly readable. 30px tall, like the field, which
+               is what keeps the row's height constant (see getToolbarHeight). */
+            .library-tool-btn { pointer-events: auto; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.62); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); color: var(--rmt-accent, #ffa800); cursor: pointer; -webkit-appearance: none; appearance: none; transition: color 0.2s ease-in-out, border-color 0.2s ease-in-out, background-color 0.2s ease-in-out, opacity 0.2s ease-in-out; }
+            .library-tool-btn svg { width: 18px; height: 18px; display: block; }
+            .library-tool-btn:hover:not(:disabled), .library-tool-btn:focus-visible { outline: none; border-color: var(--rmt-accent, #ffa800); background: rgba(var(--rmt-accent-rgb), 0.18); }
+            /* Nothing on the stack: dimmed and inert, but still drawn — the row must not
+               change shape as history fills up. */
+            .library-tool-btn:disabled { opacity: 0.3; cursor: default; }
+            /* The magnifier stays lit while the field is unfolded, so the open state reads
+               even when the field itself is scrolled behind a wall of icons. */
+            .library-toolbar.search-open .library-search-toggle { border-color: var(--rmt-accent, #ffa800); background: rgba(var(--rmt-accent-rgb), 0.18); }
+            /* The app sets user-select: none on html/body (styles.css), which takes the caret
+               and text selection out of any input that does not opt back in. */
+            .library-search-input { pointer-events: auto; flex: 0 1 320px; min-width: 0; height: 30px; box-sizing: border-box; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.62); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); color: var(--rmt-text-primary, #ffa800); font-family: 'Roboto Mono', monospace; font-size: 13px; outline: none; -webkit-appearance: none; appearance: none; user-select: text; -webkit-user-select: text;
+                transition-property: flex-basis, padding, opacity, border-color, visibility;
+                /* visibility gets NO duration, so opening makes the field focusable in the
+                   same style recalc as the class change. It has to: setSearchOpen focuses the
+                   field synchronously inside the click handler, and a focus() deferred to a
+                   later frame loses the user activation that opens the on-screen keyboard on
+                   iOS. (Given a duration, visibility still computes as hidden at progress 0
+                   and the browser refuses the focus outright.) The delay that hides it lives
+                   on the collapsed rule below, so only the CLOSE direction waits. */
+                transition-duration: 0.18s, 0.18s, 0.18s, 0.18s, 0s;
+                transition-timing-function: ease-in-out;
+                transition-delay: 0s; }
             .library-search-input::placeholder { color: var(--rmt-text-secondary, rgba(255,168,0,0.5)); }
             .library-search-input:focus { border-color: var(--rmt-accent, #ffa800); box-shadow: 0 0 0 2px rgba(var(--rmt-accent-rgb), 0.25); }
+            /* Folded away: collapsed by WIDTH, never by display or height. The 30px box stays
+               in the row (with nothing painted in it), so the row's height — which is the
+               icon grid's top inset and part of the pull-tab's fit height — cannot move when
+               the field opens. A shrink-only bar (adjustHeightToContent) would not give back
+               the height a height-changing row cost it.
+               visibility (which is NOT a layout property, so the row still measures 42px) is
+               what takes the folded field out of the accessibility tree and out of reach of
+               programmatic focus. Without it, opacity:0 alone leaves a screen reader an
+               invisible 2px textbox it can focus and type into — filtering the library with
+               no field on screen to say why. It is in the transition list so the field still
+               fades out rather than vanishing on the first frame. */
+            .library-toolbar:not(.search-open) .library-search-input { flex-basis: 0; padding-left: 0; padding-right: 0; border-color: transparent; opacity: 0; visibility: hidden; pointer-events: none;
+                /* Same property order as the base rule: hold the hide back until the field has
+                   finished folding away, so it shrinks out rather than blinking out. */
+                transition-delay: 0s, 0s, 0s, 0s, 0.18s; }
             /* Touch: the row is absolutely positioned across the WHOLE bar, but the icon
                grid beneath it is inset by the touch scrollbar's 18px gutter. Left
-               full-bleed, the field's right edge lands on top of the scrollbar thumb —
-               the one thing that has to stay grabbable. Match the grid's inset, and cap
-               the field at roughly its placeholder width (~282px at 13px Roboto Mono) plus
-               its padding and a little air, rather than stretching it edge to edge. */
+               full-bleed, the right end of the row lands on top of the scrollbar thumb —
+               the one thing that has to stay grabbable. Match the grid's inset, so the
+               undo/redo buttons stop short of the track. */
             @media (pointer: coarse) {
-              .library-search-row { padding-left: 18px; padding-right: 18px; }
-              .library-search-input { flex: 0 1 320px; }
+              .library-toolbar { padding-left: 18px; padding-right: 18px; }
             }
         `;
         document.head.appendChild(style);
