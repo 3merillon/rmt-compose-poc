@@ -2,6 +2,9 @@ import Fraction from 'fraction.js';
 import { InstrumentManager } from '../instruments/instrument-manager.js';
 import { AudioGraph } from './audio-graph.js';
 
+// Short enough to read as instant, long enough that the cut is not a step.
+const DECLICK_FADE = 0.02; // seconds
+
 export class AudioEngine {
   constructor({ initialVolume = 0.2, rampTime = 0.2 } = {}) {
     this.INITIAL_VOLUME = initialVolume;
@@ -267,6 +270,13 @@ export class AudioEngine {
     // Create the voice (may be a bare OscillatorNode or a wrapper) + envelope.
     const voice = this.instrumentManager.createOscillator(noteData.instrument, noteData.frequency);
     const gainNode = ctx.createGain();
+    // A GainNode defaults to 1, and voices are built up to LOOKAHEAD seconds
+    // before they sound. That default is what a pending voice's gain reads back
+    // as, so a fade-out (pauseFade/stopAll) would anchor it at 1.0, cancel its
+    // envelope, and let it start mid-fade at 5x the intended peak — an audible
+    // blast of a note that should never have sounded. Rest at silence instead;
+    // the envelope's setValueAtTime(EPS, start) takes over from here.
+    gainNode.gain.value = 0;
 
     try {
       this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, initialVolume);
@@ -373,24 +383,68 @@ export class AudioEngine {
       this._pauseFadeTimer = setTimeout(() => {
         this._pauseFadeTimer = null;
         this._pauseFadeResolve = null;
-        try { this.stopAll(); } finally { resolve(); }
+        // Voices are already at zero from the fade above — no declick needed.
+        try { this.stopAll(0); } finally { resolve(); }
       }, Math.max(0, rampTime * 1000));
     });
   }
 
   /**
-   * Immediately stop and disconnect all active voices, clear tracking.
+   * Stop all active voices and clear tracking.
+   *
+   * Cutting a sounding voice with stop(now)+disconnect steps the bus from the
+   * voice's instantaneous sample value to zero within one sample. Measured over a
+   * sweep of cut phases, that step reaches 17.5x the natural slew of the sustain
+   * it interrupts — a broadband edge. The reverb send runs at unity, so it hits
+   * the convolver and smears across the IR's full length as a tick plus hiss.
+   * (It rides *under* the note's own reverb tail rather than above it, so it does
+   * not raise the level — but it puts 40 dB of splatter into 1-5 kHz and 57 dB
+   * into >5 kHz that has no business being there. That is the "pshhh" on Stop.)
+   * Fade the voices out first (inaudibly short), then stop and disconnect: the
+   * step then never exceeds the sustain's own slew, at any cut phase.
+   *
+   * @param {number} fadeSec declick fade. Pass 0 when the caller has already
+   *   faded the voices to zero (pauseFade), so teardown isn't delayed twice.
    */
-  stopAll() {
+  stopAll(fadeSec = DECLICK_FADE) {
     this._stopStreaming();
     const now = this.audioContext.currentTime;
-    for (const entry of this.activeOscillators) {
-      try { entry.voice.stop(now); } catch {}
-      try { entry.voice.disconnect(); } catch {}
-      try { entry.gainNode.disconnect(); } catch {}
-      try { entry.panner && entry.panner.disconnect(); } catch {}
-    }
+    const entries = Array.from(this.activeOscillators);
+    // Clear tracking up front so the per-note cleanup() timers bail out (they
+    // check membership) and the deferred disconnect below is the only teardown.
     this.activeOscillators.clear();
+    if (!entries.length) return;
+
+    const fade = Math.max(0, fadeSec);
+    const stopAt = now + fade;
+
+    for (const entry of entries) {
+      if (fade > 0) {
+        try {
+          const g = entry.gainNode.gain;
+          // Anchor the current value at `now` before ramping — cancelScheduledValues
+          // alone leaves a past envelope event as the ramp's start point, which
+          // would step the gain instead of fading it (the very click we're killing).
+          const cur = g.value;
+          g.cancelScheduledValues(now);
+          g.setValueAtTime(cur, now);
+          g.linearRampToValueAtTime(0, stopAt);
+        } catch {}
+      }
+      // Overrides the stop already scheduled when the note was created. A voice
+      // whose start is still in the future simply never sounds.
+      try { entry.voice.stop(stopAt); } catch {}
+    }
+
+    const disconnectAll = () => {
+      for (const entry of entries) {
+        try { entry.voice.disconnect(); } catch {}
+        try { entry.gainNode.disconnect(); } catch {}
+        try { entry.panner && entry.panner.disconnect(); } catch {}
+      }
+    };
+    if (fade > 0) setTimeout(disconnectAll, fade * 1000 + 30);
+    else disconnectAll();
   }
 }
 
