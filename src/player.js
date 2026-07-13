@@ -11,6 +11,7 @@ import { menuBar } from './menu/menu-bar.js';
 import { isDSLSyntax } from './dsl/index.js';
 import { escapeHtml } from './utils/html-escape.js';
 import { settingsStore } from './settings/settings-store.js';
+import { scaleStep } from './settings/settings-schema.js';
 import { themeManager } from './theme/theme-manager.js';
 import { showGroupWidget, hideGroupWidget } from './modals/group-widget.js';
 
@@ -36,8 +37,19 @@ document.addEventListener('DOMContentLoaded', async function() {
     let currentTime = 0, playheadTime = 0, isPlaying = false, isPaused = false, isFadingOut = false, totalPausedTime = 0, isTrackingEnabled = false, isDragging = false, dragStartX = 0, dragStartY = 0, isLocked = false, lastSelectedNote = null, originalNoteOrder = new Map();
     
     let stackClickState = { lastClickPosition: null, stackedNotes: [], currentIndex: -1 };
+    // Workspace density. The Scale Controls widget and Settings → Scale are two
+    // views of these two numbers; `scale.*` in the settings store is the source of
+    // truth, so seed from it here — before the first GL sync reads them — and a
+    // reload comes back at the density you left.
     let xScaleFactor = 1.0, yScaleFactor = 1.0;
-    
+    try {
+        const persistedScale = settingsStore.get('scale');
+        if (persistedScale) {
+            if (typeof persistedScale.x === 'number') xScaleFactor = persistedScale.x;
+            if (typeof persistedScale.y === 'number') yScaleFactor = persistedScale.y;
+        }
+    } catch {}
+
     let glWorkspace = null;
 
     // Multi-note selection (marquee / shift-click). Holds note ids, never the base
@@ -158,273 +170,166 @@ document.addEventListener('DOMContentLoaded', async function() {
     `;
     document.head.appendChild(lockStyles);
   
+    // Both scale axes flow through applyXScale/applyYScale: the widget's sliders,
+    // Settings → Scale, and a limits edit that clamps an out-of-range value all
+    // arrive here by way of the settings store, so exactly one place knows how to
+    // move the workspace.
+    function applyXScale(next) {
+        if (typeof next !== 'number' || !isFinite(next) || next === xScaleFactor) return;
+
+        __rmtScalingXActive = true;
+        // Ensure playhead draws at viewport center during scaling when tracking is enabled
+        try {
+            if (isTrackingEnabled) {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
+                    glWorkspace.renderer.setTrackingMode(true);
+                }
+            }
+        } catch {}
+
+        const oldScale = xScaleFactor;
+        xScaleFactor = next;
+        // Immediately update renderer scale factors to keep playhead world-x in sync this frame
+        try {
+            if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+            }
+        } catch {}
+        // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
+        try {
+            if (isTrackingEnabled && glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                const rect = glWorkspace.containerEl.getBoundingClientRect();
+                const centerX = rect.width * 0.5;
+                const s = glWorkspace.camera.scale || 1;
+                glWorkspace.camera.tx = centerX - s * (playheadTime * (200 * xScaleFactor));
+                if (glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                }
+            }
+        } catch {}
+        updateVisualNotes(evaluatedNotes);
+        createMeasureBars();
+        // Ensure GL overlays/text/regions refresh immediately on scale change by bumping view epoch
+        try {
+            if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+            }
+        } catch {}
+
+        // Keep the same time (sec) under the screen center after x-scale changes
+        try {
+            if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                const rect = glWorkspace.containerEl.getBoundingClientRect();
+                const centerX = rect.width * 0.5;
+                const s = glWorkspace.camera.scale || 1;
+                if (isTrackingEnabled) {
+                    // When tracking, keep playhead centered to avoid any pop
+                    glWorkspace.camera.tx = centerX - s * (playheadTime * (200 * xScaleFactor));
+                } else {
+                    // Preserve the same world time under the screen center
+                    const worldXCenter = (centerX - glWorkspace.camera.tx) / s;
+                    const secCenter = worldXCenter / (200 * oldScale);
+                    glWorkspace.camera.tx = centerX - s * (secCenter * (200 * xScaleFactor));
+                }
+                if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+            }
+        } catch {}
+
+        // Clear scaling flag on next frame to suppress one recenter in updatePlayhead
+        try {
+            requestAnimationFrame(() => { __rmtScalingXActive = false; });
+        } catch {
+            setTimeout(() => { __rmtScalingXActive = false; }, 0);
+        }
+        try { updatePlayhead(); } catch {}
+    }
+
+    function applyYScale(next) {
+        if (typeof next !== 'number' || !isFinite(next) || next === yScaleFactor) return;
+
+        yScaleFactor = next;
+        // Immediately update renderer scale factors so Y-dependent overlays stay consistent
+        try {
+            if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+            }
+        } catch {}
+        updateVisualNotes(evaluatedNotes);
+        updateBaseNotePosition();
+        // Bump view epoch so GL overlays that depend on viewport epoch refresh on Y-scale changes
+        try {
+            if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+            }
+        } catch {}
+    }
+
     const createScaleControls = () => {
         const existingContainer = document.getElementById('scale-controls');
         const existingToggle = document.getElementById('scale-controls-toggle');
-        
+
         if (existingContainer) existingContainer.remove();
         if (existingToggle) existingToggle.remove();
-        
+
         const scaleControlsContainer = document.createElement('div');
         scaleControlsContainer.id = 'scale-controls';
         scaleControlsContainer.className = 'scale-controls';
-        
+
         const toggleButton = document.createElement('div');
         toggleButton.className = 'scale-controls-toggle';
         toggleButton.id = 'scale-controls-toggle';
         toggleButton.title = 'Scale Controls';
-        
+
+        // The rails are a setting now, not a hardcoded attribute: Settings → Scale
+        // can widen them by orders of magnitude, and applyScaleSettings() retunes
+        // these sliders when it does.
+        const lim = settingsStore.get('scale.limits') || {};
         scaleControlsContainer.innerHTML = `
           <div class="y-scale-slider-container">
-            <input type="range" id="y-scale-slider" min="0.3" max="5" step="0.1" value="1.0">
+            <input type="range" id="y-scale-slider" min="${lim.yMin}" max="${lim.yMax}" step="${scaleStep(lim.yMin, lim.yMax)}" value="${yScaleFactor}">
           </div>
           <div class="x-scale-slider-container">
-            <input type="range" id="x-scale-slider" min="0.3" max="2" step="0.1" value="1.0">
+            <input type="range" id="x-scale-slider" min="${lim.xMin}" max="${lim.xMax}" step="${scaleStep(lim.xMin, lim.xMax)}" value="${xScaleFactor}">
           </div>
         `;
-        
+
         document.body.appendChild(scaleControlsContainer);
         document.body.appendChild(toggleButton);
-        
+
         const xScaleSlider = document.getElementById('x-scale-slider');
         const yScaleSlider = document.getElementById('y-scale-slider');
-      
-        const handlers = { xInput: null, yInput: null, xChange: null, yChange: null, toggle: null };
-      
-        function throttle(func, limit) {
-            let inThrottle;
-            return function() {
-                const args = arguments;
-                const context = this;
-                if (!inThrottle) {
-                    func.apply(context, args);
-                    inThrottle = true;
-                    setTimeout(() => inThrottle = false, limit);
-                }
-            };
-        }
-      
-        handlers.xInput = (e) => {
-            __rmtScalingXActive = true;
-            // Ensure playhead draws at viewport center during scaling when tracking is enabled
-            try {
-                if (isTrackingEnabled) {
-                    if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
-                        glWorkspace.renderer.setTrackingMode(true);
-                    }
-                }
-            } catch {}
 
-            
-            const oldScale = xScaleFactor;
-            xScaleFactor = parseFloat(e.target.value);
-            // Immediately update renderer scale factors to keep playhead world-x in sync this frame
-            try {
-                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
-                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                }
-            } catch {}
-            // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
-            try {
-                if (isTrackingEnabled) {
-                    const neu = xScaleFactor;
-                    if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
-                        const rect = glWorkspace.containerEl.getBoundingClientRect();
-                        const centerX = rect.width * 0.5;
-                        const s = glWorkspace.camera.scale || 1;
-                        const x = playheadTime * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * x;
-                        if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                            glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                        }
-                    } else {
-                    }
-                }
-            } catch {}
-            updateVisualNotes(evaluatedNotes);
-            createMeasureBars();
-            // Ensure GL overlays/text/regions refresh immediately on scale change by bumping view epoch
-            try {
-                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } 
-            } catch {}
-            
-            // Keep the same time (sec) under the screen center after x-scale changes
-            try {
-                const old = oldScale;
-                const neu = xScaleFactor;
-                if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
-                    const rect = glWorkspace.containerEl.getBoundingClientRect();
-                    const centerX = rect.width * 0.5;
-                    const s = glWorkspace.camera.scale || 1;
-                    if (isTrackingEnabled) {
-                        // When tracking, keep playhead centered to avoid any pop
-                        const x = playheadTime * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * x;
-                    } else {
-                        // Preserve the same world time under the screen center
-                        const worldXCenter = (centerX - glWorkspace.camera.tx) / s;
-                        const secCenter = worldXCenter / (200 * old);
-                        const newWorldX = secCenter * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * newWorldX;
-                    }
-                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
-                } else {
-                }
-            } catch {}
+        // These sliders only WRITE the setting; the store subscriber below is what
+        // applies it. That single funnel is what keeps the widget and the Settings
+        // panel on the same number, whichever one you touch. ('input' alone: it
+        // already covers dragging, clicking the track and the arrow keys.)
+        const handlers = {
+            xInput: (e) => {
+                const v = parseFloat(e.target.value);
+                if (isFinite(v)) settingsStore.set('scale.x', v);
+            },
+            yInput: (e) => {
+                const v = parseFloat(e.target.value);
+                if (isFinite(v)) settingsStore.set('scale.y', v);
+            },
+            toggle: () => { toggleScaleControls(); },
+        };
 
-            // Clear scaling flag on next frame to suppress one recenter in updatePlayhead
-            try {
-                requestAnimationFrame(() => { __rmtScalingXActive = false; });
-            } catch {
-                setTimeout(() => { __rmtScalingXActive = false; }, 0);
-            }
-            try { updatePlayhead(); } catch {}
-        };
-      
-        handlers.yInput = (e) => {
-            yScaleFactor = parseFloat(e.target.value);
-            // Immediately update renderer scale factors so Y-dependent overlays stay consistent
-            try {
-                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
-                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                }
-            } catch {}
-            updateVisualNotes(evaluatedNotes);
-            updateBaseNotePosition();
-            // Bump view epoch so GL overlays that depend on viewport epoch refresh on Y-scale changes
-            try {
-                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } 
-            } catch {}
-        };
-      
-        handlers.xChange = (e) => {
-            __rmtScalingXActive = true;
-            // Ensure playhead draws at viewport center during scaling when tracking is enabled
-            try {
-                if (isTrackingEnabled) {
-                    if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
-                        glWorkspace.renderer.setTrackingMode(true);
-                    }
-                }
-            } catch {}
-
-            
-            const oldScale = xScaleFactor;
-            xScaleFactor = parseFloat(e.target.value);
-            // Immediately update renderer scale factors to keep playhead world-x in sync this frame
-            try {
-                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
-                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                }
-            } catch {}
-            // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
-            try {
-                if (isTrackingEnabled) {
-                    const neu = xScaleFactor;
-                    if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
-                        const rect = glWorkspace.containerEl.getBoundingClientRect();
-                        const centerX = rect.width * 0.5;
-                        const s = glWorkspace.camera.scale || 1;
-                        const x = playheadTime * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * x;
-                        if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                            glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                        }
-                    } else {
-                    }
-                }
-            } catch {}
-            updateVisualNotes(evaluatedNotes);
-            createMeasureBars();
-            // Ensure GL overlays/text/regions refresh immediately on scale change by bumping view epoch
-            try {
-                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } 
-            } catch {}
-            
-            // Keep the same time (sec) under the screen center after x-scale changes
-            try {
-                const old = oldScale;
-                const neu = xScaleFactor;
-                if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
-                    const rect = glWorkspace.containerEl.getBoundingClientRect();
-                    const centerX = rect.width * 0.5;
-                    const s = glWorkspace.camera.scale || 1;
-                    if (isTrackingEnabled) {
-                        // When tracking, keep playhead centered to avoid any pop
-                        const x = playheadTime * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * x;
-                    } else {
-                        // Preserve the same world time under the screen center
-                        const worldXCenter = (centerX - glWorkspace.camera.tx) / s;
-                        const secCenter = worldXCenter / (200 * old);
-                        const newWorldX = secCenter * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * newWorldX;
-                    }
-                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
-                } else {
-                }
-            } catch {}
-
-            // Clear scaling flag on next frame to suppress one recenter in updatePlayhead
-            try {
-                requestAnimationFrame(() => { __rmtScalingXActive = false; });
-            } catch {
-                setTimeout(() => { __rmtScalingXActive = false; }, 0);
-            }
-            try { updatePlayhead(); } catch {}
-        };
-      
-        handlers.yChange = (e) => {
-            yScaleFactor = parseFloat(e.target.value);
-            // Immediately update renderer scale factors so Y-dependent overlays stay consistent
-            try {
-                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
-                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                }
-            } catch {}
-            updateVisualNotes(evaluatedNotes);
-            updateBaseNotePosition();
-            // Bump view epoch so GL overlays that depend on viewport epoch refresh on Y-scale changes
-            try {
-                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } 
-            } catch {}
-        };
-        
-        handlers.toggle = () => {
-            toggleScaleControls();
-        };
-      
         xScaleSlider.addEventListener('input', handlers.xInput);
         yScaleSlider.addEventListener('input', handlers.yInput);
-        xScaleSlider.addEventListener('change', handlers.xChange);
-        yScaleSlider.addEventListener('change', handlers.yChange);
         toggleButton.addEventListener('click', handlers.toggle);
-        
+
         scaleControlsContainer.handlers = handlers;
-        
-        return { 
-            container: scaleControlsContainer, 
+
+        return {
+            container: scaleControlsContainer,
             toggle: toggleButton,
+            xSlider: xScaleSlider,
+            ySlider: yScaleSlider,
             cleanup: () => {
-                if (xScaleSlider) {
-                    xScaleSlider.removeEventListener('input', handlers.xInput);
-                    xScaleSlider.removeEventListener('change', handlers.xChange);
-                }
-                if (yScaleSlider) {
-                    yScaleSlider.removeEventListener('input', handlers.yInput);
-                    yScaleSlider.removeEventListener('change', handlers.yChange);
-                }
-                if (toggleButton) {
-                    toggleButton.removeEventListener('click', handlers.toggle);
-                }
+                if (xScaleSlider) xScaleSlider.removeEventListener('input', handlers.xInput);
+                if (yScaleSlider) yScaleSlider.removeEventListener('input', handlers.yInput);
+                if (toggleButton) toggleButton.removeEventListener('click', handlers.toggle);
             }
         };
     };
@@ -466,8 +371,35 @@ document.addEventListener('DOMContentLoaded', async function() {
     })();
     
     const scaleControls = createScaleControls();
-   
-   
+
+    // Everything that writes `scale.*` lands here — the widget's own sliders, the
+    // Settings panel, "Reset all" — so the two views can never drift apart: apply
+    // the values, retune the sliders' rails if the limits moved, and re-seed
+    // whichever knob the user is NOT currently holding.
+    function applyScaleSettings() {
+        const sc = settingsStore.get('scale') || {};
+        const lim = sc.limits || {};
+        const tune = (slider, lo, hi) => {
+            if (!slider || !isFinite(lo) || !isFinite(hi)) return;
+            slider.min = lo;
+            slider.max = hi;
+            slider.step = scaleStep(lo, hi);
+        };
+        tune(scaleControls.xSlider, lim.xMin, lim.xMax);
+        tune(scaleControls.ySlider, lim.yMin, lim.yMax);
+        applyYScale(sc.y);
+        applyXScale(sc.x);
+        if (scaleControls.xSlider && scaleControls.xSlider !== document.activeElement) {
+            scaleControls.xSlider.value = xScaleFactor;
+        }
+        if (scaleControls.ySlider && scaleControls.ySlider !== document.activeElement) {
+            scaleControls.ySlider.value = yScaleFactor;
+        }
+    }
+    settingsStore.subscribe(({ path }) => {
+        if (!path || path === 'scale' || path.indexOf('scale.') === 0) applyScaleSettings();
+    });
+
     function batchClassOperation(elements, classesToAdd = [], classesToRemove = []) {
         if (!elements || elements.length === 0) return;
         

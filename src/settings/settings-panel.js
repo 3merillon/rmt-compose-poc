@@ -23,6 +23,7 @@
  */
 
 import { settingsStore } from './settings-store.js';
+import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep } from './settings-schema.js';
 import { THEME_PRESETS, getPreset } from '../theme/presets.js';
 import { eventBus } from '../utils/event-bus.js';
 import { showConfirmation } from '../utils/confirm-dialog.js';
@@ -81,11 +82,14 @@ const DEFAULT_TOP = 110;
 // having somewhere to be.
 const MIN_USEFUL_HEIGHT = 200;
 
+// A tab's id doubles as its settings section name — "Reset this tab" resets the
+// section of the same name, so the two must not drift apart.
 const TABS = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'arrows', label: 'Arrows' },
   { id: 'audio', label: 'Audio' },
   { id: 'library', label: 'Library' },
+  { id: 'scale', label: 'Scale' },
 ];
 
 // Instrument list for the Audio tab default-instrument selector. Kept in sync
@@ -392,11 +396,132 @@ function buildLibraryTab(container) {
   container.appendChild(row('Show cents', toggle('library.showCents'), 'Display cents alongside ratios in the module library.'));
 }
 
+// ---- Scale tab ----------------------------------------------------------
+// The other half of the bottom-left Scale Controls widget: both write the same
+// `scale.*` settings, so whichever you touch, the other follows.
+
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+// Scale factors are read as numbers, not rounded percentages — show enough
+// decimals for a 0.001 limit without printing 1.0000000000000002 for 1.
+const fmtScale = (v) => (Number.isFinite(+v) ? String(Math.round(+v * 1000) / 1000) : '');
+
+// The [min, max] the given axis's slider spans.
+function scaleBounds(axis) {
+  const lim = settingsStore.get('scale.limits') || {};
+  return axis === 'x' ? [lim.xMin, lim.xMax] : [lim.yMin, lim.yMax];
+}
+
+// A slider paired with an editable number. The slider's detents get coarse once
+// the limits span decades, so the number field is how you land on an exact value
+// (it clamps into the limits — widen those first to go further).
+function scaleControl(axis) {
+  const path = `scale.${axis}`;
+  const wrap = el('div', 'rmt-set-slider-wrap');
+  const range = el('input');
+  range.type = 'range';
+  const num = el('input');
+  num.type = 'number';
+  num.className = 'rmt-set-number';
+  num.step = 'any';
+
+  // Re-seeds the bounds too, so editing the limits below retunes these live.
+  const seed = () => {
+    const [lo, hi] = scaleBounds(axis);
+    const step = scaleStep(lo, hi);
+    range.min = lo; range.max = hi; range.step = step;
+    num.min = lo; num.max = hi;
+    const v = settingsStore.get(path);
+    if (range !== document.activeElement) range.value = v;
+    if (num !== document.activeElement) num.value = fmtScale(v);
+  };
+
+  range.addEventListener('input', () => {
+    settingsStore.set(path, parseFloat(range.value));
+    num.value = fmtScale(settingsStore.get(path));
+  });
+  num.addEventListener('change', () => {
+    const v = parseFloat(num.value);
+    if (Number.isFinite(v)) settingsStore.set(path, v);
+    seed();                       // show the clamped value back
+  });
+
+  seed();
+  wrap.append(range, num);
+  addSync(null, seed);            // seed() guards each field's focus itself
+  return wrap;
+}
+
+// The min/max pair for one axis, written as ONE store update: two separate sets
+// would leave the tree momentarily inverted, and the schema resets an inverted
+// range to defaults.
+function limitControl(axis) {
+  const wrap = el('div', 'rmt-set-range');
+  const mk = () => {
+    const i = el('input');
+    i.type = 'number';
+    i.className = 'rmt-set-number';
+    i.step = 'any';
+    i.min = SCALE_HARD_MIN;
+    i.max = SCALE_HARD_MAX;
+    return i;
+  };
+  const loIn = mk();
+  const hiIn = mk();
+
+  const seed = () => {
+    const [lo, hi] = scaleBounds(axis);
+    if (loIn !== document.activeElement) loIn.value = fmtScale(lo);
+    if (hiIn !== document.activeElement) hiIn.value = fmtScale(hi);
+  };
+
+  // Whichever field you just edited wins; the other gives way by a decade rather
+  // than the edit being rejected.
+  const commit = (edited) => {
+    let lo = clamp(parseFloat(loIn.value), SCALE_HARD_MIN, SCALE_HARD_MAX);
+    let hi = clamp(parseFloat(hiIn.value), SCALE_HARD_MIN, SCALE_HARD_MAX);
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) { seed(); return; }
+    if (hi <= lo) {
+      if (edited === 'lo') hi = Math.min(SCALE_HARD_MAX, lo * 10);
+      else lo = Math.max(SCALE_HARD_MIN, hi / 10);
+    }
+    if (hi <= lo) { seed(); return; }   // pinned flat against a hard rail
+    const next = settingsStore.get('scale.limits') || {};
+    next[`${axis}Min`] = lo;
+    next[`${axis}Max`] = hi;
+    settingsStore.set('scale.limits', next);
+    seed();
+  };
+  loIn.addEventListener('change', () => commit('lo'));
+  hiIn.addEventListener('change', () => commit('hi'));
+
+  seed();
+  wrap.append(loIn, el('span', 'rmt-set-ratio-slash', '–'), hiIn);
+  addSync(null, seed);
+  return wrap;
+}
+
+function buildScaleTab(container) {
+  container.appendChild(row('Horizontal (time)', scaleControl('x'), 'How far apart notes sit along the time axis.'));
+  container.appendChild(row('Vertical (pitch)', scaleControl('y'), 'How far apart octaves sit along the frequency axis.'));
+
+  container.appendChild(el('div', 'rmt-set-subhead', 'Slider limits'));
+  container.appendChild(row('Horizontal range', limitControl('x')));
+  container.appendChild(row('Vertical range', limitControl('y')));
+
+  container.appendChild(el('div', 'rmt-set-note',
+    `The limits are the rails of both the sliders above and the bottom-left Scale Controls widget `
+    + `(anywhere from ${SCALE_HARD_MIN} to ${SCALE_HARD_MAX}). Widen them to compose at a density orders of `
+    + `magnitude from the default, or narrow them around a far-off value to keep the sliders fine-grained. `
+    + `A scale always clamps into its range.`));
+}
+
 const TAB_BUILDERS = {
   appearance: buildAppearanceTab,
   arrows: buildArrowsTab,
   audio: buildAudioTab,
   library: buildLibraryTab,
+  scale: buildScaleTab,
 };
 
 // ---- panel lifecycle ----------------------------------------------------
@@ -494,7 +619,7 @@ function confirmResetTab() {
 
 function confirmResetAll() {
   showConfirmation({
-    messageHtml: "This will reset <span style='color: var(--rmt-danger, #ff0000);'>ALL settings</span> — appearance, arrows, audio and library — "
+    messageHtml: "This will reset <span style='color: var(--rmt-danger, #ff0000);'>ALL settings</span> — appearance, arrows, audio, library and scale — "
       + "to their defaults. This action is <span style='color: var(--rmt-danger, #ff0000);'>irreversible</span>, are you sure you wish to proceed?",
     confirmLabel: 'Yes, Reset All',
     onConfirm: () => {
@@ -642,7 +767,10 @@ const SETTINGS_CSS = `
    underline lands directly on the dotted rule instead of floating above it. */
 .rmt-set-tabs{flex:0 0 auto;display:flex;gap:2px;padding:0 10px;
   border-bottom:1px dotted rgba(var(--rmt-accent-rgb,255,168,0),0.4);}
-.rmt-set-tab{position:relative;flex:1 1 0;min-width:0;text-align:center;background:none;border:none;
+/* flex-basis auto, not 0: the tabs still share out the whole row, but each one
+   starts from its own label width, so a long label ("Appearance") isn't squeezed
+   into an ellipsis by short ones once there are five of them. */
+.rmt-set-tab{position:relative;flex:1 1 auto;min-width:0;text-align:center;background:none;border:none;
   color:var(--rmt-text-secondary,#aaa);
   padding:7px 6px;font-size:13px;cursor:pointer;
   min-height:32px;font-family:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
@@ -701,6 +829,9 @@ const SETTINGS_CSS = `
 .rmt-set-toggle{width:20px;height:20px;accent-color:var(--rmt-accent,#ffa800);cursor:pointer;}
 .rmt-set-ratio{display:flex;align-items:center;gap:6px;flex:1 1 auto;}
 .rmt-set-ratio-slash{color:var(--rmt-text-secondary,#aaa);font-size:16px;}
+/* min–max pair (Scale limits). Same shape as .rmt-set-ratio, named for what it
+   is so the next reader doesn't go looking for a fraction. */
+.rmt-set-range{display:flex;align-items:center;gap:6px;flex:1 1 auto;}
 .rmt-set-cents{margin-left:8px;font-size:12px;color:var(--rmt-text-secondary,#bbb);}
 .rmt-set-color{display:flex;align-items:center;gap:8px;flex:0 0 auto;}
 .rmt-set-color-input{width:40px;height:28px;padding:0;border:1px solid var(--rmt-surface-border,#3a3a4a);

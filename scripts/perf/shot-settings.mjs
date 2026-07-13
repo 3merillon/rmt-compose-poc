@@ -8,6 +8,11 @@
  * clamp, the height shrink, the stacking against the confirm overlay, and that
  * the workspace still takes clicks while the panel is open.
  *
+ * Also covers the Scale tab, whose whole point is that it is NOT a second copy of
+ * the state: it and the bottom-left Scale Controls widget write the same
+ * `scale.*` settings, so the checks drive one and assert on the other (and on
+ * what the renderer actually drew with).
+ *
  *   npm run dev            # in another terminal
  *   node scripts/perf/shot-settings.mjs --url http://localhost:3000
  */
@@ -36,11 +41,16 @@ async function newPage({ width, height, hasTouch = false }) {
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('  !! pageerror:', e.message));
   page.on('console', (m) => { if (m.type() === 'error') console.log('  !! console.error:', m.text()); });
+  // Factory settings every run — but only on the context's FIRST load. This runs
+  // on every navigation, and the scale section reloads the page on purpose to
+  // prove the settings survive it.
   await page.addInitScript(() => {
     try {
+      if (sessionStorage.getItem('__shotSettingsBooted')) return;
+      sessionStorage.setItem('__shotSettingsBooted', '1');
       localStorage.removeItem('rmt:moduleSnapshot:v1');
       localStorage.removeItem('ui-state');
-      localStorage.removeItem('rmt:settings:v1');   // factory settings every run
+      localStorage.removeItem('rmt:settings:v1');
     } catch {}
   });
   await page.goto(`${URL_BASE}/?perf=1`, { waitUntil: 'load' });
@@ -585,6 +595,136 @@ console.log('\n== desktop 1280x820');
     gear: document.getElementById('settingsGearBtn').classList.contains('open'),
   }));
   check('clicking the gear while open toggles the panel closed', !toggled.open && !toggled.gear);
+
+  await ctx.close();
+}
+
+// ───────────────────────────────────────────────────────────────── scale ────
+// Settings → Scale and the bottom-left Scale Controls widget are two views of ONE
+// value: move either and the other must follow, live. And the limits are what both
+// sliders span, so editing them has to retune both — and drag an out-of-range
+// value back inside with them.
+console.log('\n== scale: the widget and Settings → Scale are one value');
+{
+  const { ctx, page } = await newPage({ width: 1280, height: 820 });
+
+  const scale = () => page.evaluate(async () => {
+    const { settingsStore } = await import('/src/settings/settings-store.js');
+    return settingsStore.get('scale');
+  });
+  // What the WORKSPACE actually drew with — the store agreeing with itself proves nothing.
+  const drawnWith = () => page.evaluate(() => ({
+    x: window.__rmtRenderer.currentXScaleFactor, y: window.__rmtRenderer.currentYScaleFactor,
+  }));
+  const widget = () => page.evaluate(() => {
+    const x = document.getElementById('x-scale-slider'), y = document.getElementById('y-scale-slider');
+    return { xv: x.value, xmin: x.min, xmax: x.max, xstep: x.step,
+             yv: y.value, ymin: y.min, ymax: y.max, ystep: y.step };
+  });
+  // The Scale tab's inputs, in DOM order.
+  const XRANGE = 0, XNUM = 1, XLIM_MAX = 5, XLIM_MIN = 4;
+  const panelInput = (i) => page.evaluate((i) => {
+    const el = [...document.querySelectorAll('.rmt-set-tabpanel input')][i];
+    return { value: el.value, min: el.min, max: el.max };
+  }, i);
+  // Move a control the way a user does: the native setter, then the real event.
+  const drive = (sel, value, evt) => page.evaluate(({ sel, value, evt }) => {
+    const el = typeof sel === 'number'
+      ? [...document.querySelectorAll('.rmt-set-tabpanel input')][sel]
+      : document.querySelector(sel);
+    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, String(value));
+    el.dispatchEvent(new Event(evt, { bubbles: true }));
+  }, { sel, value, evt });
+
+  // --- 1. the defaults still reproduce the widget's old hardcoded attributes
+  const w0 = await widget();
+  check('scale defaults reproduce the old hardcoded widget rails',
+    w0.xmin === '0.3' && w0.xmax === '2' && w0.ymin === '0.3' && w0.ymax === '5' && w0.ystep === '0.1',
+    `X ${w0.xmin}–${w0.xmax}, Y ${w0.ymin}–${w0.ymax} (step ${w0.ystep})`);
+  check('scale starts neutral at 1.0 / 1.0', w0.xv === '1' && w0.yv === '1', `x=${w0.xv} y=${w0.yv}`);
+
+  // --- 2. widget -> store -> renderer -> panel
+  await page.click('#scale-controls-toggle');
+  await drive('#x-scale-slider', 1.5, 'input');
+  await drive('#y-scale-slider', 2.5, 'input');
+  await page.waitForTimeout(300);
+  let s = await scale(), r = await drawnWith();
+  check('dragging the widget sliders writes scale.x/scale.y AND re-scales the workspace',
+    s.x === 1.5 && s.y === 2.5 && r.x === 1.5 && r.y === 2.5,
+    `store=${s.x}/${s.y}, renderer=${r.x}/${r.y}`);
+  await shoot(page, '10-scale-widget');
+
+  await openPanel(page);
+  await page.click('.rmt-set-tab[data-tab="scale"]');
+  await page.waitForTimeout(250);
+  let xr = await panelInput(XRANGE), xn = await panelInput(XNUM);
+  check('opening Settings → Scale shows what the widget set (no staleness)',
+    xr.value === '1.5' && xn.value === '1.5', `slider=${xr.value}, number=${xn.value}`);
+  await shoot(page, '11-scale-tab');
+
+  // --- 3. panel -> widget, live, with both open
+  await drive(XRANGE, 0.6, 'input');
+  await page.waitForTimeout(300);
+  let w = await widget(); r = await drawnWith(); s = await scale();
+  check('the panel slider moves the widget slider AND the workspace',
+    w.xv === '0.6' && r.x === 0.6 && s.x === 0.6, `widget=${w.xv}, renderer=${r.x}, store=${s.x}`);
+
+  // --- 4. the limits are the rails of BOTH sliders
+  await drive(XLIM_MAX, 50, 'change');
+  await page.waitForTimeout(300);
+  s = await scale(); w = await widget(); xr = await panelInput(XRANGE);
+  check('raising the X limit retunes both sliders to the new rail',
+    s.limits.xMax === 50 && w.xmax === '50' && xr.max === '50',
+    `store=${s.limits.xMin}–${s.limits.xMax}, widget max=${w.xmax}, panel max=${xr.max}`);
+
+  // The point of the limits: a density orders of magnitude from the default. The
+  // slider's detent is coarse out here, so the number field is what lands it exactly.
+  await drive(XNUM, 37.5, 'change');
+  await page.waitForTimeout(400);
+  s = await scale(); r = await drawnWith(); w = await widget();
+  check('an exact off-detent value (37.5×) reaches the workspace',
+    s.x === 37.5 && r.x === 37.5, `store=${s.x}, renderer=${r.x}`);
+  check('the widget slider follows to within one detent',
+    Math.abs(parseFloat(w.xv) - 37.5) <= parseFloat(w.xstep), `widget=${w.xv} (step=${w.xstep})`);
+  await shoot(page, '12-scale-wide');
+
+  // --- 5. narrowing the limits drags an out-of-range value back in
+  await drive(XLIM_MAX, 2, 'change');
+  await page.waitForTimeout(400);
+  s = await scale(); r = await drawnWith(); w = await widget(); xn = await panelInput(XNUM);
+  check('narrowing the limits clamps the scale back into range, everywhere',
+    s.x === 2 && r.x === 2 && w.xv === '2' && xn.value === '2',
+    `store=${s.x}, renderer=${r.x}, widget=${w.xv}, panel=${xn.value}`);
+
+  // --- 6. an inverted range is fixed up, never stored inverted
+  await drive(XLIM_MIN, 5, 'change');            // min 5 against a max of 2
+  await page.waitForTimeout(300);
+  s = await scale();
+  check('a min typed above the max pushes the max out instead of inverting',
+    s.limits.xMin === 5 && s.limits.xMax === 50 && s.x === 5,
+    `limits=${s.limits.xMin}–${s.limits.xMax}, value=${s.x}`);
+
+  // --- 7. it all survives a reload (scale is persisted now, unlike before)
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => !!(window.__rmtRenderer?.instanceCount > 0), null, { timeout: 120_000 });
+  await page.waitForTimeout(700);
+  r = await drawnWith(); w = await widget();
+  check('a reload comes back at the saved scale, with the saved rails',
+    r.x === 5 && r.y === 2.5 && w.xmin === '5' && w.xmax === '50' && w.xv === '5',
+    `renderer=${r.x}/${r.y}, widget X ${w.xmin}–${w.xmax} @ ${w.xv}`);
+
+  // --- 8. "Reset this tab" reaches the widget and the workspace too
+  await openPanel(page);
+  await page.click('.rmt-set-tab[data-tab="scale"]');
+  await page.click('.rmt-set-actions .rmt-set-btn:not(.rmt-set-btn-danger)');
+  await page.waitForTimeout(250);
+  await page.click('.delete-confirm-modal .modal-btn-container button');
+  await page.waitForTimeout(400);
+  s = await scale(); r = await drawnWith(); w = await widget();
+  check('"Reset this tab" restores 1.0 and the default rails, live',
+    s.x === 1 && s.y === 1 && s.limits.xMax === 2 && s.limits.yMax === 5 &&
+    r.x === 1 && r.y === 1 && w.xv === '1' && w.xmax === '2',
+    `store=${JSON.stringify(s)}, renderer=${r.x}/${r.y}`);
 
   await ctx.close();
 }

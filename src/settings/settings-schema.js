@@ -13,6 +13,30 @@
 
 export const SETTINGS_VERSION = 1;
 
+// Outer rails for the workspace scale factors AND for the user-editable limits
+// themselves. The limits are what the sliders span; these are what the limits
+// may span — six orders of magnitude, so a composition can be laid out at a
+// density far from the default one.
+export const SCALE_HARD_MIN = 0.001;
+export const SCALE_HARD_MAX = 1000;
+
+/**
+ * Slider detent for a scale range: about a fiftieth of the span, snapped to a
+ * 1/2/5 ladder so the numbers stay round. The default ranges land on 0.02 (X)
+ * and 0.1 (Y), both of which keep 1.0 exactly reachable by dragging.
+ * @param {number} lo
+ * @param {number} hi
+ * @returns {number}
+ */
+export function scaleStep(lo, hi) {
+  const span = Math.max((hi - lo) || 0, SCALE_HARD_MIN);
+  const raw = span / 50;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const norm = raw / mag;                       // in [1, 10)
+  const snapped = norm < 1.5 ? 1 : norm < 3.5 ? 2 : norm < 7.5 ? 5 : 10;
+  return Math.max(snapped * mag, 1e-4);
+}
+
 /**
  * Factory for a fresh defaults object (never share a mutable reference).
  * @returns {object}
@@ -63,6 +87,17 @@ export function defaultSettings() {
       showCents: true,
       layoutVersion: 2,
     },
+    scale: {
+      // Workspace density — the same two values the bottom-left Scale Controls
+      // widget drives. 1.0 is the pre-settings default; they now persist, so a
+      // reload restores the view you left.
+      x: 1,
+      y: 1,
+      // The rails the scale sliders span. These reproduce the widget's original
+      // hardcoded slider bounds, and are editable so you can work at a density
+      // orders of magnitude away from the default one.
+      limits: { xMin: 0.3, xMax: 2, yMin: 0.3, yMax: 5 },
+    },
   };
 }
 
@@ -89,6 +124,18 @@ export function validateRatio(raw, fallback) {
   }
   const label = typeof raw.label === 'string' && raw.label.length <= 12 ? raw.label : null;
   return { n, d, label };
+}
+
+/**
+ * Validate one axis's {min,max} scale limits. An inverted or degenerate range
+ * would leave the slider unusable, so it falls back to that axis's defaults
+ * wholesale rather than inventing a bound the user never chose. (The panel
+ * fixes ordering up before it writes, so this is the corrupt-storage path.)
+ */
+function validateScaleRange(rawLo, rawHi, defLo, defHi) {
+  const lo = clampNum(rawLo, SCALE_HARD_MIN, SCALE_HARD_MAX, defLo);
+  const hi = clampNum(rawHi, SCALE_HARD_MIN, SCALE_HARD_MAX, defHi);
+  return (hi > lo) ? { lo, hi } : { lo: defLo, hi: defHi };
 }
 
 /**
@@ -140,6 +187,18 @@ export function validateSettings(raw) {
   d.library.iconSizePx = clampNum(lib.iconSizePx, 32, 96, d.library.iconSizePx);
   d.library.showCents = asBool(lib.showCents, d.library.showCents);
   d.library.layoutVersion = isNum(lib.layoutVersion) ? lib.layoutVersion : d.library.layoutVersion;
+
+  // Limits first, then the values — the range is what the value is clamped into,
+  // so narrowing the limits pulls an out-of-range scale back in with it.
+  const sc = src.scale || {};
+  const sl = sc.limits || {};
+  const xr = validateScaleRange(sl.xMin, sl.xMax, d.scale.limits.xMin, d.scale.limits.xMax);
+  const yr = validateScaleRange(sl.yMin, sl.yMax, d.scale.limits.yMin, d.scale.limits.yMax);
+  d.scale.limits = { xMin: xr.lo, xMax: xr.hi, yMin: yr.lo, yMax: yr.hi };
+  // The neutral 1.0 is itself only a fallback when it fits: a range that lives
+  // entirely away from 1 (say 100–200) must not snap the value back outside it.
+  d.scale.x = clampNum(sc.x, xr.lo, xr.hi, clampNum(1, xr.lo, xr.hi, 1));
+  d.scale.y = clampNum(sc.y, yr.lo, yr.hi, clampNum(1, yr.lo, yr.hi, 1));
 
   return d;
 }
