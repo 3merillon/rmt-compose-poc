@@ -2,24 +2,29 @@
 /**
  * Mobile viewport: does the app lay itself out inside the screen it ACTUALLY has?
  *
- * The app is `overflow: hidden`, so the document never scrolls, so a mobile browser
- * never collapses its URL bar. Two different things went wrong because of that:
+ * The app is `overflow: hidden`, so the document never scrolls, so a mobile browser never
+ * collapses its URL bar. Three things went wrong because of that, and each scenario below
+ * pins one of them.
  *
- *   A. The screen is genuinely short. A landscape phone leaves ~200px between the
- *      top bar and the bottom edge, and the note-variables widget had a 300px "open
- *      at least this tall" floor that beat its own fit-to-viewport clamp.
+ *   1. The screen is genuinely short. A landscape phone leaves ~200px between the top bar
+ *      and the bottom edge, and every panel has to fit in it. A short window reproduces
+ *      this exactly — no tricks needed.
  *
- *   B. `100vh` is not the screen. By spec `vh` is the LARGE viewport — the page as
- *      it would be *if* the URL bar collapsed — so the "+" menu's
- *      `max-height: calc(100vh - 100px)` was permanently taller than the phone, and
- *      its footer sat below the fold.
+ *   2. `100vh` is not the screen. By spec `vh` is the LARGE viewport — the page as it
+ *      would be *if* the URL bar collapsed — so the "+" menu's
+ *      `max-height: calc(100vh - 100px)` was permanently taller than the phone and its
+ *      footer sat below the fold.
  *
- * Playwright has no URL bar, so (A) and (B) need different setups:
+ *   3. The browser lies at boot. Loading straight into landscape, a phone can report a
+ *      viewport its chrome has not taken its cut of yet — and the note widget's fit was
+ *      SELF-REFERENTIAL (bottom-anchored, so `viewportHeight() - rect.top` is just the
+ *      height it already had), so it inherited a bogus boot-time size and only snapped
+ *      right when you touched it, which broke the self-reference.
  *
- *   Scenario 1 reproduces (A) directly — a short viewport is a short viewport.
- *   Scenario 2 reproduces (B) by stubbing `innerHeight` / `visualViewport` to be
- *      CHROME_PX shorter than the real window, which is exactly the divergence a URL
- *      bar creates: `vh` still says 390, the usable screen is 294.
+ * Playwright renders no browser chrome, so the `vh` gap in (2) cannot be produced
+ * end-to-end. It is tested as two links instead: scenario 3 proves the app measures the
+ * true layout viewport even when every API lies, and scenario 2 proves the CSS that used
+ * to say `100vh` now follows that measurement.
  *
  *   npm run dev            # in another terminal
  *   node scripts/perf/shot-mobile-viewport.mjs --url http://localhost:3000
@@ -45,7 +50,7 @@ const check = (name, pass, detail) => {
 
 const browser = await chromium.launch({ headless: true });
 
-async function newPage({ width, height, fakeChrome = 0, touch = true }) {
+async function newPage({ width, height, liesBy = 0, touch = true }) {
   const ctx = await browser.newContext({
     viewport: { width, height }, deviceScaleFactor: 1, hasTouch: touch, isMobile: touch,
   });
@@ -61,24 +66,39 @@ async function newPage({ width, height, fakeChrome = 0, touch = true }) {
     } catch {}
   });
 
-  // Simulate a browser info bar: the window is `height` tall, but only
-  // `height - fakeChrome` of it is on screen. That is precisely what a phone's URL
-  // bar does — and it leaves `vh` reporting the full, unreachable height.
-  if (fakeChrome > 0) {
-    await page.addInitScript((chrome) => {
-      const realInner = Object.getOwnPropertyDescriptor(window, 'innerHeight')
+  // A browser that LIES about the viewport: every API the app can ask reports `liesBy`
+  // px MORE height than the screen really has, forever, and no resize is ever fired to
+  // correct it. This is the boot-into-landscape case, taken to its worst: the real
+  // window is `height` tall (and `position: fixed` still anchors to it, exactly as on a
+  // phone), but every number the app is handed is wrong. Anything that survives this
+  // survives because it MEASURED, not because it was told.
+  if (liesBy > 0) {
+    await page.addInitScript((lie) => {
+      const innerDesc = Object.getOwnPropertyDescriptor(window, 'innerHeight')
         || Object.getOwnPropertyDescriptor(Window.prototype, 'innerHeight');
       Object.defineProperty(window, 'innerHeight', {
         configurable: true,
-        get: () => realInner.get.call(window) - chrome,
+        get: () => innerDesc.get.call(window) + lie,
       });
+
+      // This runs at document-start, so document.documentElement does not exist yet —
+      // patch the getter on Element.prototype and lie only for the root element.
+      const rootDesc = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight');
+      Object.defineProperty(Element.prototype, 'clientHeight', {
+        configurable: true,
+        get() {
+          const real = rootDesc.get.call(this);
+          return this === document.documentElement ? real + lie : real;
+        },
+      });
+
       const vv = window.visualViewport;
       if (vv) {
         Object.defineProperty(window, 'visualViewport', {
           configurable: true,
           get: () => ({
             get width() { return vv.width; },
-            get height() { return vv.height - chrome; },
+            get height() { return vv.height + lie; },
             get scale() { return vv.scale; },
             get offsetTop() { return vv.offsetTop; },
             get offsetLeft() { return vv.offsetLeft; },
@@ -87,7 +107,7 @@ async function newPage({ width, height, fakeChrome = 0, touch = true }) {
           }),
         });
       }
-    }, fakeChrome);
+    }, liesBy);
   }
 
   await page.goto(`${URL_BASE}/?perf=1`, { waitUntil: 'load' });
@@ -192,49 +212,108 @@ console.log(`\n== landscape phone, 844x294 (a real phone's usable height in land
   await ctx.close();
 }
 
-// ────────────── Scenario 2: full-height window, but a URL bar eats the bottom ────
-console.log(`\n== portrait 390x844 with a ${CHROME_PX}px info bar (usable ${844 - CHROME_PX}) — the vh trap`);
+// ───────────────────────────────── Scenario 2: the `vh` trap, and the CSS binding ────
+//
+// A real URL bar makes the LARGE viewport (what `vh` means) taller than the layout
+// viewport (what you can see). Playwright renders no browser chrome, so it cannot
+// produce that gap — and stubbing the viewport APIs no longer fakes it either, because
+// the app stopped trusting those APIs and now measures the layout itself (scenario 3
+// proves it does so even against a browser that lies outright).
+//
+// So test the two links in the chain separately. Scenario 3 proves link one: the app
+// measures the true layout viewport. Here we prove link two: the chrome that used to be
+// sized in `vh` now follows that measurement. Drive `--app-height` down to what a URL bar
+// would leave and the "+" menu's cap must follow it — the old `100vh` rule could not.
+console.log('\n== portrait 390x844 — the "+" menu must follow the measured viewport, not 100vh');
 {
-  const { ctx, page } = await newPage({ width: 390, height: 844, fakeChrome: CHROME_PX });
-  const usable = 844 - CHROME_PX;
+  const { ctx, page } = await newPage({ width: 390, height: 844 });
 
   const wired = await page.evaluate(() => ({
     appHeight: getComputedStyle(document.documentElement).getPropertyValue('--app-height').trim(),
     inner: window.innerHeight,
   }));
-  check('the app measures the USABLE height, not the window',
-    wired.appHeight === `${usable}px` && wired.inner === usable,
-    `--app-height=${wired.appHeight}, innerHeight=${wired.inner} (window is 844)`);
+  check('with no browser chrome, the measured viewport IS the window',
+    wired.appHeight === '844px' && wired.inner === 844,
+    `--app-height=${wired.appHeight}, innerHeight=${wired.inner}`);
 
-  // The heart of it: the "+" menu must be bounded by the usable height, not by 100vh
-  // (which still reports the full 844 — that is exactly what a phone does).
   await page.tap('.dropdown-button');
   await page.waitForTimeout(500);
-  const menu = await boxOf(page, '#general-widget');
-  console.log('  menu ' + JSON.stringify(menu));
-  const cap = parseFloat(menu.maxHeight);
-  check('the "+" menu is capped by the usable height, not by 100vh',
-    cap <= usable - 100 + 1, `max-height=${menu.maxHeight} (usable ${usable} - 100 = ${usable - 100}; the 100vh bug gives ${844 - 100})`);
-  check('the "+" menu fits inside the usable screen',
-    menu.bottom <= usable, `bottom=${menu.bottom} (usable=${usable})`);
-  await shoot(page, '04-urlbar-menu');
+
+  // Now pretend a URL bar just took CHROME_PX off the bottom.
+  const usable = 844 - CHROME_PX;
+  await page.evaluate((h) => {
+    document.documentElement.style.setProperty('--app-height', h + 'px');
+  }, usable);
+  // `.widget` carries `transition: all 0.3s`, and max-height is animatable — read it
+  // mid-flight and you get the value it is transitioning AWAY from.
+  await page.waitForTimeout(600);
+  const capped = await page.evaluate(() => ({
+    maxHeight: getComputedStyle(document.querySelector('#general-widget')).maxHeight,
+    appHeight: getComputedStyle(document.documentElement).getPropertyValue('--app-height').trim(),
+  }));
+  const cap = parseFloat(capped.maxHeight);
+  check('the "+" menu is capped by the MEASURED viewport, not by 100vh',
+    Math.abs(cap - (usable - 100)) <= 1,
+    `--app-height=${usable}px -> max-height=${capped.maxHeight} (want ${usable - 100}px; the 100vh bug gives ${844 - 100}px)`);
+  await shoot(page, '04-menu-follows-measured-viewport');
   await page.tap('.dropdown-button');
   await page.waitForTimeout(400);
 
-  // The JS clamps must agree with the CSS about where the bottom is.
-  //
-  // Assert the HEIGHT, not the bottom edge. The note widget is `position: fixed;
-  // bottom: 19px`, and a fixed element anchors to the LAYOUT viewport — which a real
-  // phone shrinks to the visible area, but which Playwright leaves at the full 844
-  // because there is no actual URL bar here. So `bottom` is the one number this
-  // simulation cannot reproduce faithfully; scenario 1 covers it for real by using a
-  // genuinely short window. Do not "fix" a bottom-edge failure here.
+  // And the note widget, at full height, sits in the band below the top bar.
   await openNoteWidget(page);
   const note = await boxOf(page, '#note-widget');
   console.log('  note widget ' + JSON.stringify(note));
-  check('the note widget is sized against the usable screen',
-    note.h <= usable - 50 - 19, `height=${note.h} (band below the top bar = ${usable - 50 - 19})`);
-  await shoot(page, '05-urlbar-note-widget');
+  check('portrait: the note widget opens as a 300px card, bottom-left',
+    note.h === 300 && note.left === 19 && note.bottom === 844 - 19,
+    `${note.w}x${note.h} at left=${note.left} bottom=${note.bottom}`);
+  await shoot(page, '05-portrait-note-widget');
+
+  await ctx.close();
+}
+
+// ── Scenario 3: boot into landscape on a browser that LIES about the viewport ────
+// The bug this guards: on first open the widget's fit was self-referential — it is
+// bottom-anchored, so `viewportHeight() - rect.top` is just the height it already had,
+// which was whatever got computed at boot while it was still display:none. Open it and
+// it inherited that; TOUCH it (which writes an inline top, breaking the self-reference)
+// and it snapped to the right size. So: the widget must be right WITHOUT being touched,
+// even when every viewport API is lying to it.
+const LIE = 90;
+console.log(`\n== boot into landscape 844x294, every viewport API lying by +${LIE}px`);
+{
+  const { ctx, page } = await newPage({ width: 844, height: 294, liesBy: LIE });
+  const vh = 294;                       // what the screen REALLY is
+  const minTop = 50 + 19;               // top bar + buffer
+
+  const lied = await page.evaluate(() => window.innerHeight);
+  check(`the browser really is lying (innerHeight says ${lied}, screen is ${vh})`,
+    lied === vh + LIE, `innerHeight=${lied}`);
+
+  await openNoteWidget(page);
+  const opened = await boxOf(page, '#note-widget');
+  console.log('  note widget @open ' + JSON.stringify(opened));
+  check('boot: the widget opens ON the screen even though the viewport is lying',
+    opened.top >= minTop && opened.bottom <= vh,
+    `top=${opened.top} bottom=${opened.bottom} height=${opened.h} (screen=${vh}, must clear ${minTop})`);
+  await shoot(page, '07-lying-viewport-open');
+
+  // ...and it must not JUMP when first touched. A widget that only becomes correct once
+  // you grab it is the exact symptom this scenario exists to kill.
+  const h = await page.locator('.note-widget-header').boundingBox();
+  await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(h.x + h.width / 2 + 1, h.y + h.height / 2, { steps: 2 });
+  await page.mouse.up();
+  await page.waitForTimeout(300);
+  const touched = await boxOf(page, '#note-widget');
+  console.log('  note widget @touch ' + JSON.stringify(touched));
+  check('boot: touching the widget does not resize it (no "pop to the correct size")',
+    Math.abs(touched.h - opened.h) <= 2,
+    `height ${opened.h} -> ${touched.h}`);
+  check('boot: it is still on the screen after being touched',
+    touched.top >= minTop && touched.bottom <= vh,
+    `top=${touched.top} bottom=${touched.bottom}`);
+  await shoot(page, '08-lying-viewport-touched');
 
   await ctx.close();
 }

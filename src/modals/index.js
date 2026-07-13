@@ -24,7 +24,11 @@ const domCache = {
 
 let currentSelectedNote = null;
 let currentMeasureId = null;
-let widgetInitiallyOpened = false;
+
+// A freshly-opened note widget is a compact card. Its content (every variable, with its
+// expression) is far taller than this and scrolls; the card only grows past 300px if the
+// user drags it somewhere with room to fit more.
+const DEFAULT_OPEN_HEIGHT = 300;
 
 let externalFunctions = {
     updateVisualNotes: null,
@@ -173,7 +177,6 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     }
     
     domCache.noteWidget.classList.add('visible');
-    widgetInitiallyOpened = true;
     updateNoteWidgetHeight();
 
     if (!clickedElement && note && note.id !== undefined) {
@@ -357,22 +360,50 @@ export function updateNoteWidgetHeight() {
     
     const headerHeight = header.offsetHeight;
     const rect = widget.getBoundingClientRect();
-    const availableSpace = viewportHeight() - rect.top - MIN_BUFFER;
-    const contentNaturalHeight = content.scrollHeight;
     const PADDING = 5;
-    const widgetDesiredHeight = headerHeight + contentNaturalHeight + PADDING;
-    const minInitialHeight = widgetInitiallyOpened ? 40 : 300;
+    const widgetDesiredHeight = headerHeight + content.scrollHeight + PADDING;
 
-    // The band between the bottom of the top bar and the bottom edge — all the room
-    // this widget can ever have. A landscape phone has under 300px of it, so both the
-    // "open at least this tall" floor and the fit-to-content height have to yield to
-    // it: the floor used to win, which is what pushed the widget off the screen.
-    const roomOnScreen = Math.max(headerHeight, viewportHeight() - TOP_HEADER_HEIGHT - 2 * MIN_BUFFER);
-    const floor = Math.min(minInitialHeight, roomOnScreen);
-    const fitted = Math.max(floor, Math.min(availableSpace, widgetDesiredHeight));
-    const effectiveHeight = Math.min(fitted, roomOnScreen);
+    // Until it is first dragged the widget is bottom-anchored (`bottom: 19px`) and has
+    // no inline top, so it GROWS UPWARD. That distinction is the whole of this function.
+    const dragged = !!widget.style.top;
 
+    // The room to fit into.
+    //
+    // Bottom-anchored: the band between the top bar and the bottom edge. It must NOT be
+    // derived from rect.top — for a bottom-anchored box rect.top is a function of the
+    // height we are trying to compute, so `viewportHeight() - rect.top - MIN_BUFFER` is
+    // just the height it already had. That self-reference is why the widget used to open
+    // at whatever size it was last given, including the size computed at boot while it
+    // was still display:none — and why touching it (which writes an inline top, breaking
+    // the self-reference) snapped it to the right size.
+    //
+    // Dragged: a real measurement — whatever is below where the user parked it.
+    const room = dragged
+        ? viewportHeight() - rect.top - MIN_BUFFER
+        : viewportHeight() - TOP_HEADER_HEIGHT - 2 * MIN_BUFFER;
+
+    // A freshly-opened widget is a compact card, not a full-height panel: the variable
+    // list is long and scrolls. Once dragged, it fits its content instead.
+    const desired = dragged
+        ? widgetDesiredHeight
+        : Math.min(widgetDesiredHeight, DEFAULT_OPEN_HEIGHT);
+
+    let effectiveHeight = Math.max(headerHeight, Math.min(room, desired));
     widget.style.height = effectiveHeight + "px";
+
+    // Now check what we actually GOT. A position:fixed box is anchored to the layout
+    // viewport — the real visible area — even in the frames after boot where a mobile
+    // browser is still reporting a stale window.innerHeight. So don't trust the number
+    // we just did arithmetic on: measure the box, and hand back any overshoot that
+    // pushed the header off the top of the screen.
+    if (!dragged) {
+        const overshoot = (TOP_HEADER_HEIGHT + MIN_BUFFER) - widget.getBoundingClientRect().top;
+        if (overshoot > 0.5) {
+            effectiveHeight = Math.max(headerHeight, effectiveHeight - overshoot);
+            widget.style.height = effectiveHeight + "px";
+        }
+    }
+
     const contentHeight = effectiveHeight - headerHeight - PADDING;
     content.style.height = Math.max(40, contentHeight) + "px";
     content.style.overflowY = "auto";
