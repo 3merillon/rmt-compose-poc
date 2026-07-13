@@ -97,7 +97,22 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     
     const widgetContent = domCache.widgetContent;
     const widgetTitle = domCache.widgetTitle;
-    
+
+    // This function is both "open the widget on a note" and "rebuild the widget in place"
+    // (an octave arrow, a saved variable, an added note, a changed arrow setting all come
+    // back through here). A rebuild wipes the scroll container below, so remember where the
+    // user was scrolled to when the note on screen is the one we are about to redraw.
+    // Opening on a DIFFERENT note is a fresh card and starts at the top.
+    const prevEffectiveId = currentSelectedNote
+        ? ((currentSelectedNote.id !== undefined) ? currentSelectedNote.id : currentMeasureId)
+        : undefined;
+    const isRebuildOfSameNote =
+        domCache.noteWidget.classList.contains('visible') &&
+        prevEffectiveId !== undefined &&
+        String(prevEffectiveId) === String(effectiveNoteId) &&
+        (currentMeasureId ?? null) === (measureId ?? null);
+    const preservedScrollTop = isRebuildOfSameNote ? widgetContent.scrollTop : 0;
+
     const isSilence = note && note.getVariable('startTime') &&
                      note.getVariable('duration') &&
                      !note.getVariable('frequency');
@@ -183,6 +198,11 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     // not behind it. Without this the widget only came forward once you touched it.
     raisePanel(domCache.noteWidget);
     updateNoteWidgetHeight();
+
+    // After the height is settled, so the browser clamps against the final scroll range.
+    if (preservedScrollTop > 0) {
+        widgetContent.scrollTop = preservedScrollTop;
+    }
 
     if (!clickedElement && note && note.id !== undefined) {
         const selElem = document.querySelector(`[data-note-id="${CSS.escape(String(note.id))}"]`);
