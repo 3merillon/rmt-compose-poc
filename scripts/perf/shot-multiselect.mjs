@@ -822,6 +822,81 @@ console.log('\n== mobile 390x844 (touch) — long-press marquee');
   const camRestored = await page.evaluate(() => window.__rmtWorkspace.camera.inputEnabled);
   check('the camera is restored after the marquee', camRestored === true);
 
+  // ── long-press ON A NOTE = the touch equivalent of shift-click ──────────────
+  // Press and HOLD on a note, without moving, then release.
+  const longPressNote = async (id) => {
+    const p = await pointOfNote(page, id);
+    await touch('touchStart', [{ x: p.x, y: p.y }]);
+    await page.waitForTimeout(750);          // > 500ms, no travel => the press fires
+    await touch('touchEnd', []);
+    await page.waitForTimeout(450);
+    return selection(page);
+  };
+
+  // 1. REMOVE a note that is in the group
+  const victim = mSel[0];
+  const afterRemove = await longPressNote(victim);
+  check(`long-press REMOVES note ${victim} from the group (was clearing everything)`,
+    !afterRemove.includes(victim) && afterRemove.length === mSel.length - 1,
+    `${mSel.length} -> ${afterRemove.length} selected`);
+  await shoot(page, '21-mobile-longpress-removed');
+
+  // 2. ADD it back
+  const afterAdd = await longPressNote(victim);
+  check(`long-press ADDS note ${victim} back to the group`,
+    afterAdd.includes(victim) && afterAdd.length === mSel.length,
+    `${afterRemove.length} -> ${afterAdd.length} selected`);
+  await shoot(page, '22-mobile-longpress-added');
+
+  // 3. the group must SURVIVE the release (the tap that follows a long-press used to
+  //    reach player.js's pointerup handler and clear everything)
+  await page.waitForTimeout(600);
+  check('the group survives the long-press release (tap suppression holds)',
+    (await selection(page)).length === afterAdd.length,
+    `${(await selection(page)).length} still selected 600ms after release`);
+
+  // 4. a long-press on a note with NOTHING selected must SELECT it (it was doing nothing)
+  await page.evaluate(async () => {
+    const { eventBus } = await import('/src/utils/event-bus.js');
+    eventBus.emit('workspace:marqueeCommit', { ids: [], additive: false });
+  });
+  await page.waitForTimeout(300);
+  const notes = await page.evaluate(() => Array.from(window.__rmtRenderer._instanceNoteIds || []).slice(0, 40));
+  const solo = notes.find((n) => n !== 0);
+  const p = await pointOfNote(page, solo);
+  await touch('touchStart', [{ x: p.x, y: p.y }]);
+  await page.waitForTimeout(750);
+  await touch('touchEnd', []);
+  await page.waitForTimeout(500);
+  const soloState = await page.evaluate(() => ({
+    sel: (window.__rmtRenderer.getMultiSelection?.() || []).length,
+    selectedId: window.__rmtRenderer._lastSelectedNoteId,
+    noteWidget: document.getElementById('note-widget').classList.contains('visible'),
+    groupWidget: !!document.getElementById('group-widget')?.classList.contains('visible'),
+  }));
+  check(`an initial long-press on note ${solo} SELECTS it (one note = normal selection)`,
+    Number(soloState.selectedId) === Number(solo) && soloState.noteWidget && !soloState.groupWidget,
+    JSON.stringify(soloState));
+  await shoot(page, '23-mobile-longpress-initial-select');
+
+  // 5. REGRESSION: a quick TAP on a note must still select it normally (not toggle)
+  await page.evaluate(async () => {
+    const { eventBus } = await import('/src/utils/event-bus.js');
+    eventBus.emit('workspace:marqueeCommit', { ids: [], additive: false });
+  });
+  await page.waitForTimeout(300);
+  await touch('touchStart', [{ x: p.x, y: p.y }]);
+  await page.waitForTimeout(80);            // well under the long-press threshold
+  await touch('touchEnd', []);
+  await page.waitForTimeout(450);
+  const tapped = await page.evaluate(() => ({
+    selectedId: window.__rmtRenderer._lastSelectedNoteId,
+    noteWidget: document.getElementById('note-widget').classList.contains('visible'),
+  }));
+  check('REGRESSION: a quick tap on a note still selects it normally',
+    Number(tapped.selectedId) === Number(solo) && tapped.noteWidget,
+    JSON.stringify(tapped));
+
   check('no pageerror on mobile', !errors.length, errors.join(' | ') || 'clean');
   await ctx.close();
 }

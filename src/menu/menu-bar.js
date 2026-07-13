@@ -287,7 +287,7 @@ const menuAPI = (function() {
         row.className = 'library-search-row';
         const input = document.createElement('input');
         input.type = 'search';
-        input.placeholder = 'Search modules — name, ratio, tag…';
+        input.placeholder = 'Search modules — name, ratio, tag...';
         input.className = 'library-search-input';
         input.value = currentSearchQuery;
         input.setAttribute('autocomplete', 'off');
@@ -2224,6 +2224,16 @@ const menuAPI = (function() {
             .library-search-input { pointer-events: auto; flex: 0 1 420px; min-width: 0; height: 30px; box-sizing: border-box; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.62); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); color: var(--rmt-text-primary, #ffa800); font-family: 'Roboto Mono', monospace; font-size: 13px; outline: none; -webkit-appearance: none; appearance: none; }
             .library-search-input::placeholder { color: var(--rmt-text-secondary, rgba(255,168,0,0.5)); }
             .library-search-input:focus { border-color: var(--rmt-accent, #ffa800); box-shadow: 0 0 0 2px rgba(var(--rmt-accent-rgb), 0.25); }
+            /* Touch: the row is absolutely positioned across the WHOLE bar, but the icon
+               grid beneath it is inset by the touch scrollbar's 18px gutter. Left
+               full-bleed, the field's right edge lands on top of the scrollbar thumb —
+               the one thing that has to stay grabbable. Match the grid's inset, and cap
+               the field at roughly its placeholder width (~282px at 13px Roboto Mono) plus
+               its padding and a little air, rather than stretching it edge to edge. */
+            @media (pointer: coarse) {
+              .library-search-row { padding-left: 18px; padding-right: 18px; }
+              .library-search-input { flex: 0 1 320px; }
+            }
         `;
         document.head.appendChild(style);
     }

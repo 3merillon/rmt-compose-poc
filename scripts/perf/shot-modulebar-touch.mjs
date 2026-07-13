@@ -160,6 +160,41 @@ console.log('\n== mobile 390x844 (touch) — module bar scrollbar');
     thumb.nullProbesDownTrack > 0 || geom.trackTotal >= 32,
     `null probes down the track = ${thumb.nullProbesDownTrack} @x=${thumb.probeX}`);
 
+  // The search row is absolutely positioned across the whole bar, so it does not
+  // automatically respect the wrapper's scrollbar gutter. Left full-bleed, the field's
+  // right edge sits on top of the scrollbar thumb.
+  const search = await page.evaluate(() => {
+    const inp = document.querySelector('.library-search-input');
+    const wrap = document.querySelector('.icons-wrapper');
+    const cont = document.querySelector('.icons-container');
+    const ir = inp.getBoundingClientRect();
+    const wr = wrap.getBoundingClientRect();
+    const cr = cont.getBoundingClientRect();
+    const cs = getComputedStyle(inp);
+    const cv = document.createElement('canvas').getContext('2d');
+    cv.font = cs.fontSize + ' ' + cs.fontFamily;
+    return {
+      left: Math.round(ir.left), right: Math.round(ir.right), width: Math.round(ir.width),
+      gutterStartsAt: Math.round(cr.right),          // icon grid's right edge = gutter start
+      trackRight: Math.round(wr.right),
+      textWidth: Math.ceil(cv.measureText(inp.placeholder).width),
+      clipped: inp.scrollWidth > inp.clientWidth + 1,
+      vw: window.innerWidth,
+    };
+  });
+  console.log('  ' + JSON.stringify(search));
+
+  check('the search field clears the scrollbar gutter (does not overlap the thumb)',
+    search.right <= search.gutterStartsAt,
+    `field right=${search.right}, gutter starts at ${search.gutterStartsAt} (track right=${search.trackRight})`);
+  check('the search field is inset to match the icon grid',
+    search.left >= 18, `left=${search.left}`);
+  check('...but is still wide enough for its placeholder, with room to spare',
+    search.width >= search.textWidth + 24 && !search.clipped,
+    `width=${search.width}px vs text ${search.textWidth}px + padding; clipped=${search.clipped}`);
+  check('...and is no longer full-bleed', search.width < search.vw - 40,
+    `${search.width}px in a ${search.vw}px viewport`);
+
   const noErrors = !errors.length;
   check('no pageerror on mobile boot', noErrors, errors.join(' | ') || 'clean');
 

@@ -163,23 +163,30 @@ export class Workspace {
           }
         }
 
-        // ── Marquee entry ───────────────────────────────────────────────────────
-        // Shift-drag (mouse) or long-press (touch) on EMPTY background rubber-bands a
-        // selection. Group drag is NOT handled here: a note already in the group falls
-        // through to the normal move gesture below, which is then decorated as a group
-        // drag — that way it inherits all the existing snapping and clamping for free.
-        if (!this._pickAny(e.clientX, e.clientY)) {
-          const additive = this._multiSelIds().size > 0;
-          if (e.pointerType !== 'touch' && e.shiftKey) {
-            this._beginMarquee(e, additive);
-            return;
+        // ── Multi-select entry ──────────────────────────────────────────────────
+        // Long-press IS the touch equivalent of shift: on empty background it rubber-bands
+        // a marquee, on a note it toggles that note in or out of the selection. Group drag
+        // is NOT handled here — a note already in the group falls through to the normal
+        // move gesture below, which is then decorated as a group drag, so it inherits all
+        // the existing snapping and clamping for free.
+        {
+          const hit = this._pickAny(e.clientX, e.clientY);
+
+          if (!hit) {
+            if (e.pointerType !== 'touch' && e.shiftKey) {
+              this._beginMarquee(e, this._multiSelIds().size > 0);
+              return;
+            }
+            if (e.pointerType === 'touch') {
+              this._armLongPress(e, { kind: 'marquee', additive: this._multiSelIds().size > 0 });
+            }
+          } else if (e.pointerType === 'touch' && hit.type === 'note') {
+            this._armLongPress(e, { kind: 'toggle', noteId: Number(hit.id) });
           }
-          if (e.pointerType === 'touch') {
-            // Arm a long-press, then FALL THROUGH. Until the timer fires this is still
-            // an ordinary single-finger pan; movement, a second finger, or an early
-            // release all cancel it. Pan and pinch-zoom are untouched.
-            this._armMarqueeLongPress(e, additive);
-          }
+          // Deliberately FALL THROUGH in both touch cases. Until the timer fires this is
+          // still an ordinary pan (on background) or a pending note drag (on a note);
+          // travel, a second finger, or an early release all cancel it. So pan, pinch-zoom
+          // and note dragging are untouched, and we never take a gesture on speculation.
         }
 
         if (!this.renderer || typeof this.renderer.hitTestSubRegion !== 'function') return;
@@ -1890,7 +1897,7 @@ export class Workspace {
       try { if (this.renderer?.setProspectiveParentId) this.renderer.setProspectiveParentId(null); } catch {}
       // Take the rubber-band rectangle down (on cancel as well as commit)
       try { this.renderer?.setMarqueeRect?.(null); } catch {}
-      this._cancelMarqueeLongPress();
+      this._cancelLongPress();
       // An ABANDONED marquee (pinch, pointercancel) must not strand its live preview
       // highlight — restore what was selected before the drag. On commit we leave it
       // alone: player.js overwrites it from marqueeCommit a moment later.
@@ -2196,7 +2203,7 @@ export class Workspace {
   }
 
   _beginMarquee(e, additive = false) {
-    this._cancelMarqueeLongPress();
+    this._cancelLongPress();
 
     // Take the camera out of the gesture for its duration, or we rubber-band and pan at
     // the same time. _endInteraction restores both, on cancel as well as commit.
@@ -2230,15 +2237,22 @@ export class Workspace {
     // suppressing the default (text selection, etc.) actually matters.
   }
 
-  _armMarqueeLongPress(e, additive = false) {
-    this._cancelMarqueeLongPress();
+  // Arm a long-press. `opts.kind` is either:
+  //   'marquee' — pressed on empty background: begin a rubber-band selection
+  //   'toggle'  — pressed on note `opts.noteId`: add/remove it from the selection,
+  //               i.e. the touch equivalent of a shift-click
+  //
+  // Non-committal until it fires: travel beyond the slop, a second finger, or an early
+  // release all cancel it, so a pan / pinch / note-drag / plain tap is never stolen.
+  _armLongPress(e, opts = {}) {
+    this._cancelLongPress();
 
     const startX = e.clientX, startY = e.clientY, pid = e.pointerId;
     const slop = Workspace.MARQUEE_LONG_PRESS_SLOP_PX;
 
-    const cancel = () => this._cancelMarqueeLongPress();
+    const cancel = () => this._cancelLongPress();
 
-    // Any travel beyond the slop means this was a pan, not a press.
+    // Any travel beyond the slop means this was a pan or a drag, not a press.
     const onMove = (ev) => {
       try {
         if (ev.pointerId != null && ev.pointerId !== pid) return;
@@ -2252,10 +2266,25 @@ export class Workspace {
       timer: setTimeout(() => {
         // Fires only if the finger stayed put, stayed down, and stayed alone.
         try {
-          if ((this._touchActiveCount || 0) >= 2) { cancel(); return; }
-          if (this._interaction && this._interaction.active) { cancel(); return; }
+          this._cancelLongPress();                       // consume the arming
+          if ((this._touchActiveCount || 0) >= 2) return;  // a second finger => pinch wins
+
+          if (opts.kind === 'toggle') {
+            // A note press arrives here with a PENDING note drag already staged (the
+            // normal touch path). Tear it down — the user asked to select, not to drag —
+            // and take the trailing tap out of play, or the click/pointerup handlers in
+            // player.js will read it as a plain background-ish tap and clear the group we
+            // are in the middle of building.
+            try { this._endInteraction(false); } catch {}
+            this._suppressTapAfterLongPress();
+            eventBus.emit('workspace:multiSelectToggle', { id: Number(opts.noteId) });
+            return;
+          }
+
+          // Marquee: nothing should be interacting yet (we pressed empty background).
+          if (this._interaction && this._interaction.active) return;
           const synthetic = { clientX: startX, clientY: startY, pointerId: pid, preventDefault() {} };
-          this._beginMarquee(synthetic, additive);
+          this._beginMarquee(synthetic, !!opts.additive);
         } catch { cancel(); }
       }, Workspace.MARQUEE_LONG_PRESS_MS)
     };
@@ -2265,7 +2294,7 @@ export class Workspace {
     document.addEventListener('pointercancel', cancel, true);
   }
 
-  _cancelMarqueeLongPress() {
+  _cancelLongPress() {
     const lp = this._lp;
     if (!lp) return;
     this._lp = null;
@@ -2275,6 +2304,34 @@ export class Workspace {
       document.removeEventListener('pointerup', lp.cancel, true);
       document.removeEventListener('pointercancel', lp.cancel, true);
     } catch {}
+  }
+
+  // Swallow the tap that a long-press leaves behind.
+  //
+  // The finger is still DOWN when the press fires, and it may be held for a while yet —
+  // so a fixed time window stamped now can expire before the release. Instead, stamp the
+  // suppression window again on the actual pointerup, from a CAPTURE listener so it lands
+  // before player.js's document pointerup handler reads it. Both that handler and the
+  // workspace click handler gate on __rmtSuppressClickUntil, and both would otherwise
+  // treat the release as a plain tap and clear the selection we just changed.
+  _suppressTapAfterLongPress() {
+    const cont = this.containerEl;
+    const stamp = () => {
+      try {
+        const now = (performance && performance.now) ? performance.now() : Date.now();
+        cont.__rmtSuppressClickUntil = now + 400;
+      } catch {}
+    };
+    stamp();
+    const onUp = () => {
+      stamp();
+      try {
+        document.removeEventListener('pointerup', onUp, true);
+        document.removeEventListener('pointercancel', onUp, true);
+      } catch {}
+    };
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('pointercancel', onUp, true);
   }
 
   // Turn a freshly-built single-note move into a GROUP move, if the grabbed note is in

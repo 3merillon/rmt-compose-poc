@@ -5625,6 +5625,17 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
       });
 
+      // Long-press on a note (touch): the same refinement a shift-click does on desktop —
+      // toggle that note in or out of the group.
+      eventBus.on('workspace:multiSelectToggle', ({ id }) => {
+        try {
+          if (isLocked) return;
+          toggleMultiSelectId(Number(id));
+        } catch (e) {
+          console.warn('workspace:multiSelectToggle failed', e);
+        }
+      });
+
       // Marquee released: the workspace hands us the ids it crossed. This is the ONLY
       // writer of the authoritative selection for a marquee — the live highlight during
       // the drag was just a renderer-side preview.
