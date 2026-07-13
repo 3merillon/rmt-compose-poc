@@ -12,6 +12,7 @@ import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
 import { escapeHtml } from '../utils/html-escape.js';
 import { isDSLSyntax } from '../dsl/index.js';
+import { makeDraggableWidget, MIN_BUFFER } from '../utils/draggable-widget.js';
 
 const domCache = {
     noteWidget: null,
@@ -21,9 +22,8 @@ const domCache = {
 };
 
 let currentSelectedNote = null;
+let currentMeasureId = null;
 let widgetInitiallyOpened = false;
-const TOP_HEADER_HEIGHT = 50;
-const MIN_BUFFER = 19;
 
 let externalFunctions = {
     updateVisualNotes: null,
@@ -183,6 +183,7 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     }
     
     currentSelectedNote = note;
+    currentMeasureId = measureId;
     try { eventBus.emit('modals:show', { noteId: effectiveNoteId, isMeasure: measureId !== null }); } catch (e) {}
 }
 
@@ -318,6 +319,7 @@ export function clearSelection() {
 
     domCache.noteWidget.classList.remove('visible');
     currentSelectedNote = null;
+    currentMeasureId = null;
     
     const elementsToClean = document.querySelectorAll(
       '.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected, ' +
@@ -367,107 +369,19 @@ export function updateNoteWidgetHeight() {
     content.style.overflowY = "auto";
 }
 
-function handleWindowResize() {
-    const widget = domCache.noteWidget;
-    if (!widget || !widget.classList.contains('visible')) return;
-
-    const header = widget.querySelector('.note-widget-header');
-    const headerHeight = header ? header.getBoundingClientRect().height : 0;
-    const rect = widget.getBoundingClientRect();
-
-    const availableHeight = window.innerHeight - TOP_HEADER_HEIGHT + 5;
-    const maxWidgetHeight = availableHeight - headerHeight;
-
-    const maxLeft = window.innerWidth - rect.width - MIN_BUFFER;
-    const maxTop = window.innerHeight - Math.min(rect.height, maxWidgetHeight) - MIN_BUFFER;
-
-    if (rect.right > window.innerWidth - MIN_BUFFER) {
-        widget.style.left = Math.max(MIN_BUFFER, maxLeft) + "px";
-    }
-
-    if (rect.bottom > window.innerHeight - MIN_BUFFER) {
-        widget.style.top = Math.max(TOP_HEADER_HEIGHT + MIN_BUFFER, maxTop) + "px";
-    }
-
-    if (rect.top < TOP_HEADER_HEIGHT + MIN_BUFFER) {
-        widget.style.top = (TOP_HEADER_HEIGHT + MIN_BUFFER) + "px";
-    }
-
-    updateNoteWidgetHeight();
-}
-
 function addDraggableNoteWidget() {
     const widget = domCache.noteWidget;
     if (!widget) return;
-
-    widget.style.position = 'fixed';
     const header = widget.querySelector('.note-widget-header');
     if (!header) return;
 
-    let isDragging = false;
-    let dragOffsetX = 0;
-    let dragOffsetY = 0;
-
-    header.addEventListener('mousedown', startDrag);
-    header.addEventListener('touchstart', startDrag, {passive: false});
-
-    function startDrag(e) {
-        if (e.target.classList.contains('note-widget-close')) return;
-        isDragging = true;
-        e.preventDefault();
-        const rect = widget.getBoundingClientRect();
-        
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-        dragOffsetX = clientX - rect.left;
-        dragOffsetY = clientY - rect.top;
-        
-        document.addEventListener('mousemove', duringDrag);
-        document.addEventListener('touchmove', duringDrag, {passive: false});
-        document.addEventListener('mouseup', endDrag);
-        document.addEventListener('touchend', endDrag);
-    }
-
-    function duringDrag(e) {
-        if (!isDragging) return;
-        e.preventDefault();
-        
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-        
-        let newLeft = clientX - dragOffsetX;
-        let newTop = clientY - dragOffsetY;
-        
-        const widgetRect = widget.getBoundingClientRect();
-        const maxLeft = window.innerWidth - widgetRect.width - MIN_BUFFER;
-        newLeft = Math.max(MIN_BUFFER, Math.min(newLeft, maxLeft));
-        
-        const headerHeight = widget.querySelector('.note-widget-header')?.getBoundingClientRect().height || TOP_HEADER_HEIGHT;
-        const minTop = TOP_HEADER_HEIGHT + MIN_BUFFER;
-        const maxTop = window.innerHeight - headerHeight - MIN_BUFFER;
-        newTop = Math.max(minTop, Math.min(newTop, maxTop));
-        
-        widget.style.left = newLeft + "px";
-        widget.style.top = newTop + "px";
-        
-        updateNoteWidgetHeight();
-    }
-
-    function endDrag(e) {
-        isDragging = false;
-        document.removeEventListener('mousemove', duringDrag);
-        document.removeEventListener('touchmove', duringDrag);
-        document.removeEventListener('mouseup', endDrag);
-        document.removeEventListener('touchend', endDrag);
-    }
+    makeDraggableWidget({
+        el: widget,
+        handle: header,
+        onMove: updateNoteWidgetHeight,
+        isVisible: () => widget.classList.contains('visible'),
+        ignoreDragStart: (e) => e.target.classList.contains('note-widget-close'),
+    });
 }
 
 export function showDeleteConfirmation(noteId) {
@@ -1687,14 +1601,26 @@ export function init() {
         clearSelection();
     });
 
-    window.addEventListener('resize', handleWindowResize);
-    addDraggableNoteWidget();
+    addDraggableNoteWidget(); // also registers the resize re-clamp
     updateNoteWidgetHeight();
     try { eventBus.emit('modals:init'); } catch (e) {}
     // Accept refresh requests from other modules (to avoid window.modals usage)
     try {
         eventBus.on('modals:requestRefresh', ({ note, measureId, clickedElement }) => {
             showNoteVariables(note, clickedElement, measureId ?? null);
+        });
+    } catch {}
+    // The widget bakes its ▲/▼ octave buttons (and their ratio tooltips) from the
+    // arrow settings when it is built. The settings panel is non-modal now, so
+    // those settings can change while the widget is open — rebuild it rather than
+    // leave buttons that disagree with the workspace.
+    try {
+        eventBus.on('settings:changed', ({ path }) => {
+            const p = String(path ?? '');
+            if (p !== '' && p !== 'arrows' && !p.startsWith('arrows.')) return;
+            if (!currentSelectedNote) return;
+            if (!domCache.noteWidget || !domCache.noteWidget.classList.contains('visible')) return;
+            showNoteVariables(currentSelectedNote, null, currentMeasureId);
         });
     } catch {}
 }

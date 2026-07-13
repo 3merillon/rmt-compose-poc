@@ -83,9 +83,10 @@ async function initApp() {
     // wire the "Settings…" menu entry to open the panel.
     try {
         const { settingsStore } = await import('./settings/settings-store.js');
-        const { openSettingsPanel } = await import('./settings/settings-panel.js');
+        const { openSettingsPanel, toggleSettingsPanel } = await import('./settings/settings-panel.js');
         // Touch the store so it loads + emits 'settings:loaded' early.
         settingsStore.getAll();
+
         const settingsBtn = document.getElementById('settingsBtn');
         if (settingsBtn) {
             settingsBtn.addEventListener('click', () => {
@@ -98,6 +99,18 @@ async function initApp() {
                     if (pm) pm.classList.remove('open');
                 } catch {}
                 openSettingsPanel();
+            });
+        }
+
+        // Top-bar gear: same panel, and a second click closes it again.
+        const gearBtn = document.getElementById('settingsGearBtn');
+        if (gearBtn) {
+            gearBtn.addEventListener('click', () => toggleSettingsPanel());
+            // Track the panel's REAL state, so the gear also un-lights when the
+            // panel is closed from its own × or with Escape.
+            eventBus.on('settings:panelToggled', ({ open }) => {
+                gearBtn.classList.toggle('open', !!open);
+                gearBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
             });
         }
     } catch (e) {

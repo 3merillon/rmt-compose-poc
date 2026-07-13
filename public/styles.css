@@ -433,6 +433,66 @@ html, body {
     filter: drop-shadow(0 0 10px var(--rmt-danger, #ff0000));
 }
 
+/* Settings gear — sits between the tracking toggle and the "+" menu. Same 20x20
+   box as .dropdown-button / #playPauseBtn, and .right-controls has no gap, so it
+   carries its own 16px like #resetViewBtn and .tracking-zone do. */
+.settings-gear-btn {
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 16px;
+    padding: 0;
+    color: var(--rmt-accent, #ffa800);
+    transition: color 0.5s ease-in-out;
+}
+
+.settings-gear-btn .gear-icon {
+    width: 20px;
+    height: 20px;
+    display: block;
+    overflow: visible;          /* let the glow spill past the 20px box */
+    transform-origin: center;
+    transition: transform 0.5s ease-in-out, filter 0.5s ease-in-out;
+}
+
+/* The gear has 8 teeth, so it is symmetric every 45deg: hovering turns it by
+   exactly one tooth and lands on identical geometry — it never snaps back. */
+.settings-gear-btn:hover .gear-icon,
+.settings-gear-btn:focus-visible .gear-icon {
+    transform: rotate(45deg);
+    filter: drop-shadow(0 0 10px var(--rmt-accent, #ffa800));
+}
+
+/* Open: danger-red, like .plusminus.open, and parked half a tooth over so the
+   state reads even without color. */
+.settings-gear-btn.open {
+    color: var(--rmt-danger, #ff0000);
+}
+
+.settings-gear-btn.open .gear-icon {
+    transform: rotate(22.5deg);
+}
+
+.settings-gear-btn.open:hover .gear-icon,
+.settings-gear-btn.open:focus-visible .gear-icon {
+    transform: rotate(67.5deg);   /* still exactly +45deg */
+    filter: drop-shadow(0 0 10px var(--rmt-danger, #ff0000));
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .settings-gear-btn .gear-icon,
+    .settings-gear-btn:hover .gear-icon,
+    .settings-gear-btn.open .gear-icon,
+    .settings-gear-btn.open:hover .gear-icon {
+        transform: none;
+    }
+}
+
 .widget {
     position: absolute;
     top: 35px;
@@ -517,7 +577,9 @@ html, body {
 
 #volumeSlider {
     -webkit-appearance: none;
-    width: 100px;
+    /* Narrowed from 100px to make room for the settings gear in .right-controls
+       (which grew by 20 + 16 = 36px). Still 56px of travel for the 16px thumb. */
+    width: 72px;
     height: 2px;
     border-radius: 2px;
     background: var(--rmt-accent, #ffa800);

@@ -355,7 +355,7 @@ export function initStackClick() {
   }
   
   document.addEventListener('mousedown', function(event) {
-    if (!event.target.closest('.note-rect, .note-content, .note-widget, .measure-bar-triangle')) {
+    if (!event.target.closest('.note-rect, .note-content, .note-widget, .measure-bar-triangle, .rmt-set-panel')) {
       log("Clicked on background, resetting stack");
       stackClickState.stackedNotes = [];
       stackClickState.currentIndex = -1;

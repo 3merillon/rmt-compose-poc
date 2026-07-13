@@ -1146,10 +1146,6 @@ document.addEventListener('DOMContentLoaded', async function() {
                         try {
                             if (!(typeof v === 'number') || !isFinite(v)) return;
                             if (domCache.volumeSlider) domCache.volumeSlider.value = v;
-                            const disp = domCache.volumeSlider &&
-                                domCache.volumeSlider.parentElement &&
-                                domCache.volumeSlider.parentElement.querySelector('span');
-                            if (disp) disp.textContent = String(v);
                         } catch {}
                     };
                     const persistedVol = settingsStore.get('audio.masterVolume');
@@ -4128,6 +4124,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 !event.target.closest('#baseNoteCircle') &&
                 !event.target.closest('.measure-bar-triangle') &&
                 !event.target.closest('.delete-confirm-overlay') &&
+                // The settings panel is non-modal: working in it must not drop
+                // the note selection out from under you (nor must opening it).
+                !event.target.closest('.rmt-set-panel') &&
+                !event.target.closest('#settingsGearBtn') &&
                 !event.target.closest('.octave-button')) {
                 clearSelection();
             }
@@ -4179,6 +4179,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 !event.target.closest('#baseNoteCircle') &&
                 !event.target.closest('.measure-bar-triangle') &&
                 !event.target.closest('.delete-confirm-overlay') &&
+                // The settings panel is non-modal: working in it must not drop
+                // the note selection out from under you (nor must opening it).
+                !event.target.closest('.rmt-set-panel') &&
+                !event.target.closest('#settingsGearBtn') &&
                 !event.target.closest('.octave-button')) {
                 clearSelection();
             }
@@ -4310,7 +4314,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     });
 
     domCache.volumeSlider.addEventListener('input', (event) => {
-        setVolume(event.target.value);
+        const v = parseFloat(event.target.value);
+        setVolume(v);
+        // Live echo for any UI mirroring this value (Settings → Audio). The store
+        // write stays on 'change' (drag end) so we don't hammer localStorage, but
+        // an open settings panel should track the knob as it moves, not after.
+        try { eventBus.emit('audio:masterVolumeInput', { value: v }); } catch {}
     });
 
     if (domCache.loadModuleBtn && domCache.loadModuleInput) {
@@ -4812,73 +4821,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         modals.invalidateDependencyGraphCache();
     }
 
-    const TOP_HEADER_HEIGHT = 50;
-    const MIN_BUFFER = 20;
-    let widgetInitiallyOpened = false;
-
     function updateNoteWidgetHeight() {
         modals.updateNoteWidgetHeight();
     }
-      
+
     updateNoteWidgetHeight();
-
-    function startDrag(e) {
-        if (e.target.classList.contains('note-widget-close')) return;
-        isDragging = true;
-        e.preventDefault();
-        const rect = widget.getBoundingClientRect();
-        
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-        dragOffsetX = clientX - rect.left;
-        dragOffsetY = clientY - rect.top;
-        
-        document.addEventListener('mousemove', duringDrag);
-        document.addEventListener('touchmove', duringDrag, {passive: false});
-        document.addEventListener('mouseup', endDrag);
-        document.addEventListener('touchend', endDrag);
-    }
-
-    function duringDrag(e) {
-        if (!isDragging) return;
-        e.preventDefault();
-        
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-        
-        let newLeft = clientX - dragOffsetX;
-        let newTop = clientY - dragOffsetY;
-        
-        const widgetRect = widget.getBoundingClientRect();
-        const maxLeft = window.innerWidth - widgetRect.width - MIN_BUFFER;
-        newLeft = Math.max(MIN_BUFFER, Math.min(newLeft, maxLeft));
-        
-        const headerHeight = widget.querySelector('.note-widget-header')?.getBoundingClientRect().height || TOP_HEADER_HEIGHT;
-        const minTop = TOP_HEADER_HEIGHT + MIN_BUFFER;
-        const maxTop = window.innerHeight - headerHeight - MIN_BUFFER;
-        newTop = Math.max(minTop, Math.min(newTop, maxTop));
-        
-        widget.style.left = newLeft + "px";
-        widget.style.top = newTop + "px";
-        
-        updateNoteWidgetHeight();
-    }
-
-    function endDrag(e) {
-        isDragging = false;
-        document.removeEventListener('mousemove', duringDrag);
-        document.removeEventListener('touchmove', duringDrag);
-        document.removeEventListener('mouseup', endDrag);
-        document.removeEventListener('touchend', endDrag);
-    }
 
     const lockButton = document.getElementById('lockButton');
     const lockIcon = lockButton.querySelector('.lock-icon');

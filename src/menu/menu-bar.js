@@ -645,7 +645,9 @@ const menuAPI = (function() {
         // Live-apply library icon size + cents visibility from Settings.
         try {
             settingsStore.subscribe(({ path }) => {
-                if (!path || path.startsWith('library.')) applyIconSizeToAll();
+                // resetSection('library') emits the bare section name, not a
+                // 'library.' path — match both or "Reset this tab" is a no-op here.
+                if (!path || path === 'library' || path.startsWith('library.')) applyIconSizeToAll();
             });
         } catch (e) {}
     }
