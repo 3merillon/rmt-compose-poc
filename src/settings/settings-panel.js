@@ -29,10 +29,10 @@ import { eventBus } from '../utils/event-bus.js';
 import { showConfirmation } from '../utils/confirm-dialog.js';
 import {
   makeDraggableWidget,
-  raiseWidget,
   TOP_HEADER_HEIGHT,
   MIN_BUFFER,
 } from '../utils/draggable-widget.js';
+import { raisePanel } from '../utils/panel-stack.js';
 import { viewportWidth, viewportHeight } from '../utils/viewport.js';
 
 // Themeable color tokens exposed as individual pickers (key + friendly label),
@@ -566,19 +566,30 @@ function selectTab(id) {
   renderTab();
 }
 
-// Fit the panel to its content, but never past the bottom of the viewport —
-// the same idea as updateNoteWidgetHeight(): a panel dragged low shrinks (its
-// body scrolls) instead of running off the screen.
+// Cap the panel at the bottom of the viewport, and let its CONTENT pick the height
+// under that cap — so a panel dragged low shrinks (its body scrolls) instead of
+// running off the screen, and a short tab is short.
+//
+// This used to measure the content — `chrome + bodyEl.scrollHeight` — and write a
+// `height`. That measurement can only ever GROW: `scrollHeight` never reports less
+// than the box the element already has, so once Appearance (long) had stretched the
+// panel to the bottom of the screen, Library (short) measured the tall box we had
+// just given it ourselves and dutifully re-applied the same tall height. The panel
+// was stuck at its high-water mark, and only "popped" back to size when a drag
+// happened to write a smaller height first. That is the whole bug.
+//
+// So do not measure the content at all. A max-height CAP over a flex column that
+// shrink-wraps its content makes the browser do it — on every tab swap, for free,
+// and with no way to read back a number we wrote. The group widget's fitHeight()
+// has always done it this way.
 function updatePanelHeight() {
   if (!root || !isSettingsPanelOpen()) return;
-  const chrome = headerEl.offsetHeight + tabsEl.offsetHeight;
-  const desired = chrome + bodyEl.scrollHeight;
   const available = viewportHeight() - root.getBoundingClientRect().top - MIN_BUFFER;
   // Floor is the HEADER alone, not header+tabs: the drag clamp only guarantees
   // the handle stays on screen, so anything taller would hang off the bottom
   // when the panel is parked at the very bottom. (Same floor as the note widget.)
   const floor = headerEl.offsetHeight;
-  root.style.height = Math.max(floor, Math.min(available, desired)) + 'px';
+  root.style.maxHeight = Math.max(floor, available) + 'px';
 }
 
 // First open only: park it top-right, under the bars and clear of the note
@@ -690,7 +701,7 @@ export function openSettingsPanel(tabId) {
 
   root.classList.add('rmt-set-open');
   if (!placed) { placeDefault(); placed = true; }
-  raiseWidget(root);
+  raisePanel(root);
 
   // Stay current while open: the transport volume slider (and any future
   // outside writer) changes settings under us.

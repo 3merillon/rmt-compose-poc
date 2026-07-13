@@ -54,46 +54,55 @@
         <button class="dropdown-button" title="Main Menu">
           <div class="plusminus"></div>
         </button>
-        <div id="general-widget" class="widget">
-          <div class="menu-actions">
-            <button id="undoBtn" class="module-action-btn" disabled>Undo</button>
-            <button id="redoBtn" class="module-action-btn" disabled>Redo</button>
-            <button id="reorderModuleBtn" class="module-action-btn" style="background: #add8e6;">Reorder Module</button>
-            <button id="saveModuleBtn" class="module-action-btn">Save Module</button>
-            <input type="file" id="loadModuleInput" accept=".json" style="display: none;">
-            <button id="loadModuleBtn" class="module-action-btn">Load Module ▾</button>
-            <div id="loadModuleDropdown" style="display: none; margin-top: -6px;">
-              <div id="loadFromFileItem" class="menu-item">Load Module from file…</div>
-              <div id="resetDefaultModuleItem" class="menu-item">Reset Default Module</div>
-            </div>
-          </div>
-          <div class="widget-footer">
-            <div class="docs-section">
-              <a href="https://docs.rmt.world" target="_blank" class="docs-button">
-                <svg class="docs-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M4 4C4 2.89543 4.89543 2 6 2H14L20 8V20C20 21.1046 19.1046 22 18 22H6C4.89543 22 4 21.1046 4 20V4Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M14 2V8H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M8 13H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M8 17H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <span>Documentation</span>
-              </a>
-            </div>
-            <div class="support-section">
-              <a href="https://buy.stripe.com/7sYeV7aW70eG75I9N6bAs00" target="_blank" class="donate-button">
-                <svg class="donate-heart" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                </svg>
-                <span>Donate</span>
-              </a>
-            </div>
-            <div class="legal-section">
-              <a href="/license.html" target="_blank" class="license-link" rel="license noopener noreferrer">License (MIT)</a>
-            </div>
-            <div class="widget-copyright">© 2026 Cyril Monkewitz</div>
-          </div>
-        </div>
       </div>
+    </div>
+  </div>
+  <!--
+    The "+" main menu. A body-level SIBLING of .top-bar, not a child of the
+    .menu-container button it drops from — `.top-bar` carries both a z-index and a
+    backdrop-filter, and either one makes it a stacking context that would pin this
+    menu below the floating panels (1200+) no matter what z-index it asked for. Out
+    here it is a peer of the note widget / group widget / settings panel: it can be
+    raised over them and they over it (src/utils/panel-stack.js). Its `top: 50px;
+    right: 0` reproduces exactly where it sat when it was anchored to the button.
+  -->
+  <div id="general-widget" class="widget">
+    <div class="menu-actions">
+      <button id="undoBtn" class="module-action-btn" disabled>Undo</button>
+      <button id="redoBtn" class="module-action-btn" disabled>Redo</button>
+      <button id="reorderModuleBtn" class="module-action-btn" style="background: #add8e6;">Reorder Module</button>
+      <button id="saveModuleBtn" class="module-action-btn">Save Module</button>
+      <input type="file" id="loadModuleInput" accept=".json" style="display: none;">
+      <button id="loadModuleBtn" class="module-action-btn">Load Module ▾</button>
+      <div id="loadModuleDropdown" style="display: none; margin-top: -6px;">
+        <div id="loadFromFileItem" class="menu-item">Load Module from file…</div>
+        <div id="resetDefaultModuleItem" class="menu-item">Reset Default Module</div>
+      </div>
+    </div>
+    <div class="widget-footer">
+      <div class="docs-section">
+        <a href="https://docs.rmt.world" target="_blank" class="docs-button">
+          <svg class="docs-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 4C4 2.89543 4.89543 2 6 2H14L20 8V20C20 21.1046 19.1046 22 18 22H6C4.89543 22 4 21.1046 4 20V4Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M14 2V8H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M8 13H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M8 17H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span>Documentation</span>
+        </a>
+      </div>
+      <div class="support-section">
+        <a href="https://buy.stripe.com/7sYeV7aW70eG75I9N6bAs00" target="_blank" class="donate-button">
+          <svg class="donate-heart" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+          </svg>
+          <span>Donate</span>
+        </a>
+      </div>
+      <div class="legal-section">
+        <a href="/license.html" target="_blank" class="license-link" rel="license noopener noreferrer">License (MIT)</a>
+      </div>
+      <div class="widget-copyright">© 2026 Cyril Monkewitz</div>
     </div>
   </div>
   <div class="second-top-bar">

@@ -14,6 +14,7 @@ import { settingsStore } from './settings/settings-store.js';
 import { scaleStep } from './settings/settings-schema.js';
 import { themeManager } from './theme/theme-manager.js';
 import { showGroupWidget, hideGroupWidget } from './modals/group-widget.js';
+import { registerPanel, raisePanel } from './utils/panel-stack.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -4441,6 +4442,25 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
     });
 
+    // The "+" menu closes when you click AWAY from it — into the workspace, the
+    // module bar, the transport. It must NOT close when you click one of its PEER
+    // panels: clicking the settings panel while the menu is open means "bring the
+    // settings panel forward", not "dismiss the menu". The four panels are meant to
+    // layer, and a menu that evaporates the instant you touch the panel in front of
+    // it cannot be layered with anything.
+    //
+    // This is the same allow-list, for the same reason, as the one clearSelection
+    // uses a few lines below — a non-modal panel is not "outside".
+    const PEER_PANELS = '.rmt-set-panel, #settingsGearBtn, #note-widget, #group-widget, .delete-confirm-overlay';
+
+    function closeGeneralWidgetOnOutsideClick(event) {
+        const t = event.target;
+        if (domCache.generalWidget.contains(t) || domCache.dropdownButton.contains(t)) return;
+        if (t && t.closest && t.closest(PEER_PANELS)) return;
+        domCache.plusminus.classList.remove('open');
+        domCache.generalWidget.classList.remove('open');
+    }
+
     document.addEventListener('mouseup', (event) => {
         if (!isDragging) {
             // Suppress global clearSelection if a GL octave action just occurred
@@ -4472,10 +4492,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 !event.target.closest('.octave-button')) {
                 clearSelection();
             }
-            if (!domCache.generalWidget.contains(event.target) && !domCache.dropdownButton.contains(event.target)) {
-                domCache.plusminus.classList.remove('open');
-                domCache.generalWidget.classList.remove('open');
-            }
+            closeGeneralWidgetOnOutsideClick(event);
             // Close Load Module dropdown when clicking outside
             const dd = document.getElementById('loadModuleDropdown');
             const lb = domCache.loadModuleBtn;
@@ -4536,10 +4553,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 !event.target.closest('.octave-button')) {
                 clearSelection();
             }
-            if (!domCache.generalWidget.contains(event.target) && !domCache.dropdownButton.contains(event.target)) {
-                domCache.plusminus.classList.remove('open');
-                domCache.generalWidget.classList.remove('open');
-            }
+            closeGeneralWidgetOnOutsideClick(event);
             const dd = document.getElementById('loadModuleDropdown');
             const lb = domCache.loadModuleBtn;
             if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
@@ -4549,10 +4563,20 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         isDragging = false;
     });
 
+    // The "+" menu is a floating panel like the note widget, the group widget and
+    // the settings panel: it shares their band and their click-to-front rule.
+    registerPanel(domCache.generalWidget);
+    domCache.generalWidget.addEventListener('mousedown', () => raisePanel(domCache.generalWidget));
+    domCache.generalWidget.addEventListener('touchstart', () => raisePanel(domCache.generalWidget), { passive: true });
+
     domCache.dropdownButton.addEventListener('click', (event) => {
         event.stopPropagation();
+        const opening = !domCache.generalWidget.classList.contains('open');
         domCache.plusminus.classList.toggle('open');
         domCache.generalWidget.classList.toggle('open');
+        // Last opened wins — so the menu lands ON TOP of a settings panel parked
+        // over the + button, instead of unrolling invisibly behind it.
+        if (opening) raisePanel(domCache.generalWidget);
     });
 
     domCache.volumeSlider.addEventListener('touchstart', function() {

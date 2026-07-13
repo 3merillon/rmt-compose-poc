@@ -523,15 +523,38 @@ html, body {
 }
 
 .widget {
-    position: absolute;
-    top: 35px;
-    right: -16px;
+    /* Fixed to the viewport, NOT absolute inside .menu-container — the menu is a
+       body-level sibling of .top-bar now (see index.html), because .top-bar's
+       z-index + backdrop-filter make it a stacking context that would pin the menu
+       under the floating panels. These two values reproduce, to the pixel, where it
+       sat when it hung off the + button: the bar is 50px tall, and the button's
+       right edge is inset exactly 16px from the screen edge by .right-controls'
+       margin, which the old `right: -16px` cancelled out to land flush at the edge. */
+    position: fixed;
+    top: 50px;
+    right: 0;
+    /* The floating-panel band, shared with .note-widget / .group-widget /
+       .rmt-set-panel. src/utils/panel-stack.js orders the open ones within it; this
+       is the resting level a closed menu falls back to. */
+    z-index: 1200;
     background: rgba(var(--rmt-bg-rgb), 0.88);
+    /* The same glass as .note-widget / .group-widget / .rmt-set-panel. The menu was
+       the only floating panel without it, which never showed while it could only ever
+       overlap the workspace — now that it can be parked over another panel, 0.88 alpha
+       with nothing behind it lets that panel's controls read straight through. */
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
     border-bottom-left-radius: 5px;
     border-left: 1px dotted var(--rmt-accent, #ffa800);
     border-bottom: 1px dotted var(--rmt-accent, #ffa800);
     padding: 20px;
-    min-width: 250px;
+    /* WIDTH, not min-width. As an absolutely-positioned child of the 20px-wide
+       .menu-container, this box was shrink-to-fit against 20px — it collapsed to its
+       min-width and rendered at 250 + 40 padding + 1 border = 291px. Fixed to the
+       viewport, "shrink-to-fit" resolves against the whole screen instead, and the
+       same box springs open to its max-content width (593px at 1280px). Pin the 250px
+       the menu has always actually been. */
+    width: 250px;
     /* 100 = the two fixed bars. `vh` is the LARGE viewport — the screen as it would
        be with the browser's URL bar collapsed — and this app never scrolls, so that
        bar never collapses and 100vh is permanently taller than the phone. Size to the

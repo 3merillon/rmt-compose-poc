@@ -196,12 +196,58 @@ console.log('\n== desktop 1280x820');
   const b0 = await panelBox(page);
   console.log('  panel@open ' + JSON.stringify(b0));
   check('panel is position:fixed and visible', b0.position === 'fixed' && b0.display === 'flex');
-  check('panel z-index is in the floating-widget layer (1200/1201), below modals (2000)',
-    (b0.zIndex === '1200' || b0.zIndex === '1201'), `z-index: ${b0.zIndex}`);
+  // The band is 1200 + position-in-stack (panel-stack.js). Four panels can be open
+  // at once, so it is 1200-1203 — not the old 1200/1201 front/back flip.
+  check('panel z-index is in the floating-panel band (1200-1209), below modals (2000)',
+    Number(b0.zIndex) >= 1200 && Number(b0.zIndex) <= 1209, `z-index: ${b0.zIndex}`);
   check('panel opens inside the viewport, clear of the top bar',
     b0.top >= 50 && b0.left >= 19 && b0.right <= b0.vw - 19 && b0.bottom <= b0.vh - 19);
 
   await shoot(page, '03-panel-open');
+
+  // --- 3a. swapping tabs RESIZES the panel, in both directions
+  //
+  // The panel used to keep its high-water mark: it measured `chrome + body.scrollHeight`
+  // and wrote a `height`, but scrollHeight can never report LESS than the box the
+  // element already has — so after Appearance (long enough to hit the bottom clamp)
+  // stretched it, Library (two rows) measured the tall box the panel had just been
+  // given and re-applied it. You got the Library tab with dead space running to the
+  // bottom of the screen, and it only snapped back when a drag wrote a smaller height.
+  const tabFit = async (tab) => {
+    await page.click(`.rmt-set-tab[data-tab="${tab}"]`);
+    await page.waitForTimeout(120);
+    return page.evaluate(() => {
+      const p = document.querySelector('.rmt-set-panel');
+      const body = p.querySelector('.rmt-set-body');
+      const content = body.firstElementChild;                     // .rmt-set-tabpanel
+      const cs = getComputedStyle(body);
+      const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+      // The panel is border-box with a 1px dotted border, so its own border counts
+      // toward the height its children need.
+      const ps = getComputedStyle(p);
+      const border = parseFloat(ps.borderTopWidth) + parseFloat(ps.borderBottomWidth);
+      return {
+        h: Math.round(p.getBoundingClientRect().height),
+        // what this tab needs in order to show everything without scrolling
+        needs: Math.round(p.querySelector('.rmt-set-header').offsetHeight +
+                          p.querySelector('.rmt-set-tabs').offsetHeight +
+                          content.getBoundingClientRect().height + pad + border),
+        scrolls: body.scrollHeight > body.clientHeight + 1,
+      };
+    });
+  };
+  const longTab = await tabFit('appearance');
+  const shortTab = await tabFit('library');
+  console.log(`  tabs appearance=${JSON.stringify(longTab)} library=${JSON.stringify(shortTab)}`);
+  check('a SHORT tab shrinks the panel instead of keeping the tall tab\'s height',
+    shortTab.h < longTab.h, `appearance=${longTab.h}px -> library=${shortTab.h}px`);
+  check('the short tab fits its content exactly — no dead space, nothing to scroll',
+    Math.abs(shortTab.h - shortTab.needs) <= 1 && !shortTab.scrolls,
+    `panel=${shortTab.h}px, content needs=${shortTab.needs}px, body scrolls=${shortTab.scrolls}`);
+  await shoot(page, '03a-short-tab-fits');
+  const longAgain = await tabFit('appearance');
+  check('and a long tab GROWS it back (the fit is not a one-way ratchet)',
+    longAgain.h > shortTab.h, `library=${shortTab.h}px -> appearance=${longAgain.h}px`);
 
   // --- 3b. the header must be the note widget's header, to the pixel
   await page.evaluate(() => {                   // open the note widget for comparison
@@ -320,14 +366,23 @@ console.log('\n== desktop 1280x820');
   const behind = notes.filter(outside);
   if (!behind.length) throw new Error(`no note found outside the panel to click (found ${notes.length} notes)`);
   await clickNote(page, behind[0]);
-  const afterNoteClick = await page.evaluate(() => ({
-    noteWidget: document.getElementById('note-widget').classList.contains('visible'),
-    title: document.getElementById('note-widget-title').textContent,
-    panelStillOpen: document.querySelector('.rmt-set-panel').classList.contains('rmt-set-open'),
-  }));
+  const afterNoteClick = await page.evaluate(() => {
+    const z = (s) => parseInt(getComputedStyle(document.querySelector(s)).zIndex, 10);
+    return {
+      noteWidget: document.getElementById('note-widget').classList.contains('visible'),
+      title: document.getElementById('note-widget-title').textContent,
+      panelStillOpen: document.querySelector('.rmt-set-panel').classList.contains('rmt-set-open'),
+      zNote: z('#note-widget'), zPanel: z('.rmt-set-panel'),
+    };
+  });
   check('the app behind the panel still takes clicks (note selected while panel is open)',
     afterNoteClick.noteWidget && afterNoteClick.panelStillOpen,
     `note widget="${afterNoteClick.title}", panel open=${afterNoteClick.panelStillOpen}`);
+  // LAST OPENED WINS: the widget you just summoned must land in FRONT of the panel
+  // that was already there — not behind it, waiting to be touched.
+  check('a note widget opened UNDER the settings panel comes to the front by itself',
+    afterNoteClick.zNote > afterNoteClick.zPanel,
+    `note widget z=${afterNoteClick.zNote} > panel z=${afterNoteClick.zPanel}`);
 
   await shoot(page, '05-panel-and-note-widget');
 
@@ -352,8 +407,13 @@ console.log('\n== desktop 1280x820');
       return !(a.right < b.left || b.right < a.left || a.bottom < b.top || b.bottom < a.top);
     })() };
   });
-  check('panel + note widget coexist in the same layer, both < 2000',
-    stack.panel < 2000 && stack.noteWidget < 2000 && Math.abs(stack.panel - stack.noteWidget) <= 1,
+  // Same band, but DISTINCT levels: an ordered stack never ties two panels at one
+  // z-index, because a tie is resolved by DOM order — i.e. by markup, not by what
+  // the user last did.
+  check('panel + note widget coexist in the same band, on distinct levels, both < 2000',
+    stack.panel >= 1200 && stack.panel < 2000 &&
+    stack.noteWidget >= 1200 && stack.noteWidget < 2000 &&
+    stack.panel !== stack.noteWidget,
     `panel z=${stack.panel}, note widget z=${stack.noteWidget}, overlapping=${stack.overlap}`);
 
   // REGRESSION GUARD: the note widget's own drag still works after the extraction.
@@ -405,6 +465,84 @@ console.log('\n== desktop 1280x820');
   check('clicking a panel brings it to the front (no unreachable-panel trap)',
     raised.noteWidget > raised.panel,
     `note widget z=${raised.noteWidget} > panel z=${raised.panel}`);
+
+  // --- 4b. the "+" main menu is a PEER of the panels, not a popup trapped under them
+  //
+  // It used to live inside .top-bar, which has a z-index AND a backdrop-filter —
+  // either one alone makes it a stacking context — so no z-index could ever lift the
+  // menu above a panel at 1200. It unrolled invisibly BEHIND the settings panel that
+  // was parked over the + button. It is a body-level sibling now.
+  const menuState = () => page.evaluate(() => {
+    const z = (s) => parseInt(getComputedStyle(document.querySelector(s)).zIndex, 10);
+    const m = document.getElementById('general-widget');
+    const p = document.querySelector('.rmt-set-panel');
+    const a = m.getBoundingClientRect(), b = p.getBoundingClientRect();
+    return {
+      menu: z('#general-widget'), panel: z('.rmt-set-panel'),
+      open: m.classList.contains('open'),
+      bodyLevel: m.parentElement === document.body,
+      position: getComputedStyle(m).position,
+      top: Math.round(a.top), right: Math.round(a.right), w: Math.round(a.width),
+      vw: window.innerWidth,
+      overlapsPanel: !(a.right < b.left || b.right < a.left || a.bottom < b.top || b.bottom < a.top),
+    };
+  });
+
+  // Park the settings panel where the menu drops, so this is the real collision.
+  await dragTo(1260, 120);
+  await page.click('.dropdown-button');
+  await page.waitForTimeout(400);                 // .widget has a 0.3s scaleY transition
+  const menuOpen = await menuState();
+  console.log('  + menu ' + JSON.stringify(menuOpen));
+  check('the + menu escaped .top-bar (body-level, fixed) and kept its exact position',
+    menuOpen.bodyLevel && menuOpen.position === 'fixed' &&
+    menuOpen.top === 50 && menuOpen.right === menuOpen.vw,
+    `parent=body:${menuOpen.bodyLevel}, ${menuOpen.position}, top=${menuOpen.top}, right=${menuOpen.right}/${menuOpen.vw}`);
+  // 250px content + 40px padding + 1px border. It was shrink-to-fit against a 20px
+  // .menu-container; fixed to the viewport, shrink-to-fit resolves against the SCREEN,
+  // and an unpinned width springs open to max-content (593px) — twice the menu.
+  check('the + menu kept its 291px box (shrink-to-fit did not spring open)',
+    menuOpen.w === 291, `width=${menuOpen.w}px`);
+  check('opening the + menu OVER the settings panel puts it in front (last opened wins)',
+    menuOpen.open && menuOpen.menu > menuOpen.panel,
+    `menu z=${menuOpen.menu} > panel z=${menuOpen.panel}, overlapping=${menuOpen.overlapsPanel}`);
+  await shoot(page, '05b-menu-over-panel');
+
+  // Clicking the panel underneath raises IT — and must not dismiss the menu.
+  await page.click('.rmt-set-header', { position: { x: 40, y: 10 } });
+  await page.waitForTimeout(150);
+  const panelRaised = await menuState();
+  check('clicking the settings panel raises it above the menu WITHOUT closing the menu',
+    panelRaised.open && panelRaised.panel > panelRaised.menu,
+    `menu open=${panelRaised.open}, panel z=${panelRaised.panel} > menu z=${panelRaised.menu}`);
+
+  // ...and clicking the menu brings it back. This is the user-facing point of the whole
+  // change: two panels stacked over each other, either one reachable in one click.
+  //
+  // Click the SLIVER of the menu the raised panel does not cover (the panel's top edge
+  // is at y≈97; the menu starts at y=50) — by coordinate, not by selector. A selector
+  // click would target an element the panel is legitimately covering, and Playwright
+  // would rightly refuse it. Clicking the visible part IS the interaction being tested.
+  const sliver = await page.evaluate(() => {
+    const m = document.getElementById('general-widget').getBoundingClientRect();
+    const p = document.querySelector('.rmt-set-panel').getBoundingClientRect();
+    return { x: Math.round(m.left + m.width / 2), y: Math.round((m.top + Math.min(p.top, m.bottom)) / 2) };
+  });
+  await page.mouse.click(sliver.x, sliver.y);
+  await page.waitForTimeout(150);
+  const menuRaised = await menuState();
+  check('clicking the menu brings it back to the front (neither panel can trap the other)',
+    menuRaised.open && menuRaised.menu > menuRaised.panel,
+    `menu z=${menuRaised.menu} > panel z=${menuRaised.panel}`);
+  await shoot(page, '05c-menu-raised-again');
+
+  // REGRESSION GUARD: it must still be a menu — a click that is genuinely away from
+  // every panel still dismisses it. (Empty middle of the top bar: no note under it.)
+  await page.mouse.click(640, 25);
+  await page.waitForTimeout(400);
+  const dismissed = await menuState();
+  check('a click away from every panel still closes the + menu',
+    !dismissed.open, `menu open=${dismissed.open}`);
 
   // --- 5. drag to the bottom edge: the clamp holds and the panel shrinks
   const hBefore = (await panelBox(page)).h;

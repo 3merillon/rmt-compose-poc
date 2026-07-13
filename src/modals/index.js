@@ -13,6 +13,7 @@ import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric
 import { escapeHtml } from '../utils/html-escape.js';
 import { isDSLSyntax } from '../dsl/index.js';
 import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.js';
+import { raisePanel } from '../utils/panel-stack.js';
 import { viewportHeight } from '../utils/viewport.js';
 
 const domCache = {
@@ -177,6 +178,10 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     }
     
     domCache.noteWidget.classList.add('visible');
+    // Last opened wins: clicking a note with the settings panel (or the "+" menu)
+    // parked over the widget must put the widget you just summoned in FRONT of it,
+    // not behind it. Without this the widget only came forward once you touched it.
+    raisePanel(domCache.noteWidget);
     updateNoteWidgetHeight();
 
     if (!clickedElement && note && note.id !== undefined) {

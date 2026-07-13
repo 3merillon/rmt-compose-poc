@@ -32,10 +32,10 @@
 import { showConfirmation } from '../utils/confirm-dialog.js';
 import {
   makeDraggableWidget,
-  raiseWidget,
   TOP_HEADER_HEIGHT,
   MIN_BUFFER,
 } from '../utils/draggable-widget.js';
+import { raisePanel } from '../utils/panel-stack.js';
 import { viewportWidth, viewportHeight } from '../utils/viewport.js';
 
 // ---- the action registry ------------------------------------------------
@@ -109,7 +109,7 @@ export function showGroupWidget({ count: n = 0, onDeleteAll = null, onClear = nu
   if (!placed) { placeDefault(); placed = true; }
 
   fitHeight();
-  raiseWidget(root);
+  raisePanel(root);
   // The viewport may have changed while we were hidden.
   if (drag) drag.clampIntoView();
 }

@@ -17,29 +17,12 @@
  */
 
 import { viewportWidth, viewportHeight } from './viewport.js';
+import { registerPanel, raisePanel, unregisterPanel } from './panel-stack.js';
 
 // The fixed top bar is 50px tall; floating panels stay below it, and keep a
 // 19px buffer to every viewport edge.
 export const TOP_HEADER_HEIGHT = 50;
 export const MIN_BUFFER = 19;
-
-// Floating panels share one stacking level: above the menu bars (1100/1099),
-// below global modals (2000). The panel you touch last comes to the front, so
-// two open panels can never trap each other.
-const BASE_Z = 1200;
-const FRONT_Z = 1201;
-
-const widgets = new Set();
-
-export function raiseWidget(el) {
-  // With a single panel there is nothing to stack against — leave its z-index
-  // to CSS, exactly as before this helper existed.
-  if (!el || widgets.size < 2) return;
-  for (const other of widgets) {
-    if (other !== el) other.style.zIndex = String(BASE_Z);
-  }
-  el.style.zIndex = String(FRONT_Z);
-}
 
 // Touch list must be probed before clientX/clientY: a MouseEvent has no `.touches`,
 // and a coordinate of 0 is falsy, so `e.clientY || e.touches[0].clientY` throws at
@@ -78,7 +61,9 @@ export function makeDraggableWidget({
   if (!el || !handle) return { destroy() {}, clampIntoView() {}, raise() {} };
 
   el.style.position = 'fixed';
-  widgets.add(el);
+  // Draggable panels stack against the ones that are not draggable (the "+" menu),
+  // so the stack is a module of its own — see panel-stack.js.
+  registerPanel(el);
 
   let isDragging = false;
   let dragOffsetX = 0;
@@ -93,7 +78,7 @@ export function makeDraggableWidget({
     if (ignoreDragStart(e)) return;
     isDragging = true;
     e.preventDefault();
-    raiseWidget(el);
+    raisePanel(el);
 
     const rect = el.getBoundingClientRect();
     const { x, y } = pointerOf(e);
@@ -169,7 +154,7 @@ export function makeDraggableWidget({
   }
 
   const onWindowResize = () => clampIntoView();
-  const onPress = () => raiseWidget(el);
+  const onPress = () => raisePanel(el);
 
   handle.addEventListener('mousedown', startDrag);
   handle.addEventListener('touchstart', startDrag, { passive: false });
@@ -185,9 +170,9 @@ export function makeDraggableWidget({
       el.removeEventListener('mousedown', onPress);
       el.removeEventListener('touchstart', onPress);
       window.removeEventListener('resize', onWindowResize);
-      widgets.delete(el);
+      unregisterPanel(el);
     },
     clampIntoView,
-    raise: () => raiseWidget(el),
+    raise: () => raisePanel(el),
   };
 }
