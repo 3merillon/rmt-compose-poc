@@ -2,7 +2,7 @@
   "baseNote": {
     "frequency": "263",
     "startTime": "0",
-    "tempo": "150",
+    "tempo": "200",
     "beatsPerMeasure": "3"
   },
   "notes": [
@@ -64,10 +64,10 @@
     },
     {
       "id": 9,
-      "startTime": "base.t + beat(base) * (10/1)",
-      "duration": "beat(base) * (3/2)",
-      "frequency": "(15/16) * base.f",
-      "color": "rgba(150,90,210,0.75)"
+      "startTime": "[1].t + beat([1]) * 10",
+      "duration": "beat([1])",
+      "frequency": "(7/8) * [1].f",
+      "color": "rgba(74,144,226,0.7)"
     },
     {
       "id": 10,
@@ -113,10 +113,31 @@
     },
     {
       "id": 16,
-      "startTime": "base.t + beat(base) * (18/1)",
-      "duration": "beat(base)",
-      "frequency": "(3/4) * base.f",
-      "color": "rgba(210,70,70,0.75)"
+      "startTime": "[14].t + beat([14]) * 2",
+      "duration": "beat([14])",
+      "frequency": "[14].f",
+      "color": "rgba(242,167,27,0.7)"
+    },
+    {
+      "id": 17,
+      "startTime": "[14].t + beat([14]) * 3",
+      "duration": "beat(base) * (7/4)",
+      "frequency": "(9/8) * [14].f",
+      "color": "rgba(242,167,27,0.7)"
+    },
+    {
+      "id": 18,
+      "startTime": "[14].t + beat([14]) * (19/4)",
+      "duration": "beat(base) * (5/4)",
+      "frequency": "(15/16) * [14].f",
+      "color": "rgba(63,185,80,0.7)"
+    },
+    {
+      "id": 19,
+      "startTime": "[14].t + beat([14]) * 6",
+      "duration": "beat([14])",
+      "frequency": "(3/4) * [14].f",
+      "color": "rgba(242,167,27,0.7)"
     }
   ]
 }

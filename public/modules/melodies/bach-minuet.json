@@ -51,84 +51,70 @@
     {
       "id": 7,
       "startTime": "base.t + beat(base) * (8/1)",
-      "duration": "beat(base)",
+      "duration": "beat(base) * (2/1)",
       "frequency": "base.f",
       "color": "rgba(128,128,128,0.75)"
     },
     {
       "id": 8,
-      "startTime": "base.t + beat(base) * (9/1)",
+      "startTime": "base.t + beat(base) * (10/1)",
       "duration": "beat(base) * (2/1)",
       "frequency": "base.f",
       "color": "rgba(128,128,128,0.75)"
     },
     {
       "id": 9,
-      "startTime": "base.t + beat(base) * (11/1)",
-      "duration": "beat(base)",
-      "frequency": "base.f",
-      "color": "rgba(128,128,128,0.75)"
-    },
-    {
-      "id": 10,
       "startTime": "base.t + beat(base) * (12/1)",
       "duration": "beat(base) * (2/1)",
       "frequency": "(5/3) * base.f",
       "color": "rgba(80,160,180,0.75)"
     },
     {
-      "id": 11,
+      "id": 10,
       "startTime": "base.t + beat(base) * (14/1)",
       "duration": "beat(base)",
       "frequency": "(4/3) * base.f",
       "color": "rgba(230,150,40,0.75)"
     },
     {
-      "id": 12,
+      "id": 11,
       "startTime": "base.t + beat(base) * (15/1)",
       "duration": "beat(base)",
       "frequency": "(3/2) * base.f",
       "color": "rgba(210,70,70,0.75)"
     },
     {
-      "id": 13,
+      "id": 12,
       "startTime": "base.t + beat(base) * (16/1)",
       "duration": "beat(base)",
       "frequency": "(5/3) * base.f",
       "color": "rgba(80,160,180,0.75)"
     },
     {
-      "id": 14,
+      "id": 13,
       "startTime": "base.t + beat(base) * (17/1)",
       "duration": "beat(base)",
       "frequency": "(15/8) * base.f",
       "color": "rgba(150,90,210,0.75)"
     },
     {
-      "id": 15,
+      "id": 14,
       "startTime": "base.t + beat(base) * (18/1)",
       "duration": "beat(base) * (2/1)",
       "frequency": "(2/1) * base.f",
       "color": "rgba(128,128,128,0.75)"
     },
     {
-      "id": 16,
+      "id": 15,
       "startTime": "base.t + beat(base) * (20/1)",
-      "duration": "beat(base)",
-      "frequency": "base.f",
-      "color": "rgba(128,128,128,0.75)"
-    },
-    {
-      "id": 17,
-      "startTime": "base.t + beat(base) * (21/1)",
       "duration": "beat(base) * (2/1)",
       "frequency": "base.f",
       "color": "rgba(128,128,128,0.75)"
     },
     {
-      "id": 18,
-      "startTime": "base.t + beat(base) * (23/1)",
-      "duration": "beat(base)",
+      "id": 16,
+      "startTime": "base.t + beat(base) * (22/1)",
+      "duration": "beat(base) * (2/1)",
       "frequency": "base.f",
       "color": "rgba(128,128,128,0.75)"
     }

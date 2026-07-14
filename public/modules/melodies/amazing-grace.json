@@ -51,83 +51,181 @@
     {
       "id": 7,
       "startTime": "base.t + beat(base) * (7/1)",
-      "duration": "beat(base) * (3/1)",
+      "duration": "beat(base) * (2/1)",
       "frequency": "base.f",
       "color": "rgba(128,128,128,0.75)"
     },
     {
       "id": 8,
-      "startTime": "base.t + beat(base) * (10/1)",
-      "duration": "beat(base) * (2/1)",
-      "frequency": "(5/4) * base.f",
-      "color": "rgba(60,190,110,0.75)"
+      "startTime": "base.t + beat(base) * (9/1)",
+      "duration": "beat(base)",
+      "frequency": "(5/6) * base.f",
+      "color": "rgba(80,160,180,0.75)"
     },
     {
       "id": 9,
-      "startTime": "base.t + beat(base) * (12/1)",
-      "duration": "beat(base)",
-      "frequency": "(5/4) * base.f",
-      "color": "rgba(60,190,110,0.75)"
+      "startTime": "base.t + beat(base) * (10/1)",
+      "duration": "beat(base) * (2/1)",
+      "frequency": "(3/4) * base.f",
+      "color": "rgba(210,70,70,0.75)"
     },
     {
       "id": 10,
-      "startTime": "base.t + beat(base) * (13/1)",
-      "duration": "beat(base) * (3/1)",
-      "frequency": "(3/2) * base.f",
+      "startTime": "base.t + beat(base) * (12/1)",
+      "duration": "beat(base)",
+      "frequency": "(3/4) * base.f",
       "color": "rgba(210,70,70,0.75)"
     },
     {
       "id": 11,
-      "startTime": "base.t + beat(base) * (16/1)",
+      "startTime": "base.t + beat(base) * (13/1)",
       "duration": "beat(base) * (2/1)",
-      "frequency": "(3/2) * base.f",
-      "color": "rgba(210,70,70,0.75)"
+      "frequency": "base.f",
+      "color": "rgba(128,128,128,0.75)"
     },
     {
       "id": 12,
-      "startTime": "base.t + beat(base) * (18/1)",
-      "duration": "beat(base)",
+      "startTime": "base.t + beat(base) * (15/1)",
+      "duration": "beat(base) * (1/2)",
       "frequency": "(5/4) * base.f",
       "color": "rgba(60,190,110,0.75)"
     },
     {
       "id": 13,
+      "startTime": "base.t + beat(base) * (31/2)",
+      "duration": "beat(base) * (1/2)",
+      "frequency": "base.f",
+      "color": "rgba(128,128,128,0.75)"
+    },
+    {
+      "id": 14,
+      "startTime": "base.t + beat(base) * (16/1)",
+      "duration": "beat(base) * (2/1)",
+      "frequency": "(5/4) * base.f",
+      "color": "rgba(60,190,110,0.75)"
+    },
+    {
+      "id": 15,
+      "startTime": "base.t + beat(base) * (18/1)",
+      "duration": "beat(base)",
+      "frequency": "(9/8) * base.f",
+      "color": "rgba(90,170,120,0.75)"
+    },
+    {
+      "id": 16,
       "startTime": "base.t + beat(base) * (19/1)",
       "duration": "beat(base) * (2/1)",
       "frequency": "base.f",
       "color": "rgba(128,128,128,0.75)"
     },
     {
-      "id": 14,
+      "id": 17,
       "startTime": "base.t + beat(base) * (21/1)",
+      "duration": "beat(base)",
+      "frequency": "(5/4) * base.f",
+      "color": "rgba(60,190,110,0.75)"
+    },
+    {
+      "id": 18,
+      "startTime": "base.t + beat(base) * (22/1)",
+      "duration": "beat(base) * (2/1)",
+      "frequency": "(3/2) * base.f",
+      "color": "rgba(210,70,70,0.75)"
+    },
+    {
+      "id": 19,
+      "startTime": "base.t + beat(base) * (24/1)",
       "duration": "beat(base) * (1/2)",
       "frequency": "(5/4) * base.f",
       "color": "rgba(60,190,110,0.75)"
     },
     {
-      "id": 15,
-      "startTime": "base.t + beat(base) * (43/2)",
+      "id": 20,
+      "startTime": "base.t + beat(base) * (49/2)",
       "duration": "beat(base) * (1/2)",
       "frequency": "base.f",
       "color": "rgba(128,128,128,0.75)"
     },
     {
-      "id": 16,
-      "startTime": "base.t + beat(base) * (22/1)",
+      "id": 21,
+      "startTime": "base.t + beat(base) * (25/1)",
       "duration": "beat(base) * (2/1)",
       "frequency": "(5/4) * base.f",
       "color": "rgba(60,190,110,0.75)"
     },
     {
-      "id": 17,
-      "startTime": "base.t + beat(base) * (24/1)",
+      "id": 22,
+      "startTime": "base.t + beat(base) * (27/1)",
       "duration": "beat(base)",
       "frequency": "(9/8) * base.f",
       "color": "rgba(90,170,120,0.75)"
     },
     {
-      "id": 18,
-      "startTime": "base.t + beat(base) * (25/1)",
+      "id": 23,
+      "startTime": "base.t + beat(base) * (28/1)",
+      "duration": "beat(base) * (2/1)",
+      "frequency": "base.f",
+      "color": "rgba(128,128,128,0.75)"
+    },
+    {
+      "id": 24,
+      "startTime": "base.t + beat(base) * (30/1)",
+      "duration": "beat(base)",
+      "frequency": "(5/6) * base.f",
+      "color": "rgba(80,160,180,0.75)"
+    },
+    {
+      "id": 25,
+      "startTime": "base.t + beat(base) * (31/1)",
+      "duration": "beat(base) * (2/1)",
+      "frequency": "(3/4) * base.f",
+      "color": "rgba(210,70,70,0.75)"
+    },
+    {
+      "id": 26,
+      "startTime": "base.t + beat(base) * (33/1)",
+      "duration": "beat(base)",
+      "frequency": "(3/4) * base.f",
+      "color": "rgba(210,70,70,0.75)"
+    },
+    {
+      "id": 27,
+      "startTime": "base.t + beat(base) * (34/1)",
+      "duration": "beat(base) * (2/1)",
+      "frequency": "base.f",
+      "color": "rgba(128,128,128,0.75)"
+    },
+    {
+      "id": 28,
+      "startTime": "base.t + beat(base) * (36/1)",
+      "duration": "beat(base) * (1/2)",
+      "frequency": "(5/4) * base.f",
+      "color": "rgba(60,190,110,0.75)"
+    },
+    {
+      "id": 29,
+      "startTime": "base.t + beat(base) * (73/2)",
+      "duration": "beat(base) * (1/2)",
+      "frequency": "base.f",
+      "color": "rgba(128,128,128,0.75)"
+    },
+    {
+      "id": 30,
+      "startTime": "base.t + beat(base) * (37/1)",
+      "duration": "beat(base) * (2/1)",
+      "frequency": "(5/4) * base.f",
+      "color": "rgba(60,190,110,0.75)"
+    },
+    {
+      "id": 31,
+      "startTime": "base.t + beat(base) * (39/1)",
+      "duration": "beat(base)",
+      "frequency": "(9/8) * base.f",
+      "color": "rgba(90,170,120,0.75)"
+    },
+    {
+      "id": 32,
+      "startTime": "base.t + beat(base) * (40/1)",
       "duration": "beat(base) * (3/1)",
       "frequency": "base.f",
       "color": "rgba(128,128,128,0.75)"
