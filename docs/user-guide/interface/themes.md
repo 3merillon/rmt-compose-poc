@@ -1,6 +1,6 @@
 ---
 title: Themes & Appearance
-description: Four colour presets, per-token colour pickers and note geometry — what the Appearance tab changes, and what it deliberately leaves alone.
+description: Four colour presets, per-token colour pickers and note geometry — what the Appearance tab changes, picker by picker.
 ---
 
 # Themes & Appearance
@@ -37,8 +37,8 @@ Each preset's accent, background and note-border colours:
 | Mono Light | `#d17400` | `#f5f5f0` | `#9a9a92` |
 | High Contrast | `#ffd400` | `#000000` | `#ffffff` |
 
-::: warning Picking a theme discards your custom colours.
-Selecting a preset applies its full colour set **and clears every colour override you have made**, with no confirmation, so the preset shows cleanly. Choose your theme first, then customize.
+::: warning Picking a theme discards your custom colours — and re-seeds the geometry sliders.
+Selecting a preset applies its full colour set **and clears every colour override you have made**, with no confirmation, so the preset shows cleanly. It also writes the preset's declared note geometry over the three sliders below. Choose your theme first, then customize.
 :::
 
 ::: info There is no automatic light mode.
@@ -47,7 +47,7 @@ The app does not follow your operating system's light/dark preference. If you wa
 
 ## Note geometry
 
-Three sliders under the theme dropdown reshape every note on the canvas. They apply live and are independent of which theme you are on — switching presets does not change them.
+Three sliders under the theme dropdown reshape every note on the canvas. They apply live. Each preset declares its own geometry, and **switching presets re-seeds the sliders with it** — High Contrast, for instance, lands a 2 px border and 4 px corners. Anything you drag afterwards sticks until the next preset switch.
 
 | Slider | Range | Default | What it changes |
 |---|---|---|---|
@@ -63,30 +63,23 @@ Below the sliders sit **15 colour pickers**, grouped under *Interface*, *Workspa
 
 Overrides are **sparse**: you only override the tokens you actually touch, and everything else keeps following the preset.
 
-These are the pickers that change something, and what they change:
+Every picker changes something. What each one recolours:
 
 | Picker | What it recolours |
 |---|---|
-| **Accent** | Almost all of the interface — buttons, borders, panel titles, glows — plus, on the canvas: the BaseNote circle, the note ID labels, the BaseNote's fraction, the octave guide lines and the measure-triangle labels. This is the one big lever. |
-| **Background** | The canvas and page background, input backgrounds, and the translucent backing of the bars and panels. |
+| **Accent** | Almost all of the interface — buttons, borders, panel titles, glows — plus, on the canvas: the BaseNote circle, the note ID labels, the BaseNote's fraction, the octave guide lines, the measure-triangle labels, and the **marquee rectangle** you drag when multi-selecting. This is the one big lever. |
+| **Background** | The canvas and page background, and input backgrounds. |
+| **Panel surface** | The translucent backing of the bars and panels. |
 | **Panel border** | The outlines of inputs, chips and buttons inside the panels. |
-| **Text** | Primary text. |
+| **Text** | Primary text — including all the text drawn **on** notes: fraction labels, the word "silence", the ▲/▼ arrow glyphs, and the BaseNote's fraction. |
 | **Muted text** | Secondary text — hints, readouts, inactive tab labels. |
 | **Active / delete** | The danger colour: destructive buttons, active toggle states, the gear when Settings is open. |
 | **Note border** | The outline of **every** note, the dashed ring around a silence, and the BaseNote circle's border. |
 | **Playhead** | The playhead line. |
 | **Measure bars** | The measure bars — dashed interior and solid start/end alike. |
-| **Selection ring** | The **marquee rectangle** you drag when multi-selecting. See the warning below: it does not recolour the ring around a selected note. |
-
-::: warning Five pickers currently have no effect.
-These controls exist in the panel and store a value, but nothing in the app reads it. Changing them does nothing visible:
-
-- **Panel surface** — panels are drawn from the Background colour instead.
-- **Hover ring** — the ring under your cursor is always white.
-- **Frequency**, **Start time** and **Duration** (the whole *Dependency highlights* group) — the [dependency highlight rings](/user-guide/notes/dependencies) are always orange, teal and purple.
-
-**Selection ring** is also mislabelled: it colours the multi-select marquee rectangle, not the ring around a selected note (which is always white).
-:::
+| **Selection ring** | The ring and wash on a **selected** note, the ring around a multi-selected **group**, and the outline of a selected BaseNote or measure triangle. |
+| **Hover ring** | The ring under your cursor — on notes, the BaseNote and measure triangles. |
+| **Frequency**, **Start time**, **Duration** | The [dependency highlight](/user-guide/notes/dependencies) rings **and** the dependency link lines, per property. |
 
 ### Reset colors to theme
 
@@ -96,22 +89,12 @@ It touches colours only — your note height, border thickness and corner radius
 
 ## What is not themed
 
-Some things on the canvas are deliberately not part of the theme.
+One thing on the canvas is deliberately not part of the theme.
 
-**Note colours are your data, not the theme's.** Every note carries its own colour: a new note takes the colour of the note it was created against, or a random hue if there is none. You change it on the note's `COLOR` row in the [note widget](/user-guide/interface/variable-widget), by typing a value — hex, `rgb()`, `rgba()`, `hsl()`, `hsla()` or a named colour — and saving. A theme change never repaints your notes, which is the point: the colours you chose to tell one voice from another survive a change of skin.
+**Note colours are your data, not the theme's.** Every note carries its own colour: a new note takes the colour of the note it was created against, or a random hue if there is none (the preset does set that random hue's *saturation*). You change it on the note's `COLOR` row in the [note widget](/user-guide/interface/variable-widget), by typing a value — hex, `rgb()`, `rgba()`, `hsl()`, `hsla()` or a named colour — and saving. A theme change never repaints your notes, which is the point: the colours you chose to tell one voice from another survive a change of skin.
 
-The rest is fixed by design:
-
-| Element | Colour |
-|---|---|
-| The ring and wash on a **selected** note | white |
-| The ring on a **hovered** note | white |
-| The ring around a **multi-selected group** | white |
-| **Dependency highlight** rings — frequency, start time, duration | orange, teal, purple |
-| The fraction text, the word "silence", and the ▲/▼ arrow glyphs drawn on a note | white |
-
-::: tip Mono Light and white-on-white.
-Because those elements are hardcoded white, they are hard to see against the Mono Light background. Mono Light is usable, but selection and hover feedback are weaker on it than on the dark themes.
+::: tip Mono Light has its own feedback colours.
+Selection and hover feedback follow the preset's tokens, so on Mono Light the selection ring is burnt-orange (`#d17400`), the hover ring dark grey (`#333333`) and on-note text near-black — no white-on-white.
 :::
 
 ## Next

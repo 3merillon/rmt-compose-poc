@@ -178,8 +178,8 @@ The two formats can be mixed in one file. The format is detected per expression 
 
 </details>
 
-::: danger An expression neither compiler can read becomes `0`, silently
-There is no error toast for a bad expression. The compiler emits a constant `0`, logs a warning to the browser console, and the module loads anyway. A file that "loads successfully" is not a file that is musically correct — check the notes you expected actually appeared.
+::: warning An expression neither compiler can read is rejected
+The compiler logs a `console.error` and refuses the expression — it never silently compiles to `0`. On the **Load Module** file path the module still loads, but the affected property is left unset (the note falls back to its defaults); the library-upload and Load-UI validators reject the file outright with the reason. If a load "succeeded" but a note looks wrong, check the browser console.
 :::
 
 ## Colours
@@ -223,13 +223,13 @@ Ids are yours to choose while you hand-write a file, but they will not survive:
 
 So the ids in the file you download will generally differ from the ids you saw on screen, and from the ids you originally wrote. There is no byte-stable round trip. **Reorder Module** (in the **+** menu, behind a confirmation) applies the same renumbering to the live workspace.
 
-One more thing changes on the way out: the BaseNote gains a `measureLength` even if your file omitted it, written in legacy form because that is the class default.
+One more thing changes on the way out: the BaseNote gains a `measureLength` even if your file omitted it, written in DSL form because that is the class default.
 
 ```json
-"measureLength": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(module.baseNote.getVariable('beatsPerMeasure'))"
+"measureLength": "beat(base) * base.bpm"
 ```
 
-It is harmless — it compiles to the same bytecode as `beat(base) * base.bpm` — but it means a saved file is never "pure DSL".
+It is harmless — and because it is DSL, a pure-DSL file stays "pure DSL" when saved.
 
 ## Limits
 
@@ -238,13 +238,11 @@ It is harmless — it compiles to the same bytecode as `beat(base) * base.bpm` �
 | Max file size (**Load Module**) | 3 MB |
 | Max notes | 10 000 |
 | Max JSON nesting depth (**Load Module**) | 20 |
-| Valid note id | integer, 0 – 100 000 |
+| Valid note id | integer, 0 – 65 535 |
 | Max expression length | 10 000 characters |
 | Note ids blocked outright | `__proto__`, `constructor`, `prototype` |
 
-::: warning Note ids above 65 535 break references silently
-The loader accepts ids up to 100 000, but a reference is encoded as a 16-bit integer in the bytecode, so `[70000].f` wraps around. Keep your ids below 65 536.
-:::
+The id ceiling matches the bytecode: a reference is encoded as a 16-bit integer, and the loader rejects (skips, with a console warning) any id above 65 535 — so an id can never wrap to a different note.
 
 ## What is checked, and where
 
@@ -304,9 +302,9 @@ Self-containment is what makes a module droppable. On import, its note 0 is rema
 
 **Writing a `measures` array.** There is no such key. A measure bar is a note with a `startTime` and nothing else. See [note kinds](#note-kinds-are-inferred-not-declared).
 
-**Writing `60 / tempo(base)` for a duration.** It becomes `0`. An expression that starts with a number is not detected as DSL, so it is routed to the legacy compiler, which cannot read it — the note gets a constant `0` and a console warning. Write `beat(base)`.
+**Writing `60 / tempo(base)` for a duration.** It works — an expression that starts with a number is routed to the legacy compiler first, which cannot read it, but the failure falls through to the DSL parser — yet write `beat(base)` anyway: it is what the app itself writes, it skips the wasted parse, and it is the form the decompiler gives back.
 
-**Using `//` for comments inside an expression.** The DSL comment character is `#`. `//` lexes as two division operators and fails to parse — which means the expression becomes `0`.
+**Using `//` for comments inside an expression.** The DSL comment character is `#`. `//` lexes as two division operators and fails to parse — the expression is rejected with a compile error and the property is left unset on load.
 
 **Assuming `[2].f = base.f * (3/2)` is valid.** The DSL has no assignment operator. An expression is only ever the right-hand side; the property it belongs to is the JSON key.
 

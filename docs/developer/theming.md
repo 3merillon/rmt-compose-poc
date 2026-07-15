@@ -51,11 +51,11 @@ A `ThemePreset` is `{ id, name, tokens, geometry }` (`presets.js:20`).
 **Non-colour tokens**, present in every preset: `noteDefaultSaturation` (a number) and
 `newNoteColorMode` (`'random'` in all four presets).
 
-::: warning Neither non-colour token is read by anything.
-New notes always get `hsla(<random 0–360>, 70%, 60%, 0.7)` (`player.js:2391`, `player.js:4017`).
-There is no "new note colour mode" setting anywhere in the UI. Note *body* colours are per-note user
-data, not theme data, and are deliberately not themed.
-:::
+`noteDefaultSaturation` **is consumed**: the theme manager publishes it as the CSS var
+`--rmt-note-default-saturation`, and `note-creation.js` reads it back as the saturation a new
+note's random `hsla(<random 0–360>, <sat>%, 60%, 0.7)` colour is born with. `newNoteColorMode` is
+still read by nothing — there is no "new note colour mode" setting anywhere in the UI. Note *body*
+colours remain per-note user data, not theme data.
 
 **Geometry:**
 
@@ -97,11 +97,13 @@ The stored shape:
 }
 ```
 
-::: warning The geometry `??` fallback is dead code.
+::: info The geometry `??` fallback in `resolve()` never fires — the panel applies preset geometry instead.
 `validateSettings()` *always* fills `appearance.note.*` with a clamped number (defaults 22 / 1 / 6),
-so those three values are never `null` or `undefined` and the preset's geometry can never win. The
-`high-contrast` preset declares `borderPxAtZoom1: 2, roundedCornerPxAtZoom1: 4` — and switching to
-it changes nothing. Only the three sliders change note geometry.
+so those three values are never `null`/`undefined` and the `??` branches above are technically dead.
+Preset geometry reaches the canvas by a different route: **selecting a preset in the Appearance tab
+writes `preset.geometry` into `appearance.note`** (`settings-panel.js:264-270`), re-seeding the
+sliders — switching to `high-contrast` lands its declared `borderPxAtZoom1: 2,
+roundedCornerPxAtZoom1: 4`. The sliders remain the fine-tuning control afterwards.
 :::
 
 Overrides are **not validated**: `validateSettings` copies `appearance.overrides` verbatim
@@ -130,19 +132,21 @@ writes each token onto `document.documentElement.style` as `--rmt-<kebab>`:
 | `hoverRing` | `--rmt-hover-ring` |
 | `depFrequency` / `depStartTime` / `depDuration` | `--rmt-dep-frequency` / `--rmt-dep-start-time` / `--rmt-dep-duration` |
 
-It then derives **three RGB component triplets** so that translucent forms work without a second
-token:
+It then derives **four RGB component triplets** so that translucent forms work without a second
+token, and publishes the numeric saturation token:
 
 ```javascript
-setRgb('--rmt-accent-rgb', tokens.accent);   //  →  "255, 168, 0"
-setRgb('--rmt-bg-rgb',     tokens.bg);
-setRgb('--rmt-danger-rgb', tokens.danger);
+setRgb('--rmt-accent-rgb',  tokens.accent);   //  →  "255, 168, 0"
+setRgb('--rmt-bg-rgb',      tokens.bg);
+setRgb('--rmt-surface-rgb', tokens.surface);
+setRgb('--rmt-danger-rgb',  tokens.danger);
+rootStyle.setProperty('--rmt-note-default-saturation', String(tokens.noteDefaultSaturation));
 ```
 
 ```css
 /* which is what makes this possible */
 box-shadow: 0 0 12px rgba(var(--rmt-accent-rgb), 0.6);
-background: rgba(var(--rmt-bg-rgb), 0.88);
+background: rgba(var(--rmt-surface-rgb), 0.88);   /* every translucent panel */
 ```
 
 `public/styles.css:10-32` declares the same 16 vars literally in `:root` with the *classic-orange*
@@ -159,7 +163,8 @@ Writing a var is not the same as anyone reading it. Today:
 | `--rmt-danger`, `--rmt-danger-rgb` | **Yes** — heavily |
 | `--rmt-text-primary`, `--rmt-text-secondary` | **Yes** |
 | `--rmt-surface-border` | **Yes** — settings inputs, chips, buttons, menu bar |
-| `--rmt-surface` | **No consumers.** Panels use `rgba(var(--rmt-bg-rgb), 0.88)` instead |
+| `--rmt-surface` (via `--rmt-surface-rgb`) | **Yes** — the projected triplet drives every 0.88-alpha panel background (`rgba(var(--rmt-surface-rgb), 0.88)`) |
+| `--rmt-note-default-saturation` | **Yes** — read by `note-creation.js` for new-note random colour saturation |
 | `--rmt-accent-text` | **No consumers**, and no picker |
 | `--rmt-note-border`, `--rmt-playhead`, `--rmt-measure-bar`, `--rmt-selection-ring`, `--rmt-hover-ring`, `--rmt-dep-*` | No CSS consumers by design — these are GL concerns, delivered through the renderer path below |
 
@@ -196,11 +201,14 @@ invalidation they would keep rendering in the old accent.
 renderer.setThemeColors({
   accent, noteBorder, measureBar, selectionRing, hoverRing,
   depFrequency, depStartTime, depDuration,
+  textPrimary,   // stored as noteText / noteTextHex — on-note glyph text
 });
 ```
 
-Reads go through accessors with baked fallbacks — `_accentRgba()`, `_accentHex()`,
-`_noteBorderRgba()`, `_measureBarRgb()` (`renderer.js:378-381`) — so the renderer draws correctly
+Reads go through accessors with baked fallbacks matching the pre-theme literals —
+`_accentRgba()`, `_noteBorderRgba()`, `_measureBarRgb()`, `_selectionRingRgba()`,
+`_hoverRingRgba()`, `_depFrequencyRgba()` / `_depStartTimeRgba()` / `_depDurationRgba()`,
+`_noteTextRgba()` / `_noteTextHex()` (`renderer.js:378-392`) — so the renderer draws correctly
 even if `setThemeColors` was never called.
 
 | Method | Input | Effect | Triggers a re-sync? |
@@ -241,38 +249,28 @@ actually costs.
 | Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:4981` |
 | Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5167` |
 | Playhead line | `playhead`, via `config.playhead.color` | `renderer.js:3034` |
-| Marquee rectangle (multi-select drag) | `selectionRing` | `renderer.js:10833` |
+| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:10866-10871` |
+| Selected-note ring | `selectionRing` | `renderer.js:2931` |
+| Selected-note fill wash | `selectionRing` @ 0.12 | `renderer.js:2888` |
+| Multi-select group ring | `selectionRing`, 4 px (`selection.multiRingThicknessPxAtZoom1 ?? 4.0`) | `renderer.js:1532-1539` |
+| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5381`, `:6017` |
+| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3006`, `:5464`, `:5989` |
+| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:2786-2788`, `:5413-5415` |
+| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:5962-5978` |
+| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:5638-5712`, `:6148-6215`, `:7008`, `:7098` |
 | Note height / border px / corner px | `appearance.note.*` | `theme-manager.js:151-158` |
 
 ### What is baked and cannot be themed
 
-These are shader literals or per-note user data. `setThemeColors` may *store* the corresponding
-token, but nothing reads it.
-
 | GL element | Colour | Source |
 |---|---|---|
-| Note body **fill** | per-note user data (`note.color`) | `player.js:2391` |
-| Selected-note ring | white `(1,1,1,1)` | `renderer.js:2913` |
-| Selected-note fill wash | white @ 0.12 | `renderer.js:2870` |
-| Hover ring | white (0.6 alpha when it coincides with the selection) | `renderer.js:2988` |
-| Multi-select group ring | white, 4 px (`selection.multiRingThicknessPxAtZoom1 ?? 4.0` — the key is not in `defaultRendererConfig`, so 4.0 is the effective default) | `renderer.js:1521-1526` |
-| Dependency-highlight rings | orange `(1,.5,0)`, cyan `(0,1,1)`, purple `(.615,0,1)` | `renderer.js:2774-2792` |
-| Measure-triangle outlines | teal / purple / white | `renderer.js:5842-5991` |
-| On-note fraction digits, "silence", ▲/▼ glyphs | white | `renderer.js:6982`, `:7072-7088`, `:7196-7211` |
-
-::: danger Four of the fifteen colour pickers currently do nothing.
-`hoverRing`, `depFrequency`, `depStartTime` and `depDuration` are stored on `_themeColors` and never
-read; the rings are drawn from hardcoded literals. `surface` is written to `--rmt-surface`, which has
-zero consumers. And `selectionRing` does **not** recolour the selected note's ring (that is
-hardcoded white) — it only tints the **marquee rectangle**. These are bugs, not design. Do not build
-on the assumption that they work.
-:::
+| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2391`, `note-creation.js:502-509` |
 
 ![The Appearance tab of the Settings panel: theme dropdown, three geometry sliders, and fifteen colour pickers grouped into Interface, Workspace and Dependency highlights](/img/settings-appearance.png)
 
 ## Adding a new theme token, end to end
 
-Say you want a themeable **hover ring** that actually works.
+The hover ring is a worked example of the full path (it is wired this way today).
 
 1. **Add the token to every preset** in `src/theme/presets.js`. All four, or `resolve()` will
    produce `undefined` for the presets that lack it. (`hoverRing` already exists — for a genuinely
@@ -288,9 +286,9 @@ Say you want a themeable **hover ring** that actually works.
      fallback matching today's literal, and add an accessor next to `_accentRgba()` /
      `_noteBorderRgba()` (`renderer.js:378-381`).
 
-3. **Make the draw path read the accessor** instead of the literal. For the hover ring that means
-   replacing `gl.uniform4f(uCol, 1.0, 1.0, 1.0, a)` (`renderer.js:2988`) with the themed RGBA,
-   keeping the existing alpha logic.
+3. **Make the draw path read the accessor** instead of the literal. For the hover ring that is
+   `const hr = this._hoverRingRgba(); gl.uniform4f(uCol, hr[0], hr[1], hr[2], a)`
+   (`renderer.js:3006`), keeping the existing alpha logic.
 
 4. **Add a picker** — one entry in `COLOR_TOKEN_GROUPS` (`settings-panel.js:40-53`):
 
@@ -311,10 +309,10 @@ Say you want a themeable **hover ring** that actually works.
    `node scripts/perf/visual-regress.mjs --compare --url http://localhost:3000` and switch presets
    in a real browser. `node scripts/perf/shot-settings.mjs` drives the panel headlessly.
 
-::: tip Skipping step 3 is exactly how the four dead pickers happened.
+::: tip Skipping step 3 is exactly how a picker goes dead.
 A token can be defined, persisted, mapped to a CSS var, handed to `setThemeColors` and given a
-picker — and still do nothing, because no draw call reads it. Wiring the consumer is the step that
-counts.
+picker — and still do nothing, because no draw call reads it. The hover-ring and dependency-colour
+pickers shipped in exactly that state for a while. Wiring the consumer is the step that counts.
 :::
 
 ## Adding a new preset
@@ -335,7 +333,8 @@ export const THEME_PRESETS = { /* … */, 'my-theme': MY_THEME };
 The Appearance dropdown is built from `Object.values(THEME_PRESETS)`, so it appears with no UI
 change. Ship **every** colour token: a missing one resolves to `undefined` and the CSS var is simply
 not written (`_applyCssVars` only sets string values), leaving the previous theme's value on
-`<html>`. Do not bother tuning `geometry` — see the dead-fallback warning above.
+`<html>`. Tune `geometry` too — selecting your preset writes it into `appearance.note`, so it is
+the note shape users land on.
 
 `getPreset(id)` falls back to `classic-orange` for an unknown id (`presets.js:142`), so a stale
 `themeId` in someone's localStorage degrades quietly rather than crashing.
@@ -361,12 +360,13 @@ Full token tables are in the [Settings reference](/reference/settings-reference)
 - **There is a boot flash.** The `:root` literals in `styles.css` are classic-orange, and
   `themeManager.init()` only runs once the GL workspace exists (`player.js:1195`). A user on
   `mono-light` sees a brief dark/orange flash on every load. Do not promise flicker-free theming.
-- **Selecting a preset silently discards every colour override**, with no confirmation. Only the
-  explicit "Reset colors to theme" button asks first.
+- **Selecting a preset silently discards every colour override** and overwrites the geometry
+  sliders with the preset's declared geometry, with no confirmation. Only the explicit "Reset
+  colors to theme" button asks first (and it leaves geometry alone).
 - **There is no theme import/export and no custom named themes.** Four presets plus a flat override
   map is the whole surface.
-- **`geometry` in a preset is inert** (see above). Note height, border and corner radius come only
-  from the three Appearance sliders, clamped to `[8, 60]`, `[0, 6]` and `[0, 20]`.
+- **`geometry` values are clamped** to `[8, 60]`, `[0, 6]` and `[0, 20]` by `validateSettings`,
+  whether they come from a preset selection or the sliders.
 - **Note height is the master dimension for on-note overlays.** The ID label, fraction text, arrow
   column and pull tab are all sized as factors of it (`renderer-config.js:61-74`), so a geometry
   change is never just a note-body change.

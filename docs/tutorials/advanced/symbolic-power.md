@@ -205,8 +205,8 @@ succeeded and you have an exact value.
 rounding instead of `k`.
 
 **Did my edit save?** The `Save` button next to the `Raw:` field only appears once you start typing,
-and the value does not change until you press it. Invalid expressions are reported to the browser
-console only — there is no on-screen error.
+and the value does not change until you press it. An invalid expression is rejected with its reason
+shown in red under the Save button.
 
 ## Next
 

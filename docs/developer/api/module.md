@@ -44,13 +44,12 @@ that they are still in the legacy format (`src/module.js:76-88`):
 | `startTime` | `new Fraction(0)` | 0 s |
 | `tempo` | `new Fraction(60)` | 60 BPM |
 | `beatsPerMeasure` | `new Fraction(4)` | 4 |
-| `measureLength` | `new Fraction(60).div(module.findTempo(module.baseNote)).mul(module.baseNote.getVariable('beatsPerMeasure'))` | 4 s at the defaults |
+| `measureLength` | `'beat(base) * base.bpm'` | 4 s at the defaults |
 
 There is **no `duration` default** — the BaseNote has no duration.
 
-Because `measureLength` is seeded from that string and `createModuleJSON()` writes source text
-verbatim, a saved file contains that one legacy expression on its BaseNote even when every note
-in it is DSL.
+Because `measureLength` is seeded from that DSL string and `createModuleJSON()` writes source text
+verbatim, a saved pure-DSL module stays pure DSL.
 
 ## Properties
 
@@ -124,9 +123,11 @@ module.removeNote(id)
 ```
 
 Deletes the note, drops its evaluation-cache entry, and unregisters it from the dependency graph.
-It does **not** rewrite expressions in other notes that referenced it. The app's delete flows deal
-with dependents first — deleting them too, or re-pointing them at the deleted note's parent — and
-only then call this.
+It does **not** rewrite expressions in other notes that referenced it — but it now emits a
+`console.warn` listing every dependent left dangling before it deletes, since a dangling
+`LOAD_REF` evaluates to hardcoded defaults (440 Hz / 0 s / 1 s). The app's delete flows deal with
+dependents first — deleting them too, or re-pointing them at the deleted note's parent — and only
+then call this; the warning guards programmatic callers.
 
 ## Evaluation
 
@@ -433,10 +434,10 @@ const module = await Module.loadFromJSON(source)
 `source` is either a URL string (which gets `fetch`ed) or a plain object. Ends with
 `invalidateAll()`, so the returned module is ready to evaluate.
 
-Per-note id guards (`src/module.js:844-861`): ids that are not integers, are `< 0`, or are
-`> 100000` are skipped with a `[RMT Security]` warning; the literal ids `__proto__`, `constructor`
-and `prototype` are blocked outright. There is no `eval()` anywhere in this path — expressions are
-compiled to bytecode.
+Per-note id guards (`src/module.js:864-880`): ids that are not integers, are `< 0`, or are
+`> 65535` (the `u16` ceiling of `LOAD_REF`) are skipped with a `[RMT Security]` warning; the
+literal ids `__proto__`, `constructor` and `prototype` are blocked outright. There is no `eval()`
+anywhere in this path — expressions are compiled to bytecode.
 
 ::: warning There is no `Module.fromJSON()` and no `module.toJSON()`
 Both appeared in older docs. The real methods are the three above.

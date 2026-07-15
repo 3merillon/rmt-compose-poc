@@ -91,7 +91,7 @@ If the icons are too small to hit comfortably, raise **Icon size** in [Settings 
 | Shift+drag to marquee | Long-press empty background |
 | Shift+click to add a note to the selection | Long-press the note |
 | Hover ring and cursor hints show you what a region does | No hover — the regions are still there, they just cannot preview themselves |
-| `Ctrl/Cmd+Z` / `Ctrl/Cmd+Y` for undo/redo | Use the **Undo** and **Redo** entries in the "+" menu, or the buttons in the library toolbar |
+| `Ctrl/Cmd+Z` to undo, `Ctrl/Cmd+Y` or `Ctrl/Cmd+Shift+Z` to redo | Use the **Undo** and **Redo** entries in the "+" menu, or the buttons in the library toolbar |
 
 Undo and redo are the app's *only global* keyboard shortcuts — the rest of the keyboard surface is `Escape`, scoped to whichever panel or dialog is in front of you. So unless you have a hardware keyboard attached there is effectively no keyboard path on a phone, and everything is reachable by touch. See [Keyboard Shortcuts](/user-guide/interface/keyboard-shortcuts).
 

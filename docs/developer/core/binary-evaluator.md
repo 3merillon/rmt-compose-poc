@@ -59,14 +59,14 @@ Step 3 is the inheritance rule users feel: `[5].tempo` on a note with no tempo e
 | `beatsPerMeasure` | `4` |
 | `measureLength` | `4` |
 
-(`binary-evaluator.js:965-977`.) Delete a note and its dependents keep evaluating against these — a dependent's frequency silently becomes 440 Hz. `Module.removeNote()` does not rewrite dependents.
+(`binary-evaluator.js:965-977`.) Delete a note and its dependents keep evaluating against these — a dependent's frequency becomes 440 Hz. `Module.removeNote()` still does not rewrite dependents, but it now emits a `console.warn` listing every dependent left dangling (the UI's delete paths liberate dependents first; the warning guards programmatic callers and hand-authored JSON).
 :::
 
 ## Runtime behaviour of the other opcodes
 
 | Situation | What happens |
 |---|---|
-| `DIV` with a zero divisor | `console.warn('Division by zero in binary evaluator, using 1')` and pushes `1` (`:1052-1060`) |
+| `DIV` with a zero divisor | `console.warn('Division by zero in binary evaluator, using 1')`, pushes `1`, **and sets the corruption flag** for the property being evaluated — the note crosshatches, same path as an irrational `POW` (`:1052-1062`) |
 | Stack depth ≠ 1 at the end | `console.warn('Stack has N items after evaluation, expected 1')`, returns the top (`:1200-1204`) |
 | `pop()` on an empty stack | throws `Stack underflow in binary evaluator` (`:838-843`) |
 | `peek()` on an empty stack | throws `Stack empty in binary evaluator` |
@@ -262,15 +262,14 @@ Depth, not note count, is what costs: the incremental evaluator only touches the
 | Fraction pool (evaluator) | 256, doubles when exhausted | `:731` (class default is 128, `:655`) |
 | Fraction backing | `fraction.js@4.3.7` — `n`/`d`/`s` are **doubles**, not BigInt | `node_modules/fraction.js/fraction.js` |
 | Note id in bytecode | `u16` → max **65535** | `binary-note.js:117-121` |
-| Note id accepted on load | integer `0 … 100000` | `module.js:852` |
+| Note id accepted on load | integer `0 … 65535` — matches the `u16` | `module.js:870-873` |
 
 ::: warning `fraction.js` is not arbitrary precision
 The package ships a BigInt variant (`bigfraction.js`) but nothing imports it. The default export is double-backed. Exact rational arithmetic, yes; unbounded, no — a product like `(81/80)^1000` overflows.
 :::
 
-::: warning Note ids above 65 535 wrap silently
-The JSON loader accepts ids up to 100 000, but `LOAD_REF` writes a `u16`. No guard exists.
-:::
+The JSON loader caps ids at 65 535 to match the `u16` that `LOAD_REF` writes — an id can no longer
+wrap to a different note; out-of-range ids are skipped with a console warning.
 
 ## See also
 

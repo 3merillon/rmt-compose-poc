@@ -87,21 +87,19 @@ Clicking a chip writes the ratio into the `n` / `d` fields and updates the cents
 | Range | The ratio must be between **1/16 and 16**, inclusive |
 | Not 1 | A ratio of 1 would do nothing, so it is rejected |
 
-::: warning An invalid ratio snaps back to the octave
-If what you type breaks any of those rules, the ratio resets to the **default octave 2/1** — not to
-the value you had before. Type `17/1` and you silently get `2/1` back. The number fields have no
-maximum, so nothing stops you typing it; the panel just rewrites the fields with the coerced value.
-:::
+If what you type breaks any of those rules, the ratio **heals to the value you had before** — an
+invalid numerator or denominator restores just that field from your previous ratio, and a ratio
+that lands out of range (`17/1`) or equal to 1 (`3/3`) reverts wholesale. The number fields have no
+maximum, so nothing stops you typing it; the panel just rewrites the fields with your previous
+value. Only a corrupt settings store loaded fresh — where there is no previous value — falls back
+to the default octave `2/1`.
 
 Nothing forbids an "up" ratio below 1. Set up to `1/2` and **▲ transposes down**. That is allowed,
 not a guard rail.
 
-::: warning Independent up/down has no down-interval editor
-The **Arrow mode** dropdown offers *Independent up/down*, but the Arrows tab only renders a ratio
-editor for the **up** interval. Selecting independent mode therefore freezes the down interval at
-whatever it last held, with no way to change it from the UI. Stay on **Reciprocal** unless you know
-exactly what is already stored.
-:::
+In **Independent up/down** mode the tab shows a second **Down interval (ratio)** row, with its own
+cents readout, below the up editor. (In reciprocal mode the row is hidden — down auto-derives as
+the reciprocal, so the row would just repeat the up editor upside-down.)
 
 Your arrow settings are saved in the browser and survive a reload. **Reset this tab** puts the
 Arrows tab back to its defaults. See [Settings](/user-guide/interface/settings) for the whole panel.
@@ -146,6 +144,11 @@ A power term is left alone — the coefficient never migrates into it, so a
 base.f * 2^(7/12)        ▲ octave →   2 * base.f * 2^(7/12)
 2 * base.f * 2^(7/12)    ▼ octave →   base.f * 2^(7/12)
 ```
+
+The same folding applies to a note whose frequency is still stored in **legacy** syntax, including
+a `.pow()` (crosshatched, TET) chain: repeated presses rescale one leading
+`new Fraction(a, b).mul(…)` coefficient rather than nesting a new wrapper per press, and ▲ followed
+by ▼ returns the exact original expression.
 
 The rewrite is checked before it is kept: the new expression must evaluate to the old value times
 the factor, **and** must not change the note's corruption flag. If either check fails, the app

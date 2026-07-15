@@ -73,13 +73,9 @@ const copy = expr.clone()
 
 Deep copy. `ExpressionCompiler.compile()` always hands back a clone, never the cached instance.
 
-::: danger `clone()` throws above 16 dependencies
-The clone's `dependencies` array is always allocated at the default capacity of 16, while
-`addDependency()` grows the original's past it. Cloning an expression that references **17 or more
-distinct notes** throws `RangeError: offset is out of bounds` (`src/binary-note.js:309`). Because
-`compile()` returns a clone, the throw surfaces as a failed compile, and the compiler's fallback
-emits the **constant 0**. An expression referencing 17 or more notes silently evaluates to zero.
-:::
+The clone's `dependencies` array starts at the default capacity of 16 but is regrown from
+`this.depCount` when the original tracks more — an expression referencing 17 or more distinct
+notes clones (and therefore compiles) correctly.
 
 ### addDependency()
 
@@ -182,10 +178,9 @@ Constants are GCD-normalised and the sign moved to the numerator before emission
 is used only when the numerator or denominator falls outside the i32 range
 (−2 147 483 648 … 2 147 483 647) — which happens with exact ratios that have very large terms.
 
-::: warning Note ids above 65535 wrap
-`LOAD_REF` encodes the id as a `u16`, and `dependencies` is a `Uint16Array`. `Module.loadFromJSON()`
-accepts ids up to 100000. Nothing guards the gap.
-:::
+`LOAD_REF` encodes the id as a `u16`, and `dependencies` is a `Uint16Array`.
+`Module.loadFromJSON()` guards the boundary: it rejects (skips, with a console warning) any note
+whose id is above 65535, so an id can never wrap.
 
 ## Worked example
 
@@ -264,7 +259,8 @@ const expr = compiler.compile('base.f * (3/2)', 'frequency')
 2. Routes on `isDSLSyntax(text)` — a regex sniff, not a parse — to `compileDSL()`.
 3. Falls back to the legacy method-chain parser, and if *that* throws, retries `compileDSL()` (the
    sniff can misclassify).
-4. If everything fails, warns and emits a **constant 0**.
+4. If everything fails, logs a `console.error` and **throws** an `Error` whose message carries both
+   parsers' failures — there is no constant-0 fallback.
 
 To compile DSL directly, skipping the routing:
 
@@ -302,12 +298,12 @@ information is gone.
 
 ## Error handling
 
-::: danger `compiler.compile()` does not throw
-On an unparseable expression it logs a console warning and returns bytecode for the **constant 0**
-(`Unable to parse expression: …` when the legacy parser falls through, `Failed to compile
-expression: …` when both parsers throw). There is no `SyntaxError`, no `ReferenceError`, and no
-exception to catch. A note whose expression is a typo becomes a note whose value is zero.
-:::
+`compiler.compile()` **throws** on an unparseable expression. After the legacy parser fails it
+retries the other syntax; if the DSL parser fails too, it logs
+`Failed to compile expression: …` via `console.error` and throws an `Error` whose message includes
+both parser messages (`Unparseable expression: "…" — legacy parser: …; DSL parser: …`). Callers
+that can show the message do (the note widget's inline error, the validators); load paths catch
+per-note and leave the property unset rather than zeroing it.
 
 The DSL layer *does* throw, with its own error classes (`src/dsl/errors.js`) — `DSLError` and its
 subclasses `DSLLexerError`, `DSLParseError`, `DSLCompileError`. Each carries a `position` and a
@@ -331,7 +327,8 @@ try {
 //      ^
 ```
 
-Validate before you compile if a silent zero would be a problem.
+Validate before you compile if you want a structured `{ valid, error }` result rather than a
+thrown `Error`.
 
 ## Performance
 
@@ -344,9 +341,9 @@ npm run perf:bench     # scripts/perf/bench-node.mjs
 ## The other two classes in this file
 
 `src/binary-note.js` also exports `BinaryNote` (six `BinaryExpression`s plus cached values) and
-`BinaryModule` (a `Map` of them). **Neither is on the live path.** Their only consumer is
-`src/module-serializer.js`, which nothing in `src/` or `scripts/` imports. The live containers are
-`Note` and `Module`. Do not build against them without checking that first.
+`BinaryModule` (a `Map` of them). **Neither is on the live path** — nothing imports them (their
+last consumer, the dead `src/module-serializer.js`, has been deleted from the repo). The live
+containers are `Note` and `Module`. Do not build against them without checking that first.
 
 ## See also
 

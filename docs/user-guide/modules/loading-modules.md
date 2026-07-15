@@ -112,12 +112,12 @@ Loading a module from a **file** enforces:
 | File larger than **3 MB** | `Module file too large (max 3MB)` |
 | Not an object, or no `baseNote` object, or `notes` is not an array, or more than **10 000** notes, or JSON nested deeper than **20** levels | `Invalid module file structure` |
 | The module passes those checks but fails to build (for example, it has no `notes` key at all) | A red banner: `Error loading module: <message>` |
-| **The file is not valid JSON** | **Nothing.** No toast, no banner. The parse error only reaches the browser console. |
+| **The file is not valid JSON** | A red toast: `Error loading module: <message>` |
 
-**Library uploads**, **Load UI** imports and **Copy to Modules** run a *different*, stricter check — not an additional one. It does not enforce the 3 MB cap or the nesting limit, but it does what the file path never does: every expression string is screened for dangerous-looking patterns and must compile, note ids must be unique and within `0 … 100000`, and every `color` must be on the colour whitelist. For an entry-point-by-entry-point table of who checks what, see [Module Format](/user-guide/modules/module-format#what-is-checked-and-where).
+**Library uploads**, **Load UI** imports and **Copy to Modules** run a *different*, stricter check — not an additional one. It does not enforce the 3 MB cap or the nesting limit, but it does what the file path never does: every expression string is screened for dangerous-looking patterns and must compile, note ids must be unique and within `0 … 65535`, and every `color` must be on the colour whitelist. For an entry-point-by-entry-point table of who checks what, see [Module Format](/user-guide/modules/module-format#what-is-checked-and-where).
 
 ::: warning Loading a file does not check its expressions
-The **Load Module from file…** path checks size and shape only. A malformed expression is not rejected — the compiler emits a constant `0`, logs a warning to the browser console, and the note loads at the wrong value. Likewise, a reference to a note that does not exist (`[99].f`) and a dependency cycle both load without an error message. If a load "succeeded" but the result looks wrong, open the browser console.
+The **Load Module from file…** path checks size and shape only. A malformed expression does not stop the load: the compiler refuses it with a `console.error` and the affected property is left **unset**, so the note falls back to its defaults rather than loading at a silent zero. Likewise, a reference to a note that does not exist (`[99].f`) and a dependency cycle both load without an error message. If a load "succeeded" but the result looks wrong, open the browser console.
 :::
 
 ## Troubleshooting
@@ -128,17 +128,17 @@ The **Load Module from file…** path checks size and shape only. A malformed ex
 - **`Invalid module file structure`** — most often a missing `baseNote` object or a `notes` key that is not an array. Note that a file with *no* `notes` key passes this check and then fails in the loader with a red `Error loading module: data.notes is not iterable` banner. Always include `notes`.
 - **`Invalid module: …`** on an upload — the expression or color validator rejected something. The toast names the first three problems; the full list is in the browser console.
 
-### Nothing happened at all
+### `Error loading module: …` in red
 
-You picked a file and the workspace did not change and no message appeared. The file is almost certainly not valid JSON — a trailing comma, a smart quote, a truncated download. The load path reports this only to the browser console. Open it, and validate the file in an editor.
+The file could not be read or parsed — a trailing comma, a smart quote, a truncated download. The toast carries the parser's message; validate the file in an editor.
 
 ### Notes are missing or in the wrong place
 
 Open the browser console. The failures that do not surface in the UI all log there:
 
-- `Unable to parse expression: …` — the expression compiled to `0`.
+- `Failed to compile expression: …` — the expression was refused; the property was left unset and the note fell back to its default.
 - `Dependency cycle detected! Some notes could not be evaluated.` — an A→B→A reference chain.
-- `[RMT Security] Invalid note ID: …, skipping` — an id outside `0 … 100000`, or not an integer.
+- `[RMT Security] Invalid note ID: … (must be 0-65535), skipping` — an id outside `0 … 65535`, or not an integer.
 
 A reference to a note that does not exist does not warn at all; it silently resolves to a default (440 Hz, 0 s, 1 s).
 

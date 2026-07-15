@@ -68,7 +68,7 @@ Every beginner tutorial starts by clearing that composition: click the BaseNote,
 Three facts save a lot of confusion:
 
 - **Edits take effect on Save, not while you type.** Every expression row — startTime, duration, frequency — has a `Raw:` field and a `Save` button. The Save button is *invisible until you touch the field* — it appears on your first keystroke.
-- **A bad expression fails silently.** There is no inline error message; the failure is logged to the browser console and the old value stays. If Save seems to do nothing, your expression did not parse.
+- **A bad expression is rejected with a message.** The reason appears in red under the Save button, the field gets a red border, and the old value stays until you fix it.
 - **Undo works.** `Ctrl+Z` / `Ctrl+Y`, or the Undo/Redo buttons in the "+" menu and in the module library toolbar. You do not need to save defensively.
 
 ::: tip

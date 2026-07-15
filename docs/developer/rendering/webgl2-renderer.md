@@ -335,24 +335,25 @@ renderer.setThemeColors({
   accent: '#ffa800',
   noteBorder: '#636363',
   measureBar: '#ffffff',
-  selectionRing: '#ffa800'
+  selectionRing: '#ffffff',
+  hoverRing: '#ffffff',
+  depFrequency: '#ff8000', depStartTime: '#00ffff', depDuration: '#9d00ff',
+  textPrimary: '#ffffff'
 });
 ```
 
-| Key | Actually read by a draw path? |
+| Key | Read by |
 |---|---|
-| `accent` | **Yes** — BaseNote circle fill, octave guide lines, note ID labels, base fraction label, canvas label textures |
-| `noteBorder` | **Yes** — every note body border, silence dashed rings, base-circle border |
-| `measureBar` | **Yes** — measure bars (dashed interior @ 0.35 alpha, solid start/end @ 0.8) |
-| `selectionRing` | **Yes, but only the marquee rectangle** (`renderer.js:10833`). The selected-note ring is hardcoded white. |
-| `hoverRing` | **No.** Stored on `_themeColors`, never read. The hover ring is hardcoded white. |
-| `depFrequency` / `depStartTime` / `depDuration` | **No.** Stored, never read. The rings come from the hardcoded literals above. |
+| `accent` | BaseNote circle fill, octave guide lines, note ID labels, canvas label textures, the multi-select **marquee rectangle** |
+| `noteBorder` | Every note body border, silence dashed rings, base-circle border |
+| `measureBar` | Measure bars (dashed interior @ 0.35 alpha, solid start/end @ 0.8) |
+| `selectionRing` | The selected-note ring and fill wash, the multi-select group ring, and selected BaseNote / measure-triangle outlines |
+| `hoverRing` | The hover ring on notes, the BaseNote and measure triangles |
+| `depFrequency` / `depStartTime` / `depDuration` | The dependency-highlight rings and dependency link lines |
+| `textPrimary` | Stored as `noteText` / `noteTextHex` — all on-note glyph text: fraction digits, "silence", ▲/▼ glyphs, the BaseNote fraction |
 
-::: warning
-Four of the eight keys are inert. Settings exposes colour pickers for all of them, so a user can pick
-a hover-ring or dependency-highlight colour and see nothing change. Do not build on those keys until
-the draw paths read them.
-:::
+Every key reaches a draw path; the accessors (`renderer.js:378-392`) carry fallbacks matching the
+pre-theme literals so an unthemed boot renders identically.
 
 Note **body** colours are deliberately not themed — they are per-note user data (`note.color`).
 
@@ -457,17 +458,16 @@ Every other tool is run directly:
 `converge.mjs` is non-negotiable now that idle frames are gated: a pass that needs a *second* frame
 to settle leaves the user staring at a stale one forever.
 
-::: warning Two traps in the harness
+::: warning A trap in the harness
 **The pixel-diff tolerance is 300 px, not 0.** The GL context is created with `antialias: true`, and
 MSAA sample resolution is not bit-deterministic across runs — re-comparing an *unchanged* build still
 flips a handful of pixels out of ~1,024,000. A zero-pixel gate would be permanently red.
 `visual-regress.mjs` defaults `--tolerance 300`, far above that noise floor and far below any real
 regression. (Its own usage comment still says "default 0 pixels" — the code says 300.)
-
-**Pass `--url` explicitly.** `npm run dev` serves on **port 3000**, but the harness defaults are
-inconsistent (`bench-render.mjs` defaults to `:5173`, most others to `:3001`). Always pass
-`--url http://localhost:3000`.
 :::
+
+The scripts all default to `--url http://localhost:3000`, matching `npm run dev`'s pinned port —
+pass `--url` only for a non-default server.
 
 The `voices-*` stress modules (5k / 20k / 100k) are **gitignored** — 100k notes is 16 MB. Run
 `npm run perf:gen` before any render benchmark.

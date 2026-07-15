@@ -62,9 +62,7 @@ They apply a **user-chosen ratio**, set in **Settings → Arrows**. The default 
 
 Each property gets a row with an **`Evaluated:`** readout (what it currently works out to) and a **`Raw:`** field (the expression). The Raw field **always shows DSL**, even for a note that was authored in the legacy method-chain format.
 
-::: warning A rejected expression fails silently
-If an expression is invalid, self-referencing, or would create a cycle, pressing `Save` does nothing visible — the error only reaches the browser console and the field keeps your text. If Save appears to do nothing, that is why. The only exception is `color`, which pops an alert.
-:::
+If an expression is invalid, self-referencing, or would create a cycle, pressing `Save` refuses the edit and shows the reason **inline** — a red message under the Save button and a red border on the field, both cleared on your next keystroke. The field keeps your text so you can fix it. (`color` is the exception: it pops an alert instead.)
 
 ### Frequency
 
@@ -189,7 +187,7 @@ On the **BaseNote** the section is **DELETE ALL NOTES** instead, with a single *
 :::
 
 ::: tip Clean Slate is undoable
-The confirmation dialog claims the action cannot be undone. It can — `Clean Slate` captures an undo snapshot like everything else, and Ctrl/Cmd+Z brings your notes back.
+The confirmation dialog says so itself: `Clean Slate` captures an undo snapshot like everything else, and Ctrl/Cmd+Z brings your notes back.
 :::
 
 ## Undo and redo
@@ -197,10 +195,10 @@ The confirmation dialog claims the action cannot be undone. It can — `Clean Sl
 | Action | Shortcut | Button |
 |---|---|---|
 | Undo | `Ctrl/Cmd + Z` | Undo, in the module bar |
-| Redo | `Ctrl/Cmd + Y` | Redo, in the module bar |
+| Redo | `Ctrl/Cmd + Y` or `Ctrl/Cmd + Shift + Z` | Redo, in the module bar |
 
 - The history holds the **last 50 changes**.
-- Redo is `Ctrl/Cmd + Y`. `Ctrl + Shift + Z` is **not** redo — the shift is ignored, so it undoes.
+- Both redo chords work: `Ctrl/Cmd + Y` and the `Ctrl/Cmd + Shift + Z` you may know from other apps.
 - The shortcuts are ignored while your cursor is in a text field, so `Ctrl+Z` inside a `Raw:` box undoes your typing, not your composition.
 
 ## Where to go next

@@ -25,11 +25,10 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 | **VitePress** | This documentation site (`docs/`, deployed separately). |
 
 ::: warning The WASM evaluator is not the default path
-The `rmt-core` WASM binary is fetched and instantiated on every page load, but it is **not used
-for evaluation**. Installing it requires the URL flag `?evaluator=wasm`
-(`src/wasm/evaluator-adapter.js:36-40`), and that flag currently hangs the tab on a full
-re-evaluation. Everything you experience in the app runs on the **JavaScript** evaluator.
-See [WASM Overview](/developer/wasm/overview).
+The `rmt-core` WASM binary is **not even fetched** on a normal page load — `initWasm()` returns
+early without the URL flag `?evaluator=wasm` (`src/wasm/evaluator-adapter.js:36-40`), and that
+flag currently hangs the tab on a full re-evaluation. Everything you experience in the app runs
+on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 :::
 
 ## The layers
@@ -142,10 +141,8 @@ See [WASM Overview](/developer/wasm/overview).
 | `src/utils/event-bus.js` | The pub/sub bus every subsystem talks over. |
 | `src/utils/simplify.js` | Expression simplification and the arrow-interval coefficient fold. |
 
-::: info `src/module-serializer.js` is dead code
-Nothing in `src/` or `scripts/` imports it. The live save/load path is `Module.loadFromJSON()` and
-`Module.createModuleJSON()` in `src/module.js`. Do not extend it.
-:::
+The save/load path is `Module.loadFromJSON()` and `Module.createModuleJSON()` in `src/module.js`.
+(The dead `src/module-serializer.js` that used to sit beside it has been deleted.)
 
 ## Getting started
 

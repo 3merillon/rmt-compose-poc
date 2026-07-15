@@ -131,7 +131,7 @@ npm run wasm:sync
 ```
 
 ::: warning The WASM evaluator is not active
-The Rust core is fetched and initialised on every page load, but **all expression evaluation runs on the JavaScript engine.** Enabling the WebAssembly evaluator is opt-in and is currently blocked by a hang inside the Rust `PersistentEvaluator`. Do not expect a speed-up from it, and do not enable it. The JavaScript path is the shipped path and is what the app is tuned against.
+On a normal page load the Rust core is **not fetched at all** — `initWasm()` returns early unless `?evaluator=wasm` is in the URL — and **all expression evaluation runs on the JavaScript engine.** Enabling the WebAssembly evaluator is opt-in and is currently blocked by a hang inside the Rust `PersistentEvaluator`. Do not expect a speed-up from it, and do not enable it. The JavaScript path is the shipped path and is what the app is tuned against.
 :::
 
 ## All npm scripts
@@ -155,9 +155,7 @@ The Rust core is fetched and initialised on every page load, but **all expressio
 
 The chord/progression and melody generators have no npm alias — run them with `node scripts/gen-chords-progressions.mjs` and `node scripts/gen-melodies.mjs`.
 
-::: danger Do not routinely re-run the melody generator
-`scripts/gen-melodies.mjs` is behind the shipped JSON. Amazing Grace, Bach Minuet and Greensleeves were corrected by hand after the generator last ran; re-running it would overwrite all three with the older versions the script still encodes. The files in `public/modules/melodies/` are the truth.
-:::
+Re-running the melody generator is safe: Amazing Grace, Bach Minuet and Greensleeves were corrected by hand after the generator last ran, and the script now **skips those three by name** (it prints `skipped hand-maintained melody: …`) instead of overwriting them. For those three, the JSON files in `public/modules/melodies/` remain the source of truth — the generator's own comments say so.
 
 ## Browser support
 

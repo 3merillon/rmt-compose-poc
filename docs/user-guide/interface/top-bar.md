@@ -31,13 +31,14 @@ The **lock** is a floating padlock at the **bottom-right** of the viewport — s
 
 ### Play / Pause
 
-One button, three states:
+One button, four states:
 
 | Icon | State |
 |---|---|
 | Play triangle | Stopped or paused. |
 | Red pause bars | Playing. |
 | Red dashes orbiting a figure-8 | Playing on a **loop**. |
+| Red dashes orbiting while stopped | Loop is **armed** for the next play — this is what a seek during a loop leaves behind. |
 
 Playback starts from wherever the playhead is. Click empty canvas to move the playhead first.
 
@@ -47,8 +48,8 @@ Playback starts from wherever the playhead is. Click empty canvas to move the pl
 
 - Arming loop from a stopped or paused transport also **starts playback** — the gesture means "play this on a loop".
 - Disarming flips the icon back straight away, but the audio **plays the current pass out to its end** and stops there rather than cutting off.
-- Pausing a loop shows the ordinary play triangle. The loop is still armed; press play and it resumes looping.
-- **Stop** disarms the loop outright — it is the escape hatch out of the mode.
+- Pausing a loop **disarms it** — that is why the button shows the ordinary play triangle. The next play is a single pass; re-arm with the gesture if you want the loop back.
+- **Stop** disarms the loop outright too — it is the escape hatch out of the mode.
 - Loop mode is not saved. It is gone on reload.
 
 ### Stop

@@ -430,19 +430,16 @@ for `npm run perf:render`.
 | `visual-regress.mjs` | `--capture` / `--compare`: 11 scenes × 3 modules, pixel-diffed |
 | `drag-shot.mjs` | Drives real move/resize gestures |
 
-::: warning Always pass `--url` explicitly.
-The dev server runs on **port 3000**, but the harness defaults disagree with each other and with
-reality: `bench-render.mjs` defaults to `:5173`, and `bench-drag` / `bench-hover` / `bench-pick` /
-`converge` / `profile-sync` / `who-dirties` / `visual-regress` default to `:3001`. Pass
-`--url http://localhost:3000` every time.
-:::
+Every bench and shot harness script defaults to `--url http://localhost:3000` — the port `npm run
+dev` pins — so `--url` is only needed when driving a non-default server. (The two docs-site
+scripts, `check-docs-rendered.mjs` at 4173 and `shot-docs.mjs` at 3005, are the only exceptions.)
 
 ```bash
-npm run dev                                                          # port 3000
-npm run perf:gen                                                     # once
-node scripts/perf/bench-render.mjs --url http://localhost:3000 --module voices-20000
-node scripts/perf/who-dirties.mjs  --url http://localhost:3000
-node scripts/perf/converge.mjs     --url http://localhost:3000
+npm run dev                                            # port 3000
+npm run perf:gen                                       # once
+node scripts/perf/bench-render.mjs --module voices-20000
+node scripts/perf/who-dirties.mjs
+node scripts/perf/converge.mjs
 ```
 
 ## Rules for changing the renderer

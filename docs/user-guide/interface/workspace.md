@@ -173,9 +173,7 @@ Thickness tells you which way the arrow of dependency points:
 
 While you are dragging or resizing, the properties that are not changing are **dimmed**, so the ones that matter stand out: a body drag emphasises the teal start-time highlights, a pull-tab resize emphasises the purple duration highlights.
 
-::: warning
-The three "Dependency highlights" colour pickers in **Settings → Appearance** do not currently change these colours. The highlights are drawn from fixed colours regardless of the theme.
-:::
+The three "Dependency highlights" colour pickers in **Settings → Appearance** are what set these colours — each preset ships its own orange/teal/purple family, and you can override any of the three.
 
 ## Locking {#locking}
 
@@ -189,9 +187,9 @@ Lock before you demo a finished piece, or when you want to scroll around one wit
 
 The canvas is drawn from the active theme. The default is **Classic Orange**; three more presets ship (Slate Cyan, Mono Light, High Contrast), one of which is light. Note geometry — height, border thickness, corner radius — is adjustable too. See [Themes & Appearance](/user-guide/interface/themes).
 
-Two things are **not** themed, whatever the pickers suggest: the selection and hover rings are always white, and the dependency-highlight colours are fixed (see the warning above).
+The selection and hover rings and the dependency-highlight colours are all themed too, each behind its own picker.
 
-Note *body* colours are not part of the theme either: they are per-note data. A new note takes the colour of the note it is created against, or a random hue if there is none, and you can change it from the [note widget](/user-guide/interface/variable-widget)'s `COLOR` row.
+Note *body* colours are **not** part of the theme: they are per-note data. A new note takes the colour of the note it is created against, or a random hue if there is none, and you can change it from the [note widget](/user-guide/interface/variable-widget)'s `COLOR` row.
 
 ## Performance
 

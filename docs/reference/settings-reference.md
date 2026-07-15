@@ -23,7 +23,7 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `arrows.enabled` | boolean | `true` | — | Show note arrows |
 | `arrows.mode` | string | `'reciprocal'` | `reciprocal`, `independent` | Arrow mode |
 | `arrows.up` | `{n, d, label}` | `{n: 2, d: 1, label: null}` | positive integers; `1/16 ≤ n/d ≤ 16`; `n/d ≠ 1` | Up interval + quick-pick chips |
-| `arrows.down` | `{n, d, label}` | `{n: 1, d: 2, label: null}` | same; derived from `up` in reciprocal mode | **no UI** |
+| `arrows.down` | `{n, d, label}` | `{n: 1, d: 2, label: null}` | same; derived from `up` in reciprocal mode | Down interval — shown in independent mode only |
 | `audio.masterVolume` | number | `1` | 0 – 1, step 0.01 | Master volume (and the transport slider) |
 | `audio.defaultInstrument` | string | `'sine-wave'` | the nine [instrument names](#instrument-names) | Default instrument |
 | `audio.reverb.enabled` | boolean | **`true`** | — | Enable reverb |
@@ -53,7 +53,7 @@ Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate
 
 | Control | Type | Range | Default | Hint shown |
 |---|---|---|---|---|
-| **Theme** | dropdown | 4 presets | Classic Orange | "Presets apply a full color set; pick one, then customize below." |
+| **Theme** | dropdown | 4 presets | Classic Orange | "Presets apply a full color set and note geometry; pick one, then customize below." |
 | **Note height** | slider, `N wu` | 8 – 60, step 1 | 22 wu | "Bar thickness in world units." |
 | **Border thickness** | slider, `N px` | 0 – 6, step 0.5 | 1 px | — |
 | **Corner radius** | slider, `N px` | 0 – 20, step 1 | 6 px | — |
@@ -61,8 +61,8 @@ Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate
 
 Then fifteen color pickers (a native swatch plus an uppercase hex readout), in three groups.
 
-::: danger Choosing a preset discards your color overrides
-The theme dropdown clears `appearance.overrides` before it applies the preset, with no confirmation. Only the **Reset colors to theme** button asks first.
+::: danger Choosing a preset discards your color overrides — and re-seeds the geometry sliders
+The theme dropdown clears `appearance.overrides` before it applies the preset, with no confirmation, and writes the preset's declared note geometry into `appearance.note` — picking High Contrast lands border 2 px / corner 4 px, overwriting whatever the sliders held. Only the **Reset colors to theme** button asks first (and it, unlike the dropdown, leaves geometry alone).
 :::
 
 ### Theme tokens
@@ -73,7 +73,7 @@ The fifteen tokens with a picker, and their value in each preset:
 |---|---|---|---|---|---|---|
 | Interface | Accent | `accent` | `#ffa800` | `#38bdf8` | `#d17400` | `#ffd400` |
 | Interface | Background | `bg` | `#151525` | `#0b1120` | `#f5f5f0` | `#000000` |
-| Interface | Panel surface | `surface` | `#1e1e2e` | `#111a2e` | `#ffffff` | `#0a0a0a` |
+| Interface | Panel surface | `surface` | `#151525` | `#111a2e` | `#ffffff` | `#0a0a0a` |
 | Interface | Panel border | `surfaceBorder` | `#3a3a4a` | `#26334d` | `#cfcfc7` | `#ffffff` |
 | Interface | Text | `textPrimary` | `#ffffff` | `#e6f0ff` | `#1a1a1a` | `#ffffff` |
 | Interface | Muted text | `textSecondary` | `#aaaaaa` | `#8fa3c0` | `#666660` | `#dddddd` |
@@ -81,29 +81,25 @@ The fifteen tokens with a picker, and their value in each preset:
 | Workspace | Note border | `noteBorder` | `#636363` | `#5a6a85` | `#9a9a92` | `#ffffff` |
 | Workspace | Playhead | `playhead` | `#ffa800` | `#38bdf8` | `#d17400` | `#ffd400` |
 | Workspace | Measure bars | `measureBar` | `#ffffff` | `#cbd5e1` | `#333333` | `#ffffff` |
-| Workspace | Selection ring | `selectionRing` | `#ffa800` | `#38bdf8` | `#d17400` | `#ffd400` |
+| Workspace | Selection ring | `selectionRing` | `#ffffff` | `#38bdf8` | `#d17400` | `#ffd400` |
 | Workspace | Hover ring | `hoverRing` | `#ffffff` | `#cbd5e1` | `#333333` | `#ffffff` |
 | Dependency highlights | Frequency | `depFrequency` | `#ff8000` | `#fb923c` | `#e06600` | `#ff8000` |
 | Dependency highlights | Start time | `depStartTime` | `#00ffff` | `#22d3ee` | `#0088aa` | `#00ffff` |
 | Dependency highlights | Duration | `depDuration` | `#9d00ff` | `#a78bfa` | `#7a2fd0` | `#c46bff` |
 
-Each token is also published as a CSS custom property on `<html>`: `--rmt-accent`, `--rmt-bg`, `--rmt-surface`, `--rmt-surface-border`, `--rmt-text-primary`, `--rmt-text-secondary`, `--rmt-danger`, `--rmt-note-border`, `--rmt-playhead`, `--rmt-measure-bar`, `--rmt-selection-ring`, `--rmt-hover-ring`, `--rmt-dep-frequency`, `--rmt-dep-start-time`, `--rmt-dep-duration`, plus `--rmt-accent-text` and the RGB triplets `--rmt-accent-rgb`, `--rmt-bg-rgb`, `--rmt-danger-rgb` for `rgba(var(--x), α)` forms.
+Each token is also published as a CSS custom property on `<html>`: `--rmt-accent`, `--rmt-bg`, `--rmt-surface`, `--rmt-surface-border`, `--rmt-text-primary`, `--rmt-text-secondary`, `--rmt-danger`, `--rmt-note-border`, `--rmt-playhead`, `--rmt-measure-bar`, `--rmt-selection-ring`, `--rmt-hover-ring`, `--rmt-dep-frequency`, `--rmt-dep-start-time`, `--rmt-dep-duration`, plus `--rmt-accent-text`, `--rmt-note-default-saturation`, and the RGB triplets `--rmt-accent-rgb`, `--rmt-bg-rgb`, `--rmt-surface-rgb`, `--rmt-danger-rgb` for `rgba(var(--x), α)` forms — `--rmt-surface-rgb` is what drives every 0.88-alpha panel background.
 
-Every preset also carries three values with **no picker**: `accentText`, `noteDefaultSaturation` and `newNoteColorMode`. They are preset-only and you cannot change them from the UI.
+Every preset also carries three values with **no picker**: `accentText`, `noteDefaultSaturation` and `newNoteColorMode`. `noteDefaultSaturation` *is* consumed — published as `--rmt-note-default-saturation`, it sets the saturation of the random colour a new note gets — but you can only change it by picking a different preset. `accentText` and `newNoteColorMode` are declared and read by nothing.
 
-::: warning Pickers that currently have no visible effect
-These write and persist an override, but nothing reads it:
+What each workspace picker reaches:
 
-- **Panel surface** — panels are painted from the background token, not this one.
-- **Hover ring** — the hover ring is drawn in a hardcoded white.
-- **Frequency / Start time / Duration** (Dependency highlights) — the dependency lines and rings are drawn from hardcoded colors.
+- **Selection ring** colours the ring around a selected note, the selection wash, the group (multi-select) ring, and the outline of a selected BaseNote or measure triangle. The rubber-band **marquee rectangle follows the Accent picker**, not this one.
+- **Hover ring** colours the hover ring on notes, the BaseNote and measure triangles.
+- **Frequency / Start time / Duration** (Dependency highlights) colour both the dependency rings and the dependency link lines.
+- **Text** (`textPrimary`) also recolours all on-note glyph text — fraction labels, the word "silence", the octave arrows, and the BaseNote fraction.
+- **Panel surface** drives the translucent panel backgrounds via `rgba(var(--rmt-surface-rgb), 0.88)`.
 
-**Selection ring** is partially wired: it colors the marquee rectangle you drag when multi-selecting, but not the ring around a selected note (also hardcoded white).
-:::
-
-::: warning Preset geometry does not apply
-`high-contrast` declares thicker borders and tighter corners, but note geometry always comes from the three sliders. Switching theme never changes note height, border or corner radius.
-:::
+Selecting a preset also applies its **declared note geometry**, re-seeding the three sliders — High Contrast lands border 2 px / corner 4 px. The sliders remain the way to fine-tune afterwards, and **Reset colors to theme** never touches geometry.
 
 ## Arrows
 
@@ -128,13 +124,11 @@ Quick-pick chips and the cents they show:
 Rules:
 
 - In **reciprocal** mode, `arrows.down` is re-derived as `d/n` on every write of `arrows.up`. Set up to `3/2` and down becomes `2/3`.
-- An **invalid ratio snaps to the octave** — `2/1` — not back to your previous value. `17/1`, `1/20`, `3/3` and `0/1` all give you `2/1`. The number fields carry a `min` of 1 but no `max`, so the browser lets you type 100; the store is what corrects it, and it visibly rewrites the fields with the coerced value.
+- An **invalid ratio heals to your previous value**, per field: a bad numerator or denominator restores just that field from the ratio you had, while a wholly out-of-range ratio (`17/1`, `1/20`) or one equal to 1 (`3/3`) reverts wholesale. Only a corrupt store loaded fresh — with no previous value to heal from — falls back to the default `2/1`. The number fields carry a `min` of 1 but no `max`, so the browser lets you type 100; the store is what corrects it, and it visibly rewrites the fields with the healed value.
 - Nothing forbids an "up" ratio below 1. Set `arrows.up` to `1/2` and ▲ transposes downward.
 - Unchecking **Show note arrows** dims the ratio editor and the chips but leaves them editable. The values take effect when you switch arrows back on.
 
-::: warning `Independent up/down` has no down-interval editor
-The mode exists in the dropdown and the store honours a stored independent `down`, but the Arrows tab renders an editor for `up` only. Selecting `Independent` freezes `down` at whatever it last held, with no way to change it from the UI.
-:::
+In **Independent up/down** mode a **Down interval (ratio)** row renders below the up editor — the same two number fields and live cents readout, hinted "Only used in independent mode". (It is hidden in reciprocal mode, where `down` auto-derives.)
 
 ## Audio
 
@@ -260,7 +254,7 @@ Paths are dot-delimited: `arrows.up`, `audio.reverb.wet`, `appearance.themeId`, 
 
 ### How a bad value is handled
 
-The **whole tree is re-validated on every single write**, then persisted. That is what keeps derived invariants (the reciprocal `down`) true and what makes a hand-edited storage entry safe.
+The **whole tree is re-validated on every single write**, then persisted. That is what keeps derived invariants (the reciprocal `down`) true and what makes a hand-edited storage entry safe. `validateSettings(raw, prev)` takes an optional second parameter — the pre-edit tree — and the store passes it on every `set`/`setSection`, which is what lets an invalid arrow ratio heal to the value you previously had instead of a schema default. Load and migrate paths pass no `prev`. The envelope, key and version are unchanged.
 
 | Situation | Result |
 |---|---|
@@ -268,7 +262,7 @@ The **whole tree is re-validated on every single write**, then persisted. That i
 | Corrupt JSON | Warn to the console, then defaults |
 | A number out of range | Clamped into range |
 | A field of the wrong type | Replaced by its default |
-| An invalid arrow ratio | Replaced by the default `2/1` |
+| An invalid arrow ratio | Healed to your previous ratio (per-field); only a fresh load with nothing to heal from falls back to `2/1` |
 | An inverted scale range (`min ≥ max`) | That axis's limits fall back to their defaults wholesale |
 | Scale limits narrowed around a far-off value | The limits are validated **first**, then the value is clamped into them |
 | `localStorage` full, or private mode | Non-fatal: settings work for the session but are not saved |

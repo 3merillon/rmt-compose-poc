@@ -94,12 +94,14 @@ Two syntaxes compile to the **same bytecode**. `ExpressionCompiler.compile()`
   `+ - * / ^`. Every shipped module file uses it, the note widget always *displays* it, and every
   expression the app writes on your behalf is DSL.
 - **Legacy** is the old method-chain form
-  (`module.baseNote.getVariable('frequency').mul(new Fraction(3,2))`). It still loads, and it is
-  still what `new Module()` seeds its BaseNote with when no JSON is supplied.
+  (`module.baseNote.getVariable('frequency').mul(new Fraction(3,2))`). It still loads, and the
+  constant defaults `new Module()` seeds its BaseNote with are still written in it (the
+  `measureLength` default is now the DSL `beat(base) * base.bpm`).
 
-::: warning A failed compile is silent
-If both parsers fail, `compile()` emits a constant `0` and logs a `console.warn`. It does not throw.
-A malformed expression can therefore zero a note without any user-visible error. See
+::: warning A failed compile throws
+If both parsers fail, `compile()` logs a `console.error` and **throws** an error carrying both
+parsers' messages — there is no constant-0 fallback. Interactive callers surface the message (the
+note widget shows it under Save); the load paths catch per-note and leave the property unset. See
 [Expression Compiler](/developer/core/expression-compiler).
 :::
 
@@ -215,7 +217,6 @@ src/
 ├── binary-evaluator.js         # stack VM, IncrementalEvaluator, FractionPool, SymbolicPower
 ├── binary-utils.js
 ├── dependency-graph.js         # forward/inverse + per-property indexes + corruption flags
-├── module-serializer.js        # DEAD CODE — imported by nothing
 ├── dsl/                        # THE primary expression language
 │   ├── lexer.js  parser.js  compiler.js  decompiler.js
 │   ├── ast.js  constants.js  errors.js  simplify.js

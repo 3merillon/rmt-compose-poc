@@ -265,10 +265,10 @@ camera gestures on touch are in [Camera Controller](/developer/rendering/camera-
 ## Picking is 100% CPU
 
 ::: warning GPU picking is not shipped
-`src/renderer/webgl2/picking.js` is a self-described scaffold: *"No draw integration yet."* It
-allocates an FBO and can decode a 24-bit id, but **no ID pass is ever drawn** — `Picking.begin()` and
-`end()` have zero call sites. `Workspace.pickAt()` tries `renderer.pickAllAt()` first, which always
-exists, so the GPU branch is unreachable. Do not document or build on it.
+`src/renderer/webgl2/picking.js` is a self-described scaffold: *"No draw integration yet."* It is
+**imported by nothing** — never constructed, never initialized, not bundled — so the FBO it would
+allocate never exists. `Workspace.pickAt()` goes straight to `renderer.pickAllAt()`. Do not
+document or build on it.
 :::
 
 The live path:

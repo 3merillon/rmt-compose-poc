@@ -26,6 +26,8 @@ Select a note and the workspace draws its neighbourhood, colour-coded **by the p
 | **Teal** | start time |
 | **Purple** | duration |
 
+(Those are the default theme's colours — the three *Dependency highlights* pickers in [Settings → Appearance](/user-guide/interface/themes) set them.)
+
 And **thickness tells you which way the arrow points**:
 
 | Weight | Meaning |
@@ -150,7 +152,7 @@ The confirmation dialog describes the delete as irreversible. It isn't: it lands
 
 ## Two edges the graph will not accept
 
-The graph must stay acyclic, so a note cannot reference itself and two notes cannot reference each other. Both are rejected on `Save` — silently, with the reason in the browser console.
+The graph must stay acyclic, so a note cannot reference itself and two notes cannot reference each other. Both are rejected on `Save`, with the reason shown in red under the Save button.
 
 A reference to a note that **does not exist** is a different problem: it produces no edge, no line and no warning, and the evaluator quietly substitutes 440 Hz. Both cases are worked through in [Expressions → Things that go wrong](/user-guide/notes/expressions#things-that-go-wrong).
 

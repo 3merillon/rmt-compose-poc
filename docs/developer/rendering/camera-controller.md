@@ -174,9 +174,10 @@ When single-finger pan is disabled the handler still tracks `_lastX`/`_lastY` wi
 delta, so re-enabling mid-gesture does not produce a jump.
 
 ::: warning Dead hook
-`workspace.js:123` assigns `camera.shouldAllowSingleFingerPanStart = (ev) => {...}`.
-**`CameraController` never calls it.** The behaviour it was meant to provide is actually delivered by
-`setSingleFingerPanEnabled(false)`. Do not treat it as an extension point.
+`shouldAllowSingleFingerPanStart` is now entirely unreferenced: the `workspace.js` assignment that
+used to set it has been removed, and **`CameraController` never called it** in the first place. The
+behaviour it was meant to provide is delivered by `setSingleFingerPanEnabled(false)`. Do not treat
+it as an extension point.
 :::
 
 ## Resize

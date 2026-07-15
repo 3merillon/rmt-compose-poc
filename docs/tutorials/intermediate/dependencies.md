@@ -144,9 +144,7 @@ Its pitch belongs to Note 1's harmonic structure; its timing belongs to Note 3's
 
 If A depends on B and you try to make B depend on A, the app refuses the edit. It also refuses an expression that references its own note.
 
-::: warning
-The rejection is **silent**. There is no error message, no red border, no toast — the Save simply does nothing and the old expression stays. If Save appears to have no effect, you have either written a cycle or made a typo. Open the browser console to see which.
-:::
+The rejection tells you why: the validator's message appears in red under the Save button — a cycle, a self-reference or a typo each get their own wording — and the old expression stays until you fix it.
 
 ## Getting out of a chain
 

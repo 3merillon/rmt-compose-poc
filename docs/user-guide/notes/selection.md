@@ -5,17 +5,18 @@ description: Select several notes with a marquee or shift-click, drag them as on
 
 # Selection & Group Editing
 
-Most of the time you work on one note: you click it, it gets an orange ring, and the
+Most of the time you work on one note: you click it, it gets a selection ring, and the
 [note widget](/user-guide/interface/variable-widget) opens on it.
 
 Select **two or more** notes and the app switches presentation. The selected notes get a heavy
-white ring, the note widget closes (with a group there is no single note for it to describe), and
-a floating **group widget** appears with the count and two actions: **Copy to Modules** and
-**Delete all**. Drag any note in the set and the whole group moves as one.
+selection ring (white in the default theme — the **Selection ring** picker in Settings →
+Appearance sets it), the note widget closes (with a group there is no single note for it to
+describe), and a floating **group widget** appears with the count and two actions: **Copy to
+Modules** and **Delete all**. Drag any note in the set and the whole group moves as one.
 
 A group of exactly one note is not a group. However you get there — a lone shift-click, a marquee
 that caught one note, removing notes until one is left — it normalizes back to an ordinary single
-selection with the orange ring and the note widget.
+selection with the ring and the note widget.
 
 ![The workspace during a marquee drag: a rubber-band rectangle over several notes, the notes it crosses ringed in white, and the group widget in the bottom-right corner showing the count](/img/multi-select-marquee.png)
 
@@ -65,7 +66,7 @@ a marquee dragged across them does not pick them up, and shift-clicking one does
 still selectable, movable and deletable on their own.
 
 The marquee selects by **intersection**: any note the rectangle touches is caught, even partly. You
-do not have to enclose a note completely. Notes light up with the white ring as the rectangle
+do not have to enclose a note completely. Notes light up with the selection ring as the rectangle
 crosses them, before you release.
 
 ## The group widget

@@ -165,14 +165,12 @@ The compiler sniffs the format per string (`isDSLSyntax()`), so a legacy string 
 equivalent produce identical bytecode.
 </details>
 
-::: danger Compilation failures are silent
-`_setExpression()` wraps `compiler.compile()` in a `try/catch` and only `console.warn`s
-(`src/note.js:195-203`) — **nothing throws**, and the previous expression stays in place.
-
-Worse, `ExpressionCompiler.compile()` itself rarely throws: an expression it cannot parse is
-replaced by the **constant 0** with a console warning (`src/expression-compiler.js:97-103`). So a
-typo can silently zero a property. Validate first with `validateDSL()` from `src/dsl/index.js` if
-you need to know.
+::: warning Compilation failures do not throw out of `setVariable()`
+`ExpressionCompiler.compile()` **throws** on an expression neither parser can read, after emitting
+a `console.error` naming the expression. `_setExpression()` and the constructor catch that throw
+per-property, so a typo leaves the property **unset** (or keeps the previous expression) rather
+than silently zeroing it — but the caller of `setVariable()` sees no exception either. Validate
+first with `validateDSL()` from `src/dsl/index.js` if you need a structured answer.
 :::
 
 ### getExpressionSource()

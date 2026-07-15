@@ -217,7 +217,8 @@ into a biquad — **lowpass** at `min(0.48 × sampleRate, 16000 / √ratio)` whe
 at `max(20, 60 × √ratio)` when shifting down, `Q = 0.5` either way.
 
 `applyEnvelope()` multiplies the peak by `this.gain` (from the manifest's `gainDb`) and then calls the
-shared `applyVoiceEnvelope`.
+shared `applyVoiceEnvelope` with `getEnvelopeSettings(duration)` — the note's duration is what lets
+the manifest's absolute `attack`/`release` seconds be converted to per-note ratios.
 
 ### The manifest (schema 1)
 
@@ -235,15 +236,23 @@ shared `applyVoiceEnvelope`.
 }
 ```
 
-Of those fields, exactly **one** reaches the sound: `gainDb`, applied as `peak × 10^(gainDb/20)`.
+Two of those fields reach the sound: `gainDb`, applied as `peak × 10^(gainDb/20)`, and `envelope`.
 
-::: warning `envelope` in the manifest does nothing
-`_loadManifest()` parses it into `this.envelope`, but `getEnvelopeSettings()` returns **hardcoded**
-ratios (`0.02 / 0 / 1 / 0.12`) and `applyEnvelope()` never reads `this.envelope`. Editing `attack` or
-`release` in a manifest changes nothing. `displayName` and `license` are parsed and likewise never
-rendered anywhere in the app. `zones[].loop` and `zones[].velLayers[]` are reserved and not even
-parsed.
-:::
+**How `envelope` is honored.** `_loadManifest()` merges `m.envelope` over the defaults
+(`{ attack: 0.006, release: 0.18 }`), and `getEnvelopeSettings(duration)` builds the per-note
+envelope from it:
+
+- The base is the default ratio set `attackTimeRatio 0.02 / decayTimeRatio 0 / sustainLevel 1 /
+  releaseTimeRatio 0.12`. A manifest may declare any of those **ratio keys directly** and they are
+  taken as-is.
+- `attack` and `release` are **absolute seconds**: when the note's duration is known they override
+  the ratios as `attack / duration` and `release / duration`, so a 4 ms attack is 4 ms whether the
+  note lasts 0.2 s or 4 s.
+- The result still passes through `applyVoiceEnvelope`'s guards — the 3 ms attack / 15 ms release
+  floors, and the clamp that keeps attack+release inside ~90% of the note.
+
+`displayName` and `license` are parsed and never rendered anywhere in the app. `zones[].loop` and
+`zones[].velLayers[]` are reserved and not even parsed.
 
 ### The shipped samples
 

@@ -195,9 +195,7 @@ Line weight tells you which way the arrow points: a **thick** line is something 
 
 You cannot make note A depend on note B that depends on note A. Nor can an expression reference its own note.
 
-::: warning The rejection is silent
-The app refuses the edit — but it does **not** tell you why. There is no error banner and no red border; the message goes to the browser console. If a **Save** appears to do nothing, that is what happened. Open the console.
-:::
+The app refuses the edit and tells you why: the reason appears in red under the **Save** button, and the field gets a red border. Fix the expression and save again.
 
 ## Silences
 

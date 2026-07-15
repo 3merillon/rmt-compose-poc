@@ -39,16 +39,16 @@ With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/modul
 | `startTime` | `new Fraction(0)` | 0 s |
 | `tempo` | `new Fraction(60)` | 60 BPM |
 | `beatsPerMeasure` | `new Fraction(4)` | 4 |
-| `measureLength` | `new Fraction(60).div(module.findTempo(module.baseNote)).mul(module.baseNote.getVariable('beatsPerMeasure'))` | 4 s |
+| `measureLength` | `'beat(base) * base.bpm'` | 4 s |
 
 There is **no `duration` default on the BaseNote** — it has none.
 
-::: warning These defaults are still legacy-format strings
-The DSL migration did not touch them. Every *shipped* module JSON is DSL, so a user never sees these,
-but "everything is DSL now" is not true of the code-level fallback. It also means
-`createModuleJSON()` emits that `measureLength` legacy chain on the BaseNote **even when the source
-file omitted the key** — so a saved file is almost never pure DSL.
-:::
+The four simple defaults are still legacy-format strings (a user never sees them: every shipped
+module JSON is DSL, and their values are plain constants that print identically either way). The
+one that used to leak — `measureLength`, which `createModuleJSON()` emits on the BaseNote **even
+when the source file omitted the key** — is now the DSL string `beat(base) * base.bpm`, so a
+saved pure-DSL file stays pure DSL. It compiles to the exact same bytecode as the old legacy
+chain.
 
 The BaseNote a fresh user actually sees comes from `public/modules/defaultModule.json`:
 frequency `263`, startTime `0`, tempo `100`, beatsPerMeasure `4`.
@@ -99,9 +99,10 @@ graph, and invalidates the end-time cache.
 
 ::: warning `removeNote()` does not touch dependents
 Their expressions still reference the deleted id. On the next evaluation, `LOAD_REF` fails to resolve
-and pushes a hard-coded default (`frequency 440`, `startTime 0`, `duration 1`) without warning. If
-you want the dependents' *meaning* preserved, liberate them first — that is exactly what the note
-widget's **Keep Dependencies** delete does.
+and pushes a hard-coded default (`frequency 440`, `startTime 0`, `duration 1`). `removeNote()` now
+`console.warn`s up front, listing the dependents it is about to leave dangling — but it still does
+not rewrite them. If you want the dependents' *meaning* preserved, liberate them first — that is
+exactly what the note widget's **Keep Dependencies** delete does.
 :::
 
 ### Accessing
@@ -285,8 +286,8 @@ module.getNoteById(5).getVariable('startTime').add(module.findMeasureLength(modu
 
 ## Serialization
 
-There is **no `toJSON()` and no `fromJSON()`**. `src/module-serializer.js` exists but is imported by
-nothing — it is dead code.
+There is **no `toJSON()` and no `fromJSON()`**. (A dead `src/module-serializer.js` used to shadow
+the real path; it has been deleted from the repo.)
 
 ### Load
 
@@ -302,9 +303,9 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 3. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
    `evaluateModule()` does that.
 
-Ids are guarded (`module.js:844-861`): non-integer, `< 0` or `> 100000` ids are skipped with a
-`[RMT Security] Invalid note ID` warning, and `__proto__` / `constructor` / `prototype` are blocked
-outright as prototype-pollution vectors.
+Ids are guarded (`module.js:864-880`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
+`LOAD_REF`) are skipped with a `[RMT Security] Invalid note ID` warning, and `__proto__` /
+`constructor` / `prototype` are blocked outright as prototype-pollution vectors.
 
 ### Save
 

@@ -100,9 +100,10 @@ It exits non-zero on any failure. Run it after **any** change to the DSL, the ex
 the evaluator, or anything under `public/modules/`.
 
 ::: warning A passing module is not a correct module
-`validateExpressionSyntax` cannot reject a malformed **legacy** expression: the legacy compiler never
-throws, it warns and emits a constant `0`. Malformed **DSL** *is* rejected. So `npm test` proves a
-module loads and evaluates to finite numbers — not that it says what you meant.
+`validateExpressionSyntax` rejects malformed expressions of **either** syntax — the compiler throws
+on anything neither parser can read, and the validator reports it as `valid: false`. What
+`npm test` cannot check is intent: a module that loads and evaluates to finite numbers is not
+necessarily a module that says what you meant.
 :::
 
 ## Project layout
@@ -171,8 +172,9 @@ evaluator. You do not need it to develop:
 
 - `src/wasm/rmt_core.js` and `src/wasm/rmt_core_bg.wasm` are **committed build artifacts**. They are
   what the app imports and what the deploy ships. `rust/pkg/` is gitignored.
-- The WASM binary is fetched and instantiated on every page load, and then — on the default path —
-  **not used for evaluation**.
+- On the default path the WASM binary is **not fetched at all**: `initWasm()` returns `false` early
+  unless `?evaluator=wasm` is in the URL (headless Node — benches and tests — still initializes).
+  The 384 KB download and instantiation happen only behind the opt-in.
 
 ::: danger Do not enable the WASM evaluator
 `?evaluator=wasm` opts into the hot-swap (`src/wasm/evaluator-adapter.js:36-40`). A full
@@ -191,9 +193,10 @@ npm run wasm:build   # wasm-pack build --target web --out-dir pkg, then sync-was
 `rust/pkg/` into `src/wasm/`. **Commit them.** If you skip the sync step, the app keeps loading the
 previous binary and your Rust change silently does nothing.
 
-The `WASM_CONFIG` flags in `src/wasm/config.js` are the JS-side switches. Only `useEvaluator`,
-`usePersistentCache` and `fallbackOnError` reach live code; `useFractions`, `useGraph` and
-`useCompiler` gate adapters that nothing imports.
+The `WASM_CONFIG` flags in `src/wasm/config.js` are the JS-side switches: `useEvaluator`,
+`usePersistentCache`, `fallbackOnError`, `logPerformance` and `debug`. Every flag reaches live
+code — the old dead switches for the unimported adapters (`useFractions`, `useGraph`,
+`useCompiler`) no longer exist.
 
 ## Performance and visual-regression harness
 
@@ -208,23 +211,21 @@ npm run perf:gen     # write stress modules to public/modules/perf/
 npm run perf:bench   # headless Node evaluation benchmark (no renderer)
 ```
 
-Everything else runs directly with `node`, drives a **running dev server** through Playwright, and
-needs an explicit URL:
+Everything else runs directly with `node` and drives a **running dev server** through Playwright:
 
 ```bash
-node scripts/perf/bench-render.mjs   --url http://localhost:3000 voices-5000
-node scripts/perf/bench-drag.mjs     --url http://localhost:3000 --module hub-5000 --steps 200
-node scripts/perf/bench-pick.mjs     --url http://localhost:3000
-node scripts/perf/who-dirties.mjs    --url http://localhost:3000
-node scripts/perf/converge.mjs       --url http://localhost:3000
-node scripts/perf/visual-regress.mjs --url http://localhost:3000 --capture
-node scripts/perf/visual-regress.mjs --url http://localhost:3000 --compare
+node scripts/perf/bench-render.mjs   voices-5000
+node scripts/perf/bench-drag.mjs     --module hub-5000 --steps 200
+node scripts/perf/bench-pick.mjs
+node scripts/perf/who-dirties.mjs
+node scripts/perf/converge.mjs
+node scripts/perf/visual-regress.mjs --capture
+node scripts/perf/visual-regress.mjs --compare
 ```
 
-::: warning Always pass `--url`
-The harness scripts' built-in defaults disagree with each other and with reality: `bench-render.mjs`
-defaults to port 5173, several others to 3001. `npm run dev` serves on **3000**.
-:::
+Every app harness script defaults to `http://localhost:3000` — the port `npm run dev` pins — so
+`--url` is only needed for a non-default server. (The two docs-site scripts are the exceptions:
+`check-docs-rendered.mjs` targets 4173 and `shot-docs.mjs` defaults to 3005.)
 
 Two more things about the harness:
 
@@ -293,8 +294,8 @@ drivers. There is no fallback renderer — the workspace does not initialise wit
 
 ### The port is taken
 
-`vite.config.js` pins port 3000. If it is in use, Vite picks another and prints it; the perf scripts
-will still default to the wrong port, so pass `--url`.
+`vite.config.js` pins port 3000. If it is in use, Vite picks another and prints it; the perf
+scripts still default to 3000, so pass `--url` with the port Vite actually chose.
 
 ## Style and tooling
 

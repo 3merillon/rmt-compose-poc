@@ -262,10 +262,8 @@ It lands in the library's **Custom** section, rooted at its earliest note, with 
 intact — so dropping it on a different note transposes the whole thing. This is strictly better than
 saving a file and re-uploading it.
 
-::: warning Colours and instruments do not survive the copy
-Per-note `color` and `instrument` are dropped by **Copy to Modules**. Pitch, timing and structure
-come across; the look and the timbre do not.
-:::
+Per-note `color` and `instrument` survive the copy too — pitch, timing, structure, look and timbre
+all come across.
 
 ::: info The library is flat
 There is one level of section — no nested folders. Use **Add Category** to make a section like

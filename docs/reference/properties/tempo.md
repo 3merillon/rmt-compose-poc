@@ -123,23 +123,23 @@ Always use `beat(x)`. It is what the app itself writes, and it is the only helpe
 reconstructs, so it survives a save. Writing the division out by hand as `60 / base.tempo` also
 works, and is normalised straight back to `beat(base)`.
 
-::: danger Put the helper call first
-An expression whose *only* DSL marker is a `beat(…)`, `tempo(…)` or `measure(…)` call is recognised
+::: tip Put the helper call first
+An expression whose *only* DSL marker is a `beat(…)`, `tempo(…)` or `measure(…)` call is sniffed
 as DSL only when that call is the **first thing in the expression**. Otherwise it is handed to the
-legacy parser, which cannot read it — and the failure path compiles to the constant **0**, silently
-zeroing the property.
+legacy parser first, which cannot read it — the failure then falls through to a DSL retry, so the
+expression still compiles, at the cost of a wasted parse.
 
-| Write | Result |
+| Write | Routing |
 |---|---|
-| `beat(base) * 2` | fine — the helper leads |
-| `2 * beat(base)` | **zeroed** |
-| `60 / tempo(base)` | **zeroed** |
-| `1 + beat(base)` | **zeroed** |
-| `(1/2) * beat(base)` | fine — the leading fraction is itself a DSL marker |
-| `base.t + beat(base)` | fine — `base.` is a DSL marker |
-| `60 / base.tempo` | fine, and normalised back to `beat(base)` |
+| `beat(base) * 2` | DSL directly — the helper leads |
+| `2 * beat(base)` | legacy first, compiles on the DSL retry |
+| `60 / tempo(base)` | legacy first, compiles on the DSL retry |
+| `1 + beat(base)` | legacy first, compiles on the DSL retry |
+| `(1/2) * beat(base)` | DSL directly — the leading fraction is itself a DSL marker |
+| `base.t + beat(base)` | DSL directly — `base.` is a DSL marker |
+| `60 / base.tempo` | DSL directly, and normalised back to `beat(base)` |
 
-Lead with the helper, or with a note reference, and you will not hit this.
+Lead with the helper, or with a note reference, and the sniff gets it right the first time.
 :::
 
 <details>

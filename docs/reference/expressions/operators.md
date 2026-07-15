@@ -107,9 +107,10 @@ base.f / (3/2)         # a fifth below the BaseNote
 ```
 
 ::: warning Division by zero is not an error
-`5 / 0` compiles. At evaluation the result is **1**, and a warning goes to the browser console.
-The value is wrong and nothing on screen says so. `(5/0)` behaves the same way — it is not read
-as a fraction literal, it falls back to a grouped division.
+`5 / 0` compiles. At evaluation the result is **1**, a warning goes to the browser console, and
+the property is **marked corrupted** — the note crosshatches on the canvas, so the substituted
+value does announce itself. `(5/0)` behaves the same way — it is not read as a fraction literal,
+it falls back to a grouped division.
 :::
 
 For a beat duration, write `beat(base)`. It compiles to `60 / tempo(base)` and, unlike the long
@@ -255,16 +256,14 @@ See [Binary Evaluator](/developer/core/binary-evaluator) for how the bytecode ru
 
 ## Error conditions
 
-There are fewer real errors than you would expect, and more silent wrong answers.
-
 | What you write | What happens |
 |---|---|
-| `1 +`, `base.`, `a & b` | Rejected on save. Reason goes to the browser console; nothing appears on screen |
-| `5 / 0` | Accepted. Evaluates to **1** with a console warning |
+| `1 +`, `base.`, `a & b` | Rejected on save; the reason appears in red under the Save button |
+| `5 / 0` | Accepted. Evaluates to **1** with a console warning, and the property is flagged corrupted (crosshatch) |
 | `2^(1/12)` | Accepted. Irrational — the property is flagged corrupted |
-| Anything neither compiler can parse | Silently compiles to constant **`0`** with a console warning |
+| Anything neither compiler can parse | Rejected: `console.error` plus a thrown compile error; the widget shows the message, and on a file load the property is left unset |
 
-Check the `Evaluated:` line in the note widget after saving. It is the only feedback you get.
+The `Evaluated:` line in the note widget still repays a glance after saving anything unusual.
 
 ## See also
 

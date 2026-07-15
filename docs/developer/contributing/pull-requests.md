@@ -95,17 +95,17 @@ unmasked real bugs that a full-rebuild-every-frame renderer was hiding.
 With `npm run dev` running:
 
 ```bash
-npm run perf:gen                                                       # stress modules (gitignored)
-node scripts/perf/visual-regress.mjs --url http://localhost:3000 --capture   # on main
+npm run perf:gen                                # stress modules (gitignored)
+node scripts/perf/visual-regress.mjs --capture  # on main
 # ... apply your change ...
-node scripts/perf/visual-regress.mjs --url http://localhost:3000 --compare
-node scripts/perf/bench-render.mjs   --url http://localhost:3000 voices-5000
-node scripts/perf/bench-drag.mjs     --url http://localhost:3000 --module hub-5000 --steps 200
-node scripts/perf/converge.mjs       --url http://localhost:3000
+node scripts/perf/visual-regress.mjs --compare
+node scripts/perf/bench-render.mjs   voices-5000
+node scripts/perf/bench-drag.mjs     --module hub-5000 --steps 200
+node scripts/perf/converge.mjs
 ```
 
-- **Pass `--url` explicitly.** The scripts' built-in defaults point at ports 5173 and 3001; the dev
-  server is on 3000.
+- The scripts all default to `--url http://localhost:3000`, the dev server's pinned port — pass
+  `--url` only when driving a non-default server.
 - The pixel-diff tolerance is **300 px by default, not 0** — MSAA resolution is not bit-deterministic
   across runs, so a zero gate would be permanently red. Do not "fix" a passing diff by tightening it.
 - `converge.mjs` (does one redraw produce the final image?) is non-negotiable now that idle frames
@@ -127,7 +127,9 @@ links, no `.md` extension: `[Dependencies](/user-guide/notes/dependencies)`.
 Anything added to or changed under `public/modules/` must be reachable from the v2 manifest
 `public/modules/library.json` and must pass `npm test`. Several sections are generated —
 `npm run gen:intervals`, `scripts/gen-chords-progressions.mjs`, `scripts/gen-melodies.mjs` — so
-change the generator, not just its output.
+change the generator, not just its output. (Exception: `gen-melodies.mjs` deliberately skips the
+three hand-maintained melodies — `amazing-grace.json`, `bach-minuet.json`, `greensleeves.json` —
+whose JSON files are the source of truth.)
 
 ## 4. Commit
 

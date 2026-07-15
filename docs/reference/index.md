@@ -159,8 +159,8 @@ A bitmask, one bit per property, recording which of a note's values came out irr
 | Thing | Value |
 |---|---|
 | Value used when a reference cannot be resolved | startTime 0, duration 1, frequency 440, tempo 60, beatsPerMeasure 4, measureLength 4 |
-| Division by zero at evaluation time | Result 1, plus a console warning |
-| An expression neither compiler can parse | Constant 0, plus a console warning |
+| Division by zero at evaluation time | Result 1, plus a console warning; the property is flagged corrupted (crosshatch) |
+| An expression neither compiler can parse | Compile error — `console.error` plus a thrown message naming both parser failures; validators return `valid: false`; on a file load the note's property is left unset |
 | Decimal → fraction, largest denominator | 10 000 |
 | Constant fits `LOAD_CONST` when both parts are within | −2 147 483 648 to 2 147 483 647 |
 | Maximum expression length accepted on import | 10 000 characters |

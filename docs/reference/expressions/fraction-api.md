@@ -200,22 +200,22 @@ That is the whole list.
 
 ### What it does not accept
 
-::: danger These silently become zero
-The following are real Fraction.js methods, so they look like they should work. **They do
-not.** The legacy parser does not recognize them, and an expression it cannot parse is not
-rejected — it compiles to the constant `0` with only a browser-console warning. A note whose
-frequency you wrote as `new Fraction(-5, 3).abs()` is silently a 0 Hz note.
+::: warning These are rejected with an error
+The following are real Fraction.js methods, so they look like they should work. **They do not.**
+The legacy parser does not recognize them, and after the DSL retry fails too the compiler throws
+— the note widget shows the message under the Save button, and on a file load the property is
+left unset with a `console.error`.
 
-| Not accepted | What actually happens |
-|---|---|
-| `.neg()` | Compiles to `0` |
-| `.abs()` | Compiles to `0` |
-| `.inverse()` | Compiles to `0` |
-| `.mod()` | Compiles to `0` |
-| `.equals()`, `.compare()` | Compiles to `0` |
-| `.valueOf()`, `.toString()`, `.toFraction()` | Compiles to `0` |
-| `.n`, `.d`, `.s` (property access) | Compiles to `0` |
-| String arguments, e.g. `new Fraction("355", "113")` | Compiles to `0` |
+| Not accepted |
+|---|
+| `.neg()` |
+| `.abs()` |
+| `.inverse()` |
+| `.mod()` |
+| `.equals()`, `.compare()` |
+| `.valueOf()`, `.toString()`, `.toFraction()` |
+| `.n`, `.d`, `.s` (property access) |
+| String arguments, e.g. `new Fraction("355", "113")` |
 
 Write `-5` (DSL) or `new Fraction(-5)` (legacy) instead of a negation call. Everything else on
 that list has no expression-language equivalent — comparisons, string conversion and modulo are

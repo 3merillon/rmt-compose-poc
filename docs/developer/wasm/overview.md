@@ -26,14 +26,21 @@ feature. The JS path carries the app on its own: a full re-evaluation of the 100
 
 | Step | Where | Effect |
 |---|---|---|
-| `initWasm()` is called eagerly at import time | `src/store/app-state.js:6` | Fetches and instantiates the `.wasm` binary |
-| `initWasm()` is `await`ed during `initApp()` | `src/main.js:77` | Logs `RMT Core WASM v0.1.0 initialized` |
-| `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:125-134` | Same call, deduped by an `wasmInitialized` guard |
+| `initWasm()` is called eagerly at import time | `src/store/app-state.js:6` | **Returns `false` early** unless `?evaluator=wasm` — no fetch |
+| `initWasm()` is `await`ed during `initApp()` | `src/main.js:77` | Same early-out on the default path |
+| `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:136-145` | Same call, same gate, deduped by a `wasmInitialized` guard |
 | `Module` constructor registers a hot-swap callback | `src/module.js:62-68` | **Only if** `isEvaluatorHotSwapEnabled()` — false in a browser without `?evaluator=wasm` |
 | Evaluation | `src/binary-evaluator.js` | JS |
 
-So the 384 KB `rmt_core_bg.wasm` is downloaded and instantiated on **every** page load, and then —
-on the default path — never used to evaluate anything. That is a known cost, not a feature.
+So on the default path the 384 KB `rmt_core_bg.wasm` is **never downloaded or instantiated** —
+every boot-time caller funnels through `initWasm()`, which checks `isEvaluatorHotSwapEnabled()`
+before touching the network. Only `?evaluator=wasm` (or headless Node, which has no `window` and
+passes the gate so benches and tests can run) pays the fetch+instantiate.
+
+A consequence worth knowing: because `isWasmAvailable()` stays `false` on the default path,
+modules constructed *later* in a session — a file load, an undo/redo snapshot restore — can no
+longer silently pick up a WASM-backed evaluator through `createEvaluator()`. Every evaluator is JS
+unless the opt-in is set.
 
 ## The crate
 
@@ -231,7 +238,7 @@ It hangs on the **first** registration (note 0) after `invalidateAll()`.
 |---|---|
 | Stale committed artifact | Two separately-built binaries both hang |
 | Node vs browser runtime | The identical call sequence — including the exact construct-then-upgrade race, the default module, and repeated register/invalidate/register cycles — passes headlessly in Node |
-| A poisoned browser context | A fresh `PersistentEvaluator` in the same page, fed the same bytecodes (including the legacy `measureLength` bytecode `[1,0,0,0,60,0,0,0,1,3,3,19,3,4,18]`), evaluated, invalidated and re-registered: no hang |
+| A poisoned browser context | A fresh `PersistentEvaluator` in the same page, fed the same bytecodes (including the default `measureLength` bytecode `[1,0,0,0,60,0,0,0,1,3,3,19,3,4,18]` — the source string is now DSL, but the bytes are unchanged), evaluated, invalidated and re-registered: no hang |
 | serde input shape | Plain objects and arrays; `register_note` deserializes them fine everywhere else |
 
 ### What is suspicious

@@ -599,7 +599,7 @@ export function createMeasureDurationRow(note, measureId, externalFunctions) {
   variableValueDiv.className = 'variable-value';
 
   // Initial RAW expression (prefer measure override, fallback to base)
-  let initialRaw = 'new Fraction(4)';
+  let initialRaw = '4';
   try {
     if (measureNote?.variables?.beatsPerMeasureString) {
       initialRaw = measureNote.variables.beatsPerMeasureString;
@@ -622,7 +622,7 @@ export function createMeasureDurationRow(note, measureId, externalFunctions) {
       pauseIfPlaying();
       if (!measureNote) return;
 
-      const raw = (rawInput.value || '').trim() || 'new Fraction(4)';
+      const raw = (rawInput.value || '').trim() || '4';
       // Set the expression string directly - the Note class will compile it to binary
       measureNote.setVariable('beatsPerMeasureString', raw);
 

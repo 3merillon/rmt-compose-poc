@@ -225,7 +225,7 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 
 | Cache | Where | Lifetime |
 |---|---|---|
-| Compile cache | `ExpressionCompiler`, LRU **4000** entries, keyed on raw text | Per compiler instance — [seven independent caches](/developer/core/expression-compiler#the-compile-cache) in a running app. |
+| Compile cache | `ExpressionCompiler`, LRU **4000** entries, keyed on raw text | Per compiler instance — [six independent caches](/developer/core/expression-compiler#the-compile-cache) in a running app. |
 | Compiled bytecode | Inside each `BinaryExpression` | Until the expression text changes. |
 | Evaluation cache | `Map<noteId, result>` on the module and the incremental evaluator | Invalidated per note when marked dirty. |
 | Module end time | A **module-level** `let` in `src/module.js`, not a per-instance field | Cleared by `invalidateModuleEndTimeCache()`, emitted on every expression change. |

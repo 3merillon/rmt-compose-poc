@@ -31,7 +31,7 @@ The play icon has three states:
 |---|---|
 | Triangle in the accent colour (orange in the default theme) | Stopped or paused |
 | Red pause bars | Playing |
-| Red dashes orbiting a figure-8 | Loop playback (see below) |
+| Red dashes orbiting a figure-8 | Loop mode armed — while playing *or* while parked after a seek (see below) |
 
 ## Stop
 
@@ -79,13 +79,13 @@ When you disarm it with the same gesture, the icon changes back immediately, but
 
 Engaging an endless loop is always deliberate: you re-arm it with the gesture, every time.
 
-::: warning Seeking while looping leaves the mode armed but invisible
-If you click the background to seek while a loop is running, playback stops and the icon reverts to the plain play triangle — but the mode is **still armed**. The next Play loops again, from the new position. Press Stop if you want a clean exit.
+::: warning Seeking while looping keeps the mode armed
+If you click the background to seek while a loop is running, playback stops — but the mode stays **armed**, and the icon says so: the dashes keep orbiting while the transport is parked. The next Play loops again, from the new position. Press Stop if you want a clean exit.
 :::
 
 ### When loop refuses
 
-Loop silently does not engage — the transport plays the module once and stops — if the module is empty, contains only measure bars (nothing with a frequency), or is shorter than 50 ms.
+Loop does not engage — the transport plays the module once and stops — if the module is empty, contains only measure bars (nothing with a frequency), or is shorter than 50 ms. The mode disarms with it: the icon drops back to the plain play triangle instead of orbiting over playback that will not actually loop.
 
 ::: tip
 In a browser without CSS motion-path support, loop playback still runs, but the icon looks the same as normal playback. If you have "reduce motion" turned on in your OS, the three dashes sit parked around the figure-8 instead of orbiting.
@@ -108,7 +108,7 @@ Note that a pause **drops loop mode** — so an edit made mid-loop ends the loop
 
 ## Keyboard
 
-There are **no keyboard shortcuts for the transport**. `Space` does not play, `Escape` does not stop. The only global shortcuts in the app are `Ctrl/Cmd + Z` (undo) and `Ctrl/Cmd + Y` (redo) — see [Keyboard Shortcuts](/user-guide/interface/keyboard-shortcuts).
+There are **no keyboard shortcuts for the transport**. `Space` does not play, `Escape` does not stop. The only global shortcuts in the app are `Ctrl/Cmd + Z` (undo) and `Ctrl/Cmd + Y` or `Ctrl/Cmd + Shift + Z` (redo) — see [Keyboard Shortcuts](/user-guide/interface/keyboard-shortcuts).
 
 The one keyboard-ish transport interaction is **Shift**+click on Play, which arms loop playback.
 

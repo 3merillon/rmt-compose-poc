@@ -44,7 +44,7 @@ does not walk up to a parent.
 ![The note widget open on a note, showing the Evaluated and Raw rows and the note-length buttons](/img/note-widget.png)
 
 - **The `Raw:` input.** Type an expression, press **Save**. Edits apply on Save, not while typing.
-  An invalid expression is dropped silently — the error only reaches the browser console.
+  An invalid expression is rejected with the reason shown in red under the Save button.
 - **The note-length buttons** under the duration row (see below).
 - **The right edge of the note.** Drag the pull tab on a note's right edge to resize it. The new
   length snaps to a **quarter of a beat** — a sixteenth note, when a beat is a quarter — with a
@@ -88,10 +88,10 @@ beat(base) * (3/4)     # a dotted eighth
 `beat(x)` compiles to `60 / tempo(x)`. It is the only helper the decompiler reconstructs, so it
 survives a save unchanged.
 
-::: danger Write the multiplier after the beat, not before
-`beat(base) * 2` is fine. `2 * beat(base)` is **silently compiled to 0**: a lone helper call is only
-recognised as DSL when it leads the expression. See
-[tempo](/reference/properties/tempo#the-beat-unit).
+::: tip Prefer the multiplier after the beat
+`beat(base) * 2` is sniffed as DSL directly. `2 * beat(base)` compiles too, but only after a
+wasted trip through the legacy parser — a lone helper call is recognised as DSL only when it leads
+the expression. See [tempo](/reference/properties/tempo#the-beat-unit).
 :::
 
 <details>

@@ -6,7 +6,7 @@ A GL-only composition tool built around rational number relationships (ratios) i
 
 - Try it in your browser: https://www.rmt.world/
 - **Full documentation**: https://docs.rmt.world/ — guides, tutorials, reference
-- **Contributing / continuing development?** Start with the [developer docs](https://docs.rmt.world/developer/) (architecture, core systems, performance, contributing guides) and [KNOWN-ISSUES.md](KNOWN-ISSUES.md) — a verified, file:line-cited bug backlog.
+- **Contributing / continuing development?** Start with the [developer docs](https://docs.rmt.world/developer/) — architecture, core systems, performance, and contributing guides.
 - Screenshot:
 
 ![RMT Compose screenshot](public/screenshot.png)
@@ -137,7 +137,7 @@ Other scripts:
 
 ### WASM (optional, and not currently usable)
 
-A Rust core (`rust/`, crate `rmt-core`) compiles to WebAssembly and implements an alternative evaluator. **It is not active.** Activation is opt-in via `?evaluator=wasm`, and doing so currently **hangs the main thread** on a full re-evaluation cycle — a non-deterministic bug in the Rust `PersistentEvaluator`. Everything you see in the app runs on the JavaScript evaluator, which after the Phase 1/8 work is fast enough on its own (sub-2 ms evaluation at 1000 notes). The WASM path passes in Node; the hang is browser-only.
+A Rust core (`rust/`, crate `rmt-core`) compiles to WebAssembly and implements an alternative evaluator. **It is not active.** Activation is opt-in via `?evaluator=wasm` — without that flag the 384 KB binary is not even fetched (`initWasm()` returns early; headless Node still initializes for benches). Opting in currently **hangs the main thread** on a full re-evaluation cycle — a non-deterministic bug in the Rust `PersistentEvaluator`. Everything you see in the app runs on the JavaScript evaluator, which after the Phase 1/8 work is fast enough on its own (sub-2 ms evaluation at 1000 notes). The WASM path passes in Node; the hang is browser-only.
 
 Do not enable it. The infrastructure is here for when the hang is fixed.
 
@@ -171,9 +171,9 @@ If you built the crate by hand, sync with `npm run wasm:sync` and commit the upd
 - **Import/Export**
   - Load a module from a file, or drag one from the module library onto a note, a measure bar, or the BaseNote
   - Save Module downloads `module.json` (reindexed on export). Save UI / Load UI export the *library layout*, not a composition.
-- **Keyboard** — there are exactly two global shortcuts:
+- **Keyboard** — the only global shortcuts are undo and redo:
   - **Undo: Ctrl/Cmd+Z**
-  - **Redo: Ctrl/Cmd+Y** — note that **Ctrl/Cmd+Shift+Z is *not* redo**; the handler lowercases the key and ignores Shift, so it fires Undo.
+  - **Redo: Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z**
   - Escape is scoped: it closes the Settings panel, clears the group selection, cancels a confirmation, or closes the library search — but only when focus is already inside that surface. There is no global Escape, no Space-to-play, and no Delete shortcut.
 
 ## Module Library

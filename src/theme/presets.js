@@ -26,7 +26,9 @@ const CLASSIC_ORANGE = {
     accent: '#ffa800',
     accentText: '#151525',
     bg: '#151525',
-    surface: '#1e1e2e',
+    // Pre-theme panels drew rgba(bg, 0.88); surface must equal bg so the
+    // surface-driven panel backgrounds stay pixel-identical for this preset.
+    surface: '#151525',
     surfaceBorder: '#3a3a4a',
     textPrimary: '#ffffff',
     textSecondary: '#aaaaaa',
@@ -34,7 +36,8 @@ const CLASSIC_ORANGE = {
     noteBorder: '#636363',
     playhead: '#ffa800',
     measureBar: '#ffffff',
-    selectionRing: '#ffa800',
+    // The pre-theme selection/hover rings (and selection wash) were white.
+    selectionRing: '#ffffff',
     hoverRing: '#ffffff',
     // Dependency highlight colors (source = dep, target = rdep tint).
     depFrequency: '#ff8000',

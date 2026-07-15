@@ -72,11 +72,8 @@ What you get is a genuinely reusable module, not a snapshot:
 
 Drop the copy back onto the note it came from and it lands exactly on top of itself.
 
-::: warning Copy to Modules loses colours and instruments
-Per-note `color` and `instrument` are **not** carried into the copied module, and neither is the base
-note's instrument. Pitch, timing and structure survive; the look and the timbre do not. Re-set them
-after you drop the copy back in.
-:::
+Per-note `color` and `instrument` are carried into the copied module too, along with the BaseNote's
+instrument — the copy keeps its look and its timbre, not just its pitch, timing and structure.
 
 ::: info Copy to Modules is not undoable
 It writes to the library, not to your composition — so `Ctrl+Z` will not remove it. To get rid of a

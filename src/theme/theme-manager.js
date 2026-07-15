@@ -134,6 +134,7 @@ class ThemeManager {
       };
       setRgb('--rmt-accent-rgb', tokens.accent);
       setRgb('--rmt-bg-rgb', tokens.bg);
+      setRgb('--rmt-surface-rgb', tokens.surface);
       setRgb('--rmt-danger-rgb', tokens.danger);
       // Numeric token: the saturation new notes' random colors are born with
       // (read back by note-creation.js). Published as a CSS var so consumers
@@ -175,6 +176,8 @@ class ThemeManager {
           depFrequency: tokens.depFrequency,
           depStartTime: tokens.depStartTime,
           depDuration: tokens.depDuration,
+          // On-note glyph text (fractions, "silence", octave arrows).
+          textPrimary: tokens.textPrimary,
         });
       }
       // Geometry affects note rects computed in sync(); re-sync only when it

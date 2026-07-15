@@ -91,11 +91,7 @@ Typing in a `Raw:` field changes nothing. The `Save` button is **hidden until yo
 
 Validation rejects an empty expression, an expression that references its own note, and an expression that would create a circular dependency.
 
-::: warning A bad expression gives you no on-screen error
-If validation fails, the save silently does nothing and the reason is logged to the browser console. There is no red border and no inline message. If a `Save` appears to do nothing, that is why — check the expression, or open the console.
-
-The one exception is `COLOR`: an unparseable colour raises a browser alert telling you the accepted formats (hex, `rgb()`, `rgba()`, `hsl()`, `hsla()`, or a named colour).
-:::
+When a save is rejected, the reason appears **inline**: the validator's message shows in red under the `Save` button and the `Raw:` field gets a red border. Both clear on your next keystroke or your next save attempt. (`COLOR` is the odd one out: an unparseable colour raises a browser alert telling you the accepted formats — hex, `rgb()`, `rgba()`, `hsl()`, `hsla()`, or a named colour.)
 
 ### The `Raw:` field always shows DSL
 
@@ -115,9 +111,9 @@ is displayed in the widget as `base.f * (3/2)`. Press Save and it is stored that
 
 ### The `≈` symbol
 
-Fractions are exact; powers usually are not. `base.f * 2^(7/12)` — a 12-TET fifth — has an irrational result the evaluator can only approximate. When that happens the **`Evaluated:`** readout is prefixed with **`≈`** and shown in italic brown.
+Fractions are exact; powers usually are not. `base.f * 2^(7/12)` — a 12-TET fifth — has an irrational result the evaluator can only approximate. When that happens the **`Evaluated:`** readout is prefixed with **`≈`** and the value prints as a decimal to 8 significant figures, in italic brown.
 
-Any row whose evaluated value is irrational carries the `≈`. In practice that means the **`FREQUENCY`** row, and it shows up both when the note's own frequency is irrational and when it inherits an irrational frequency from a note further up its chain — that second, transitive case is only tracked for frequency. So the whole of a TET scale built on `[1].f * 2^(1/12)` reads `≈`.
+Any row whose **own expression** is irrational carries the `≈` — a startTime or duration built on a power shows it just like a frequency does. The *transitive* case — a note that merely inherits an irrational frequency from a note further up its chain — is tracked for **frequency only**, so the whole of a TET scale built on `[1].f * 2^(1/12)` reads `≈` on its `FREQUENCY` rows.
 
 On the canvas the same notes are hatched, and the hatching tells you *which* kind you are looking at:
 
@@ -204,9 +200,7 @@ Change it and a `Save` button appears; Save pins that instrument on the note. On
 
 Measures have no instrument row. See [Instruments](/user-guide/playback/instruments) for what each one sounds like.
 
-::: warning The BaseNote's instrument row is not authoritative
-When the BaseNote has no instrument of its own, its row always reads `Current: sine-wave`, even if you have set **Default instrument** to something else — and playback will correctly use the default you set. Trust the setting, not this row.
-:::
+The BaseNote's row follows the same rules: with nothing pinned it reads **`Inherited: <name>`**, where the name is whatever **Settings → Audio → Default instrument** is set to — the same instrument playback uses.
 
 ## Add Note / Silence
 
@@ -277,7 +271,7 @@ For a note, a silence or a measure, the **`DELETE NOTE`** section offers two but
 | `Delete Dependencies` | Deletes this note **and every note that depends on it**. |
 
 ::: danger
-`Delete Dependencies` can take out a large part of the composition in one click. The confirmation dialog refers to "notes highlighted in red" — those are the dependents already highlighted in the workspace while the widget is open. Look at them before you confirm.
+`Delete Dependencies` can take out a large part of the composition in one click. The confirmation dialog points you at the **dependency lines in the workspace** — the notes linked to this one by those lines are what will go. Look at them before you confirm.
 :::
 
 ### Clean Slate
@@ -285,7 +279,7 @@ For a note, a silence or a measure, the **`DELETE NOTE`** section offers two but
 On the **BaseNote** the section becomes **`DELETE ALL NOTES`** with a single button: **`Clean Slate`**. It deletes every note in the module except the BaseNote. The confirmation button reads `Yes, Clean Slate`.
 
 ::: tip
-The confirmation dialog says the action cannot be undone. It can — `Clean Slate` captures an undo snapshot like everything else, so `Ctrl/Cmd + Z` brings your notes back.
+Clean Slate is undoable, and the confirmation dialog says so — it captures an undo snapshot like everything else, so `Ctrl/Cmd + Z` brings your notes back.
 :::
 
 ## Undo

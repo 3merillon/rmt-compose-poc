@@ -122,7 +122,7 @@ Click **Play** (▶) in the [top bar](/user-guide/interface/top-bar). The playhe
 Select a note. In the widget, each variable has a **Raw:** box. Type a new expression and click **Save** — the Save button only appears once you've typed something.
 
 ::: warning Changes apply on save, not while you type
-And if an expression doesn't compile, **nothing visible happens** — no error banner, no red border. The note just doesn't change. If a Save appears to do nothing, open the browser console; the parse error is there.
+And if an expression doesn't compile, the reason appears in red under the Save button and the box gets a red border. The note doesn't change until the expression is fixed.
 :::
 
 More in [Editing Notes](/user-guide/notes/editing-notes).
@@ -153,7 +153,7 @@ A 12-TET semitone is irrational, so that last note displays with a leading **≈
 
 ### Undo
 
-Three ways, all equivalent: **Ctrl/Cmd + Z** and **Ctrl/Cmd + Y**, the **Undo** / **Redo** entries in the **+** menu, or the Undo/Redo buttons at the right of the [module bar](/user-guide/interface/module-bar)'s toolbar.
+Three ways, all equivalent: the keyboard — **Ctrl/Cmd + Z** to undo, **Ctrl/Cmd + Y** or **Ctrl/Cmd + Shift + Z** to redo — the **Undo** / **Redo** entries in the **+** menu, or the Undo/Redo buttons at the right of the [module bar](/user-guide/interface/module-bar)'s toolbar.
 
 ## Step 9: Select several notes at once
 

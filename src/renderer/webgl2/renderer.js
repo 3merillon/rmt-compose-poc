@@ -340,7 +340,7 @@ export class RendererAdapter {
    * arrays for the draw paths. Canvas-textured labels (note ids, octave guide
    * labels, measure ids) are cached by string key, so we invalidate that
    * cache and bump the color epoch so they regenerate in the new color.
-   * @param {{accent?:string,noteBorder?:string,measureBar?:string,selectionRing?:string,hoverRing?:string,depFrequency?:string,depStartTime?:string,depDuration?:string}} colors
+   * @param {{accent?:string,noteBorder?:string,measureBar?:string,selectionRing?:string,hoverRing?:string,depFrequency?:string,depStartTime?:string,depDuration?:string,textPrimary?:string}} colors
    */
   setThemeColors(colors) {
     try {
@@ -363,6 +363,7 @@ export class RendererAdapter {
       if (colors.depFrequency) tc.depFrequency = hexToRgba(colors.depFrequency, [1.0, 0.5, 0.0, 1.0]);
       if (colors.depStartTime) tc.depStartTime = hexToRgba(colors.depStartTime, [0.0, 1.0, 1.0, 1.0]);
       if (colors.depDuration) tc.depDuration = hexToRgba(colors.depDuration, [0.615, 0.0, 1.0, 1.0]);
+      if (colors.textPrimary) { tc.noteTextHex = colors.textPrimary; tc.noteText = hexToRgba(colors.textPrimary, [1, 1, 1, 1]); }
 
       // Canvas-textured labels are cached by string key with no color in it —
       // clear so they redraw in the new accent.
@@ -379,6 +380,16 @@ export class RendererAdapter {
   _accentHex() { return (this._themeColors && this._themeColors.accentHex) || '#ffa800'; }
   _noteBorderRgba() { return (this._themeColors && this._themeColors.noteBorder) || [0.388, 0.388, 0.388, 1.0]; }
   _measureBarRgb() { return (this._themeColors && this._themeColors.measureBar) || [1.0, 1.0, 1.0, 1.0]; }
+  // Ring / on-note text theme accessors. Fallbacks are the pre-theme hardcoded
+  // literals (white rings/text, orange/teal/purple dependency rings) so an
+  // unthemed boot renders exactly as before.
+  _selectionRingRgba() { return (this._themeColors && this._themeColors.selectionRing) || [1.0, 1.0, 1.0, 1.0]; }
+  _hoverRingRgba() { return (this._themeColors && this._themeColors.hoverRing) || [1.0, 1.0, 1.0, 1.0]; }
+  _depFrequencyRgba() { return (this._themeColors && this._themeColors.depFrequency) || [1.0, 0.5, 0.0, 1.0]; }
+  _depStartTimeRgba() { return (this._themeColors && this._themeColors.depStartTime) || [0.0, 1.0, 1.0, 1.0]; }
+  _depDurationRgba() { return (this._themeColors && this._themeColors.depDuration) || [0.615, 0.0, 1.0, 1.0]; }
+  _noteTextRgba() { return (this._themeColors && this._themeColors.noteText) || [1.0, 1.0, 1.0, 1.0]; }
+  _noteTextHex() { return (this._themeColors && this._themeColors.noteTextHex) || '#ffffff'; }
 
   // Config helpers (seconds/world X, freq/world Y)
   _cfgSX() { try { return this._config?.scales?.secondsToWorldX ?? 200; } catch { return 200; } }
@@ -1519,7 +1530,8 @@ export class RendererAdapter {
   }
 
   _multiSelRingRgba() {
-    return [1.0, 1.0, 1.0, 1.0];
+    const c = this._selectionRingRgba();
+    return [c[0], c[1], c[2], 1.0];
   }
 
   _multiSelRingPx() {
@@ -2770,25 +2782,31 @@ export class RendererAdapter {
         const dragType = this._dragOverlay?.type || '';
         const isResize = dragType === 'resize';
 
+        // Themed dependency-highlight colors (classic-orange tokens equal the old literals)
+        const fqC = this._depFrequencyRgba();
+        const stC = this._depStartTimeRgba();
+        const duC = this._depDurationRgba();
+        const withA = (c, a) => [c[0], c[1], c[2], a];
+
         // Normal colors (full brightness)
         const HIGHLIGHT_COLORS_NORMAL = {
-          frequency: { dep: [1.0, 0.5, 0.0, 0.9], rdep: [1.0, 0.5, 0.0, 0.4] },
-          startTime: { dep: [0.0, 1.0, 1.0, 0.9], rdep: [0.0, 1.0, 1.0, 0.4] },
-          duration:  { dep: [0.615, 0.0, 1.0, 0.9], rdep: [0.615, 0.0, 1.0, 0.4] }
+          frequency: { dep: withA(fqC, 0.9), rdep: withA(fqC, 0.4) },
+          startTime: { dep: withA(stC, 0.9), rdep: withA(stC, 0.4) },
+          duration:  { dep: withA(duC, 0.9), rdep: withA(duC, 0.4) }
         };
 
         // During drag (move): startTime full, others dimmed
         const HIGHLIGHT_COLORS_DRAG = {
-          frequency: { dep: [1.0, 0.5, 0.0, 0.15], rdep: [1.0, 0.5, 0.0, 0.08] },
-          startTime: { dep: [0.0, 1.0, 1.0, 0.9], rdep: [0.0, 1.0, 1.0, 0.4] },
-          duration:  { dep: [0.615, 0.0, 1.0, 0.15], rdep: [0.615, 0.0, 1.0, 0.08] }
+          frequency: { dep: withA(fqC, 0.15), rdep: withA(fqC, 0.08) },
+          startTime: { dep: withA(stC, 0.9), rdep: withA(stC, 0.4) },
+          duration:  { dep: withA(duC, 0.15), rdep: withA(duC, 0.08) }
         };
 
         // During resize: duration full, others dimmed
         const HIGHLIGHT_COLORS_RESIZE = {
-          frequency: { dep: [1.0, 0.5, 0.0, 0.15], rdep: [1.0, 0.5, 0.0, 0.08] },
-          startTime: { dep: [0.0, 1.0, 1.0, 0.15], rdep: [0.0, 1.0, 1.0, 0.08] },
-          duration:  { dep: [0.615, 0.0, 1.0, 0.9], rdep: [0.615, 0.0, 1.0, 0.4] }
+          frequency: { dep: withA(fqC, 0.15), rdep: withA(fqC, 0.08) },
+          startTime: { dep: withA(stC, 0.15), rdep: withA(stC, 0.08) },
+          duration:  { dep: withA(duC, 0.9), rdep: withA(duC, 0.4) }
         };
 
         const HIGHLIGHT_COLORS = isDragging
@@ -2866,8 +2884,8 @@ export class RendererAdapter {
             { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCRF)  gl.uniform1f(uCRF, cr * (this.xScalePxPerWU || 1.0)); }
             // Inset ~1.5px at zoom=1 to keep a clean gap from the ring/border
             if (uIN)   gl.uniform1f(uIN, 1.5 * (this.xScalePxPerWU || 1.0));
-            // Subtle highlight fill (premultiplied-friendly)
-            if (uCF)   gl.uniform4f(uCF, 1.0, 1.0, 1.0, 0.12);
+            // Subtle highlight fill (premultiplied-friendly), themed selection color
+            { const sr = this._selectionRingRgba(); if (uCF) gl.uniform4f(uCF, sr[0], sr[1], sr[2], 0.12); }
 
             // Disable unused attrib 4 for selection fill single-instance pass
             this._setAttr4Enabled(false);
@@ -2910,7 +2928,7 @@ export class RendererAdapter {
           if (uSC)  gl.uniform2f(uSC, (this.xScalePxPerWU || 1.0), (this.yScalePxPerWU || 1.0));
           { const cr = (this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0); if (uCR)  gl.uniform1f(uCR, cr * (this.xScalePxPerWU || 1.0)); }
           if (uBW)  gl.uniform1f(uBW, (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0) * (this.xScalePxPerWU || 1.0));
-          if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 1.0);
+          { const sr = this._selectionRingRgba(); if (uCol) gl.uniform4f(uCol, sr[0], sr[1], sr[2], 1.0); }
 
           // Disable unused attrib 4 for selection ring pass
           this._setAttr4Enabled(false);
@@ -2947,7 +2965,7 @@ export class RendererAdapter {
       }
     } catch {}
 
-    // Hover outline (1px white) — drawn when a note is hovered and different from selected
+    // Hover outline (1px, themed hoverRing color) — drawn when a note is hovered and different from selected
     try {
       const hoverId = this._hoveredNoteId;
       if (this.selectionRingProgram && hoverId != null) {
@@ -2985,7 +3003,7 @@ export class RendererAdapter {
           if (uBW)  gl.uniform1f(uBW, (this._config?.selection?.hoverThicknessPxAtZoom1 ?? 1.0) * (this.xScalePxPerWU || 1.0));
           // Slightly dim if same as selected to avoid double intensity (still visible)
           const a = sameAsSelected ? 0.6 : 1.0;
-          if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, a);
+          { const hr = this._hoverRingRgba(); if (uCol) gl.uniform4f(uCol, hr[0], hr[1], hr[2], a); }
 
           // Disable unused attrib 4 for hover ring pass
           this._setAttr4Enabled(false);
@@ -5360,7 +5378,7 @@ const e = startSec + addDx + durSec;
             if (uVPc2) gl.uniform2f(uVPc2, vpW, vpH);
             if (uBWc2) gl.uniform1f(uBWc2, (this._config?.selection?.ringThicknessPxAtZoom1 ?? 2.0) * (this.xScalePxPerWU || 1.0)); // 2px at zoom=1
             if (uFill2) gl.uniform4f(uFill2, 1.0, 1.0, 1.0, 0.0);               // no interior fill
-            if (uBCol2) gl.uniform4f(uBCol2, 1.0, 1.0, 1.0, 1.0);               // white ring
+            { const sr = this._selectionRingRgba(); if (uBCol2) gl.uniform4f(uBCol2, sr[0], sr[1], sr[2], 1.0); } // themed selection ring
 
             gl.bindVertexArray(this.baseCircleVAO);
             gl.bindBuffer(gl.ARRAY_BUFFER, this.baseCirclePosSizeBuffer);
@@ -5390,18 +5408,22 @@ const e = startSec + addDx + durSec;
               gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
               gl.bindVertexArray(null);
             };
-            // Property-colored base note rings
+            // Property-colored base note rings (themed dep-highlight tokens;
+            // classic-orange tokens equal the old orange/teal/purple literals)
+            const bFq = this._depFrequencyRgba();
+            const bSt = this._depStartTimeRgba();
+            const bDu = this._depDurationRgba();
             // Dependencies (what this note depends on from baseNote) - brighter, thicker
             const BASE_DEP_COLORS = {
-              frequency: [1.0, 0.5, 0.0, 0.9],   // Orange
-              startTime: [0.0, 1.0, 1.0, 0.9],   // Teal
-              duration:  [0.615, 0.0, 1.0, 0.9]  // Purple
+              frequency: [bFq[0], bFq[1], bFq[2], 0.9],
+              startTime: [bSt[0], bSt[1], bSt[2], 0.9],
+              duration:  [bDu[0], bDu[1], bDu[2], 0.9]
             };
             // Dependents (baseNote doesn't depend on notes, so this is rarely used)
             const BASE_RDEP_COLORS = {
-              frequency: [1.0, 0.5, 0.0, 0.4],   // Orange (dimmer)
-              startTime: [0.0, 1.0, 1.0, 0.4],   // Teal (dimmer)
-              duration:  [0.615, 0.0, 1.0, 0.4]  // Purple (dimmer)
+              frequency: [bFq[0], bFq[1], bFq[2], 0.4],
+              startTime: [bSt[0], bSt[1], bSt[2], 0.4],
+              duration:  [bDu[0], bDu[1], bDu[2], 0.4]
             };
 
             // Draw property-colored deps rings for baseNote
@@ -5419,10 +5441,10 @@ const e = startSec + addDx + durSec;
 
             // Fallback for old behavior
             if (this._relDepsHasBase && !this._relDepsHasBaseByProperty?.startTime && !this._relDepsHasBaseByProperty?.frequency && !this._relDepsHasBaseByProperty?.duration) {
-              drawBaseDepRing([0.0, 1.0, 1.0, 0.9], 2.0);
+              drawBaseDepRing([bSt[0], bSt[1], bSt[2], 0.9], 2.0);
             }
             if (this._relRdepsHasBase && !this._relRdepsHasBaseByProperty?.startTime && !this._relRdepsHasBaseByProperty?.frequency && !this._relRdepsHasBaseByProperty?.duration) {
-              drawBaseDepRing([0.615686, 0.0, 1.0, 0.9], 1.0);
+              drawBaseDepRing([bDu[0], bDu[1], bDu[2], 0.9], 1.0);
             }
           }
         } catch {}
@@ -5439,7 +5461,7 @@ const e = startSec + addDx + durSec;
             if (uVPc3) gl.uniform2f(uVPc3, vpW, vpH);
             if (uBWc3) gl.uniform1f(uBWc3, 1.0 * (this.xScalePxPerWU || 1.0));   // 1px
             if (uFill3) gl.uniform4f(uFill3, 1.0, 1.0, 1.0, 0.0);
-            if (uBCol3) gl.uniform4f(uBCol3, 1.0, 1.0, 1.0, 0.75);               // softer white
+            { const hr = this._hoverRingRgba(); if (uBCol3) gl.uniform4f(uBCol3, hr[0], hr[1], hr[2], 0.75); } // softer, themed hover ring
             gl.bindVertexArray(this.baseCircleVAO);
             gl.bindBuffer(gl.ARRAY_BUFFER, this.baseCirclePosSizeBuffer);
             gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
@@ -5613,8 +5635,8 @@ if (this.useGlyphCache) {
 numEntry2W = this._measureGlyphRunWidth(numStr2, fontPx2);
 denEntry2W = this._measureGlyphRunWidth(denStr2, fontPx2);
 } else {
-numEntry2 = this._createTightDigitTexture(numStr2, fontPx2, 0, '#ffffff');
-denEntry2 = this._createTightDigitTexture(denStr2, fontPx2, 0, '#ffffff');
+numEntry2 = this._createTightDigitTexture(numStr2, fontPx2, 0, this._noteTextHex());
+denEntry2 = this._createTightDigitTexture(denStr2, fontPx2, 0, this._noteTextHex());
 numEntry2W = (numEntry2 && numEntry2.wCss) ? numEntry2.wCss : 0.0;
 denEntry2W = (denEntry2 && denEntry2.wCss) ? denEntry2.wCss : 0.0;
 }
@@ -5647,7 +5669,7 @@ if (this.solidCssCircMaskProgram && this.octaveLineVAO && this.octaveLinePosSize
  const uRad = Ucmask ? Ucmask.u_circleRadiusInner : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_circleRadiusInner');
  if (uVPm) gl.uniform2f(uVPm, vpW2, vpH2);
  if (uZm)  gl.uniform1f(uZm, -0.00001); // on top
- if (uColm)gl.uniform4f(uColm, 1.0, 1.0, 1.0, 1.0);
+ { const tc = this._noteTextRgba(); if (uColm) gl.uniform4f(uColm, tc[0], tc[1], tc[2], 1.0); }
  if (uCtr) gl.uniform2f(uCtr, localCX2, localCY2);
  if (uRad) gl.uniform1f(uRad, innerR);
 
@@ -5687,7 +5709,7 @@ if (this.useGlyphCache) {
    const uCtrT = Utcm ? Utcm.u_circleCenter      : gl.getUniformLocation(prog, 'u_circleCenter');
    const uRadT = Utcm ? Utcm.u_circleRadiusInner : gl.getUniformLocation(prog, 'u_circleRadiusInner');
    if (uVPtm) gl.uniform2f(uVPtm, vpW2, vpH2);
-   if (uTintm)gl.uniform4f(uTintm, 1, 1, 1, 1);
+   { const tc = this._noteTextRgba(); if (uTintm) gl.uniform4f(uTintm, tc[0], tc[1], tc[2], 1); }
    if (uTexm) gl.uniform1i(uTexm, 0);
    if (uZtm)  gl.uniform1f(uZtm, -0.00001);
    if (uCtrT) gl.uniform2f(uCtrT, localCX2, localCY2);
@@ -5937,31 +5959,35 @@ try {
         // - If prospective is BaseNote (0): draw nothing (no teal measure outline)
         if (prospectiveIsMeasure) {
           const idx = idToIdx.get(Number(prospPid));
-          drawTriOutlineAtIndex(idx, [0.0, 1.0, 1.0, 0.9], this.measureTriPosSizeOutline);
+          const st = this._depStartTimeRgba();
+          drawTriOutlineAtIndex(idx, [st[0], st[1], st[2], 0.9], this.measureTriPosSizeOutline);
         }
         // else: prospective is BaseNote, don't draw any teal measure outline
       } else if (this._relDepsMeasureIds && this._relDepsMeasureIds.length) {
         // Normal case (not dragging or no prospective): draw actual dependencies
+        const st = this._depStartTimeRgba();
         for (let i = 0; i < this._relDepsMeasureIds.length; i++) {
             const id = Number(this._relDepsMeasureIds[i]);
             const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
-            drawTriOutlineAtIndex(idx, [0.0, 1.0, 1.0, 0.9], this.measureTriPosSizeOutline);
+            drawTriOutlineAtIndex(idx, [st[0], st[1], st[2], 0.9], this.measureTriPosSizeOutline);
         }
       }
     }
     // Dependents: neon deep purple
     if (this._lastSelectedNoteId !== 0 && this._relRdepsMeasureIds && this._relRdepsMeasureIds.length) {
+      const du = this._depDurationRgba();
       for (let i = 0; i < this._relRdepsMeasureIds.length; i++) {
         const id = Number(this._relRdepsMeasureIds[i]);
         const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
-        drawTriOutlineAtIndex(idx, [0.615686, 0.0, 1.0, 0.9], this.measureTriPosSizeOutline);
+        drawTriOutlineAtIndex(idx, [du[0], du[1], du[2], 0.9], this.measureTriPosSizeOutline);
       }
     }
     // Hover outline for measures
     if (this._hoveredMeasureId != null && this._hoveredMeasureId !== this._lastSelectedNoteId) {
       const id = Number(this._hoveredMeasureId);
       const idx = idToIdx ? idToIdx.get(id) : (this._measureTriIds ? this._measureTriIds.indexOf(id) : -1);
-      drawTriOutlineAtIndex(idx, [1.0, 1.0, 1.0, 0.6], this.measureTriPosSizeOutline);
+      const hr = this._hoverRingRgba();
+      drawTriOutlineAtIndex(idx, [hr[0], hr[1], hr[2], 0.6], this.measureTriPosSizeOutline);
     }
 
     // (No multi-selection outline for measures: measures are not group-selectable.)
@@ -5988,7 +6014,7 @@ try {
       const uVPto2 = Uto2 ? Uto2.u_viewport : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_viewport');
       const uColSel = Uto2 ? Uto2.u_color : gl.getUniformLocation(this.measureTriOutlineProgram, 'u_color');
       if (uVPto2) gl.uniform2f(uVPto2, vpW, vpH);
-      if (uColSel) gl.uniform4f(uColSel, 1.0, 1.0, 1.0, 1.0);
+      { const sr = this._selectionRingRgba(); if (uColSel) gl.uniform4f(uColSel, sr[0], sr[1], sr[2], 1.0); }
       // Apply drag mask for selected if moving (and not preview-baked)
       {
         const uDX = gl.getUniformLocation(this.measureTriOutlineProgram, 'u_dragCssX');
@@ -6119,8 +6145,8 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
         numW = this._measureGlyphRunWidth(numStr, fontPx);
         denW = this._measureGlyphRunWidth(denStr, fontPx);
       } else {
-        numEntry = this._createTightDigitTexture(numStr, fontPx, 0, '#ffffff');
-        denEntry = this._createTightDigitTexture(denStr, fontPx, 0, '#ffffff');
+        numEntry = this._createTightDigitTexture(numStr, fontPx, 0, this._noteTextHex());
+        denEntry = this._createTightDigitTexture(denStr, fontPx, 0, this._noteTextHex());
         numW = (numEntry && numEntry.wCss) ? numEntry.wCss : 0;
         denW = (denEntry && denEntry.wCss) ? denEntry.wCss : 0;
       }
@@ -6148,7 +6174,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
         const uRad= U ? U.u_circleRadiusInner : gl.getUniformLocation(this.solidCssCircMaskProgram, 'u_circleRadiusInner');
         if (uVP) gl.uniform2f(uVP, vpW, vpH);
         if (uZ)  gl.uniform1f(uZ, -0.00001);
-        if (uCol)gl.uniform4f(uCol, 1.0, 1.0, 1.0, 1.0);
+        { const tcTxt = this._noteTextRgba(); if (uCol) gl.uniform4f(uCol, tcTxt[0], tcTxt[1], tcTxt[2], 1.0); }
         if (uCtr)gl.uniform2f(uCtr, localCX, localCY);
         if (uRad)gl.uniform1f(uRad, innerR);
 
@@ -6186,7 +6212,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
         const uCtrT = Utcm ? Utcm.u_circleCenter      : gl.getUniformLocation(prog, 'u_circleCenter');
         const uRadT = Utcm ? Utcm.u_circleRadiusInner : gl.getUniformLocation(prog, 'u_circleRadiusInner');
         if (uVPtm) gl.uniform2f(uVPtm, vpW, vpH);
-        if (uTintm)gl.uniform4f(uTintm, 1, 1, 1, 1);
+        { const tcTxt = this._noteTextRgba(); if (uTintm) gl.uniform4f(uTintm, tcTxt[0], tcTxt[1], tcTxt[2], 1); }
         if (uTexm) gl.uniform1i(uTexm, 0);
         if (uZtm)  gl.uniform1f(uZtm, -0.00001);
         if (uCtrT) gl.uniform2f(uCtrT, localCX, localCY);
@@ -6979,7 +7005,7 @@ try {
               const nx = sLeft;
               const ny = Math.round((top + hCss * 0.5 - runH * 0.5) * 2.0) / 2.0;
               this._deferredGlyphRuns.push({
-                text: labelSil, noteId: id, x: nx, y: ny, fontPx, color: [1,1,1,1], layerZ, scaleX: sx,
+                text: labelSil, noteId: id, x: nx, y: ny, fontPx, color: this._noteTextRgba(), layerZ, scaleX: sx,
                 scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                 rrCx, rrCy, rrHx, rrHy, rrR
               });
@@ -7069,12 +7095,12 @@ try {
 
               // Enqueue glyph runs with horizontal compression scaleX
               this._deferredGlyphRuns.push({
-                text: String(numStr), noteId: id, x: nx, y: numTop, fontPx, color: [1,1,1,1], layerZ, scaleX: sxNum,
+                text: String(numStr), noteId: id, x: nx, y: numTop, fontPx, color: this._noteTextRgba(), layerZ, scaleX: sxNum,
                 scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                 rrCx, rrCy, rrHx, rrHy, rrR
               });
               this._deferredGlyphRuns.push({
-                text: String(denStr), noteId: id, x: dx, y: denTop, fontPx, color: [1,1,1,1], layerZ, scaleX: sxDen,
+                text: String(denStr), noteId: id, x: dx, y: denTop, fontPx, color: this._noteTextRgba(), layerZ, scaleX: sxDen,
                 scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                 rrCx, rrCy, rrHx, rrHy, rrR
               });
@@ -7085,14 +7111,14 @@ try {
                 const approxAsc = (this._measureRunMetricsCanvas && this._measureRunMetricsCanvas(approxSymbol, fontPx).ascent) || this._getRunAscent(approxSymbol, fontPx);
                 const approxY = Math.round((centerY - approxAsc * 0.5) * 2.0) / 2.0;
                 this._deferredGlyphRuns.push({
-                  text: approxSymbol, noteId: id, x: contentLeft, y: approxY, fontPx, color: [1,1,1,1], layerZ, scaleX: 1.0,
+                  text: approxSymbol, noteId: id, x: contentLeft, y: approxY, fontPx, color: this._noteTextRgba(), layerZ, scaleX: 1.0,
                   scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                   rrCx, rrCy, rrHx, rrHy, rrR
                 });
               }
             } else {
-              const numEntry = this._createTightDigitTexture(String(numStr), fontPx, 0, '#ffffff');
-              const denEntry = this._createTightDigitTexture(String(denStr), fontPx, 0, '#ffffff');
+              const numEntry = this._createTightDigitTexture(String(numStr), fontPx, 0, this._noteTextHex());
+              const denEntry = this._createTightDigitTexture(String(denStr), fontPx, 0, this._noteTextHex());
 
               const numWforDiv = (numEntry && numEntry.wCss) ? numEntry.wCss : 0;
               const denWforDiv = (denEntry && denEntry.wCss) ? denEntry.wCss : 0;
@@ -7124,7 +7150,7 @@ try {
 
               // Render ≈ symbol for corrupted notes (non-glyph-cache path)
               if (isCorrupted) {
-                const approxEntry = this._createTightDigitTexture(approxSymbol, fontPx, 0, '#ffffff');
+                const approxEntry = this._createTightDigitTexture(approxSymbol, fontPx, 0, this._noteTextHex());
                 if (approxEntry && approxEntry.tex) {
                   const approxAsc = (approxEntry && typeof approxEntry.ascent === 'number') ? approxEntry.ascent : (approxEntry ? approxEntry.hCss * 0.5 : 0);
                   const approxY = Math.round((centerY - approxAsc * 0.5) * 2.0) / 2.0;
@@ -7193,7 +7219,7 @@ try {
                 const inkH = Math.max(0, inkBottom - inkTop);
                 const ay = Math.round((topCenterY - (inkTop + inkH * 0.5) - bias) * 2.0) / 2.0;
                 this._deferredGlyphRuns.push({
-                  text: '▲', noteId: id, x: ax, y: ay, fontPx: arrowFont, color: [1,1,1,1], layerZ,
+                  text: '▲', noteId: id, x: ax, y: ay, fontPx: arrowFont, color: this._noteTextRgba(), layerZ,
                   scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                   rrCx, rrCy, rrHx, rrHy, rrR
                 });
@@ -7208,7 +7234,7 @@ try {
                 const inkH = Math.max(0, inkBottom - inkTop);
                 const ay = Math.round((botCenterY - (inkTop + inkH * 0.5) + bias) * 2.0) / 2.0;
                 this._deferredGlyphRuns.push({
-                  text: '▼', noteId: id, x: ax, y: ay, fontPx: arrowFont, color: [1,1,1,1], layerZ,
+                  text: '▼', noteId: id, x: ax, y: ay, fontPx: arrowFont, color: this._noteTextRgba(), layerZ,
                   scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
                   rrCx, rrCy, rrHx, rrHy, rrR
                 });
@@ -7225,7 +7251,7 @@ try {
               const botCenterY = contentTopAr + (contentHAr * 0.75);
               const bias = 0.5;
 
-              const upEntry = this._createStyledTextTexture('▲', arrowFont, 0, '#ffffff', 'rgba(0,0,0,0)', 0);
+              const upEntry = this._createStyledTextTexture('▲', arrowFont, 0, this._noteTextHex(), 'rgba(0,0,0,0)', 0);
               if (upEntry && upEntry.tex) {
                 const ax = colCx - upEntry.wCss * 0.5;
                 const ay = Math.round((topCenterY - upEntry.hCss * 0.5 - bias) * 2.0) / 2.0;
@@ -7239,7 +7265,7 @@ try {
                 gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
               }
 
-              const downEntry = this._createStyledTextTexture('▼', arrowFont, 0, '#ffffff', 'rgba(0,0,0,0)', 0);
+              const downEntry = this._createStyledTextTexture('▼', arrowFont, 0, this._noteTextHex(), 'rgba(0,0,0,0)', 0);
               if (downEntry && downEntry.tex) {
                 const ax = colCx - downEntry.wCss * 0.5;
                 const ay = Math.round((botCenterY - downEntry.hCss * 0.5 + bias) * 2.0) / 2.0;
@@ -7463,7 +7489,7 @@ try {
             if (uDrag) gl.uniform2f(uDrag, this._dragOffsetX || 0.0, this._dragOffsetW || 0.0);
           }
           if (uBias) gl.uniform1f(uBias, 0.0);
-          if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 1.0);
+          { const tcTxt = this._noteTextRgba(); if (uCol) gl.uniform4f(uCol, tcTxt[0], tcTxt[1], tcTxt[2], 1.0); }
 
           gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
           gl.disable(gl.SCISSOR_TEST);
@@ -10367,23 +10393,29 @@ try {
             const isMove = dragType === 'move';
             const isResize = dragType === 'resize';
 
+            // Themed dependency-highlight tokens (classic-orange equals the old literals)
+            const lFq = this._depFrequencyRgba();
+            const lSt = this._depStartTimeRgba();
+            const lDu = this._depDurationRgba();
+            const lineA = (c, a) => [c[0], c[1], c[2], a];
+
             // Deps colors (brighter, thicker - these are what the selected note depends on)
             const DEPS_LINE_COLORS_NORMAL = {
-              frequency: [1.0, 0.5, 0.0, 0.6],   // Orange
-              startTime: [0.0, 1.0, 1.0, 0.6],   // Teal
-              duration:  [0.615, 0.0, 1.0, 0.6]  // Purple
+              frequency: lineA(lFq, 0.6),
+              startTime: lineA(lSt, 0.6),
+              duration:  lineA(lDu, 0.6)
             };
 
             const DEPS_LINE_COLORS_DRAG = {
-              frequency: [1.0, 0.5, 0.0, 0.15],
-              startTime: [0.0, 1.0, 1.0, 0.6],
-              duration:  [0.615, 0.0, 1.0, 0.15]
+              frequency: lineA(lFq, 0.15),
+              startTime: lineA(lSt, 0.6),
+              duration:  lineA(lDu, 0.15)
             };
 
             const DEPS_LINE_COLORS_RESIZE = {
-              frequency: [1.0, 0.5, 0.0, 0.15],
-              startTime: [0.0, 1.0, 1.0, 0.15],
-              duration:  [0.615, 0.0, 1.0, 0.6]
+              frequency: lineA(lFq, 0.15),
+              startTime: lineA(lSt, 0.15),
+              duration:  lineA(lDu, 0.6)
             };
 
             const DEPS_LINE_COLORS = isDragging
@@ -10416,21 +10448,21 @@ try {
 
             // Rdeps colors (dimmer, thinner - these depend on the selected note)
             const RDEPS_LINE_COLORS_NORMAL = {
-              frequency: [1.0, 0.5, 0.0, 0.25],   // Orange
-              startTime: [0.0, 1.0, 1.0, 0.25],   // Teal
-              duration:  [0.615, 0.0, 1.0, 0.25]  // Purple
+              frequency: lineA(lFq, 0.25),
+              startTime: lineA(lSt, 0.25),
+              duration:  lineA(lDu, 0.25)
             };
 
             const RDEPS_LINE_COLORS_DRAG = {
-              frequency: [1.0, 0.5, 0.0, 0.08],
-              startTime: [0.0, 1.0, 1.0, 0.3],
-              duration:  [0.615, 0.0, 1.0, 0.08]
+              frequency: lineA(lFq, 0.08),
+              startTime: lineA(lSt, 0.3),
+              duration:  lineA(lDu, 0.08)
             };
 
             const RDEPS_LINE_COLORS_RESIZE = {
-              frequency: [1.0, 0.5, 0.0, 0.08],
-              startTime: [0.0, 1.0, 1.0, 0.08],
-              duration:  [0.615, 0.0, 1.0, 0.3]
+              frequency: lineA(lFq, 0.08),
+              startTime: lineA(lSt, 0.08),
+              duration:  lineA(lDu, 0.3)
             };
 
             const RDEPS_LINE_COLORS = isDragging
@@ -10830,7 +10862,10 @@ try {
       const w = Math.max(1, Math.abs(r.x1 - r.x0));
       const h = Math.max(1, Math.abs(r.y1 - r.y0));
 
-      const accent = (this._themeColors && this._themeColors.selectionRing) || this._accentRgba();
+      // Marquee tracks the ACCENT token (pre-theme literal #ffa800), not selectionRing:
+      // classic-orange's selectionRing token is white (the note ring literal), while the
+      // marquee has always drawn orange.
+      const accent = this._accentRgba();
       const border = [accent[0], accent[1], accent[2], 0.95];
       const fill   = [accent[0], accent[1], accent[2], 0.12];
 

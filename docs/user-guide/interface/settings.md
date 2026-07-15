@@ -58,7 +58,7 @@ Every control writes to the settings store on change. The store re-validates, pe
 | **Colour pickers** | 15 pickers in three groups | per theme |
 | **Reset colors to theme** | button, disabled when you have no custom colours | — |
 
-The three geometry sliders reshape every note on the canvas live. The theme dropdown and the colour pickers are covered in full — including which pickers actually do something — on [Themes & Appearance](/user-guide/interface/themes).
+The three geometry sliders reshape every note on the canvas live — and picking a theme preset re-seeds them with that preset's declared geometry. The theme dropdown and the colour pickers are covered in full, picker by picker, on [Themes & Appearance](/user-guide/interface/themes).
 
 ## Arrows
 
@@ -75,17 +75,13 @@ The ▲/▼ arrows on a note transpose it by an interval you choose. The default
 
 Set the ratio and the cents readout updates beside it. A ratio is only accepted if it is built from positive whole numbers, lands between 1/16 and 16, and is not 1/1.
 
-::: warning A rejected ratio falls back to the default, not to what you had.
-An invalid field is replaced by the *default's* field — 2 for the numerator, 1 for the denominator — and if the ratio is still out of range after that, the whole thing resets to 2/1. The value you had before the edit is not restored.
-:::
+A rejected ratio **restores your previous value**: an invalid field heals from the ratio you had before the edit, and a ratio that lands out of range reverts wholesale to it. The fields visibly rewrite themselves with the healed value.
 
 In reciprocal mode, **down is the reciprocal of up**: set the up interval to 3/2 and ▼ divides by 3/2. The note widget's arrow buttons pick up the interval too — their tooltips read `Transpose up ×3/2` and `Transpose down ×2/3`.
 
-Turning **Show note arrows** off does three things at once: the arrows stop being drawn, their click zones on the note disappear (no invisible dead spots), and the ▲/▼ buttons vanish from the [note widget](/user-guide/interface/variable-widget). The ratio controls stay editable while arrows are off — they just dim, and take effect when you switch arrows back on.
+In **Independent up/down** mode, a **Down interval (ratio)** row appears below the up editor — its own two number fields and cents readout — so both directions are yours to set. In reciprocal mode the row is hidden, since down auto-derives.
 
-::: warning "Independent up/down" has no down editor.
-You can select the mode, but the Arrows tab only ever renders an editor for the **up** interval. There is no way to set a separate down interval from the UI, so selecting Independent simply freezes `down` at whatever it last was. Stay in Reciprocal mode.
-:::
+Turning **Show note arrows** off does three things at once: the arrows stop being drawn, their click zones on the note disappear (no invisible dead spots), and the ▲/▼ buttons vanish from the [note widget](/user-guide/interface/variable-widget). The ratio controls stay editable while arrows are off — they just dim, and take effect when you switch arrows back on.
 
 ## Audio
 

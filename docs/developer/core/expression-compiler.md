@@ -25,19 +25,15 @@ Every shipped module JSON is DSL. The legacy parser exists so old modules still 
 
 `ExpressionCompiler.compile(textExpr, varName)` (`src/expression-compiler.js:53`) is the only door in. `Note._setExpression()` calls the module-level singleton `compiler` exported at `expression-compiler.js:1042`.
 
-The routing is worth reading closely, because one of its branches can silently zero a note:
+The routing is worth reading closely:
 
 1. **Cache probe.** On a hit the key is deleted and re-inserted (an LRU touch) and a **clone** is returned (`:56-63`).
 2. **`isDSLSyntax(textExpr)`** → `compileDSL()`. If the DSL compiler throws, it logs a warning and **falls through to the legacy parser** (`:66-75`).
 3. **Legacy path** → `parse()` → `emitBytecode()`.
-4. If the *legacy* parser throws, it **retries `compileDSL()`** (`:89-95`). The routing check in step 2 is a regex sniff, not a parse, so it can misclassify a DSL expression as legacy; without this retry the next step would zero the note.
-5. If nothing parses, it emits a **constant `0`** with a `console.warn` (`:97-103`).
+4. If the *legacy* parser throws, it **retries `compileDSL()`** (`:89-96`). The routing check in step 2 is a regex sniff, not a parse, so it can misclassify a DSL expression as legacy; this retry is what lets a misclassified DSL string still compile.
+5. If both parsers fail, it logs `Failed to compile expression: …` via `console.error` and **throws** an `Error` whose message carries both parsers' failures (`:98-107`). There is no constant-0 fallback: interactive callers (the note widget's Save, the validators) surface the message, while the load paths catch per-note and leave the property unset.
 
 `compile()` always returns `binary.clone()`, never the cached instance.
-
-::: danger The constant-0 fallback is silent
-Step 5 does not throw. An expression the compiler cannot understand becomes `0` — a note's frequency drops to zero and the only trace is a console warning. This is reachable from real input: see [Known footgun](#known-footgun-1-f-becomes-0) below.
-:::
 
 ## The compile cache
 
@@ -48,7 +44,7 @@ const COMPILE_CACHE_MAX = 4000;  // src/expression-compiler.js:22
 A plain `Map` keyed on the raw expression text, used as an **LRU**: `_cacheSet()` evicts `cache.keys().next().value` — the oldest insertion — when at cap and the key is new (`:34-41`). The cap exists because drag and resize commits mint a fresh fraction string on every commit, so an unbounded cache grows for the life of the session.
 
 ::: warning The cache is per-instance, not global
-`src/note.js` uses the exported singleton, but `src/modals/validation.js`, `src/modals/variable-controls.js`, `src/modals/note-creation.js`, `src/utils/safe-expression-validator.js`, `src/utils/simplify.js` and `src/module-serializer.js` each construct their **own** `new ExpressionCompiler()`. That is seven independent 4000-entry caches in a running app. `clearCache()` only clears the one you call it on.
+`src/note.js` uses the exported singleton, but `src/modals/validation.js`, `src/modals/variable-controls.js`, `src/modals/note-creation.js`, `src/utils/safe-expression-validator.js` and `src/utils/simplify.js` each construct their **own** `new ExpressionCompiler()`. That is six independent 4000-entry caches in a running app. `clearCache()` only clears the one you call it on.
 :::
 
 ## Format detection — `isDSLSyntax()`
@@ -60,15 +56,15 @@ A plain `Map` keyed on the raw expression text, used as an **LRU**: `_cacheSet()
 3. **DSL** if the whole string is **reference-free arithmetic** — `/^[-+*\/^().\d\s]+$/`. This matches `263`, `2 * 263`, `(1/2) * 263`.
 4. Otherwise **legacy** (the safe default).
 
-Rule 3 is not cosmetic. The BaseNote's frequency references nothing — in the default module it is the literal `263` — so a reference-free edit to it is the common case. Legacy cannot spell infix arithmetic without `new Fraction(` or a `.mul()` chain, so routing it to the legacy parser makes it fail, and the failure path emits constant `0`. Confirmed against the legacy parser:
+Rule 3 is not cosmetic. The BaseNote's frequency references nothing — in the default module it is the literal `263` — so a reference-free edit to it is the common case. Legacy cannot spell infix arithmetic without `new Fraction(` or a `.mul()` chain:
 
 | Expression | Legacy parser yields |
 |---|---|
-| `2 * 263` | `const 0` |
-| `789/2` | `const 0` |
+| `2 * 263` | throws (`parseAtomic` refuses to guess) |
+| `789/2` | throws |
 | `526` | `const 526/1` — a bare number is the one case legacy handles |
 
-Rule 3 sends all three to the DSL compiler instead. The rule is commented as such at `dsl/index.js:60-67` (that comment still says "octave arrows"; the arrows now fold their factor into the coefficient, so they write `526`, not `2 * 263` — but a user can type either into the `Raw:` box).
+Rule 3 sends all three to the DSL compiler directly. Even without it these would still compile — a legacy-parser throw falls through to the DSL retry in `compile()` — but the direct route skips a parse-and-fail round trip on the hottest edit in the app.
 
 ## The DSL pipeline
 
@@ -210,7 +206,7 @@ parse(expr)
               └ parseAtomic
 ```
 
-`parseAtomic` (`expression-compiler.js:167-313`) regex-matches, in order: `new Fraction(n[, d])`, `module.baseNote.getVariable('x')`, `module.getNoteById(N).getVariable('x')`, `module.findTempo(ref)`, `module.findMeasureLength(ref)`, the beat pattern `new Fraction(60).div(module.findTempo(ref))`, a bare number, a `.pow()` chain, a `new Fraction(...).mul(...)` chain, a bare variable name — and if none match, it **returns `{type: 'const', num: 0, den: 1}` without throwing** (`:310-312`).
+`parseAtomic` (`expression-compiler.js:172-319`) regex-matches, in order: `new Fraction(n[, d])`, `module.baseNote.getVariable('x')`, `module.getNoteById(N).getVariable('x')`, `module.findTempo(ref)`, `module.findMeasureLength(ref)`, the beat pattern `new Fraction(60).div(module.findTempo(ref))`, a bare number, a `.pow()` chain, a `new Fraction(...).mul(...)` chain, a bare variable name — and if none match, it **throws** (`Unable to parse expression fragment: …`), which is what lets `compile()` fall through to the DSL retry instead of guessing.
 
 The legacy AST node types (`emitBytecode`, `:593-641`):
 
@@ -261,19 +257,17 @@ The note widget's `Raw:` box always shows DSL: `convertToDSLDisplay()` decompile
 
 ## Validation
 
-The compiler is not the validator. It warns and degrades; validation is a separate gate.
+The compiler refuses garbage by throwing, but validation is still a separate gate — it is what checks self-references and cycles, and what turns a parser failure into a structured result.
 
 | Gate | Where | What it does |
 |---|---|---|
 | UI edits | `validateExpression()`, `src/modals/validation.js:13` | self-reference check, `validateDSL()`, circular-dependency BFS, then `compileDSL()` to prove it yields bytecode |
 | DSL syntax | `validateDSL()`, `src/dsl/index.js:142` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
-| JSON import | `validateExpressionSyntax()`, `src/utils/safe-expression-validator.js:30` | rejects strings over 10 000 chars and a blocklist (`eval(`, `Function(`, `import(`, `document.`, `__proto__`, `<script`, …) |
+| JSON import | `validateExpressionSyntax()`, `src/utils/safe-expression-validator.js:30` | rejects strings over 10 000 chars and a blocklist (`eval(`, `Function(`, `import(`, `document.`, `__proto__`, `<script`, …), then proves the string compiles — a compiler throw comes back as `{valid: false, error}` |
 
 Nothing anywhere calls `eval()` or `new Function()` on an expression.
 
-::: warning Errors never reach the screen
-The `Save` handler catches validation errors and only does `console.error(...)` — there is no alert, no inline message, no red border (`src/modals/variable-controls.js:1375-1377`). The error strings in `src/dsl/errors.js` are user-grade and go nowhere but the console.
-:::
+The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.js:138-153`, `:998`). The user-grade error strings in `src/dsl/errors.js` are what the user actually reads.
 
 ## Worked example
 
@@ -303,19 +297,19 @@ Bytecode (verified against the real compiler):
 
 Decompiled with `decompileToDSL()`: `[1].f * (3/2)` — exact round-trip.
 
-## Known footgun: `[1]f` becomes `0`
+## Worked failure: `[1]f` is rejected
 
-Omit the dot and the note silently evaluates to zero. Confirmed by running the real compiler:
+Omit the dot and the expression is refused with a real error rather than compiling to zero:
 
 ```
 isDSLSyntax('[1]f')  → false     // the DSL regexes all require `[N].`
-  → legacy parser
-  → parseAtomic falls through to `{const 0}` WITHOUT throwing  (expression-compiler.js:310-312)
-  → the DSL-retry in compile()'s catch block never runs, because nothing threw
-  → bytecode: LOAD_CONST 0/1  → the note's frequency is 0
+  → legacy parser → parseAtomic throws (`Unable to parse expression fragment: [1]f`)
+  → compile()'s catch retries compileDSL('[1]f') → DSL parser throws too
+  → compile() console.errors and throws:
+    Unparseable expression: "[1]f" — legacy parser: …; DSL parser: …
 ```
 
-Validation does not save you either: `modals/validation.js` sees a valid, reference-free expression and canonicalises it. Always include the dot.
+In the widget the message lands under the Save button; the validators return `valid: false`; on a file load the property is left unset.
 
 ## See also
 

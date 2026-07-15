@@ -114,8 +114,9 @@ except on the legacy branch required by the invariant below.
 
 ::: danger Any code that writes an expression must handle both formats
 A note's expression is stored as source text and round-trips verbatim — saving does **not** convert
-legacy to DSL. So a single module can hold both formats at once, and *does*: the BaseNote's default
-`measureLength` is a legacy string even in an otherwise pure-DSL module.
+legacy to DSL. So a single module can hold both formats at once whenever a legacy-authored file is
+loaded. (The code-level defaults no longer leak legacy into DSL modules: the BaseNote's default
+`measureLength` is now the DSL string `beat(base) * base.bpm`.)
 
 If you emit a new expression for an existing note, you must emit it in **the format that note is
 already written in**. Emitting DSL onto a legacy note (or the reverse) produces an expression the
@@ -162,19 +163,19 @@ Call sites that already do this and are worth reading: `src/module.js` (`generat
 `findInstrument`), `src/player.js` (drag/resize commit, module import, the interval arrows),
 `src/modals/variable-controls.js`.
 
-## Error handling: swallow-and-degrade
+## Error handling: throw at the compiler, catch at the boundary
 
-::: warning Expression compilation never throws
-`ExpressionCompiler.compile()` does not raise. On an unparseable expression it logs
-`Failed to compile expression: …` and emits **a constant `0`** (`src/expression-compiler.js:97-103`).
-`Note._setExpression()` wraps the compile in `try/catch` and, on failure, `console.warn`s and leaves
-the previous expression in place (`src/note.js:195-203`).
-
-Do not write `try { compile(x) } catch (SyntaxError) { … }`. It can never fire.
+::: warning Expression compilation throws — but the throw is caught per note
+`ExpressionCompiler.compile()` raises a plain `Error` (not a `SyntaxError`) on an unparseable
+expression, after logging `Failed to compile expression: …` via `console.error`
+(`src/expression-compiler.js:98-107`). `Note._setExpression()` and the constructor wrap the
+compile in `try/catch` and, on failure, `console.warn` and leave the previous expression in place
+(`src/note.js:195-203`) — so callers of `setVariable()` still see no exception.
 :::
 
-This is a deliberate convention — a bad expression degrades a single value instead of tearing down
-the app — but it means **validation is your job, before the write**:
+This is a deliberate convention — a bad expression degrades a single property instead of tearing
+down the app — but it means **validation is your job, before the write**, whenever you need a
+structured answer:
 
 - `validateExpressionSyntax(expr)` (`src/utils/safe-expression-validator.js`) — the pattern blacklist
   plus a compile check. This is what `npm test` uses.

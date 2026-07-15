@@ -120,7 +120,7 @@ one lookup, not a hundred searches.
 ::: warning Edits apply on save
 Typing in a `Raw:` field changes nothing. The `Save` button appears next to the field as soon as you
 start typing; the value updates when you press it. If the expression is invalid, the save is
-rejected **silently** — the error goes to the browser console, not to the screen.
+rejected and the reason appears in red under the Save button.
 :::
 
 ## Tempo is a BaseNote property
@@ -200,7 +200,7 @@ Once a structure is more than a handful of notes, edit it as a set.
 
 **Build a selection.** Shift-drag a marquee across empty background on desktop; long-press empty
 space and drag on touch. Shift-click (desktop) or long-press (touch) individual notes to toggle them
-in or out. Selected notes get a heavy white ring and a group widget appears.
+in or out. Selected notes get a heavy selection ring and a group widget appears.
 
 ![A marquee rectangle being dragged across the workspace, with the notes it crosses picking up white selection rings](/img/multi-select-marquee.png)
 

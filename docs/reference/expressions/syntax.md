@@ -318,29 +318,27 @@ unchanged:
 | Self-reference | `[5].f * 2` typed on note 5 |
 | Circular dependency | note 1 references note 2, which references note 1 |
 
-::: warning Rejection is silent
-A rejected expression produces **no message in the interface**. The `Save` button does nothing
-visible, the note keeps its old value, and the reason is written to the browser console. Open
-the developer console (F12) if a save appears to do nothing — the message there is specific,
-for example `Unknown property 'x'. Valid properties: f (frequency), t (startTime), d
-(duration), tempo, bpm, ml (at column 5)`.
-:::
+A rejected expression shows its reason **inline in the widget** — in red under the `Save` button,
+with a red border on the field. The note keeps its old value. The message is specific, for
+example `Unknown property 'x'. Valid properties: f (frequency), t (startTime), d (duration),
+tempo, bpm, ml (at column 5)`.
 
 ### What is *not* an error
 
-Three things that look like errors are not.
+Two things that look like errors are not.
 
 **Division by zero.** `(5/0)` is accepted. It is not read as a fraction literal — it falls back
 to a grouped division, and at evaluation time a division by zero yields **1** with a console
-warning.
+warning. The property is additionally **marked corrupted**, so the note crosshatches on the
+canvas the same way an irrational power does.
 
 **An unresolvable reference.** See the defaults table above. Evaluation degrades rather than
 failing.
 
-**An expression neither compiler can parse.** It is not rejected — it silently compiles to the
-constant **`0`**, with only a console warning. This is how a typo like `[1]f` (the dot is
-missing) can zero a note's value without any visible complaint. Check the `Evaluated:` line
-after saving anything unusual.
+An expression **neither compiler can parse**, on the other hand, *is* an error: the compiler
+logs a `console.error` and throws, the validators return `valid: false`, and a typo like `[1]f`
+(the dot is missing) is refused with a message instead of silently zeroing the note. On a file
+load the affected property is left unset.
 
 ## Format detection
 
@@ -355,7 +353,9 @@ Each expression string is classified as DSL or legacy on its own, at compile tim
    `(1/2) * 263` — it is **DSL**.
 4. Otherwise it is treated as legacy.
 
-Rule 3 is why a bare number in a module file is DSL, not legacy.
+Rule 3 is why a bare number in a module file is DSL, not legacy. Misclassification is not fatal
+in either direction: a string routed to the wrong parser fails there and is retried with the
+other one before the compiler gives up.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>

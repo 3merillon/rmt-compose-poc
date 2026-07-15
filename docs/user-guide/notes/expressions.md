@@ -160,8 +160,8 @@ A note whose frequency is irrational — or which depends on one that is — is 
 
 This is information, not an error. TET music is supposed to look like this. It is telling you where exactness stops. [Equal Temperament](/user-guide/tuning/equal-temperament) goes into what stays exact and what does not.
 
-::: info The ≈ badge only shows on the frequency row
-Start times and durations can be irrational too, but the widget doesn't mark them.
+::: info Every row can carry the ≈ badge
+An irrational start time or duration is marked just like an irrational frequency — the row shows `≈` and a decimal to 8 significant figures. Only the *transitive* case (inheriting an irrational value from up the chain) is tracked for frequency alone.
 :::
 
 ## Things that go wrong
@@ -184,9 +184,9 @@ A note cannot reference itself, and two notes cannot reference each other in a l
 [6].f * (3/2)
 ```
 
-### Rejections are silent
+### Rejections tell you why
 
-When `Save` rejects an expression — bad syntax, self-reference, cycle — **nothing appears on screen**. The button stays, the field keeps your text, and the note doesn't change. The error goes to the browser console. If Save seems to do nothing, that is what happened.
+When `Save` rejects an expression — bad syntax, self-reference, cycle — the reason appears **inline in the widget**: a red message under the `Save` button, and a red border on the `Raw:` field. The field keeps your text and the note doesn't change; fix the expression and save again. Both clear on your next keystroke.
 
 ## Expression versus value
 

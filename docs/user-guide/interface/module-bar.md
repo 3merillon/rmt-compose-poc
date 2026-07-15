@@ -150,9 +150,7 @@ Click the dashed **`+`** tile at the end of any section and pick a `.json` file.
 
 Select several notes in the workspace and the group widget offers **Copy to Modules**. It builds a self-contained module from your selection — rooted at its earliest note, with the dependency tree intact — and files it in **Custom** as `Selection (N notes)`. If Custom is collapsed, it expands so you can see the new tile.
 
-::: warning
-**Copy to Modules loses your note colours and instruments.** The copied module keeps its structure and its pitches, but every note comes back with the default colour and the inherited instrument. This is a bug, not a design decision.
-:::
+The copy is complete: structure and pitches, but also each note's **colour** and **pinned instrument**, and the BaseNote's instrument, all survive into the copied module.
 
 ## Icon size and cents
 

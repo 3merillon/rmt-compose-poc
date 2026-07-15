@@ -70,10 +70,10 @@ Run these with `node` directly.
 | `scripts/perf/bench-render.mjs`, `bench-drag.mjs`, `bench-hover.mjs`, `bench-pick.mjs`, `bench-marquee.mjs`, `profile-sync.mjs`, `converge.mjs`, `who-dirties.mjs` | Playwright render/interaction benchmarks. They drive a **running** dev server |
 | `scripts/perf/visual-regress.mjs` | Playwright pixel-diff regression harness (`--capture` / `--compare`) |
 
-::: tip Pass `--url` explicitly
-The Playwright harness scripts have inconsistent `--url` defaults (5173 and 3001 both appear), and
-the dev server is on **3000**. Always pass `--url http://localhost:3000`.
-:::
+All the app-facing Playwright harness scripts default to `--url http://localhost:3000` — the dev
+server's pinned port — so `--url` is only needed for a non-default server. The only exceptions are
+the two docs-site scripts: `check-docs-rendered.mjs` (4173, the VitePress preview port) and
+`shot-docs.mjs` (3005).
 
 See [Performance](/developer/performance) for how to use them.
 
@@ -142,9 +142,10 @@ Rust toolchain. **The committed `src/wasm/` files are what gets bundled and ship
 change under `rust/`, run `npm run wasm:build` and commit the two synced files, or the deploy keeps
 serving the old binary with no warning.
 
-The binary is fetched and instantiated on every page load — and then, on the default path, never
-used, because the WASM evaluator is
+The binary ships in the bundle but is **not fetched on a normal page load**: `initWasm()` returns
+early unless `?evaluator=wasm` is present, because the WASM evaluator is
 [opt-in and currently blocked](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked).
+Only the opt-in (or headless Node) pays the download and instantiation.
 
 ## Deploys
 

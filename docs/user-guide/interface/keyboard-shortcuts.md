@@ -1,11 +1,11 @@
 ---
 title: Keyboard Shortcuts
-description: Every key and modifier RMT Compose responds to — two global shortcuts, four scoped Escapes, and the Shift and long-press gestures.
+description: Every key and modifier RMT Compose responds to — the undo/redo chords, four scoped Escapes, and the Shift and long-press gestures.
 ---
 
 # Keyboard Shortcuts
 
-RMT Compose is pointer-first. There are exactly **two global keyboard shortcuts**. Everything else on this page is either scoped to one panel, or is a modifier that changes what a click does.
+RMT Compose is pointer-first. The only global keyboard shortcuts are **undo and redo**. Everything else on this page is either scoped to one panel, or is a modifier that changes what a click does.
 
 ## Global shortcuts
 
@@ -13,12 +13,9 @@ RMT Compose is pointer-first. There are exactly **two global keyboard shortcuts*
 |---|---|
 | `Ctrl + Z` / `Cmd + Z` | Undo |
 | `Ctrl + Y` / `Cmd + Y` | Redo |
+| `Ctrl + Shift + Z` / `Cmd + Shift + Z` | Redo |
 
-Both are ignored while the focus is in a text field, a textarea, or any editable element — so typing an expression into the note widget never triggers them.
-
-::: warning
-Redo is `Ctrl/Cmd + Y` only. **`Ctrl/Cmd + Shift + Z` is not redo** — the handler ignores Shift, so it undoes again. If you have the reflex from other apps, it will walk you backwards, not forwards.
-:::
+All of them are ignored while the focus is in a text field, a textarea, or any editable element — so typing an expression into the note widget never triggers them.
 
 The module bar's toolbar carries the same pair as buttons (`Undo (Ctrl+Z)` / `Redo (Ctrl+Y)`), as does the "+" menu. All of them drive one shared history.
 

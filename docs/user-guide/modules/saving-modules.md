@@ -70,7 +70,7 @@ Saving does **not** convert legacy expressions to DSL, or DSL to legacy. The sou
 
 **The file is reindexed.** Measure bars are renumbered first (sorted by start time), then the remaining notes (also by start time), starting at id 1, and every `[N]` reference is rewritten to match. The ids in the downloaded file will generally differ from the ids you saw on screen. **Reorder Module** in the **+** menu applies the same renumbering to the live workspace, behind a confirmation — it is not something you need to do before saving.
 
-**The BaseNote gains a `measureLength`,** written in legacy form, even if it never had one. It is harmless and compiles to the same thing as `beat(base) * base.bpm`, but it does mean a saved file is never purely DSL.
+**The BaseNote gains a `measureLength`,** even if it never had one. It is written in DSL form — `beat(base) * base.bpm` — so a pure-DSL file stays pure DSL on the way out.
 
 ## Is there an autosave?
 

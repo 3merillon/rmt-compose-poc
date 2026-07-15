@@ -120,7 +120,7 @@ module.getNoteById(3).getVariable('startTime').add(module.getNoteById(3).getVari
 | Input | Action |
 |---|---|
 | `Ctrl/Cmd + Z` | Undo |
-| `Ctrl/Cmd + Y` | Redo |
+| `Ctrl/Cmd + Y` or `Ctrl/Cmd + Shift + Z` | Redo |
 | Wheel over the canvas | Zoom |
 | Drag empty canvas | Pan |
 | Shift + drag empty canvas | Marquee-select notes |

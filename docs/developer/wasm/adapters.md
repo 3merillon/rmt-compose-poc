@@ -41,10 +41,7 @@ you are looking for the compiler that actually runs, it is
 ```javascript
 // src/wasm/config.js
 export const WASM_CONFIG = {
-  useFractions: true,       // dead switch
   useEvaluator: true,       // live, but see below
-  useGraph: true,           // dead switch
-  useCompiler: true,        // dead switch
   usePersistentCache: true, // live: pick PersistentEvaluator over Evaluator
 
   fallbackOnError: true,    // fall back to JS instead of throwing
@@ -53,14 +50,14 @@ export const WASM_CONFIG = {
 };
 ```
 
-There is **no `enabled` key**. `shouldUseWasm(component)` takes one of
-`'fractions' | 'evaluator' | 'graph' | 'compiler' | 'persistentCache'`; `disableWasm()` and
-`enableWasm()` flip the five feature flags together.
+There is **no `enabled` key**, and there are no flags for the dead adapters — the old
+`useFractions` / `useGraph` / `useCompiler` switches have been removed. `shouldUseWasm(component)`
+recognises `'evaluator'` and `'persistentCache'`; any other name (including `'fractions'`,
+`'graph'`, `'compiler'`) falls to the `default` branch and returns `false`. `disableWasm()` and
+`enableWasm()` flip the two feature flags together.
 
-::: warning Four of these flags are misleading
-`useFractions`, `useGraph` and `useCompiler` gate adapters that nothing imports — setting them to
-`false` changes nothing. And `useEvaluator: true` only *permits* the WASM evaluator; the actual gate
-is `isEvaluatorHotSwapEnabled()`.
+::: warning `useEvaluator: true` is a permission, not a switch
+It only *permits* the WASM evaluator; the actual gate is `isEvaluatorHotSwapEnabled()`.
 :::
 
 ## The `?evaluator` gate

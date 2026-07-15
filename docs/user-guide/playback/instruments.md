@@ -88,9 +88,7 @@ Three consequences worth knowing:
 Six of the shipped modules pin `"instrument": "sine-wave"` on their BaseNote — `canon base` and the five scale systems (`BP-13`, `Mixed-Base`, `TET-12`, `TET-19`, `TET-31`). Load one of those and changing "Default instrument" appears to do nothing, because every note is inheriting `sine-wave` from the BaseNote. Change the BaseNote's instrument in the note widget instead. `defaultModule` does not pin one, so the setting works there.
 :::
 
-::: warning The BaseNote's widget always reports `Current: sine-wave`
-When the BaseNote has no instrument of its own, its widget row shows `Current: sine-wave` regardless of what "Default instrument" is set to — and playback uses the *setting*, not what the widget says. Every other note reports its inherited instrument correctly. Do not trust the BaseNote row.
-:::
+The BaseNote's widget row agrees with playback: with no instrument of its own it reads `Inherited: <name>`, where the name is your "Default instrument" setting.
 
 ### Deleting a note keeps its instrument alive
 

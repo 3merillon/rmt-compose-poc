@@ -11,12 +11,10 @@ selection, start here.
 
 ::: warning GPU picking does not ship
 `src/renderer/webgl2/picking.js` describes itself as a scaffold: *"This is a scaffold. No draw
-integration yet — `readAt()` will typically return null."* Nothing in the codebase ever draws into
-the picking framebuffer. `Picking.begin()` and `Picking.end()` have **zero call sites**, and
-`_encodeId24` is annotated "Not used yet".
-
-It is also unreachable. `Workspace.pickAt()` tries `renderer.pickAllAt()` **first**, and that method
-always exists — so the GPU branch below it can never run.
+integration yet — `readAt()` will typically return null."* The file remains on disk but is
+**imported by nothing** — it is never constructed or initialized, it is not in the bundle, and the
+canvas-sized FBO it would allocate never exists. (`Workspace` keeps a `this.picking` slot; it
+stays `null`.)
 
 **All picking is CPU-side.** That is not a stopgap: it costs **0.31 ms per call at 100,000 notes**,
 which is why no one has finished the GPU path.

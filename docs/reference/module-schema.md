@@ -73,7 +73,7 @@ Every field is optional. An omitted field falls back to the **class default** be
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `id` | integer | **yes** | `0 ≤ id ≤ 100000`. `0` is reserved for the BaseNote. Duplicates are rejected by the library validator. |
+| `id` | integer | **yes** | `0 ≤ id ≤ 65535`. `0` is reserved for the BaseNote. Duplicates are rejected by the library validator. |
 | `startTime` | expression string | in practice, yes | Seconds from time zero. |
 | `duration` | expression string | no | Seconds. Absent = a measure bar. |
 | `frequency` | expression string | no | Hz. Absent (with a `duration` present) = a silence. |
@@ -138,12 +138,12 @@ new Fraction(60).div(module.findTempo(module.baseNote))
 
 A string is compiled as **DSL** when it contains `[N].` or `base.` anywhere, or **starts with** a fraction literal like `(3/2)` or a call to `tempo(`, `measure(`, `beat(`. It is compiled as **legacy** when it contains `new Fraction(`, `module.`, `.getVariable(`, or a `.mul(`/`.div(`/`.add(`/`.sub(`/`.pow(` chain.
 
-Position matters for the helper calls: `beat(base) * 2` is DSL, but `2 * beat(base)` has no leading marker and no reference, so it falls through to the legacy parser — which cannot read it. See [the beat unit](/reference/properties/tempo#the-beat-unit).
+Position matters for the helper calls only in the *first* routing pass: `beat(base) * 2` is sniffed as DSL directly, while `2 * beat(base)` has no leading marker and is routed to the legacy parser first. That is no longer fatal — when the legacy parser fails, the compiler retries the string as DSL, so `2 * beat(base)` still compiles. See [the beat unit](/reference/properties/tempo#the-beat-unit).
 
-A string that is **pure arithmetic with no references** — `440`, `263`, `2 * 263`, `(1/2) * 263` — is routed to the **DSL** compiler. It is not "valid in both formats": the legacy parser fails on it, and its failure path silently emits a constant `0`.
+A string that is **pure arithmetic with no references** — `440`, `263`, `2 * 263`, `(1/2) * 263` — is routed to the **DSL** compiler directly.
 
-::: danger An unparseable expression becomes zero, silently
-If neither compiler can read a string, the compiler emits a constant `0` and logs a warning to the browser console. The note loads, the file "loads successfully", and the property is silently zero. A module that passes validation is not guaranteed to be musically correct.
+::: warning An unparseable expression is rejected with an error
+If neither compiler can read a string, `compile()` logs a `console.error` naming the expression and **throws** — there is no silent constant-0 fallback. In the note widget the message appears under the Save button; the syntax validators return `valid: false`; `npm test` rejects a shipped module containing one. On a file load the affected property is left **unset** rather than zeroed, so the note falls back to its defaults.
 :::
 
 ## Colors
@@ -185,13 +185,13 @@ This is why most scale-system modules pin `"instrument": "sine-wave"` on their B
 
 1. **It is reindexed.** Measure bars are renumbered first (sorted by evaluated `startTime`), then the remaining notes (also by `startTime`), starting at id 1. Every `[N]` reference is rewritten to match. Ids in the saved file will generally differ from the ids you saw on screen. There is no byte-stable round trip.
 2. **Expression source text is preserved verbatim.** Saving does **not** convert legacy expressions to DSL, and it does not convert DSL to legacy.
-3. **The BaseNote gains a `measureLength`,** even if your source file omitted it — and it is emitted in legacy form, because that is the class default. Round-tripping the file above produces:
+3. **The BaseNote gains a `measureLength`,** even if your source file omitted it. It is emitted in DSL form — the class default. Round-tripping the file above produces:
 
 ```json
-"measureLength": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(module.baseNote.getVariable('beatsPerMeasure'))"
+"measureLength": "beat(base) * base.bpm"
 ```
 
-It is harmless (it compiles to the same bytecode as `beat(base) * base.bpm`), but it means a saved file is never "pure DSL".
+A pure-DSL source file therefore round-trips as pure DSL.
 
 ## Limits and validation
 
@@ -212,17 +212,15 @@ Hard limits, wherever a module is read:
 | Max file size (Load Module) | **3 MB** |
 | Max notes | **10 000** |
 | Max JSON nesting depth (Load Module) | **20** |
-| Valid note id | integer, **0 – 100 000** |
+| Valid note id | integer, **0 – 65 535** (ids are encoded as u16 in the evaluator's bytecode) |
 | Max expression length | **10 000 characters** |
 | Note ids blocked outright | `__proto__`, `constructor`, `prototype` |
 
 Toasts you can hit on load: `Module file too large (max 3MB)`, `Invalid module file structure`, `Module loaded successfully`.
 
-::: warning Note ids above 65 535 break references silently
-The loader accepts ids up to 100 000, but a reference is encoded as a 16-bit integer in the bytecode, so `[70000].f` wraps. Keep ids below 65 536.
-:::
+The id ceiling exists because a reference is encoded as a 16-bit integer in the evaluator's bytecode. The loader rejects (and skips) any note whose id is above 65 535, so an id can never wrap to a different note.
 
-Expression strings are additionally screened for dangerous-looking patterns (`eval(`, `Function(`, `fetch(`, `document.`, `window.`, `__proto__`, `<script`, `javascript:`, …) at the library-upload and Load-UI entry points. That screen catches malformed **DSL**; it cannot catch malformed **legacy** — a broken method chain passes validation and then silently evaluates to `0` (see above).
+Expression strings are additionally screened for dangerous-looking patterns (`eval(`, `Function(`, `fetch(`, `document.`, `window.`, `__proto__`, `<script`, `javascript:`, …) at the library-upload and Load-UI entry points. Malformed expressions of either syntax — DSL or a broken legacy method chain — are caught by the compiler itself, which throws instead of guessing (see above).
 
 ## The library manifest
 

@@ -16,7 +16,7 @@ A module is a small, reusable piece of relational music: a BaseNote plus a handf
 Every note is removed; the BaseNote stays.
 
 ::: tip Clean Slate is undoable
-The confirmation dialog says the action cannot be undone. It is wrong: Clean Slate is captured in history, and `Ctrl/Cmd + Z` brings your notes back.
+The confirmation dialog says so too: Clean Slate is captured in history, and `Ctrl/Cmd + Z` brings your notes back.
 :::
 
 ## Set up the BaseNote
@@ -105,13 +105,9 @@ beat(base) * (1/4)         # a sixteenth
 
 Use `beat(base)`, never `60 / tempo(base)`. `beat(base)` is what the app writes for you when you use the note-length buttons in the duration row.
 
-::: danger `60 / tempo(base)` compiles to `0`
-It looks like it should work, and the DSL grammar does accept it — but an expression that *starts with a number* is not recognized as DSL, so it is handed to the legacy compiler, which cannot read it. The result is a silent constant `0` and a console warning. Write `beat(base)`.
-:::
+`60 / tempo(base)` does compile — an expression that *starts with a number* is first handed to the legacy compiler, which cannot read it, but the failure falls through to the DSL parser and lands correctly. Still write `beat(base)`: it is what the app writes for you, and it is the only form the decompiler gives back.
 
-::: warning A bad expression fails silently
-There is no error toast and no red border. If an expression will not compile, the property becomes `0` and a warning goes to the browser console. If a note vanishes or lands at the far left of the workspace, that is why.
-:::
+If an expression will not compile at all, it is **rejected with an error** — in the note widget the message appears in red under the Save button; in a hand-written file the property is left unset on load, with a `console.error` naming the expression.
 
 ## Colour and instrument
 

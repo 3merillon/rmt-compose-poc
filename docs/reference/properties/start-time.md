@@ -40,7 +40,7 @@ hard-coded `0`, it does not walk up to a parent.
 
 - **The note widget.** Select the note; the `startTime` row has an `Evaluated:` readout and a
   `Raw:` input with a `Save` button. Edits apply on **Save**, not while typing. An invalid
-  expression is dropped silently (the error goes to the console only).
+  expression is rejected with the reason shown in red under the Save button.
 - **Dragging.** Drag a note's body left or right. Notes only move horizontally — dragging never
   changes pitch.
 - **Group drag.** With several notes selected, dragging one applies the same time delta to every
