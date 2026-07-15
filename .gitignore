@@ -25,6 +25,10 @@ npm-debug.log*
 rust/target/
 rust/pkg/
 
+# Scratch/probe files
+.tmp-probe/
+scripts/perf/__tmp-*
+
 # Docs build cache
 docs/.vitepress/cache/
 docs/.vitepress/dist/
