@@ -41,6 +41,11 @@ export class Note {
     // dependency sets in the graph on every markNoteDirty call.
     this._depsEpoch = 0;
     this._depsRegKey = null;
+    // The module the stamp above belongs to. Module import migrates note
+    // objects out of a temporary module, and the key alone (generation:id:epoch)
+    // collides across modules when ids are reused (e.g. a drop after Clean
+    // Slate), silently skipping registration in the destination module.
+    this._depsRegModule = null;
 
     // Initialize from variables (supports both legacy and new formats)
     this._initFromVariables(variables);

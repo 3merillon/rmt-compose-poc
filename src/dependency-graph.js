@@ -664,6 +664,42 @@ export class DependencyGraph {
   }
 
   /**
+   * Drop every edge and flag for every note. Used when a module empties itself
+   * (Clean Slate): deleting notes from the module map without pruning the graph
+   * leaves the old composition's edges alive, and ids reused by a later import
+   * inherit them — corrupting dirty propagation and evaluation order.
+   */
+  clear() {
+    this.dependencies.clear();
+    this.dependents.clear();
+    this.baseNoteDependents.clear();
+
+    this.startTimeDependencies.clear();
+    this.startTimeDependents.clear();
+    this.startTimeBaseNoteDependents.clear();
+    this.startTimeOnStartTimeDependents.clear();
+    this.startTimeOnDurationDependents.clear();
+    this.startTimeOnFrequencyDependents.clear();
+
+    this.frequencyDependencies.clear();
+    this.frequencyDependents.clear();
+    this.frequencyBaseNoteDependents.clear();
+    this.frequencyOnStartTimeDependents.clear();
+    this.frequencyOnDurationDependents.clear();
+    this.frequencyOnFrequencyDependents.clear();
+
+    this.durationDependencies.clear();
+    this.durationDependents.clear();
+    this.durationBaseNoteDependents.clear();
+    this.durationOnStartTimeDependents.clear();
+    this.durationOnDurationDependents.clear();
+    this.durationOnFrequencyDependents.clear();
+
+    this.corruptionFlags.clear();
+    this._corruptionEpoch++;
+  }
+
+  /**
    * Get direct dependencies for a note (what it depends on)
    * O(1) lookup
    *

@@ -569,10 +569,18 @@ document.addEventListener('DOMContentLoaded', async function() {
         const dependents = myModule.getDependentNotes(noteId);
         const idsToDelete = new Set([noteId, ...dependents]);
         
+        // Two passes: empty the notes map first so removeNote's dangling-dependent
+        // warning can't fire for set members that just haven't been processed yet,
+        // then removeNote prunes the graph, evaluation cache (it is a Map — the old
+        // `delete cache[id]` was a silent no-op), and incremental evaluator.
         idsToDelete.forEach(id => {
-            if (id !== 0) {
+            if (Number(id) !== 0) {
                 delete myModule.notes[id];
-                delete myModule._evaluationCache[id];
+            }
+        });
+        idsToDelete.forEach(id => {
+            if (Number(id) !== 0) {
+                myModule.removeNote(Number(id));
             }
         });
         
@@ -595,16 +603,12 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
 
     function cleanSlate() {
-        Object.keys(myModule.notes).forEach(id => {
-            if (id !== '0') {
-                delete myModule.notes[id];
-            }
-        });
+        // clearAllNotes also prunes the dependency graph and bumps the
+        // registration generation. Deleting from myModule.notes directly left
+        // the old composition's edges alive, and a module dropped onto the
+        // fresh slate reused those ids — jumbling evaluation order until reload.
+        myModule.clearAllNotes();
 
-        myModule.nextId = 1;
-        // Use invalidateAll() to properly reset evaluation state with correct Map type
-        myModule.invalidateAll();
-        
         evaluatedNotes = myModule.evaluateModule();
         setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
@@ -769,10 +773,12 @@ document.addEventListener('DOMContentLoaded', async function() {
         updateDependentRawExpressions(noteId, selectedRaw);
         
         if (noteId !== 0) {
-            delete myModule.notes[noteId];
-            delete myModule._evaluationCache[noteId];
-
+            // Capture dependents before removeNote prunes the graph edges.
+            // removeNote also clears the evaluation cache entry (a Map — the old
+            // `delete cache[id]` was a silent no-op) and the graph, so the freed
+            // id can be reused by a later import without inheriting stale edges.
             const dependents = myModule.getDependentNotes(noteId);
+            myModule.removeNote(Number(noteId));
             dependents.forEach(depId => {
                 myModule.markNoteDirty(depId);
             });

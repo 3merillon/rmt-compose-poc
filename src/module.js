@@ -175,7 +175,11 @@ export class Module {
    */
   _registerNoteDependencies(note) {
     const regKey = `${this._depsRegGeneration}:${note.id}:${note._depsEpoch || 0}`;
-    if (note._depsRegKey === regKey) {
+    // The module identity check matters: import builds notes inside a temporary
+    // module (which stamps them), then migrates the objects into this one. When
+    // ids are reused — a drop after Clean Slate maps ids 1:1 — the key alone
+    // collides and this module would never learn the note's real dependencies.
+    if (note._depsRegKey === regKey && note._depsRegModule === this) {
       return;
     }
 
@@ -196,6 +200,7 @@ export class Module {
     this._dependencyGraph.registerDurationDependencies(note.id, durExpr);
 
     note._depsRegKey = regKey;
+    note._depsRegModule = this;
   }
 
   /**
@@ -593,6 +598,32 @@ export class Module {
       this._incrementalEvaluator.cache.delete(id);
     }
 
+    invalidateModuleEndTimeCache();
+  }
+
+  /**
+   * Remove every note except the base note and reset to a clean slate.
+   * Deleting from `notes` directly is NOT equivalent: it leaves the deleted
+   * ids' edges in the dependency graph, and with nextId reset to 1 a later
+   * import reuses exactly those ids — inheriting phantom edges and, via the
+   * registration memo, skipping re-registration entirely. Both corrupt the
+   * evaluation order until the page is reloaded.
+   */
+  clearAllNotes() {
+    for (const id of Object.keys(this.notes)) {
+      if (Number(id) !== 0) {
+        delete this.notes[id];
+      }
+    }
+    this.nextId = 1;
+
+    this._dependencyGraph.clear();
+    // New generation: every memo stamp from before the wipe is now invalid,
+    // whatever module it came from.
+    this._depsRegGeneration++;
+    this._registerNoteDependencies(this.baseNote);
+
+    this.invalidateAll();
     invalidateModuleEndTimeCache();
   }
 
