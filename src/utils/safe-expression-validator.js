@@ -137,10 +137,13 @@ export function evaluateExpressionSafe(expr, moduleInstance, evalCache = null) {
             return result;
         }
         if (typeof result.toFraction === 'function') {
-            return result.toFraction();
+            // Exact either way: MusicValue yields a Fraction, Fraction-likes an 'n/d' string
+            const exact = result.toFraction();
+            return exact instanceof Fraction ? exact : new Fraction(exact);
         }
-        if (typeof result.valueOf === 'function') {
-            return new Fraction(result.valueOf());
+        if (typeof result.n === 'bigint' && typeof result.d === 'bigint') {
+            const sign = result.s != null && result.s < 0n ? -1n : 1n;
+            return new Fraction(sign * result.n, result.d);
         }
         return new Fraction(result);
     } catch (e) {

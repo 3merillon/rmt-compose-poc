@@ -306,6 +306,12 @@ export class BinaryExpression {
     const copy = new BinaryExpression(this.bytecode.length);
     copy.bytecode.set(this.bytecode.subarray(0, this.length));
     copy.length = this.length;
+    // The constructor arg only sizes the bytecode buffer; dependencies start
+    // at the default 16. Grow the copy's array when this expression tracks
+    // more (17+ distinct note refs), or .set() throws RangeError.
+    if (this.depCount > copy.dependencies.length) {
+      copy.dependencies = new Uint16Array(this.depCount);
+    }
     copy.dependencies.set(this.dependencies.subarray(0, this.depCount));
     copy.depCount = this.depCount;
     copy.sourceText = this.sourceText;

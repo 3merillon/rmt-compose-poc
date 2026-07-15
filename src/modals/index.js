@@ -12,6 +12,10 @@ import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
 import { escapeHtml } from '../utils/html-escape.js';
 import { isDSLSyntax } from '../dsl/index.js';
+import { toNumber } from '../utils/fraction-num.js';
+import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.js';
+import { raisePanel } from '../utils/panel-stack.js';
+import { viewportHeight } from '../utils/viewport.js';
 
 const domCache = {
     noteWidget: null,
@@ -21,9 +25,12 @@ const domCache = {
 };
 
 let currentSelectedNote = null;
-let widgetInitiallyOpened = false;
-const TOP_HEADER_HEIGHT = 50;
-const MIN_BUFFER = 19;
+let currentMeasureId = null;
+
+// A freshly-opened note widget is a compact card. Its content (every variable, with its
+// expression) is far taller than this and scrolls; the card only grows past 300px if the
+// user drags it somewhere with room to fit more.
+const DEFAULT_OPEN_HEIGHT = 300;
 
 let externalFunctions = {
     updateVisualNotes: null,
@@ -91,7 +98,22 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     
     const widgetContent = domCache.widgetContent;
     const widgetTitle = domCache.widgetTitle;
-    
+
+    // This function is both "open the widget on a note" and "rebuild the widget in place"
+    // (an octave arrow, a saved variable, an added note, a changed arrow setting all come
+    // back through here). A rebuild wipes the scroll container below, so remember where the
+    // user was scrolled to when the note on screen is the one we are about to redraw.
+    // Opening on a DIFFERENT note is a fresh card and starts at the top.
+    const prevEffectiveId = currentSelectedNote
+        ? ((currentSelectedNote.id !== undefined) ? currentSelectedNote.id : currentMeasureId)
+        : undefined;
+    const isRebuildOfSameNote =
+        domCache.noteWidget.classList.contains('visible') &&
+        prevEffectiveId !== undefined &&
+        String(prevEffectiveId) === String(effectiveNoteId) &&
+        (currentMeasureId ?? null) === (measureId ?? null);
+    const preservedScrollTop = isRebuildOfSameNote ? widgetContent.scrollTop : 0;
+
     const isSilence = note && note.getVariable('startTime') &&
                      note.getVariable('duration') &&
                      !note.getVariable('frequency');
@@ -121,10 +143,6 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     
     if (clickedElement) {
         clickedElement.classList.add('selected');
-    }
-    
-    if (note !== moduleInstance.baseNote && effectiveNoteId !== undefined) {
-        highlightDependencies(effectiveNoteId);
     }
     
     const variables = collectVariables(note, measureId, moduleInstance);
@@ -172,8 +190,16 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     }
     
     domCache.noteWidget.classList.add('visible');
-    widgetInitiallyOpened = true;
+    // Last opened wins: clicking a note with the settings panel (or the "+" menu)
+    // parked over the widget must put the widget you just summoned in FRONT of it,
+    // not behind it. Without this the widget only came forward once you touched it.
+    raisePanel(domCache.noteWidget);
     updateNoteWidgetHeight();
+
+    // After the height is settled, so the browser clamps against the final scroll range.
+    if (preservedScrollTop > 0) {
+        widgetContent.scrollTop = preservedScrollTop;
+    }
 
     if (!clickedElement && note && note.id !== undefined) {
         const selElem = document.querySelector(`[data-note-id="${CSS.escape(String(note.id))}"]`);
@@ -183,39 +209,15 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     }
     
     currentSelectedNote = note;
+    currentMeasureId = measureId;
     try { eventBus.emit('modals:show', { noteId: effectiveNoteId, isMeasure: measureId !== null }); } catch (e) {}
 }
 
-function highlightDependencies(selfNoteId) {
-    const elementMap = new Map();
-    
-    const allHighlightableElements = document.querySelectorAll('.note-content, .base-note-circle, .measure-bar-triangle');
-    allHighlightableElements.forEach(el => {
-        const id = el.getAttribute('data-note-id');
-        if (id) {
-            if (!elementMap.has(id)) {
-                elementMap.set(id, []);
-            }
-            elementMap.get(id).push(el);
-        }
-    });
-    
-    const directDeps = getModule().getDirectDependencies(selfNoteId).filter(depId => depId !== selfNoteId);
-    const dependents = getModule().getDependentNotes(selfNoteId).filter(depId => depId !== selfNoteId);
-    
-    directDeps.forEach(depId => {
-        const elements = elementMap.get(String(depId));
-        if (elements) {
-            elements.forEach(el => el.classList.add('dependency'));
-        }
-    });
-    
-    dependents.forEach(depId => {
-        const elements = elementMap.get(String(depId));
-        if (elements) {
-            elements.forEach(el => el.classList.add('dependent'));
-        }
-    });
+// Seed the Raw editor with a parseable exact form when no source string exists.
+// Fraction toString() prints repeating decimals like '0.(3)', which won't re-parse;
+// toFraction() gives 'n/d' which both expression formats accept.
+function rawValueSeed(v) {
+    return (v && typeof v.toFraction === 'function') ? v.toFraction() : String(v);
 }
 
 function collectVariables(note, measureId, moduleInstance) {
@@ -243,17 +245,21 @@ function collectVariables(note, measureId, moduleInstance) {
             if (!key.endsWith('String') && key !== 'measureLength') {
                 variables[key] = {
                     evaluated: note.getVariable(key),
-                    raw: note.variables[key + 'String'] || note.variables[key].toString(),
+                    raw: note.variables[key + 'String'] || rawValueSeed(note.variables[key]),
                     isCorrupted: false // BaseNote is never corrupted
                 };
             }
         });
 
         if (!variables.instrument) {
+            const hasOwnInstrument = note.properties.instrument != null;
+            const resolvedInstrument = hasOwnInstrument
+                ? note.getVariable('instrument')
+                : module.findInstrument(note);
             variables.instrument = {
-                evaluated: note.getVariable('instrument') || 'sine-wave',
-                raw: note.getVariable('instrument') || 'sine-wave',
-                isInherited: false,
+                evaluated: resolvedInstrument,
+                raw: resolvedInstrument,
+                isInherited: !hasOwnInstrument,
                 isCorrupted: false
             };
         }
@@ -288,7 +294,7 @@ function collectVariables(note, measureId, moduleInstance) {
                 } else {
                     variables[key] = {
                         evaluated: note.getVariable(key),
-                        raw: note.variables[key + 'String'] || note.variables[key].toString(),
+                        raw: note.variables[key + 'String'] || rawValueSeed(note.variables[key]),
                         isCorrupted: propertyCorrupted,
                         // For frequency, flag if transitively corrupted (for display purposes)
                         isTransitivelyCorrupted: key === 'frequency' && freqTransitivelyCorrupted
@@ -318,6 +324,7 @@ export function clearSelection() {
 
     domCache.noteWidget.classList.remove('visible');
     currentSelectedNote = null;
+    currentMeasureId = null;
     
     const elementsToClean = document.querySelectorAll(
       '.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected, ' +
@@ -354,120 +361,80 @@ export function updateNoteWidgetHeight() {
     
     const headerHeight = header.offsetHeight;
     const rect = widget.getBoundingClientRect();
-    const availableSpace = window.innerHeight - rect.top - MIN_BUFFER;
-    const contentNaturalHeight = content.scrollHeight;
     const PADDING = 5;
-    const widgetDesiredHeight = headerHeight + contentNaturalHeight + PADDING;
-    const minInitialHeight = widgetInitiallyOpened ? 40 : 300;
-    const effectiveHeight = Math.max(minInitialHeight, Math.min(availableSpace, widgetDesiredHeight));
-    
+
+    // Measure the CONTENT — not the box we last gave it.
+    //
+    // The last line of this function writes an inline height onto `content`, and
+    // `scrollHeight` can never report less than the box an element already has. So the
+    // measurement could only ever GROW: show the BaseNote (a long variable list, capped
+    // at DEFAULT_OPEN_HEIGHT), then click a Measure (one `startTime` row), and the
+    // widget re-measured the tall box it had just been given itself and kept it — a
+    // single row of content with dead space under it. Clearing the inline height first
+    // lets the element report what it actually needs. Nothing paints between here and
+    // the write below, so this is a measurement, not a flicker.
+    content.style.height = '';
+    const widgetDesiredHeight = headerHeight + content.scrollHeight + PADDING;
+
+    // Until it is first dragged the widget is bottom-anchored (`bottom: 19px`) and has
+    // no inline top, so it GROWS UPWARD. That distinction is the whole of this function.
+    const dragged = !!widget.style.top;
+
+    // The room to fit into.
+    //
+    // Bottom-anchored: the band between the top bar and the bottom edge. It must NOT be
+    // derived from rect.top — for a bottom-anchored box rect.top is a function of the
+    // height we are trying to compute, so `viewportHeight() - rect.top - MIN_BUFFER` is
+    // just the height it already had. That self-reference is why the widget used to open
+    // at whatever size it was last given, including the size computed at boot while it
+    // was still display:none — and why touching it (which writes an inline top, breaking
+    // the self-reference) snapped it to the right size.
+    //
+    // Dragged: a real measurement — whatever is below where the user parked it.
+    const room = dragged
+        ? viewportHeight() - rect.top - MIN_BUFFER
+        : viewportHeight() - TOP_HEADER_HEIGHT - 2 * MIN_BUFFER;
+
+    // A freshly-opened widget is a compact card, not a full-height panel: the variable
+    // list is long and scrolls. Once dragged, it fits its content instead.
+    const desired = dragged
+        ? widgetDesiredHeight
+        : Math.min(widgetDesiredHeight, DEFAULT_OPEN_HEIGHT);
+
+    let effectiveHeight = Math.max(headerHeight, Math.min(room, desired));
     widget.style.height = effectiveHeight + "px";
+
+    // Now check what we actually GOT. A position:fixed box is anchored to the layout
+    // viewport — the real visible area — even in the frames after boot where a mobile
+    // browser is still reporting a stale window.innerHeight. So don't trust the number
+    // we just did arithmetic on: measure the box, and hand back any overshoot that
+    // pushed the header off the top of the screen.
+    if (!dragged) {
+        const overshoot = (TOP_HEADER_HEIGHT + MIN_BUFFER) - widget.getBoundingClientRect().top;
+        if (overshoot > 0.5) {
+            effectiveHeight = Math.max(headerHeight, effectiveHeight - overshoot);
+            widget.style.height = effectiveHeight + "px";
+        }
+    }
+
     const contentHeight = effectiveHeight - headerHeight - PADDING;
     content.style.height = Math.max(40, contentHeight) + "px";
     content.style.overflowY = "auto";
 }
 
-function handleWindowResize() {
-    const widget = domCache.noteWidget;
-    if (!widget || !widget.classList.contains('visible')) return;
-
-    const header = widget.querySelector('.note-widget-header');
-    const headerHeight = header ? header.getBoundingClientRect().height : 0;
-    const rect = widget.getBoundingClientRect();
-
-    const availableHeight = window.innerHeight - TOP_HEADER_HEIGHT + 5;
-    const maxWidgetHeight = availableHeight - headerHeight;
-
-    const maxLeft = window.innerWidth - rect.width - MIN_BUFFER;
-    const maxTop = window.innerHeight - Math.min(rect.height, maxWidgetHeight) - MIN_BUFFER;
-
-    if (rect.right > window.innerWidth - MIN_BUFFER) {
-        widget.style.left = Math.max(MIN_BUFFER, maxLeft) + "px";
-    }
-
-    if (rect.bottom > window.innerHeight - MIN_BUFFER) {
-        widget.style.top = Math.max(TOP_HEADER_HEIGHT + MIN_BUFFER, maxTop) + "px";
-    }
-
-    if (rect.top < TOP_HEADER_HEIGHT + MIN_BUFFER) {
-        widget.style.top = (TOP_HEADER_HEIGHT + MIN_BUFFER) + "px";
-    }
-
-    updateNoteWidgetHeight();
-}
-
 function addDraggableNoteWidget() {
     const widget = domCache.noteWidget;
     if (!widget) return;
-
-    widget.style.position = 'fixed';
     const header = widget.querySelector('.note-widget-header');
     if (!header) return;
 
-    let isDragging = false;
-    let dragOffsetX = 0;
-    let dragOffsetY = 0;
-
-    header.addEventListener('mousedown', startDrag);
-    header.addEventListener('touchstart', startDrag, {passive: false});
-
-    function startDrag(e) {
-        if (e.target.classList.contains('note-widget-close')) return;
-        isDragging = true;
-        e.preventDefault();
-        const rect = widget.getBoundingClientRect();
-        
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-        dragOffsetX = clientX - rect.left;
-        dragOffsetY = clientY - rect.top;
-        
-        document.addEventListener('mousemove', duringDrag);
-        document.addEventListener('touchmove', duringDrag, {passive: false});
-        document.addEventListener('mouseup', endDrag);
-        document.addEventListener('touchend', endDrag);
-    }
-
-    function duringDrag(e) {
-        if (!isDragging) return;
-        e.preventDefault();
-        
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-        
-        let newLeft = clientX - dragOffsetX;
-        let newTop = clientY - dragOffsetY;
-        
-        const widgetRect = widget.getBoundingClientRect();
-        const maxLeft = window.innerWidth - widgetRect.width - MIN_BUFFER;
-        newLeft = Math.max(MIN_BUFFER, Math.min(newLeft, maxLeft));
-        
-        const headerHeight = widget.querySelector('.note-widget-header')?.getBoundingClientRect().height || TOP_HEADER_HEIGHT;
-        const minTop = TOP_HEADER_HEIGHT + MIN_BUFFER;
-        const maxTop = window.innerHeight - headerHeight - MIN_BUFFER;
-        newTop = Math.max(minTop, Math.min(newTop, maxTop));
-        
-        widget.style.left = newLeft + "px";
-        widget.style.top = newTop + "px";
-        
-        updateNoteWidgetHeight();
-    }
-
-    function endDrag(e) {
-        isDragging = false;
-        document.removeEventListener('mousemove', duringDrag);
-        document.removeEventListener('touchmove', duringDrag);
-        document.removeEventListener('mouseup', endDrag);
-        document.removeEventListener('touchend', endDrag);
-    }
+    makeDraggableWidget({
+        el: widget,
+        handle: header,
+        onMove: updateNoteWidgetHeight,
+        isVisible: () => widget.classList.contains('visible'),
+        ignoreDragStart: (e) => e.target.classList.contains('note-widget-close'),
+    });
 }
 
 export function showDeleteConfirmation(noteId) {
@@ -480,7 +447,7 @@ export function showDeleteConfirmation(noteId) {
     const message = document.createElement('p');
     // SECURITY: Escape noteId to prevent XSS
     message.innerHTML = "Are you sure you want to <strong>DELETE</strong> Note[<span class='modal-note-id'>"
-        + escapeHtml(noteId) + "</span>] and <span class='modal-delete-all'>DELETE ALL</span> its Dependencies (notes highlighted in red)?";
+        + escapeHtml(noteId) + "</span>] and <span class='modal-delete-all'>DELETE ALL</span> its Dependencies (the notes linked to it by dependency lines in the workspace)?";
     modal.appendChild(message);
 
     const btnContainer = document.createElement('div');
@@ -572,7 +539,7 @@ export function showCleanSlateConfirmation() {
     modal.className = 'delete-confirm-modal';
 
     const message = document.createElement('p');
-    message.innerHTML = "Are you sure you want to <span class='modal-delete-all'>DELETE ALL</span> notes except the base note? This action cannot be undone.";
+    message.innerHTML = "Are you sure you want to <span class='modal-delete-all'>DELETE ALL</span> notes except the base note? You can undo this with Ctrl/Cmd+Z.";
     modal.appendChild(message);
 
     const btnContainer = document.createElement('div');
@@ -621,9 +588,9 @@ function showNotification(message, type = 'info') {
     if (type === 'success') {
         Object.assign(notification.style, { backgroundColor: 'rgba(0, 255, 255, 0.8)', color: '#151525' });
     } else if (type === 'error') {
-        Object.assign(notification.style, { backgroundColor: 'rgba(255, 0, 0, 0.8)', color: '#fff' });
+        Object.assign(notification.style, { backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.8)', color: '#fff' });
     } else {
-        Object.assign(notification.style, { backgroundColor: 'rgba(255, 168, 0, 0.8)', color: '#000' });
+        Object.assign(notification.style, { backgroundColor: 'rgba(var(--rmt-accent-rgb), 0.8)', color: '#000' });
     }
     document.body.appendChild(notification);
     setTimeout(() => {
@@ -718,17 +685,15 @@ function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
             const refNote = moduleInstance.getNoteById(parseInt(noteId, 10));
             if (!refNote) return match;
 
-            const refStartTime = refNote.getVariable('startTime').valueOf();
-            const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
-            const beatLength = 60 / baseTempo;
-            const beatOffset = new Fraction(numerator, denominator).valueOf();
+            const refStartTime = refNote.getVariable('startTime');
+            const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
+            const baseTempo = moduleInstance.baseNote.getVariable('tempo');
+            const beatOffset = new Fraction(numerator.trim(), denominator.trim());
 
-            const absoluteTime = refStartTime + (beatOffset * beatLength);
-            const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
-            const offset = absoluteTime - baseStartTime;
-            const offsetBeats = offset / beatLength;
+            // offsetBeats = (refStart - baseStart) * tempo / 60 + beatOffset, exact
+            const offsetBeats = refStartTime.sub(baseStartTime).mul(baseTempo).div(60).add(beatOffset);
 
-            return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetBeats})))`;
+            return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${toFractionString(offsetBeats)}))`;
         });
 
         const noteRefRegex = /module\.getNoteById\((\d+)\)\.getVariable\('([^']+)'\)/g;
@@ -772,31 +737,34 @@ function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
 }
 
 // ===== Feature: Evaluate to BaseNote =====
-// Helper to convert a decimal to a clean Fraction string (legacy format)
+// Helper to convert an exact value (Fraction preferred, number tolerated) to a
+// clean Fraction string (legacy format). BigInt fields interpolate digit-exact.
 function toFractionString(value) {
     try {
-        const frac = new Fraction(value);
+        const frac = value instanceof Fraction ? value : new Fraction(value);
         // Use the Fraction's built-in simplification
-        if (frac.d === 1) {
+        if (frac.d === 1n) {
             return `new Fraction(${frac.s * frac.n})`;
         }
         return `new Fraction(${frac.s * frac.n}, ${frac.d})`;
-    } catch {
+    } catch (e) {
         // Fallback for values that Fraction can't handle cleanly
+        console.warn('toFractionString: inexact fallback for', value, e?.message ?? e);
         return `new Fraction(${value})`;
     }
 }
 
-// Helper to convert a decimal to a DSL fraction/number string
+// Helper to convert an exact value to a DSL fraction/number string
 function toDSLFractionString(value) {
     try {
-        const frac = new Fraction(value);
+        const frac = value instanceof Fraction ? value : new Fraction(value);
         const val = frac.s * frac.n;
-        if (frac.d === 1) {
+        if (frac.d === 1n) {
             return `${val}`;
         }
         return `(${val}/${frac.d})`;
-    } catch {
+    } catch (e) {
+        console.warn('toDSLFractionString: inexact fallback for', value, e?.message ?? e);
         return `${value}`;
     }
 }
@@ -829,6 +797,8 @@ function createFrequencyAlgebra(coeff = new Fraction(1), powers = []) {
 
 /**
  * Merge power terms, combining like bases: base^a * base^b = base^(a+b)
+ * Bases and exponents are small TET integers (2/3/5, steps/divisions), so
+ * Number arithmetic stays exact here; only coefficients need BigInt Fractions.
  */
 function mergePowerTerms(a, b) {
     const map = new Map();
@@ -907,10 +877,11 @@ function parseFrequencyExpression(exprText) {
         const { left, right } = mulMatch;
 
         // Check if right is a fraction constant: new Fraction(a) or new Fraction(a, b)
+        // Coefficient digits parse as BigInt so they survive at any magnitude
         const fracMatch = right.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
         if (fracMatch) {
-            const num = parseInt(fracMatch[1], 10);
-            const den = fracMatch[2] ? parseInt(fracMatch[2], 10) : 1;
+            const num = BigInt(fracMatch[1]);
+            const den = fracMatch[2] ? BigInt(fracMatch[2]) : 1n;
             const leftParsed = parseFrequencyExpression(left);
             if (leftParsed) {
                 leftParsed.algebra.coeff = leftParsed.algebra.coeff.mul(new Fraction(num, den));
@@ -921,8 +892,8 @@ function parseFrequencyExpression(exprText) {
         // Check if left is a fraction constant
         const fracMatchLeft = left.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
         if (fracMatchLeft) {
-            const num = parseInt(fracMatchLeft[1], 10);
-            const den = fracMatchLeft[2] ? parseInt(fracMatchLeft[2], 10) : 1;
+            const num = BigInt(fracMatchLeft[1]);
+            const den = fracMatchLeft[2] ? BigInt(fracMatchLeft[2]) : 1n;
             const rightParsed = parseFrequencyExpression(right);
             if (rightParsed) {
                 rightParsed.algebra.coeff = rightParsed.algebra.coeff.mul(new Fraction(num, den));
@@ -1080,7 +1051,7 @@ function algebraToExpression(algebra, useDSL = false) {
     // Add coefficient if not 1
     if (!algebra.coeff.equals(1)) {
         const c = algebra.coeff;
-        if (c.d === 1) {
+        if (c.d === 1n) {
             parts.push(`new Fraction(${c.s * c.n})`);
         } else {
             parts.push(`new Fraction(${c.s * c.n}, ${c.d})`);
@@ -1117,7 +1088,7 @@ function algebraToExpressionDSL(algebra) {
     if (!algebra.coeff.equals(1)) {
         const c = algebra.coeff;
         const val = c.s * c.n;
-        const fracStr = (c.d === 1) ? `${val}` : `(${val}/${c.d})`;
+        const fracStr = (c.d === 1n) ? `${val}` : `(${val}/${c.d})`;
         result = `${result} * ${fracStr}`;
     }
 
@@ -1195,34 +1166,34 @@ function createTETFrequencyExpr(interval, useDSL = false) {
     return `module.baseNote.getVariable('frequency').mul(new Fraction(${base}).pow(new Fraction(${numerator}, ${denominator})))`;
 }
 
-// Create BaseNote-relative expression for startTime
+// Create BaseNote-relative expression for startTime.
+// Takes the exact evaluated Fraction; all offset algebra stays in Fraction
+// arithmetic so the emitted literal is digit-exact at any magnitude.
 function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance, useDSL = false) {
-    const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
-    const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
-    const beatLength = 60 / baseTempo;
+    const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
+    const baseTempo = moduleInstance.baseNote.getVariable('tempo');
 
-    const offsetSeconds = noteStartTime - baseStartTime;
-    const offsetBeats = offsetSeconds / beatLength;
+    // offsetBeats = (t - baseT) * tempo / 60
+    const offsetBeats = noteStartTime.sub(baseStartTime).mul(baseTempo).div(60);
 
-    if (Math.abs(offsetBeats) < 1e-10) {
+    if (offsetBeats.equals(0)) {
         return useDSL ? 'base.t' : `module.baseNote.getVariable('startTime')`;
     }
 
     if (useDSL) {
-        const fracStr = toDSLFractionString(Math.abs(offsetBeats));
+        const fracStr = toDSLFractionString(offsetBeats.abs());
         const beatMul = (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
-        return offsetBeats >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
+        return offsetBeats.compare(0) >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
     }
 
     const beatsFrac = toFractionString(offsetBeats);
     return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac}))`;
 }
 
-// Create BaseNote-relative expression for duration
-function createBaseNoteDurationExpr(durationSeconds, moduleInstance, useDSL = false) {
-    const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
-    const beatLength = 60 / baseTempo;
-    const durationBeats = durationSeconds / beatLength;
+// Create BaseNote-relative expression for duration (exact Fraction in)
+function createBaseNoteDurationExpr(duration, moduleInstance, useDSL = false) {
+    const baseTempo = moduleInstance.baseNote.getVariable('tempo');
+    const durationBeats = duration.mul(baseTempo).div(60);
 
     if (useDSL) {
         const fracStr = toDSLFractionString(durationBeats);
@@ -1233,14 +1204,14 @@ function createBaseNoteDurationExpr(durationSeconds, moduleInstance, useDSL = fa
     return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac})`;
 }
 
-// Create BaseNote-relative expression for frequency
+// Create BaseNote-relative expression for frequency (exact Fraction in)
 // Preserves POW expressions by tracing the dependency chain algebraically
 function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null, useDSL = false) {
-    const baseFreq = moduleInstance.baseNote.getVariable('frequency').valueOf();
-    const ratio = frequency / baseFreq;
+    const baseFreq = moduleInstance.baseNote.getVariable('frequency');
+    const ratio = frequency.div(baseFreq);
 
-    // If ratio is effectively 1, just reference baseNote directly
-    if (Math.abs(ratio - 1) < 1e-10) {
+    // If ratio is exactly 1, just reference baseNote directly
+    if (ratio.equals(1)) {
         return useDSL ? 'base.f' : `module.baseNote.getVariable('frequency')`;
     }
 
@@ -1261,8 +1232,9 @@ function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null, use
         }
     }
 
-    // Option 3: Try to detect TET interval from the ratio (for non-chain cases)
-    const tetInterval = detectTETInterval(ratio);
+    // Option 3: Try to detect TET interval from the ratio (for non-chain cases).
+    // TET detection is a float heuristic by design — approximate via toNumber.
+    const tetInterval = detectTETInterval(toNumber(ratio));
     if (tetInterval) {
         return createTETFrequencyExpr(tetInterval, useDSL);
     }
@@ -1296,20 +1268,18 @@ export function evaluateNoteToBaseNote(noteId) {
     for (const varName of variablesToProcess) {
         if (!note.variables[varName + 'String']) continue;
 
-        // Get the current evaluated value
+        // Get the current evaluated value (exact Fraction)
         const currentValue = note.getVariable(varName);
         if (currentValue == null) continue;
 
-        const value = currentValue.valueOf();
-
-        // Create the BaseNote-relative expression directly from the value
+        // Create the BaseNote-relative expression directly from the exact value
         let newExpr;
         if (varName === 'startTime') {
-            newExpr = createBaseNoteStartTimeExpr(value, moduleInstance, useDSL);
+            newExpr = createBaseNoteStartTimeExpr(currentValue, moduleInstance, useDSL);
         } else if (varName === 'duration') {
-            newExpr = createBaseNoteDurationExpr(value, moduleInstance, useDSL);
+            newExpr = createBaseNoteDurationExpr(currentValue, moduleInstance, useDSL);
         } else if (varName === 'frequency') {
-            newExpr = createBaseNoteFrequencyExpr(value, moduleInstance, note, useDSL);
+            newExpr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note, useDSL);
         }
 
         if (newExpr) {
@@ -1348,10 +1318,10 @@ export function evaluateEntireModule() {
     const moduleInstance = getModule();
     const noteIds = Object.keys(moduleInstance.notes).map(id => parseInt(id, 10)).filter(id => id !== 0);
 
-    // Pre-compute BaseNote reference values ONCE (avoid repeated lookups)
-    const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
-    const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
-    const beatLength = 60 / baseTempo;
+    // Pre-compute BaseNote reference values ONCE (avoid repeated lookups);
+    // keep them as exact Fractions so all offset/ratio algebra stays exact
+    const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
+    const baseTempo = moduleInstance.baseNote.getVariable('tempo');
 
     // Collect all expression updates in a single pass
     const updates = [];
@@ -1373,17 +1343,16 @@ export function evaluateEntireModule() {
         if (note.hasExpression('startTime')) {
             const currentValue = note.getVariable('startTime');
             if (currentValue != null) {
-                const value = currentValue.valueOf();
-                const offsetSeconds = value - baseStartTime;
-                const offsetBeats = offsetSeconds / beatLength;
+                // offsetBeats = (t - baseT) * tempo / 60, exact
+                const offsetBeats = currentValue.sub(baseStartTime).mul(baseTempo).div(60);
 
                 let expr;
-                if (Math.abs(offsetBeats) < 1e-10) {
+                if (offsetBeats.equals(0)) {
                     expr = useDSL ? 'base.t' : `module.baseNote.getVariable('startTime')`;
                 } else if (useDSL) {
-                    const fracStr = toDSLFractionString(Math.abs(offsetBeats));
+                    const fracStr = toDSLFractionString(offsetBeats.abs());
                     const beatMul = (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
-                    expr = offsetBeats >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
+                    expr = offsetBeats.compare(0) >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
                 } else {
                     const beatsFrac = toFractionString(offsetBeats);
                     expr = `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac}))`;
@@ -1396,15 +1365,13 @@ export function evaluateEntireModule() {
         if (isMeasureNote && note.hasExpression('beatsPerMeasure')) {
             const currentValue = note.getVariable('beatsPerMeasure');
             if (currentValue != null) {
-                const beats = currentValue.valueOf();
-                const baseBeats = moduleInstance.baseNote.getVariable('beatsPerMeasure').valueOf();
+                const baseBeats = moduleInstance.baseNote.getVariable('beatsPerMeasure');
 
                 let expr;
-                if (Math.abs(beats - baseBeats) < 1e-10) {
+                if (baseBeats != null && currentValue.equals(baseBeats)) {
                     expr = useDSL ? 'base.bpm' : `module.baseNote.getVariable('beatsPerMeasure')`;
                 } else {
-                    const beatsFrac = useDSL ? toDSLFractionString(beats) : toFractionString(beats);
-                    expr = beatsFrac;
+                    expr = useDSL ? toDSLFractionString(currentValue) : toFractionString(currentValue);
                 }
                 updates.push({ noteId, varName: 'beatsPerMeasure', expr });
             }
@@ -1415,8 +1382,7 @@ export function evaluateEntireModule() {
             if (note.hasExpression('duration')) {
                 const currentValue = note.getVariable('duration');
                 if (currentValue != null) {
-                    const durationSeconds = currentValue.valueOf();
-                    const durationBeats = durationSeconds / beatLength;
+                    const durationBeats = currentValue.mul(baseTempo).div(60);
                     let expr;
                     if (useDSL) {
                         const fracStr = toDSLFractionString(durationBeats);
@@ -1432,8 +1398,7 @@ export function evaluateEntireModule() {
             if (note.hasExpression('frequency')) {
                 const currentValue = note.getVariable('frequency');
                 if (currentValue != null) {
-                    const frequency = currentValue.valueOf();
-                    const expr = createBaseNoteFrequencyExpr(frequency, moduleInstance, note, useDSL);
+                    const expr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note, useDSL);
                     updates.push({ noteId, varName: 'frequency', expr });
                 }
             }
@@ -1485,17 +1450,18 @@ export function liberateDependencies(noteId) {
         if (selectedNote.variables[varName + "String"]) {
             selectedRaw[varName] = selectedNote.variables[varName + "String"];
         } else {
+            // Emit the canonical two-arg form from the exact fields: digit-exact
+            // at any magnitude, and never toString()'s repeating decimals
             const frac = selectedNote.getVariable(varName);
-            let fracStr;
             if (frac == null) {
-                fracStr = (varName === "frequency") ? "1/1" : "0/1";
-            } else if (frac && typeof frac.toFraction === "function") {
-                fracStr = frac.toFraction();
+                selectedRaw[varName] = (varName === "frequency") ? "new Fraction(1, 1)" : "new Fraction(0, 1)";
             } else {
-                fracStr = frac.toString();
+                let f = frac;
+                if (!(f instanceof Fraction)) {
+                    f = new Fraction(typeof f.toFraction === "function" ? f.toFraction() : f);
+                }
+                selectedRaw[varName] = `new Fraction(${f.s * f.n}, ${f.d})`;
             }
-            if (!fracStr.includes("/")) fracStr = fracStr + "/1";
-            selectedRaw[varName] = "new Fraction(" + fracStr + ")";
         }
     });
 
@@ -1687,14 +1653,26 @@ export function init() {
         clearSelection();
     });
 
-    window.addEventListener('resize', handleWindowResize);
-    addDraggableNoteWidget();
+    addDraggableNoteWidget(); // also registers the resize re-clamp
     updateNoteWidgetHeight();
     try { eventBus.emit('modals:init'); } catch (e) {}
     // Accept refresh requests from other modules (to avoid window.modals usage)
     try {
         eventBus.on('modals:requestRefresh', ({ note, measureId, clickedElement }) => {
             showNoteVariables(note, clickedElement, measureId ?? null);
+        });
+    } catch {}
+    // The widget bakes its ▲/▼ octave buttons (and their ratio tooltips) from the
+    // arrow settings when it is built. The settings panel is non-modal now, so
+    // those settings can change while the widget is open — rebuild it rather than
+    // leave buttons that disagree with the workspace.
+    try {
+        eventBus.on('settings:changed', ({ path }) => {
+            const p = String(path ?? '');
+            if (p !== '' && p !== 'arrows' && !p.startsWith('arrows.')) return;
+            if (!currentSelectedNote) return;
+            if (!domCache.noteWidget || !domCache.noteWidget.classList.contains('visible')) return;
+            showNoteVariables(currentSelectedNote, null, currentMeasureId);
         });
     } catch {}
 }

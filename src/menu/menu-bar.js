@@ -1,6 +1,11 @@
 import { eventBus } from '../utils/event-bus.js';
 import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
+import { renderModuleIcon } from './icon-factory.js';
+import { settingsStore } from '../settings/settings-store.js';
+import { pointerOf } from '../utils/draggable-widget.js';
+import { viewportHeight } from '../utils/viewport.js';
+import { history } from '../store/history.js';
 
 const menuAPI = (function() {
     const domCache = {
@@ -12,177 +17,877 @@ const menuAPI = (function() {
     };
 
     const PULL_TAB_HEIGHT = 16, TOP_BAR_HEIGHT = 50, SAFETY_MARGIN = 10;
-    let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0, hasAppliedInitialPadding = false, targetFitHeight = null;
+    let isDragging = false, startY, startHeight, categoryContainers = [], draggedElement = null, draggedElementType = null, draggedElementCategory = null, maxMenuBarHeight = 0, hasAppliedDefaultHeight = false, targetFitHeight = null;
 
     // Module drop mode: 'start' = drop at target note's start, 'end' = drop at target note's end
     let moduleDropMode = 'start';
 
+    // === Manifest v2 support (Phase 6.1) ===
+    // The library is described by a single top-level manifest,
+    // public/modules/library.json = { version:2, sections:[{id,label,items:[...]}] }.
+    // Each item = { file, name, ratio?, cents?, family?, tags?, icon? }.
+    // Loaders branch on the manifest: v2 object -> section-driven; missing/legacy
+    // array -> the old per-category index.json path (kept as a fallback).
+    const LIBRARY_VERSION = 2;
+    // Built-in section ids the app ships. Used by the ui-state migration to
+    // decide what to rebuild (built-ins) vs. preserve (user 'custom' + uploads).
+    const BUILTIN_SECTION_IDS = ['intervals', 'chords', 'progressions', 'melodies', 'scale-systems', 'custom'];
+    let libraryManifest = null; // cached parsed library.json (v2), or null if legacy/absent
+
+    // Fetch + validate the top-level v2 manifest.
+    // Returns the manifest object, or null when absent/legacy so callers fall back.
+    async function loadLibraryManifest() {
+        if (libraryManifest) return libraryManifest;
+        try {
+            // no-store: the manifest is the library index and changes as content is
+            // added/removed; a stale HTTP-cached copy would strand users on an old
+            // layout that references deleted module files (404s).
+            const res = await fetch('modules/library.json', { cache: 'no-store' });
+            if (!res.ok) return null;
+            const json = await res.json();
+            if (json && json.version === 2 && Array.isArray(json.sections)) {
+                libraryManifest = json;
+                return json;
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    // Encode each path segment of a manifest-relative module path (handles spaces).
+    function encodeModulePath(path) {
+        return String(path).split('/').map(encodeURIComponent).join('/');
+    }
+
+    // Fetch a module file by its manifest-relative path (e.g. "intervals/5th.json"),
+    // with a spaces->underscores fallback (mirrors the legacy per-file fetch).
+    async function fetchModuleFile(file) {
+        let res = await fetch('modules/' + encodeModulePath(file));
+        if (!res.ok) {
+            const alt = 'modules/' + file.split('/').map(s => s.replace(/\s+/g, '_')).join('/');
+            res = await fetch(alt);
+        }
+        if (!res.ok) throw new Error('Network response not ok for ' + file);
+        return res.json();
+    }
+
+    // === Icon sizing (Phase 6.2 / 6.5) ===
+    function getIconSizePx() {
+        try { const v = settingsStore.get('library.iconSizePx'); if (typeof v === 'number' && v > 0) return v; } catch (e) {}
+        return 56;
+    }
+    function getShowCents() {
+        try { const v = settingsStore.get('library.showCents'); if (typeof v === 'boolean') return v; } catch (e) {}
+        return true;
+    }
+    // Place the delete × with its centre on the centre of the corner arc (radius r in
+    // from each edge), so a larger icon — which has a larger radius — pushes it inward
+    // rather than letting the rounded corner clip it. Box and glyph scale with the icon;
+    // everything else about the button lives in CSS.
+    function styleDeleteButton(btn, size = getIconSizePx()) {
+        if (!btn) return;
+        const radius = Math.round(size * 0.14);
+        const box = Math.max(14, Math.min(20, Math.round(size * 0.25)));
+        const offset = Math.max(1, radius - Math.round(box / 2));
+        Object.assign(btn.style, {
+            width: box + 'px', height: box + 'px', fontSize: box + 'px',
+            top: offset + 'px', right: offset + 'px'
+        });
+    }
+
+    // Size a section label so it matches the module icons around it: same height,
+    // same corner-radius treatment, with the type and padding scaled to follow.
+    // Called on creation and again from applyIconSizeToAll() when the setting changes.
+    function styleLabelIcon(labelIcon, size = getIconSizePx()) {
+        const fontSize = Math.max(11, Math.min(18, Math.round(size * 0.28)));
+        Object.assign(labelIcon.style, {
+            height: size + 'px',
+            borderRadius: Math.round(size * 0.14) + 'px',
+            padding: '0 ' + Math.max(6, Math.round(size * 0.16)) + 'px',
+            fontSize: fontSize + 'px'
+        });
+        const chevron = labelIcon.querySelector('.category-collapse-chevron');
+        if (chevron) {
+            const chevSize = Math.max(8, Math.round(fontSize * 0.68));
+            Object.assign(chevron.style, {
+                fontSize: chevSize + 'px',
+                width: (chevSize + 2) + 'px',
+                marginRight: Math.max(4, Math.round(fontSize * 0.35)) + 'px'
+            });
+        }
+        styleDeleteButton(labelIcon.querySelector('.category-delete-btn'), size);
+    }
+
+    // Live-apply icon size + cents visibility to every rendered icon/placeholder/label.
+    function applyIconSizeToAll() {
+        const size = getIconSizePx();
+        const showCents = getShowCents();
+        const radius = Math.round(size * 0.14);
+        document.querySelectorAll('.icons-container .icon').forEach(icon => {
+            icon.style.width = size + 'px';
+            icon.style.height = size + 'px';
+            if (icon.classList.contains('empty-placeholder')) return;
+            icon.style.borderRadius = radius + 'px';
+            styleDeleteButton(icon.querySelector(':scope > .module-delete-btn'), size);
+            const tc = icon.querySelector(':scope > div');
+            if (tc && icon.moduleMeta) {
+                renderModuleIcon(tc, icon.moduleMeta, size, { showCents, name: icon.getAttribute('data-name') });
+            }
+        });
+        // Labels are not .icon elements (icon-only selectors deliberately exclude
+        // them), so they need their own pass to track the setting.
+        document.querySelectorAll('.icons-container .category-label').forEach(label => styleLabelIcon(label, size));
+        try { updateMaxHeight(); } catch (e) {}
+    }
+
+    // The module count shown on a collapsed section chip, via `content: attr(data-count)`.
+    // Written as an attribute (not text) so it never lands inside .category-label-text,
+    // which drag/reorder and saveUIState read, and so it can't retrigger the
+    // childList MutationObserver that autosaves.
+    function refreshSectionCounts() {
+        categoryContainers.forEach(section => {
+            if (!section) return;
+            const label = section.querySelector(':scope > .category-label');
+            if (!label) return;
+            const count = String(section.querySelectorAll(':scope > .icon:not(.empty-placeholder)').length);
+            if (label.getAttribute('data-count') !== count) label.setAttribute('data-count', count);
+        });
+    }
+
+    // === Collapsible sections (Phase 6.5) ===
+    // Collapse hides a section's module icons + trailing placeholder (via a CSS
+    // class), leaving just the label chip. The chip stops being a full-width row
+    // (.library-section drops to `flex: 0 0 auto`), and updateSectionFlow() drops
+    // the row-break between consecutive chips so they pack onto shared rows.
+    // Height re-fits through the same path as wrap/unwrap so the pull-tab stays
+    // consistent on desktop and mobile.
+    function setSectionCollapsed(container, collapsed) {
+        if (!container) return;
+        container.setAttribute('data-collapsed', collapsed ? 'true' : 'false');
+        container.classList.toggle('section-collapsed', !!collapsed);
+        const chevron = container.querySelector('.category-label .category-collapse-chevron');
+        if (chevron) chevron.textContent = collapsed ? '▸' : '▾';
+        refreshSectionCounts();
+        updateSectionFlow();
+        // Reclaim space when collapsing (shrink-only, same path as wrap/unwrap).
+        try { adjustHeightToContent(); } catch (e) {}
+    }
+
+    // An expanded section is a full-width flex item, so it always starts its own row;
+    // the dotted separator between sections is likewise full-width. This pass decides
+    // which separators are still wanted:
+    //   - between two collapsed chips: none, so the chips share a row;
+    //   - around a section hidden by search: none, so filtering leaves no blank rows
+    //     or orphan dividers;
+    //   - otherwise exactly one divider per visible section boundary.
+    // Reads only classes and writes only classes, so it is safe to call from the
+    // childList MutationObserver that autosaves.
+    function updateSectionFlow() {
+        const container = domCache.iconsContainer;
+        if (!container) return;
+        const has = (el, cls) => !!el.classList && el.classList.contains(cls);
+
+        let owner = null;   // last visible section seen
+        let run = [];       // separators since that section
+
+        // Keep the last divider of the run, unless the run sits between two chips
+        // (they share a row) or has no visible section above it.
+        const flush = (next) => {
+            const packed = owner && next && has(owner, 'section-collapsed') && has(next, 'section-collapsed');
+            const keep = (owner && !packed) ? run[run.length - 1] : null;
+            for (const el of run) el.classList.toggle('library-hidden', el !== keep);
+            run = [];
+        };
+
+        for (const el of Array.from(container.children)) {
+            if (has(el, 'library-section')) {
+                if (has(el, 'library-hidden')) continue; // its dividers fold into the current run
+                flush(el);
+                owner = el;
+            } else if (has(el, 'separator')) {
+                run.push(el);
+            }
+        }
+        flush(null); // trailing run: keeps the divider above the action buttons
+    }
+
+    // === Library search (Phase 6.5) ===
+    let currentSearchQuery = '';
+    let heightBeforeSearch = null;
+
+    function moduleMatchesQuery(icon, q) {
+        const parts = [];
+        const dn = icon.getAttribute('data-name');
+        if (dn) parts.push(dn);
+        const nameEl = icon.querySelector('div');
+        if (nameEl && nameEl.textContent) parts.push(nameEl.textContent);
+        const meta = icon.moduleMeta;
+        if (meta) {
+            if (meta.ratio) parts.push(String(meta.ratio));
+            if (meta.family) parts.push(String(meta.family));
+            if (meta.cents != null) parts.push(String(meta.cents));
+            if (Array.isArray(meta.tags)) parts.push(meta.tags.join(' '));
+            if (meta.file) parts.push(meta.file);
+        } else {
+            const fn = icon.getAttribute('data-filename');
+            if (fn) parts.push(fn);
+        }
+        return parts.join(' ').toLowerCase().includes(q);
+    }
+
+    // Filter visible modules by name/ratio/tags/family. While searching, matching
+    // modules are shown even inside collapsed sections; empty sections are hidden.
+    // Visibility is toggled with the .library-hidden class only — never with inline
+    // style.display, which would wipe the .library-section display and drop each
+    // section back to `display: block` (one icon per row).
+    function applyModuleSearch(query) {
+        const wasSearching = currentSearchQuery.trim().length > 0;
+        currentSearchQuery = query || '';
+        const q = currentSearchQuery.trim().toLowerCase();
+        const searching = q.length > 0;
+        // Filtering shrinks the content, and the ResizeObserver shrinks the bar to
+        // match — but the bar never auto-grows, so without this the bar would stay
+        // stranded at the results' height once the search is cleared. Remember the
+        // height the search started from and hand it back when it ends.
+        if (searching && !wasSearching) {
+            heightBeforeSearch = parseInt(document.defaultView.getComputedStyle(domCache.secondTopBar).height, 10) || null;
+        }
+        categoryContainers.forEach(section => {
+            if (!section) return;
+            const icons = Array.from(section.querySelectorAll(':scope > .icon:not(.empty-placeholder):not(.category-label)'));
+            const placeholder = section.querySelector(':scope > .empty-placeholder');
+            let anyMatch = false;
+            icons.forEach(icon => {
+                const show = !searching || moduleMatchesQuery(icon, q);
+                icon.classList.toggle('library-hidden', !show);
+                if (show) anyMatch = true;
+            });
+            if (placeholder) placeholder.classList.toggle('library-hidden', searching);
+            if (searching) {
+                section.classList.remove('section-collapsed'); // reveal matches regardless of collapse
+                section.classList.toggle('library-hidden', !anyMatch);
+            } else {
+                section.classList.remove('library-hidden');
+                // Restore the collapsed state the search temporarily revealed.
+                section.classList.toggle('section-collapsed', section.getAttribute('data-collapsed') === 'true');
+            }
+        });
+        refreshSectionCounts();
+        updateSectionFlow();
+        if (!searching && wasSearching && heightBeforeSearch != null) {
+            // Never above the fit height or the max — this restores, it doesn't grow.
+            const restored = Math.min(maxMenuBarHeight, getContentFitHeight(), heightBeforeSearch);
+            domCache.secondTopBar.style.height = Math.max(0, restored) + 'px';
+            heightBeforeSearch = null;
+        }
+    }
+
+    // === Toolbar (search + history) ===
+    // 24x24, stroke-only, currentColor — the idiom the gear and docs icons in index.html
+    // already use, so a button colours its glyph just by setting `color`.
+    function toolIconSVG(paths) {
+        return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${paths}</svg>`;
+    }
+    const ICON_SEARCH = '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.6 15.6 21 21"/>';
+    const ICON_UNDO = '<path d="M4 9h10a5.5 5.5 0 0 1 0 11h-3"/><path d="M8 5 4 9l4 4"/>';
+    const ICON_REDO = '<path d="M20 9H10a5.5 5.5 0 0 0 0 11h3"/><path d="m16 5 4 4-4 4"/>';
+    // Arrow-to-bar (⇤ / ⇥): the bar is the target note's edge, the arrow is the module
+    // being pushed against it.
+    const ICON_DROP_START = '<path d="M5 4v16"/><path d="M19 12H9"/><path d="m13 8-4 4 4 4"/>';
+    const ICON_DROP_END = '<path d="M19 4v16"/><path d="M5 12h10"/><path d="m11 8 4 4-4 4"/>';
+
+    function createToolButton(cls, label, iconPaths) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'library-tool-btn ' + cls;
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+        btn.innerHTML = toolIconSVG(iconPaths);
+        return btn;
+    }
+
+    function getToolbar() {
+        return domCache.secondTopBar ? domCache.secondTopBar.querySelector('.library-toolbar') : null;
+    }
+
+    let searchOpen = false;
+
+    // Open/close the search field. Closing ALWAYS clears the query: a filter still applied
+    // behind a folded-away field is a library that is silently missing modules, with
+    // nothing on screen to say why. Clearing is also what hands the bar back the height
+    // the search shrank it to (applyModuleSearch's heightBeforeSearch).
+    function setSearchOpen(open, { focus = true } = {}) {
+        const row = getToolbar();
+        if (!row) return;
+        const input = row.querySelector('.library-search-input');
+        const toggle = row.querySelector('.library-search-toggle');
+        searchOpen = !!open;
+        row.classList.toggle('search-open', searchOpen);
+        if (toggle) toggle.setAttribute('aria-expanded', searchOpen ? 'true' : 'false');
+        if (!input) return;
+        // Collapsed it is 0-wide and unpaintable, so keep it out of the tab order too —
+        // otherwise Tab lands on a field nobody can see.
+        input.tabIndex = searchOpen ? 0 : -1;
+        if (searchOpen) {
+            if (focus) input.focus();
+            return;
+        }
+        const hadFocus = document.activeElement === input;
+        input.value = '';
+        if (currentSearchQuery) applyModuleSearch('');
+        // Hand focus back to the magnifier rather than dropping it on <body>: the field the
+        // user was in is gone, and Enter has to be able to bring it back. (Only if the field
+        // actually held focus — a programmatic close must not steal it from elsewhere.)
+        if (hadFocus) {
+            if (toggle) toggle.focus();
+            else input.blur();
+        }
+    }
+
+    // The toolbar is bar chrome, not library content: it lives in .library-body above
+    // .icons-wrapper, so it survives a library rebuild (which wipes .icons-container) and
+    // does not scroll with the icons.
+    //
+    // Left: a magnifier that unfolds the search field — collapsed by default, because a
+    // permanently-open field sat there costing a module row's worth of width to show a
+    // control most sessions never touch. Right: the drop-mode pair (start/end — where a
+    // dropped module lands relative to the target note; it used to hide at the bottom of
+    // the library, a long scroll from the notes being edited), then undo/redo, which is
+    // the whole point of putting them here — history without opening the "+" menu, for
+    // anyone not using Ctrl+Z. Undo/redo emit the same eventBus events the menu's
+    // Undo/Redo buttons do.
+    //
+    // Every control is 30px tall and border-boxed, and the field collapses by WIDTH (never
+    // display/height), so the row's height is a constant 42px. That matters: its height is
+    // .icons-wrapper's top inset and part of the pull-tab's fit height, and neither is
+    // recomputed when the field opens (see getToolbarHeight).
+    function createToolbar() {
+        const row = document.createElement('div');
+        row.className = 'library-toolbar';
+
+        const toggle = createToolButton('library-search-toggle', 'Search modules', ICON_SEARCH);
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.addEventListener('click', () => setSearchOpen(!searchOpen));
+        // Keep the focus where it is while the toggle is pressed: without this, mousedown
+        // blurs the field, the blur handler below folds it shut, and the click that follows
+        // reads `searchOpen === false` and immediately reopens what the user just closed.
+        toggle.addEventListener('mousedown', (e) => e.preventDefault());
+
+        const input = document.createElement('input');
+        // Deliberately NOT type="search": WebKit gives that one a native Escape-to-clear
+        // that resets the value WITHOUT firing `input`, which would leave the library
+        // filtered against a query the field no longer shows. Escape is handled below.
+        input.type = 'text';
+        input.placeholder = 'Search name, ratio, tag…';
+        input.className = 'library-search-input';
+        input.value = currentSearchQuery;
+        input.tabIndex = -1;
+        input.setAttribute('autocomplete', 'off');
+        input.setAttribute('autocorrect', 'off');
+        input.setAttribute('spellcheck', 'false');
+        input.addEventListener('input', () => applyModuleSearch(input.value));
+        // An empty field that has lost focus is just chrome in the way — fold it back to
+        // the icon. A field with a live query stays open: the library is filtered, and the
+        // query has to remain visible and clearable.
+        input.addEventListener('blur', () => {
+            // The `searchOpen` guard makes this re-entrancy-safe: closing moves focus to the
+            // magnifier, which fires this blur, which would otherwise re-enter setSearchOpen.
+            if (searchOpen && !input.value.trim()) setSearchOpen(false);
+        });
+        input.addEventListener('keydown', (e) => {
+            if (e.key !== 'Escape') return;
+            // Only swallow Escape when this field is the thing it closes — the listener is
+            // on the input, so it can only fire while the field has focus.
+            e.stopPropagation();
+            setSearchOpen(false);
+        });
+
+        // Drop mode is a radio pair, not a command pair like undo/redo: one of the two is
+        // always lit (see syncDropModeButtons). Clicking the lit one is a no-op by design.
+        const dropGroup = document.createElement('div');
+        dropGroup.className = 'library-drop-group';
+        const dropStart = createToolButton('library-drop-btn library-drop-start-btn', 'Drop modules at note start', ICON_DROP_START);
+        const dropEnd = createToolButton('library-drop-btn library-drop-end-btn', 'Drop modules at note end', ICON_DROP_END);
+        dropStart.addEventListener('click', () => setModuleDropMode('start'));
+        dropEnd.addEventListener('click', () => setModuleDropMode('end'));
+        dropGroup.appendChild(dropStart);
+        dropGroup.appendChild(dropEnd);
+
+        const group = document.createElement('div');
+        group.className = 'library-tool-group';
+        const undo = createToolButton('library-undo-btn', 'Undo (Ctrl+Z)', ICON_UNDO);
+        const redo = createToolButton('library-redo-btn', 'Redo (Ctrl+Y)', ICON_REDO);
+        // Born disabled, like their counterparts in index.html: an empty history is the
+        // truth at boot, and syncHistoryButtons() (which needs the row mounted to find
+        // them) only runs once ensureToolbar has inserted it.
+        undo.disabled = true;
+        redo.disabled = true;
+        undo.addEventListener('click', () => { try { eventBus.emit('history:undo'); } catch (e) {} });
+        redo.addEventListener('click', () => { try { eventBus.emit('history:redo'); } catch (e) {} });
+        group.appendChild(undo);
+        group.appendChild(redo);
+
+        row.appendChild(toggle);
+        row.appendChild(input);
+        row.appendChild(dropGroup);
+        row.appendChild(group);
+        return row;
+    }
+
+    // The single writer of moduleDropMode from the UI side. Persists immediately, like
+    // the old bottom-of-library toggle did — the mode is part of the saved UI state.
+    function setModuleDropMode(value) {
+        if ((value !== 'start' && value !== 'end') || moduleDropMode === value) return;
+        moduleDropMode = value;
+        syncDropModeButtons();
+        saveUIStateToLocalStorage();
+    }
+
+    // Reflect moduleDropMode onto the pair. Called from ensureToolbar rather than only
+    // from clicks: applyUIState() restores the stored mode AFTER the toolbar was first
+    // built (init builds it before localStorage is read), and its ensureToolbar() call
+    // is what brings the buttons back in line with the restored value.
+    function syncDropModeButtons() {
+        const row = getToolbar();
+        if (!row) return;
+        [['.library-drop-start-btn', 'start'], ['.library-drop-end-btn', 'end']].forEach(([sel, value]) => {
+            const btn = row.querySelector(sel);
+            if (!btn) return;
+            const active = moduleDropMode === value;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
+    }
+
+    // Enable/disable from the live stacks. The bus does not replay, and this row is built
+    // during boot — possibly before the module's first snapshot is seeded — so the initial
+    // state is read from the store rather than waited for. `state` is the payload when this
+    // runs as a history:stackChanged subscriber (see init).
+    function syncHistoryButtons(state) {
+        const row = getToolbar();
+        if (!row) return;
+        let canUndo = false, canRedo = false;
+        try {
+            canUndo = state ? !!state.canUndo : history.canUndo();
+            canRedo = state ? !!state.canRedo : history.canRedo();
+        } catch (e) {}
+        const undo = row.querySelector('.library-undo-btn');
+        const redo = row.querySelector('.library-redo-btn');
+        if (undo) undo.disabled = !canUndo;
+        if (redo) redo.disabled = !canRedo;
+    }
+
+    // The clipping box for the bar's contents (toolbar + scrolling icons). The clip
+    // cannot live on .second-top-bar itself: the pull-tab hangs below it (bottom: -16px)
+    // and would be clipped away. With it here, dragging the bar shut closes over the
+    // toolbar exactly as it does over the icons.
+    function ensureLibraryBody() {
+        const bar = domCache.secondTopBar, wrapper = domCache.iconsWrapper;
+        if (!bar || !wrapper) return null;
+        let body = bar.querySelector(':scope > .library-body');
+        if (!body) {
+            body = document.createElement('div');
+            body.className = 'library-body';
+            bar.insertBefore(body, wrapper);
+            body.appendChild(wrapper);
+        }
+        return body;
+    }
+
+    // Create the toolbar once, above the scrolling icons wrapper. Kept (not recreated)
+    // across library rebuilds so an in-flight query, the input's focus, and the open/closed
+    // state survive; the query is simply re-applied to the freshly built icons.
+    function ensureToolbar() {
+        const body = ensureLibraryBody();
+        if (!body) return;
+        // Drop a stale row from the pre-move layout, if one is still in the container.
+        const orphan = domCache.iconsContainer && domCache.iconsContainer.querySelector(':scope > .library-toolbar');
+        if (orphan) orphan.remove();
+        if (!body.querySelector(':scope > .library-toolbar')) {
+            body.insertBefore(createToolbar(), body.firstChild);
+        }
+        // Only now that the row is IN the document can syncHistoryButtons find its buttons.
+        // It has to run here and not merely on the next history:stackChanged: the bus does
+        // not replay, and the module's initial snapshot may already have been seeded before
+        // this module ever subscribed.
+        syncHistoryButtons();
+        syncDropModeButtons();
+        // Re-apply an in-flight query to freshly built icons.
+        if (currentSearchQuery.trim()) applyModuleSearch(currentSearchQuery);
+    }
+
+    // Constant by construction (30px controls + 6px padding top/bottom = 42px), and it has
+    // to stay that way: this is .icons-wrapper's top inset and part of the pull-tab's fit
+    // height, and nothing re-measures it when the search field opens or closes.
+    function getToolbarHeight() {
+        const row = getToolbar();
+        return row ? row.offsetHeight : 0;
+    }
+
+    // The one description of "what the library looks like right now". Both persistence
+    // paths — the localStorage autosave and the "Save UI" download — serialize exactly
+    // this, so an exported file carries the same fields as a stored state. It has to
+    // carry `meta`: without a family/ratio an icon has no identity to draw, and
+    // rehydrates as the flat accent tile instead of its procedural one.
+    function captureUIState() {
+        const uiState = { categories: [], version: "1.0", libraryVersion: LIBRARY_VERSION, timestamp: Date.now(), dropMode: moduleDropMode };
+        categoryContainers.forEach(container => {
+            if (!container) return;
+            const categoryLabel = container.querySelector('.category-label');
+            if (!categoryLabel) return;
+            const category = categoryLabel.getAttribute('data-category');
+            if (!category) return;
+            const labelTextEl = categoryLabel.querySelector('.category-label-text');
+            const labelText = labelTextEl ? labelTextEl.textContent.trim() : (categoryLabel.textContent || '').trim() || category;
+            const moduleIcons = Array.from(container.querySelectorAll(':scope > .icon:not(.empty-placeholder):not(.category-label)'));
+            const categoryObj = { name: category, label: labelText, collapsed: container.getAttribute('data-collapsed') === 'true', modules: [] };
+            moduleIcons.forEach(icon => {
+                // data-name, never the tile's text: the tile holds an SVG now, so its
+                // textContent reads back as the glyphs of a fraction ("3 2 702¢").
+                const moduleName = icon.getAttribute('data-name')
+                    || (icon.moduleMeta && icon.moduleMeta.name)
+                    || (icon.getAttribute('data-filename') || '').replace(/\.json$/i, '')
+                    || '';
+                const dataFilename = icon.getAttribute('data-filename') || moduleName;
+                const file = icon.getAttribute('data-file') || (icon.moduleMeta && icon.moduleMeta.file) || null;
+                const isUploaded = icon.getAttribute('data-uploaded') === 'true';
+                const moduleEntry = {
+                    name: moduleName,
+                    filename: dataFilename,
+                    file: file,
+                    originalCategory: icon.getAttribute('data-original-category') || category,
+                    currentCategory: category,
+                    isUploaded: isUploaded
+                };
+                if (icon.moduleMeta) moduleEntry.meta = icon.moduleMeta;
+                // Embed full module JSON when there is no re-fetchable `file`
+                // (uploads, or built-ins carried over from a pre-v2 state without
+                // a file path). Built-ins with a `file` are re-fetched on rehydrate,
+                // keeping both localStorage and the exported file small even with a
+                // large shipped catalog.
+                if (icon.moduleData && (isUploaded || !file)) {
+                    if (!icon.moduleData.filename) icon.moduleData.filename = moduleName;
+                    moduleEntry.moduleData = icon.moduleData;
+                    moduleEntry.hasData = true;
+                }
+                if (icon.getAttribute('data-load-failed') === 'true') moduleEntry.loadFailed = true;
+                categoryObj.modules.push(moduleEntry);
+            });
+            uiState.categories.push(categoryObj);
+        });
+        return uiState;
+    }
+
     function saveUIStateToLocalStorage() {
         try {
-            const uiState = { categories: [], version: "1.0", timestamp: Date.now(), dropMode: moduleDropMode };
-            categoryContainers.forEach(container => {
-                if (!container) return;
-                const categoryLabel = container.querySelector('.category-label');
-                if (!categoryLabel) return;
-                const category = categoryLabel.getAttribute('data-category');
-                if (!category) return;
-                const moduleIcons = Array.from(container.querySelectorAll('.icon:not(.empty-placeholder):not(.category-label)'));
-                const categoryObj = { name: category, modules: [] };
-                moduleIcons.forEach(icon => {
-                    const textContainer = icon.querySelector('div');
-                    const moduleName = textContainer ? textContainer.textContent.trim() : '';
-                    let filename = icon.getAttribute('data-filename') || moduleName;
-                    if (icon.moduleData && icon.moduleData.filename) filename = icon.moduleData.filename;
-                    const moduleEntry = {
-                        name: moduleName,
-                        filename: filename,
-                        originalCategory: icon.getAttribute('data-original-category') || category,
-                        currentCategory: category,
-                        isUploaded: icon.getAttribute('data-uploaded') === 'true'
-                    };
-                    if (icon.moduleData) {
-                        if (!icon.moduleData.filename) icon.moduleData.filename = filename;
-                        moduleEntry.moduleData = icon.moduleData;
-                        moduleEntry.hasData = true;
-                    }
-                    if (icon.getAttribute('data-load-failed') === 'true') moduleEntry.loadFailed = true;
-                    categoryObj.modules.push(moduleEntry);
-                });
-                uiState.categories.push(categoryObj);
-            });
-            localStorage.setItem('ui-state', JSON.stringify(uiState));
+            localStorage.setItem('ui-state', JSON.stringify(captureUIState()));
         } catch (error) {
             console.error('Error saving UI state to localStorage:', error);
         }
     }
 
+    // Normalize a stored ui-state module entry into a common section-state module shape.
+    // `data` is the legacy v1 export's key for the embedded module JSON.
+    function normalizeStoredModule(m) {
+        return {
+            name: m.name,
+            filename: m.filename || ((m.name || 'module') + '.json'),
+            file: m.file || null,
+            meta: m.meta || null,
+            moduleData: m.moduleData || m.data || null,
+            isUploaded: !!m.isUploaded,
+            loadFailed: !!m.loadFailed,
+            originalCategory: m.originalCategory || null
+        };
+    }
+
+    // Index the manifest by file path and by name, so a stored module that lost its
+    // metadata can be matched back to its manifest item.
+    function manifestIndex(manifest) {
+        const byFile = new Map(), byName = new Map();
+        if (!manifest) return { byFile, byName };
+        for (const section of manifest.sections) {
+            for (const item of (section.items || [])) {
+                byFile.set(item.file, item);
+                // First item wins: two manifest entries can share a display name
+                // (e.g. "Harmonic 7th"), and a name-only match cannot tell them apart.
+                const stem = item.file.split('/').pop().replace(/\.json$/i, '');
+                for (const key of [item.name, stem]) {
+                    const k = String(key || '').trim().toLowerCase();
+                    if (k && !byName.has(k)) byName.set(k, item);
+                }
+            }
+        }
+        return { byFile, byName };
+    }
+
+    // Give a stored module its manifest metadata back — the file path, and the family /
+    // ratio / cents / tags the icon is drawn from. Matches on the file path first, then
+    // on the name, which is all a state written by the old exporter kept. Without this,
+    // such a state rehydrates into a library of flat accent tiles, and (because the
+    // autosave then writes those metadata-less icons straight back) stays that way.
+    // Uploads are never healed: a user's module that happens to be called "Major" is
+    // not the built-in Major, and adopting its file would re-fetch over their data.
+    // Returns true if the module now carries real metadata.
+    function healModuleMeta(m, index) {
+        if (m.isUploaded) return false;
+        if (m.meta && m.meta.family) return true;
+        let item = (m.file && index.byFile.get(m.file)) || null;
+        if (!item) {
+            for (const key of [m.name, String(m.filename || '').replace(/\.json$/i, '')]) {
+                const k = String(key || '').trim().toLowerCase();
+                if (k && index.byName.has(k)) { item = index.byName.get(k); break; }
+            }
+        }
+        if (!item) return false;
+        m.meta = item;
+        m.file = item.file;
+        if (!m.name) m.name = item.name;
+        return true;
+    }
+
+    // Convert a v2 manifest section into a render-ready section-state.
+    function manifestSectionToState(section) {
+        return {
+            id: section.id,
+            label: section.label || section.id,
+            collapsed: false,
+            modules: (section.items || []).map(item => ({
+                name: item.name || item.file.split('/').pop().replace(/\.json$/i, ''),
+                filename: item.file.split('/').pop(),
+                file: item.file,
+                meta: item,
+                moduleData: null,
+                isUploaded: false,
+                loadFailed: false,
+                originalCategory: section.id
+            }))
+        };
+    }
+
+    // Build a section container (label + icons + trailing placeholder) from a
+    // section-state and append it (plus breaker/separator) to the icons container.
+    // Icons fetch their data lazily (same as the cold-load path).
+    function renderSectionState(state, index, count) {
+        const iconsContainer = domCache.iconsContainer;
+        const sectionContainer = createSectionContainer();
+        categoryContainers.push(sectionContainer);
+        const labelIcon = createLabelIcon(state.label || state.id, state.id);
+        sectionContainer.appendChild(labelIcon);
+        if (state.collapsed) {
+            sectionContainer.setAttribute('data-collapsed', 'true');
+            sectionContainer.classList.add('section-collapsed');
+            const chev = labelIcon.querySelector('.category-collapse-chevron');
+            if (chev) chev.textContent = '▸';
+        }
+
+        for (const m of state.modules) {
+            let icon;
+            if (m.isUploaded && m.moduleData) {
+                if (!m.moduleData.filename) m.moduleData.filename = m.name;
+                icon = createModuleIcon(state.id, m.name, m.moduleData, m.meta || null);
+                icon.setAttribute('data-uploaded', 'true');
+            } else if (m.loadFailed) {
+                icon = createModuleIcon(state.id, m.filename, null, m.meta || null);
+                icon.classList.add('failed-to-load');
+                Object.assign(icon.style, { background: '#888888', color: '#ffffff' });
+                icon.setAttribute('data-load-failed', 'true');
+                const warningIcon = document.createElement('div');
+                Object.assign(warningIcon.style, { position: 'absolute', bottom: '2px', left: '2px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: 'var(--rmt-danger, #ff0000)', zIndex: '5' });
+                warningIcon.title = 'Module data failed to load';
+                icon.appendChild(warningIcon);
+                const tc = icon.querySelector('div:first-child');
+                if (tc) tc.style.opacity = '0.7';
+            } else {
+                // Built-in / re-fetchable: embedded data if present, else fetch via meta.file.
+                const meta = m.meta || (m.file ? { file: m.file, name: m.name } : null);
+                icon = createModuleIcon(state.id, m.filename, m.moduleData || null, meta);
+            }
+            if (m.originalCategory) icon.setAttribute('data-original-category', m.originalCategory);
+            sectionContainer.appendChild(icon);
+        }
+
+        const emptyPlaceholder = createEmptyPlaceholder(state.id);
+        sectionContainer.appendChild(emptyPlaceholder);
+        iconsContainer.appendChild(sectionContainer);
+        if (index < count - 1) iconsContainer.appendChild(createSectionSeparator());
+        return sectionContainer;
+    }
+
+    // Migrate a pre-v2 ui-state to v2 section-states: rebuild built-in sections from
+    // the manifest, preserve the user's 'custom' section wholesale + any user-created
+    // sections, and rescue uploads dragged into built-in sections (into custom).
+    function buildMigratedSectionStates(oldState, manifest) {
+        const index = manifestIndex(manifest);
+        const rescuedUploads = [];
+        const oldCustom = [];
+        const userSections = [];
+        for (const cat of oldState.categories) {
+            const isBuiltin = BUILTIN_SECTION_IDS.includes(cat.name);
+            if (cat.name === 'custom') {
+                for (const m of (cat.modules || [])) oldCustom.push(normalizeStoredModule(m));
+            } else if (!isBuiltin) {
+                userSections.push({ id: cat.name, label: cat.label || cat.name, collapsed: !!cat.collapsed,
+                                    modules: (cat.modules || []).map(normalizeStoredModule) });
+            } else {
+                // The built-in sections are rebuilt from the manifest below, so only user
+                // content in them needs rescuing. A pre-v2 state — and the old exporter —
+                // didn't record `isUploaded`, so treat anything the manifest doesn't
+                // recognise but that carries its own data as the user's, and keep it.
+                for (const raw of (cat.modules || [])) {
+                    const m = normalizeStoredModule(raw);
+                    if (!m.moduleData) continue;
+                    if (m.isUploaded || !healModuleMeta(m, index)) {
+                        m.isUploaded = true;
+                        rescuedUploads.push(m);
+                    }
+                }
+            }
+        }
+        // Sections the user arranged keep their modules, so let those modules reclaim
+        // their manifest metadata (and file) first. Rebuilding the built-in sections
+        // below then skips what they already hold — otherwise a module the user had
+        // dragged into Custom would be dealt out a second time in its home section.
+        const claimed = new Set();
+        for (const m of oldCustom.concat(...userSections.map(s => s.modules))) {
+            if (healModuleMeta(m, index) && m.file) claimed.add(m.file);
+        }
+        const unclaimed = (state) => ({ ...state, modules: state.modules.filter(m => !claimed.has(m.file)) });
+
+        const states = [];
+        for (const section of manifest.sections) {
+            if (section.id === 'custom') continue;
+            states.push(unclaimed(manifestSectionToState(section)));
+        }
+        const manifestCustom = manifest.sections.find(s => s.id === 'custom');
+        const customModules = (oldCustom.length
+            ? oldCustom
+            : (manifestCustom ? unclaimed(manifestSectionToState(manifestCustom)).modules : []))
+            .concat(rescuedUploads);
+        states.push({ id: 'custom', label: (manifestCustom && manifestCustom.label) || 'Custom', collapsed: false, modules: customModules });
+        for (const us of userSections) states.push(us);
+        return states;
+    }
+
+    // Reconcile a stored layout against the CURRENT manifest so library content
+    // updates take effect without a manual "Reload Defaults":
+    //   - re-derive metadata a lossy writer dropped, so built-ins get their icons back;
+    //   - drop stored built-in modules whose file no longer exists in the manifest
+    //     (prevents 404s / failed icons on renamed or removed modules);
+    //   - keep uploads + fileless embedded modules; refresh kept built-ins' meta;
+    //   - append manifest items not present in the stored state to their section
+    //     (creating the section if it is new).
+    function reconcileWithManifest(states, manifest) {
+        if (!manifest) return states;
+        const index = manifestIndex(manifest);
+        const fileToItem = index.byFile;
+        const presentFiles = new Set();
+        const outStates = states.map((st) => {
+            const modules = [];
+            for (const m of st.modules) {
+                healModuleMeta(m, index); // no-op once the module already has its metadata
+                if (m.file && fileToItem.has(m.file)) {
+                    m.meta = fileToItem.get(m.file); // refresh metadata from the manifest
+                    presentFiles.add(m.file);
+                    modules.push(m);
+                } else if (m.isUploaded || (!m.file && m.moduleData)) {
+                    modules.push(m); // user upload / fileless embedded module
+                }
+                // else: built-in whose file was removed/renamed → drop (no 404)
+            }
+            return { ...st, modules };
+        });
+        const stateById = new Map(outStates.map((s) => [s.id, s]));
+        for (const section of manifest.sections) {
+            for (const item of (section.items || [])) {
+                if (presentFiles.has(item.file)) continue;
+                let target = stateById.get(section.id);
+                if (!target) {
+                    target = { id: section.id, label: section.label || section.id, collapsed: false, modules: [] };
+                    stateById.set(section.id, target);
+                    outStates.push(target);
+                }
+                target.modules.push({
+                    name: item.name || item.file.split('/').pop().replace(/\.json$/i, ''),
+                    filename: item.file.split('/').pop(),
+                    file: item.file,
+                    meta: item,
+                    moduleData: null,
+                    isUploaded: false,
+                    loadFailed: false,
+                    originalCategory: section.id,
+                });
+                presentFiles.add(item.file);
+            }
+        }
+        return outStates;
+    }
+
+    // The one way a ui-state becomes a library. Boot-time rehydration from localStorage
+    // and the "Load UI" file import both land here, so an imported file gets the same
+    // treatment a stored one does: pre-v2 migration, reconciliation against the current
+    // manifest, metadata healing, and the full post-build layout pass.
+    // Resolves false when the state is unusable, so the caller can cold-load instead.
+    function applyUIState(uiState, { persist = false } = {}) {
+        if (!uiState || !Array.isArray(uiState.categories) || uiState.categories.length === 0) {
+            return Promise.resolve(false);
+        }
+        if (uiState.dropMode === 'start' || uiState.dropMode === 'end') moduleDropMode = uiState.dropMode;
+        const needsMigration = uiState.libraryVersion !== LIBRARY_VERSION;
+
+        return loadLibraryManifest().then(manifest => {
+            // Pre-v2 state with no manifest available: let the caller cold-load (legacy).
+            if (needsMigration && !manifest) return false;
+
+            let sectionStates = needsMigration
+                ? buildMigratedSectionStates(uiState, manifest)
+                : uiState.categories.map(cat => ({
+                      id: cat.name,
+                      label: cat.label || cat.name,
+                      collapsed: !!cat.collapsed,
+                      modules: (cat.modules || []).map(normalizeStoredModule)
+                  }));
+            // Heal the layout against the current manifest: new/removed content, and the
+            // metadata a lossy writer dropped. Safe after a migration too — it only fills
+            // in what is missing.
+            sectionStates = reconcileWithManifest(sectionStates, manifest);
+
+            domCache.iconsContainer.innerHTML = '';
+            categoryContainers = [];
+            sectionStates.forEach((state, i) => renderSectionState(state, i, sectionStates.length));
+
+            const actionButtons = createActionButtons();
+            domCache.iconsContainer.appendChild(createSectionSeparator());
+            domCache.iconsContainer.appendChild(actionButtons);
+            ensurePlaceholdersAtEnd();
+            normalizeLayoutSeparators();
+            injectLibraryStyle();
+            refreshSectionCounts();
+            updateSectionFlow();
+            ensureToolbar();
+            updateMaxHeight();
+            applyDefaultOpenHeight();
+            // Write the migrated/healed/imported layout back, so the repair happens once
+            // and an import survives the next reload.
+            if (persist || needsMigration) { try { saveUIStateToLocalStorage(); } catch (e) {} }
+            return true;
+        });
+    }
+
     function loadUIStateFromLocalStorage() {
+        let uiState;
         try {
             const storedState = localStorage.getItem('ui-state');
             if (!storedState) return false;
-            const uiState = JSON.parse(storedState);
-            if (uiState.dropMode) moduleDropMode = uiState.dropMode;
-            if (!uiState.categories || !Array.isArray(uiState.categories) || uiState.categories.length === 0) return false;
-            domCache.iconsContainer.innerHTML = '';
-            categoryContainers = [];
-            const moduleDataCache = {};
-            
-            const loadCategoryModules = async (category) => {
-                try {
-                    const response = await fetch(`modules/${category}/index.json`);
-                    if (!response.ok) return;
-                    const moduleList = await response.json();
-                    for (const filename of moduleList) {
-                        try {
-                            const moduleResponse = await fetch(`modules/${category}/${filename}`);
-                            if (moduleResponse.ok) {
-                                const moduleData = await moduleResponse.json();
-                                moduleDataCache[`${category}/${filename}`] = moduleData;
-                                moduleDataCache[`${category}/${filename.replace(/\.json$/i, '')}`] = moduleData;
-                            }
-                        } catch (error) {}
-                    }
-                } catch (error) {}
-            };
-            
-            const defaultCategories = ['intervals', 'chords', 'melodies', 'custom'];
-            const cachePromises = defaultCategories.map(category => loadCategoryModules(category));
-            uiState.categories.forEach(categoryObj => {
-                if (!defaultCategories.includes(categoryObj.name)) {
-                    cachePromises.push(loadCategoryModules(categoryObj.name));
-                }
-            });
-            
-            return Promise.all(cachePromises).then(() => {
-                const loadPromises = uiState.categories.map((categoryObj, index) => {
-                    return new Promise((resolve) => {
-                        const sectionContainer = document.createElement('div');
-                        Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
-                        categoryContainers.push(sectionContainer);
-                        const labelIcon = createLabelIcon(categoryObj.name, categoryObj.name);
-                        sectionContainer.appendChild(labelIcon);
-                        
-                        const processModules = async () => {
-                            for (const moduleInfo of categoryObj.modules) {
-                                let moduleData = null;
-                                if (moduleInfo.isUploaded && moduleInfo.moduleData) {
-                                    moduleData = moduleInfo.moduleData;
-                                    const displayName = moduleInfo.name;
-                                    if (!moduleData.filename) moduleData.filename = displayName;
-                                    const icon = createModuleIcon(categoryObj.name, displayName, moduleData);
-                                    icon.setAttribute('data-uploaded', 'true');
-                                    sectionContainer.appendChild(icon);
-                                    continue;
-                                }
-                                if (moduleInfo.loadFailed) {
-                                    const icon = createModuleIcon(categoryObj.name, moduleInfo.name + '.json', null);
-                                    icon.classList.add('failed-to-load');
-                                    Object.assign(icon.style, { background: '#888888', color: '#ffffff' });
-                                    icon.setAttribute('data-load-failed', 'true');
-                                    const warningIcon = document.createElement('div');
-                                    Object.assign(warningIcon.style, { position: 'absolute', bottom: '2px', left: '2px', width: '10px', height: '10px', borderRadius: '50%', backgroundColor: '#ff0000', zIndex: '5' });
-                                    warningIcon.title = 'Module data failed to load';
-                                    icon.appendChild(warningIcon);
-                                    const textContainer = icon.querySelector('div:first-child');
-                                    if (textContainer) textContainer.style.opacity = '0.7';
-                                    sectionContainer.appendChild(icon);
-                                    continue;
-                                }
-                                // First try to use embedded moduleData from localStorage
-                                if (moduleInfo.moduleData) {
-                                    moduleData = moduleInfo.moduleData;
-                                }
-                                // Fall back to cache from filesystem if no embedded data
-                                if (!moduleData && moduleInfo.originalCategory) {
-                                    const originalKey = `${moduleInfo.originalCategory}/${moduleInfo.name}`;
-                                    if (moduleDataCache[originalKey]) moduleData = moduleDataCache[originalKey];
-                                }
-                                if (!moduleData) {
-                                    const currentKey = `${categoryObj.name}/${moduleInfo.name}`;
-                                    if (moduleDataCache[currentKey]) moduleData = moduleDataCache[currentKey];
-                                }
-                                if (!moduleData) {
-                                    for (const category of defaultCategories) {
-                                        const key = `${category}/${moduleInfo.name}`;
-                                        if (moduleDataCache[key]) {
-                                            moduleData = moduleDataCache[key];
-                                            break;
-                                        }
-                                    }
-                                }
-                                const icon = createModuleIcon(categoryObj.name, moduleInfo.name + '.json', moduleData);
-                                if (moduleInfo.originalCategory) icon.setAttribute('data-original-category', moduleInfo.originalCategory);
-                                sectionContainer.appendChild(icon);
-                            }
-                            const emptyPlaceholder = createEmptyPlaceholder(categoryObj.name);
-                            sectionContainer.appendChild(emptyPlaceholder);
-                        };
-                        
-                        processModules().then(resolve);
-                        domCache.iconsContainer.appendChild(sectionContainer);
-                        const breaker = document.createElement('div');
-                        Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-                        domCache.iconsContainer.appendChild(breaker);
-                        if (index < uiState.categories.length - 1) {
-                            domCache.iconsContainer.appendChild(createSectionSeparator());
-                        }
-                    });
-                });
-                
-                return Promise.all(loadPromises).then(() => {
-                    const actionButtons = createActionButtons();
-                    domCache.iconsContainer.appendChild(createSectionSeparator());
-                    domCache.iconsContainer.appendChild(actionButtons);
-                    ensurePlaceholdersAtEnd();
-                    normalizeLayoutSeparators();
-                    updateMaxHeight();
-                    return true;
-                });
-            });
+            uiState = JSON.parse(storedState);
         } catch (error) {
             console.error('Error loading UI state from localStorage:', error);
             return false;
         }
+        return applyUIState(uiState).catch(error => {
+            console.error('Error loading UI state from localStorage:', error);
+            return false;
+        });
     }
 
     function clearUIStateFromLocalStorage() {
@@ -194,8 +899,15 @@ const menuAPI = (function() {
     }
 
     function init() {
+        // Inject before any section is built: sections get their layout from
+        // .library-section, so the sheet has to exist before they are rendered.
+        injectLibraryStyle();
+        ensureToolbar(); // bar chrome — must exist before the height math runs
+        // One subscription for the life of the page: the toolbar itself is created once
+        // and survives every library rebuild, so its buttons never need re-wiring.
+        try { eventBus.on('history:stackChanged', syncHistoryButtons); } catch (e) {}
         updateMaxHeight();
-        domCache.secondTopBar.style.height = '50px';
+        domCache.secondTopBar.style.height = '50px'; // replaced by applyDefaultOpenHeight() once the library is built
         setupResizeEvents();
         setupTouchEdgeAutoscroll();
         const loaded = loadUIStateFromLocalStorage();
@@ -212,13 +924,25 @@ const menuAPI = (function() {
         }
         window.addEventListener('resize', updateMaxHeight);
         setupAutoSave();
+        // Live-apply library icon size + cents visibility from Settings.
+        try {
+            settingsStore.subscribe(({ path }) => {
+                // resetSection('library') emits the bare section name, not a
+                // 'library.' path — match both or "Reset this tab" is a no-op here.
+                if (!path || path === 'library' || path.startsWith('library.')) applyIconSizeToAll();
+            });
+        } catch (e) {}
     }
-    
+
     function setupAutoSave() {
         window.addEventListener('beforeunload', saveUIStateToLocalStorage);
         setInterval(saveUIStateToLocalStorage, 30000);
         const onUIChanged = debounce(() => {
             try { saveUIStateToLocalStorage(); } catch (e) {}
+            // Re-derive chip counts + row-breaks after any structural change (reorder,
+            // add/delete). Both only write classes/attributes, which this observer
+            // does not watch, so they cannot re-trigger it.
+            try { refreshSectionCounts(); updateSectionFlow(); } catch (e) {}
             // If content got shorter (e.g., unwrapping on wider screens), shrink bar automatically.
             adjustHeightToContent();
         }, 200);
@@ -241,61 +965,35 @@ const menuAPI = (function() {
         };
     }
 
-    // Keep the first row centered between the top-bar bottom border and the menu separator on initial load only.
-    // When content wraps to multiple rows, revert to fixed padding for predictable spacing.
-    function updateInitialRowPadding() {
+    // Open the bar far enough to show the search row plus the library's first row of
+    // icons — the first thing a user wants to see. Once, on the first build; after that
+    // the height is the user's business (pull-tab), and adjustHeightToContent() only shrinks.
+    function applyDefaultOpenHeight() {
+        if (hasAppliedDefaultHeight) return;
         try {
-            const wrapper = domCache.iconsWrapper;
             const container = domCache.iconsContainer;
-            if (!wrapper || !container) return;
-
-            const available = wrapper.clientHeight; // space between top and separator inside second-top-bar
-            if (available <= 0) return;
-
-            // Collect relevant items that form the first line
-            const items = Array.from(container.children).filter(el => {
-                if (!el.classList) return false;
-                return el.classList.contains('icon') || el.classList.contains('category-label');
-            });
-            if (items.length === 0) return;
-
-            // Determine number of visual rows by unique offsetTop
-            const uniqueTops = Array.from(new Set(items.map(el => el.offsetTop)));
-            const isSingleRow = uniqueTops.length === 1;
-
-            if (!isSingleRow) {
-                // Multi-line: stable fixed spacing
-                container.style.paddingTop = '4px';
-                container.style.paddingBottom = '0px';
-                return;
-            }
-
-            // Single row: center precisely within available height
-            const rowHeight = Math.max(...items.map(el => el.offsetHeight)) || 42;
-            const topPad = Math.max(0, Math.round((available - rowHeight) / 2));
-            const bottomPad = Math.max(0, available - rowHeight - topPad);
-
-            container.style.paddingTop = topPad + 'px';
-            container.style.paddingBottom = bottomPad + 'px';
-            hasAppliedInitialPadding = true;
-        } catch (e) {
-            // no-op: do not break UX if measurements fail during early boot
-        }
+            if (!container || !container.querySelector('.library-section')) return; // not built yet
+            const cs = window.getComputedStyle(container);
+            const padding = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
+            const firstRow = getIconSizePx(); // label and icons are both one icon-size tall
+            const target = getToolbarHeight() + padding + firstRow + getSeparatorHeight();
+            const h = Math.min(maxMenuBarHeight, getContentFitHeight(), target);
+            domCache.secondTopBar.style.height = Math.max(0, h) + 'px';
+            hasAppliedDefaultHeight = true;
+        } catch (e) {}
     }
 
     function updateMaxHeight() {
-        const windowHeight = window.innerHeight;
+        const windowHeight = viewportHeight();
         const topBarHeight = domCache.topBar ? domCache.topBar.offsetHeight : TOP_BAR_HEIGHT;
         maxMenuBarHeight = windowHeight - topBarHeight - PULL_TAB_HEIGHT - SAFETY_MARGIN;
         const currentHeight = parseInt(domCache.secondTopBar.style.height || '50', 10);
         if (currentHeight > maxMenuBarHeight) domCache.secondTopBar.style.height = maxMenuBarHeight + 'px';
 
-        // Subtract the separator (including margins) so the wrapper can fully fit content without tiny scrollbars.
-        const sepH = getSeparatorHeight();
-        domCache.iconsWrapper.style.maxHeight = Math.max(0, (maxMenuBarHeight - sepH)) + 'px';
-
-        // After height constraints are applied, set initial row padding precisely.
-        if (!hasAppliedInitialPadding) updateInitialRowPadding();
+        // The toolbar overlays the top of the wrapper, so the wrapper is inset by its
+        // height and only the separator is subtracted from the wrapper's own max height.
+        domCache.iconsWrapper.style.paddingTop = getToolbarHeight() + 'px';
+        domCache.iconsWrapper.style.maxHeight = Math.max(0, (maxMenuBarHeight - getSeparatorHeight())) + 'px';
 
         // Auto-shrink to fit current content if window got wider and content unwrapped
         adjustHeightToContent();
@@ -317,8 +1015,10 @@ const menuAPI = (function() {
     }
 
     function initResize(e) {
+        const y = pointerOf(e).y;
+        if (!Number.isFinite(y)) return;
         isDragging = true;
-        startY = e.clientY || e.touches[0].clientY;
+        startY = y;
         startHeight = parseInt(document.defaultView.getComputedStyle(domCache.secondTopBar).height, 10);
         // Lock the target fit height at drag start so we don't chase layout while dragging
         targetFitHeight = Math.min(maxMenuBarHeight, getContentFitHeight());
@@ -327,7 +1027,8 @@ const menuAPI = (function() {
 
     function resize(e) {
         if (!isDragging) return;
-        const clientY = e.clientY || e.touches[0].clientY;
+        const clientY = pointerOf(e).y;
+        if (!Number.isFinite(clientY)) return;
         const deltaY = clientY - startY;
 
         // Clamp to the precomputed fit height so growth stops exactly when all content is visible (with 1px underflow).
@@ -353,9 +1054,13 @@ const menuAPI = (function() {
     function getContentHeight() { return domCache.iconsWrapper.scrollHeight; }
     function getMaxHeight() { return Math.min(maxMenuBarHeight, getContentHeight()); }
 
-    // Compute the separator height inside the second top bar, including its vertical margins.
+    // Height of the bar's own chrome separator (index.html), including its vertical
+    // margins. Scoped to a direct child: an unscoped '.separator' resolves in tree
+    // order to the FIRST section separator inside .icons-container, which
+    // updateSectionFlow() may have hidden (offsetHeight 0) — measuring the wrong
+    // element as 0 would understate the pull-tab fit height.
     function getSeparatorHeight() {
-        const sep = domCache.secondTopBar ? domCache.secondTopBar.querySelector('.separator') : null;
+        const sep = domCache.secondTopBar ? domCache.secondTopBar.querySelector(':scope > .separator') : null;
         if (!sep) return 0;
         const h = sep.offsetHeight || 0;
         const cs = window.getComputedStyle(sep);
@@ -363,10 +1068,11 @@ const menuAPI = (function() {
         const mt = parseFloat(cs.marginTop) || 0;
         return h + mt + mb;
     }
-    // Compute total height required to show all icons (icons-container content) plus separator.
+    // Height required to show everything: the wrapper's full scroll height (which
+    // already includes the inset for the overlaid search row) plus the separator.
     function getIconsContentHeight() {
-        const container = domCache.iconsContainer;
-        return container ? (container.scrollHeight || 0) : 0;
+        const wrapper = domCache.iconsWrapper;
+        return wrapper ? (wrapper.scrollHeight || 0) : 0;
     }
     function getContentFitHeight() {
         // 1px under exact content height to keep a tiny overflow so the vertical scrollbar remains visible.
@@ -458,14 +1164,39 @@ const menuAPI = (function() {
         labelIcon.classList.add('category-label');
         labelIcon.setAttribute('data-category', category);
         Object.assign(labelIcon.style, {
-            touchAction: 'none', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '1px solid #ffa800', borderRadius: '4px', padding: '0 8px', textTransform: 'uppercase',
-            fontFamily: "'Roboto Mono', monospace", color: '#ffa800', boxSizing: 'border-box',
-            background: 'transparent', cursor: 'pointer', position: 'relative'
+            touchAction: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            border: '1px solid var(--rmt-accent, #ffa800)', textTransform: 'uppercase',
+            fontFamily: "'Roboto Mono', monospace", color: 'var(--rmt-accent, #ffa800)', boxSizing: 'border-box',
+            background: 'transparent', cursor: 'pointer', position: 'relative', whiteSpace: 'nowrap'
         });
-        labelIcon.textContent = text;
+        // Collapse chevron + text kept in dedicated spans so drag/save/read logic
+        // (which reads the label text) ignores the chevron glyph.
+        const chevron = document.createElement('span');
+        chevron.className = 'category-collapse-chevron';
+        chevron.textContent = '▾'; // ▾ expanded
+        Object.assign(chevron.style, {
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            flex: '0 0 auto', opacity: '0.85', pointerEvents: 'none'
+        });
+        const labelTextSpan = document.createElement('span');
+        labelTextSpan.className = 'category-label-text';
+        labelTextSpan.textContent = text;
+        labelTextSpan.style.pointerEvents = 'none';
+        labelIcon.appendChild(chevron);
+        labelIcon.appendChild(labelTextSpan);
         labelIcon.setAttribute('draggable', 'true');
-        
+
+        // Click / tap toggles collapse. Guarded against the synthetic click that can
+        // follow a touch reorder-drag (see the pointerup handler below).
+        labelIcon.addEventListener('click', function(e) {
+            if (this._suppressClickUntil && Date.now() < this._suppressClickUntil) return;
+            const container = this.parentNode;
+            if (!container) return;
+            const collapsed = container.getAttribute('data-collapsed') === 'true';
+            setSectionCollapsed(container, !collapsed);
+            try { saveUIStateToLocalStorage(); } catch (err) {}
+        });
+
         labelIcon.addEventListener('dragstart', function(event) {
             draggedElement = this;
             draggedElementType = 'category';
@@ -480,19 +1211,19 @@ const menuAPI = (function() {
             if (draggedElementType === 'category' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
-                Object.assign(this.style, { border: '1px dashed #ff0000', backgroundColor: 'rgba(255, 0, 0, 0.1)' });
+                Object.assign(this.style, { border: '1px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.1)' });
             }
         });
         
         labelIcon.addEventListener('dragleave', function() {
             this.classList.remove('drag-over');
-            Object.assign(this.style, { border: '1px solid #ffa800', backgroundColor: 'transparent' });
+            Object.assign(this.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
         });
         
         labelIcon.addEventListener('drop', function(event) {
             event.preventDefault();
             this.classList.remove('drag-over');
-            Object.assign(this.style, { border: '1px solid #ffa800', backgroundColor: 'transparent' });
+            Object.assign(this.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
             if (draggedElementType === 'category' && draggedElement !== this) {
                 const draggedIndex = Array.from(categoryContainers).findIndex(container => 
                     container.querySelector('.category-label') === draggedElement);
@@ -513,20 +1244,21 @@ const menuAPI = (function() {
                         draggedParent.insertBefore(targetContainer, draggedNext);
                         targetParent.insertBefore(draggedContainer, targetNext);
                     }
-                    [categoryContainers[draggedIndex], categoryContainers[targetIndex]] = 
+                    [categoryContainers[draggedIndex], categoryContainers[targetIndex]] =
                     [categoryContainers[targetIndex], categoryContainers[draggedIndex]];
+                    updateSectionFlow(); // the reorder can change which row-breaks are needed
                     saveUIStateToLocalStorage();
                 }
             }
         });
-        
+
         labelIcon.addEventListener('dragend', function() {
             this.classList.remove('dragging');
             this.style.opacity = '1';
             draggedElement = null;
             draggedElementType = null;
             document.querySelectorAll('.category-label').forEach(label => {
-                Object.assign(label.style, { border: '1px solid #ffa800', backgroundColor: 'transparent' });
+                Object.assign(label.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
             });
         });
 
@@ -550,9 +1282,9 @@ const menuAPI = (function() {
                         position: 'fixed', width: 'auto', minWidth: '80px', height: '42px', padding: '0 8px',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontFamily: "'Roboto Mono', monospace", fontSize: '14px', textTransform: 'uppercase',
-                        color: '#ffa800', border: '1px solid #ffa800', borderRadius: '4px',
+                        color: 'var(--rmt-accent, #ffa800)', border: '1px solid var(--rmt-accent, #ffa800)', borderRadius: '4px',
                         boxShadow: '0 2px 6px rgba(0,0,0,0.5)', zIndex: '9999', pointerEvents: 'none',
-                        opacity: '0.7', background: 'rgba(21, 21, 37, 0.8)'
+                        opacity: '0.7', background: 'rgba(var(--rmt-bg-rgb), 0.8)'
                     });
                     document.body.appendChild(ghost);
                     draggedElement = thisLabel;
@@ -579,11 +1311,11 @@ const menuAPI = (function() {
                     const targetLabel = elemBelow ? elemBelow.closest('.category-label') : null;
                     document.querySelectorAll('.category-label').forEach(label => {
                         label.classList.remove('drag-over');
-                        Object.assign(label.style, { border: '1px solid #ffa800', backgroundColor: 'transparent' });
+                        Object.assign(label.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
                     });
                     if (targetLabel && targetLabel !== thisLabel) {
                         targetLabel.classList.add('drag-over');
-                        Object.assign(targetLabel.style, { border: '2px dashed #ff0000', backgroundColor: 'rgba(255, 0, 0, 0.1)' });
+                        Object.assign(targetLabel.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.1)' });
                         const indicator = document.getElementById('drag-indicator');
                         if (indicator) indicator.textContent = 'Drop on: ' + targetLabel.getAttribute('data-category');
                     }
@@ -622,19 +1354,23 @@ const menuAPI = (function() {
                                 draggedParent.insertBefore(targetContainer, draggedNext);
                                 targetParent.insertBefore(draggedContainer, targetNext);
                             }
-                            [categoryContainers[draggedIndex], categoryContainers[targetIndex]] = 
+                            [categoryContainers[draggedIndex], categoryContainers[targetIndex]] =
                             [categoryContainers[targetIndex], categoryContainers[draggedIndex]];
                             ensurePlaceholdersAtEnd();
+                            updateSectionFlow(); // the reorder can change which row-breaks are needed
                             saveUIStateToLocalStorage();
                         }
                     }
                 }
                 document.querySelectorAll('.category-label').forEach(label => {
                     label.classList.remove('drag-over');
-                    Object.assign(label.style, { border: '1px solid #ffa800', backgroundColor: 'transparent' });
+                    Object.assign(label.style, { border: '1px solid var(--rmt-accent, #ffa800)', backgroundColor: 'transparent' });
                 });
                 thisLabel.classList.remove('dragging');
                 thisLabel.style.opacity = '1';
+                // Suppress the synthetic click that follows a touch drag so a reorder
+                // doesn't also toggle the section collapse.
+                if (dragStarted) thisLabel._suppressClickUntil = Date.now() + 400;
                 draggedElement = null;
                 draggedElementType = null;
                 document.removeEventListener('pointermove', onPointerMove);
@@ -650,12 +1386,6 @@ const menuAPI = (function() {
         const catDelete = document.createElement('div');
         catDelete.className = 'category-delete-btn';
         catDelete.innerHTML = '×';
-        Object.assign(catDelete.style, {
-            position: 'absolute', top: '0px', right: '0px', width: '14px', height: '14px',
-            lineHeight: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center',
-            color: '#ff0000', background: 'transparent', cursor: 'pointer',
-            zIndex: '12', pointerEvents: 'auto', transition: 'transform 0.2s, color 0.2s'
-        });
         catDelete.title = 'Delete category';
         catDelete.addEventListener('click', function(e) {
             e.stopPropagation();
@@ -670,6 +1400,10 @@ const menuAPI = (function() {
         });
         labelIcon.appendChild(catDelete);
 
+        // Height / radius / type / delete-× placement all scale with the library
+        // icon-size setting; re-applied live by applyIconSizeToAll() when it changes.
+        styleLabelIcon(labelIcon);
+
         return labelIcon;
         }
 
@@ -677,8 +1411,9 @@ const menuAPI = (function() {
         const placeholder = document.createElement('div');
         placeholder.classList.add('icon', 'empty-placeholder');
         placeholder.setAttribute('data-category', category);
+        const phSize = getIconSizePx();
         Object.assign(placeholder.style, {
-            width: '42px', height: '42px', border: '2px dashed #ffffff', borderRadius: '4px',
+            width: phSize + 'px', height: phSize + 'px', border: '2px dashed #ffffff', borderRadius: Math.round(phSize * 0.14) + 'px',
             boxSizing: 'border-box', background: 'transparent', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center'
         });
@@ -699,7 +1434,7 @@ const menuAPI = (function() {
             if (draggedElementType === 'module' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
-                Object.assign(this.style, { border: '2px dashed #ff0000', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
+                Object.assign(this.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.2)' });
             }
         });
         
@@ -772,7 +1507,9 @@ const menuAPI = (function() {
                 continue;
             }
             const noteId = parseInt(note.id, 10);
-            if (isNaN(noteId) || noteId < 0 || noteId > 100000) {
+            // 65535 matches the u16 note-id field in LOAD_REF — the same cap
+            // the JSON loader and both expression parsers enforce.
+            if (isNaN(noteId) || noteId < 0 || noteId > 65535) {
                 errors.push(`notes[${i}]: invalid id ${note.id}`);
                 continue;
             }
@@ -800,6 +1537,67 @@ const menuAPI = (function() {
         }
 
         return { valid: errors.length === 0, errors };
+    }
+
+    // Add a module built in-app (today: "Copy to Modules" from a group selection) to the
+    // Custom section. Takes the SAME path an uploaded .json takes — validate, build an
+    // icon carrying moduleData, mark it uploaded, persist to ui-state — because that is
+    // what makes it survive a reload and be draggable back into the workspace.
+    // Returns the final (uniquified) name, or null if it could not be added.
+    function addCustomModule(baseName, moduleData) {
+        try {
+            if (!moduleData) return null;
+
+            const validation = validateModuleData(moduleData);
+            if (!validation.valid) {
+                console.error('[Security] Generated module failed validation:', validation.errors);
+                showNotification(`Could not copy: ${validation.errors.slice(0, 2).join('; ')}`, 'error');
+                return null;
+            }
+
+            const sectionContainer = categoryContainers.find(
+                (c) => c && c.querySelector('.category-label[data-category="custom"]')
+            );
+            if (!sectionContainer) {
+                showNotification('Custom section not found', 'error');
+                return null;
+            }
+
+            // Don't collide with an existing name — the library keys icons by name.
+            const taken = new Set(
+                [...sectionContainer.querySelectorAll('.icon')].map((i) => i.getAttribute('data-name'))
+            );
+            let name = String(baseName || 'Selection').trim() || 'Selection';
+            if (taken.has(name)) {
+                let i = 2;
+                while (taken.has(`${name} ${i}`)) i++;
+                name = `${name} ${i}`;
+            }
+
+            const data = { ...moduleData, filename: name };
+            const icon = createModuleIcon('custom', name, data);
+            icon.setAttribute('data-uploaded', 'true');
+
+            const placeholder = sectionContainer.querySelector('.empty-placeholder');
+            if (placeholder) sectionContainer.removeChild(placeholder);
+            sectionContainer.appendChild(icon);
+            ensurePlaceholdersAtEnd();
+
+            // The Custom section may be collapsed; a copy the user cannot see reads as a
+            // copy that did not happen.
+            try {
+                if (sectionContainer.getAttribute('data-collapsed') === 'true') {
+                    const label = sectionContainer.querySelector('.category-label[data-category="custom"]');
+                    if (label) label.click();
+                }
+            } catch {}
+
+            saveUIStateToLocalStorage();
+            return name;
+        } catch (e) {
+            console.error('addCustomModule failed', e);
+            return null;
+        }
     }
 
     function handleFileUpload(category, sectionContainer) {
@@ -850,7 +1648,7 @@ const menuAPI = (function() {
         document.body.removeChild(input);
     }
 
-    function createModuleIcon(category, filename, moduleData = null) {
+    function createModuleIcon(category, filename, moduleData = null, meta = null) {
         const moduleIcon = document.createElement('div');
         moduleIcon.classList.add('icon');
         moduleIcon.setAttribute('data-category', category);
@@ -860,34 +1658,49 @@ const menuAPI = (function() {
         const isUploaded = moduleIcon.getAttribute('data-uploaded') === 'true' || /module_-/.test(filename);
         moduleIcon.setAttribute('data-uploaded', isUploaded ? 'true' : 'false');
         moduleIcon.setAttribute('data-filename', filename);
+        // v2 manifest metadata (file path, ratio, cents, family, tags) — stashed on
+        // the icon so ui-state can round-trip it and 6.2 can render richer icons.
+        if (meta) {
+            moduleIcon.moduleMeta = meta;
+            if (meta.file) moduleIcon.setAttribute('data-file', meta.file);
+            if (meta.family) moduleIcon.setAttribute('data-family', meta.family);
+        }
+        const iconSize = getIconSizePx();
+        let displayName = (meta && meta.name) ? meta.name : filename.replace(/\.json$/i, '');
+        moduleIcon.setAttribute('data-name', displayName);
+        // Themed procedural SVG tile when the metadata says what the module IS; plain
+        // text tile otherwise (uploads, and the bare {file, name} stub a restore falls
+        // back to when the manifest is unreachable). Drawing that stub would hue it with
+        // the 'default' family — an amber tile that reads as a module whose icon broke.
+        const useSvg = !!(meta && (meta.family || meta.ratio));
         Object.assign(moduleIcon.style, {
-            width: '42px', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            width: iconSize + 'px', height: iconSize + 'px', display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontFamily: "'Roboto Mono', monospace", fontSize: '8px', lineHeight: '1.2', color: '#151525',
-            cursor: 'grab', touchAction: 'none', padding: '2px', boxSizing: 'border-box',
-            textAlign: 'center', wordWrap: 'break-word', overflow: 'hidden', background: '#ffa800',
+            cursor: 'grab', touchAction: 'none', padding: useSvg ? '0' : '2px', boxSizing: 'border-box',
+            textAlign: 'center', wordWrap: 'break-word', overflow: 'hidden',
+            background: useSvg ? 'transparent' : 'var(--rmt-accent, #ffa800)',
+            borderRadius: Math.round(iconSize * 0.14) + 'px',
             position: 'relative', border: '1px solid transparent', transition: 'border-color 0.3s, box-shadow 0.3s'
         });
         moduleIcon.setAttribute('draggable', 'true');
-        let displayName = filename.replace(/\.json$/i, '');
         const textContainer = document.createElement('div');
         Object.assign(textContainer.style, {
             width: '100%', height: '100%', display: 'flex', alignItems: 'center',
             justifyContent: 'center', overflow: 'hidden', padding: '0'
         });
-        textContainer.textContent = displayName;
+        if (useSvg) {
+            renderModuleIcon(textContainer, meta, iconSize, { showCents: getShowCents(), name: displayName });
+        } else {
+            textContainer.textContent = displayName;
+        }
         moduleIcon.appendChild(textContainer);
-        moduleIcon.title = displayName;
+        moduleIcon.title = displayName + (meta && meta.ratio ? `  (${meta.ratio}${meta.cents != null ? `, ${Math.round(meta.cents)}¢` : ''})` : '');
 
         const deleteButton = document.createElement('div');
         deleteButton.className = 'module-delete-btn';
         deleteButton.innerHTML = '×';
-        Object.assign(deleteButton.style, {
-            position: 'absolute', top: '1px', right: '1px', width: '14px', height: '14px',
-            lineHeight: '12px', fontSize: '14px', fontWeight: 'bold', textAlign: 'center',
-            color: '#ff0000', background: 'transparent', borderRadius: '0', cursor: 'pointer',
-            zIndex: '10', display: 'block', transition: 'transform 0.2s, color 0.2s', pointerEvents: 'auto'
-        });
-        
+        styleDeleteButton(deleteButton, iconSize);
+
         deleteButton.addEventListener('click', function(e) {
             e.stopPropagation();
             e.preventDefault();
@@ -895,14 +1708,14 @@ const menuAPI = (function() {
         });
         moduleIcon.appendChild(deleteButton);
         
+        // The × grows only on its own :hover (from its own centre, see CSS). Scaling it
+        // from the icon's hover as well made it twitch as the pointer crossed into it.
         moduleIcon.addEventListener('mouseenter', function() {
-            Object.assign(this.style, { borderColor: 'white', boxShadow: '0 0 5px #ffa800' });
-            deleteButton.style.transform = 'scale(1.1)';
+            Object.assign(this.style, { borderColor: 'white', boxShadow: '0 0 5px var(--rmt-accent, #ffa800)' });
         });
-        
+
         moduleIcon.addEventListener('mouseleave', function() {
             Object.assign(this.style, { borderColor: 'transparent', boxShadow: 'none' });
-            deleteButton.style.transform = 'scale(1)';
         });
 
         const markAsFailed = () => {
@@ -913,7 +1726,7 @@ const menuAPI = (function() {
             const warningIcon = document.createElement('div');
             Object.assign(warningIcon.style, {
                 position: 'absolute', bottom: '2px', left: '2px', width: '10px', height: '10px',
-                borderRadius: '50%', backgroundColor: '#ff0000', zIndex: '5'
+                borderRadius: '50%', backgroundColor: 'var(--rmt-danger, #ff0000)', zIndex: '5'
             });
             warningIcon.title = 'Module data failed to load';
             moduleIcon.appendChild(warningIcon);
@@ -925,21 +1738,22 @@ const menuAPI = (function() {
         } else if (isUploaded) {
             markAsFailed();
         } else {
-            const encodedFilename = encodeURIComponent(filename);
-            const url = 'modules/' + category + '/' + encodedFilename;
-            fetch(url)
-                .then(response => {
-                    if (!response.ok) {
-                        const altFilename = filename.replace(/\s+/g, '_');
-                        const altUrl = 'modules/' + category + '/' + altFilename;
-                        return fetch(altUrl);
-                    }
-                    return response;
-                })
-                .then(response => {
-                    if (!response.ok) throw new Error('Network response not ok for ' + filename);
-                    return response.json();
-                })
+            // v2: fetch by the manifest file path; legacy: fetch modules/<category>/<filename>.
+            const fetchPromise = (meta && meta.file)
+                ? fetchModuleFile(meta.file)
+                : fetch('modules/' + category + '/' + encodeURIComponent(filename))
+                    .then(response => {
+                        if (!response.ok) {
+                            const altUrl = 'modules/' + category + '/' + filename.replace(/\s+/g, '_');
+                            return fetch(altUrl);
+                        }
+                        return response;
+                    })
+                    .then(response => {
+                        if (!response.ok) throw new Error('Network response not ok for ' + filename);
+                        return response.json();
+                    });
+            fetchPromise
                 .then(data => {
                     data.filename = displayName;
                     moduleIcon.moduleData = data;
@@ -973,13 +1787,13 @@ const menuAPI = (function() {
             if (draggedElementType === 'module' && draggedElement !== this) {
                 event.preventDefault();
                 this.classList.add('drag-over');
-                Object.assign(this.style, { border: '2px dashed #ff0000', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
+                Object.assign(this.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.2)' });
             }
         });
         
         moduleIcon.addEventListener('dragleave', function() {
             this.classList.remove('drag-over');
-            Object.assign(this.style, { border: '1px solid transparent', backgroundColor: '#ffa800' });
+            Object.assign(this.style, { border: '1px solid transparent', backgroundColor: 'var(--rmt-accent, #ffa800)' });
         });
         
         moduleIcon.addEventListener('drop', function(event) {
@@ -1010,7 +1824,7 @@ const menuAPI = (function() {
                 [sourceIcon, targetIcon].forEach(icon => {
                     icon.classList.remove('drag-over');
                     icon.style.border = '1px solid transparent';
-                    icon.style.backgroundColor = '#ffa800';
+                    icon.style.backgroundColor = 'var(--rmt-accent, #ffa800)';
                 });
 
                 saveUIStateToLocalStorage();
@@ -1038,7 +1852,7 @@ const menuAPI = (function() {
                 if (icon.classList.contains('empty-placeholder')) {
                     icon.style.border = '2px dashed #ffffff';
                 } else if (!icon.classList.contains('category-label')) {
-                    Object.assign(icon.style, { border: '1px solid transparent', backgroundColor: '#ffa800' });
+                    Object.assign(icon.style, { border: '1px solid transparent', backgroundColor: 'var(--rmt-accent, #ffa800)' });
                 }
             });
         });
@@ -1059,19 +1873,27 @@ const menuAPI = (function() {
                     draggedElementCategory = category;
                     moduleIcon.classList.add('dragging');
                     moduleIcon.style.opacity = '0.5';
+                    const ghostSize = getIconSizePx();
                     ghost = document.createElement('div');
-                    ghost.textContent = displayName;
                     Object.assign(ghost.style, {
-                        position: 'fixed', width: '42px', height: '42px', display: 'flex',
+                        position: 'fixed', width: ghostSize + 'px', height: ghostSize + 'px', display: 'flex',
                         alignItems: 'center', justifyContent: 'center', fontFamily: "'Roboto Mono', monospace",
-                        fontSize: '10px', background: '#ffa800', color: '#151525', borderRadius: '4px',
-                        boxShadow: '0 2px 6px rgba(0,0,0,0.5)', zIndex: '9999', pointerEvents: 'none', opacity: '0.5'
+                        fontSize: '10px', color: '#151525', borderRadius: Math.round(ghostSize * 0.14) + 'px',
+                        boxShadow: '0 2px 6px rgba(0,0,0,0.5)', zIndex: '9999', pointerEvents: 'none', opacity: '0.6',
+                        overflow: 'hidden'
                     });
+                    if (moduleIcon.moduleMeta) {
+                        renderModuleIcon(ghost, moduleIcon.moduleMeta, ghostSize, { showCents: getShowCents(), name: displayName });
+                    } else {
+                        ghost.textContent = displayName;
+                        ghost.style.background = 'var(--rmt-accent, #ffa800)';
+                    }
                     document.body.appendChild(ghost);
                 }
                 if (dragStarted && ghost) {
-                    ghost.style.left = (ev.clientX - 21) + 'px';
-                    ghost.style.top = (ev.clientY - 21) + 'px';
+                    const gh = (ghost.offsetWidth || getIconSizePx()) / 2;
+                    ghost.style.left = (ev.clientX - gh) + 'px';
+                    ghost.style.top = (ev.clientY - gh) + 'px';
                     const elemBelow = document.elementFromPoint(ev.clientX, ev.clientY);
                     document.querySelectorAll('.drag-over').forEach(el => {
                         el.classList.remove('drag-over');
@@ -1079,7 +1901,7 @@ const menuAPI = (function() {
                             if (el.classList.contains('empty-placeholder')) {
                                 el.style.border = '2px dashed #ffffff';
                             } else {
-                                Object.assign(el.style, { border: '1px solid transparent', backgroundColor: '#ffa800' });
+                                Object.assign(el.style, { border: '1px solid transparent', backgroundColor: 'var(--rmt-accent, #ffa800)' });
                             }
                         }
                     });
@@ -1088,7 +1910,7 @@ const menuAPI = (function() {
                         if (targetIcon && targetIcon !== moduleIcon) {
                             targetIcon.classList.add('drag-over');
                             if (!targetIcon.classList.contains('category-label')) {
-                                Object.assign(targetIcon.style, { border: '2px dashed #ff0000', backgroundColor: 'rgba(255, 0, 0, 0.2)' });
+                                Object.assign(targetIcon.style, { border: '2px dashed var(--rmt-danger, #ff0000)', backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.2)' });
                             }
                         }
                         const noteTarget = elemBelow.closest('[data-note-id]');
@@ -1106,7 +1928,7 @@ const menuAPI = (function() {
                         if (el.classList.contains('empty-placeholder')) {
                             el.style.border = '2px dashed #ffffff';
                         } else {
-                            Object.assign(el.style, { border: '1px solid transparent', backgroundColor: '#ffa800' });
+                            Object.assign(el.style, { border: '1px solid transparent', backgroundColor: 'var(--rmt-accent, #ffa800)' });
                         }
                     }
                 });
@@ -1190,12 +2012,12 @@ const menuAPI = (function() {
         const modal = document.createElement('div');
         modal.className = 'delete-confirm-modal';
         const message = document.createElement('p');
-        message.innerHTML = "This will <span style='color: #ff0000;'>remove any changes</span> to the UI, this action is <span style='color: #ff0000;'>irreversible</span>, are you sure you wish to proceed?";
+        message.innerHTML = "This will <span style='color: var(--rmt-danger, #ff0000);'>remove any changes</span> to the UI, this action is <span style='color: var(--rmt-danger, #ff0000);'>irreversible</span>, are you sure you wish to proceed?";
         const btnContainer = document.createElement('div');
         btnContainer.className = 'modal-btn-container';
         const yesButton = document.createElement('button');
         yesButton.textContent = 'Yes, Reload Defaults';
-        Object.assign(yesButton.style, { backgroundColor: '#ff0000', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
+        Object.assign(yesButton.style, { backgroundColor: 'var(--rmt-danger, #ff0000)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
         const cancelButton = document.createElement('button');
         cancelButton.textContent = 'Cancel';
         Object.assign(cancelButton.style, { backgroundColor: '#add8e6', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer' });
@@ -1217,12 +2039,12 @@ const menuAPI = (function() {
         modal.className = 'delete-confirm-modal';
         const message = document.createElement('p');
         // SECURITY: Escape moduleName to prevent XSS
-        message.innerHTML = `Are you sure you want to <span style='color: #ff0000;'>remove</span> the module "<span style='color: #ffa800;'>${escapeHtml(moduleName)}</span>" from the menu?`;
+        message.innerHTML = `Are you sure you want to <span style='color: var(--rmt-danger, #ff0000);'>remove</span> the module "<span style='color: var(--rmt-accent, #ffa800);'>${escapeHtml(moduleName)}</span>" from the menu?`;
         const btnContainer = document.createElement('div');
         btnContainer.className = 'modal-btn-container';
         const yesButton = document.createElement('button');
         yesButton.textContent = 'Yes, Remove';
-        Object.assign(yesButton.style, { backgroundColor: '#ff0000', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
+        Object.assign(yesButton.style, { backgroundColor: 'var(--rmt-danger, #ff0000)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
         const cancelButton = document.createElement('button');
         cancelButton.textContent = 'Cancel';
         Object.assign(cancelButton.style, { backgroundColor: '#add8e6', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer' });
@@ -1261,12 +2083,12 @@ const menuAPI = (function() {
         modal.className = 'delete-confirm-modal';
         const message = document.createElement('p');
         // SECURITY: Escape categoryName to prevent XSS
-        message.innerHTML = `Are you sure you want to <span style='color: #ff0000;'>remove</span> the category "<span style='color: #ffa800;'>${escapeHtml((categoryName || '').toUpperCase())}</span>" and all its icons from the menu?`;
+        message.innerHTML = `Are you sure you want to <span style='color: var(--rmt-danger, #ff0000);'>remove</span> the category "<span style='color: var(--rmt-accent, #ffa800);'>${escapeHtml((categoryName || '').toUpperCase())}</span>" and all its icons from the menu?`;
         const btnContainer = document.createElement('div');
         btnContainer.className = 'modal-btn-container';
         const yesButton = document.createElement('button');
         yesButton.textContent = 'Yes, Remove Category';
-        Object.assign(yesButton.style, { backgroundColor: '#ff0000', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
+        Object.assign(yesButton.style, { backgroundColor: 'var(--rmt-danger, #ff0000)', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer', marginRight: '10px' });
         const cancelButton = document.createElement('button');
         cancelButton.textContent = 'Cancel';
         Object.assign(cancelButton.style, { backgroundColor: '#add8e6', color: '#000', border: 'none', padding: '10px 20px', borderRadius: '4px', cursor: 'pointer' });
@@ -1275,18 +2097,27 @@ const menuAPI = (function() {
             try {
                 if (sectionContainer && sectionContainer.parentNode) {
                     const container = sectionContainer.parentNode;
-                    const breaker = sectionContainer.nextElementSibling;
-                    const maybeSeparator = breaker && breaker.nextElementSibling && breaker.nextElementSibling.classList && breaker.nextElementSibling.classList.contains('separator') ? breaker.nextElementSibling : null;
+                    // Take the section's own divider with it. For the last section that
+                    // is the divider above the action buttons, so fall back to the one
+                    // above the section instead — never leave two stacked or none.
+                    const next = sectionContainer.nextElementSibling;
+                    const prev = sectionContainer.previousElementSibling;
+                    const isSep = (el) => !!(el && el.classList && el.classList.contains('separator'));
+                    const nextSection = next && next.nextElementSibling;
+                    const divider = (isSep(next) && nextSection && nextSection.classList.contains('library-section'))
+                        ? next
+                        : (isSep(prev) ? prev : (isSep(next) ? next : null));
 
                     container.removeChild(sectionContainer);
-                    if (breaker && breaker.parentNode === container) container.removeChild(breaker);
-                    if (maybeSeparator && maybeSeparator.parentNode === container) container.removeChild(maybeSeparator);
+                    if (divider && divider.parentNode === container) container.removeChild(divider);
 
                     const idx = categoryContainers.indexOf(sectionContainer);
                     if (idx !== -1) categoryContainers.splice(idx, 1);
 
                     ensurePlaceholdersAtEnd();
                     normalizeLayoutSeparators();
+                    refreshSectionCounts();
+                    updateSectionFlow();
                     updateMaxHeight();
                     saveUIStateToLocalStorage();
                 }
@@ -1307,6 +2138,7 @@ const menuAPI = (function() {
     function reloadModuleIcons() {
         domCache.iconsContainer.innerHTML = '';
         categoryContainers = [];
+        libraryManifest = null; // bust the in-memory cache so a fresh manifest is fetched
         clearUIStateFromLocalStorage();
         loadModuleIcons();
     }
@@ -1404,7 +2236,7 @@ const menuAPI = (function() {
             });
             button.addEventListener('mouseenter', function() {
                 this.style.backgroundColor = color;
-                this.style.color = color === '#ff0000' ? '#fff' : '#151525';
+                this.style.color = color === 'var(--rmt-danger, #ff0000)' ? '#fff' : '#151525';
             });
             button.addEventListener('mouseleave', function() {
                 this.style.backgroundColor = 'transparent';
@@ -1414,8 +2246,8 @@ const menuAPI = (function() {
             return button;
         };
         
-        buttonsContainer.appendChild(createButton('Save UI', '#ffa800', saveUIState));
-        buttonsContainer.appendChild(createButton('Load UI', '#ffa800', loadUIState));
+        buttonsContainer.appendChild(createButton('Save UI', 'var(--rmt-accent, #ffa800)', saveUIState));
+        buttonsContainer.appendChild(createButton('Load UI', 'var(--rmt-accent, #ffa800)', loadUIState));
 
         const onAddCategory = () => {
             try {
@@ -1433,8 +2265,7 @@ const menuAPI = (function() {
                 const iconsContainer = domCache.iconsContainer;
                 if (!iconsContainer) return;
 
-                const sectionContainer = document.createElement('div');
-                Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+                const sectionContainer = createSectionContainer();
                 categoryContainers.push(sectionContainer);
 
                 const labelIcon = createLabelIcon(displayName, slug);
@@ -1443,112 +2274,59 @@ const menuAPI = (function() {
                 const emptyPlaceholder = createEmptyPlaceholder(slug);
                 sectionContainer.appendChild(emptyPlaceholder);
 
-                // Insert before the final separator + action buttons
+                // Insert before the final separator + action buttons, with its own
+                // divider so it is separated from the section above it.
                 const actionButtons = iconsContainer.lastElementChild;
                 const sep = actionButtons && actionButtons.previousElementSibling && actionButtons.previousElementSibling.classList && actionButtons.previousElementSibling.classList.contains('separator')
                     ? actionButtons.previousElementSibling
                     : null;
+                const before = sep || actionButtons;
 
-                if (sep) {
-                    iconsContainer.insertBefore(sectionContainer, sep);
-                    const breaker = document.createElement('div');
-                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-                    iconsContainer.insertBefore(breaker, sep);
-                } else if (actionButtons) {
-                    iconsContainer.insertBefore(sectionContainer, actionButtons);
-                    const breaker = document.createElement('div');
-                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-                    iconsContainer.insertBefore(breaker, actionButtons);
+                if (before) {
+                    iconsContainer.insertBefore(createSectionSeparator(), before);
+                    iconsContainer.insertBefore(sectionContainer, before);
                 } else {
                     // Fallback: append at end
+                    iconsContainer.appendChild(createSectionSeparator());
                     iconsContainer.appendChild(sectionContainer);
-                    const breaker = document.createElement('div');
-                    Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-                    iconsContainer.appendChild(breaker);
                 }
 
                 ensurePlaceholdersAtEnd();
                 normalizeLayoutSeparators();
+                refreshSectionCounts();
+                updateSectionFlow();
                 saveUIStateToLocalStorage();
                 updateMaxHeight();
                 showNotification(`Category "${displayName}" added`, 'success');
             } catch (e) {}
         };
 
-        buttonsContainer.appendChild(createButton('Add Category', '#ffa800', onAddCategory));
-        buttonsContainer.appendChild(createButton('Reload Defaults', '#ff0000', showReloadDefaultsConfirmation));
+        buttonsContainer.appendChild(createButton('Add Category', 'var(--rmt-accent, #ffa800)', onAddCategory));
+        buttonsContainer.appendChild(createButton('Reload Defaults', 'var(--rmt-danger, #ff0000)', showReloadDefaultsConfirmation));
 
-        // Drop mode toggle row (placed above buttons)
-        const dropModeRow = document.createElement('div');
-        Object.assign(dropModeRow.style, {
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-            marginTop: '18px', marginBottom: '4px', width: '100%', fontFamily: "'Roboto Mono', monospace", fontSize: '12px', color: '#ffa800'
-        });
+        return buttonsContainer;
+    }
 
-        const dropModeLabel = document.createElement('span');
-        dropModeLabel.textContent = 'Drop at:';
-
-        const createToggleOption = (text, value) => {
-            const option = document.createElement('span');
-            option.textContent = text;
-            option.dataset.value = value;
-            Object.assign(option.style, {
-                padding: '4px 8px', borderRadius: '3px', cursor: 'pointer',
-                border: '1px solid #ffa800', transition: 'background-color 0.2s, color 0.2s'
-            });
-            const updateStyle = () => {
-                if (moduleDropMode === value) {
-                    option.style.backgroundColor = '#ffa800';
-                    option.style.color = '#151525';
-                } else {
-                    option.style.backgroundColor = 'transparent';
-                    option.style.color = '#ffa800';
-                }
-            };
-            updateStyle();
-            option.addEventListener('click', () => {
-                moduleDropMode = value;
-                saveUIStateToLocalStorage();
-                dropModeRow.querySelectorAll('span[data-value]').forEach(opt => {
-                    if (opt.dataset.value === moduleDropMode) {
-                        opt.style.backgroundColor = '#ffa800';
-                        opt.style.color = '#151525';
-                    } else {
-                        opt.style.backgroundColor = 'transparent';
-                        opt.style.color = '#ffa800';
-                    }
-                });
-            });
-            return option;
-        };
-
-        dropModeRow.appendChild(dropModeLabel);
-        dropModeRow.appendChild(createToggleOption('Start', 'start'));
-        dropModeRow.appendChild(createToggleOption('End', 'end'));
-
-        // Wrap with toggle above buttons
-        const wrapper = document.createElement('div');
-        Object.assign(wrapper.style, { display: 'flex', flexDirection: 'column', width: '100%' });
-        wrapper.appendChild(dropModeRow);
-        wrapper.appendChild(buttonsContainer);
-
-        return wrapper;
+    // A section row (label + module icons + trailing placeholder). Layout lives in
+    // .library-section (injectLibraryStyle) rather than inline styles, so code that
+    // shows/hides a section can toggle a class without clobbering `display: flex`.
+    function createSectionContainer() {
+        const sectionContainer = document.createElement('div');
+        sectionContainer.classList.add('library-section');
+        return sectionContainer;
     }
 
     function createSectionSeparator() {
         const separator = document.createElement('div');
         separator.classList.add('separator');
-        // Rely on CSS (.separator { height: 1px; border-bottom: 1px dotted #ffa800; })
+        // Rely on CSS (.separator { height: 1px; border-bottom: 1px dotted var(--rmt-accent, #ffa800); })
         // to draw a single line. Do not add a top border here to avoid double lines.
         Object.assign(separator.style, { width: '100%', opacity: '0.3', marginTop: '0px', marginBottom: '0px' });
         return separator;
     }
 
-    function loadModuleIcons() {
-        const iconsContainer = domCache.iconsContainer;
-        if (!iconsContainer) return;
-        iconsContainer.innerHTML = '';
-        categoryContainers = [];
+    // Ensure the viewport meta opts out of default touch gestures (mobile pan/zoom).
+    function ensureLibraryViewport() {
         const metaTag = document.querySelector('meta[name="viewport"]');
         if (metaTag) {
             const content = metaTag.getAttribute('content');
@@ -1561,10 +2339,49 @@ const menuAPI = (function() {
             newMeta.content = 'width=device-width, initial-scale=1.0, user-scalable=no, touch-action=none';
             document.head.appendChild(newMeta);
         }
+    }
+
+    // Append a section container (label + module icons + trailing placeholder) plus
+    // its breaker and separator to the icons container. Shared by both build paths.
+    function appendSection(iconsContainer, { id, label, buildItems }, index, count) {
+        const sectionContainer = createSectionContainer();
+        categoryContainers.push(sectionContainer);
+        const labelIcon = createLabelIcon(label || id, id);
+        sectionContainer.appendChild(labelIcon);
+        buildItems(sectionContainer);
+        const emptyPlaceholder = createEmptyPlaceholder(id);
+        sectionContainer.appendChild(emptyPlaceholder);
+        iconsContainer.appendChild(sectionContainer);
+        if (index < count - 1) iconsContainer.appendChild(createSectionSeparator());
+        return sectionContainer;
+    }
+
+    // v2 path: build sections directly from the manifest (all metadata is inline).
+    function buildSectionsFromManifest(sections) {
+        const iconsContainer = domCache.iconsContainer;
+        sections.forEach((section, index) => {
+            appendSection(iconsContainer, {
+                id: section.id,
+                label: section.label,
+                buildItems: (container) => {
+                    (section.items || []).forEach(item => {
+                        const filename = item.file.split('/').pop();
+                        const icon = createModuleIcon(section.id, filename, null, item);
+                        container.appendChild(icon);
+                    });
+                }
+            }, index, sections.length);
+        });
+        finalizeLibraryLayout();
+    }
+
+    // Legacy path: per-category index.json arrays (kept as a fallback for when
+    // the top-level v2 manifest is missing or itself an Array).
+    function buildSectionsLegacy() {
+        const iconsContainer = domCache.iconsContainer;
         const categories = ['intervals', 'chords', 'melodies', 'custom'];
         categories.forEach((category, index) => {
-            const sectionContainer = document.createElement('div');
-            Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
+            const sectionContainer = createSectionContainer();
             categoryContainers.push(sectionContainer);
             const labelIcon = createLabelIcon(category, category);
             sectionContainer.appendChild(labelIcon);
@@ -1593,59 +2410,182 @@ const menuAPI = (function() {
                     }
                 });
             iconsContainer.appendChild(sectionContainer);
-            const breaker = document.createElement('div');
-            Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-            iconsContainer.appendChild(breaker);
-            if (index < categories.length - 1) {
+                if (index < categories.length - 1) {
                 iconsContainer.appendChild(createSectionSeparator());
             }
         });
+        finalizeLibraryLayout();
+    }
+
+    // Append the action buttons + normalize separators. Shared by both build paths.
+    function finalizeLibraryLayout() {
+        const iconsContainer = domCache.iconsContainer;
         const actionButtons = createActionButtons();
         iconsContainer.appendChild(createSectionSeparator());
         iconsContainer.appendChild(actionButtons);
         normalizeLayoutSeparators();
- 
+        refreshSectionCounts();
+        updateSectionFlow();
+    }
+
+    function loadModuleIcons() {
+        const iconsContainer = domCache.iconsContainer;
+        if (!iconsContainer) return;
+        iconsContainer.innerHTML = '';
+        categoryContainers = [];
+        ensureLibraryViewport();
+        loadLibraryManifest().then(manifest => {
+            if (manifest) {
+                buildSectionsFromManifest(manifest.sections);
+            } else {
+                buildSectionsLegacy();
+            }
+            injectLibraryStyle();
+            ensureToolbar();
+            setTimeout(() => { updateMaxHeight(); applyDefaultOpenHeight(); }, 100);
+        });
+    }
+
+    function injectLibraryStyle() {
+        if (document.getElementById('rmt-library-style')) return;
         const style = document.createElement('style');
+        style.id = 'rmt-library-style';
         style.textContent = `
             .icon { position: relative; }
             .icon > div:first-child { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; text-align: center; padding: 0; }
             .icon.dragging, .category-label.dragging { opacity: 0.5; }
-            .icon.drag-over, .category-label.drag-over, .empty-placeholder.drag-over { border: 2px dashed #ff0000 !important; background-color: rgba(255, 0, 0, 0.1); }
+            .icon.drag-over, .category-label.drag-over, .empty-placeholder.drag-over { border: 2px dashed var(--rmt-danger, #ff0000) !important; background-color: rgba(var(--rmt-danger-rgb), 0.1); }
             .icons-wrapper { overflow-y: scroll; overflow-x: hidden; scrollbar-gutter: stable both-edges; }
-            .empty-placeholder { display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
-            .empty-placeholder:hover { opacity: 1; border-color: #ffa800; background-color: rgba(255, 168, 0, 0.1); }
-            .module-delete-btn { position: absolute; top: 1px; right: 1px; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: #ff0000; background: transparent !important; border-radius: 0; cursor: pointer; z-index: 10; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
-            .module-delete-btn:hover { transform: scale(1.2); color: #ff0000; text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); background-color: transparent !important; }
-            .category-delete-btn { position: absolute; top: 0; right: 0; width: 14px; height: 14px; line-height: 12px; font-size: 14px; font-weight: bold; text-align: center; color: #ff0000; background: transparent !important; cursor: pointer; z-index: 12; display: block; transition: transform 0.2s, color 0.2s; pointer-events: auto; }
-            .category-delete-btn:hover { transform: scale(1.2); color: #ff0000; text-shadow: 0 0 3px rgba(255, 0, 0, 0.5); }
-            .empty-placeholder { width: 42px; height: 42px; border: 2px dashed #ffffff; border-radius: 4px; box-sizing: border-box; background: transparent; cursor: pointer; margin: 2px; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
+            /* No margin: it would make an expanded row taller than the icons in it, so
+               collapsing a section (which hides the placeholder) would change the row
+               height. Spacing comes from the container/section gap alone. */
+            .empty-placeholder { box-sizing: border-box; background: transparent; cursor: pointer; margin: 0; display: flex; align-items: center; justify-content: center; opacity: 0.7; transition: opacity 0.3s, border-color 0.3s, background-color 0.3s; }
+            .empty-placeholder:hover { opacity: 1; border-color: var(--rmt-accent, #ffa800); background-color: rgba(var(--rmt-accent-rgb), 0.1); }
+            /* The × is centred on the corner arc's centre (its top/right offsets are set
+               in JS from the icon's corner radius) so it never clips on large icons.
+               Flex-centred with a fixed box + centre transform-origin, so :hover grows it
+               in place instead of nudging it around. */
+            .module-delete-btn, .category-delete-btn {
+                position: absolute; display: flex; align-items: center; justify-content: center;
+                line-height: 1; font-weight: bold; text-align: center; color: var(--rmt-danger, #ff0000);
+                background: transparent !important; border-radius: 0; cursor: pointer; pointer-events: auto;
+                transform-origin: 50% 50%; transition: transform 0.15s ease, text-shadow 0.15s ease;
+            }
+            .module-delete-btn { z-index: 10; }
+            .category-delete-btn { z-index: 12; }
+            .module-delete-btn:hover, .category-delete-btn:hover {
+                transform: scale(1.25); color: var(--rmt-danger, #ff0000);
+                text-shadow: 0 0 3px rgba(var(--rmt-danger-rgb), 0.5); background-color: transparent !important;
+            }
             .category-label { touch-action: none; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
             .icons-wrapper { -webkit-overflow-scrolling: touch; }
             .icons-wrapper.dragging { overflow: hidden !important; }
             .buttonsContainer div { display: flex; align-items: center; justify-content: center; text-align: center; }
+            /* Layout of a section lives here, NOT in an inline style: search hides
+               sections with a class, and an inline display would be wiped by a
+               style.display = '' reset (dropping the section to display:block, i.e.
+               one icon per row). */
+            .library-section { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; flex: 0 0 100%; box-sizing: border-box; }
+            /* A collapsed section is just its label chip, so it no longer claims a
+               full row — consecutive chips pack onto shared rows (see updateSectionFlow). */
+            .library-section.section-collapsed { flex: 0 0 auto; }
+            .library-hidden { display: none !important; }
+            .section-collapsed .icon { display: none !important; }
+            .category-collapse-chevron { line-height: 1; }
+            /* Module count on a collapsed chip, so it still says what's inside. */
+            .category-label::after { content: attr(data-count); display: none; }
+            .section-collapsed .category-label::after {
+                display: inline-flex; align-items: center; justify-content: center;
+                margin-left: 0.5em; padding: 0 0.4em; min-width: 1.1em; height: 1.4em;
+                border-radius: 999px; font-size: 0.75em; line-height: 1;
+                background: rgba(var(--rmt-accent-rgb), 0.18);
+                border: 1px solid rgba(var(--rmt-accent-rgb), 0.45);
+            }
+            /* Clips the bar's contents so dragging it shut closes over the toolbar
+               too, without clipping the pull-tab that hangs below the bar. */
+            .library-body { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+            /* Chrome, not content: it overlays the top of the scroll area (which is
+               padded to match) rather than scrolling with it, so it never moves. The row
+               itself is invisible and transparent to the pointer — only its controls are
+               there — so a module peeking out between them can still be grabbed.
+               z-index sits above the delete × buttons (10/12), or the controls would have
+               them punching through unblurred while the icons behind are frosted. */
+            .library-toolbar { position: absolute; top: 0; left: 0; right: 0; z-index: 30; display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 0; box-sizing: border-box; background: transparent; pointer-events: none; }
+            /* The right-end cluster: drop-mode pair, then undo/redo. The drop group
+               carries the auto margin that pins the cluster right; the tool group's own
+               margin (on top of the row's 6px gap) is what visually separates the two
+               pairs, so start/end cannot be misread as more history buttons. Both are
+               inert, like the row: only the buttons inside them take the pointer. */
+            .library-drop-group { margin-left: auto; display: flex; align-items: center; gap: 6px; pointer-events: none; }
+            .library-tool-group { margin-left: 8px; display: flex; align-items: center; gap: 6px; pointer-events: none; }
+            /* The painted, clickable parts of the row: frosted, translucent so the icons
+               scrolling under them stay faintly readable. 30px tall, like the field, which
+               is what keeps the row's height constant (see getToolbarHeight). */
+            .library-tool-btn { pointer-events: auto; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.62); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); color: var(--rmt-accent, #ffa800); cursor: pointer; -webkit-appearance: none; appearance: none; transition: color 0.2s ease-in-out, border-color 0.2s ease-in-out, background-color 0.2s ease-in-out, opacity 0.2s ease-in-out; }
+            .library-tool-btn svg { width: 18px; height: 18px; display: block; }
+            .library-tool-btn:hover:not(:disabled), .library-tool-btn:focus-visible { outline: none; border-color: var(--rmt-accent, #ffa800); background: rgba(var(--rmt-accent-rgb), 0.18); }
+            /* Nothing on the stack: dimmed and inert, but still drawn — the row must not
+               change shape as history fills up. */
+            .library-tool-btn:disabled { opacity: 0.3; cursor: default; }
+            /* The magnifier stays lit while the field is unfolded, so the open state reads
+               even when the field itself is scrolled behind a wall of icons. */
+            .library-toolbar.search-open .library-search-toggle { border-color: var(--rmt-accent, #ffa800); background: rgba(var(--rmt-accent-rgb), 0.18); }
+            /* The selected drop mode: solid accent fill with a dark glyph — a state, so it
+               must read stronger than the translucent hover wash the other buttons get.
+               The :hover selector isn't redundant: the shared hover rule above ties this
+               one's specificity, and hovering the lit button must not wash out its fill. */
+            .library-drop-btn.active, .library-drop-btn.active:hover { border-color: var(--rmt-accent, #ffa800); background: var(--rmt-accent, #ffa800); color: var(--rmt-bg, #151525); }
+            /* The app sets user-select: none on html/body (styles.css), which takes the caret
+               and text selection out of any input that does not opt back in. */
+            .library-search-input { pointer-events: auto; flex: 0 1 320px; min-width: 0; height: 30px; box-sizing: border-box; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.62); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); color: var(--rmt-text-primary, #ffa800); font-family: 'Roboto Mono', monospace; font-size: 13px; outline: none; -webkit-appearance: none; appearance: none; user-select: text; -webkit-user-select: text;
+                transition-property: flex-basis, padding, opacity, border-color, visibility;
+                /* visibility gets NO duration, so opening makes the field focusable in the
+                   same style recalc as the class change. It has to: setSearchOpen focuses the
+                   field synchronously inside the click handler, and a focus() deferred to a
+                   later frame loses the user activation that opens the on-screen keyboard on
+                   iOS. (Given a duration, visibility still computes as hidden at progress 0
+                   and the browser refuses the focus outright.) The delay that hides it lives
+                   on the collapsed rule below, so only the CLOSE direction waits. */
+                transition-duration: 0.18s, 0.18s, 0.18s, 0.18s, 0s;
+                transition-timing-function: ease-in-out;
+                transition-delay: 0s; }
+            .library-search-input::placeholder { color: var(--rmt-text-secondary, rgba(255,168,0,0.5)); }
+            .library-search-input:focus { border-color: var(--rmt-accent, #ffa800); box-shadow: 0 0 0 2px rgba(var(--rmt-accent-rgb), 0.25); }
+            /* Folded away: collapsed by WIDTH, never by display or height. The 30px box stays
+               in the row (with nothing painted in it), so the row's height — which is the
+               icon grid's top inset and part of the pull-tab's fit height — cannot move when
+               the field opens. A shrink-only bar (adjustHeightToContent) would not give back
+               the height a height-changing row cost it.
+               visibility (which is NOT a layout property, so the row still measures 42px) is
+               what takes the folded field out of the accessibility tree and out of reach of
+               programmatic focus. Without it, opacity:0 alone leaves a screen reader an
+               invisible 2px textbox it can focus and type into — filtering the library with
+               no field on screen to say why. It is in the transition list so the field still
+               fades out rather than vanishing on the first frame. */
+            .library-toolbar:not(.search-open) .library-search-input { flex-basis: 0; padding-left: 0; padding-right: 0; border-color: transparent; opacity: 0; visibility: hidden; pointer-events: none;
+                /* Same property order as the base rule: hold the hide back until the field has
+                   finished folding away, so it shrinks out rather than blinking out. */
+                transition-delay: 0s, 0s, 0s, 0s, 0.18s; }
+            /* Touch: the row is absolutely positioned across the WHOLE bar, but the icon
+               grid beneath it is inset by the touch scrollbar's 18px gutter. Left
+               full-bleed, the right end of the row lands on top of the scrollbar thumb —
+               the one thing that has to stay grabbable. Match the grid's inset, so the
+               undo/redo buttons stop short of the track. */
+            @media (pointer: coarse) {
+              .library-toolbar { padding-left: 18px; padding-right: 18px; }
+            }
         `;
         document.head.appendChild(style);
     }
 
+    // "Save UI": download the live layout. The payload is captureUIState() — the same
+    // one the autosave writes — so the file carries everything the library now has
+    // (module metadata, section labels, collapse state, uploads, drop mode) and comes
+    // back through the same restore path.
     function saveUIState() {
         try {
-            const uiState = { categories: [], version: "1.0" };
-            categoryContainers.forEach(container => {
-                if (!container) return;
-                const categoryLabel = container.querySelector('.category-label');
-                if (!categoryLabel) return;
-                const category = categoryLabel.getAttribute('data-category');
-                if (!category) return;
-                const moduleIcons = Array.from(container.querySelectorAll('.icon:not(.empty-placeholder):not(.category-label)'));
-                const categoryObj = { name: category, modules: [] };
-                moduleIcons.forEach(icon => {
-                    const textContainer = icon.querySelector('div');
-                    const moduleName = textContainer ? textContainer.textContent.trim() : '';
-                    const moduleData = icon.moduleData || null;
-                    categoryObj.modules.push({ name: moduleName, data: moduleData });
-                });
-                uiState.categories.push(categoryObj);
-            });
+            const uiState = captureUIState();
+            uiState.exportedAt = new Date().toISOString();
             const jsonString = JSON.stringify(uiState, null, 2);
             const blob = new Blob([jsonString], { type: 'application/json' });
             const a = document.createElement('a');
@@ -1662,6 +2602,26 @@ const menuAPI = (function() {
         }
     }
 
+    // An imported file is untrusted: every module JSON it embeds gets the same check an
+    // uploaded .json does, and a module that fails it is stripped of its data rather
+    // than being allowed to reach the workspace. Returns how many were rejected.
+    function sanitizeImportedState(uiState) {
+        let rejected = 0;
+        for (const cat of uiState.categories) {
+            for (const m of (cat.modules || [])) {
+                const data = m.moduleData || m.data;
+                if (!data || typeof data !== 'object') continue;
+                const validation = validateModuleData(data);
+                if (validation.valid) continue;
+                console.warn(`[Security] Skipping invalid module "${m.name}" from UI state:`, validation.errors);
+                m.moduleData = null;
+                m.data = null;
+                rejected++;
+            }
+        }
+        return rejected;
+    }
+
     function loadUIState() {
         try {
             const fileInput = document.createElement('input');
@@ -1673,53 +2633,38 @@ const menuAPI = (function() {
                 if (!file) return;
                 const reader = new FileReader();
                 reader.onload = function(e) {
+                    let uiState;
                     try {
-                        const uiState = JSON.parse(e.target.result);
-                        if (!uiState.categories || !Array.isArray(uiState.categories)) {
+                        uiState = JSON.parse(e.target.result);
+                        if (!uiState || !Array.isArray(uiState.categories) || uiState.categories.length === 0) {
                             throw new Error('Invalid UI state format');
                         }
-                        domCache.iconsContainer.innerHTML = '';
-                        categoryContainers = [];
-                        uiState.categories.forEach((categoryObj, index) => {
-                            const sectionContainer = document.createElement('div');
-                            Object.assign(sectionContainer.style, { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' });
-                            categoryContainers.push(sectionContainer);
-                            const labelIcon = createLabelIcon(categoryObj.name, categoryObj.name);
-                            labelIcon.addEventListener('click', () => handleFileUpload(categoryObj.name, sectionContainer));
-                            sectionContainer.appendChild(labelIcon);
-                            categoryObj.modules.forEach(moduleInfo => {
-                                // Validate embedded module data before loading
-                                let safeData = moduleInfo.data;
-                                if (safeData && typeof safeData === 'object') {
-                                    const validation = validateModuleData(safeData);
-                                    if (!validation.valid) {
-                                        console.warn(`[Security] Skipping invalid module "${moduleInfo.name}" from UI state:`, validation.errors);
-                                        safeData = null;
-                                    }
-                                }
-                                const icon = createModuleIcon(categoryObj.name, moduleInfo.name + '.json', safeData);
-                                sectionContainer.appendChild(icon);
-                            });
-                            const emptyPlaceholder = createEmptyPlaceholder(categoryObj.name);
-                            sectionContainer.appendChild(emptyPlaceholder);
-                            domCache.iconsContainer.appendChild(sectionContainer);
-                            const breaker = document.createElement('div');
-                            Object.assign(breaker.style, { flexBasis: '100%', height: '0' });
-                            domCache.iconsContainer.appendChild(breaker);
-                            if (index < uiState.categories.length - 1) {
-                                domCache.iconsContainer.appendChild(createSectionSeparator());
-                            }
-                        });
-                        const actionButtons = createActionButtons();
-                        domCache.iconsContainer.appendChild(createSectionSeparator());
-                        domCache.iconsContainer.appendChild(actionButtons);
-                        normalizeLayoutSeparators();
-                        updateMaxHeight();
-                        showNotification('UI state loaded successfully!', 'success');
                     } catch (error) {
                         console.error('Error parsing UI state:', error);
                         showNotification('Error loading UI state: ' + error.message, 'error');
+                        return;
                     }
+                    const rejected = sanitizeImportedState(uiState);
+                    // persist: an import is a deliberate change to the library, so it has
+                    // to outlive the reload — and it must not be left to the autosave,
+                    // which would capture the layout mid-build.
+                    applyUIState(uiState, { persist: true })
+                        .then(ok => {
+                            if (!ok) {
+                                showNotification('Error loading UI state: no sections to restore', 'error');
+                                return;
+                            }
+                            showNotification(
+                                rejected
+                                    ? `UI state loaded — ${rejected} invalid module${rejected > 1 ? 's' : ''} skipped`
+                                    : 'UI state loaded successfully!',
+                                rejected ? 'info' : 'success'
+                            );
+                        })
+                        .catch(error => {
+                            console.error('Error applying UI state:', error);
+                            showNotification('Error loading UI state: ' + error.message, 'error');
+                        });
                 };
                 reader.readAsText(file);
             });
@@ -1742,9 +2687,9 @@ const menuAPI = (function() {
         if (type === 'success') {
             Object.assign(notification.style, { backgroundColor: 'rgba(0, 255, 0, 0.8)', color: '#000' });
         } else if (type === 'error') {
-            Object.assign(notification.style, { backgroundColor: 'rgba(255, 0, 0, 0.8)', color: '#fff' });
+            Object.assign(notification.style, { backgroundColor: 'rgba(var(--rmt-danger-rgb), 0.8)', color: '#fff' });
         } else {
-            Object.assign(notification.style, { backgroundColor: 'rgba(255, 168, 0, 0.8)', color: '#000' });
+            Object.assign(notification.style, { backgroundColor: 'rgba(var(--rmt-accent-rgb), 0.8)', color: '#000' });
         }
         document.body.appendChild(notification);
         setTimeout(() => {
@@ -1765,6 +2710,8 @@ const menuAPI = (function() {
         saveUIStateToLocalStorage: saveUIStateToLocalStorage,
         loadUIStateFromLocalStorage: loadUIStateFromLocalStorage,
         clearUIStateFromLocalStorage: clearUIStateFromLocalStorage,
+        addCustomModule: addCustomModule,
+        notify: showNotification,
         getModuleDropMode: () => moduleDropMode
     };
 })();

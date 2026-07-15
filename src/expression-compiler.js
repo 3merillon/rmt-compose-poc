@@ -11,14 +11,34 @@
 import Fraction from 'fraction.js';
 import { BinaryExpression, OP, VAR } from './binary-note.js';
 import { isDSLSyntax, compileDSL, decompileToDSL } from './dsl/index.js';
+import { bigGcd, decimalStringToBigFraction } from './utils/fraction-num.js';
 
 /**
  * Expression compiler that converts text expressions to binary bytecode
  */
+// Cap the compile cache. Drag/resize commits generate a fresh fraction
+// string per commit, so an unbounded cache grows without limit over a long
+// session. LRU eviction (Map keeps insertion order) keeps memory bounded
+// while retaining the hot working set.
+const COMPILE_CACHE_MAX = 4000;
+
 export class ExpressionCompiler {
   constructor() {
     // Cache compiled expressions to avoid recompiling
     this.cache = new Map();
+  }
+
+  /**
+   * Store a compiled expression, evicting the oldest entry when over cap.
+   * @private
+   */
+  _cacheSet(key, binary) {
+    if (this.cache.size >= COMPILE_CACHE_MAX && !this.cache.has(key)) {
+      // Evict least-recently-inserted entry (first key in iteration order).
+      const oldest = this.cache.keys().next().value;
+      if (oldest !== undefined) this.cache.delete(oldest);
+    }
+    this.cache.set(key, binary);
   }
 
   /**
@@ -34,15 +54,20 @@ export class ExpressionCompiler {
   compile(textExpr, varName = null) {
     // Check cache
     const cacheKey = textExpr;
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey).clone();
+    const cached = this.cache.has(cacheKey) ? this.cache.get(cacheKey) : null;
+    if (cached) {
+      // Mark as recently used (move to end of insertion order) so churny
+      // one-off expressions are evicted before the stable working set.
+      this.cache.delete(cacheKey);
+      this.cache.set(cacheKey, cached);
+      return cached.clone();
     }
 
     // Auto-detect and route to DSL compiler if appropriate
     if (isDSLSyntax(textExpr)) {
       try {
         const binary = compileDSL(textExpr);
-        this.cache.set(cacheKey, binary);
+        this._cacheSet(cacheKey, binary);
         return binary.clone();
       } catch (e) {
         // If DSL parsing fails, fall through to legacy parser
@@ -57,16 +82,33 @@ export class ExpressionCompiler {
     try {
       const ast = this.parse(textExpr);
       this.emitBytecode(ast, binary);
-    } catch (e) {
-      // If parsing fails, create a fallback that returns 0
-      console.warn(`Failed to compile expression: ${textExpr}`, e);
-      binary.clear();
-      binary.sourceText = textExpr;
-      // Emit a constant 0
-      this.emitConstant(binary, 0, 1);
+    } catch (legacyError) {
+      // The legacy parser failed. Before giving up, try the DSL compiler: the
+      // routing check above is a regex sniff, not a parse, so it can misclassify
+      // a DSL expression as legacy.
+      let dslError;
+      try {
+        const dslBinary = compileDSL(textExpr);
+        this._cacheSet(cacheKey, dslBinary);
+        return dslBinary.clone();
+      } catch (e2) {
+        // Not valid DSL either — genuinely unparseable.
+        dslError = e2;
+      }
+
+      // Both parsers failed: propagate a real error instead of silently
+      // compiling to a constant 0 (which used to zero the note's value with
+      // no feedback and made every validator pass garbage). Load paths stay
+      // resilient — Note's constructor/_setExpression and batchSetExpressions
+      // catch per-note — while interactive paths (widget save, validators)
+      // surface the message.
+      console.error(`Failed to compile expression: ${textExpr}`, legacyError);
+      throw new Error(
+        `Unparseable expression: "${textExpr}" — legacy parser: ${legacyError.message}; DSL parser: ${dslError.message}`
+      );
     }
 
-    this.cache.set(cacheKey, binary);
+    this._cacheSet(cacheKey, binary);
     return binary.clone();
   }
 
@@ -137,16 +179,21 @@ export class ExpressionCompiler {
     if (fracMatch) {
       const args = fracMatch[1].split(',').map(s => s.trim());
       if (args.length === 1) {
-        const num = this.parseNumber(args[0]);
-        if (num !== null) {
-          const frac = this.decimalToFraction(num);
+        // Exact at any magnitude: digits never pass through a double.
+        const frac = decimalStringToBigFraction(args[0]);
+        if (frac) {
           return { type: 'const', num: frac.num, den: frac.den };
         }
       } else if (args.length === 2) {
-        const num = this.parseNumber(args[0]);
-        const den = this.parseNumber(args[1]);
-        if (num !== null && den !== null) {
-          return { type: 'const', num, den };
+        // Each argument may itself be a decimal: a/b = (n1/d1)/(n2/d2).
+        const numFrac = decimalStringToBigFraction(args[0]);
+        const denFrac = decimalStringToBigFraction(args[1]);
+        if (numFrac && denFrac) {
+          return {
+            type: 'const',
+            num: numFrac.num * denFrac.den,
+            den: numFrac.den * denFrac.num,
+          };
         }
       }
     }
@@ -164,6 +211,10 @@ export class ExpressionCompiler {
     const noteVarMatch = trimmed.match(/^module\.getNoteById\s*\(\s*(\d+)\s*\)\.getVariable\s*\(\s*'([a-zA-Z_][a-zA-Z0-9_]*)'\s*\)$/);
     if (noteVarMatch) {
       const noteId = parseInt(noteVarMatch[1], 10);
+      // u16 note-id field in LOAD_REF — larger ids would silently truncate.
+      if (noteId > 65535) {
+        throw new Error(`Note id ${noteId} out of range (max 65535)`);
+      }
       const varName = noteVarMatch[2];
       return { type: 'noteRef', noteId, varName };
     }
@@ -195,10 +246,9 @@ export class ExpressionCompiler {
     while (numStr.startsWith('(') && numStr.endsWith(')')) {
       numStr = numStr.slice(1, -1).trim();
     }
-    const numValue = this.parseNumber(numStr);
-    if (numValue !== null) {
-      const frac = this.decimalToFraction(numValue);
-      return { type: 'const', num: frac.num, den: frac.den };
+    const bareFrac = decimalStringToBigFraction(numStr);
+    if (bareFrac) {
+      return { type: 'const', num: bareFrac.num, den: bareFrac.den };
     }
 
     // 8. Check for .pow() expressions: base.pow(exponent)
@@ -271,9 +321,10 @@ export class ExpressionCompiler {
       return { type: 'baseRef', varName: trimmed };
     }
 
-    // Truly opaque - this shouldn't happen for valid expressions
-    console.warn(`Unable to parse expression: ${trimmed}`);
-    return { type: 'const', num: 0, den: 1 };
+    // Truly opaque — refuse to guess. Returning a constant 0 here silently
+    // zeroed the note's value; throw so compile() can propagate a real error
+    // (or retry the other syntax).
+    throw new Error(`Unable to parse expression fragment: ${trimmed}`);
   }
 
   /**
@@ -285,87 +336,14 @@ export class ExpressionCompiler {
     }
     const match = s.match(/module\.getNoteById\s*\(\s*(\d+)\s*\)/);
     if (match) {
-      return { kind: 'note', id: parseInt(match[1], 10) };
+      const id = parseInt(match[1], 10);
+      // Same u16 cap as the noteRef path.
+      if (id > 65535) {
+        throw new Error(`Note id ${id} out of range (max 65535)`);
+      }
+      return { kind: 'note', id };
     }
     return { kind: 'base' };
-  }
-
-  /**
-   * Parse a number (integer or float)
-   * Returns number for small values, BigInt string for large integers, or null if invalid
-   */
-  parseNumber(s) {
-    const trimmed = s.trim();
-
-    // Check if this looks like an integer (possibly large)
-    if (/^-?\d+$/.test(trimmed)) {
-      // For large integers that exceed safe integer range, return as string
-      // The emitConstant function will convert to BigInt
-      const num = Number(trimmed);
-      if (Number.isSafeInteger(num)) {
-        return num;
-      }
-      // For large integers, return the string - BigInt(str) will be used later
-      return trimmed;
-    }
-
-    // Handle floats
-    const num = Number(trimmed);
-    if (isFinite(num) && !isNaN(num)) {
-      return num;
-    }
-    return null;
-  }
-
-  /**
-   * Convert a decimal number to fraction components { num, den }
-   */
-  decimalToFraction(value) {
-    if (Number.isInteger(value)) {
-      return { num: value, den: 1 };
-    }
-
-    // Handle common decimal fractions
-    const tolerance = 1e-10;
-    const maxDen = 10000;
-
-    // Check for exact simple fractions first
-    const simpleTests = [
-      [0.25, 1, 4], [0.5, 1, 2], [0.75, 3, 4],
-      [0.125, 1, 8], [0.375, 3, 8], [0.625, 5, 8], [0.875, 7, 8],
-      [0.2, 1, 5], [0.4, 2, 5], [0.6, 3, 5], [0.8, 4, 5],
-      [0.333333, 1, 3], [0.666666, 2, 3],
-      [0.1666666, 1, 6], [0.8333333, 5, 6],
-      // Common values > 1
-      [1.25, 5, 4], [1.5, 3, 2], [1.75, 7, 4], [2.5, 5, 2],
-    ];
-
-    const absVal = Math.abs(value);
-    const sign = value < 0 ? -1 : 1;
-
-    for (const [dec, n, d] of simpleTests) {
-      if (Math.abs(absVal - dec) < tolerance) {
-        return { num: sign * n, den: d };
-      }
-    }
-
-    // Use continued fraction approximation for other decimals
-    let num = 1, den = 1;
-    let bestNum = Math.round(value), bestDen = 1;
-    let bestErr = Math.abs(value - bestNum);
-
-    for (let d = 1; d <= maxDen; d++) {
-      const n = Math.round(value * d);
-      const err = Math.abs(value - n / d);
-      if (err < bestErr) {
-        bestNum = n;
-        bestDen = d;
-        bestErr = err;
-        if (err < tolerance) break;
-      }
-    }
-
-    return { num: bestNum, den: bestDen };
   }
 
   /**
@@ -628,37 +606,35 @@ export class ExpressionCompiler {
       throw new Error('Invalid denominator format');
     }
 
-    // Check if inputs are integers (as number or string)
-    const numIsInteger = (typeof num === 'string' && /^-?\d+$/.test(num)) || Number.isInteger(num) || typeof num === 'bigint';
-    const denIsInteger = (typeof den === 'string' && /^-?\d+$/.test(den)) || Number.isInteger(den) || typeof den === 'bigint';
-
-    // Convert to BigInt for range checking and to handle large values
-    let finalNumBig = BigInt(num);
-    let finalDenBig = BigInt(den);
-
-    // For decimal inputs, convert to fraction first
-    if (!numIsInteger || !denIsInteger) {
-      const value = Number(num) / Number(den);
-      const frac = this.decimalToFraction(value);
-      finalNumBig = BigInt(frac.num);
-      finalDenBig = BigInt(frac.den);
-    }
-
-    // Normalize using Fraction.js for proper reduction (if values fit in safe integer range)
-    const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
-    const MIN_SAFE = BigInt(Number.MIN_SAFE_INTEGER);
-
-    if (finalNumBig >= MIN_SAFE && finalNumBig <= MAX_SAFE &&
-        finalDenBig >= MIN_SAFE && finalDenBig <= MAX_SAFE) {
-      try {
-        const frac = new Fraction(Number(finalNumBig), Number(finalDenBig));
-        finalNumBig = BigInt(frac.s) * BigInt(frac.n);
-        finalDenBig = BigInt(frac.d);
-      } catch (e) {
-        console.warn(`Fraction normalization failed for ${num}/${den}:`, e);
+    // Convert each component to an exact BigInt fraction. Decimal components
+    // are exact-as-written ('1.5' is 3/2 via 15/10), and a/b with decimal
+    // parts composes as (n1/d1)/(n2/d2) — digits never pass through a double.
+    let finalNumBig, finalDenBig;
+    if (typeof num === 'bigint' && typeof den === 'bigint') {
+      finalNumBig = num;
+      finalDenBig = den;
+    } else {
+      const numFrac = decimalStringToBigFraction(String(num));
+      const denFrac = decimalStringToBigFraction(String(den));
+      if (!numFrac || !denFrac) {
+        throw new Error(`Invalid fraction components: ${num}/${den}`);
       }
+      finalNumBig = numFrac.num * denFrac.den;
+      finalDenBig = numFrac.den * denFrac.num;
     }
-    // For very large values, we skip Fraction.js normalization and trust the input is already reduced
+
+    if (finalDenBig === 0n) {
+      throw new Error('Division by zero in constant');
+    }
+    if (finalDenBig < 0n) {
+      finalNumBig = -finalNumBig;
+      finalDenBig = -finalDenBig;
+    }
+
+    // Normalize with BigInt GCD — exact at any magnitude.
+    const gcd = bigGcd(finalNumBig, finalDenBig);
+    finalNumBig /= gcd;
+    finalDenBig /= gcd;
 
     // Check if values fit in i32 range for backward-compatible LOAD_CONST
     const MIN_I32 = -2147483648n;

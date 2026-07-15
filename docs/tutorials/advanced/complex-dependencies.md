@@ -1,24 +1,23 @@
+---
+title: Complex Dependencies
+description: Multi-property references, branching and diamond structures, group edits on a selection, and how to break a dependency chain cleanly.
+---
+
 # Complex Dependencies
 
-Master advanced dependency patterns for sophisticated compositions with intricate note relationships.
+A note's `startTime`, `duration` and `frequency` are three independent expressions. They can point
+at three different notes. Once you internalise that, most "complex" structures are just bookkeeping.
 
-## Beyond Simple Chains
+**Prerequisites:** [Note Dependencies](/tutorials/intermediate/dependencies).
 
-Basic dependencies link one note to another. Complex dependencies involve:
-- Multiple inheritance paths
-- Property-specific dependencies
-- Conditional relationships
-- Hierarchical structures
+## One note, three parents
 
-## Multi-Property Dependencies
-
-A single note can depend on different notes for different properties:
+Note 3 takes its pitch from note 1 and its timing from note 2:
 
 ```
-// Note 3 depends on Note 1 for frequency, Note 2 for timing
 frequency: [1].f * (5/4)
 startTime: [2].t
-duration: [2].d
+duration:  [2].d
 ```
 
 <details>
@@ -27,532 +26,267 @@ duration: [2].d
 ```javascript
 frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
 startTime: module.getNoteById(2).getVariable('startTime')
-duration: module.getNoteById(2).getVariable('duration')
+duration:  module.getNoteById(2).getVariable('duration')
 ```
-
 </details>
 
-### Use Case: Harmony Following Melody
+### Harmony that follows a melody
+
+| Note | Role | frequency | startTime | duration |
+|---|---|---|---|---|
+| 1 | Melody | `base.f * (3/2)` | `base.t` | `beat(base)` |
+| 2 | Harmony | `[1].f * (5/4)` | `[1].t` | `[1].d` |
+| 3 | Bass | `[1].f / 2` | `[1].t` | `[1].d` |
+
+Move note 1, and 2 and 3 move with it. Retune note 1, and they retune with it, keeping their
+intervals. Nothing about notes 2 and 3 needed editing — that is the whole point.
+
+## Branching
+
+One note feeding several children:
 
 ```
-// Melody note (Note 1)
-frequency: base.f * (3/2)
-startTime: 0
-duration: 1
-
-// Harmony note - follows melody timing but uses different pitch
-frequency: [1].f * (5/4)
-startTime: [1].t  // Same timing
-duration: [1].d
-
-// Bass note - same timing as melody, octave below
-frequency: [1].f / 2
-startTime: [1].t
-duration: [1].d
+        Note 1
+       /   |   \
+   Note 2 Note 3 Note 4
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+| Note | frequency | startTime | duration |
+|---|---|---|---|
+| 1 | `base.f` | `base.t` | `beat(base) * 4` |
+| 2 | `[1].f * (3/2)` | `[1].t` | `beat(base) * 2` |
+| 3 | `[1].f * (5/4)` | `[1].t + beat(base) * 2` | `beat(base) * 2` |
+| 4 | `[1].f * 2` | `[1].t` | `beat(base) * 4` |
 
-```javascript
-// Melody note (Note 1)
-frequency: module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-startTime: new Fraction(0)
-duration: new Fraction(1)
+## Diamonds
 
-// Harmony note - follows melody timing but uses different pitch
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
-startTime: module.getNoteById(1).getVariable('startTime')  // Same timing
-duration: module.getNoteById(1).getVariable('duration')
-
-// Bass note - same timing as melody, octave below
-frequency: module.getNoteById(1).getVariable('frequency').div(new Fraction(2))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
-```
-
-</details>
-
-## Branching Dependencies
-
-Create tree structures where one note feeds multiple branches:
+Two notes share an ancestor; a third depends on both.
 
 ```
-        Root (Note 1)
-       /     |      \
-   Note 2  Note 3  Note 4
-    |        |        |
- Note 5   Note 6   Note 7
+      base
+      /    \
+  Note 1   Note 2
+      \    /
+      Note 3
 ```
 
-### Implementation
-
-```
-// Root (Note 1)
-frequency: base.f
-startTime: 0
-duration: 4
-
-// Branch A: Perfect fifth up
-frequency: [1].f * (3/2)
-startTime: [1].t
-duration: 2
-
-// Branch B: Major third up
-frequency: [1].f * (5/4)
-startTime: [1].t + 2
-duration: 2
-
-// Branch C: Octave up
-frequency: [1].f * 2
-startTime: [1].t
-duration: 4
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Root (Note 1)
-frequency: module.baseNote.getVariable('frequency')
-startTime: new Fraction(0)
-duration: new Fraction(4)
-
-// Branch A: Perfect fifth up
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: new Fraction(2)
-
-// Branch B: Major third up
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
-startTime: module.getNoteById(1).getVariable('startTime').add(new Fraction(2))
-duration: new Fraction(2)
-
-// Branch C: Octave up
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(2))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: new Fraction(4)
-```
-
-</details>
-
-## Diamond Dependencies
-
-A note can depend on multiple notes that share a common ancestor:
-
-```
-      BaseNote
-       /    \
-   Note 1  Note 2
-       \    /
-       Note 3
-```
-
-### Implementation
-
-```
-// Note 1: Fifth up from base
-frequency: base.f * (3/2)
-startTime: 0
-duration: 2
-
-// Note 2: Third up from base
-frequency: base.f * (5/4)
-startTime: 2
-duration: 2
-
-// Note 3: Combines Note 1's timing with Note 2's pitch relationship
-frequency: [2].f * (3/2)
-startTime: [1].t + [1].d
-duration: 2
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Note 1: Fifth up from base
-frequency: module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-startTime: new Fraction(0)
-duration: new Fraction(2)
-
-// Note 2: Third up from base
-frequency: module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
-startTime: new Fraction(2)
-duration: new Fraction(2)
-
-// Note 3: Combines Note 1's timing with Note 2's pitch relationship
-frequency: module.getNoteById(2).getVariable('frequency').mul(new Fraction(3, 2))
-startTime: module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-duration: new Fraction(2)
-```
+| Note | frequency | startTime | duration |
+|---|---|---|---|
+| 1 | `base.f * (3/2)` | `base.t` | `beat(base) * 2` |
+| 2 | `base.f * (5/4)` | `[1].t + [1].d` | `beat(base) * 2` |
+| 3 | `[2].f * (3/2)` | `[1].t + [1].d` | `beat(base) * 2` |
 
-</details>
+Note 3 gets its pitch from note 2 and its start from note 1. Both routes lead back to the BaseNote,
+so a change to `base.f` reaches note 3 twice — and the evaluator still visits each note exactly
+once, in topological order.
 
-## Cascading Property Changes
+## Reading the dependency lines
 
-When you change a property at the top of a hierarchy, all dependent notes update:
+Select a note. Lines appear connecting it to its relatives, coloured by **which property** the
+relationship is in:
 
-```javascript
-// If BaseNote.frequency changes from 440 to 330:
+| Colour | Property |
+|---|---|
+| Orange | frequency |
+| Teal | startTime |
+| Purple | duration |
 
-// Note 1 (depends on BaseNote): 330 × 3/2 = 495 Hz
-// Note 2 (depends on Note 1): 495 × 5/4 = 618.75 Hz
-// Note 3 (depends on Note 2): 618.75 × 6/5 = 742.5 Hz
-// ... entire chain updates
-```
+| Weight | Direction |
+|---|---|
+| **Thick** | what this note depends on (its parents) |
+| Thin | what depends on this note (its children) |
 
-### Visualizing the Cascade
+![A selected note with orange, teal and purple dependency lines radiating to its parent and child notes](/img/dependency-lines.png)
 
-1. Select the root note
-2. Dependency lines show all relationships:
-   - **Orange lines**: frequency dependents
-   - **Teal lines**: startTime dependents
-   - **Purple lines**: duration dependents
-   - **Thick lines**: parents (what this note depends on)
-   - **Thin lines**: children (what depends on this note)
-3. Edit the root's frequency
-4. Watch all connected notes update on save
+The lines only show while a note is selected. During a drag, the properties that aren't being
+changed dim to a faint 15% — so while you move a note horizontally, teal (startTime) stays bright
+and orange and purple recede. That is the app telling you which relationships your gesture is
+actually about.
 
-## Tempo Hierarchies
+## Cascading changes
 
-Create sections with different tempos by establishing tempo-defining notes:
+Take the diamond above and change `base.f` from 263 to 330. Every note downstream re-evaluates:
 
-```
-// BaseNote: tempo = 100 BPM (global default)
+- note 1 = `base.f * (3/2)` → 495 Hz
+- note 2 = `base.f * (5/4)` → 412.5 Hz
+- note 3 = `[2].f * (3/2)` → 618.75 Hz
 
-// Section A root (Note 10)
-tempo: 120  // Section A at 120 BPM
-startTime: 0
-duration: beat([10])  // Uses own tempo
-
-// Section A notes depend on Note 10 for tempo
-startTime: [10].t + [10].d
-duration: beat([10])
-
-// Section B root (Note 20)
-tempo: 80  // Section B at 80 BPM
-startTime: measure([10]) * 8  // After 8 measures of Section A
-duration: beat([20])
-
-// Section B notes depend on Note 20 for tempo
-duration: beat([20])
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// BaseNote: tempo = 100 BPM (global default)
+Note 3 never mentions `base.f`, but it moved anyway — it reaches the BaseNote through note 2.
 
-// Section A root (Note 10)
-tempo: new Fraction(120)  // Section A at 120 BPM
-startTime: new Fraction(0)
-duration: new Fraction(60).div(new Fraction(120))  // Uses own tempo
+Only notes that actually depend on what changed are recalculated. The graph keeps an inverse index
+for exactly this, so a wide tree (a hundred notes all hanging off the BaseNote) is cheap — it is
+one lookup, not a hundred searches.
 
-// Section A notes depend on Note 10 for tempo
-startTime: module.getNoteById(10).getVariable('startTime')
-  .add(module.getNoteById(10).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.getNoteById(10)))
+::: warning Edits apply on save
+Typing in a `Raw:` field changes nothing. The `Save` button appears next to the field as soon as you
+start typing; the value updates when you press it. If the expression is invalid, the save is
+rejected and the reason appears in red under the Save button.
+:::
 
-// Section B root (Note 20)
-tempo: new Fraction(80)  // Section B at 80 BPM
-startTime: module.findMeasureLength(module.getNoteById(10)).mul(new Fraction(8))  // After 8 measures of Section A
-duration: new Fraction(60).div(new Fraction(80))
+## Tempo is a BaseNote property
 
-// Section B notes depend on Note 20 for tempo
-duration: new Fraction(60).div(module.findTempo(module.getNoteById(20)))
-```
+::: warning There is no per-note tempo control
+The note widget exposes exactly four variables for a regular note — `startTime`, `duration`,
+`frequency`, `color` — plus an instrument selector. **There is no tempo field.** Tempo is editable
+on the BaseNote only. You cannot build a section that runs at a different tempo from within the app.
 
-</details>
+The module *file format* does accept a `tempo` key on a note, and `beat([N])` does read it — but
+`measure([N])` does **not** pick up a regular note's tempo, and nothing in the UI will ever write
+one. Treat per-note tempo as unreachable, and change tempo on the BaseNote.
+:::
 
-## Relative Timing Patterns
+What you *can* vary is **`beatsPerMeasure` per measure**: select a measure bar (the dashed vertical
+lines) and use its **Measure Duration** row. See
+[Working with Measures](/tutorials/intermediate/measures).
 
-### Call and Response
+## Relative timing patterns
 
-```
-// Call (Note 1)
-startTime: 0
-duration: 2
+### Call and response
 
-// Response (Note 2) - starts after call with a gap
-startTime: [1].t + [1].d + (1/2)  // Half-second gap
-duration: [1].d  // Same duration as call
-```
+| Note | startTime | duration |
+|---|---|---|
+| 1 (call) | `base.t` | `beat(base) * 2` |
+| 2 (response) | `[1].t + [1].d + beat(base) * (1/2)` | `[1].d` |
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Note 2 starts half a beat after note 1 ends and lasts exactly as long. Lengthen note 1 by dragging
+its right edge and note 2 slides *and* stretches to match.
 
-```javascript
-// Call (Note 1)
-startTime: new Fraction(0)
-duration: new Fraction(2)
+### Echo
 
-// Response (Note 2) - starts after call with a gap
-startTime: module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-  .add(new Fraction(1, 2))  // Half-second gap
-duration: module.getNoteById(1).getVariable('duration')  // Same duration as call
-```
+| Note | frequency | startTime | duration |
+|---|---|---|---|
+| 1 | `base.f` | `base.t` | `beat(base)` |
+| 2 | `[1].f` | `[1].t + beat(base) * (1/4)` | `[1].d` |
+| 3 | `[1].f` | `[1].t + beat(base) * (1/2)` | `[1].d` |
 
-</details>
+::: info There is no per-note volume
+You cannot fade an echo out — note volume is not a property. What you *can* vary per note is the
+**instrument**: the note widget has an instrument selector, and a note with no explicit instrument
+inherits one up its frequency chain. Giving the echoes a quieter timbre (`sine-wave` against an
+`organ` original) is the closest available approximation.
+:::
 
-### Echo Effect
+### Parallel voice leading
 
-```
-// Original note
-frequency: base.f
-startTime: 0
-duration: 1
+| Voice | frequency | startTime | duration |
+|---|---|---|---|
+| 1 Soprano | `base.f * 2` | `base.t` | `beat(base)` |
+| 2 Alto | `[1].f * (4/5)` | `[1].t` | `[1].d` |
+| 3 Tenor | `[1].f * (2/3)` | `[1].t` | `[1].d` |
+| 4 Bass | `[1].f / 2` | `[1].t` | `[1].d` |
 
-// Echo 1 (delayed)
-frequency: [1].f
-startTime: [1].t + (1/4)
-duration: [1].d
-// Note: Per-note volume isn't implemented yet
+Every voice is defined against the soprano. Move the soprano and the block moves in parallel,
+intervals intact.
 
-// Echo 2 (even more delayed)
-frequency: [1].f
-startTime: [1].t + (1/2)
-duration: [1].d
-```
+### Stepwise sequence
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+There is no loop construct and no variables in the expression language — each note names a concrete
+id. A five-note ascending sequence in whole tones:
 
-```javascript
-// Original note
-frequency: module.baseNote.getVariable('frequency')
-startTime: new Fraction(0)
-duration: new Fraction(1)
+| Note | frequency | startTime |
+|---|---|---|
+| 1 | `base.f` | `base.t` |
+| 2 | `[1].f * (9/8)` | `[1].t + [1].d` |
+| 3 | `[2].f * (9/8)` | `[2].t + [2].d` |
+| 4 | `[3].f * (9/8)` | `[3].t + [3].d` |
+| 5 | `[4].f * (9/8)` | `[4].t + [4].d` |
 
-// Echo 1 (delayed)
-frequency: module.getNoteById(1).getVariable('frequency')
-startTime: module.getNoteById(1).getVariable('startTime').add(new Fraction(1, 4))
-duration: module.getNoteById(1).getVariable('duration')
-// Note: Per-note volume isn't implemented yet
+Each note steps up from the previous one, so retuning note 1 shifts the whole run. This is the same
+shape the shipped Scale Systems modules use.
 
-// Echo 2 (even more delayed)
-frequency: module.getNoteById(1).getVariable('frequency')
-startTime: module.getNoteById(1).getVariable('startTime').add(new Fraction(1, 2))
-duration: module.getNoteById(1).getVariable('duration')
-```
+## Editing a whole structure at once
 
-</details>
+Once a structure is more than a handful of notes, edit it as a set.
 
-## Parallel Voice Leading
+**Build a selection.** Shift-drag a marquee across empty background on desktop; long-press empty
+space and drag on touch. Shift-click (desktop) or long-press (touch) individual notes to toggle them
+in or out. Selected notes get a heavy selection ring and a group widget appears.
 
-Create multiple voices that move together.
+![A marquee rectangle being dragged across the workspace, with the notes it crosses picking up white selection rings](/img/multi-select-marquee.png)
 
-> **Tip**: When building chords from saved modules, use the Module Bar's **"Drop at: Start"** mode to stack notes at the same start time.
+**Drag the group.** Dragging any selected note moves the whole set in time, as one undo entry.
+Crucially, **relationships are preserved**: if note 2 is `[1].t + [1].d` and you drag both, note 2's
+expression is not rewritten — it just follows note 1 for free. Only "root" notes of the selection
+(those whose timing anchor lies outside the set) get re-anchored.
 
+Notes *outside* the selection that depend on a moved note still follow it. That is deliberate, and it
+is the same rule as a single-note drag.
 
+::: info What is not a group operation
+Resizing, the ▲/▼ arrows, and the note widget all act on **one** note. Only the note-body
+drag is group-aware. There is no group transpose, no group resize, no group colour change.
+:::
 
-```
-// Soprano (Note 1)
-frequency: base.f * 2  // 880 Hz
-startTime: 0
-duration: 1
+## Breaking a chain
 
-// Alto - always a third below soprano
-frequency: [1].f * (4/5)  // Down major third
-startTime: [1].t
-duration: [1].d
+Two escape hatches, both in the note widget's **EVALUATE** section. They cut the chain in **opposite
+directions**, and picking the wrong one is the classic mistake:
 
-// Tenor - always a fifth below soprano
-frequency: [1].f * (2/3)  // Down perfect fifth
-startTime: [1].t
-duration: [1].d
+**Liberate Dependencies** — frees the note's **children**. Every note that referenced the selected
+note has that reference replaced by the selected note's own raw expressions. The dependents keep
+their exact pitches, positions and lengths, but they no longer point here. The selected note itself
+is untouched. Use it before you delete or radically rewrite a note, so its dependents do not follow
+it.
 
-// Bass - always an octave below soprano
-frequency: [1].f / 2
-startTime: [1].t
-duration: [1].d
+**Evaluate to BaseNote** — frees the note **itself**. It rewrites the selected note's own
+`startTime`, `duration` and `frequency` so they reference nothing but the BaseNote. The note does not
+move; it just stops depending on its parents.
 
-// When soprano changes, all voices update maintaining their intervals
-```
+So: *Liberate* looks downstream, *Evaluate to BaseNote* looks upstream. Reach for them instead of
+hand-editing every expression. Full walkthrough in
+[Note Dependencies](/tutorials/intermediate/dependencies).
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+### Group delete liberates, it does not cascade
 
-```javascript
-// Soprano (Note 1)
-frequency: module.baseNote.getVariable('frequency').mul(new Fraction(2))  // 880 Hz
-startTime: new Fraction(0)
-duration: new Fraction(1)
+Press **Delete all** in the group widget and you get a confirmation, then: the selected notes are
+removed, and every note *outside* the group that referenced them is **liberated, not deleted**.
+Their expressions are inlined, so they keep their exact positions, lengths and pitches. A direct
+dependent that had no explicit instrument also inherits the deleted note's instrument.
 
-// Alto - always a third below soprano
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(4, 5))  // Down major third
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
+The confirmation text says "irreversible". It is not — the whole delete is one undo entry, and
+Ctrl+Z brings it back.
 
-// Tenor - always a fifth below soprano
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(2, 3))  // Down perfect fifth
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
+## Cycles
 
-// Bass - always an octave below soprano
-frequency: module.getNoteById(1).getVariable('frequency').div(new Fraction(2))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
+An expression cannot reference itself, and a chain cannot close on itself. The validator catches
+both before the edit lands:
 
-// When soprano changes, all voices update maintaining their intervals
-```
+- `Expression cannot reference itself directly`
+- `Circular dependency detected in expression`
 
-</details>
+These messages reach the **browser console**, not the screen. If a save appears to do nothing, open
+the console — that is where the reason is.
 
-## Sequential Pattern Generation
+If a cycle does somehow get into the graph (via a hand-edited JSON file), the evaluator logs
+`Dependency cycle detected! Some notes could not be evaluated.` and evaluates the stuck notes anyway
+rather than dropping them.
 
-> **Tip**: When building scales or sequences from saved modules, use the Module Bar's **"Drop at: End"** mode to chain notes one after another.
+## Debugging
 
-### Rhythmic Sequence
+**Trace the chain.** Select the last note. Follow the **thick** lines — orange for pitch, teal for
+timing, purple for length — back to their source. Thick means "this is what I depend on."
 
-```
-// Beat 1
-startTime: 0
-duration: beat(base)
+**Check the hatching.** A crosshatched note produced an irrational value itself; a single-diagonal
+note inherited one. See [Understanding SymbolicPower](/tutorials/advanced/symbolic-power).
 
-// Each subsequent beat references previous
-startTime: [PREV].t + [PREV].d
-duration: beat(base)
-```
+**Common mistakes:**
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+| Symptom | Cause |
+|---|---|
+| Save does nothing | Invalid expression — check the console |
+| Note jumps to 0 / 440 Hz | The referenced note id does not exist; the evaluator substitutes a default rather than failing |
+| Wrong note moved | You referenced `[2]` when you meant `[3]` — ids are not stable across a **Save Module** (it reindexes) |
+| Value shows `≈` unexpectedly | Something upstream is irrational |
 
-```javascript
-// Beat 1
-startTime: new Fraction(0)
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
+::: warning Note ids change when you save
+**Save Module** reindexes the whole module in one run from 1 — measures first, then notes, each
+group sorted by start time. The ids in the downloaded file will generally not match the ids you were
+looking at. Expressions are rewritten to match, so the music is unchanged, but do not memorise ids
+across a save.
+:::
 
-// Each subsequent beat references previous
-startTime: module.getNoteById(PREV).getVariable('startTime')
-  .add(module.getNoteById(PREV).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-```
+## Next
 
-</details>
-
-### Melodic Sequence (Stepwise)
-
-```
-// Start note
-frequency: base.f
-
-// Each subsequent note is a step higher
-frequency: [PREV].f * (9/8)  // Major second up
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Start note
-frequency: module.baseNote.getVariable('frequency')
-
-// Each subsequent note is a step higher
-frequency: module.getNoteById(PREV).getVariable('frequency')
-  .mul(new Fraction(9, 8))  // Major second up
-```
-
-</details>
-
-## Dependency Graph Analysis
-
-### Viewing Dependencies
-
-Click on any note to see dependency lines:
-- **Orange lines**: frequency relationships
-- **Teal lines**: startTime relationships
-- **Purple lines**: duration relationships
-- **Thick lines**: Parents (notes this note depends on)
-- **Thin lines**: Children (notes that depend on this note)
-
-### Understanding Propagation
-
-When Note 1 changes:
-1. All notes with blue lines to Note 1 are marked dirty
-2. Evaluation propagates through the dependency tree
-3. Only affected notes are recalculated (efficient!)
-
-### Cycle Prevention
-
-RMT Compose automatically prevents circular dependencies:
-
-```javascript
-// This would be rejected:
-Note 1: depends on Note 2
-Note 2: depends on Note 1  // ERROR: Circular dependency
-```
-
-## Performance Considerations
-
-### Deep Dependency Chains
-
-Very deep chains (Note 1 → Note 2 → ... → Note 100) work but may have evaluation latency.
-
-**Tip**: Consider flattening structures where possible:
-
-```javascript
-// Instead of: Note 10 → Note 9 → ... → Note 1 → BaseNote
-// Consider:   All notes → BaseNote (flat)
-```
-
-### Wide Dependency Trees
-
-Many notes depending on one note is efficient due to the inverted index lookup.
-
-```javascript
-// This is fine:
-100 notes all depending on BaseNote.frequency
-```
-
-## Debugging Complex Dependencies
-
-### Trace the Chain
-
-1. Select the final note in your chain
-2. Follow blue lines back to the source
-3. Check each intermediate value
-
-### Verify Evaluation
-
-1. Change a root value
-2. Check that intermediate notes updated
-3. Verify final values are correct
-
-### Common Issues
-
-- **Wrong note ID**: Double-check `getNoteById(N)` numbers
-- **Property typo**: Ensure `getVariable('frequency')` spelling
-- **Missing dependency**: Check that the referenced note exists
-
-## Best Practices
-
-### 1. Document Your Structure
-
-Keep a mental (or written) map of your dependency hierarchy.
-
-### 2. Test Incrementally
-
-Build complex structures step-by-step, testing each addition.
-
-### 3. Use Meaningful IDs
-
-When planning, assign note IDs purposefully:
-- 1-10: Melody
-- 11-20: Harmony
-- 21-30: Bass
-- etc.
-
-### 4. Avoid Unnecessary Depth
-
-Direct dependencies on common ancestors are more efficient than long chains.
-
-## Next Steps
-
-- [Module Library Creation](/tutorials/workflows/module-library) - Save and reuse patterns
-- [Interval Exploration](/tutorials/workflows/intervals) - Experiment with different intervals
-- [Dependency Graph Architecture](/developer/core/dependency-graph) - Technical details
-
+- [Building a Module Library](/tutorials/workflows/module-library) — turn a structure into a reusable module
+- [Exploring Intervals](/tutorials/workflows/intervals) — the 46 shipped ratios
+- [Dependency Graph](/developer/core/dependency-graph) — how the indexes work

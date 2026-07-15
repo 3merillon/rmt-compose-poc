@@ -1,268 +1,186 @@
+---
+title: Build a Major Scale
+description: Build an eight-note just-intonation major scale in RMT Compose, one note at a time, using pure frequency ratios.
+---
+
 # Build a Major Scale
 
-In this tutorial, you'll build a major scale using just intonation ratios - the exact fractions from the natural harmonic series.
+You will build an eight-note major scale — Do Re Mi Fa Sol La Ti Do — where every pitch is an exact fraction of the BaseNote's frequency.
 
-## Objective
+**Prerequisites:** the app running, and a skim of [Core Concepts](/getting-started/concepts).
 
-Create an 8-note major scale (Do-Re-Mi-Fa-Sol-La-Ti-Do) using pure ratios.
+## The ratios
 
-## Prerequisites
+| Degree | Name | Ratio | Expression |
+|---|---|---|---|
+| 1 | Do | 1/1 | `base.f` |
+| 2 | Re | 9/8 | `base.f * (9/8)` |
+| 3 | Mi | 5/4 | `base.f * (5/4)` |
+| 4 | Fa | 4/3 | `base.f * (4/3)` |
+| 5 | Sol | 3/2 | `base.f * (3/2)` |
+| 6 | La | 5/3 | `base.f * (5/3)` |
+| 7 | Ti | 15/8 | `base.f * (15/8)` |
+| 8 | Do | 2/1 | `base.f * 2` |
 
-- RMT Compose running
-- Familiarity with the [Variable Widget](/user-guide/interface/variable-widget)
-- Understanding of [Core Concepts](/getting-started/concepts)
+Note that fractions are parenthesised and whole numbers are not. `(9/8)` is a fraction literal; `2` is a plain number.
 
-## The Major Scale Ratios
+## Step 1: Clear the workspace
 
-| Degree | Name | Ratio | Decimal |
-|--------|------|-------|---------|
-| 1 | Do | 1/1 | 1.000 |
-| 2 | Re | 9/8 | 1.125 |
-| 3 | Mi | 5/4 | 1.250 |
-| 4 | Fa | 4/3 | 1.333 |
-| 5 | Sol | 3/2 | 1.500 |
-| 6 | La | 5/3 | 1.667 |
-| 7 | Ti | 15/8 | 1.875 |
-| 8 | Do | 2/1 | 2.000 |
+The app opens with a 169-note demo composition. Get rid of it.
 
-## Step 1: Set Up the BaseNote
+1. Click the **BaseNote** — the orange circle at the far left.
+2. The note widget opens, titled **BaseNote Variables**.
+3. Scroll to the bottom, to the **DELETE ALL NOTES** section.
+4. Click **Clean Slate**, then **Yes, Clean Slate**.
 
-1. Open RMT Compose
-2. Click the **BaseNote** (orange circle)
-3. In the Variable Widget, scroll down to the bottom and click **"Clean Slate"** to remove all notes except the BaseNote
-4. Verify the BaseNote settings are what you want:
-   - **frequency**: e.g. `440` (A4)
-   - **tempo**: e.g. `120` (120 BPM)
+::: warning
+The dialog says "This action cannot be undone." It is wrong — Clean Slate is captured in the undo history and `Ctrl+Z` brings the composition back.
+:::
 
-## Step 2: Create the Root (Do)
+Clean Slate closes the note widget and clears the selection. The BaseNote keeps its defaults: **263 Hz**, **100 BPM**, 4 beats per measure. Leave them alone — the scale is built from ratios, so the starting pitch does not matter.
 
-1. With the BaseNote selected
-2. In the Variable Widget, find **"Add Note / Silence"** section
-3. Select **"Note"**, then click **"Create Note"**
-4. Select the new note
-5. Set its frequency:
+## Step 2: Create Do
 
-```
-base.f
-```
+1. Click the **BaseNote** again to reopen its widget.
+2. Scroll to the **ADD NOTE / SILENCE** section.
+3. Leave the kind set to **Note**.
+4. The three fields are already filled in for you:
+   - **Frequency:** `base.f`
+   - **Duration:** `beat(base)`
+   - **Start Time:** `base.t`
+5. Click **Create**.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+::: info
+On the BaseNote the button reads **Create**, not "Create Note", and there is no At Start / At End choice — a note added from the BaseNote always starts at `base.t`.
+:::
 
-```javascript
-module.baseNote.getVariable('frequency')
-```
-</details>
+The new note appears, gets selected, and the widget re-opens on it as **Note [1] Variables**. That is your Do, at 1/1.
 
-6. Set its duration to a quarter note:
+## Step 3: Create Re
 
-```
-beat(base)
-```
+Now you are working from a normal note, and the widget looks different.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(60).div(module.findTempo(module.baseNote))
-```
-</details>
-
-7. Click **Save**
-
-## Step 3: Create Re (9/8)
-
-1. Select the Do note you just created (Note 1)
-2. In **"Add Note / Silence"**, keep **"Note"** and **"At End"** selected, click **"Create Note"**
-3. Select the new note (Note 2)
-4. Set its frequency:
+1. With Note 1 selected, scroll to **ADD NOTE / SILENCE**.
+2. Leave the kind on **Note** and the position on **At End** — this is the default, and it is what you want for a scale. Each note starts where the previous one stops.
+3. The fields prefill from Note 1:
+   - **Frequency:** `[1].f` ← you will replace this
+   - **Duration:** `beat(base)` ← leave it
+   - **Start Time:** `[1].t + [1].d` ← leave it; this is what "At End" means
+4. Replace the **Frequency** field with:
 
 ```
 base.f * (9/8)
 ```
 
+5. Click **Create Note**.
+
+::: tip
+The `Evaluated:` line above each field updates as you type. It prints `Invalid` if the expression does not parse — this live preview is the one place in the widget that does not wait for a Save.
+:::
+
+## Steps 4–9: the rest of the scale
+
+Repeat Step 3 six more times. Each time: select the note you just made, keep **At End**, overwrite the **Frequency** field, click **Create Note**.
+
+| Create | Select first | Frequency field |
+|---|---|---|
+| Mi (Note 3) | Note 2 | `base.f * (5/4)` |
+| Fa (Note 4) | Note 3 | `base.f * (4/3)` |
+| Sol (Note 5) | Note 4 | `base.f * (3/2)` |
+| La (Note 6) | Note 5 | `base.f * (5/3)` |
+| Ti (Note 7) | Note 6 | `base.f * (15/8)` |
+| Do (Note 8) | Note 7 | `base.f * 2` |
+
+Every note anchors its *pitch* to the BaseNote and its *timing* to the note before it. That split is deliberate, and Step 11 shows why it matters.
+
 <details>
 <summary>Legacy JavaScript syntax</summary>
+
+Older modules store expressions as method chains. The widget decompiles them to DSL for display, so you will not need to type this — but you may see it in a hand-edited file.
 
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(9, 8))
 ```
 </details>
 
-5. Click **Save**
+## Step 10: Listen
 
-## Step 4: Create Mi (5/4)
+Press **Play** in the top bar. You should hear eight notes climbing, and the last should sound like the first an octave higher.
 
-1. Select Note 2
-2. Click **"Create Note"** (in **"Add Note / Silence"** section)
-3. Select Note 3
-4. Set its frequency:
+Select each note in turn and read the `Evaluated:` line on its frequency row. At the default 263 Hz base:
 
-```
-base.f * (5/4)
-```
+| Note | Raw | Evaluated |
+|---|---|---|
+| 1 | `base.f` | 263 |
+| 2 | `base.f * (9/8)` | 2367/8 |
+| 5 | `base.f * (3/2)` | 789/2 |
+| 8 | `base.f * 2` | 526 |
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+The values are exact fractions, not decimals. Nothing here is rounded.
 
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
-```
-</details>
+## Step 11: Transpose the whole scale at once
 
-5. Click **Save**
+This is the point of the exercise.
 
-## Step 5: Create Fa (4/3)
+1. Click the **BaseNote**.
+2. On the **frequency** row, change the `Raw:` field to `330`.
+3. Click **Save**.
 
-1. Select Note 3
-2. Add a new note
-3. Set frequency:
+Every note in the scale moves. You wrote the pitches as ratios of `base.f`, so they are still a major scale — just a higher one. Nothing was recalculated by hand.
 
-```
-base.f * (4/3)
-```
+Change it back to `263` when you are done.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+## The eight-drag alternative
 
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(4, 3))
-```
-</details>
+Every interval in the table above already ships as a module. You do not have to type them.
 
-## Step 6: Create Sol (3/2)
+1. In the module bar, expand **Intervals** (46 modules).
+2. Set the drop mode to **End** — click the ⇥ button next to Undo/Redo in the module bar's toolbar. This makes each dropped module land at the end of the note you drop it on, which is what chains a scale together.
+3. Drag **Major 2nd** (9/8) onto your Do note. Drag **Just major 3rd** (5/4) onto the note that appears. Keep going: Perfect 4th, Perfect 5th, Just major 6th, Just major 7th, Octave.
 
-1. Add note after Fa
-2. Set frequency:
+Each interval module is a single note whose frequency is `(N/D) * base.f` — dropping it onto a note re-anchors it to *that* note, so you get the interval above whatever you dropped on.
 
-```
-base.f * (3/2)
-```
+::: tip
+Click the **magnifier** in the library toolbar to search. It matches on name, ratio, family and tags, so typing `3/2` or `fifth` both find the Perfect 5th.
+:::
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+## Saving your scale
 
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-```
-</details>
+Two ways, and the second is usually better.
 
-## Step 7: Create La (5/3)
+**Into the library.** Shift-drag a marquee across all eight notes (or shift-click them one by one). The group widget appears. Click **Copy to Modules**. Your scale lands in the library's **Custom** section as `Selection (8 notes)`, and it survives a reload. You can now drag it onto any note.
 
-1. Add note after Sol
-2. Set frequency:
-
-```
-base.f * (5/3)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(5, 3))
-```
-</details>
-
-## Step 8: Create Ti (15/8)
-
-1. Add note after La
-2. Set frequency:
-
-```
-base.f * (15/8)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(15, 8))
-```
-</details>
-
-## Step 9: Create High Do (2/1)
-
-1. Add note after Ti
-2. Set frequency:
-
-```
-base.f * 2
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(2))
-```
-</details>
-
-## Verification
-
-1. Click **Play** to hear your scale
-2. You should hear 8 notes ascending
-3. The last note (high Do) should sound like the first note, but higher
-
-### Check Your Work
-
-Select each note and verify the frequency ratio in the Variable Widget:
-
-| Note ID | Expected Ratio |
-|---------|----------------|
-| 1 | 1/1 |
-| 2 | 9/8 |
-| 3 | 5/4 |
-| 4 | 4/3 |
-| 5 | 3/2 |
-| 6 | 5/3 |
-| 7 | 15/8 |
-| 8 | 2/1 |
-
-## Save Your Module
-
-1. Click **Menu** > **Save Module**
-2. Rename to `major-scale-just.json`
+**To a file.** Open the **+** menu in the top bar and click **Save Module**. The download is always named `module.json` — rename it yourself, to something like `major-scale-just.json`.
 
 ## Exercises
 
-### Exercise 1: Descending Scale
+### 1. Make it a minor scale
 
-Modify your scale to descend from high Do to low Do.
+Change three notes:
 
-**Hint**: Change the order of start times, or create new notes in reverse order.
+| Note | From | To |
+|---|---|---|
+| Mi (3) | `base.f * (5/4)` | `base.f * (6/5)` |
+| La (6) | `base.f * (5/3)` | `base.f * (8/5)` |
+| Ti (7) | `base.f * (15/8)` | `base.f * (9/5)` |
 
-### Exercise 2: Change the Root
+### 2. Slow it down
 
-1. Click the BaseNote
-2. Change frequency to `330` (E4)
-3. Play - the scale is now in E major!
+Select a note, find the **duration** row, and click the **half note** icon. The Raw field fills with `beat(base) * 2` — then click **Save**. The icon buttons write the expression for you; they do not commit it.
 
-### Exercise 3: Longer Notes
+### 3. Hear the difference against 12-TET
 
-Change all durations to half notes:
+Drag the **12-TET** module from the library's **Scale Systems** section onto the BaseNote. Play both. The just major third (5/4, 386¢) is noticeably flatter and calmer than the 12-TET one (2^(4/12), 400¢).
 
-```
-beat(base) * 2
-```
+## What you learned
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+- Major-scale degrees as exact ratios of a single reference pitch.
+- **At End** chains notes in time; the frequency stays anchored to the BaseNote.
+- Changing the BaseNote transposes everything that references it.
+- The Intervals library already contains every ratio you typed.
 
-```javascript
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
-```
-</details>
+## Next
 
-## What You Learned
-
-- Major scale intervals as pure ratios
-- Creating sequential notes using "At End" positioning
-- How changing BaseNote transposes the entire scale
-- The relationship between tempo and duration
-
-## Next Steps
-
-- [Create a Major Triad](./major-triad) - Build a chord
-- [Add Rhythm](./rhythm) - Create varied rhythms
-- Compare with [12-TET](/user-guide/tuning/12-tet) to hear the difference
+- [Create a Major Triad](/tutorials/beginner/major-triad) — the same ratios, sounding together
+- [Add Rhythm](/tutorials/beginner/rhythm) — durations, dots and silences
+- [Pure Ratios](/user-guide/tuning/ratios) — why these fractions and not others

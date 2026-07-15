@@ -1,58 +1,53 @@
+---
+title: Workflow Tutorials
+description: Practical end-to-end workflows - building a module library, systematic interval study, and structured microtonal listening experiments.
+---
+
 # Workflow Tutorials
 
-Practical guides for common tasks and experimentation.
+Three complete tasks, start to finish. Where the other tutorials teach a concept, these walk a
+job through to a result you keep.
 
-## In This Section
+## In this section
 
-### [Creating a Module Library](./module-library)
-Build, organize, and maintain a personal library of reusable modules. Learn best practices for naming, categorizing, and designing modules for reuse.
+### [Building a Module Library](/tutorials/workflows/module-library)
 
-### [Interval Exploration](./intervals)
-A systematic workflow for understanding and experimenting with musical intervals. Includes comparison charts, exercises, and methods for building your ear.
+How the shipped library is actually organised (six sections, 79 modules), how to get your own work
+into it — mainly by selecting notes and pressing **Copy to Modules** — and how to back the whole
+layout up.
 
-### [Microtonal Experiments](./microtonal-experiments)
-Practical experiments for exploring microtonal tuning systems. Discover new sounds through structured comparison and experimentation.
+### [Exploring Intervals](/tutorials/workflows/intervals)
 
-## What Are Workflow Tutorials?
+A systematic pass through the 46 interval modules that ship: ratios, cents, limit families,
+inversions and the harmonic series. Most of the bookkeeping is already done for you by the library's
+search and its icons.
 
-Unlike concept-focused tutorials, workflow tutorials guide you through complete tasks from start to finish. They're designed to help you:
-- Accomplish specific goals efficiently
-- Develop good habits and practices
-- Build lasting resources (like a module library)
-- Learn through hands-on experimentation
+### [Microtonal Experiments](/tutorials/workflows/microtonal-experiments)
+
+Structured listening: TET comparison, neutral and septimal intervals, Bohlen–Pierce, commas and
+quarter tones. Includes the audio settings you must change first, or the experiments are worthless.
 
 ## Prerequisites
 
-These workflows assume familiarity with:
-- Basic note creation and editing
-- Expression syntax
-- The Module Bar and file operations
+You should be able to create a note, write an expression, and drag a module out of the library bar.
+If not, start with the [beginner tutorials](/tutorials/).
 
-For specific workflows, see individual prerequisites in each tutorial.
+## Three things that changed
 
-## Recommended Use
+If you last used RMT Compose a while ago, these three will save you the most time:
 
-### Building Your Library
-Start with [Module Library](./module-library) to set up your organizational structure. Then use the other workflows to populate it with useful content.
+**Copy to Modules.** Select notes, press one button, and the selection becomes a library module in
+the **Custom** section — rooted at its earliest note, dependency tree intact. This replaces the old
+Save Module → rename → upload dance entirely.
 
-### Learning Tuning Theory
-Follow [Interval Exploration](./intervals) to systematically study intervals, then apply that knowledge in [Microtonal Experiments](./microtonal-experiments).
+**The library search.** The magnifier at the left of the library bar's toolbar filters all 79
+modules by name, ratio, cents, family or tag. Naming conventions are no longer how you find things.
 
-### Quick Reference
-Return to these tutorials when you need to remember specific procedures or want templates for common tasks.
+**Undo/Redo everywhere.** `Ctrl+Z` / `Ctrl+Y`, buttons in the "+" menu, and buttons in the library
+bar's own toolbar. Every module-level action is undoable, including **Load Module** and importing a
+module by drag-and-drop. "Save frequently" is no longer the survival strategy it once was.
 
-## Workflow Patterns
+## Next
 
-Common patterns you'll learn:
-- **A/B Comparison**: Creating side-by-side comparisons for ear training
-- **Template Design**: Building reusable starting points
-- **Systematic Exploration**: Methodically covering a topic
-- **Documentation**: Recording discoveries for future reference
-
-## Next Steps
-
-After working through these tutorials:
-- Apply techniques to your own compositions
-- Share interesting modules with others
-- Explore the [Developer Documentation](/developer/) if you want to understand the technical details
-
+- [Advanced Tutorials](/tutorials/advanced/) — microtonal composition, exact-value algebra, complex structures
+- [Developer Documentation](/developer/) — how it works underneath

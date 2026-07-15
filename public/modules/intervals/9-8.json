@@ -1,0 +1,17 @@
+{
+  "baseNote": {
+    "frequency": "263",
+    "startTime": "0",
+    "tempo": "60",
+    "beatsPerMeasure": "4"
+  },
+  "notes": [
+    {
+      "id": 1,
+      "startTime": "base.t",
+      "duration": "beat(base)",
+      "frequency": "(9/8) * base.f",
+      "color": "rgba(242,167,27,0.7)"
+    }
+  ]
+}

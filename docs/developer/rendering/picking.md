@@ -1,220 +1,171 @@
-# GPU Picking
+---
+title: Picking
+description: How a click becomes a note in RMT Compose — a CPU rounded-rect scan over the instance arrays, plus the unused GPU picking scaffold and why it stays unused.
+---
 
-GPU picking enables efficient note selection by rendering note IDs to an offscreen buffer.
+# Picking
 
-## Overview
+This page explains how a pointer position becomes a note, a measure triangle, or the BaseNote —
+which methods run, in what order, and what each one costs. If you are changing hit-testing or
+selection, start here.
 
-Instead of iterating through all notes to find which one is under the cursor, GPU picking:
+::: warning GPU picking does not ship
+`src/renderer/webgl2/picking.js` describes itself as a scaffold: *"This is a scaffold. No draw
+integration yet — `readAt()` will typically return null."* The file remains on disk but is
+**imported by nothing** — it is never constructed or initialized, it is not in the bundle, and the
+canvas-sized FBO it would allocate never exists. (`Workspace` keeps a `this.picking` slot; it
+stays `null`.)
 
-1. Renders notes to an offscreen framebuffer
-2. Encodes note IDs as colors
-3. Reads the pixel at the cursor position
-4. Decodes the color back to a note ID
+**All picking is CPU-side.** That is not a stopgap: it costs **0.31 ms per call at 100,000 notes**,
+which is why no one has finished the GPU path.
+:::
 
-This provides O(1) selection regardless of note count.
-
-## Class: Picking
-
-### Constructor
+## What actually runs
 
 ```javascript
-const picking = new Picking(gl, width, height)
+const hit = workspace.pickAt(clientX, clientY);        // top-most hit, or null
+// -> { type: 'note' | 'measure' | 'base', id: number }
+
+const stack = workspace.pickStackAt(clientX, clientY); // every hit, top-most first
 ```
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `gl` | WebGL2RenderingContext | WebGL2 context |
-| `width` | number | Framebuffer width |
-| `height` | number | Framebuffer height |
+`Workspace.pickAt()` delegates straight to `RendererAdapter.pickAllAt()` and takes the first entry.
+`pickStackAt()` takes the whole list.
 
-### Methods
+### `pickAllAt(clientX, clientY, expandCssPx = 2)`
 
-#### begin()
+The mixed-type entry point (`renderer.js:9109`). It concatenates three probes, in visual top-to-bottom
+order:
 
-```javascript
-picking.begin()
-```
+1. **Measure triangles** — `pickTrianglesAt()`, a barycentric point-in-triangle test against cached
+   CSS-space triangles. Triangles sit on top of notes visually, so they are probed first.
+2. **The BaseNote circle** — `pickBaseCircleAt()`, a radius test against the cached circle.
+3. **Notes** — `pickStackAt()`, the rounded-rect scan below.
 
-Binds the picking framebuffer for rendering.
+Measure bars and the BaseNote **are** pickable. Any code that assumes a hit is a note will
+mis-handle a click on a measure triangle.
 
-#### end()
+### `pickAt(clientX, clientY, expandCssPx = 2)` — the note scan
 
-```javascript
-picking.end()
-```
-
-Unbinds the picking framebuffer, returning to default framebuffer.
-
-#### readAt()
+`RendererAdapter.pickAt()` (`renderer.js:3363`) walks the **instance arrays**, not `module.notes`:
 
 ```javascript
-const noteId = picking.readAt(x, y)
-```
-
-Reads the note ID at the specified pixel coordinates.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `x` | number | X coordinate in CSS pixels |
-| `y` | number | Y coordinate in CSS pixels |
-
-Returns `null` if no note at that position, or the note ID.
-
-#### resize()
-
-```javascript
-picking.resize(width, height)
-```
-
-Resizes the framebuffer when canvas size changes.
-
-## ID Encoding
-
-Note IDs are encoded into RGB values:
-
-```javascript
-function encodeId(id) {
-  return [
-    (id >> 16) & 0xFF,  // R
-    (id >> 8) & 0xFF,   // G
-    id & 0xFF           // B
-  ]
+for (let i = N - 1; i >= 0; i--) {   // reverse: last-drawn is top-most
+  // 1. cheap AABB reject in world units, expanded by expandCssPx converted to WU
+  if (p.x < x || p.x > x + w || p.y < y || p.y > y + h) continue;
+  // 2. precise rounded-rect containment
+  if (this._isPointInsideRoundedNote(i, p.x, p.y, expandCssPx)) return { type: 'note', id };
 }
-
-function decodeId(r, g, b) {
-  return (r << 16) | (g << 8) | b
-}
+return null;
 ```
 
-This supports up to 16,777,215 unique note IDs (24-bit).
+Three details matter:
 
-## Framebuffer Setup
+- **Reverse order.** `sync()` writes the selected note last, so the instance arrays are already in
+  draw order and iterating backwards yields the top-most hit first. No depth sort at pick time.
+- **The precise test is a rounded-rect SDF**, the same one the body shader uses
+  (`_isPointInsideRoundedNote`, `renderer.js:3308`). An AABB alone would let you select a note by
+  clicking the empty pixels in its rounded corner.
+- **`expandCssPx` only applies along straight edges.** Inside the corner arcs the tolerance is
+  dropped entirely — otherwise the expansion would reintroduce exactly the corner-selection artifact
+  the SDF exists to prevent.
+
+There is **no spatial index**, and none is warranted: see the numbers below.
+
+### `hitTestSubRegion(clientX, clientY)`
+
+Resolves *which part* of a note was hit (`renderer.js:3426`):
 
 ```javascript
-// Create framebuffer
-const fbo = gl.createFramebuffer()
-gl.bindFramebuffer(GL_FRAMEBUFFER, fbo)
-
-// Create color texture
-const colorTexture = gl.createTexture()
-gl.bindTexture(GL_TEXTURE_2D, colorTexture)
-gl.texImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, null)
-gl.framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, colorTexture, 0)
-
-// Optional: depth buffer for correct overlap handling
-const depthBuffer = gl.createRenderbuffer()
-gl.bindRenderbuffer(GL_RENDERBUFFER, depthBuffer)
-gl.renderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, width, height)
-gl.framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, depthBuffer)
+// -> { id, region } where region is 'body' | 'tab' | 'octaveUp' | 'octaveDown'
 ```
 
-## Picking Shader
+It calls `pickAt()` first, so it inherits the rounded-rect interior and only runs when a note body is
+genuinely hit. Then:
 
-```glsl
-// Vertex shader (same as main render)
-attribute vec4 a_posSize;
-uniform mat3 u_matrix;
+- **Pull tab** — a full-height band on the inner right,
+  `max(10, round(noteHeightCss * overlays.tabWidthFactor) - border)` px wide.
+- **Arrow columns** — on the inner left, split into upper/lower halves with a 0.5 px dead zone
+  around the midline so a click on the centre reads as `body`. They are **gated on
+  `drawNoteArrows`**: turning arrows off in Settings removes their click zones too, so there are no
+  invisible hit regions left behind. The region names are still `octaveUp` / `octaveDown`, but the
+  arrows apply whatever interval is configured under **Settings → Arrows** (default 2/1) — the names
+  are historical.
+- **Silence notes report no arrow regions** at all.
 
-void main() {
-  vec2 worldPos = a_posSize.xy + position * a_posSize.zw;
-  vec3 clipPos = u_matrix * vec3(worldPos, 1.0);
-  gl_Position = vec4(clipPos.xy, 0.0, 1.0);
-}
+### `pickRect(x0, y0, x1, y1)` — the marquee
 
-// Fragment shader (ID output)
-uniform vec3 u_id;  // Encoded ID as normalized RGB
+`renderer.js:1452`. The multi-select hit test (shift+drag on desktop, 500 ms long-press on touch).
 
-void main() {
-  gl_FragColor = vec4(u_id, 1.0);
-}
-```
+- Selects by **intersection**, not containment — any overlap with the rectangle counts.
+- **AABB only.** No rounded-rect refinement: a rubber band that skims a corner should still catch the
+  note.
+- **The BaseNote (id 0) is structurally excluded** (`if (id === 0) continue`), and measure bars are
+  never returned. A measure's `startTime` is its link in the measure chain, so a group move could
+  neither re-anchor it (that reflows the grid under the whole score) nor leave it behind (the group
+  tears on drop).
 
-## Usage Pattern
+See [Selection](/user-guide/notes/selection) for the gestures.
+
+## Instance indices go stale
+
+Ids are stable across a `sync()`. **Instance indices are not.** `sync()` mints a brand-new
+`_noteIdToIndex` Map and reorders instances (the selected note moves to the end so it draws on top).
+Any cached index silently starts pointing at a *different note*.
+
+This is why `_resolveMultiSelIndices()` re-derives the multi-selection's index cache after every
+rebuild of `_noteIdToIndex`, and why `_ensureMultiSelIndices()` compares the **Map identity** it was
+built from before trusting the cache. If you cache an instance index anywhere, key it on the Map
+identity or re-resolve it on every sync.
+
+## Performance
+
+Measured with `node scripts/perf/bench-pick.mjs --url http://localhost:3000`, headless Chromium with
+a real GPU:
+
+| Module | Notes | `pickAt` | `pickStackAt` | `hitTestSubRegion` |
+|---|---|---|---|---|
+| `voices-5000` | 5,000 | 0.017 ms | 0.018 ms | 0.017 ms |
+| `voices-100000` | 100,000 | **0.314 ms** | 0.351 ms | 0.318 ms |
+
+A linear scan of 100,000 notes costs a third of a millisecond — about 2% of a 16.6 ms frame, on a
+path that runs at most once per pointermove. Hover at 100k notes still holds 60 fps end to end.
+
+Neither a spatial index nor a GPU ID pass would buy anything a user could perceive, and both would
+add a cache to keep in step with `sync()`. That is the whole reason `picking.js` was never finished.
+
+## The scaffold, for the record
+
+If you do pick the GPU path back up, the existing class is close to correct but its API is not what
+the old docs claimed:
 
 ```javascript
-// 1. Begin picking pass
-picking.begin()
-
-// 2. Clear with background color (ID 0 = no note)
-gl.clearColor(0, 0, 0, 1)
-gl.clear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
-
-// 3. Render each note with its ID
-for (const note of notes) {
-  const [r, g, b] = encodeId(note.id)
-  gl.uniform3f(u_id, r / 255, g / 255, b / 255)
-  drawNote(note)
-}
-
-// 4. End picking pass
-picking.end()
-
-// 5. On click, read ID
-canvas.addEventListener('click', (e) => {
-  const noteId = picking.readAt(e.clientX, e.clientY)
-  if (noteId !== null) {
-    selectNote(noteId)
-  }
-})
+const picking = new Picking();              // NO arguments
+picking.init(gl, canvasForCoords);          // sizes itself from the canvas rect x DPR
+picking.resizeFromCanvas(canvasForCoords);  // NOT resize(w, h)
+const hit = picking.readAt(clientX, clientY);  // -> { type: 'note', id } or null
+picking.destroy();
 ```
 
-## Reading Pixels
+- It allocates an RGBA8 colour texture plus a `DEPTH_COMPONENT16` renderbuffer, and checks
+  `FRAMEBUFFER_COMPLETE`.
+- `begin()` stashes the previous FBO binding, viewport, and the blend/depth/scissor enables, then
+  disables blending, enables depth, disables scissor, and clears to transparent black (id 0 = no
+  hit). `end()` restores all of it.
+- ID encoding is **little-endian across the channels**:
+  `_encodeId24(id) → [id & 0xFF, (id >> 8) & 0xFF, (id >> 16) & 0xFF]` and
+  `_decodeId24(r, g, b) → r | (g << 8) | (b << 16)`. R is the **low** byte, not the high one. 24 bits,
+  so ids 1–16,777,215.
+- What is missing is the draw integration: an ID pass that renders the note instances with their
+  encoded ids, and a shader to do it. Any such shader must be **GLSL ES 3.00**
+  (`#version 300 es`, `layout(location=…) in`, `out vec4`) — this is a WebGL2 renderer and a WebGL1
+  `attribute` / `gl_FragColor` shader will not compile.
+- Also note `readAt()` would be a synchronous `readPixels` — a GPU stall on the main thread. At the
+  measured CPU cost above, that trade is not obviously a win.
 
-```javascript
-readAt(x, y) {
-  // Bind framebuffer
-  gl.bindFramebuffer(GL_FRAMEBUFFER, this.fbo)
+## See also
 
-  // Flip Y coordinate (WebGL origin is bottom-left)
-  const glY = this.height - y
-
-  // Read single pixel
-  const pixel = new Uint8Array(4)
-  gl.readPixels(x, glY, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel)
-
-  // Decode ID
-  const id = (pixel[0] << 16) | (pixel[1] << 8) | pixel[2]
-
-  // ID 0 means no note (background)
-  return id === 0 ? null : id
-}
-```
-
-## Current Implementation
-
-The current implementation uses a CPU fallback for simplicity:
-
-```javascript
-function findNoteAtPosition(module, cache, worldX, worldY) {
-  for (const [id, note] of module.notes) {
-    const values = cache.get(id)
-    const bounds = calculateBounds(values)
-    if (pointInBounds(worldX, worldY, bounds)) {
-      return id
-    }
-  }
-  return null
-}
-```
-
-GPU picking is scaffolded but not yet the primary path.
-
-## Performance Comparison
-
-| Method | Complexity | Notes per Frame |
-|--------|------------|-----------------|
-| CPU iteration | O(n) | ~1,000 |
-| GPU picking | O(1) | ~100,000+ |
-
-GPU picking becomes beneficial with large note counts.
-
-## Limitations
-
-- Requires WebGL2 framebuffer support
-- Single pixel read has GPU sync cost
-- Must re-render on viewport change
-
-## See Also
-
-- [WebGL2 Renderer](/developer/rendering/webgl2-renderer) - Main renderer
-- [Camera Controller](/developer/rendering/camera-controller) - Coordinate conversion
+- [WebGL2 Renderer](/developer/rendering/webgl2-renderer) — the instance arrays picking reads
+- [Camera Controller](/developer/rendering/camera-controller) — the basis behind `RendererAdapter.screenToWorld()`, which every pick starts with
+- [Selection](/user-guide/notes/selection) — marquee, shift-click, and stack cycling
+- [Workspace](/user-guide/interface/workspace) — the gestures from the user's side

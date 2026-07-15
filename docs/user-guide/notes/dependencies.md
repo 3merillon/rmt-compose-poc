@@ -1,278 +1,202 @@
+---
+title: Dependencies
+description: How referencing one note from another builds a graph, how the colour-coded highlights read, and how to reshape or break dependencies safely.
+---
+
 # Dependencies
 
-**Dependencies** are the relationships between notes created when one note's expression references another. Understanding dependencies is crucial for building dynamic, flexible compositions.
-
-## What Are Dependencies?
-
-When a note's expression references another note, it creates a dependency:
+When one note's expression names another note, it **depends** on it. Change the note it points at and it follows. That is the mechanism behind everything RMT Compose does: a composition is a graph, not a list.
 
 ```
-// Note 2's frequency depends on Note 1's frequency
+# Note 2's frequency depends on Note 1's frequency
 [1].f * (5/4)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Note 2 **depends on** note 1. Note 1 **has a dependent**: note 2. Move note 1's pitch and note 2 keeps its major third.
 
-```javascript
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
-```
-</details>
+## Reading the highlights
 
-In this example:
-- Note 2 **depends on** Note 1
-- Note 1 **has a dependent**: Note 2
+Select a note and the workspace draws its neighbourhood, colour-coded **by the property involved**:
 
-## Visualizing Dependencies
+![A selected note with orange, teal and purple dependency lines running to the notes it depends on and the notes that depend on it](/img/dependency-lines.png)
 
-When you select a note, dependency lines appear, color-coded by which property is affected:
+| Colour | Property |
+|---|---|
+| **Orange** | frequency |
+| **Teal** | start time |
+| **Purple** | duration |
 
-| Line Color | Property Affected |
-|------------|-------------------|
-| **Orange** | Frequency dependencies |
-| **Teal/Cyan** | Start time dependencies |
-| **Purple** | Duration dependencies |
+(Those are the default theme's colours — the three *Dependency highlights* pickers in [Settings → Appearance](/user-guide/interface/themes) set them.)
 
-### Line Thickness
+And **thickness tells you which way the arrow points**:
 
-- **Thick lines** → Connect to **parent** notes (notes the selected note depends on)
-- **Thin lines** → Connect to **child** notes (notes that depend on the selected note)
+| Weight | Meaning |
+|---|---|
+| **Thick line** | a note the selected note **depends on** — its parents, traced all the way back to the BaseNote |
+| **Thin line** | a note that **depends on** the selected note — its dependents |
 
-### Example
+The notes at both ends also get a **coloured ring** in the same scheme, thicker on the notes you depend on. In practice the rings are most of what you see; the lines tell you which note is connected to which.
 
-If you select Note 3:
-- **Thick orange line** to Note 1 means Note 3's frequency depends on Note 1
-- **Thin teal lines** to Notes 4 and 5 mean their start times depend on Note 3
+So if you select note 3 and see a **thick orange line** running back to note 1, note 3's *frequency* is derived from note 1. A **thin teal line** out to note 5 means note 5's *start time* is anchored to note 3 — lengthen or move note 3 and note 5 will shift.
 
-## Property-Specific Dependencies
+### While you drag
 
-Dependencies are tracked per-property:
+The highlights sharpen to show you what the gesture will actually affect:
 
-| Dependency Type | Description |
-|-----------------|-------------|
-| **Frequency dependency** | One note's frequency references another's |
-| **Start time dependency** | One note's timing references another's |
-| **Duration dependency** | One note's length references another's |
+- **Dragging a note**: the teal start-time relationships stay bright and the orange and purple ones fade out — because moving a note changes only what is anchored to its timing.
+- **Resizing a note**: the purple duration relationships stay bright and the others fade.
 
-This enables smart behavior:
-- **Drag preview**: Only notes whose *start time* depends on the dragged note move
-- **Cascade updates**: Changing frequency only re-evaluates frequency-dependent notes
+## The graph
 
-## Dependency Graph
+Dependencies are tracked **per property**, not per note. Note 4 can take its pitch from note 1 and its timing from note 3 without those two knowing about each other. This is why the app can be precise about consequences:
 
-RMT Compose maintains an **inverted index** for O(1) dependency lookup:
+- **Drag previews** only move the notes whose *start time* traces back to the note in your hand.
+- **Cascade updates** only recompute the notes that are actually downstream of what changed.
 
-### Forward Dependencies
-
-"What does this note depend on?"
+When a value changes, every note that depends on it — directly or transitively — is marked stale and recomputed in **topological order**, so a note is never evaluated before the notes it is built from.
 
 ```
-Note 5 → depends on → {Note 1, Note 2}
-Note 3 → depends on → {Note 1}
+BaseNote  (frequency 263)
+    └── Note 1   base.f * (3/2)   = 394.5
+          └── Note 2   [1].f * (5/4)   = 493.125
+                └── Note 3   [2].f * (3/2)   = 739.6875
 ```
 
-### Inverse Dependencies (Dependents)
+Retune the BaseNote to 220 and all three follow, keeping their intervals exactly. One edit, whole piece transposed.
 
-"What depends on this note?"
+## The BaseNote
 
-```
-Note 1 → depended on by → {Note 3, Note 5}
-Note 2 → depended on by → {Note 5}
-```
+The BaseNote (ID 0) is the root. It depends on nothing, and nearly everything depends on it — directly, or by way of a chain. It carries the properties the rest of the module reads: `frequency`, `startTime`, `tempo`, `beatsPerMeasure` and `measureLength`.
 
-## Smart Drag Previews
+`base.f` and `[0].f` are the same reference.
 
-When you drag a note:
+## Measure chains
 
-1. The system queries: "Which notes' *start time* depends on this note?"
-2. Only those notes show a preview of their new positions
-3. Notes with unrelated dependencies don't move
-
-This makes complex compositions feel responsive and predictable.
-
-## Cascade Updates
-
-When you change a note:
-
-1. All notes that depend on it are marked "dirty"
-2. Notes are re-evaluated in topological order (dependencies first)
-3. The update cascades through the entire dependency chain
-
-### Example Cascade
+Measure bars are notes too — a measure is a note with a `startTime` and nothing else. They form their own chain, each measure hanging off the previous one:
 
 ```
-BaseNote (frequency: 440)
-    ↓
-Note 1 (frequency: BaseNote × 3/2 = 660)
-    ↓
-Note 2 (frequency: Note 1 × 5/4 = 825)
-    ↓
-Note 3 (frequency: Note 2 × 6/5 = 990)
+# Measure 1
+base.t
+
+# Measure 2
+[1].t + measure([1])
+
+# Measure 3
+[2].t + measure([2])
 ```
 
-If you change BaseNote's frequency to 220:
-- Note 1 updates to 330
-- Note 2 updates to 412.5
-- Note 3 updates to 495
+Change the BaseNote's tempo or beats-per-measure and the whole bar grid re-lays itself, because every measure's start time is expressed in terms of the one before it. `measure(x)` is the measure length of `x`, in seconds. (The widget redisplays it as `[1].ml` — see [Expressions](/user-guide/notes/expressions#the-three-helper-functions).)
 
-All from one change!
+## Instruments ride the frequency edge
 
-## Managing Dependencies
+A surprising consequence of the graph: **instruments are inherited along the frequency reference**. A note with no instrument of its own plays with the instrument of the note its *frequency* points at, recursively up the chain, until something sets one or the chain reaches the BaseNote — at which point the global default from Settings → Audio applies.
+
+Set note 1 to `violin`, and every note whose frequency reads `[1].f * …` becomes a violin. Repoint a note's frequency at a different parent and its instrument may change with it. See [Instruments](/user-guide/playback/instruments).
+
+## Reshaping the graph
 
 ### Evaluate to BaseNote
 
-Simplifies a note's expression to reference only BaseNote:
+Collapses a note's chain so it references only the BaseNote. The note keeps its exact pitch, position and length; it just stops caring about the notes in between.
 
-**Before:**
+Given this chain:
+
 ```
-[3].f * (5/4)
-// Note 3 frequency is: Note 2 × 3/2
-// Note 2 frequency is: Note 1 × 5/4
-// Note 1 frequency is: BaseNote × 3/2
+# Note 1
+base.f * (3/2)
+
+# Note 2
+[1].f * (5/4)
+
+# Note 3
+[2].f * (3/2)
 ```
 
-**After:**
+Selecting note 3 and clicking **`Evaluate to BaseNote`** rewrites it as:
+
 ```
 base.f * (45/16)
-// Direct computation: 3/2 × 5/4 × 3/2 × 5/4 = 45/16
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+because 3/2 × 5/4 × 3/2 = 45/16. Note 3 now transposes with the BaseNote but no longer follows notes 1 and 2.
 
-```javascript
-// Before
-module.getNoteById(3).getVariable('frequency').mul(new Fraction(5, 4))
+The conversion traces the chain **algebraically**, so a TET note stays a TET note — `base.f * 2^(7/12)` does not degrade into a decimal approximation.
 
-// After
-module.baseNote.getVariable('frequency').mul(new Fraction(45, 16))
-```
-</details>
-
-Use this to "freeze" a note's value or simplify complex chains.
+**`Evaluate Module`**, on the BaseNote, does this to every note at once. Useful for flattening a module before you share it.
 
 ### Liberate Dependencies
 
-Rewrites other notes' references to bypass *this* note, substituting the liberated note's expressions directly:
+The inverse operation: instead of freeing *this* note from its parents, it frees *everyone else* from **this** note. Every note that referenced it has the reference replaced by what this note itself referenced. The note survives, but nothing depends on it any more.
 
-**Before:** Note 3 references Note 2, and Note 2's frequency is `base.f * (3/2)`
-```
-// Note 3's frequency
-[2].f * (5/4)
-```
+Note 3's frequency is `[2].f * (5/4)`, and note 2's frequency is `base.f * (3/2)`. Liberate note 2, and note 3 becomes:
 
-**After:** Note 3 now references what Note 2 referenced (bypassing Note 2)
 ```
-// Note 3's frequency - Note 2's expression substituted in
 base.f * (3/2) * (5/4)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Note 3 sounds exactly the same, but note 2 has dropped out of its lineage. You can now retune or move note 2 freely without disturbing note 3.
 
-```javascript
-// Before
-module.getNoteById(2).getVariable('frequency').mul(new Fraction(5, 4))
+Use it when you want to break a note out of the middle of a chain while keeping the chain's behaviour intact. `Liberate Dependencies` is not available on measure bars.
 
-// After - Note 2's expression substituted
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2)).mul(new Fraction(5, 4))
-```
-</details>
+### Delete with Keep Dependencies
 
-Use this to move/edit a note without affecting its dependents, or before deleting a note.
+**`Keep Dependencies`** performs exactly the same substitution and *then* removes the note. Its dependents keep their positions, lengths and pitches; they simply now reference whatever the deleted note referenced. A direct dependent with no instrument of its own also inherits the deleted note's instrument, so the sound doesn't change either.
 
-## Circular Dependencies
+**`Delete Dependencies`**, by contrast, removes the note *and everything downstream of it*. Look at the thin lines before you use it.
 
-**Circular dependencies are not allowed.**
+### Deleting a group
 
-```
-// Note A depends on Note B
-[B].f * (3/2)
+Deleting a multi-selection **liberates rather than cascades**. Every dependent that lies *outside* the selection is liberated — the deleted notes' expressions are inlined into it, so it keeps its exact position, length and pitch. Only what you selected is destroyed.
 
-// Note B depends on Note A - ERROR!
-[A].f * (5/4)
-```
+The confirmation dialog describes the delete as irreversible. It isn't: it lands as one undo entry. See [Selecting Notes](/user-guide/notes/selection).
 
-The app prevents you from creating circular references.
+## Two edges the graph will not accept
 
-## BaseNote Dependencies
+The graph must stay acyclic, so a note cannot reference itself and two notes cannot reference each other. Both are rejected on `Save`, with the reason shown in red under the Save button.
 
-The **BaseNote** is special:
-- It has no dependencies (it's the root)
-- Almost all notes ultimately depend on it
-- Changing BaseNote affects the entire composition
+A reference to a note that **does not exist** is a different problem: it produces no edge, no line and no warning, and the evaluator quietly substitutes 440 Hz. Both cases are worked through in [Expressions → Things that go wrong](/user-guide/notes/expressions#things-that-go-wrong).
+
+## Patterns
+
+**Sequential melody** — each note starts when the previous one ends. Lengthen any note and everything after it slides along.
 
 ```
-BaseNote (root)
-    ├── Note 1
-    │   ├── Note 3
-    │   └── Note 4
-    └── Note 2
-        └── Note 5
-```
-
-## Tips
-
-1. **Check dependency lines** before making changes - see what will be affected
-2. **Use BaseNote references** for notes that should transpose together
-3. **Use note-to-note references** for relative relationships (intervals, timing chains)
-4. **Liberate before deleting** to preserve dependent notes
-5. **Evaluate to BaseNote** to simplify complex chains
-6. **Avoid deep chains** - they're harder to understand and debug
-
-## Common Patterns
-
-### Sequential Melody
-
-Each note starts when the previous ends:
-
-```
-// Note 2 starts when Note 1 ends
 [1].t + [1].d
-
-// Note 3 starts when Note 2 ends
 [2].t + [2].d
-
-// Note 4 starts when Note 3 ends
 [3].t + [3].d
 ```
 
-### Chord Stack
-
-All notes share the same start time:
+**Chord stack** — all the tones share the root's start time and take their pitch from it. Move the root and the chord moves; retune the root and it transposes as a unit.
 
 ```
-// Notes 2, 3, 4 all start at the same time as Note 1
+# start time on every chord tone
 [1].t
-```
 
-### Parallel Motion
-
-Notes maintain the same interval:
-
-```
-// Note 2: Third above Note 1
+# frequencies
 [1].f * (5/4)
-
-// Note 3: Fifth above Note 1
 [1].f * (3/2)
-
-// Moving Note 1 moves all three in parallel
 ```
 
-### Relative Transposition
-
-One note is the reference, others follow:
+**Transposable phrase** — pin one note to the BaseNote and hang the rest off *that* note rather than off the base. Now you have a single handle for the phrase's pitch, independent of the piece's.
 
 ```
-// Root note: some interval above BaseNote
+# Note 1: the phrase's root
 base.f * (9/8)
 
-// Third: major third above root (Note 1)
+# The rest of the phrase, relative to it
 [1].f * (5/4)
-
-// Fifth: perfect fifth above root (Note 1)
 [1].f * (3/2)
-
-// Changing the root's interval changes the whole chord
 ```
+
+## Practical advice
+
+1. **Select before you delete.** The lines tell you what is downstream.
+2. **Reference the BaseNote for things that should transpose with the piece**; reference a neighbouring note for things that should hold an interval or a rhythm against it.
+3. **Liberate before deleting** when you want the dependents to stay put — or just use `Keep Dependencies`, which does it for you.
+4. **Evaluate to BaseNote** when a chain has become hard to reason about and you no longer need it.
+
+## Where to go next
+
+- [Expressions](/user-guide/notes/expressions) — the syntax that creates dependencies.
+- [Editing Notes](/user-guide/notes/editing-notes) — where the Liberate, Evaluate and Delete buttons live.
+- [The Note Widget](/user-guide/interface/variable-widget) — the panel itself.

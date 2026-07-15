@@ -1,6 +1,16 @@
+---
+title: Note Class
+description: API reference for the Note class in src/note.js — expression storage, variable get/set, dependency introspection, and the legacy variables proxy.
+---
+
 # Note Class
 
-The Note class represents a single musical note with expressions defining its properties.
+A `Note` (`src/note.js`) is six compiled expressions plus two plain properties. It stores no
+numbers: every musical value is an expression, and reading one goes through the module's evaluator.
+
+```javascript
+import { Note } from './note.js'
+```
 
 ## Constructor
 
@@ -8,34 +18,41 @@ The Note class represents a single musical note with expressions defining its pr
 const note = new Note(id, variables = {})
 ```
 
-### Parameters
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | number | Note id. `0` is the BaseNote. |
+| `variables` | object | Expression strings (DSL or legacy), plus optional `color` / `instrument`. |
 
-| Name | Type | Description |
-|------|------|-------------|
-| `id` | number | Unique note identifier |
-| `variables` | object | Initial expression strings |
-
-::: warning
-Notes should be created via `module.addNote()`, not directly.
+::: warning Create notes through the module
+`module.addNote(variables)` or `Module.loadFromJSON()`. A `Note` built directly has
+`note.module === null`, so `getVariable()` returns `null` for every **evaluated** property (there
+is no evaluator to ask) and no dependency registration happens. Source text and `color` /
+`instrument` still read back.
 :::
+
+The constructor accepts a value per property in several shapes (`_initFromVariables`,
+`src/note.js:53-104`): a plain string (compiled), a `*String` key (preferred over the plain key
+when both are present), a legacy function (its `return` expression is extracted), or an existing
+`BinaryExpression` (adopted as-is).
 
 ## Properties
 
 ### id
 
 ```javascript
-note.id  // number (read-only)
+note.id  // number
 ```
 
-Unique identifier. BaseNote has ID 0, other notes have positive IDs.
+A plain writable field. `reindexModule()` does not mutate it — it builds fresh `Note` objects.
 
 ### expressions
 
 ```javascript
-note.expressions  // object
+note.expressions  // { [name: string]: BinaryExpression }
 ```
 
-Map of property names to BinaryExpression objects:
+Always all six keys, always a `BinaryExpression` object — an *unset* property is an **empty**
+expression, not a missing one. Use `hasExpression(name)` rather than a truthiness check.
 
 ```javascript
 {
@@ -51,27 +68,50 @@ Map of property names to BinaryExpression objects:
 ### properties
 
 ```javascript
-note.properties  // object
+note.properties  // { color: string | null, instrument: string | null }
 ```
 
-Non-expression properties:
+Both default to `null` — including on the BaseNote. A `null` instrument is what lets
+`module.findInstrument()` fall through to the configurable default instrument.
+
+### module
 
 ```javascript
-{
-  color: string | null,      // CSS color
-  instrument: string | null  // Instrument name
-}
+note.module  // Module | null
 ```
+
+Back-reference, set by `addNote()` / `loadFromJSON()`. Without it, `getVariable()` cannot evaluate.
 
 ### parentId
 
 ```javascript
-note.parentId  // number | null
+note.parentId  // number | undefined
 ```
 
-Optional parent note ID for hierarchical organization.
+**Undefined until something assigns it** — the constructor never initialises it. It is written in
+four places: `Module.generateMeasures()` (chains each measure to the previous one),
+`Module.reindexModule()` (remaps it through the new ids), the measure-creation path in
+`src/modals/note-creation.js`, and the module-import path in `src/player.js`.
 
-## Variable Access
+It is not decorative: `Module.findTempo()` and `Module.findMeasureLength()` walk the `parentId`
+chain to resolve inherited tempo and measure length. It is also **not** part of the module JSON
+schema, so it does not survive a save/load round-trip.
+
+### lastModifiedTime
+
+```javascript
+note.lastModifiedTime  // number — Date.now() of the last mutation
+```
+
+Seeded at construction, then rewritten by `setVariable()` and `_setExpressionSilent()`.
+
+### _depsEpoch / _depsRegKey
+
+Bumped on every expression mutation. `Module._registerNoteDependencies()` builds a key from
+`graphGeneration:id:_depsEpoch` and skips re-registration (~15 graph maps) when it is unchanged —
+which matters because `markNoteDirty()` re-registers every dependent it touches.
+
+## Variable access
 
 ### getVariable()
 
@@ -79,18 +119,20 @@ Optional parent note ID for hierarchical organization.
 const value = note.getVariable(name)
 ```
 
-Returns the evaluated value from the module's cache.
+Reads through `module.getEvaluationCache()`, which evaluates first if anything is dirty.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | string | Property name |
+| `name` | Returns |
+|---|---|
+| `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength` | `Fraction` |
+| `color`, `instrument` | `string \| null` (straight from `note.properties` — no module needed) |
+| any `<name>String` | `string \| null` — the expression **source text**, via `getExpressionSource()` (no module needed) |
+| any of the six expression names, when unresolvable or when `note.module` is `null` | `null` |
+| any other name | `null` |
 
-Returns: `Fraction` object.
-
-Example:
 ```javascript
-const freq = note.getVariable('frequency')  // Fraction
-freq.valueOf()  // 440 (JavaScript number)
+note.getVariable('frequency').valueOf()   // 394.5
+note.getVariable('frequencyString')       // '[1].f * (3/2)'
+note.getVariable('color')                 // 'rgba(255,0,0,0.5)'
 ```
 
 ### setVariable()
@@ -99,19 +141,16 @@ freq.valueOf()  // 440 (JavaScript number)
 note.setVariable(name, value)
 ```
 
-Sets an expression or property.
+| `name` | `value` | Effect |
+|---|---|---|
+| an expression name, or `<name>String` | string | Compile and store; mark the module dirty |
+| an expression name | function | Extract the `return` expression, then compile |
+| an expression name | `BinaryExpression` | Adopt it directly |
+| `color` / `instrument` | string | Set the property; mark the module dirty |
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | string | Property name |
-| `value` | string | Expression text (for expressions) or value (for properties) |
-
-Example:
 ```javascript
-// Set expression using DSL syntax
-note.setVariable('frequency', "base.f * 2")
-
-// Set property
+note.setVariable('frequency', 'base.f * (3/2)')
+note.setVariable('frequencyString', 'base.f * (3/2)')   // identical
 note.setVariable('color', '#ff0000')
 ```
 
@@ -119,196 +158,176 @@ note.setVariable('color', '#ff0000')
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// Set expression using legacy syntax
-note.setVariable('frequency', "module.baseNote.getVariable('frequency').mul(new Fraction(2))")
-
-// Set property
-note.setVariable('color', '#ff0000')
+note.setVariable('frequency', "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))")
 ```
+
+The compiler sniffs the format per string (`isDSLSyntax()`), so a legacy string and its DSL
+equivalent produce identical bytecode.
 </details>
+
+::: warning Compilation failures do not throw out of `setVariable()`
+`ExpressionCompiler.compile()` **throws** on an expression neither parser can read, after emitting
+a `console.error` naming the expression. `_setExpression()` and the constructor catch that throw
+per-property, so a typo leaves the property **unset** (or keeps the previous expression) rather
+than silently zeroing it — but the caller of `setVariable()` sees no exception either. Validate
+first with `validateDSL()` from `src/dsl/index.js` if you need a structured answer.
+:::
 
 ### getExpressionSource()
 
 ```javascript
-const source = note.getExpressionSource(name)
-// → "base.f * (3/2)"
+const source = note.getExpressionSource('frequency')  // → '[1].f * (3/2)'
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Returns `expr.sourceText` when the expression was compiled from text — so a DSL note gives you back
+exactly the DSL you wrote. Returns `null` for an unset property.
+
+If `sourceText` is empty (a synthesised expression), it falls back to `decompiler.decompile(expr)`,
+which emits **legacy** syntax. For DSL output from bytecode use `decompileToDSL()` instead.
+
+### getExpression() / hasExpression()
 
 ```javascript
-const source = note.getExpressionSource(name)
-// → "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))"
-```
-</details>
-
-Returns the original expression text.
-
-### getExpression()
-
-```javascript
-const expr = note.getExpression(name)
-// → BinaryExpression
+note.getExpression('frequency')   // → BinaryExpression (possibly empty)
+note.hasExpression('frequency')   // → boolean — true only when it has bytecode
 ```
 
-Returns the compiled BinaryExpression object.
-
-### hasExpression()
-
-```javascript
-const has = note.hasExpression(name)
-// → boolean
-```
-
-Checks if an expression is defined.
+`hasExpression()` is how note kinds are told apart: a **measure** has `startTime` but no `duration`
+and no `frequency`; a **silence** has `startTime` and `duration` but no `frequency`.
 
 ### getAllVariables()
 
 ```javascript
-const all = note.getAllVariables()
-// → { startTime: Fraction, duration: Fraction, frequency: Fraction, ... }
+note.getAllVariables()
+// → {
+//   startTime: Fraction,  startTimeString: '[1].t + [1].d',
+//   duration: Fraction,   durationString: 'beat(base)',
+//   frequency: Fraction,  frequencyString: '[1].f * (3/2)',
+//   color: 'rgba(255,0,0,0.5)'
+// }
 ```
 
-Returns all evaluated values.
+Every defined expression appears **twice**: once evaluated, once as its source string. `color` and
+`instrument` are included only when set. Code iterating this object will hit string values —
+`Object.entries(note.getAllVariables())` is not six Fractions.
 
-## Dependency Tracking
+## Dependency tracking
 
 ### getAllDependencies()
 
 ```javascript
-const deps = note.getAllDependencies()
-// → Set<number>
+note.getAllDependencies()  // → Set<number>
 ```
 
-Returns IDs of all notes referenced in any expression.
+Ids referenced across all six expressions. **The BaseNote is not in it** — base references set the
+`referencesBase` flag on the expression instead of adding an edge to note 0.
 
 ### referencesBaseNote()
 
 ```javascript
-const refs = note.referencesBaseNote()
-// → boolean
+note.referencesBaseNote()  // → boolean
 ```
 
-Checks if any expression references the BaseNote.
-
-## Expression Properties
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `startTime` | Fraction | When note plays (seconds) |
-| `duration` | Fraction | How long note plays (seconds) |
-| `frequency` | Fraction | Pitch in Hz |
-| `tempo` | Fraction | Tempo in BPM |
-| `beatsPerMeasure` | Fraction | Time signature numerator |
-| `measureLength` | Fraction | Computed measure duration |
-
-## Non-Expression Properties
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `color` | string | CSS color for visualization |
-| `instrument` | string | Instrument name |
-
-## Internal Methods
-
-### _setExpression()
-
-```javascript
-note._setExpression(name, exprText)
-```
-
-Compiles expression and notifies module.
-
-### _setExpressionSilent()
-
-```javascript
-note._setExpressionSilent(name, exprText)
-```
-
-Sets expression without notification (used in batch operations).
-
-### _notifyChange()
-
-```javascript
-note._notifyChange()
-```
-
-Triggers module cache invalidation and event emission.
+True when any expression carries `referencesBase`.
 
 ## Serialization
 
 ### toJSON()
 
 ```javascript
-const json = note.toJSON()
-// → { id, frequency, startTime, duration, color, instrument, ... }
+note.toJSON()
+// → { id: 2, startTime: '[1].t + [1].d', duration: 'beat(base)', frequency: '[1].f * (3/2)', color: '…' }
 ```
 
-Serializes note with expression source text.
+One entry per non-empty expression, plus `color` / `instrument` when set.
 
-## Example Usage
+::: info This is not the app's save path
+`toJSON()` runs each expression through the **legacy** decompiler. That decompiler returns
+`sourceText` verbatim when it has it, so for a note loaded from text you get your DSL back — but a
+synthesised expression comes out as a legacy method chain.
+
+The app saves through `Module.createModuleJSON()`, which uses `getExpressionSource()`. Reach for
+that one.
+:::
+
+## Internal methods
+
+| Method | Contract |
+|---|---|
+| `_setExpression(name, text)` | Compile, bump `_depsEpoch`, call `_notifyChange()`. |
+| `_setExpressionSilent(name, text)` | Compile and bump `_depsEpoch`, but do **not** notify. The caller must mark the note dirty — `Module.batchSetExpressions()` does this, then batches one `markNotesDirtyBatch()`. |
+| `_notifyChange()` | `module.markNoteDirty(this.id)` + emit `player:invalidateModuleEndTimeCache`. |
+
+## The `variables` proxy (legacy compatibility)
 
 ```javascript
-// Create via module
-const note = module.addNote({
-  frequency: "base.f * (5/4)",
-  startTime: "0",
-  duration: "60 / tempo(base)"
-})
-
-// Set color
-note.setVariable('color', '#4a90d9')
-
-// Change frequency
-note.setVariable('frequency', "base.f * (3/2)")
-
-// Read values (after evaluation)
-const freq = note.getVariable('frequency')
-console.log(freq.valueOf())  // 660
-
-// Check dependencies
-const deps = note.getAllDependencies()
-console.log(deps.has(0))  // true (references BaseNote)
-
-// Get source
-const source = note.getExpressionSource('frequency')
-console.log(source)  // "base.f * (3/2)"
+note.variables  // Proxy
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+A compatibility shim, still used across `player.js`, `module.js` and the renderer. It is memoized
+per note (it used to allocate a fresh `Proxy` on every access, on hot paths).
+
+| Access | Result |
+|---|---|
+| `note.variables.frequencyString` | the expression source text |
+| `note.variables.frequency` | a **function wrapper**, not a value — call it to get the `Fraction` |
+| `String(note.variables.frequency)` | the expression source (its `toString()` is overridden) |
+| `note.variables.frequency` on an unset property | `undefined` |
+| `note.variables.color` / `.instrument` | the property value |
+| `note.variables.x = 'base.f'` | write-through to `setVariable()` |
+| `Object.keys(note.variables)` | defined expression names **and** their `*String` twins, plus any set properties |
 
 ```javascript
-// Create via module
-const note = module.addNote({
-  frequency: "module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))",
-  startTime: "new Fraction(0)",
-  duration: "new Fraction(60).div(module.findTempo(module.baseNote))"
+note.variables.frequency()          // Fraction — note the call
+String(note.variables.frequency)    // '[1].f * (3/2)'
+note.variables.frequencyString      // '[1].f * (3/2)'
+```
+
+New code should use `getVariable()` / `setVariable()` / `getExpressionSource()` instead.
+
+## Property reference
+
+| Expression property | Meaning |
+|---|---|
+| `startTime` | when the note starts, in seconds |
+| `duration` | how long it sounds, in seconds |
+| `frequency` | pitch in Hz |
+| `tempo` | BPM (inheritable — falls back to the BaseNote) |
+| `beatsPerMeasure` | time-signature numerator (inheritable) |
+| `measureLength` | measure duration in seconds (inheritable) |
+
+| Non-expression property | Meaning |
+|---|---|
+| `color` | CSS colour string used by the renderer |
+| `instrument` | pins the timbre; `null` means "inherit down the frequency chain" |
+
+## Example
+
+```javascript
+const module = await Module.loadFromJSON({
+  baseNote: { frequency: '263', startTime: '0', tempo: '120', beatsPerMeasure: '4' },
+  notes: [{ id: 1, startTime: 'base.t', duration: 'beat(base)', frequency: 'base.f' }]
 })
 
-// Set color
+const note = module.addNote({
+  frequency: '[1].f * (5/4)',
+  startTime: '[1].t + [1].d',
+  duration: 'beat(base)'
+})
+
 note.setVariable('color', '#4a90d9')
+note.setVariable('frequency', '[1].f * (3/2)')   // retune to a fifth
 
-// Change frequency
-note.setVariable('frequency', "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))")
-
-// Read values (after evaluation)
-const freq = note.getVariable('frequency')
-console.log(freq.valueOf())  // 660
-
-// Check dependencies
-const deps = note.getAllDependencies()
-console.log(deps.has(0))  // true (references BaseNote)
-
-// Get source
-const source = note.getExpressionSource('frequency')
-console.log(source)  // "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))"
+note.getVariable('frequency').valueOf()   // 394.5
+note.getExpressionSource('frequency')     // '[1].f * (3/2)'
+note.getAllDependencies()                 // Set(1) { 1 }  — BaseNote is never in here
+note.referencesBaseNote()                 // true (duration reads beat(base))
+note.hasExpression('tempo')               // false
 ```
-</details>
 
-## See Also
+## See also
 
-- [Module Class](/developer/api/module) - Module API
-- [BinaryExpression](/developer/api/binary-expression) - Expression objects
-- [Creating Notes](/user-guide/notes/creating-notes) - User guide
+- [Module Class](/developer/api/module) — creation, evaluation, dependency queries
+- [BinaryExpression](/developer/api/binary-expression) — what `note.expressions` holds
+- [Expression Syntax](/reference/expressions/syntax) — the DSL these strings are written in
+- [Creating Notes](/user-guide/notes/creating-notes) — the user-facing side

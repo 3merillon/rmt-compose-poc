@@ -1,398 +1,215 @@
-# SymbolicPower Algebra
+---
+title: Understanding SymbolicPower
+description: What "exact" means in RMT Compose - which powers resolve exactly, which are approximated and flagged, and how much error a chain of TET steps accumulates.
+---
 
-Understanding how RMT Compose handles irrational numbers like 2^(1/12) with full algebraic precision.
+# Understanding SymbolicPower
 
-## The Problem with Irrational Numbers
+Equal temperament produces irrational numbers. `2^(1/12)` = 1.0594630943592953… cannot be written
+as a fraction. This page shows you exactly what RMT Compose does with such a value — where it is
+exact, where it is not, and how to tell which you are looking at.
 
-Equal temperament tuning produces irrational numbers. For example:
+**Prerequisites:** [Microtonal Composition](/tutorials/advanced/microtonal), or equivalent comfort
+with `^` expressions.
+
+::: danger Read this before you rely on exactness
+The headline you may have heard — *"chain twelve semitones and you get a perfect octave"* — is
+**not true** on the evaluator that ships. It is true for `2^(12/12)`. It is false for
+`2^(1/12) * 2^(1/12) * … ` twelve times. The rest of this page explains the difference, because the
+difference is the whole story.
+:::
+
+## Two kinds of power
+
+The `^` operator hands its result to a rational-power check before anything else. That check has
+two ways to succeed.
+
+**1. The exponent resolves to an integer.**
 
 ```
-12-TET semitone = 2^(1/12) = 1.0594630943592953...
+2^(12/12)               # 12/12 = 1  ->  exactly 2
+2^3                     # exactly 8
+2^(-1)                  # exactly 1/2
 ```
 
-This number cannot be exactly represented as a fraction or floating-point number. If we just used floats:
+**2. The result is a perfect n-th root.**
+
+```
+4^(1/2)                 # exactly 2
+8^(1/3)                 # exactly 2
+```
+
+In both cases you get an exact rational. The note is **not** flagged, **not** hatched, and its
+`Evaluated:` line shows a plain value with no `≈`.
+
+**Everything else is irrational**, and irrational is where the guarantees stop:
+
+```
+2^(1/12)                # irrational
+3^(1/13)                # irrational
+2^(7/12)                # irrational
+```
+
+When `^` yields an irrational, the evaluator does one thing: it converts the result to an
+**approximating fraction** and sets a corruption flag on the property. There is no symbolic value
+sitting on the stack afterwards. The approximation *is* the value from that point on.
+
+## What corruption looks like
+
+| Where | Directly corrupted | Transitively corrupted |
+|---|---|---|
+| Note rectangle | **Crosshatch** (two diagonals) | **Single diagonal** hatch |
+| Note widget `Evaluated:` | `≈<value>`, italic amber | `≈<value>`, italic amber |
+
+"Directly corrupted" means this note's own expression produced the irrational.
+"Transitively corrupted" means it inherited one from something it references. Both show `≈`; only
+the hatching distinguishes them.
+
+The flag propagates: give note 1 a TET frequency, write note 2 as `[1].f * (3/2)`, and note 2 is
+hatched too — its value is rational arithmetic performed on an approximation.
+
+## How much error, exactly
+
+This is measurable, so measure it. Base frequency 263 Hz:
+
+| Expression | Evaluates to | Exact? | Flagged? |
+|---|---|---|---|
+| `base.f * 2^(12/12)` | 526 | yes — exactly | no |
+| `base.f * 4^(1/2)` | 526 | yes — exactly | no |
+| `base.f * 2^(1/12) * 2^(1/12) * …` (×12) | 525.999999999985675 | **no** | yes |
+| `base.f * 2^(1/12)` | 278.6387938165… | no | yes |
+
+Twelve chained semitones land **1.4 × 10⁻¹¹ short** of the octave. Each `^` rounds once, and twelve
+roundings accumulate. It is a small error and it will never be audible — but it is an error, and a
+page that promises "no drift" is lying to you.
+
+The lesson is not "avoid TET". It is: **write the power you mean.** `2^(7/12)` rounds once.
+`2^(1/12)` seven times rounds seven times. Prefer the closed form.
+
+## What the simplifier does — and refuses to do
+
+Saving a variable runs the expression through a simplifier. It has real symbolic algebra in it, and
+it does merge like bases:
+
+| You type | Saved as |
+|---|---|
+| `base.f + base.f` | `2 * base.f` |
+| `2 * (1/2) * base.f` | `base.f` |
+| `4^(1/2) * base.f` | `2 * base.f` |
+| `base.f * 2^(1/12) * 2^(1/12)` | `base.f * 2^(1/6)` |
+
+So `2^(1/12) × 2^(1/12) = 2^(1/6)` — the like-base merge — is real. It happens **at save time**, in
+the simplifier, not during evaluation.
+
+But now try the twelve-fold chain. The simplifier *can* fold it to `base.f * 2`… and then throws
+that result away and keeps what you wrote.
+
+Why: a rewrite is rejected if it **flips the corruption flag**. The chain is irrational (hatched);
+`base.f * 2` is rational (clean). Silently swapping one for the other would repaint your note and
+quietly change what the app is telling you about the value. So the simplifier declines.
+
+::: tip This is a feature, not a bug
+The app will not launder an approximation into an exact value behind your back. If you want the
+exact octave, write `base.f * 2` or `base.f * 2^(12/12)` and get a clean note. If you write twelve
+irrational steps, you keep twelve irrational steps — hatching and all.
+:::
+
+## The ▲/▼ arrows and TET
+
+The frequency row's arrows multiply by the interval configured in Settings → Arrows (default ×2 up,
+×1/2 down). They **fold the factor into the expression's rational coefficient** rather than stacking
+a new multiplier on the front:
+
+| Before | After ▲ |
+|---|---|
+| `base.f` | `2 * base.f` |
+| `(1/2) * base.f` | `base.f` |
+| `base.f * 2^(7/12)` | `2 * base.f * 2^(7/12)` |
+
+Note the third row. The coefficient absorbs the ×2; the power term is left alone. **A TET note stays
+a TET note** — the arrows will never quietly rationalise it, and up-then-down returns you to exactly
+`base.f` rather than `(1/2) * 2 * base.f`.
+
+## SymbolicPower, the class
+
+The name on this page comes from a class in the evaluator. Its real shape is:
 
 ```javascript
-// Float multiplication loses precision
-const semitone = Math.pow(2, 1/12)  // 1.0594630943592953
-const octave = semitone ** 12       // 1.9999999999999998 (not exactly 2!)
-```
-
-## SymbolicPower: Algebraic Precision
-
-RMT Compose uses `SymbolicPower` to preserve the algebraic structure of expressions.
-
-### How It Works
-
-Instead of computing `2^(1/12)` as a float, SymbolicPower stores:
-- **Base**: 2
-- **Exponent**: 1/12
-
-This representation is exact and allows perfect algebraic simplification.
-
-### Automatic Simplification
-
-```javascript
-// 2^(1/12) × 2^(1/12) = 2^(2/12) = 2^(1/6)
-// Exponents add: 1/12 + 1/12 = 2/12 = 1/6
-
-// Full octave: (2^(1/12))^12 = 2^1 = 2 (exactly!)
-```
-
-RMT Compose handles this automatically when you chain TET operations.
-
-## Creating SymbolicPower Values
-
-### Basic Syntax
-
-```
-// 2 to the power of 1/12
-2^(1/12)
-
-// 3 to the power of 1/13 (Bohlen-Pierce)
-3^(1/13)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// 2 to the power of 1/12
-new Fraction(2).pow(new Fraction(1, 12))
-
-// 3 to the power of 1/13 (Bohlen-Pierce)
-new Fraction(3).pow(new Fraction(1, 13))
-```
-
-</details>
-
-### Chained Operations
-
-```
-// Major third in 12-TET (4 semitones)
-base.f * 2^(4/12)
-
-// Same result, built step by step
-base.f * 2^(1/12) * 2^(1/12) * 2^(1/12) * 2^(1/12)
-```
-
-Both produce exactly `2^(4/12) = 2^(1/3)`.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Major third in 12-TET (4 semitones)
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(4, 12)))
-
-// Same result, built step by step
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(1, 12)))
-  .mul(new Fraction(2).pow(new Fraction(1, 12)))
-  .mul(new Fraction(2).pow(new Fraction(1, 12)))
-  .mul(new Fraction(2).pow(new Fraction(1, 12)))
-```
-
-</details>
-
-## Algebraic Rules Applied
-
-### Multiplication
-
-When multiplying SymbolicPower values with the same base:
-
-```
-a^m × a^n = a^(m+n)
-
-// Example: 2^(1/12) × 2^(3/12) = 2^(4/12)
-2^(1/12) * 2^(3/12)
-```
-
-### Division
-
-```
-a^m ÷ a^n = a^(m-n)
-
-// Going down a semitone
-frequency / 2^(1/12)
-// = frequency × 2^(-1/12)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-frequency.div(new Fraction(2).pow(new Fraction(1, 12)))
-```
-
-</details>
-
-### Power of Power
-
-```
-(a^m)^n = a^(m×n)
-```
-
-```javascript
-// Octave check: (2^(1/12))^12 = 2^1 = 2
-```
-
-### Mixed Operations with Fractions
-
-SymbolicPower values can multiply with regular fractions:
-
-```
-// 440 × 2^(7/12) = 659.25... Hz (perfect fifth in 12-TET)
-440 * 2^(7/12)
-```
-
-The system tracks both components:
-- Rational part: 440
-- Irrational part: 2^(7/12)
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(440).mul(new Fraction(2).pow(new Fraction(7, 12)))
-```
-
-</details>
-
-## The ≈ Display
-
-When a value contains SymbolicPower components, the Variable Widget shows:
-
-```
-≈ 659.26 Hz
-```
-
-The ≈ indicates:
-1. The displayed number is an approximation
-2. The actual stored value is algebraically exact
-3. Further calculations use the exact symbolic form
-
-## Why This Matters
-
-### Scenario: Building a Full Chromatic Scale
-
-Without SymbolicPower:
-```javascript
-// Float accumulation error
-let freq = 440
-for (let i = 0; i < 12; i++) {
-  freq *= 1.0594630943592953
-}
-// freq = 879.9999999999999 (not exactly 880!)
-```
-
-With SymbolicPower:
-```javascript
-// Algebraic precision
-// 440 × (2^(1/12))^12 = 440 × 2 = 880 exactly
-```
-
-### Scenario: Transposition
-
-When transposing a melody:
-```
-// Transpose up a major third (4 semitones)
-originalFreq * 2^(4/12)
-```
-
-The system preserves relationships:
-```
-If note1 = 440 × 2^(3/12)
-And note2 = note1 × 2^(4/12)
-Then note2 = 440 × 2^(7/12)  // Exact!
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-originalFreq.mul(new Fraction(2).pow(new Fraction(4, 12)))
-```
-
-</details>
-
-## Advanced: Different Bases
-
-### Bohlen-Pierce (Base 3)
-
-```
-// Tritave (3:1) divided into 13 parts
-3^(1/13)
-```
-
-SymbolicPower handles any integer base:
-- Base 2: Standard octave-based temperaments
-- Base 3: Tritave-based scales like Bohlen-Pierce
-- Other bases: Experimental tuning systems
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(3).pow(new Fraction(1, 13))
-```
-
-</details>
-
-### Combining Different Bases
-
-When multiplying different bases, the system tracks them separately:
-
-```javascript
-// 2^(1/12) × 3^(1/13) - tracked as compound symbolic value
-```
-
-## Internal Representation
-
-For developers, here's how SymbolicPower works internally:
-
-### Structure
-
-```javascript
-{
-  type: 'symbolic_power',
-  base: Fraction(2),      // The base number
-  exponent: Fraction(1, 12),  // The exponent
-  coefficient: Fraction(440)  // Optional rational multiplier
+class SymbolicPower {
+  coefficient  // Fraction
+  powers       // Array<{ base: number, exp: Fraction }>
 }
 ```
 
-### Evaluation Pipeline
-
-1. **Parse**: Expression text → AST
-2. **Compile**: AST → Bytecode (SymbolicPower opcodes)
-3. **Evaluate**: Stack VM evaluates, preserving symbolic structure
-4. **Display**: Evaluate to float only for final display
-
-### Bytecode Operations
-
-The binary evaluator has specific opcodes for symbolic operations:
-- `POW`: Creates SymbolicPower from base and exponent
-- `MUL_SYM`: Multiplies preserving symbolic structure
-- `DIV_SYM`: Divides preserving symbolic structure
-
-## Practical Examples
-
-### 12-TET Scale with Perfect Octave
+It models `coefficient × base₁^exp₁ × base₂^exp₂ × … × baseₙ^expₙ` — a **list** of power terms, not a
+single base/exponent pair. That is what lets a value carry a base-2 term and a base-3 term at once,
+which is what the shipped **Mixed-Base** scale needs:
 
 ```
-// Root
-frequency: base.f
-
-// Each subsequent note adds one semitone
-// Note N: frequency × 2^(N/12)
-
-// After 12 notes, we get:
-frequency: base.f * 2^(12/12)
-// = baseFreq × 2 (exactly one octave, no drift!)
+[7].f * 2 ^ (-1/12) * 3 ^ (-1/13)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+::: warning The class is not what evaluates your notes
+On the evaluator that ships, the stack holds plain rational fractions. `^` reaches
+`SymbolicPower`, gets an irrational back, and immediately approximates it to a `Fraction`. The
+like-base merging the class advertises is performed by the **simplifier** at save time, not by the
+evaluator at run time.
 
-```javascript
-// Root
-frequency: module.baseNote.getVariable('frequency')
+A statement like "the evaluator preserves symbolic form end to end" is false. Do not build on it.
+:::
 
-// Each subsequent note adds one semitone
-// Note N: frequency × 2^(N/12)
+For the class internals and the bytecode, see
+[SymbolicPower (developer)](/developer/core/symbolic-power) and
+[Binary Evaluator](/developer/core/binary-evaluator).
 
-// After 12 notes, we get:
-frequency: module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(12, 12)))
-// = baseFreq × 2 (exactly one octave, no drift!)
-```
+## Different bases
 
-</details>
-
-### Stacking Fifths
-
-```javascript
-// Perfect fifth in 12-TET = 7 semitones
-// Stack 12 fifths: (2^(7/12))^12 = 2^7 = 128 (7 octaves exactly)
-
-// But musically, 12 pure fifths = (3/2)^12 = 129.746...
-// The Pythagorean comma! 12-TET eliminates this by distributing the error.
-```
-
-### Verification
-
-Test that 12 semitones = 1 octave:
+Any positive integer base works.
 
 ```
-// Build note 12 semitones up
-base.f * 2^(12/12)
-
-// This simplifies to:
-// baseFreq × 2^1 = baseFreq × 2
-
-// The evaluated value will be exactly 2× the base frequency
+2^(1/12)                # 12-TET step   — octave-based
+3^(1/13)                # Bohlen-Pierce — tritave-based
+5^(1/7)                 # a 5-based step, as used in Mixed-Base
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+### Twelve fifths, three ways
 
-```javascript
-const twelveUp = module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(12, 12)))
-```
+The circle of fifths is the cleanest demonstration of everything above. Base frequency 263 Hz;
+seven octaves up is 33664 Hz.
 
-</details>
+| Written as | Evaluates to | Exact? | Flagged? |
+|---|---|---|---|
+| `base.f * 2^(84/12)` | 33664 | yes | no |
+| `base.f * 2^(7/12) * 2^(7/12) * …` (×12) | 33663.999999999163265 | **no** | yes |
+| `base.f * (3/2)^12` | 34123.286865234375 | yes (and *not* an octave) | no |
 
-## Limitations
+Row 1 is the closed form: `84/12` reduces to the integer 7, so the power resolves exactly and the
+note is clean. Row 2 is the same music written as twelve separate irrational steps — twelve
+roundings, drifting 8 × 10⁻¹⁰ off, permanently hatched. Row 3 is twelve *pure* fifths, which is
+exact rational arithmetic that simply does not land on an octave: it overshoots by the Pythagorean
+comma (531441/524288, about 23.5 cents).
 
-### What SymbolicPower Handles
+Three different answers, and all three are correct — they are answers to three different questions.
+Equal temperament exists to make rows 1 and 3 agree; the evaluator's rounding is what separates
+rows 1 and 2.
 
-- Powers of integers: `2^(1/12)`, `3^(1/13)`
-- Products of symbolic powers
-- Mixed rational and irrational values
+## Debugging checklist
 
-### What Requires Approximation
+**Is this note exact?** Look at the rectangle. Clean = exact rational. Crosshatched = its own
+expression produced an irrational. Single-diagonal = it inherited one.
 
-- Addition of irrational values: `2^(1/12) + 2^(1/19)` (no closed form)
-- Transcendental operations on symbolic values
-- Nested irrational exponents
+**Did my power resolve?** Write it and read `Evaluated:`. No `≈` means the rational-power check
+succeeded and you have an exact value.
 
-For these cases, the system falls back to high-precision float approximation.
+**Is my chain drifting?** Replace `2^(1/12)` repeated `k` times with a single `2^(k/12)`. One
+rounding instead of `k`.
 
-## Debugging Tips
+**Did my edit save?** The `Save` button next to the `Raw:` field only appears once you start typing,
+and the value does not change until you press it. An invalid expression is rejected with its reason
+shown in red under the Save button.
 
-### Check Symbolic Preservation
+## Next
 
-1. Create a note with TET expression
-2. Look for ≈ in the display
-3. Chain 12 semitones and verify exact octave
-
-### Verify Algebraic Simplification
-
-```
-// This should display exactly 2× the base frequency
-frequency: base.f * 2^(1/12) * 2^(1/12) * ... // (repeat 12 times)
-// Or simply:
-frequency: base.f * 2^(12/12)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-frequency: module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(1, 12)))
-  .mul(new Fraction(2).pow(new Fraction(1, 12)))
-  // ... (repeat 12 times)
-```
-
-</details>
-
-## Next Steps
-
-- [Complex Dependencies](/tutorials/advanced/complex-dependencies) - Build sophisticated note relationships
-- [Microtonal Composition](/tutorials/advanced/microtonal) - Apply symbolic algebra to microtonal music
-- [Expression Compiler](/developer/core/expression-compiler) - Technical deep dive
-
+- [Microtonal Composition](/tutorials/advanced/microtonal) — put the temperaments to work
+- [Complex Dependencies](/tutorials/advanced/complex-dependencies) — how corruption spreads through a graph
+- [Expression Compiler](/developer/core/expression-compiler) — text to bytecode

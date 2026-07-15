@@ -1,4 +1,13 @@
 [
-    "major.json",
-    "minor.json"
+  "major.json",
+  "minor.json",
+  "dom7.json",
+  "harm7.json",
+  "min7.json",
+  "maj7.json",
+  "dim.json",
+  "aug.json",
+  "sus4.json",
+  "base3.json",
+  "base5.json"
 ]

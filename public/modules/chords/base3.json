@@ -1,0 +1,38 @@
+{
+  "baseNote": {
+    "frequency": "263",
+    "startTime": "0",
+    "tempo": "120",
+    "beatsPerMeasure": "4"
+  },
+  "notes": [
+    {
+      "id": 1,
+      "startTime": "base.t",
+      "duration": "beat(base) * 2",
+      "frequency": "base.f",
+      "color": "rgba(128,128,128,0.7)"
+    },
+    {
+      "id": 2,
+      "startTime": "[1].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(5/3) * [1].f",
+      "color": "rgba(0,180,130,0.7)"
+    },
+    {
+      "id": 3,
+      "startTime": "[1].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(7/3) * [1].f",
+      "color": "rgba(70,120,230,0.7)"
+    },
+    {
+      "id": 4,
+      "startTime": "[1].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(3/1) * [1].f",
+      "color": "rgba(128,128,128,0.7)"
+    }
+  ]
+}

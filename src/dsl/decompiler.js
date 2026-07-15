@@ -55,7 +55,9 @@ export class DSLDecompiler {
           pc += numBytes;
           const { value: den, bytesRead: denBytes } = this.readBigIntUnsigned(bytecode, pc);
           pc += denBytes;
-          this.pushConst(Number(num), Number(den), Precedence.ATOMIC);
+          // Keep the BigInts — template interpolation prints every digit;
+          // Number() would round and emit unparseable scientific notation.
+          this.pushConst(num, den, Precedence.ATOMIC);
           break;
         }
 
@@ -200,10 +202,10 @@ export class DSLDecompiler {
   }
 
   /**
-   * Push a constant (number or fraction)
+   * Push a constant (number or fraction; components may be Number or BigInt)
    */
   pushConst(num, den, prec = Precedence.ATOMIC) {
-    if (den === 1) {
+    if (den === 1 || den === 1n) {
       this.push(String(num), prec);
     } else {
       this.push(`(${num}/${den})`, prec);

@@ -4,11 +4,11 @@
 //   - createAddMeasureSection(note, measureId, externalFunctions) => HTMLElement
 import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
-import Fraction from 'fraction.js';
 import { isDSLSyntax, compileDSL, decompileToDSL } from '../dsl/index.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
 import { ExpressionCompiler } from '../expression-compiler.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
+import { hugeFractionDisplay } from './fraction-display.js';
 
 // Singleton compiler for safe evaluation
 const safeCompiler = new ExpressionCompiler();
@@ -31,11 +31,6 @@ function refreshModals(note, measureId = null) {
   } catch (e) {
     console.warn('Could not refresh modals view:', e);
   }
-}
-
-function fractionLiteral(n, d) {
-  if (d === 1) return `${n}`;
-  return `(${n}/${d})`;
 }
 
 function beatUnitFor(noteRef) {
@@ -359,7 +354,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       // First validate the expression syntax
       const validation = validateExpressionSyntax(expr);
       if (!validation.valid) {
-        return 'Invalid';
+        return { text: 'Invalid', title: '' };
       }
 
       // Compile the expression using safe parser
@@ -404,20 +399,28 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       // Evaluate using safe binary evaluator
       const evaluator = new BinaryEvaluator(module);
       const result = evaluator.evaluate(binary, evalCache);
-      return result.toFraction();
-    } catch {
-      return 'Invalid';
+      const huge = hugeFractionDisplay(result);
+      if (huge) return huge;
+      return { text: result.toFraction(), title: '' };
+    } catch (e) {
+      console.warn('Add-note preview evaluation failed:', e?.message ?? e);
+      return { text: 'Invalid', title: '' };
     }
+  }
+  function setEvalDisplay(span, res) {
+    span.textContent = res.text;
+    if (res.title) span.title = res.title;
+    else span.removeAttribute('title');
   }
   function refreshEvaluations() {
     try {
       if (noteRadio.checked) {
-        freqEval.querySelector('#add-note-freq-eval').textContent = safeEval(freqInput.value);
+        setEvalDisplay(freqEval.querySelector('#add-note-freq-eval'), safeEval(freqInput.value));
       } else {
-        freqEval.querySelector('#add-note-freq-eval').textContent = '—';
+        setEvalDisplay(freqEval.querySelector('#add-note-freq-eval'), { text: '—', title: '' });
       }
-      durEval.querySelector('#add-note-dur-eval').textContent = safeEval(durInput.value);
-      stEval.querySelector('#add-note-st-eval').textContent = safeEval(stInput.value);
+      setEvalDisplay(durEval.querySelector('#add-note-dur-eval'), safeEval(durInput.value));
+      setEvalDisplay(stEval.querySelector('#add-note-st-eval'), safeEval(stInput.value));
     } catch {}
   }
   freqInput.addEventListener('input', refreshEvaluations);
@@ -498,8 +501,19 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
           ? note.variables.color()
           : note.variables.color;
       } else {
+        // Random hue; saturation comes from the active theme's
+        // noteDefaultSaturation token (published by theme-manager as
+        // --rmt-note-default-saturation). 0.7 is the classic-orange value,
+        // kept as the fallback so an unthemed boot is pixel-identical.
         const hue = Math.floor(Math.random() * 360);
-        vars.color = `hsla(${hue}, 70%, 60%, 0.7)`;
+        let sat = 0.7;
+        try {
+          const raw = getComputedStyle(document.documentElement)
+            .getPropertyValue('--rmt-note-default-saturation');
+          const v = parseFloat(raw);
+          if (Number.isFinite(v) && v >= 0 && v <= 1) sat = v;
+        } catch {}
+        vars.color = `hsla(${hue}, ${Math.round(sat * 100)}%, 60%, 0.7)`;
       }
 
       const newNote = module.addNote(vars);

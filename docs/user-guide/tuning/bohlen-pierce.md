@@ -1,255 +1,165 @@
-# Bohlen-Pierce Scale
+---
+title: Bohlen-Pierce
+description: The Bohlen–Pierce scale in RMT Compose — thirteen equal divisions of the tritave, the 3:5:7 chord, and the shipped Bohlen–Pierce module.
+---
 
-The **Bohlen-Pierce (BP)** scale is a unique tuning system that uses the **tritave** (3:1) instead of the octave (2:1) as its primary interval. It creates an otherworldly, distinctive sound unlike traditional Western music.
+# Bohlen-Pierce
 
-## Overview
+Bohlen–Pierce throws away the octave. Instead of dividing 2/1, it divides the **tritave** — the ratio 3/1 — into thirteen equal steps. Notes a tritave apart are treated as the "same" note, the way notes an octave apart are in every other system you know.
+
+The result sounds genuinely foreign, and it is not a gimmick: BP is built on odd harmonics, and it has consonances of its own.
 
 | Property | Value |
-|----------|-------|
-| Interval of equivalence | Tritave (3:1) |
+|---|---|
+| Interval of equivalence | tritave, 3/1 |
 | Steps per tritave | 13 |
-| Step ratio | 3^(1/13) ≈ 1.08818 |
+| Step ratio | `3 ^ (1/13)` ≈ 1.088182 |
+| Step size | 146.30 cents |
+| Tritave | 1901.96 cents, exact |
 
-## What Makes BP Different?
+## Why the tritave
 
-### The Tritave
+Take a clarinet, or a square wave. Its spectrum has **only odd harmonics**: 1, 3, 5, 7, 9… The even ones are missing, and so the 2/1 octave — which is where harmonic 2 lives — has nothing to reinforce it.
 
-Traditional music treats the octave (2:1) as the interval of "equivalence" - notes an octave apart are considered the "same" note.
+Build a scale for that spectrum and the octave stops being special. The strongest simple ratio available is 3/1, and the consonances that fall out are ratios of odd numbers: 3, 5, 7, 9. Bohlen–Pierce is what you get when you take that seriously and divide 3/1 into thirteen equal parts.
 
-Bohlen-Pierce uses the **tritave** (3:1) instead:
-- Notes a tritave apart are considered equivalent
-- The 3:1 ratio comes from the third harmonic
-- This creates a fundamentally different harmonic experience
+Thirteen is not arbitrary: it is the division that best approximates the just BP intervals (see the table below), the same way twelve best approximates 5-limit just intonation for the octave.
 
-### No Octaves!
+## The scale
 
-BP explicitly avoids the 2:1 ratio:
-- There are no octave equivalents
-- The sense of "returning home" at the octave is absent
-- This creates an alien, floating quality
+The shipped module is *equal-tempered* BP: every step is exactly `3 ^ (1/13)` = 146.30 cents. Just BP — the ratio-based version the temperament approximates — is a different set of numbers. Both are given here, side by side, because they are easy to confuse.
 
-## Expression Syntax
+| Step | Equal-tempered cents | Nearest just BP ratio | Just cents | ET error |
+|---|---|---|---|---|
+| 0 | 0 | 1/1 | 0 | 0 |
+| 1 | 146.30 | 27/25 | 133.2 | +13.1¢ |
+| 2 | 292.61 | 25/21 | 301.8 | −9.2¢ |
+| 3 | 438.91 | 9/7 | 435.1 | +3.8¢ |
+| 4 | 585.22 | 7/5 | 582.5 | +2.7¢ |
+| 5 | 731.52 | 75/49 | 736.9 | −5.4¢ |
+| 6 | 877.83 | 5/3 | 884.4 | −6.5¢ |
+| 7 | 1024.13 | 9/5 | 1017.6 | +6.5¢ |
+| 8 | 1170.43 | 49/25 | 1165.0 | +5.4¢ |
+| 9 | 1316.74 | 15/7 | 1319.4 | −2.7¢ |
+| 10 | 1463.04 | 7/3 | 1466.9 | −3.8¢ |
+| 11 | 1609.35 | 63/25 | 1600.1 | +9.2¢ |
+| 12 | 1755.65 | 25/9 | 1768.7 | −13.1¢ |
+| 13 | 1901.96 | 3/1 | 1902.0 | 0 |
 
-### Single BP Step
+The best-tuned degrees are 3, 4, 9 and 10 — and those are exactly the ones the BP chords are built from.
 
-```
-// One BP step
-3^(1/13)
-```
+## BP chords
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Traditional triads do not transfer: they are stacks of 5-limit ratios that assume an octave. BP has its own.
 
-```javascript
-new Fraction(3).pow(new Fraction(1, 13))
-```
-</details>
+### The BP major chord — 3:5:7
 
-### Multiple Steps
+The characteristic Bohlen–Pierce sonority. Take the odd harmonics 3, 5 and 7 and build a chord on them. Over a root, the tones are `1/1`, `5/3` and `7/3`.
 
-```
-// BP "fifth" (6 steps)
-3^(6/13)
-
-// Full tritave (13 steps)
-3^(13/13)  // = 3
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// BP "fifth" (6 steps)
-new Fraction(3).pow(new Fraction(6, 13))
-
-// Full tritave (13 steps)
-new Fraction(3).pow(new Fraction(13, 13))  // = 3
-```
-</details>
-
-### Applying to BaseNote
+In equal-tempered BP those land on **steps 0, 6 and 10**:
 
 ```
-// Note at 3 steps above BaseNote
-base.f * 3^(3/13)
+base.f                   # 3
+base.f * 3 ^ (6/13)      # 5   (877.8¢ — just 5/3 is 884.4¢)
+base.f * 3 ^ (10/13)     # 7   (1463.0¢ — just 7/3 is 1466.9¢)
+```
+
+Both tones land within 7 cents of pure. This chord locks the way a just major triad does — it is the reason BP works as music rather than as noise.
+
+### The BP minor chord — 5:7:9
+
+The same three odd harmonics with the root moved to 5. Over the root, the tones are `1/1`, `7/5` and `9/5`, which fall on **steps 0, 4 and 7**:
+
+```
+base.f                   # 5
+base.f * 3 ^ (4/13)      # 7   (585.2¢ — just 7/5 is 582.5¢)
+base.f * 3 ^ (7/13)      # 9   (1024.1¢ — just 9/5 is 1017.6¢)
 ```
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-module.baseNote.getVariable('frequency').mul(
-  new Fraction(3).pow(new Fraction(3, 13))
-)
+// BP major chord (3:5:7)
+module.baseNote.getVariable('frequency')
+module.baseNote.getVariable('frequency').mul(new Fraction(3).pow(new Fraction(6, 13)))
+module.baseNote.getVariable('frequency').mul(new Fraction(3).pow(new Fraction(10, 13)))
 ```
 </details>
 
-## The BP-13 Scale
+::: tip Hear the just version too
+The library ships both chords as pure ratios. **Base-3 chord** (3:5:7:9) and **Base-5 chord** (5:7:9:11) are in the **Chords** section. Drop one next to a tempered BP chord and compare — the tempered one is a few cents off and beats very slowly.
+:::
 
-| Step | Approximate Ratio | Cents |
-|------|------------------|-------|
-| 0 | 1/1 | 0 |
-| 1 | 27/25 | 146 |
-| 2 | 25/21 | 293 |
-| 3 | 9/7 | 435 |
-| 4 | 7/5 | 583 |
-| 5 | 75/49 | 731 |
-| 6 | 5/3 | 884 |
-| 7 | 9/5 | 1018 |
-| 8 | 49/25 | 1165 |
-| 9 | 15/7 | 1319 |
-| 10 | 7/3 | 1467 |
-| 11 | 63/25 | 1600 |
-| 12 | 25/9 | 1755 |
-| 13 | 3/1 | 1902 |
-
-## Using the BP-13 Module
-
-1. Open the **Module Bar**
-2. Find **Melodies** category
-3. Drag **BP-13** onto the workspace
-
-Listen carefully - you'll hear the tritave "closure" at step 13, not an octave!
-
-## BP Intervals
-
-The BP scale has its own interval vocabulary:
-
-| BP Interval | Steps | Ratio Approximation |
-|-------------|-------|---------------------|
-| BP minor second | 1 | 27/25 |
-| BP major second | 2 | 25/21 |
-| BP minor third | 3 | 9/7 |
-| BP major third | 4 | 7/5 |
-| BP fourth | 5 | 75/49 |
-| BP fifth | 6 | 5/3 |
-| BP sixth | 7 | 9/5 |
-| BP seventh | 8 | 49/25 |
-| BP eighth | 9 | 15/7 |
-| BP ninth | 10 | 7/3 |
-| BP tenth | 11 | 63/25 |
-| BP eleventh | 12 | 25/9 |
-| Tritave | 13 | 3/1 |
-
-## BP Triads
-
-Traditional triads don't work in BP (they use 2:1 relationships). Instead:
-
-### BP Major Triad
-
-Steps: 0, 4, 9 (ratios approximately 1:7/5:15/7)
+## Writing BP expressions
 
 ```
-root.frequency = base.f
-third.frequency = base.f * 3^(4/13)
-fifth.frequency = base.f * 3^(9/13)
+3 ^ (1/13)              # one BP step
+3 ^ (6/13)              # six steps
+3 ^ (13/13)             # a full tritave = 3
+base.f * 3 ^ (4/13)     # four steps above the BaseNote
+[1].f * 3 ^ (1/13)      # one step above note 1
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+The base is 3, not 2. That is the only structural difference from the TET pages — everything else about the syntax is the same.
 
-```javascript
-root.frequency = baseNote.frequency
-third.frequency = baseNote.frequency.mul(new Fraction(3).pow(new Fraction(4, 13)))
-fifth.frequency = baseNote.frequency.mul(new Fraction(3).pow(new Fraction(9, 13)))
-```
-</details>
+RMT keeps base-2 and base-3 powers as **separate** terms rather than merging them into one number. That is why you can mix them in a single scale (see Mixed-Base, below) and why `3^(1/13)` stays symbolic across saves.
 
-### BP Minor Triad
+## The shipped module
 
-Steps: 0, 3, 9 (ratios approximately 1:9/7:15/7)
+The library's **Scale Systems** section ships a **Bohlen–Pierce** module (file `scale-systems/BP-13.json`; the tile reads **Bohlen–Pierce**).
 
-```
-root.frequency = base.f
-third.frequency = base.f * 3^(3/13)
-fifth.frequency = base.f * 3^(9/13)
-```
+| | |
+|---|---|
+| Notes | 14 — thirteen steps plus the note you start on |
+| Base frequency | 440 Hz |
+| Tempo | 80 |
+| Beats per measure | 4 |
+| Instrument | `sine-wave` |
+| Note duration | `beat(base) * (1/2)` |
+| Step | `[n].f * 3 ^ (1/13)` |
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Note 1 is `base.f`; every later note is the previous one times `3 ^ (1/13)`. Note 14 is therefore exactly three times note 1 — the tritave, not an octave. Listen for it: the scale closes somewhere your ear does not expect.
 
-```javascript
-root.frequency = baseNote.frequency
-third.frequency = baseNote.frequency.mul(new Fraction(3).pow(new Fraction(3, 13)))
-fifth.frequency = baseNote.frequency.mul(new Fraction(3).pow(new Fraction(9, 13)))
-```
-</details>
+To load it, drag the tile from **Scale Systems** (or search `bohlen`, `tritave` or `base-3` with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-## Why Use Bohlen-Pierce?
+All thirteen steps after the first show a **≈** prefix and cross-hatching, because `3^(k/13)` is irrational.
 
-### Unique Sound
+## Timbre matters more here than anywhere else
 
-BP creates sounds impossible in traditional music:
-- No sense of octave return
-- Different consonance/dissonance relationships
-- Alien, otherworldly quality
+BP is a scale designed for odd-harmonic spectra. Play it on a timbre with strong even harmonics and the consonances stop working — the chords will beat against overtones that the scale has no notes for.
 
-### Odd Harmonics
+Use an odd-harmonic voice. Of the built-in instruments, **`square-wave`** is the one to reach for: a square wave's spectrum is odd harmonics only, which is precisely what BP was designed around. `sine-wave` (the module's default) is also safe, because a sine has no harmonics at all to clash with.
 
-BP emphasizes odd-numbered harmonics (3, 5, 7, 9...):
-- Clarinet-like timbres (which naturally emphasize odd harmonics) work well
-- Square waves sound particularly at home
+The full instrument list is `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `piano`, `violin`. Set the default in **Settings → Audio → Default instrument**, or set `instrument` on a single note.
 
-### Theoretical Interest
+::: warning Sawtooth and the sampled voices will fight the scale
+`sawtooth-wave` has all harmonics, even ones included, and the sampled `piano` and `violin` are recordings of instruments with full harmonic spectra. They will play BP pitches accurately — the samplers pitch-shift by `frequency / rootHz`, so the frequencies are correct — but the harmonic clash is real, and BP chords will not lock on them.
+:::
 
-BP explores what music could sound like in an alternate universe with different acoustical foundations.
+## Neighbours in the same section
 
-## Challenges
+Two other modules sit alongside BP in **Scale Systems**, and both are natural next stops from here.
 
-### Unfamiliar
+**Tesla** is an 81-note scale of pure odd-harmonic ratios on a base-3 frame — the *just* expression of the same odd-harmonic idea BP tempers. Because every step is rational, **no Tesla note is hatched or marked with ≈**.
 
-Everything you know about Western harmony doesn't apply directly.
+**Mixed-Base** is a 12-note experiment that alternates step bases in a single line — `2^(1/12)`, then `3^(1/13)`, with a `5^(1/7)` partway through. It only works because the app keeps 2-, 3- and 5-based powers as independent terms.
 
-### Emotional Ambiguity
+Both are described in full on [Equal Temperament](/user-guide/tuning/equal-temperament#the-scale-systems-section).
 
-Without familiar major/minor distinctions, emotional content is less predictable.
+## What to expect
 
-### Limited Repertoire
+**No octave return.** The sense of arriving home an octave up is simply absent. This is disorienting for about a minute, and then it is not.
 
-Very little music exists in BP. You're exploring new territory!
+**Consonance still exists.** 3:5:7 is a stable, restful chord. It is not a major triad, but it does the same job.
 
-## Instruments for BP
+**Major and minor stop meaning what they meant.** BP's "major" and "minor" chords are two rotations of the same odd-harmonic set. They do not carry the emotional loading of their octave-world namesakes, and you should not expect them to.
 
-- **Clarinets**: Natural affinity for odd harmonics
-- **Synthesizers**: RMT Compose is perfect for BP exploration
-- **Custom-built instruments**: Some instruments have been built specifically for BP
+**There is almost no repertoire.** You are not learning a tradition. You are starting one.
 
-## Tips
+## Next steps
 
-1. **Listen without expectations** - Don't look for octaves or traditional intervals
-2. **Start with the BP-13 module** - Hear the complete scale first
-3. **Try BP triads** - They're consonant in their own way
-4. **Use odd-harmonic timbres** - Square waves, clarinets
-5. **Embrace the strangeness** - That's the point!
-
-## Example: BP Scale
-
-```
-// Build a 13-note BP scale
-note1.frequency = base.f
-note2.frequency = [1].f * 3^(1/13)
-note3.frequency = [2].f * 3^(1/13)
-// ... continue for all 13 notes
-note14.frequency = [13].f * 3^(1/13)
-// note14 = 3 × baseNote (tritave)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Build a 13-note BP scale
-note1.frequency = baseNote.frequency
-note2.frequency = note1.frequency.mul(new Fraction(3).pow(new Fraction(1, 13)))
-note3.frequency = note2.frequency.mul(new Fraction(3).pow(new Fraction(1, 13)))
-// ... continue for all 13 notes
-note14.frequency = note13.frequency.mul(new Fraction(3).pow(new Fraction(1, 13)))
-// note14 = 3 × baseNote (tritave)
-```
-</details>
-
-## Next Steps
-
-- Create your own system with [Custom TET](./custom-tet)
-- Return to [Pure Ratios](./ratios) for comparison
-- Explore [12-TET](./12-tet) to appreciate what's different
+- [31-TET](/user-guide/tuning/31-tet) — septimal harmony inside the octave
+- [Custom TET](/user-guide/tuning/custom-tet) — divide any interval you like
+- [Pure Ratios](/user-guide/tuning/ratios) — the odd-harmonic chords in just intonation
+- [12-TET](/user-guide/tuning/12-tet) — to hear what BP is not

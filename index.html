@@ -44,50 +44,65 @@
           <span class="toggle-slider" title="Playhead Tracking"></span>
         </label>
       </div>
+      <button id="settingsGearBtn" class="settings-gear-btn" title="Settings" aria-label="Settings" aria-expanded="false">
+        <svg class="gear-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+          <path d="M10.91 4.53L11.03 2.1L12.97 2.1L13.09 4.53A7.55 7.55 0 0 1 16.51 5.95L18.32 4.31L19.69 5.68L18.05 7.49A7.55 7.55 0 0 1 19.47 10.91L21.9 11.03L21.9 12.97L19.47 13.09A7.55 7.55 0 0 1 18.05 16.51L19.69 18.32L18.32 19.69L16.51 18.05A7.55 7.55 0 0 1 13.09 19.47L12.97 21.9L11.03 21.9L10.91 19.47A7.55 7.55 0 0 1 7.49 18.05L5.68 19.69L4.31 18.32L5.95 16.51A7.55 7.55 0 0 1 4.53 13.09L2.1 12.97L2.1 11.03L4.53 10.91A7.55 7.55 0 0 1 5.95 7.49L4.31 5.68L5.68 4.31L7.49 5.95A7.55 7.55 0 0 1 10.91 4.53Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <circle cx="12" cy="12" r="2.9" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </button>
       <div class="menu-container">
         <button class="dropdown-button" title="Main Menu">
           <div class="plusminus"></div>
         </button>
-        <div id="general-widget" class="widget">
-          <div class="menu-actions">
-            <button id="undoBtn" class="module-action-btn" disabled>Undo</button>
-            <button id="redoBtn" class="module-action-btn" disabled>Redo</button>
-            <button id="reorderModuleBtn" class="module-action-btn" style="background: #add8e6;">Reorder Module</button>
-            <button id="saveModuleBtn" class="module-action-btn">Save Module</button>
-            <input type="file" id="loadModuleInput" accept=".json" style="display: none;">
-            <button id="loadModuleBtn" class="module-action-btn">Load Module ▾</button>
-            <div id="loadModuleDropdown" style="display: none; margin-top: -6px;">
-              <div id="loadFromFileItem" class="menu-item">Load Module from file…</div>
-              <div id="resetDefaultModuleItem" class="menu-item">Reset Default Module</div>
-            </div>
-          </div>
-          <div class="widget-footer">
-            <div class="docs-section">
-              <a href="https://docs.rmt.world" target="_blank" class="docs-button">
-                <svg class="docs-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M4 4C4 2.89543 4.89543 2 6 2H14L20 8V20C20 21.1046 19.1046 22 18 22H6C4.89543 22 4 21.1046 4 20V4Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M14 2V8H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M8 13H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                  <path d="M8 17H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                </svg>
-                <span>Documentation</span>
-              </a>
-            </div>
-            <div class="support-section">
-              <a href="https://buy.stripe.com/7sYeV7aW70eG75I9N6bAs00" target="_blank" class="donate-button">
-                <svg class="donate-heart" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                </svg>
-                <span>Donate</span>
-              </a>
-            </div>
-            <div class="legal-section">
-              <a href="/license.html" target="_blank" class="license-link" rel="license noopener noreferrer">License (RMT-PNC)</a>
-            </div>
-            <div class="widget-copyright">© 2026 Cyril Monkewitz</div>
-          </div>
-        </div>
       </div>
+    </div>
+  </div>
+  <!--
+    The "+" main menu. A body-level SIBLING of .top-bar, not a child of the
+    .menu-container button it drops from — `.top-bar` carries both a z-index and a
+    backdrop-filter, and either one makes it a stacking context that would pin this
+    menu below the floating panels (1200+) no matter what z-index it asked for. Out
+    here it is a peer of the note widget / group widget / settings panel: it can be
+    raised over them and they over it (src/utils/panel-stack.js). Its `top: 50px;
+    right: 0` reproduces exactly where it sat when it was anchored to the button.
+  -->
+  <div id="general-widget" class="widget">
+    <div class="menu-actions">
+      <button id="undoBtn" class="module-action-btn" disabled>Undo</button>
+      <button id="redoBtn" class="module-action-btn" disabled>Redo</button>
+      <button id="reorderModuleBtn" class="module-action-btn" style="background: #add8e6;">Reorder Module</button>
+      <button id="saveModuleBtn" class="module-action-btn">Save Module</button>
+      <input type="file" id="loadModuleInput" accept=".json" style="display: none;">
+      <button id="loadModuleBtn" class="module-action-btn">Load Module ▾</button>
+      <div id="loadModuleDropdown" style="display: none; margin-top: -6px;">
+        <div id="loadFromFileItem" class="menu-item">Load Module from file…</div>
+        <div id="resetDefaultModuleItem" class="menu-item">Reset Default Module</div>
+      </div>
+    </div>
+    <div class="widget-footer">
+      <div class="docs-section">
+        <a href="https://docs.rmt.world" target="_blank" class="docs-button">
+          <svg class="docs-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M4 4C4 2.89543 4.89543 2 6 2H14L20 8V20C20 21.1046 19.1046 22 18 22H6C4.89543 22 4 21.1046 4 20V4Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M14 2V8H20" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M8 13H16" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            <path d="M8 17H13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+          <span>Documentation</span>
+        </a>
+      </div>
+      <div class="support-section">
+        <a href="https://buy.stripe.com/7sYeV7aW70eG75I9N6bAs00" target="_blank" class="donate-button">
+          <svg class="donate-heart" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+          </svg>
+          <span>Donate</span>
+        </a>
+      </div>
+      <div class="legal-section">
+        <a href="/license.html" target="_blank" class="license-link" rel="license noopener noreferrer">License (MIT)</a>
+      </div>
+      <div class="widget-copyright">© 2026 Cyril Monkewitz</div>
     </div>
   </div>
   <div class="second-top-bar">
@@ -105,7 +120,25 @@
     </div>
     <div class="note-widget-content"></div>
   </div>
-  <button id="lockButton" title="Lock Notes" class="lock-button locked" aria-label="Lock notes" aria-pressed="true">
+  <!--
+    Group-actions widget: shown when SEVERAL notes are selected (marquee /
+    shift-click). Body-level SIBLING of .myspaceapp, exactly like #note-widget
+    above — the workspace's capture-phase click handler clears the note selection
+    on any click that reaches it, so a widget nested inside .myspaceapp would
+    destroy the selection it exists to act on. Its body is rendered by
+    src/modals/group-widget.js from that module's action registry.
+  -->
+  <div id="group-widget" class="group-widget" role="dialog" aria-label="0 notes selected">
+    <div class="group-widget-header">
+      <span class="group-widget-title">
+        <span class="group-widget-count">0</span>
+        <span class="group-widget-label">notes selected</span>
+      </span>
+      <button type="button" class="group-widget-close" aria-label="Clear selection" title="Clear selection">×</button>
+    </div>
+    <div class="group-widget-content"></div>
+  </div>
+  <button id="lockButton" title="Lock Notes" class="lock-button" aria-label="Lock notes" aria-pressed="false">
     <svg class="lock-icon" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
       <g>
         <g class="lock-shackle-group">

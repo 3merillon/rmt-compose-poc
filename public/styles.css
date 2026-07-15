@@ -1,5 +1,37 @@
 @import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;700&display=swap');
 
+/*
+ * Theme tokens (RMT theme system, Phase 3). Defaults = the "classic-orange"
+ * preset, so the app looks identical before JS runs. The theme manager
+ * overrides these on <html> at runtime from Settings → Appearance. Hardcoded
+ * colors below are being migrated to var(--rmt-*, <fallback>) form; the
+ * fallback keeps each rule correct even if a token is ever unset.
+ */
+:root {
+  --rmt-accent: #ffa800;
+  --rmt-accent-text: #151525;
+  --rmt-bg: #151525;
+  --rmt-surface: #151525;
+  --rmt-surface-border: #3a3a4a;
+  --rmt-text-primary: #ffffff;
+  --rmt-text-secondary: #aaaaaa;
+  --rmt-danger: #ff0000;
+  --rmt-note-border: #636363;
+  --rmt-playhead: #ffa800;
+  --rmt-measure-bar: #ffffff;
+  --rmt-selection-ring: #ffffff;
+  --rmt-hover-ring: #ffffff;
+  --rmt-dep-frequency: #ff8000;
+  --rmt-dep-start-time: #00ffff;
+  --rmt-dep-duration: #9d00ff;
+  /* RGB component triplets so rgba() alpha variants (glows, scrollbars,
+     translucent backgrounds) can be themed: rgba(var(--rmt-accent-rgb), 0.6) */
+  --rmt-accent-rgb: 255, 168, 0;
+  --rmt-bg-rgb: 21, 21, 37;
+  --rmt-surface-rgb: 21, 21, 37;
+  --rmt-danger-rgb: 255, 0, 0;
+}
+
 html, body {
   margin: 0;
   padding: 0;
@@ -7,7 +39,7 @@ html, body {
   height: 100%;
   overflow: hidden;
   user-select: none;
-  background: #151525;
+  background: var(--rmt-bg, #151525);
 }
 
 .top-bar {
@@ -16,7 +48,7 @@ html, body {
   left: 0;
   width: 100%;
   height: 50px;
-  background: rgba(21, 21, 37, 0.88);
+  background: rgba(var(--rmt-surface-rgb), 0.88);
   backdrop-filter: blur(5px);
   -webkit-backdrop-filter: blur(5px);
   display: flex;
@@ -25,7 +57,7 @@ html, body {
   padding: 0 20px;
   /* Ensure menu bar stays above GL overlay (z-index ~1004) but below modals (2000) */
   z-index: 1100;
-  border-bottom: 1px dotted #ffa800;
+  border-bottom: 1px dotted var(--rmt-accent, #ffa800);
 }
 
 .second-top-bar {
@@ -34,7 +66,7 @@ html, body {
     left: 0;
     width: 100%;
     height: 50px;
-    background: rgba(21, 21, 37, 0.88);
+    background: rgba(var(--rmt-surface-rgb), 0.88);
     backdrop-filter: blur(5px);
     -webkit-backdrop-filter: blur(5px);
     /* Keep second bar just under main top bar but above GL overlay */
@@ -67,20 +99,49 @@ html, body {
 }
   
 .icons-wrapper::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 168, 0, 0.6);
+    background-color: rgba(var(--rmt-accent-rgb), 0.6);
     border-radius: 4px;
 }
   
 .icons-wrapper::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 168, 0, 0.8);
+    background-color: rgba(var(--rmt-accent-rgb), 0.8);
 }
 
 .icons-container {
     display: flex;
     flex-wrap: wrap;
-    padding: 4px 4px 0 4px;
+    padding: 4px;
     gap: 4px;
     align-content: flex-start;
+}
+
+/* Touch: an 8px track is far below the ~44px minimum touch target, and with the
+   grid full the icons leave nothing else to grab. Widen the track, inset the thumb
+   inside it (so the grab area grows without the bar looking heavy), and hold the
+   icons off the gutter. `scrollbar-gutter: stable both-edges` mirrors the reserved
+   width on both sides, so the grid stays centred.
+   Must follow the base .icons-container rule: a media query adds no specificity. */
+@media (pointer: coarse) {
+    .icons-wrapper {
+        scrollbar-width: auto;
+    }
+
+    .icons-wrapper::-webkit-scrollbar {
+        width: 18px;
+    }
+
+    .icons-wrapper::-webkit-scrollbar-thumb {
+        background-color: rgba(var(--rmt-accent-rgb), 0.75);
+        border-radius: 9px;
+        border: 5px solid transparent;
+        background-clip: content-box;
+        min-height: 44px;
+    }
+
+    .icons-container {
+        padding: 4px 10px;
+        gap: 8px;
+    }
 }
 .icons-container::-webkit-scrollbar {
   width: 8px;
@@ -88,16 +149,16 @@ html, body {
   background-color: transparent;
 }
 .icons-container::-webkit-scrollbar-thumb {
-  background-color: rgba(255, 168, 0, 0.6);
+  background-color: rgba(var(--rmt-accent-rgb), 0.6);
   border-radius: 4px;
 }
 .icons-container::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(255, 168, 0, 0.8);
+  background-color: rgba(var(--rmt-accent-rgb), 0.8);
 }
 
 .separator {
     height: 1px;
-    border-bottom: 1px dotted #ffa800;
+    border-bottom: 1px dotted var(--rmt-accent, #ffa800);
 }
   
 .pull-tab {
@@ -106,9 +167,9 @@ html, body {
     left: 50%;
     transform: translateX(-50%);
     height: 16px;
-    background: #ffa800;
+    background: var(--rmt-accent, #ffa800);
     opacity: 0.8;
-    border: 1px dotted #151525;
+    border: 1px dotted var(--rmt-bg, #151525);
     border-top: none;
     border-bottom-left-radius: 4px;
     border-bottom-right-radius: 4px;
@@ -117,14 +178,14 @@ html, body {
 }
   
 .pull-tab:hover {
-    background: #ff0000;
+    background: var(--rmt-danger, #ff0000);
 }
 
 .icons-container .icon {
   flex: 0 0 auto;
   width: 42px;
   height: 42px;
-  background: #ffa800;
+  background: var(--rmt-accent, #ffa800);
   border-radius: 4px;
 }
 
@@ -135,9 +196,9 @@ html, body {
   transform: translate(-50%, -50%);
   width: 40px;
   height: 16px;
-  background: #ffa800;
+  background: var(--rmt-accent, #ffa800);
   opacity: 0.8;
-  border: 1px dotted #151525;
+  border: 1px dotted var(--rmt-bg, #151525);
   border-top: none;
   border-bottom-left-radius: 4px;
   border-bottom-right-radius: 4px;
@@ -148,7 +209,7 @@ html, body {
   box-sizing: border-box;
 }
 .second-bar-toggle:hover {
-  background: #ff0000;
+  background: var(--rmt-danger, #ff0000);
 }
 
 .second-bar-toggle .toggle-line {
@@ -156,7 +217,7 @@ html, body {
   left: 50%;
   width: 60%;
   height: 1px;
-  background-color: #151525;
+  background-color: var(--rmt-bg, #151525);
   transform: translateX(-50%);
 }
 .second-bar-toggle .toggle-line:nth-child(1) {
@@ -181,7 +242,21 @@ html, body {
     margin-right: 36px;
 }
 
+/* No focus ring on the transport/chrome buttons. Chrome raises :focus-visible for a
+   MODIFIER-click (shift-click), so the hidden loop gesture would otherwise leave a
+   white box around the play button every time it is used. */
+button:focus,
+button:focus-visible {
+    outline: none;
+}
+
 #playPauseBtn {
+    /* Long-press is a real gesture on this button (it toggles loop playback), so the
+       touch platform must not answer it with a callout / selection of its own. */
+    touch-action: manipulation;
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -208,7 +283,7 @@ html, body {
     width: 20px;
     height: 2px;
     border-radius: 2px;
-    background-color: #ffa800;
+    background-color: var(--rmt-accent, #ffa800);
     transform-origin: center;
     transition: all 0.5s ease-in-out;
 }
@@ -224,7 +299,7 @@ html, body {
 .pp:hover::before,
 .pp:hover::after,
 .pp:hover span {
-    filter: drop-shadow(0 0 10px #ffa800);
+    filter: drop-shadow(0 0 10px var(--rmt-accent, #ffa800));
 }
 .pp.open::before {
     transform: translate(-75%, -50%) rotate(270deg) ;
@@ -238,16 +313,80 @@ html, body {
 .pp.open::before,
 .pp.open::after,
 .pp.open span {
-    background-color: #ff0000;
+    background-color: var(--rmt-danger, #ff0000);
 }
 .pp.open:hover::before,
 .pp.open::after,
 .pp.open span {
-    filter: drop-shadow(0 0 10px #ff0000);
+    filter: drop-shadow(0 0 10px var(--rmt-danger, #ff0000));
+}
+
+/* ── Loop playback ────────────────────────────────────────────────────────────
+   The hidden mode behind shift-click / long-press on Play (src/player.js,
+   toggleLoop). The same three bars, shrunk to dashes, chasing each other around a
+   lemniscate a third of a lap apart.
+
+   This block MUST stay after the .pp.open rules: .pp.open::before and
+   .pp.looping::before have identical specificity (0,2,1), so source order is the
+   only thing deciding which transform and colour win while both classes are on
+   (looping AND playing — the common case). */
+@supports (offset-path: path("M 0 0")) {
+    .pp.looping::before,
+    .pp.looping::after,
+    .pp.looping span {
+        /* The motion-path transform TRANSLATES the box from where layout put it; it
+           does not place it absolutely. So the box has to sit at the container's
+           origin for the path's coordinates to land where they read, and no
+           translate() may survive in `transform` — a transform is applied after the
+           path placement, in the dash's own rotated frame, and would drag the whole
+           orbit sideways. transform-origin (center, inherited from the base rule) is
+           what offset-anchor pins to the curve. */
+        top: 0;
+        left: 0;
+        offset-path: path("M 10 10 C 11.6 6.6, 14.4 5.4, 17 7 C 19 8.2, 19 11.8, 17 13 C 14.4 14.6, 11.6 13.4, 10 10 C 8.4 6.6, 5.6 5.4, 3 7 C 1 8.2, 1 11.8, 3 13 C 5.6 14.6, 8.4 13.4, 10 10 Z");
+        offset-anchor: 50% 50%;
+        offset-rotate: auto;
+        transform: scaleX(0.3);
+        /* Red, like the pause bars it morphs out of and back into: all three of these
+           are "the transport is running" states, and only the shape distinguishes them. */
+        background-color: var(--rmt-danger, #ff0000);
+        animation: pp-orbit 2.4s linear infinite;
+        /* The base rule's `transition: all` would otherwise catch offset-distance and
+           chase every animated frame, so the dashes crawl toward the target instead of
+           arriving. Keep the 0.5s morph for the shrink, drop it for the orbit. */
+        transition: transform 0.5s ease-in-out, background-color 0.5s ease-in-out;
+    }
+    /* A third of a lap apart. Negative delays start them already spread out. */
+    .pp.looping::before { animation-delay: 0s; }
+    .pp.looping span    { animation-delay: -0.8s; }
+    .pp.looping::after  { animation-delay: -1.6s; }
+
+    .pp.looping:hover::before,
+    .pp.looping:hover::after,
+    .pp.looping:hover span {
+        filter: drop-shadow(0 0 10px var(--rmt-danger, #ff0000));
+    }
+
+    /* Still say "loop" without the motion: three dashes parked around the figure-8. */
+    @media (prefers-reduced-motion: reduce) {
+        .pp.looping::before,
+        .pp.looping::after,
+        .pp.looping span {
+            animation: none;
+        }
+        .pp.looping::before { offset-distance: 0%; }
+        .pp.looping span    { offset-distance: 33.33%; }
+        .pp.looping::after  { offset-distance: 66.67%; }
+    }
+}
+
+@keyframes pp-orbit {
+    from { offset-distance: 0%; }
+    to   { offset-distance: 100%; }
 }
 
 .stop-button:hover .stop span {
-    filter: drop-shadow(0 0 10px #ff0000);
+    filter: drop-shadow(0 0 10px var(--rmt-danger, #ff0000));
 }
 .menu-container {
     position: relative;
@@ -282,7 +421,7 @@ html, body {
     width: 20px;
     height: 2px;
     border-radius: 2px;
-    background-color: #ffa800;
+    background-color: var(--rmt-accent, #ffa800);
     transition: all 0.2s ease-in-out;
     pointer-events: none;
 }
@@ -312,7 +451,7 @@ html, body {
 }
 
 .stop-button:hover .stop span {
-    background-color: #ff0000;
+    background-color: var(--rmt-danger, #ff0000);
 }
 
 .stop-button:hover .stop span:nth-child(1) {
@@ -340,7 +479,7 @@ html, body {
 }
 
 .stop-button:hover .stop span {
-    filter: drop-shadow(0 0 10px #ff0000);
+    filter: drop-shadow(0 0 10px var(--rmt-danger, #ff0000));
 }
 
 .dropdown-button {
@@ -369,7 +508,7 @@ html, body {
     width: 20px;
     height: 2px;
     border-radius: 2px;
-    background-color: #ffa800;
+    background-color: var(--rmt-accent, #ffa800);
     transform-origin: center;
     transition: all 0.5s ease-in-out;
 }
@@ -384,44 +523,132 @@ html, body {
 
 .plusminus:hover::before,
 .plusminus:hover::after {
-    filter: drop-shadow(0 0 10px #ffa800);
+    filter: drop-shadow(0 0 10px var(--rmt-accent, #ffa800));
 }
 
 .plusminus.open::before {
     transform: translate(-50%, -50%) rotate(0deg);
-    background-color: #ff0000;
+    background-color: var(--rmt-danger, #ff0000);
 }
 
 .plusminus.open::after {
     transform: translate(-50%, -50%) rotate(0deg);
-    background-color: #ff0000;
+    background-color: var(--rmt-danger, #ff0000);
 }
 
 .plusminus.open:hover::before,
 .plusminus.open:hover::after {
-    filter: drop-shadow(0 0 10px #ff0000);
+    filter: drop-shadow(0 0 10px var(--rmt-danger, #ff0000));
+}
+
+/* Settings gear — sits between the tracking toggle and the "+" menu. Same 20x20
+   box as .dropdown-button / #playPauseBtn, and .right-controls has no gap, so it
+   carries its own 16px like #resetViewBtn and .tracking-zone do. */
+.settings-gear-btn {
+    width: 20px;
+    height: 20px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 16px;
+    padding: 0;
+    color: var(--rmt-accent, #ffa800);
+    transition: color 0.5s ease-in-out;
+}
+
+.settings-gear-btn .gear-icon {
+    width: 20px;
+    height: 20px;
+    display: block;
+    overflow: visible;          /* let the glow spill past the 20px box */
+    transform-origin: center;
+    transition: transform 0.5s ease-in-out, filter 0.5s ease-in-out;
+}
+
+/* The gear has 8 teeth, so it is symmetric every 45deg: hovering turns it by
+   exactly one tooth and lands on identical geometry — it never snaps back. */
+.settings-gear-btn:hover .gear-icon,
+.settings-gear-btn:focus-visible .gear-icon {
+    transform: rotate(45deg);
+    filter: drop-shadow(0 0 10px var(--rmt-accent, #ffa800));
+}
+
+/* Open: danger-red, like .plusminus.open, and parked half a tooth over so the
+   state reads even without color. */
+.settings-gear-btn.open {
+    color: var(--rmt-danger, #ff0000);
+}
+
+.settings-gear-btn.open .gear-icon {
+    transform: rotate(22.5deg);
+}
+
+.settings-gear-btn.open:hover .gear-icon,
+.settings-gear-btn.open:focus-visible .gear-icon {
+    transform: rotate(67.5deg);   /* still exactly +45deg */
+    filter: drop-shadow(0 0 10px var(--rmt-danger, #ff0000));
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .settings-gear-btn .gear-icon,
+    .settings-gear-btn:hover .gear-icon,
+    .settings-gear-btn.open .gear-icon,
+    .settings-gear-btn.open:hover .gear-icon {
+        transform: none;
+    }
 }
 
 .widget {
-    position: absolute;
-    top: 35px;
-    right: -16px;
-    background: rgba(21, 21, 37, 0.88);
+    /* Fixed to the viewport, NOT absolute inside .menu-container — the menu is a
+       body-level sibling of .top-bar now (see index.html), because .top-bar's
+       z-index + backdrop-filter make it a stacking context that would pin the menu
+       under the floating panels. These two values reproduce, to the pixel, where it
+       sat when it hung off the + button: the bar is 50px tall, and the button's
+       right edge is inset exactly 16px from the screen edge by .right-controls'
+       margin, which the old `right: -16px` cancelled out to land flush at the edge. */
+    position: fixed;
+    top: 50px;
+    right: 0;
+    /* The floating-panel band, shared with .note-widget / .group-widget /
+       .rmt-set-panel. src/utils/panel-stack.js orders the open ones within it; this
+       is the resting level a closed menu falls back to. */
+    z-index: 1200;
+    background: rgba(var(--rmt-surface-rgb), 0.88);
+    /* The same glass as .note-widget / .group-widget / .rmt-set-panel. The menu was
+       the only floating panel without it, which never showed while it could only ever
+       overlap the workspace — now that it can be parked over another panel, 0.88 alpha
+       with nothing behind it lets that panel's controls read straight through. */
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
     border-bottom-left-radius: 5px;
-    border-left: 1px dotted #ffa800;
-    border-bottom: 1px dotted #ffa800;
+    border-left: 1px dotted var(--rmt-accent, #ffa800);
+    border-bottom: 1px dotted var(--rmt-accent, #ffa800);
     padding: 20px;
-    min-width: 250px;
+    /* WIDTH, not min-width. As an absolutely-positioned child of the 20px-wide
+       .menu-container, this box was shrink-to-fit against 20px — it collapsed to its
+       min-width and rendered at 250 + 40 padding + 1 border = 291px. Fixed to the
+       viewport, "shrink-to-fit" resolves against the whole screen instead, and the
+       same box springs open to its max-content width (593px at 1280px). Pin the 250px
+       the menu has always actually been. */
+    width: 250px;
+    /* 100 = the two fixed bars. `vh` is the LARGE viewport — the screen as it would
+       be with the browser's URL bar collapsed — and this app never scrolls, so that
+       bar never collapses and 100vh is permanently taller than the phone. Size to the
+       viewport we actually have instead; the first line is the pre-JS fallback. */
     max-height: calc(100vh - 100px);
+    max-height: calc(var(--app-height, 100dvh) - 100px);
     overflow-y: auto;
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     transform-origin: top center;
     transform: scaleY(0);
     opacity: 0;
     transition: all 0.3s ease-out;
     visibility: hidden;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 168, 0, 0.6) transparent;
+    scrollbar-color: rgba(var(--rmt-accent-rgb), 0.6) transparent;
 }
 
 .widget::-webkit-scrollbar {
@@ -430,12 +657,12 @@ html, body {
 }
 
 .widget::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 168, 0, 0.6);
+    background-color: rgba(var(--rmt-accent-rgb), 0.6);
     border-radius: 4px;
 }
 
 .widget::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 168, 0, 0.8);
+    background-color: rgba(var(--rmt-accent-rgb), 0.8);
 }
 
 .widget.open {
@@ -458,7 +685,7 @@ html, body {
     width: 100%;
     -webkit-appearance: none;
     height: 2px;
-    background: #ffa800;
+    background: var(--rmt-accent, #ffa800);
     outline: none;
     opacity: 0.7;
     transition: opacity 0.2s;
@@ -469,27 +696,29 @@ html, body {
     appearance: none;
     width: 15px;
     height: 15px;
-    background: #ffa800;
+    background: var(--rmt-accent, #ffa800);
     cursor: pointer;
     border-radius: 50%;
 }
 
 .menu-item {
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     padding: 8px;
     cursor: pointer;
 }
 
 .menu-item:hover {
-    background: rgba(255, 168, 0, 0.2);
+    background: rgba(var(--rmt-accent-rgb), 0.2);
 }
 
 #volumeSlider {
     -webkit-appearance: none;
-    width: 100px;
+    /* Narrowed from 100px to make room for the settings gear in .right-controls
+       (which grew by 20 + 16 = 36px). Still 56px of travel for the 16px thumb. */
+    width: 72px;
     height: 2px;
     border-radius: 2px;
-    background: #ffa800;
+    background: var(--rmt-accent, #ffa800);
     outline: none;
 }
 
@@ -498,27 +727,27 @@ html, body {
     appearance: none;
     width: 16px;
     height: 16px;
-    background: #ffa800;
+    background: var(--rmt-accent, #ffa800);
     cursor: pointer;
     border-radius: 50%;
-    box-shadow: 0 0 10px rgba(255, 168, 0, 0.7);
+    box-shadow: 0 0 10px rgba(var(--rmt-accent-rgb), 0.7);
     transition: all 0.2s ease-in-out;
     touch-action: manipulation;
 }
 
 #volumeSlider::-webkit-slider-thumb:active,
 #volumeSlider::-webkit-slider-thumb:hover {
-    background: #ff0000;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7);
 }
 
 #volumeSlider::-moz-range-thumb {
     width: 16px;
     height: 16px;
-    background: #ffa800;
+    background: var(--rmt-accent, #ffa800);
     cursor: pointer;
     border-radius: 50%;
-    box-shadow: 0 0 10px rgba(255, 168, 0, 0.7);
+    box-shadow: 0 0 10px rgba(var(--rmt-accent-rgb), 0.7);
     transition: all 0.2s ease-in-out;
     border: none;
     touch-action: manipulation;
@@ -526,36 +755,36 @@ html, body {
 
 #volumeSlider::-moz-range-thumb:active,
 #volumeSlider::-moz-range-thumb:hover {
-    background: #ff0000;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7);
 }
 
 #volumeSlider::-webkit-slider-thumb:focus,
 #volumeSlider::-webkit-slider-thumb:focus-visible {
-    background: #ff0000;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7);
 }
 
 @media (hover: none) {
     #volumeSlider::-webkit-slider-thumb:active {
-        background: #ff0000 !important;
-        box-shadow: 0 0 10px rgba(255, 0, 0, 0.7) !important;
+        background: var(--rmt-danger, #ff0000) !important;
+        box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7) !important;
     }
     
     #volumeSlider::-moz-range-thumb:active {
-        background: #ff0000 !important;
-        box-shadow: 0 0 10px rgba(255, 0, 0, 0.7) !important;
+        background: var(--rmt-danger, #ff0000) !important;
+        box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7) !important;
     }
 }
 
 #volumeSlider.active::-webkit-slider-thumb {
-    background: #ff0000 !important;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7) !important;
+    background: var(--rmt-danger, #ff0000) !important;
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7) !important;
 }
 
 #volumeSlider.active::-moz-range-thumb {
-    background: #ff0000 !important;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7) !important;
+    background: var(--rmt-danger, #ff0000) !important;
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7) !important;
 }
 
 .module-zone {
@@ -608,7 +837,7 @@ html, body {
     align-items: center;
     margin-left: auto;
     margin-right: 16px;
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
 }
 
 .toggle-switch {
@@ -643,10 +872,10 @@ html, body {
     width: 16px;
     left: 2px;
     bottom: 2px;
-    background-color: #ffa800;
+    background-color: var(--rmt-accent, #ffa800);
     transition: .4s;
     border-radius: 50%;
-    box-shadow: 0 0 10px rgba(255, 168, 0, 0.7);
+    box-shadow: 0 0 10px rgba(var(--rmt-accent-rgb), 0.7);
 }
 
 input:checked + .toggle-slider {
@@ -655,8 +884,8 @@ input:checked + .toggle-slider {
 
 input:checked + .toggle-slider:before {
     transform: translateX(20px);
-    background-color: #ff0000;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+    background-color: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7);
 }
 
 .tempo-container {
@@ -673,7 +902,7 @@ input:checked + .toggle-slider:before {
 }
 
 .tempo-input-group label {
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     white-space: nowrap;
     font-size: 14px;
     margin-top: 4px;
@@ -684,9 +913,9 @@ input:checked + .toggle-slider:before {
 
 #tempo-input {
     width: 60px;
-    background: rgba(255, 168, 0, 0.1);
-    border: 1px solid #ffa800;
-    color: #ffa800;
+    background: rgba(var(--rmt-accent-rgb), 0.1);
+    border: 1px solid var(--rmt-accent, #ffa800);
+    color: var(--rmt-accent, #ffa800);
     padding: 4px 8px;
     border-radius: 4px;
     outline: none;
@@ -697,7 +926,7 @@ input:checked + .toggle-slider:before {
     background: transparent;
     cursor: pointer;
     display: block;
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     opacity: 1;
 }
 
@@ -713,12 +942,12 @@ input:checked + .toggle-slider:before {
 }
 
 #tempo-input:focus {
-    box-shadow: 0 0 5px rgba(255, 168, 0, 0.5);
+    box-shadow: 0 0 5px rgba(var(--rmt-accent-rgb), 0.5);
 }
 
 #tempo-submit {
-    background: #ffa800;
-    color: #151525;
+    background: var(--rmt-accent, #ffa800);
+    color: var(--rmt-bg, #151525);
     border: none;
     padding: 4px 12px;
     border-radius: 4px;
@@ -727,8 +956,8 @@ input:checked + .toggle-slider:before {
 }
 
 #tempo-submit:hover {
-    background: #ff0000;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.5);
 }
 
 .frequency-container {
@@ -746,7 +975,7 @@ input:checked + .toggle-slider:before {
 }
 
 .frequency-input-group label {
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     white-space: nowrap;
     font-size: 14px;
     margin-top: 4px;
@@ -757,9 +986,9 @@ input:checked + .toggle-slider:before {
 
 #frequency-input {
     width: 60px;
-    background: rgba(255, 168, 0, 0.1);
-    border: 1px solid #ffa800;
-    color: #ffa800;
+    background: rgba(var(--rmt-accent-rgb), 0.1);
+    border: 1px solid var(--rmt-accent, #ffa800);
+    color: var(--rmt-accent, #ffa800);
     padding: 4px 8px;
     border-radius: 4px;
     outline: none;
@@ -770,7 +999,7 @@ input:checked + .toggle-slider:before {
     background: transparent;
     cursor: pointer;
     display: block;
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     opacity: 1;
 }
 
@@ -786,12 +1015,12 @@ input:checked + .toggle-slider:before {
 }
 
 #frequency-input:focus {
-    box-shadow: 0 0 5px rgba(255, 168, 0, 0.5);
+    box-shadow: 0 0 5px rgba(var(--rmt-accent-rgb), 0.5);
 }
 
 #frequency-submit {
-    background: #ffa800;
-    color: #151525;
+    background: var(--rmt-accent, #ffa800);
+    color: var(--rmt-bg, #151525);
     border: none;
     padding: 4px 12px;
     border-radius: 4px;
@@ -800,8 +1029,8 @@ input:checked + .toggle-slider:before {
 }
 
 #frequency-submit:hover {
-    background: #ff0000;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.5);
 }
 
 input[type="number"]::-webkit-inner-spin-button,
@@ -825,7 +1054,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     margin-top: 20px;
     padding: 15px;
     padding-bottom: 0;
-    border-top: 1px dotted rgba(255, 168, 0, 0.3);
+    border-top: 1px dotted rgba(var(--rmt-accent-rgb), 0.3);
 }
 
 .support-section {
@@ -958,7 +1187,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 
 .widget-copyright {
     text-align: center;
-    color: rgba(255, 168, 0, 0.5);
+    color: rgba(var(--rmt-accent-rgb), 0.5);
     font-size: 12px;
     margin-top: 15px;
 }
@@ -981,9 +1210,9 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     position: fixed;
     bottom: 19px;
     left: 19px;
-    background: rgba(21, 21, 37, 0.88);
+    background: rgba(var(--rmt-surface-rgb), 0.88);
     backdrop-filter: blur(5px);
-    border: 1px dotted #ffa800;
+    border: 1px dotted var(--rmt-accent, #ffa800);
     border-radius: 5px;
     width: 300px;
     overflow: hidden;
@@ -991,7 +1220,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     /* Above menu bars (1100/1099) and GL, but below global modals (2000) */
     z-index: 1200;
     display: none;
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     font-family: 'Roboto Mono', monospace;
 }
 
@@ -1001,7 +1230,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 
 .note-widget-header {
     padding: 10px;
-    border-bottom: 1px dotted #ffa800;
+    border-bottom: 1px dotted var(--rmt-accent, #ffa800);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -1015,14 +1244,14 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 .note-widget-close {
     background: none;
     border: none;
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     font-size: 20px;
     cursor: pointer;
     padding: 0 5px;
 }
 
 .note-widget-close:hover {
-    color: #ff0000;
+    color: var(--rmt-danger, #ff0000);
 }
 
 .note-widget-content {
@@ -1030,7 +1259,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     overflow-y: auto;
     box-sizing: border-box;
     scrollbar-width: thin;
-    scrollbar-color: rgba(255, 168, 0, 0.6) transparent;
+    scrollbar-color: rgba(var(--rmt-accent-rgb), 0.6) transparent;
 }
 
 .note-widget-content::-webkit-scrollbar {
@@ -1039,25 +1268,25 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .note-widget-content::-webkit-scrollbar-thumb {
-    background-color: rgba(255, 168, 0, 0.6);
+    background-color: rgba(var(--rmt-accent-rgb), 0.6);
     border-radius: 4px;
 }
 
 .note-widget-content::-webkit-scrollbar-thumb:hover {
-    background-color: rgba(255, 168, 0, 0.8);
+    background-color: rgba(var(--rmt-accent-rgb), 0.8);
 }
 
 .variable-row {
     margin-bottom: 15px;
     padding: 8px;
-    border-bottom: 1px dotted rgba(255, 168, 0, 0.3);
-    background: rgba(255, 168, 0, 0.05);
+    border-bottom: 1px dotted rgba(var(--rmt-accent-rgb), 0.3);
+    background: rgba(var(--rmt-accent-rgb), 0.05);
     border-radius: 4px;
 }
 
 .variable-name {
     font-weight: bold;
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     margin-bottom: 8px;
     font-size: 14px;
     text-transform: uppercase;
@@ -1067,7 +1296,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     font-family: 'Roboto Mono', monospace;
     word-break: break-word;
     overflow-wrap: anywhere;
-    color: rgba(255, 168, 0, 0.8);
+    color: rgba(var(--rmt-accent-rgb), 0.8);
     padding-left: 10px;
 }
 
@@ -1082,7 +1311,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .value-label {
-    color: rgba(255, 168, 0, 0.6);
+    color: rgba(var(--rmt-accent-rgb), 0.6);
     font-size: 0.9em;
     margin-right: 8px;
     font-weight: bold;
@@ -1096,9 +1325,9 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 .raw-value-input {
     display: block;
     width: 100%;
-    background: rgba(255, 168, 0, 0.1);
-    border: 1px solid rgba(255, 168, 0, 0.3);
-    color: #ffa800;
+    background: rgba(var(--rmt-accent-rgb), 0.1);
+    border: 1px solid rgba(var(--rmt-accent-rgb), 0.3);
+    color: var(--rmt-accent, #ffa800);
     font-family: 'Roboto Mono', monospace;
     padding: 8px;
     border-radius: 4px;
@@ -1108,15 +1337,15 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 
 .raw-value-input:focus {
     outline: none;
-    border-color: #ffa800;
-    box-shadow: 0 0 5px rgba(255, 168, 0, 0.3);
+    border-color: var(--rmt-accent, #ffa800);
+    box-shadow: 0 0 5px rgba(var(--rmt-accent-rgb), 0.3);
 }
 
 .raw-value-save {
     display: block;
     width: 100%;
-    background: #ffa800;
-    color: #151525;
+    background: var(--rmt-accent, #ffa800);
+    color: var(--rmt-bg, #151525);
     border: none;
     padding: 8px 16px;
     border-radius: 4px;
@@ -1126,18 +1355,18 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .raw-value-save:hover {
-    background: #ff0000;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.5);
 }
 
 .note-rect .note-content.selected {
     border-color: #ffc850 !important;
-    box-shadow: 0 0 5px #ffa800, 0 0 10px #ffa800, 0 0 15px #ffa800 !important;
+    box-shadow: 0 0 5px var(--rmt-accent, #ffa800), 0 0 10px var(--rmt-accent, #ffa800), 0 0 15px var(--rmt-accent, #ffa800) !important;
 }
 
 .base-note-circle.selected {
     border-color: white !important;
-    box-shadow: 0 0 5px #ffa800, 0 0 10px #ffa800, 0 0 15px #ffa800 !important;
+    box-shadow: 0 0 5px var(--rmt-accent, #ffa800), 0 0 10px var(--rmt-accent, #ffa800), 0 0 15px var(--rmt-accent, #ffa800) !important;
 }
 
 .success-message {
@@ -1147,18 +1376,18 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .error-message {
-    color: #ff0000;
+    color: var(--rmt-danger, #ff0000);
     font-size: 0.9em;
     margin-top: 4px;
 }
 
 .widget-title {
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     font-size: 16px;
     font-weight: bold;
     margin-bottom: 15px;
     padding-bottom: 10px;
-    border-bottom: 1px solid rgba(255, 168, 0, 0.3);
+    border-bottom: 1px solid rgba(var(--rmt-accent-rgb), 0.3);
 }
 
 /* removed legacy: .measure-bar-triangle */
@@ -1175,8 +1404,8 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 
 .module-action-btn {
     width: 100%;
-    background: #ffa800;
-    color: #151525;
+    background: var(--rmt-accent, #ffa800);
+    color: var(--rmt-bg, #151525);
     border: none;
     padding: 8px 16px;
     border-radius: 4px;
@@ -1187,8 +1416,8 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .module-action-btn:hover {
-    background: #ff0000;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.5);
 }
 
 /* removed legacy: .note-content.dependency */
@@ -1204,15 +1433,15 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 .delete-note-row {
     margin-bottom: 15px;
     padding: 8px;
-    background: rgba(255, 168, 0, 0.05);
+    background: rgba(var(--rmt-accent-rgb), 0.05);
     border-radius: 4px;
-    border-top: 2px solid #ff0000;
+    border-top: 2px solid var(--rmt-danger, #ff0000);
 }
 
 .delete-note-header {
     font-size: 14px;
     font-weight: bold;
-    color: #ff0000;
+    color: var(--rmt-danger, #ff0000);
     margin-bottom: 8px;
 }
 
@@ -1236,7 +1465,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .delete-note-btn.delete-dependencies {
-    background-color: #ff0000;
+    background-color: var(--rmt-danger, #ff0000);
 }
 
 .delete-confirm-overlay {
@@ -1245,7 +1474,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(21, 21, 37, 0.8);
+    background-color: rgba(var(--rmt-bg-rgb), 0.8);
     backdrop-filter: blur(5px);
     -webkit-backdrop-filter: blur(5px);
     display: flex;
@@ -1255,16 +1484,16 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .delete-confirm-modal {
-    background-color: rgba(21, 21, 37, 0.88);
-    border: 1px dotted #ffa800;
+    background-color: rgba(var(--rmt-surface-rgb), 0.88);
+    border: 1px dotted var(--rmt-accent, #ffa800);
     border-radius: 5px;
     padding: 20px;
     max-width: 300px;
     width: 90%;
     text-align: center;
     font-family: 'Roboto Mono', monospace;
-    color: #ffa800;
-    box-shadow: 0 0 10px rgba(255, 168, 0, 0.7);
+    color: var(--rmt-accent, #ffa800);
+    box-shadow: 0 0 10px rgba(var(--rmt-accent-rgb), 0.7);
 }
 
 .delete-confirm-modal p {
@@ -1275,7 +1504,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 
 .evaluate-note-btn.liberate-dependencies {
     background-color: #00ccff;
-    color: #151525;
+    color: var(--rmt-bg, #151525);
     margin-bottom: 8px;
 }
 
@@ -1284,11 +1513,11 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .modal-note-id {
-    color: #ff0000;
+    color: var(--rmt-danger, #ff0000);
 }
 
 .modal-delete-all {
-    color: #ff0000;
+    color: var(--rmt-danger, #ff0000);
 }
 
 .modal-keep {
@@ -1312,7 +1541,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 }
 
 .delete-confirm-modal button:first-child {
-    background-color: #ff0000;
+    background-color: var(--rmt-danger, #ff0000);
     color: #fff;
 }
 
@@ -1347,7 +1576,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     left: 50%;
     width: 8px;
     height: 8px;
-    background-color: #ffa800;
+    background-color: var(--rmt-accent, #ffa800);
     border-radius: 50%;
     transform: translate(-50%, -50%);
     transition: background-color 0.3s ease;
@@ -1366,7 +1595,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     left: 50%;
     transform: translateX(-50%);
     border-width: 4px 4px 0 4px;
-    border-color: #ffa800 transparent transparent transparent;
+    border-color: var(--rmt-accent, #ffa800) transparent transparent transparent;
   }
   
   #resetViewBtn .arrow.bottom {
@@ -1374,7 +1603,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     left: 50%;
     transform: translateX(-50%);
     border-width: 0 4px 4px 4px;
-    border-color: transparent transparent #ffa800 transparent;
+    border-color: transparent transparent var(--rmt-accent, #ffa800) transparent;
   }
   
   #resetViewBtn .arrow.left {
@@ -1382,7 +1611,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     top: 50%;
     transform: translateY(-50%);
     border-width: 4px 0 4px 4px;
-    border-color: transparent transparent transparent #ffa800;
+    border-color: transparent transparent transparent var(--rmt-accent, #ffa800);
   }
   
   #resetViewBtn .arrow.right {
@@ -1390,30 +1619,30 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     top: 50%;
     transform: translateY(-50%);
     border-width: 4px 4px 4px 0;
-    border-color: transparent #ffa800 transparent transparent;
+    border-color: transparent var(--rmt-accent, #ffa800) transparent transparent;
   }
   
   #resetViewBtn:hover .center-circle {
-    background-color: #ff0000;
+    background-color: var(--rmt-danger, #ff0000);
   }
   
   #resetViewBtn:hover .arrow.top {
-    border-top-color: #ff0000;
+    border-top-color: var(--rmt-danger, #ff0000);
     transform: translateX(-50%) translateY(6px);
   }
   
   #resetViewBtn:hover .arrow.bottom {
-    border-bottom-color: #ff0000;
+    border-bottom-color: var(--rmt-danger, #ff0000);
     transform: translateX(-50%) translateY(-6px);
   }
   
   #resetViewBtn:hover .arrow.left {
-    border-left-color: #ff0000;
+    border-left-color: var(--rmt-danger, #ff0000);
     transform: translateY(-50%) translateX(6px);
   }
   
   #resetViewBtn:hover .arrow.right {
-    border-right-color: #ff0000;
+    border-right-color: var(--rmt-danger, #ff0000);
     transform: translateY(-50%) translateX(-6px);
   }
 
@@ -1427,7 +1656,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
 .evaluate-note-row {
     margin-bottom: 15px;
     padding: 8px;
-    background: rgba(255, 168, 0, 0.05);
+    background: rgba(var(--rmt-accent-rgb), 0.05);
     border-radius: 4px;
     border-top: 2px solid #00ffff;
 }
@@ -1448,7 +1677,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     font-size: 14px;
     cursor: pointer;
     background-color: #00ffff;
-    color: #151525;
+    color: var(--rmt-bg, #151525);
     transition: background-color 0.3s ease;
 }
 
@@ -1517,7 +1746,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     appearance: none;
     width: 150px;
     height: 1px;
-    background: rgba(255, 168, 0, 0.7);
+    background: rgba(var(--rmt-accent-rgb), 0.7);
     outline: none;
     transform: rotate(-90deg);
     transform-origin: center;
@@ -1532,7 +1761,7 @@ input[type="number"]::-webkit-outer-spin-button:hover {
     appearance: none;
     width: 150px;
     height: 1px;
-    background: rgba(255, 168, 0, 0.7);
+    background: rgba(var(--rmt-accent-rgb), 0.7);
     outline: none;
     border-radius: 2px;
     opacity: 0;
@@ -1549,42 +1778,42 @@ input[type="range"]::-webkit-slider-thumb {
     appearance: none;
     width: 12px;
     height: 12px;
-    border: 1px solid #ffa800;
+    border: 1px solid var(--rmt-accent, #ffa800);
     cursor: pointer;
     border-radius: 50%;
-    box-shadow: 0 0 5px rgba(255, 168, 0, 0.5);
+    box-shadow: 0 0 5px rgba(var(--rmt-accent-rgb), 0.5);
     transition: background 0.3s ease;
 }
 
 input[type="range"]::-moz-range-thumb {
     width: 16px;
     height: 16px;
-    background: #ffa800;
+    background: var(--rmt-accent, #ffa800);
     cursor: pointer;
     border-radius: 50%;
-    box-shadow: 0 0 5px rgba(255, 168, 0, 0.5);
+    box-shadow: 0 0 5px rgba(var(--rmt-accent-rgb), 0.5);
     transition: background 0.3s ease;
     border: none;
 }
 
 input[type="range"]:hover::-webkit-slider-thumb {
-    background: #ff0000;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7);
 }
 
 input[type="range"]:hover::-moz-range-thumb {
-    background: #ff0000;
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7);
 }
 
 input[type="range"]:active::-webkit-slider-thumb {
-    background: #ff0000;
-    box-shadow: 0 0 15px rgba(255, 0, 0, 0.9);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 15px rgba(var(--rmt-danger-rgb), 0.9);
 }
 
 input[type="range"]:active::-moz-range-thumb {
-    background: #ff0000;
-    box-shadow: 0 0 15px rgba(255, 0, 0, 0.9);
+    background: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 15px rgba(var(--rmt-danger-rgb), 0.9);
 }
 
 .y-scale-slider-container::before {
@@ -1592,7 +1821,7 @@ input[type="range"]:active::-moz-range-thumb {
     position: absolute;
     top: -10px;
     left: 11px;
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     font-family: 'Roboto Mono', monospace;
     font-size: 14px;
     opacity: 0;
@@ -1605,7 +1834,7 @@ input[type="range"]:active::-moz-range-thumb {
     position: absolute;
     bottom: 6px;
     right: -10px;
-    color: #ffa800;
+    color: var(--rmt-accent, #ffa800);
     font-family: 'Roboto Mono', monospace;
     font-size: 14px;
     opacity: 0;
@@ -1624,7 +1853,7 @@ input[type="range"]:active::-moz-range-thumb {
     left: 20px;    
     width: 12px;
     height: 12px;
-    background-color: #ffa800;
+    background-color: var(--rmt-accent, #ffa800);
     border-radius: 50%;
     z-index: 1150;
     cursor: pointer;
@@ -1632,14 +1861,14 @@ input[type="range"]:active::-moz-range-thumb {
 }
 
 .scale-controls-toggle:hover {
-    background-color: #ff0000;
+    background-color: var(--rmt-danger, #ff0000);
     transform: scale(1.2);
-    box-shadow: 0 0 10px rgba(255, 0, 0, 0.7);
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.7);
 }
 
 .scale-controls-toggle.active {
-    background-color: #ff0000;
-    box-shadow: 0 0 15px rgba(255, 0, 0, 0.9);
+    background-color: var(--rmt-danger, #ff0000);
+    box-shadow: 0 0 15px rgba(var(--rmt-danger-rgb), 0.9);
 }
 
 .octave-indicators-container {
@@ -1657,28 +1886,28 @@ input[type="range"]:active::-moz-range-thumb {
     left: 0;
     width: 100%;
     height: 1px;
-    border-top: 1px dotted rgba(255, 168, 0, 0.3);
+    border-top: 1px dotted rgba(var(--rmt-accent-rgb), 0.3);
     pointer-events: none;
 }
 
 .octave-indicator.reference-octave {
-    border-top: 1px dotted rgba(255, 168, 0, 0.7);
+    border-top: 1px dotted rgba(var(--rmt-accent-rgb), 0.7);
 }
 
 .octave-label {
     position: absolute;
     left: 10px;
     top: -10px;
-    color: rgba(255, 168, 0, 0.7);
+    color: rgba(var(--rmt-accent-rgb), 0.7);
     font-family: 'Roboto Mono', monospace;
     font-size: 10px;
-    background-color: rgba(21, 21, 37, 0.7);
+    background-color: rgba(var(--rmt-bg-rgb), 0.7);
     padding: 2px 5px;
     border-radius: 3px;
 }
 
 .octave-indicator.reference-octave .octave-label {
-    color: rgba(255, 168, 0, 1);
+    color: rgba(var(--rmt-accent-rgb), 1);
     font-weight: bold;
 }
 
@@ -1718,7 +1947,7 @@ input[type="range"]:active::-moz-range-thumb {
 }
 
 .lock-body {
-    fill: #f00;
+    fill: var(--rmt-danger, #ff0000);
     transition: fill 0.3s ease 0s, stroke 0.3s ease 0s;
     transform-origin: bottom center;
 }
@@ -1730,19 +1959,19 @@ input[type="range"]:active::-moz-range-thumb {
 
 .lock-shackle {
     fill: none;
-    stroke: #f00;
+    stroke: var(--rmt-danger, #ff0000);
     stroke-width: 4;
     transition: transform 0.3s ease, stroke 0.3s ease;
     transform-origin: 19px 16px;
 }
 
 .lock-icon:hover .lock-body {
-    fill: #ffa800;
-    stroke: #ffa800;
+    fill: var(--rmt-accent, #ffa800);
+    stroke: var(--rmt-accent, #ffa800);
 }
 
 .lock-icon:hover .lock-shackle {
-    stroke: #ffa800;
+    stroke: var(--rmt-accent, #ffa800);
 }
 
 .lock-button.locked .lock-shackle-group {
@@ -1753,12 +1982,12 @@ input[type="range"]:active::-moz-range-thumb {
 .lock-button.locked .lock-shackle {
     transition-delay: 0s, 0s;
     transform: rotateY(0deg);
-    stroke: #f00;
+    stroke: var(--rmt-danger, #ff0000);
 }
 
 .lock-button.locked .lock-body {
-    fill: #f00;
-    stroke: #f00;
+    fill: var(--rmt-danger, #ff0000);
+    stroke: var(--rmt-danger, #ff0000);
 }
 
 .lock-button:not(.locked) .lock-shackle-group {
@@ -1769,28 +1998,212 @@ input[type="range"]:active::-moz-range-thumb {
 .lock-button:not(.locked) .lock-shackle {
     transition-delay: 0.3s, 0s;
     transform: rotateY(180deg);
-    stroke: #ffa800;
+    stroke: var(--rmt-accent, #ffa800);
 }
 
 .lock-button:not(.locked) .lock-body {
-    fill: #ffa800;
-    stroke: #ffa800;
+    fill: var(--rmt-accent, #ffa800);
+    stroke: var(--rmt-accent, #ffa800);
 }
 
 .lock-button.locked .lock-icon:hover .lock-body {
-    fill: #ffa800;
-    stroke: #ffa800;
+    fill: var(--rmt-accent, #ffa800);
+    stroke: var(--rmt-accent, #ffa800);
 }
 
 .lock-button.locked .lock-icon:hover .lock-shackle {
-    stroke: #ffa800;
+    stroke: var(--rmt-accent, #ffa800);
 }
 
 .lock-button:not(.locked) .lock-icon:hover .lock-body {
-    fill: #f00;
-    stroke: #f00;
+    fill: var(--rmt-danger, #ff0000);
+    stroke: var(--rmt-danger, #ff0000);
 }
 
 .lock-button:not(.locked) .lock-icon:hover .lock-shackle {
-    stroke: #f00;
+    stroke: var(--rmt-danger, #ff0000);
+}
+
+/* ── Group-actions widget (multi-note selection) ──────────────────────────
+ *
+ * Sibling species of .note-widget: same background, same 1px dotted border and
+ * 5px radius, same 10px header with a move cursor, same × box, same stacking
+ * level (1200/1201, above the menu bars and below the confirm overlays at 2000).
+ * Position is owned by the shared drag helper, which writes inline left/top.
+ *
+ * The one deliberate difference is the accent. A single-note selection is
+ * ORANGE; the multi-selection highlight in the GL canvas is WHITE, and this
+ * widget agrees with it, so you can tell at a glance which selection you are
+ * looking at. White comes from --rmt-text-primary (the token that IS #ffffff in
+ * every preset); the translucent white tints below are literal rgba() because
+ * there is no --rmt-text-primary-rgb triplet to theme them with — and they are
+ * matching a highlight the renderer draws in fixed white anyway.
+ * Destructive actions stay on --rmt-danger, as everywhere else in the app.
+ */
+.group-widget {
+    position: fixed;
+    display: none;
+    flex-direction: column;
+    box-sizing: border-box;
+    /* Same 300px as the note widget, but never wider than the viewport minus the
+       19px buffer the drag clamp keeps — so it stays a floating card on a phone
+       instead of becoming a full-screen sheet. */
+    width: min(300px, calc(100vw - 38px));
+    overflow: hidden;
+    background: rgba(var(--rmt-surface-rgb), 0.88);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
+    border: 1px dotted var(--rmt-text-primary, #ffffff);
+    border-radius: 5px;
+    color: var(--rmt-text-primary, #ffffff);
+    font-family: 'Roboto Mono', monospace;
+    z-index: 1200;
+}
+
+.group-widget.visible {
+    display: flex;
+}
+
+/* Header metrics are the note widget's, to the pixel: same padding, same font
+   size on the ×, so the two title bars line up when both are open. */
+.group-widget-header {
+    flex: 0 0 auto;
+    padding: 10px;
+    border-bottom: 1px dotted var(--rmt-text-primary, #ffffff);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: move;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.group-widget-title {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    font-weight: bold;
+}
+
+/* The live count is the whole point of the header — give it the weight. */
+.group-widget-count {
+    font-size: 18px;
+    line-height: 1;
+    color: var(--rmt-text-primary, #ffffff);
+    text-shadow: 0 0 8px rgba(255, 255, 255, 0.5);
+}
+
+.group-widget-label {
+    font-size: 13px;
+    font-weight: normal;
+    color: var(--rmt-text-secondary, #aaaaaa);
+    white-space: nowrap;
+}
+
+.group-widget-close {
+    background: none;
+    border: none;
+    color: var(--rmt-text-primary, #ffffff);
+    font-size: 20px;
+    cursor: pointer;
+    padding: 0 5px;
+}
+
+.group-widget-close:hover {
+    color: var(--rmt-danger, #ff0000);
+}
+
+.group-widget-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    padding: 15px;
+    box-sizing: border-box;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.5) transparent;
+}
+
+.group-widget-content::-webkit-scrollbar {
+    width: 8px;
+    background-color: transparent;
+}
+
+.group-widget-content::-webkit-scrollbar-thumb {
+    background-color: rgba(255, 255, 255, 0.5);
+    border-radius: 4px;
+}
+
+.group-widget-content::-webkit-scrollbar-thumb:hover {
+    background-color: rgba(255, 255, 255, 0.75);
+}
+
+.group-widget-action {
+    margin-bottom: 14px;
+}
+
+.group-widget-action:last-child {
+    margin-bottom: 0;
+}
+
+/* One button per registry entry: full width, 40px minimum for touch. */
+.group-widget-btn {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 40px;
+    padding: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--rmt-text-primary, #ffffff);
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.group-widget-btn:hover {
+    border-color: var(--rmt-text-primary, #ffffff);
+    background: rgba(255, 255, 255, 0.14);
+}
+
+.group-widget-btn-danger {
+    border-color: rgba(var(--rmt-danger-rgb), 0.6);
+    background: rgba(var(--rmt-danger-rgb), 0.12);
+    color: var(--rmt-danger, #ff0000);
+    font-weight: bold;
+}
+
+.group-widget-btn-danger:hover {
+    border-color: var(--rmt-danger, #ff0000);
+    background: var(--rmt-danger, #ff0000);
+    color: #fff;
+    box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.5);
+}
+
+/* Consequence of the action above it, in the app's usual muted hint voice. */
+.group-widget-hint {
+    margin-top: 6px;
+    font-size: 11px;
+    line-height: 1.35;
+    color: var(--rmt-text-secondary, #aaaaaa);
+}
+
+/* Not an action — the way out. Sits below the actions, behind a dotted rule. */
+.group-widget-clear {
+    margin-top: 14px;
+    border-color: rgba(255, 255, 255, 0.2);
+    background: none;
+    color: var(--rmt-text-secondary, #aaaaaa);
+    font-size: 12px;
+}
+
+.group-widget-clear:hover {
+    border-color: var(--rmt-text-primary, #ffffff);
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--rmt-text-primary, #ffffff);
 }

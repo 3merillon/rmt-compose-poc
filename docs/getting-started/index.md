@@ -1,51 +1,43 @@
+---
+title: Getting Started
+description: Try RMT Compose in your browser or run it locally, then build your first three-note composition.
+---
+
 # Getting Started
 
-Welcome to RMT Compose! This guide will help you get up and running quickly.
+RMT Compose runs in the browser. You can use the hosted app immediately, or clone the repository and run it locally.
 
-## What You'll Learn
+## Quick start
 
-1. **[Installation](./installation)** - Set up RMT Compose locally or use the live demo
-2. **[First Composition](./first-composition)** - Create your first piece in 5 minutes
-3. **[Core Concepts](./concepts)** - Understand ratios, the BaseNote, and dependencies
-
-## Quick Start
-
-The fastest way to try RMT Compose is the **live demo**:
+The fastest way to try RMT Compose is the hosted app:
 
 **[https://rmt.world](https://rmt.world)**
 
-No installation required - just open in a modern browser with WebGL2 support.
+Nothing to install, and it has every feature the local build has — the whole thing runs client-side. You need a browser with **WebGL2**: the workspace is a WebGL2 canvas and will not initialise without it.
 
-## For Local Development
+To run it locally instead:
 
 ```bash
-# Clone the repository
 git clone https://github.com/3merillon/rmt-compose-poc.git
 cd rmt-compose-poc
-
-# Install dependencies
 npm install
-
-# Start development server
 npm run dev
 ```
 
-Open the URL shown by Vite (typically `http://localhost:3000`).
+Vite serves on **`http://localhost:3000`** and opens your browser for you. You need **Node.js 20.19+ or 22.12+**; Node 18 will not start the dev server. [Installation](/getting-started/installation) has the full prerequisites, the production build, and troubleshooting.
 
-## Prerequisites
+## The first thing to find
 
-- **Node.js 18+** (for local development)
-- **Modern browser** with WebGL2 support (Chrome, Firefox, Edge, Safari)
-- **Optional**: Rust toolchain for WASM builds
+Once the app is open, the **gear** in the top bar opens the [Settings panel](/user-guide/interface/settings). It is a floating, non-modal card you can leave open while you compose, with five tabs: **Appearance**, **Arrows**, **Audio**, **Library** and **Scale**. Theme, the interval the transpose arrows use, reverb, and how densely the workspace is packed all live there, and all of them persist across reloads.
 
-## Next Steps
+## Read these in order
 
-Once you have RMT Compose running:
+1. **[Installation](/getting-started/installation)** — run it locally, build it, and rebuild the Rust/WASM core
+2. **[Your First Composition](/getting-started/first-composition)** — three notes, played, saved, in five minutes
+3. **[Core Concepts](/getting-started/concepts)** — ratios, the BaseNote, expressions, dependencies and modules
 
-1. Start with [Your First Composition](./first-composition) to create a simple melody
-2. Read [Core Concepts](./concepts) to understand the theory behind the app
-3. Explore the [User Guide](/user-guide/) for detailed feature documentation
+If you are using the hosted app, skip straight to [Your First Composition](/getting-started/first-composition).
 
-::: tip Live Demo
-If you just want to explore, the [live demo](https://rmt.world) is the easiest way to get started. All features work directly in your browser.
-:::
+## Next steps
+
+Once you have three notes on screen, the [User Guide](/user-guide/) covers every feature in detail, and the [Tutorials](/tutorials/) walk single paths to a result.

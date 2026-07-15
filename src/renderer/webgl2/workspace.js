@@ -7,8 +7,8 @@
 
 import { RendererAdapter } from './renderer.js';
 import { CameraController } from './camera-controller.js';
-import { Picking } from './picking.js';
 import { eventBus } from '../../utils/event-bus.js';
+import { toNumber } from '../../utils/fraction-num.js';
 
 /**
  * CameraController is provided by camera-controller.js
@@ -104,38 +104,11 @@ export class Workspace {
       return false;
     }
 
-    // Initialize GPU picking scaffold against renderer canvas (if available)
-    try {
-      this.picking = new Picking();
-      this.picking.init(this.renderer.gl, this.renderer.canvas);
-    } catch {}
-
     // Immediately feed basis from our camera controller
     try { this.renderer.updateViewportBasis(this.camera.getBasis()); } catch {}
 
     // Default cursor
     try { this.containerEl.style.cursor = 'default'; } catch {}
-
-    // Advise camera whether a single-finger pan should be allowed at touch start.
-    // Return false when the initial contact is on a note (so we do not pan before drag starts).
-    try {
-      if (this.camera) {
-        this.camera.shouldAllowSingleFingerPanStart = (ev) => {
-          try {
-            // Prefer precise subregion hit (notes)
-            if (this.renderer && typeof this.renderer.hitTestSubRegion === 'function') {
-              const sub = this.renderer.hitTestSubRegion(ev.clientX, ev.clientY);
-              if (sub && sub.id) return false; // on a note: block pan
-            }
-            // Fallback: mixed pick
-            const hit = this.pickAt(ev.clientX, ev.clientY, 2);
-            if (hit && hit.type === 'note') return false; // on a note: block pan
-          } catch {}
-          // Background or anything else -> allow pan
-          return true;
-        };
-      }
-    } catch {}
 
     // Pointer down to start interactions (move/resize/octave)
     this._onPointerDown = (e) => {
@@ -151,10 +124,42 @@ export class Workspace {
         // Disable multi-touch while dragging/resizing to avoid erratic placement
         if (e.pointerType === 'touch') {
           if (this._interaction && this._interaction.active) {
+            // A second finger during a pending marquee means the user actually wants to
+            // pinch-zoom. Give the gesture up rather than fight the camera for it.
+            if (this._interaction.type === 'marquee') {
+              this._endInteraction(false);
+              return;
+            }
             // Ignore additional touch contacts during an active interaction
             try { e.preventDefault(); } catch {}
             return;
           }
+        }
+
+        // ── Multi-select entry ──────────────────────────────────────────────────
+        // Long-press IS the touch equivalent of shift: on empty background it rubber-bands
+        // a marquee, on a note it toggles that note in or out of the selection. Group drag
+        // is NOT handled here — a note already in the group falls through to the normal
+        // move gesture below, which is then decorated as a group drag, so it inherits all
+        // the existing snapping and clamping for free.
+        {
+          const hit = this._pickAny(e.clientX, e.clientY);
+
+          if (!hit) {
+            if (e.pointerType !== 'touch' && e.shiftKey) {
+              this._beginMarquee(e, this._multiSelIds().size > 0);
+              return;
+            }
+            if (e.pointerType === 'touch') {
+              this._armLongPress(e, { kind: 'marquee', additive: this._multiSelIds().size > 0 });
+            }
+          } else if (e.pointerType === 'touch' && hit.type === 'note') {
+            this._armLongPress(e, { kind: 'toggle', noteId: Number(hit.id) });
+          }
+          // Deliberately FALL THROUGH in both touch cases. Until the timer fires this is
+          // still an ordinary pan (on background) or a pending note drag (on a note);
+          // travel, a second finger, or an early release all cancel it. So pan, pinch-zoom
+          // and note dragging are untouched, and we never take a gesture on speculation.
         }
 
         if (!this.renderer || typeof this.renderer.hitTestSubRegion !== 'function') return;
@@ -178,7 +183,7 @@ export class Workspace {
               const measureId = Number(mixedTop.id);
               const xScale = this.renderer.currentXScaleFactor || 1.0;
               const measureNote = this._module?.getNoteById?.(measureId);
-              const origStartSec = Number(measureNote?.getVariable?.('startTime')?.valueOf?.() ?? 0);
+              const origStartSec = toNumber(measureNote?.getVariable?.('startTime'), 0);
               const startWorldX = origStartSec * (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
               const ptr0 = this.screenToWorld(e.clientX, e.clientY);
               const pointerWX0 = (ptr0 && typeof ptr0.x === 'number') ? ptr0.x : startWorldX;
@@ -457,6 +462,7 @@ export class Workspace {
             baselineStartSec: null,
             lastPreview: { startSec: 0, durationSec: 0 }
           };
+          this._decorateAsGroupDrag(this._interaction);
 
           // Do NOT gate camera yet; allow pinch if a second touch appears.
           // Attach doc-level listeners to track pointer moves for promotion/cancel.
@@ -548,7 +554,7 @@ export class Workspace {
             let s0 = 0;
             try {
               const n = mod.getNoteById(Number(did));
-              s0 = n && n.getVariable ? n.getVariable('startTime').valueOf() : 0;
+              s0 = n && n.getVariable ? toNumber(n.getVariable('startTime'), 0) : 0;
             } catch {
               // Fallback to current renderer position (safe at pointerdown since no preview yet)
               try {
@@ -591,6 +597,9 @@ export class Workspace {
           // cachedAncestorChain: [{id,startSec}] from current parent up to BaseNote (id 0)
           cachedAncestorChain: null
         };
+        // Grabbing a note that is already in the multi-selection turns this into a GROUP
+        // drag: identical gesture, identical snapping — only the commit differs.
+        this._decorateAsGroupDrag(this._interaction);
         // Seed per-interaction parent/ancestor caches for note drags (move/resize)
         try {
           const mod = this._module;
@@ -631,12 +640,12 @@ export class Workspace {
             let curA = parent0;
             let guardA = 0;
             while (curA && guardA++ < 1024) {
-              const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+              const st = toNumber(curA.getVariable?.('startTime'), 0);
               anc.push({ id: Number(curA.id || 0), startSec: st });
               if (Number(curA.id || 0) === 0) break;
               const rawA = curA?.variables?.startTimeString || '';
               if (rawA.includes('module.baseNote')) {
-                anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                 break;
               }
               const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
@@ -648,11 +657,11 @@ export class Workspace {
                 const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
                 const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
                 if (dslId >= 0) {
-                  if (dslId === 0) { anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                  if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
                   curA = mod?.getNoteById?.(dslId);
                   if (!curA) break;
                 } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                  anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                  anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                   break;
                 } else {
                   break;
@@ -676,7 +685,7 @@ export class Workspace {
               try {
                 const mnote = mod?.getNoteById?.(mid);
                 const mlVal = mod?.findMeasureLength?.(mnote);
-                ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                ml = toNumber(mlVal, 0) || 0;
               } catch {}
               list.push({ id: mid, startSec: st, endSec: st + ml });
               if (mid === Number(parent0.id)) idx = i;
@@ -898,6 +907,41 @@ export class Workspace {
         const { type, noteId } = this._interaction;
         const xScale = this.renderer?.currentXScaleFactor || 1.0;
 
+        // Marquee: rubber-band the rectangle and live-highlight whatever it crosses.
+        if (type === 'marquee') {
+          const st = this._interaction;
+
+          // A second finger mid-marquee means the user wants to pinch. Bail out.
+          if ((this._touchActiveCount || 0) >= 2) {
+            this._endInteraction(false);
+            return;
+          }
+
+          st.lastClient = { x: e.clientX, y: e.clientY };
+          const rect = {
+            x0: st.startClient.x, y0: st.startClient.y,
+            x1: e.clientX,        y1: e.clientY
+          };
+          try { this.renderer?.setMarqueeRect?.(rect); } catch {}
+
+          let ids = [];
+          try {
+            const hits = this.renderer?.pickRect?.(rect.x0, rect.y0, rect.x1, rect.y1) || [];
+            for (const h of hits) {
+              const hid = Number(h && h.id);
+              if (Number.isFinite(hid) && hid !== 0) ids.push(hid);
+            }
+          } catch {}
+          st.marqueeIds = ids;
+
+          // Live preview only — the authoritative set is player.js's, and it is written
+          // once on release (workspace:marqueeCommit).
+          const live = st.marqueeAdditive ? new Set([...st.marqueeBaseIds, ...ids]) : new Set(ids);
+          try { this.renderer?.setMultiSelection?.(live); } catch {}
+          try { if (e.cancelable) e.preventDefault(); } catch {}
+          return;
+        }
+
         // Promotion logic for pending move on touch: prefer pinch (two touches) over dragging.
         if (this._interaction.type === 'movePending') {
           // Cancel pending if a second touch is active (let camera pinch-zoom)
@@ -962,7 +1006,7 @@ export class Workspace {
               let s0 = 0;
               try {
                 const n = mod.getNoteById(Number(did));
-                s0 = n && n.getVariable ? n.getVariable('startTime').valueOf() : 0;
+                s0 = n && n.getVariable ? toNumber(n.getVariable('startTime'), 0) : 0;
               } catch {
                 try {
                   const idx = this.renderer._noteIdToIndex && this.renderer._noteIdToIndex.get
@@ -1031,12 +1075,12 @@ export class Workspace {
               let curA = parent0;
               let guardA = 0;
               while (curA && guardA++ < 1024) {
-                const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                const st = toNumber(curA.getVariable?.('startTime'), 0);
                 anc.push({ id: Number(curA.id || 0), startSec: st });
                 if (Number(curA.id || 0) === 0) break;
                 const rawA = curA?.variables?.startTimeString || '';
                 if (rawA.includes('module.baseNote')) {
-                  anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                  anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                   break;
                 }
                 const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
@@ -1048,11 +1092,11 @@ export class Workspace {
                   const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
                   const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
                   if (dslId >= 0) {
-                    if (dslId === 0) { anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                    if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
                     curA = mod?.getNoteById?.(dslId);
                     if (!curA) break;
                   } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                    anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                    anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                     break;
                   } else {
                     break;
@@ -1076,7 +1120,7 @@ export class Workspace {
                 try {
                   const mnote = mod?.getNoteById?.(mid);
                   const mlVal = mod?.findMeasureLength?.(mnote);
-                  ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                  ml = toNumber(mlVal, 0) || 0;
                 } catch {}
                 list.push({ id: mid, startSec: st, endSec: st + ml });
                 if (mid === Number(parent0.id)) idx = i;
@@ -1116,7 +1160,7 @@ export class Workspace {
             } else {
               tempoVal = mod?.findTempo?.(mod?.baseNote);
             }
-            const tempo = (tempoVal && typeof tempoVal.valueOf === 'function') ? tempoVal.valueOf() : tempoVal;
+            const tempo = toNumber(tempoVal, 0);
             if (tempo && isFinite(tempo) && tempo > 0) return 60 / tempo;
           } catch {}
           return 60 / 120; // fallback 120 BPM
@@ -1128,7 +1172,7 @@ export class Workspace {
           return Math.max(0, snappedBeats * bl);
         };
         const baseStart = (() => {
-          try { return this._module?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0; } catch { return 0; }
+          try { return toNumber(this._module?.baseNote?.getVariable?.('startTime'), 0); } catch { return 0; }
         })();
 
         // Build preview values
@@ -1281,7 +1325,7 @@ export class Workspace {
                       if (!isMeasure(nn)) continue;
                       const sts = nn.variables?.startTimeString || '';
                       if (sts.includes(legacyLink) || sts.includes(dslLink)) {
-                        const st = Number(nn.getVariable('startTime')?.valueOf?.() ?? Infinity);
+                        const st = toNumber(nn.getVariable('startTime'), Infinity);
                         if (st < bestStart) {
                           bestStart = st;
                           best = nn;
@@ -1292,8 +1336,8 @@ export class Workspace {
                   };
 
                   let parent = parseParent(note);
-                  let parentStart = Number(parent?.getVariable?.('startTime')?.valueOf?.() ?? 0);
-                  const origStart = Number(note.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                  let parentStart = toNumber(parent?.getVariable?.('startTime'), 0);
+                  const origStart = toNumber(note.getVariable?.('startTime'), 0);
 
                   // No change if effectively no movement
                   if (Math.abs(startSec - origStart) < tol) {
@@ -1307,13 +1351,13 @@ export class Workspace {
                       while (advanced) {
                         advanced = false;
                         const mlVal = mod.findMeasureLength(cur);
-                        const ml = Number(mlVal?.valueOf?.() ?? 0);
+                        const ml = toNumber(mlVal, 0);
                         const end = curStart + ml;
                         if (startSec >= end - tol) {
                           const next = findNextInChain(cur);
                           if (next) {
                             cur = next;
-                            curStart = Number(next.getVariable('startTime')?.valueOf?.() ?? 0);
+                            curStart = toNumber(next.getVariable('startTime'), 0);
                             parent = cur;
                             parentStart = curStart;
                             advanced = true;
@@ -1360,7 +1404,7 @@ export class Workspace {
 
                     for (let i = 0; i < ancestorChain.length; i++) {
                       const anc = ancestorChain[i];
-                      const ancStart = Number(anc?.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                      const ancStart = toNumber(anc?.getVariable?.('startTime'), 0);
                       if (startSec >= ancStart - tol) {
                         parent = anc;
                         break;
@@ -1405,6 +1449,17 @@ export class Workspace {
         }
         } else {
           // octave: no preview changes
+        }
+
+        // GROUP drag: the delta is applied to the WHOLE selection, so the binding
+        // constraint is the EARLIEST note in it, not the one under the pointer. Clamp
+        // here — before the preview and before lastPreview, which the commit reads — so
+        // the ghost stops where the drop will actually land instead of sliding past the
+        // base note and snapping back.
+        if (type === 'move' && this._interaction.groupMode
+            && Number.isFinite(this._interaction.groupMinDeltaSec)) {
+          const minStart = (this._interaction.origStartSec || 0) + this._interaction.groupMinDeltaSec;
+          if (startSec < minStart) startSec = minStart;
         }
 
         // Save preview
@@ -1452,7 +1507,7 @@ export class Workspace {
                   // Fallback: read from module if not in baseline (defensive, rare)
                   try {
                     const n = this._module?.getNoteById?.(did);
-                    baseStart = n && n.getVariable ? n.getVariable('startTime').valueOf() : 0;
+                    baseStart = n && n.getVariable ? toNumber(n.getVariable('startTime'), 0) : 0;
                   } catch { baseStart = 0; }
                 }
                 // Compute new previewed start from baseline + current delta
@@ -1470,16 +1525,23 @@ export class Workspace {
               const dxWorld2 = (startSec - this._interaction.origStartSec) * (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200)) * (this.renderer.currentXScaleFactor || 1.0);
               const dwWorld = (durationSec - this._interaction.origDurationSec) * (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200)) * (this.renderer.currentXScaleFactor || 1.0);
               
-              // PERFORMANCE: Use cached dependents instead of building from previewMap
-              const affectedIds = new Set([noteId]);
-              const cachedDeps = this._interaction.cachedDependents;
-              if (cachedDeps && cachedDeps.size > 0) {
-                for (const id of cachedDeps) {
-                  affectedIds.add(Number(id));
+              // PERFORMANCE: Use cached dependents instead of building from previewMap.
+              // Build the affected-id set ONCE per gesture, not once per pointermove: the set
+              // cannot change while dragging, and re-creating a Set of thousands of dependents
+              // on every move was a major source of GC churn (and defeats the renderer's
+              // identity fast-path, which then had to re-derive its index list and re-sort it).
+              let affectedIds = this._interaction.cachedAffectedIds;
+              if (!affectedIds) {
+                affectedIds = new Set([noteId]);
+                const cachedDeps = this._interaction.cachedDependents;
+                if (cachedDeps && cachedDeps.size > 0) {
+                  for (const id of cachedDeps) {
+                    affectedIds.add(Number(id));
+                  }
                 }
+                this._interaction.cachedAffectedIds = affectedIds;
               }
-              
-              
+
               this.renderer.setDragOffsetPreview({
                 dxWorld: dxWorld2,
                 dwWorld,
@@ -1519,7 +1581,7 @@ export class Workspace {
                     if (!isMeasure) continue;
                     let baseS = 0;
                     if (baseline && baseline.has(did)) baseS = baseline.get(did) || 0;
-                    else baseS = Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
+                    else baseS = toNumber(n.getVariable('startTime'), 0);
                     const nextS = Math.max(baseStart, baseS + shift);
                     measurePreview[did] = snapSixteenth(nextS);
                   } catch {}
@@ -1557,12 +1619,17 @@ export class Workspace {
               // GPU path for measure drags:
               // - Shift downstream measures and ALL dependent normal notes via shader drag flags (no per-frame CPU rebuilds)
               // - Triangles/bars pick up movement via Renderer._dragMovingIds; notes via instanced flags
-              let moveIds = new Set();
+              let moveIds;
 
-              // Prefer per-interaction cached closure if available
+              // Prefer per-interaction cached closure if available.
+              // Reuse the cached Set BY REFERENCE rather than copying it: this runs on every
+              // pointermove, and copying a Set of thousands of dependents each time was pure
+              // garbage. Handing the same object back also lets the renderer take its O(1)
+              // identity fast-path instead of re-deriving and re-sorting the index list.
               if (this._interaction && this._interaction.cachedMeasureMovingIds instanceof Set && this._interaction.cachedMeasureMovingIds.size) {
-                try { for (const id of this._interaction.cachedMeasureMovingIds) moveIds.add(Number(id)); } catch {}
+                moveIds = this._interaction.cachedMeasureMovingIds;
               } else {
+                moveIds = new Set();
                 // OPTIMIZED: Use DependencyGraph.getAllStartTimeDependents() for O(V+E) instead of O(n³) regex scanning
                 try {
                   const mod = this._module;
@@ -1599,8 +1666,9 @@ export class Workspace {
                     }
                   }
 
-                  // Persist for rest of the drag to avoid recompute
-                  if (this._interaction) this._interaction.cachedMeasureMovingIds = new Set(moveIds);
+                  // Persist for rest of the drag to avoid recompute. Store the very Set we just
+                  // built (no copy) so subsequent moves hand the same object straight back.
+                  if (this._interaction) this._interaction.cachedMeasureMovingIds = moveIds;
                 } catch {}
               }
 
@@ -1620,12 +1688,20 @@ export class Workspace {
                     (this._interaction.lastClient?.y || 0) - (this._interaction.startClient?.y || 0)
                   );
                   if (movedPx > 2) {
+                    // Materialise the id array once per gesture. Array.from() over thousands of
+                    // dependents on every pointermove was both garbage and enough to defeat the
+                    // renderer's identity check, forcing it to rebuild its moving-id Set too.
+                    let movingIdsArr = this._interaction.cachedMeasureMovingIdsArr;
+                    if (!movingIdsArr || movingIdsArr.length !== moveIds.size) {
+                      movingIdsArr = Array.from(moveIds);
+                      this._interaction.cachedMeasureMovingIdsArr = movingIdsArr;
+                    }
                     this.renderer.setDragOverlay({
                       noteId,
                       type: 'move',
                       dxSec: startDelta,
                       ddurSec: 0,
-                      movingIds: Array.from(moveIds),
+                      movingIds: movingIdsArr,
                       origStartSec: this._interaction.origStartSec,
                       origDurationSec: this._interaction.origDurationSec
                     });
@@ -1727,8 +1803,17 @@ export class Workspace {
           const dx = lc.x - (st && st.startClient ? st.startClient.x : 0);
           const dy = lc.y - (st && st.startClient ? st.startClient.y : 0);
           const dist = Math.hypot(dx, dy);
-          movedOk = (dist > 4) && st && st.type !== 'octave';
+          // A marquee ALWAYS suppresses its trailing click, even a tiny one: that click
+          // lands on empty background, and player.js reads a background click as
+          // "clear the selection" — which would instantly wipe the selection we just made.
+          movedOk = !!st && st.type !== 'octave' && (dist > 4 || st.type === 'marquee');
         } catch {}
+        if (st && st.type === 'marquee') {
+          try {
+            const nowTs = (performance && performance.now) ? performance.now() : Date.now();
+            this.containerEl.__rmtSuppressClickUntil = nowTs + 350;
+          } catch {}
+        }
         if (movedOk) {
           const suppressOnce = (ev) => {
             try {
@@ -1783,6 +1868,17 @@ export class Workspace {
       try { if (this.renderer?.clearDragOverlay) this.renderer.clearDragOverlay(); } catch {}
       // Clear prospective parent visualization
       try { if (this.renderer?.setProspectiveParentId) this.renderer.setProspectiveParentId(null); } catch {}
+      // Take the rubber-band rectangle down (on cancel as well as commit)
+      try { this.renderer?.setMarqueeRect?.(null); } catch {}
+      this._cancelLongPress();
+      // An ABANDONED marquee (pinch, pointercancel) must not strand its live preview
+      // highlight — restore what was selected before the drag. On commit we leave it
+      // alone: player.js overwrites it from marqueeCommit a moment later.
+      try {
+        if (st && st.type === 'marquee' && !commit) {
+          this.renderer?.setMultiSelection?.(st.marqueeBaseIds || new Set());
+        }
+      } catch {}
 
       // Commit
       try {
@@ -1804,6 +1900,23 @@ export class Workspace {
               eventBus.emit('player:octaveChange', { noteId: st.noteId, direction: st.direction === 'up' ? 'up' : 'down' });
             } else {
               // No-op octave drag: restore authoritative state
+              try { if (this._lastSyncArgs) this.sync(this._lastSyncArgs); } catch {}
+            }
+          } else if (st.type === 'marquee') {
+            // Hand the result to player.js, which owns the authoritative selection.
+            // Emitted even when empty: a shift-drag across nothing should clear.
+            eventBus.emit('workspace:marqueeCommit', {
+              ids: Array.isArray(st.marqueeIds) ? st.marqueeIds : [],
+              additive: !!st.marqueeAdditive
+            });
+          } else if (st.type === 'move' && st.groupMode) {
+            // GROUP move: the grabbed note's resolved start gives the delta; player.js
+            // decides which selected notes actually get it applied (movers vs riders).
+            const startSec = (st.lastPreview?.startSec != null) ? st.lastPreview.startSec : st.origStartSec;
+            const deltaSec = (startSec || 0) - (st.origStartSec || 0);
+            if (Math.abs(deltaSec) > 1e-4) {
+              eventBus.emit('workspace:groupMoveCommit', { ids: st.groupIds || [], deltaSec });
+            } else {
               try { if (this._lastSyncArgs) this.sync(this._lastSyncArgs); } catch {}
             }
           } else if (st.type === 'move') {
@@ -2004,6 +2117,257 @@ export class Workspace {
       return [];
     }
   }
+  // ── Multi-select gestures ───────────────────────────────────────────────────
+  //
+  // Gesture arbitration, in priority order:
+  //
+  //   MOUSE   shift + drag on empty space ....... marquee
+  //           drag a note that is in the group .. group drag
+  //           anything else ..................... unchanged (single note, pan, zoom)
+  //
+  //   TOUCH   2nd finger ........................ ALWAYS wins -> pinch-zoom
+  //           long-press (500ms, <8px travel)
+  //             on empty space .................. marquee
+  //           drag a note that is in the group .. group drag
+  //           drag on empty space ............... unchanged (single-finger pan)
+  //
+  // The long-press is armed but NON-COMMITTAL: until it fires, the gesture is still a
+  // pan, and travel / a second finger / an early release all cancel it. So we never
+  // take a gesture away from the camera on speculation — only once the user has
+  // demonstrably held still.
+  static get MARQUEE_LONG_PRESS_MS() { return 500; }
+  static get MARQUEE_LONG_PRESS_SLOP_PX() { return 8; }
+
+  // The renderer holds the live set (player.js owns the authoritative one and pushes it
+  // down). Reading it here keeps the two in step without a second copy to desync.
+  _multiSelIds() {
+    const s = this.renderer && this.renderer._multiSelIds;
+    return (s instanceof Set) ? s : new Set();
+  }
+
+  // Is there any note/measure/base under this point?
+  _pickAny(clientX, clientY) {
+    try { return this.pickAt(clientX, clientY, 3) || null; } catch { return null; }
+  }
+
+  _attachDocInteractionListeners() {
+    if (!this._onDocPointerMove) {
+      this._onDocPointerMove = (ev) => { try { this._updateInteraction(ev); } catch {} };
+    }
+    if (!this._onDocPointerUp) {
+      this._onDocPointerUp = (ev) => {
+        try {
+          if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+          this._endInteraction(true);
+        } catch {}
+      };
+    }
+    if (!this._onDocPointerCancel) {
+      this._onDocPointerCancel = (ev) => {
+        try {
+          if (this._interaction && this._interaction.pointerId != null && ev && ev.pointerId != null && ev.pointerId !== this._interaction.pointerId) return;
+          this._endInteraction(false);
+        } catch {}
+      };
+    }
+    document.addEventListener('pointermove', this._onDocPointerMove, true);
+    document.addEventListener('pointerup', this._onDocPointerUp, true);
+    document.addEventListener('pointercancel', this._onDocPointerCancel, true);
+  }
+
+  _beginMarquee(e, additive = false) {
+    this._cancelLongPress();
+
+    // Take the camera out of the gesture for its duration, or we rubber-band and pan at
+    // the same time. _endInteraction restores both, on cancel as well as commit.
+    try { this.camera?.setInputEnabled?.(false); } catch {}
+    try { this.camera?.setSingleFingerPanEnabled?.(false); } catch {}
+
+    this._interaction = {
+      active: true,
+      type: 'marquee',
+      noteId: null,
+      region: null,
+      direction: null,
+      pointerId: e.pointerId,
+      startClient: { x: e.clientX, y: e.clientY },
+      lastClient:  { x: e.clientX, y: e.clientY },
+      marqueeAdditive: !!additive,
+      marqueeBaseIds: additive ? new Set(this._multiSelIds()) : new Set(),
+      marqueeIds: [],
+      lastPreview: { startSec: 0, durationSec: 0 }
+    };
+
+    this._attachDocInteractionListeners();
+
+    try { this.renderer?.setMarqueeRect?.({ x0: e.clientX, y0: e.clientY, x1: e.clientX, y1: e.clientY }); } catch {}
+    try { this.containerEl.style.cursor = 'crosshair'; } catch {}
+    // NO preventDefault here. We are called from the pointerdown listener, which is
+    // registered { passive: true } — the call would be ignored and would log
+    // "Unable to preventDefault inside passive event listener invocation" on every
+    // marquee. Checking e.cancelable does not help: it stays true in a passive
+    // listener. The doc-level pointermove we attach IS cancellable, and that is where
+    // suppressing the default (text selection, etc.) actually matters.
+  }
+
+  // Arm a long-press. `opts.kind` is either:
+  //   'marquee' — pressed on empty background: begin a rubber-band selection
+  //   'toggle'  — pressed on note `opts.noteId`: add/remove it from the selection,
+  //               i.e. the touch equivalent of a shift-click
+  //
+  // Non-committal until it fires: travel beyond the slop, a second finger, or an early
+  // release all cancel it, so a pan / pinch / note-drag / plain tap is never stolen.
+  _armLongPress(e, opts = {}) {
+    this._cancelLongPress();
+
+    const startX = e.clientX, startY = e.clientY, pid = e.pointerId;
+    const slop = Workspace.MARQUEE_LONG_PRESS_SLOP_PX;
+
+    const cancel = () => this._cancelLongPress();
+
+    // Any travel beyond the slop means this was a pan or a drag, not a press.
+    const onMove = (ev) => {
+      try {
+        if (ev.pointerId != null && ev.pointerId !== pid) return;
+        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) > slop) cancel();
+      } catch {}
+    };
+
+    this._lp = {
+      cancel,
+      onMove,
+      timer: setTimeout(() => {
+        // Fires only if the finger stayed put, stayed down, and stayed alone.
+        try {
+          this._cancelLongPress();                       // consume the arming
+          if ((this._touchActiveCount || 0) >= 2) return;  // a second finger => pinch wins
+
+          if (opts.kind === 'toggle') {
+            // A note press arrives here with a PENDING note drag already staged (the
+            // normal touch path). Tear it down — the user asked to select, not to drag —
+            // and take the trailing tap out of play, or the click/pointerup handlers in
+            // player.js will read it as a plain background-ish tap and clear the group we
+            // are in the middle of building.
+            try { this._endInteraction(false); } catch {}
+            this._suppressTapAfterLongPress();
+            eventBus.emit('workspace:multiSelectToggle', { id: Number(opts.noteId) });
+            return;
+          }
+
+          // Marquee: nothing should be interacting yet (we pressed empty background).
+          if (this._interaction && this._interaction.active) return;
+          const synthetic = { clientX: startX, clientY: startY, pointerId: pid, preventDefault() {} };
+          this._beginMarquee(synthetic, !!opts.additive);
+        } catch { cancel(); }
+      }, Workspace.MARQUEE_LONG_PRESS_MS)
+    };
+
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('pointerup', cancel, true);
+    document.addEventListener('pointercancel', cancel, true);
+  }
+
+  _cancelLongPress() {
+    const lp = this._lp;
+    if (!lp) return;
+    this._lp = null;
+    try { clearTimeout(lp.timer); } catch {}
+    try {
+      document.removeEventListener('pointermove', lp.onMove, true);
+      document.removeEventListener('pointerup', lp.cancel, true);
+      document.removeEventListener('pointercancel', lp.cancel, true);
+    } catch {}
+  }
+
+  // Swallow the tap that a long-press leaves behind.
+  //
+  // The finger is still DOWN when the press fires, and it may be held for a while yet —
+  // so a fixed time window stamped now can expire before the release. Instead, stamp the
+  // suppression window again on the actual pointerup, from a CAPTURE listener so it lands
+  // before player.js's document pointerup handler reads it. Both that handler and the
+  // workspace click handler gate on __rmtSuppressClickUntil, and both would otherwise
+  // treat the release as a plain tap and clear the selection we just changed.
+  _suppressTapAfterLongPress() {
+    const cont = this.containerEl;
+    const stamp = () => {
+      try {
+        const now = (performance && performance.now) ? performance.now() : Date.now();
+        cont.__rmtSuppressClickUntil = now + 400;
+      } catch {}
+    };
+    stamp();
+    const onUp = () => {
+      stamp();
+      try {
+        document.removeEventListener('pointerup', onUp, true);
+        document.removeEventListener('pointercancel', onUp, true);
+      } catch {}
+    };
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('pointercancel', onUp, true);
+  }
+
+  // Turn a freshly-built single-note move into a GROUP move, if the grabbed note is in
+  // the selection. Everything about the gesture stays the same — snapping, clamping,
+  // preview — only _endInteraction's commit differs.
+  _decorateAsGroupDrag(st) {
+    try {
+      if (!st || (st.type !== 'move' && st.type !== 'movePending')) return;
+      const sel = this._multiSelIds();
+      if (sel.size < 1 || !sel.has(Number(st.noteId))) return;
+
+      st.groupMode = true;
+      st.groupIds = [...sel];
+
+      // Everything the drag visibly displaces: every selected note, plus everything that
+      // hangs off one by startTime (riders inside the selection, and dependents outside
+      // it — which follow, exactly as they do for a single-note drag). Built ONCE per
+      // gesture; it cannot change mid-drag, and rebuilding a Set of thousands of
+      // dependents on every pointermove was a known source of GC churn.
+      const moving = new Set(st.groupIds.map(Number));
+      try {
+        const graph = this._module?._dependencyGraph;
+        if (graph?.getAllStartTimeDependents) {
+          for (const id of st.groupIds) {
+            for (const d of (graph.getAllStartTimeDependents(Number(id)) || [])) {
+              moving.add(Number(d));
+            }
+          }
+        }
+      } catch {}
+
+      // TWO caches, because the renderer has TWO drag paths that must agree:
+      //   cachedAffectedIds -> setDragOffsetPreview  -> shifts the note RECTS
+      //   cachedDependents  -> setDragOverlay        -> overwrites _dragMovingIds,
+      //                                                 which drives the GLYPH atlas
+      //                                                 (fraction labels, octave arrows)
+      //                                                 and the measure-triangle flags
+      // Seed only the first and the rects move while the labels stay behind — and only
+      // for some grabs, since the default cachedDependents is the GRABBED note's own
+      // dependents, which may or may not overlap the group.
+      // setDragOverlay's set omits the anchor, matching how the single-note path builds it.
+      st.cachedAffectedIds = moving;
+      const deps = new Set(moving);
+      deps.delete(Number(st.noteId));
+      st.cachedDependents = deps;
+
+      // Clamp limit for the PREVIEW. The commit clamps the batch so no mover lands before
+      // the base note; without the same limit here the ghost happily slides past it and
+      // then snaps back on drop.
+      try {
+        const mod = this._module;
+        const baseStart = toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) || 0;
+        let minStart = Infinity;
+        for (const id of st.groupIds) {
+          const n = mod?.getNoteById?.(Number(id));
+          const s = toNumber(n?.getVariable?.('startTime'), NaN);
+          if (Number.isFinite(s)) minStart = Math.min(minStart, s);
+        }
+        st.groupMinDeltaSec = Number.isFinite(minStart) ? (baseStart - minStart) : 0;
+      } catch { st.groupMinDeltaSec = 0; }
+    } catch {}
+  }
+
   // Screen (client) -> world helper via camera controller
   screenToWorld(clientX, clientY) {
     if (!this.camera) return { x: 0, y: 0 };
@@ -2025,7 +2389,7 @@ export class Workspace {
       // Tolerance for time comparisons
       const tol = 1e-2;
       // Resolve at-or-before Base start: prefer a measure starting exactly at startSec if present
-      const baseStart = Number(mod.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0);
+      const baseStart = toNumber(mod.baseNote?.getVariable?.('startTime'), 0);
       // Mirror commit-time semantics (player selectSuitableParentForStartGL): do not force a measure at base time in preview.
       // Resolution at t == baseStart should follow ancestry climbing; only clamp earlier-than-base to BaseNote (handled below).
 
@@ -2091,10 +2455,11 @@ export class Workspace {
           }
           if (!chainLinks.length) return null;
           chainLinks.sort((a, b) => {
-            const aStart = a.getVariable('startTime');
-            const bStart = b.getVariable('startTime');
-            if (!aStart || !bStart) return 0;
-            return aStart.valueOf() - bStart.valueOf();
+            const sa = toNumber(a.getVariable('startTime'), NaN);
+            const sb = toNumber(b.getVariable('startTime'), NaN);
+            if (sa < sb) return -1;
+            if (sa > sb) return 1;
+            return Number(a.id) - Number(b.id);
           });
           return chainLinks[0];
         } catch { return null; }
@@ -2102,8 +2467,8 @@ export class Workspace {
 
       // Current parent and starts
       let parent = parseParent(note);
-      let parentStart = Number(parent.getVariable('startTime')?.valueOf?.() ?? 0);
-      const origStart = Number(note.getVariable('startTime')?.valueOf?.() ?? parentStart);
+      let parentStart = toNumber(parent.getVariable('startTime'), 0);
+      const origStart = toNumber(note.getVariable('startTime'), parentStart);
 
       // If effectively no movement, keep current parent (avoid line flicker)
       if (Math.abs(startSec - origStart) < tol) {
@@ -2132,7 +2497,7 @@ export class Workspace {
               try {
                 const mnote = mod.getNoteById(mid);
                 const mlVal = mod.findMeasureLength(mnote);
-                ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                ml = toNumber(mlVal, 0) || 0;
               } catch {}
               list.push({ id: mid, startSec: st, endSec: st + ml });
               if (mid === Number(parent.id)) idxLocal = i;
@@ -2182,13 +2547,13 @@ export class Workspace {
                 let curA = parent;
                 let guardA = 0;
                 while (curA && guardA++ < 1024) {
-                  const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                  const st = toNumber(curA.getVariable?.('startTime'), 0);
                   anc.push({ id: Number(curA.id || 0), startSec: st });
                   if (Number(curA.id || 0) === 0) break;
                   const rawA = curA?.variables?.startTimeString || '';
                   // Legacy
                   if (rawA.includes('module.baseNote')) {
-                    anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                    anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                     break;
                   }
                   const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
@@ -2201,11 +2566,11 @@ export class Workspace {
                     const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
                     const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
                     if (dslId >= 0) {
-                      if (dslId === 0) { anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                      if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
                       curA = mod.getNoteById(dslId);
                       if (!curA) break;
                     } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                      anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                      anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                       break;
                     } else {
                       break;
@@ -2228,13 +2593,13 @@ export class Workspace {
             let curA = parent;
             let guardA = 0;
             while (curA && guardA++ < 1024) {
-              const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+              const st = toNumber(curA.getVariable?.('startTime'), 0);
               arr.push({ id: Number(curA.id || 0), startSec: st });
               if (Number(curA.id || 0) === 0) break;
               const rawA = curA?.variables?.startTimeString || '';
               // Legacy
               if (rawA.includes('module.baseNote')) {
-                arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                 break;
               }
               const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
@@ -2247,11 +2612,11 @@ export class Workspace {
                 const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
                 const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
                 if (dslId >= 0) {
-                  if (dslId === 0) { arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                  if (dslId === 0) { arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
                   curA = mod.getNoteById(dslId);
                   if (!curA) break;
                 } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                  arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                  arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                   break;
                 } else {
                   break;
@@ -2324,8 +2689,9 @@ export class Workspace {
         const isMeasure = hasStart && !n.variables?.duration && !n.variables?.frequency;
         if (!isMeasure) continue;
         try {
-          const t = n.getVariable('startTime').valueOf();
-          out.push({ id: Number(idStr), startSec: Number(t) || 0 });
+          const st = n.getVariable('startTime');
+          if (st == null) continue;
+          out.push({ id: Number(idStr), startSec: toNumber(st, 0) || 0 });
         } catch {}
       }
       out.sort((a, b) => a.startSec - b.startSec);
@@ -2396,8 +2762,11 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       try {
         const n = mod.getNoteById(Number(id));
         const st = n && n.getVariable && n.getVariable('startTime');
-        return Number(st && st.valueOf ? st.valueOf() : 0);
-      } catch { return 0; }
+        return toNumber(st, 0);
+      } catch (err) {
+        console.warn('[workspace] startTime evaluation failed for note', id, err);
+        return 0;
+      }
     };
 
     // Check if a dependent is a chain link (uses findMeasureLength/measure()) vs an anchor (starts new chain)
@@ -2463,9 +2832,10 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     const chain = [];
     const pushWithStart = (n) => {
       try {
-        const t = Number(n.getVariable('startTime') && n.getVariable('startTime').valueOf ? n.getVariable('startTime').valueOf() : 0);
+        const t = toNumber(n.getVariable('startTime'), 0);
         chain.push({ id: Number(n.id), startSec: t });
-      } catch {
+      } catch (err) {
+        console.warn('[workspace] startTime evaluation failed for note', n && n.id, err);
         chain.push({ id: Number(n.id), startSec: 0 });
       }
     };
@@ -2490,9 +2860,11 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       } catch {}
       // Sort by startTime and return earliest (there should typically be only one chain link)
       candidates.sort((a, b) => {
-        const sa = Number(a.getVariable('startTime') && a.getVariable('startTime').valueOf ? a.getVariable('startTime').valueOf() : 0);
-        const sb = Number(b.getVariable('startTime') && b.getVariable('startTime').valueOf ? b.getVariable('startTime').valueOf() : 0);
-        return sa - sb;
+        const sa = toNumber(a.getVariable('startTime'), NaN);
+        const sb = toNumber(b.getVariable('startTime'), NaN);
+        if (sa < sb) return -1;
+        if (sa > sb) return 1;
+        return Number(a.id) - Number(b.id);
       });
       return candidates.length > 0 ? candidates[0] : null;
     };

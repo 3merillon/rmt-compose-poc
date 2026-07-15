@@ -1,422 +1,223 @@
+---
+title: Dependency Graph
+description: The 21 forward and inverse indexes that make note dependencies O(1) — how they are registered, how property-coloured queries work, and how corruption is tracked.
+---
+
 # Dependency Graph
 
-The **Dependency Graph** tracks relationships between notes, enabling O(1) lookup for both dependencies and dependents.
-
-## Overview
-
-When a note's expression references another note, a dependency is created:
+When a note's expression references another note, that is a dependency:
 
 ```
-// Note 5 depends on Note 1
-note5.frequency = [1].f * (3/2)
+# note 5's frequency
+[1].f * (3/2)      →  note 5 depends on note 1
 ```
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// Note 5 depends on Note 1
-note5.frequency = module.getNoteById(1).getVariable('frequency').mul(...)
+module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
 ```
 </details>
 
-The dependency graph maintains:
-- **Forward index**: What does a note depend on?
-- **Inverse index**: What depends on a note?
+`src/dependency-graph.js` indexes those references so that both questions are **O(1)**:
 
-**Location**: `src/dependency-graph.js`
+- *What does note 5 depend on?* → the forward index
+- *What depends on note 1?* → the **inverse** index
 
-## Data Structures
-
-### Forward Dependencies
+The inverse index is the whole reason the class exists. Without it, "what depends on note 1?" means scanning every note in the module on every drag frame:
 
 ```javascript
-// dependencies: Map<noteId, Set<noteId>>
-// "Note X depends on these notes"
-
-dependencies = {
-  5: Set([1, 2]),    // Note 5 depends on Notes 1 and 2
-  3: Set([1]),       // Note 3 depends on Note 1
-  4: Set([3]),       // Note 4 depends on Note 3
-}
-```
-
-### Inverse Dependencies (Dependents)
-
-```javascript
-// dependents: Map<noteId, Set<noteId>>
-// "These notes depend on Note X"
-
-dependents = {
-  1: Set([3, 5]),    // Notes 3 and 5 depend on Note 1
-  2: Set([5]),       // Note 5 depends on Note 2
-  3: Set([4]),       // Note 4 depends on Note 3
-}
-```
-
-### Property-Specific Dependencies
-
-The graph also tracks dependencies by property type:
-
-```javascript
-// Which notes' startTime depends on Note X's startTime
-startTimeOnStartTimeDeps = {
-  1: Set([2, 3]),
+// O(N) — what the graph replaces
+getDependents(targetId) {
+  return allNotes.filter(n => n.references(targetId));
 }
 
-// Which notes' startTime depends on Note X's duration
-startTimeOnDurationDeps = {
-  1: Set([2]),
-}
-
-// Which notes' frequency depends on Note X's frequency
-frequencyOnFrequencyDeps = {
-  1: Set([2, 3, 4]),
-}
-```
-
-## Class Structure
-
-```javascript
-class DependencyGraph {
-  constructor() {
-    // General dependencies
-    this.dependencies = new Map();
-    this.dependents = new Map();
-
-    // Property-specific
-    this.startTimeOnStartTime = new Map();
-    this.startTimeOnDuration = new Map();
-    this.frequencyOnFrequency = new Map();
-    this.durationOnDuration = new Map();
-
-    // BaseNote dependents
-    this.baseNoteDependents = {
-      startTime: new Set(),
-      duration: new Set(),
-      frequency: new Set(),
-      tempo: new Set(),
-    };
-  }
-}
-```
-
-## Building the Graph
-
-### From Expression Bytecode
-
-```javascript
-buildFromModule(module) {
-  this.clear();
-
-  for (const note of module.notes) {
-    this.analyzeNote(note);
-  }
-}
-
-analyzeNote(note) {
-  for (const varName of ['startTime', 'duration', 'frequency']) {
-    const expr = note.getExpression(varName);
-    const refs = this.extractReferences(expr);
-
-    for (const ref of refs) {
-      this.addDependency(note.id, ref.noteId, varName, ref.varName);
-    }
-  }
-}
-```
-
-### Extracting References from Bytecode
-
-```javascript
-extractReferences(expr) {
-  const refs = [];
-  let pc = 0;
-
-  while (pc < expr.length) {
-    const op = expr[pc++];
-
-    if (op === OP.LOAD_REF) {
-      const noteId = this.readUint16(expr, pc); pc += 2;
-      const varIdx = expr[pc++];
-      refs.push({ noteId, varName: VAR_NAMES[varIdx] });
-    } else if (op === OP.LOAD_BASE) {
-      const varIdx = expr[pc++];
-      refs.push({ noteId: 0, varName: VAR_NAMES[varIdx] });
-    } else {
-      pc += OPCODE_SIZES[op] - 1;
-    }
-  }
-
-  return refs;
-}
-```
-
-### Adding Dependencies
-
-```javascript
-addDependency(fromNoteId, toNoteId, fromVar, toVar) {
-  // Forward
-  if (!this.dependencies.has(fromNoteId)) {
-    this.dependencies.set(fromNoteId, new Set());
-  }
-  this.dependencies.get(fromNoteId).add(toNoteId);
-
-  // Inverse
-  if (!this.dependents.has(toNoteId)) {
-    this.dependents.set(toNoteId, new Set());
-  }
-  this.dependents.get(toNoteId).add(fromNoteId);
-
-  // Property-specific (e.g., startTime on duration)
-  const key = `${fromVar}On${capitalize(toVar)}`;
-  if (this[key]) {
-    if (!this[key].has(toNoteId)) {
-      this[key].set(toNoteId, new Set());
-    }
-    this[key].get(toNoteId).add(fromNoteId);
-  }
-}
-```
-
-## Query Operations
-
-### Get Dependencies
-
-```javascript
-// What does Note 5 depend on?
-getDependencies(noteId) {
-  return this.dependencies.get(noteId) || new Set();
-}
-// Returns: Set([1, 2])
-```
-
-### Get Dependents
-
-```javascript
-// What depends on Note 1?
+// O(1) — what the graph does
 getDependents(noteId) {
   return this.dependents.get(noteId) || new Set();
 }
-// Returns: Set([3, 5])
 ```
 
-### Get Cascade (Transitive Dependents)
+## The indexes
+
+`DependencyGraph`'s constructor (`:12-69`) builds **21 index maps and sets**, plus a corruption map and an epoch counter — 22 `Map`/`Set` fields in all. They fall into four groups.
+
+### 1. All-property (any expression → any expression)
+
+| Field | Shape |
+|---|---|
+| `dependencies` | `Map<id, Set<id>>` — forward |
+| `dependents` | `Map<id, Set<id>>` — inverse |
+| `baseNoteDependents` | **`Set<id>`** — notes whose expressions reference `base` |
+
+### 2. Per-property forward / inverse / base
+
+The same triple exists for `startTime`, `frequency` and `duration`:
+
+| Property | Forward | Inverse | Base refs |
+|---|---|---|---|
+| startTime | `startTimeDependencies` | `startTimeDependents` | `startTimeBaseNoteDependents` |
+| frequency | `frequencyDependencies` | `frequencyDependents` | `frequencyBaseNoteDependents` |
+| duration | `durationDependencies` | `durationDependents` | `durationBaseNoteDependents` |
+
+### 3. Property-pair inverse maps (9 of them)
+
+These answer *"whose **X** depends on this note's **Y**?"* — the discrimination that makes a move drag differ from a resize drag, and that colours the dependency lines.
+
+|  | …on startTime | …on duration | …on frequency |
+|---|---|---|---|
+| **startTime** depends… | `startTimeOnStartTimeDependents` | `startTimeOnDurationDependents` | `startTimeOnFrequencyDependents` |
+| **frequency** depends… | `frequencyOnStartTimeDependents` | `frequencyOnDurationDependents` | `frequencyOnFrequencyDependents` |
+| **duration** depends… | `durationOnStartTimeDependents` | `durationOnDurationDependents` | `durationOnFrequencyDependents` |
+
+Each is `Map<dependencyId, Set<dependentId>>`.
+
+::: info Only three properties get property-level indexes
+`startTime`, `frequency` and `duration`. `tempo` and `beatsPerMeasure` do not. `measureLength` (VAR 5) is deliberately bucketed **with duration** — a measure length is derived from a duration, so a reference to `[N].ml` registers in the `…OnDuration…` maps (`:129`, `:165`, with the reasoning at `:124-129`).
+:::
+
+### 4. Corruption
+
+| Field | Shape | Purpose |
+|---|---|---|
+| `corruptionFlags` | `Map<id, u8>` | which properties of a note hold an irrational value |
+| `_corruptionEpoch` | number | lets the renderer skip a buffer upload when nothing changed |
+
+## The BaseNote is not an edge
+
+`base.f` sets `BinaryExpression.referencesBase` and lands the note in `baseNoteDependents`. It **never** appears in `dependencies` or `dependents` as an edge to note 0 — that would make the BaseNote depend on itself, and the BaseNote *is* note 0 (comments at `src/expression-compiler.js:725-728`).
+
+Consumers simulate the edge instead. `IncrementalEvaluator.topoSort()` gives BaseNote dependents an implicit in-degree from note 0 when note 0 is dirty, and releases them when it processes note 0 (`binary-evaluator.js:1459-1518`). `Module.getDependentNotes(0)` unions `getAllDependents(0)` with `getBaseNoteDependents()` (`module.js:385-398`).
+
+Any diagram showing note 0 as a graph edge target is wrong.
+
+## Registration
+
+The graph does not build itself. It has no `buildFromModule()`. **The module drives registration**, one note at a time, from `Module._registerNoteDependencies(note)` (`src/module.js:172-195`) — which takes a **Note object**, not an id:
 
 ```javascript
-// All notes affected if Note 1 changes
-getCascade(noteId) {
-  const affected = new Set();
-  const queue = [noteId];
+_registerNoteDependencies(note) {
+  const regKey = `${this._depsRegGeneration}:${note.id}:${note._depsEpoch || 0}`;
+  if (note._depsRegKey === regKey) return;          // ← skipped when nothing changed
 
-  while (queue.length > 0) {
-    const current = queue.shift();
-    const deps = this.getDependents(current);
+  this._dependencyGraph._updateDependencies(note.id, note.getAllDependencies(), note.referencesBaseNote());
+  this._dependencyGraph.registerStartTimeDependencies(note.id, note.getExpression('startTime'));
+  this._dependencyGraph.registerFrequencyDependencies(note.id, note.getExpression('frequency'));
+  this._dependencyGraph.registerDurationDependencies(note.id, note.getExpression('duration'));
 
-    for (const dep of deps) {
-      if (!affected.has(dep)) {
-        affected.add(dep);
-        queue.push(dep);
-      }
-    }
-  }
-
-  return affected;
+  note._depsRegKey = regKey;
 }
 ```
 
-### Property-Specific Query
+::: tip Re-registration is skipped when dependencies cannot have changed
+Dependencies derive purely from a note's compiled expressions. If the note's id, its expression epoch (`Note._depsEpoch`, declared at `src/note.js:42` and bumped on every expression mutation — `:185`, `:198`, `:213`) and the graph generation are all unchanged, the note is already registered identically.
 
-```javascript
-// Which notes' startTime depends on Note 2's duration?
-// (Used for drag previews)
-getStartTimeDependentsOnDuration(noteId) {
-  return this.startTimeOnDuration.get(noteId) || new Set();
-}
-```
+This matters because `markNoteDirty()` calls this for **every** marked note — on an interval-arrow change that is every dependent in the closure. The skip avoids rewriting up to 21 maps per untouched note.
+:::
 
-## Use Cases
+The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:221`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set.
 
-### Smart Drag Preview
+`_updateDependencies()` (`:442-496`) diffs old against new, patches the inverse index, and **bumps `_corruptionEpoch` if the dependency set actually changed** — because changing a note's dependencies can change whether *other* notes render as transitively corrupted, even if no corruption flag moved.
 
-When dragging Note 1:
+## Query surface
 
-```javascript
-// Only move notes whose startTime actually depends on Note 1
-const affectedNotes = graph.getStartTimeDependentsOnDuration(1);
+These are the real method names.
 
-for (const noteId of affectedNotes) {
-  // Show preview position for this note
-  previewNote(noteId, newPosition);
-}
-```
+### Basic
 
-Notes with only frequency dependencies don't move in the preview.
+| Method | Returns | Line |
+|---|---|---|
+| `getDependencies(id)` | `Set` — direct, O(1) | `:673` |
+| `getDependents(id)` | `Set` — direct, O(1) | `:684` |
+| `getAllDependents(id)` | `Set` — transitive closure (BFS) | `:695` |
+| `getAllDependencies(id)` | `Set` — transitive, upward | `:1245` |
+| `getBaseNoteDependents()` | `Set` | `:1274` |
 
-### Incremental Evaluation
+`Module.getDirectDependencies(id)` and `Module.getDependentNotes(id)` wrap these and return **Arrays**, not Sets (`module.js:377`, `:385`).
 
-When Note 3 changes:
+### Property-scoped traversals
 
-```javascript
-// Mark Note 3 and all dependents as dirty
-const dirtySet = graph.getCascade(3);
-dirtySet.add(3);
+These back the property-coloured dependency lines and the drag preview. Each is a BFS that propagates *across* properties — changing a frequency can move a note's startTime, which moves its dependents' startTimes in turn.
 
-// Evaluate only dirty notes
-for (const noteId of topologicalSort(dirtySet)) {
-  evaluate(noteId);
-}
-```
+| Method | Answers | Line |
+|---|---|---|
+| `getAllAffectedByFrequencyChange(id)` | everything that moves if this note's **frequency** changes | `:944` |
+| `getAllAffectedByStartTimeChange(id)` | …its **startTime** changes | `:1159` |
+| `getAllAffectedByDurationChange(id)` | …its **duration** changes | `:1073` |
 
-### Circular Dependency Detection
+`Module.getDependentsByProperty(id)` (`module.js:412`) calls all three and returns `{frequency: [], startTime: [], duration: []}` — which is exactly what the renderer colours:
 
-```javascript
-wouldCreateCycle(fromNoteId, toNoteId) {
-  // Check if toNoteId eventually depends on fromNoteId
-  const reachable = this.getCascade(toNoteId);
-  return reachable.has(fromNoteId);
-}
+![Dependency lines radiating from a selected note, coloured by property: orange for frequency, teal for startTime, purple for duration](/img/dependency-lines.png)
 
-// Before adding a new reference:
-if (graph.wouldCreateCycle(noteA, noteB)) {
-  throw new Error('Circular dependency detected');
-}
-```
+Thicker lines are what the selected note **depends on**; thinner lines are what **depends on it**.
 
-### Dependency Visualization
+The drag path uses the narrower startTime traversals directly: `getAllStartTimeOnStartTimeDependents(id)` (`:800`), `getAllStartTimeOnDurationDependents(id)` (`:831`), `getAllStartTimeOnFrequencyDependents(id)` (`:891`). A note whose *frequency* references the dragged note does not move when you drag it, and these are how that is known.
 
-```javascript
-// For UI: get all lines to draw
-getVisualizationData(selectedNoteId) {
-  return {
-    // Blue lines: what this note depends on
-    dependencies: this.getDependencies(selectedNoteId),
-    // Red lines: what depends on this note
-    dependents: this.getDependents(selectedNoteId),
-  };
-}
-```
+### Trees and chains
 
-## Topological Sort
+| Method | Returns | Line |
+|---|---|---|
+| `getChildrenTreeByProperty(id, property)` | `{edges: [{parentId, childId, depth}], maxDepth}` — `property` is `'frequency' \| 'startTime' \| 'duration'` | `:1410` |
+| `getChildrenTreeByAllProperties(id)` | `{edgesByProperty: {frequency: [], startTime: [], duration: []}, maxDepth}` — all three in one traversal. **Not** the same shape as above: the edges are bucketed by originating property, not flat | `:1521` |
+| `getMeasureChain(measureId, isMeasure, getStartTime, isChainLink?)` | `[{id, startSec}]` — the linear measure chain, earliest to latest, O(chain length) | `:1830` |
 
-For correct evaluation order:
+`getMeasureChain()` is live: `src/player.js:6258` and `src/renderer/webgl2/workspace.js:2808` both use it.
 
-```javascript
-topologicalSort(notes) {
-  const sorted = [];
-  const visited = new Set();
-  const visiting = new Set();
+### Structural
 
-  const visit = (noteId) => {
-    if (visited.has(noteId)) return;
-    if (visiting.has(noteId)) {
-      throw new Error('Circular dependency');
-    }
+| Method | Returns | Line |
+|---|---|---|
+| `hasDependencyPath(source, target)` | boolean — BFS up the forward index | `:1285` |
+| `detectCycles()` | `Array<Array<id>>` — recursive DFS | `:1314` |
+| `getEvaluationOrder(noteIds)` | `Array<id>` — Kahn topological sort | `:1357` |
+| `removeNote(id)` | — unlinks the note from every index | `:503` |
+| `clear()` | — empties every index | `:1624` |
+| `stats()` | `{noteCount, totalDependencies, avgDependencies, maxDependencies, maxDependents, baseNoteDependents, corruptedNotes}` | `:1794` |
+| `debug()` | console dump | `:1904` |
 
-    visiting.add(noteId);
+::: warning `getEvaluationOrder`, `detectCycles` and `hasDependencyPath` have no callers in the app
+They are API surface, mirrored by the WASM graph adapter. **Evaluation does not use them.** The sort that actually orders evaluation is `IncrementalEvaluator.topoSort()` in `src/binary-evaluator.js:1454` — a separate Kahn implementation with a BaseNote release path. The cycle guard a user actually hits is `detectCircularDependency()` in `src/modals/validation.js:190`, a BFS over `Module.getDirectDependencies()`.
+:::
 
-    // Visit dependencies first
-    for (const dep of this.getDependencies(noteId)) {
-      visit(dep);
-    }
+## Corruption tracking
 
-    visiting.delete(noteId);
-    visited.add(noteId);
-    sorted.push(noteId);
-  };
+The graph owns this and nothing else does. A property is *corrupted* when a `^` produced an irrational — `2^(1/12)`. See [SymbolicPower](/developer/core/symbolic-power).
 
-  for (const noteId of notes) {
-    visit(noteId);
-  }
+| Method | Effect | Line |
+|---|---|---|
+| `setCorruptionFlags(id, flags)` | stores the u8 bitmask. **Bumps `_corruptionEpoch` only if the value changed**; a `0` deletes the entry. | `:1659` |
+| `getCorruptionFlags(id)` | u8, `0` if clean | `:1676` |
+| `getCorruptionEpoch()` | number | `:1684` |
+| `isNoteCorrupted(id)` | any bit set | `:1694` |
+| `isPropertyCorrupted(id, flag)` | e.g. `flag = 0x04` for frequency | `:1705` |
+| `getCorruptedNotes()` | `Set<id>` — usually empty | `:1724` |
+| `isFrequencyTransitivelyCorrupted(id)` | direct check, then BFS **up** the frequency chain | `:1741` |
+| `getAllFrequencyDependencies(id)` | transitive frequency ancestors | `:1770` |
+| `clearCorruptionFlags(id)` | delete | `:1715` |
 
-  return sorted;
-}
-```
+Flags arrive from `Module._updateCorruptionFlags()` after each evaluation (`module.js:636-659`), scoped to the dirty set.
 
-## Performance
+### How the renderer consumes it
 
-### O(1) Operations
+`RendererAdapter.sync()` needs, for every note, "is anything in my dependency closure corrupt?". Because `dependents` is the maintained inverse of `dependencies`, that is answered for all notes at once by **one multi-source BFS over the `dependents` graph, seeded by `getCorruptedNotes()`** — O(N+E) instead of a transitive BFS per note, and a complete no-op when the corrupt set is empty, which is the common case (`renderer.js:823-898`). The scan produces the per-note `a_corruptionType` attribute the shader hatches from (`0` clean, `1` transitive → single diagonal hatch, `2` direct → crosshatch); the before/after numbers are in [Performance](/developer/performance).
 
-| Operation | Time |
-|-----------|------|
-| getDependencies(id) | O(1) |
-| getDependents(id) | O(1) |
-| addDependency() | O(1) |
-| removeDependency() | O(1) |
+`_corruptionEpoch` is what lets the renderer know it can skip this work. It is bumped from **two** places — `setCorruptionFlags()` when a flag changes, and `_updateDependencies()` when a note's dependency set changes. Both can alter transitive corruption.
 
-### Space Complexity
+## Space
 
-| Storage | Size |
-|---------|------|
-| Forward index | O(edges) |
-| Inverse index | O(edges) |
-| Property-specific | O(edges) |
+There is no single multiplier. The graph keeps:
 
-Total: ~3× the number of dependency edges.
+- 2 all-property maps + 1 base set = **3**
+- 3 × (forward + inverse + base set) = **9** per-property structures
+- **9** property-pair inverse maps
+- **1** corruption map
 
-### Comparison
+21 indexes, plus the corruption map. An edge is recorded in the all-property pair **and** in each per-property structure it belongs to **and** in the relevant property-pair map. The honest source is `stats()` (`:1794`) — call it on a real module rather than trusting a constant factor.
 
-Without inverted index:
-```javascript
-// Slow: O(n) scan
-getDependents(targetId) {
-  const result = [];
-  for (const note of allNotes) {
-    if (note.references(targetId)) {
-      result.push(note);
-    }
-  }
-  return result;
-}
-```
+## See also
 
-With inverted index:
-```javascript
-// Fast: O(1) lookup
-getDependents(targetId) {
-  return this.dependents.get(targetId) || new Set();
-}
-```
-
-## Maintaining the Graph
-
-### On Note Update
-
-```javascript
-onNoteUpdated(noteId, oldExpr, newExpr) {
-  // Remove old dependencies
-  const oldRefs = this.extractReferences(oldExpr);
-  for (const ref of oldRefs) {
-    this.removeDependency(noteId, ref.noteId);
-  }
-
-  // Add new dependencies
-  const newRefs = this.extractReferences(newExpr);
-  for (const ref of newRefs) {
-    this.addDependency(noteId, ref.noteId);
-  }
-}
-```
-
-### On Note Delete
-
-```javascript
-onNoteDeleted(noteId) {
-  // Remove from all indices
-  this.dependencies.delete(noteId);
-
-  // Remove from inverse index
-  for (const [depId, dependents] of this.dependents) {
-    dependents.delete(noteId);
-  }
-  this.dependents.delete(noteId);
-
-  // Update property-specific indices similarly
-}
-```
-
-## See Also
-
-- [Binary Evaluator](./binary-evaluator) - Uses graph for evaluation order
-- [Expression Compiler](./expression-compiler) - Source of reference extraction
-- [Dependencies](/user-guide/notes/dependencies) - User documentation
+- [Binary Evaluator](/developer/core/binary-evaluator) — `getAllDependents()` and `getBaseNoteDependents()` feed the topological sort
+- [Expression Compiler](/developer/core/expression-compiler) — `getPropertyDependencies()` is where the edges come from
+- [SymbolicPower](/developer/core/symbolic-power) — what sets a corruption flag
+- [Dependencies](/user-guide/notes/dependencies) — the user-facing view

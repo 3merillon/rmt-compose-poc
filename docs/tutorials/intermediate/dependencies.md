@@ -1,16 +1,23 @@
-# Chaining Notes with Dependencies
+---
+title: Note Dependencies
+description: Chain notes together with expressions that reference other notes, read the coloured dependency lines, and break a chain cleanly when you need to.
+---
 
-Learn how to create musical relationships between notes using expressions that reference other notes.
+# Note Dependencies
 
-## Understanding Dependencies
+A dependency is what happens when one note's expression names another note. This tutorial builds a chain, shows you how to read it on screen, and shows you how to get out of it.
 
-In RMT Compose, notes can reference other notes' properties. When you write an expression like:
+**Prerequisites:** the [beginner tutorials](/tutorials/).
+
+## What a dependency is
+
+Write this in Note 2's frequency field:
 
 ```
 [1].f
 ```
 
-You create a **dependency** - Note 2 depends on Note 1's frequency. When Note 1 changes, Note 2 automatically updates.
+Note 2 now **depends on** Note 1's frequency. Change Note 1 and Note 2 follows, without you touching it. `[1]` means "note with id 1"; `.f` means frequency. The other shortnames are `.t` (startTime) and `.d` (duration).
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
@@ -18,352 +25,175 @@ You create a **dependency** - Note 2 depends on Note 1's frequency. When Note 1 
 ```javascript
 module.getNoteById(1).getVariable('frequency')
 ```
-
 </details>
 
-## Why Use Dependencies?
+## Why bother
 
-### Traditional Approach (Absolute Values)
+Suppose you want three notes: a root, a fifth above it, and an octave above it.
 
-```
-Note 1: frequency = 440 Hz
-Note 2: frequency = 660 Hz  (manually calculated 440 × 3/2)
-Note 3: frequency = 880 Hz  (manually calculated 440 × 2)
-```
+**Written as numbers** — at the default base of 263 Hz, that is 263, 394.5, 526. Now transpose the passage. You edit three notes, and you do arithmetic to do it.
 
-**Problem**: If you want to transpose everything up, you must edit every note.
+**Written as relationships:**
 
-### RMT Approach (Relative Values)
+| Note | Frequency |
+|---|---|
+| 1 | `base.f` |
+| 2 | `[1].f * (3/2)` |
+| 3 | `[1].f * 2` |
 
-```
-Note 1: frequency = 440 Hz
-Note 2: frequency = Note1.frequency × 3/2
-Note 3: frequency = Note1.frequency × 2
-```
+Change Note 1 once and the other two move with it, exactly in tune, forever. That is the whole idea.
 
-**Benefit**: Change Note 1 to 330 Hz, and Notes 2 and 3 update automatically to 495 Hz and 660 Hz.
+## Build a chain
 
-## Creating Your First Dependency Chain
+### Step 1: the root
 
-### Step 1: Create the Root Note
+1. Click the **BaseNote**, **Clean Slate** the workspace, then click the BaseNote again.
+2. In **ADD NOTE / SILENCE**, accept the defaults (`base.f`, `beat(base)`, `base.t`) and click **Create**.
 
-1. Click the **BaseNote** (orange circle) to select it
-2. In the Variable Widget, find **"Add Note / Silence"** section
-3. Select **"Note"**, then click **"Create Note"**
-4. Select the new note and set:
-   - Frequency: `base.f`
-   - StartTime: `base.t`
-   - Duration: `beat(base)`
-5. Click **Save**
+Note 1 inherits the BaseNote's pitch — **263 Hz** by default.
 
-This note inherits from BaseNote (440 Hz by default).
+### Step 2: a note that depends on it
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+1. With Note 1 selected, keep the position on **At End**.
+2. Set **Frequency** to `[1].f * (3/2)` — a perfect fifth above Note 1.
+3. **Start Time** is already `[1].t + [1].d`. That is a *second* dependency: Note 2's timing follows Note 1's too.
+4. Click **Create Note**.
 
-```javascript
-frequency: module.baseNote.getVariable('frequency')
-startTime: module.baseNote.getVariable('startTime')
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-```
+### Step 3: extend it
 
-</details>
+Select Note 2 and create Note 3 from it, **At End**:
 
-### Step 2: Create a Dependent Note
+| Field | Expression |
+|---|---|
+| Frequency | `[2].f * (4/3)` |
+| Start Time | `[2].t + [2].d` (already filled in) |
 
-1. Select Note 1
-2. In **"Add Note / Silence"**, keep **"Note"** and **"At End"** selected, click **"Create Note"**
-3. Select the new note and set:
-   - Frequency (perfect fifth): `[1].f * (3/2)`
-   - StartTime (chains automatically with "At End"): `[1].t + [1].d`
-   - Duration: `beat(base)`
-4. Click **Save**
+You now have a chain: BaseNote → Note 1 → Note 2 → Note 3. Change the BaseNote's frequency and all three move.
 
-Now Note 2 plays a perfect fifth above Note 1, starting right after it ends.
+## Reading the lines
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Select a note. Coloured lines appear between it and the notes it is related to. **They only show while a note is selected** — click empty background and they vanish.
 
-```javascript
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
-startTime: module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-```
+| Colour | Property |
+|---|---|
+| Orange | frequency |
+| Teal | startTime |
+| Purple | duration |
 
-</details>
+| Thickness | Meaning |
+|---|---|
+| Thick | what the selected note **depends on** |
+| Thin | what **depends on** the selected note |
 
-### Step 3: Extend the Chain
+So selecting Note 2 in the chain above gives you thick orange and thick teal lines back to Note 1, and thin orange and thin teal lines forward to Note 3.
 
-Create Note 3 that depends on Note 2:
+::: tip
+Start dragging a note and the lines that do not matter for that gesture fade almost to nothing. Move a note and the teal (startTime) lines stay bright while orange and purple dim; resize it and the purple (duration) lines stay bright instead. The app is showing you what your gesture will actually disturb.
+:::
+
+## Dependencies you will actually use
+
+### Sequential timing
 
 ```
-// Frequency: Perfect fourth above Note 2
-[2].f * (4/3)
-
-// StartTime: After Note 2
-[2].t + [2].d
+[1].t + [1].d
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Start when Note 1 ends. The **At End** radio writes this.
 
-```javascript
-// Frequency: Perfect fourth above Note 2
-module.getNoteById(2).getVariable('frequency').mul(new Fraction(4, 3))
-
-// StartTime: After Note 2
-module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))
-```
-
-</details>
-
-## Viewing Dependencies
-
-### Visual Feedback
-
-1. Select a note by clicking on it
-2. Dependency lines are colored by property type:
-   - **Orange lines**: frequency dependencies
-   - **Teal lines**: startTime dependencies
-   - **Purple lines**: duration dependencies
-3. Line thickness indicates direction:
-   - **Thick lines**: parent dependencies (what the selected note depends on)
-   - **Thin lines**: child dependencies (what depends on the selected note)
-
-### Understanding the Flow
+### Simultaneous timing
 
 ```
-BaseNote (440 Hz)
-    ↓ (orange line - frequency dependency)
-Note 1 (440 Hz) - inherits from BaseNote
-    ↓ (orange + teal lines - frequency and timing)
-Note 2 (660 Hz) - depends on Note 1
-    ↓ (orange + teal lines)
-Note 3 (880 Hz) - depends on Note 2
+[1].t
 ```
 
-## Practical Example: Ascending Scale
+Start when Note 1 starts. The **At Start** radio writes this. This is how chords are built.
 
-Build a major scale where each note depends on the previous:
-
-```
-// Note 1 (Root)
-frequency: base.f
-startTime: base.t
-duration: beat(base)
-
-// Note 2 (Major Second - 9:8 ratio)
-frequency: [1].f * (9/8)
-startTime: [1].t + [1].d
-duration: beat(base)
-
-// Note 3 (Major Third - 5:4 ratio from root, or 10:9 from Note 2)
-frequency: [1].f * (5/4)
-startTime: [2].t + [2].d
-duration: beat(base)
-
-// Continue the pattern...
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Note 1 (Root)
-frequency: module.baseNote.getVariable('frequency')
-startTime: module.baseNote.getVariable('startTime')
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Note 2 (Major Second - 9:8 ratio)
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(9, 8))
-startTime: module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Note 3 (Major Third - 5:4 ratio from root, or 10:9 from Note 2)
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
-startTime: module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Continue the pattern...
-```
-
-</details>
-
-## Timing Dependencies
-
-### Sequential Notes
-
-Each note starts when the previous ends:
+### An offset
 
 ```
-[PREV_ID].t + [PREV_ID].d
+[1].t + beat(base) * (1/2)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Half a beat after Note 1 starts. Write the offset in beats, not seconds — `[1].t + (1/2)` would mean half a *second*, which will not survive a tempo change.
 
-```javascript
-module.getNoteById(PREV_ID).getVariable('startTime')
-  .add(module.getNoteById(PREV_ID).getVariable('duration'))
-```
+### Shared duration
 
-</details>
+Give several notes the same length by pointing them all at one:
 
-### Simultaneous Notes (Chords)
+| Note | Duration | Role |
+|---|---|---|
+| 1 | `beat(base) * 2` | the master |
+| 2, 3, 4 | `[1].d` | followers |
 
-Multiple notes share the same start time:
+Resize Note 1 and they all resize. Purple lines will show you the group.
 
-```
-// All chord notes reference the same start time
-[ROOT_ID].t
-```
+### Multi-property
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+A note can take different properties from different notes:
 
-```javascript
-module.getNoteById(ROOT_ID).getVariable('startTime')
-```
+| Property | Expression |
+|---|---|
+| frequency | `[1].f * (5/4)` |
+| startTime | `[3].t` |
+| duration | `[3].d` |
 
-</details>
+Its pitch belongs to Note 1's harmonic structure; its timing belongs to Note 3's rhythm.
 
-### Offset Timing
+## Circular dependencies are rejected
 
-Add a delay from a reference:
+If A depends on B and you try to make B depend on A, the app refuses the edit. It also refuses an expression that references its own note.
 
-```
-[1].t + (1/2)  // Half-second offset
-```
+The rejection tells you why: the validator's message appears in red under the Save button — a cycle, a self-reference or a typo each get their own wording — and the old expression stays until you fix it.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+## Getting out of a chain
 
-```javascript
-module.getNoteById(1).getVariable('startTime')
-  .add(new Fraction(1, 2))
-```
+Sometimes a note needs to stop following its parent — but stay exactly where it is. Two buttons in the widget's **EVALUATE** section do that.
 
-</details>
+### Liberate Dependencies
 
-## Complex Dependencies
+Select a note, click **Liberate Dependencies**, confirm.
 
-### Multi-Property Dependencies
+Every note that referenced *this* note has the reference replaced by this note's own raw expressions. The dependents keep their pitches, positions and lengths — they just no longer point here. The note itself survives, unchanged.
 
-A note can depend on different notes for different properties:
+Use it when you want to delete or radically change a note without dragging its children along.
 
-```
-// Frequency from Note 1
-frequency: [1].f * (5/4)
+::: info
+**Liberate Dependencies** is not offered on measure bars, and is refused if something tries to call it on one.
+:::
 
-// Timing from Note 3
-startTime: [3].t
-duration: [3].d
-```
+### Evaluate to BaseNote
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Select a note, click **Evaluate to BaseNote**, confirm.
 
-```javascript
-// Frequency from Note 1
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
+This rewrites the selected note's own startTime, duration and frequency so they reference nothing but the BaseNote. The note stops depending on anything else, and it does not move.
 
-// Timing from Note 3
-startTime: module.getNoteById(3).getVariable('startTime')
-duration: module.getNoteById(3).getVariable('duration')
-```
+It is smarter than freezing numbers: it traces the frequency chain algebraically, so a TET note written `base.f * 2^(7/12)` stays a power expression rather than collapsing into an ugly approximate fraction.
 
-</details>
+From the **BaseNote**, the same section offers **Evaluate Module**, which does this to every note at once. It flattens the entire dependency graph onto the BaseNote — useful before exporting, destructive to the structure you built.
 
-### Shared Duration
+## Deleting a note in a chain
 
-You can make multiple notes share the same duration by referencing a common note. This is useful for chord tones or any group of notes that should have identical lengths:
+Selecting a note gives you two delete buttons, and they do very different things:
 
-```
-// Note 1: The "duration master" - set this note's duration
-duration: beat(base) * 2
+| Button | Effect |
+|---|---|
+| **Keep Dependencies** | The dependents are liberated first, then the note is removed. They keep their positions. |
+| **Delete Dependencies** | The note **and every note that depends on it** are removed. The doomed notes are highlighted in red before you confirm. |
 
-// Notes 2, 3, 4: All reference Note 1's duration
-duration: [1].d
-```
+Deleting a multi-note selection with the group widget's **Delete all** behaves like *Keep Dependencies*: notes outside the selection that depended on a deleted note are liberated, not cascaded, so they hold their positions.
 
-Now changing Note 1's duration updates all notes that reference it. This creates a single control point for duration across multiple notes.
+## Verifying your chain
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+1. Select the root and change its frequency.
+2. Every dependent should move, in tune.
+3. Select each note and read the `Evaluated:` line against the `Raw:` expression.
 
-```javascript
-// Note 1: The "duration master"
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
+If a note is not updating, check the note id in the expression: `[7].f` when you meant `[1].f` is the most common mistake, and it fails quietly because note 7 may well exist.
 
-// Notes 2, 3, 4: All reference Note 1's duration
-duration: module.getNoteById(1).getVariable('duration')
-```
+## Next
 
-</details>
-
-## Avoiding Circular Dependencies
-
-RMT Compose prevents circular references:
-
-```
-Note 1 → depends on → Note 2
-Note 2 → depends on → Note 1  // ERROR!
-```
-
-If you try to create a circular dependency, you'll see an error message.
-
-### How to Fix Circular Dependencies
-
-1. Identify the loop in your dependency chain
-2. Break the cycle by referencing a common ancestor
-3. Use BaseNote as the ultimate root for shared properties
-
-## Best Practices
-
-### 1. Plan Your Hierarchy
-
-Sketch out your dependency structure before building:
-
-```
-BaseNote (tempo, base frequency)
-├── Melody Root
-│   ├── Melody Note 2
-│   └── Melody Note 3
-└── Bass Root
-    ├── Bass Note 2
-    └── Bass Note 3
-```
-
-### 2. Use Meaningful Chains
-
-- **Frequency chains**: Keep related pitches connected
-- **Timing chains**: Sequential notes should link their timing
-- **Duration chains**: Notes that share duration should reference a common source
-
-### 3. Test by Changing Root Values
-
-After building your dependencies:
-1. Select the root note
-2. Change its frequency or timing
-3. Verify all dependent notes update correctly
-
-## Troubleshooting
-
-### Note Not Updating
-
-- Check that the dependency expression is correct
-- Verify the referenced note ID exists
-- Look for typos in property shortcuts (use `f`, `t`, `d` for frequency, startTime, duration)
-
-### Unexpected Values
-
-- Click the note to see both Raw and Evaluated values in the Variable Widget
-- Trace the dependency chain to find where values diverge
-- Check for conflicting dependencies
-
-## Next Steps
-
-- [Working with Octaves](./octaves) - Octave manipulation techniques
-- [Measure-Based Timing](./measures) - Tempo and beat dependencies
-- [Expression Syntax Reference](/reference/expressions/syntax) - Full expression guide
-
+- [Octave Manipulation](/tutorials/intermediate/octaves) — moving a note, and everything under it, by an interval
+- [Working with Measures](/tutorials/intermediate/measures) — dependency chains made of measure bars
+- [Complex Dependencies](/tutorials/advanced/complex-dependencies) — branching and diamond structures
+- [Expression Syntax](/reference/expressions/syntax) — the full grammar

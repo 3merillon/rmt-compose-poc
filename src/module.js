@@ -1,7 +1,9 @@
 import Fraction from 'fraction.js';
 import { Note } from './note.js';
+import { toNumber } from './utils/fraction-num.js';
 import { DependencyGraph } from './dependency-graph.js';
-import { createEvaluator, createIncrementalEvaluator } from './wasm/evaluator-adapter.js';
+import { createEvaluator, createIncrementalEvaluator, isWasmBackedEvaluator, isEvaluatorHotSwapEnabled } from './wasm/evaluator-adapter.js';
+import { onWasmReady } from './wasm/index.js';
 import { compiler, decompiler } from './expression-compiler.js';
 import { isDSLSyntax } from './dsl/index.js';
 
@@ -11,6 +13,22 @@ let moduleLastModifiedTime = 0;
 export function invalidateModuleEndTimeCache() {
   memoizedModuleEndTime = null;
   moduleLastModifiedTime = Date.now();
+}
+
+// Global default instrument for notes that don't resolve to an explicit or
+// inherited instrument (the base note and its parentless descendants). Driven
+// by the `audio.defaultInstrument` setting via setDefaultInstrument() (wired in
+// player.js). Kept as a plain module-level value so module.js stays importable
+// in the Node perf bench without pulling in the browser-only settings store.
+// Defaults to 'sine-wave' → preserves pre-settings behavior.
+let _defaultInstrumentName = 'sine-wave';
+
+export function setDefaultInstrument(name) {
+  if (typeof name === 'string' && name) _defaultInstrumentName = name;
+}
+
+export function getDefaultInstrument() {
+  return _defaultInstrumentName;
 }
 
 /**
@@ -27,6 +45,9 @@ export class Module {
     // Binary evaluation infrastructure
     // Uses WASM evaluator when available, falls back to JS automatically
     this._dependencyGraph = new DependencyGraph();
+    // Bumped whenever the graph is cleared/rebuilt so cached per-note
+    // registration keys (see _registerNoteDependencies) can't go stale.
+    this._depsRegGeneration = 0;
     this._binaryEvaluator = createEvaluator(this);
     this._incrementalEvaluator = createIncrementalEvaluator(
       this, // Module reference (we use notes Map interface)
@@ -34,9 +55,23 @@ export class Module {
       this._binaryEvaluator
     );
 
+    // WASM init is async and usually loses the race against module creation,
+    // which used to strand every module on the JS fallback for the whole
+    // session. Hot-swap to the WASM evaluator once it becomes available.
+    // Opt-in via ?evaluator=wasm while in-browser verification is pending.
+    // WeakRef so replaced/discarded modules don't leak via the callback.
+    if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)) {
+      const ref = new WeakRef(this);
+      onWasmReady(() => {
+        const mod = ref.deref();
+        if (mod) mod._upgradeEvaluators();
+      });
+    }
+
     // Evaluation cache (Map<noteId, {startTime, duration, ...}>)
     this._evaluationCache = new Map();
     this._dirtyNotes = new Set();
+    this._evaluating = false; // reentrancy guard for evaluateModule()
 
     // Create base note with default values
     const defaultBaseNoteVariables = {
@@ -44,8 +79,16 @@ export class Module {
       startTime: 'new Fraction(0)',
       tempo: 'new Fraction(60)',
       beatsPerMeasure: 'new Fraction(4)',
-      instrument: 'sine-wave',
-      measureLength: "new Fraction(60).div(module.findTempo(module.baseNote)).mul(module.baseNote.getVariable('beatsPerMeasure'))",
+      // No hardcoded base instrument: with none set, findInstrument() resolves
+      // the base note (and everything inheriting from it) to the global default
+      // instrument (_defaultInstrumentName, default 'sine-wave' → behavior
+      // unchanged at defaults). This is what makes the audio.defaultInstrument
+      // setting reach the common inheriting-note case. A caller/JSON may still
+      // pass an explicit `instrument` to pin the base note's timbre.
+      // DSL form of 60/tempo(base) * base.bpm — compiles to the exact same
+      // bytecode (LOAD_CONST 60, LOAD_BASE tempo, DIV, LOAD_BASE bpm, MUL) as
+      // the old legacy method-chain string, but keeps saved modules pure DSL.
+      measureLength: 'beat(base) * base.bpm',
     };
 
     // Merge defaults with provided variables (convert functions to strings if needed)
@@ -85,9 +128,57 @@ export class Module {
   }
 
   /**
-   * Register a note's dependencies in the graph
+   * Swap the JS fallback evaluator for the WASM one after async WASM init.
+   * Safe to call at any time between synchronous operations: evaluator refs
+   * are replaced atomically and everything is marked dirty, so the next
+   * evaluateModule() fully re-evaluates on the new engine (values are
+   * identical, so visuals never go stale in between).
+   */
+  _upgradeEvaluators() {
+    try {
+      if (isWasmBackedEvaluator(this._binaryEvaluator)) return; // already upgraded
+      const nextEvaluator = createEvaluator(this);
+      if (!isWasmBackedEvaluator(nextEvaluator)) return; // forced JS or WASM unusable
+      const nextIncremental = createIncrementalEvaluator(
+        this,
+        this._dependencyGraph,
+        nextEvaluator
+      );
+
+      this._binaryEvaluator = nextEvaluator;
+      this._incrementalEvaluator = nextIncremental;
+      this._evaluationCache = new Map();
+      this._incrementalEvaluator.invalidateAll();
+      for (const id of Object.keys(this.notes)) {
+        this._dirtyNotes.add(Number(id));
+      }
+
+      // Warm the new engine off the critical path so the first user action
+      // after the swap doesn't pay the full re-evaluation cost.
+      if (typeof window !== 'undefined') {
+        const warm = () => { try { this.evaluateModule(); } catch {} };
+        (window.requestIdleCallback || ((cb) => setTimeout(cb, 0)))(warm);
+      }
+    } catch (e) {
+      console.warn('WASM evaluator upgrade failed; staying on JS fallback:', e);
+    }
+  }
+
+  /**
+   * Register a note's dependencies in the graph.
+   * Skipped when nothing relevant changed since the last registration:
+   * dependencies derive purely from the note's compiled expressions, so a
+   * note whose expressions (epoch), id, and graph generation are unchanged
+   * is already registered identically. markNoteDirty calls this for every
+   * marked note (e.g., all dependents on an octave change), so the skip
+   * avoids rewriting ~15 graph maps per untouched note.
    */
   _registerNoteDependencies(note) {
+    const regKey = `${this._depsRegGeneration}:${note.id}:${note._depsEpoch || 0}`;
+    if (note._depsRegKey === regKey) {
+      return;
+    }
+
     const allDeps = note.getAllDependencies();
     const refsBase = note.referencesBaseNote();
     this._dependencyGraph._updateDependencies(note.id, allDeps, refsBase);
@@ -103,6 +194,8 @@ export class Module {
     // Register duration-specific dependencies for property-colored visualization
     const durExpr = note.getExpression('duration');
     this._dependencyGraph.registerDurationDependencies(note.id, durExpr);
+
+    note._depsRegKey = regKey;
   }
 
   /**
@@ -260,6 +353,7 @@ export class Module {
         // Fallback: compile directly (for compatibility)
         try {
           note.expressions[baseName] = compiler.compile(expr, baseName);
+          if (typeof note._depsEpoch === 'number') note._depsEpoch++;
           note.lastModifiedTime = Date.now();
         } catch (e) {
           console.warn(`batchSetExpressions: Failed to compile ${baseName} for note ${noteId}:`, e);
@@ -476,6 +570,21 @@ export class Module {
    * Remove a note
    */
   removeNote(id) {
+    const numId = Number(id);
+    // Warn about dependents left dangling: a LOAD_REF to a removed note pushes
+    // hardcoded evaluator defaults (frequency 440, startTime 0, duration 1)
+    // with no error. The UI's delete paths liberate dependents first; this
+    // guards programmatic callers.
+    const dependents = this._dependencyGraph.getDependents(numId);
+    if (dependents && dependents.size > 0) {
+      const dangling = Array.from(dependents).filter(depId => depId !== numId && this.notes[depId]);
+      if (dangling.length > 0) {
+        console.warn(
+          `removeNote(${numId}): ${dangling.length} dependent note(s) left dangling: [${dangling.join(', ')}] — ` +
+          `their references to note ${numId} will now evaluate to hardcoded defaults`
+        );
+      }
+    }
     delete this.notes[id];
     this._evaluationCache.delete(id);
     this._dependencyGraph.removeNote(id);
@@ -498,19 +607,39 @@ export class Module {
    * Evaluate all dirty notes and return the evaluation cache
    */
   evaluateModule() {
+    if (this._evaluating) {
+      // Reentrant call from an evaluation callback (bytecode CALL ops like
+      // findTempo/getVariable re-enter via getEvaluationCache). Serve the
+      // in-progress cache: topological order guarantees any dependency the
+      // callback needs is already finalized. Recursing here instead used to
+      // re-run the whole dirty set per callback.
+      return this._incrementalEvaluator ? this._incrementalEvaluator.cache : this._evaluationCache;
+    }
+
     if (this._dirtyNotes.size === 0 && this._evaluationCache.size > 0) {
       return this._evaluationCache;
     }
 
-    // Use incremental evaluator
-    const cache = this._incrementalEvaluator.evaluateDirty();
+    // Corruption flags only change for notes that get re-evaluated, so
+    // capture the dirty set before it is cleared and scope the flag update
+    // to it (previously this scanned ALL notes on every evaluation).
+    const dirtyIds = this._dirtyNotes.size > 0 ? Array.from(this._dirtyNotes) : null;
+
+    this._evaluating = true;
+    let cache;
+    try {
+      // Use incremental evaluator
+      cache = this._incrementalEvaluator.evaluateDirty();
+    } finally {
+      this._evaluating = false;
+    }
 
     // Update our cache reference
     this._evaluationCache = cache;
 
     // Update corruption flags in dependency graph after evaluation
     // This enables visual tinting for notes with irrational values (TET scales)
-    this._updateCorruptionFlags(cache);
+    this._updateCorruptionFlags(cache, dirtyIds);
 
     this._dirtyNotes.clear();
 
@@ -520,9 +649,10 @@ export class Module {
   /**
    * Update corruption flags in dependency graph from evaluation cache
    * @param {Map} cache - Evaluation cache with corruptionFlags per note
+   * @param {Array<number>|null} noteIds - IDs to update (null = all notes)
    * @private
    */
-  _updateCorruptionFlags(cache) {
+  _updateCorruptionFlags(cache, noteIds = null) {
     if (!this._dependencyGraph || typeof this._dependencyGraph.setCorruptionFlags !== 'function') {
       return;
     }
@@ -532,10 +662,10 @@ export class Module {
     }
 
     try {
-      // Always iterate through all notes and fetch from cache
-      // This ensures we handle both regular Maps and lazy cache proxies correctly
-      // (Lazy proxies' entries() method only yields locally-cached items, missing WASM-resident data)
-      for (const id of Object.keys(this.notes)) {
+      // Fetch per-id from cache (rather than iterating cache.entries()) so
+      // both regular Maps and lazy WASM cache proxies are handled correctly.
+      const ids = noteIds !== null ? noteIds : Object.keys(this.notes);
+      for (const id of ids) {
         const noteId = Number(id);
         const result = cache.get(noteId);
         if (result && result.corruptionFlags !== undefined) {
@@ -634,7 +764,7 @@ export class Module {
   findInstrument(note) {
     if (!note) return 'sine-wave';
     if (!note.hasExpression('frequency') && !note.getVariable('frequency')) {
-      return 'sine-wave';
+      return _defaultInstrumentName;
     }
 
     // Check direct instrument property
@@ -672,7 +802,7 @@ export class Module {
       }
     }
 
-    return 'sine-wave';
+    return _defaultInstrumentName;
   }
 
   /**
@@ -737,9 +867,11 @@ export class Module {
       const noteId = parseInt(noteData.id, 10);
       const variables = {};
 
-      // SECURITY: Validate note ID to prevent prototype pollution and invalid values
-      if (isNaN(noteId) || !Number.isInteger(noteId) || noteId < 0 || noteId > 100000) {
-        console.warn(`[RMT Security] Invalid note ID: ${noteData.id}, skipping`);
+      // SECURITY: Validate note ID to prevent prototype pollution and invalid values.
+      // Cap at 65535: LOAD_REF encodes note ids as u16, so anything larger would
+      // silently truncate (e.g. [70000] binding to note 4464).
+      if (isNaN(noteId) || !Number.isInteger(noteId) || noteId < 0 || noteId > 65535) {
+        console.warn(`[RMT Security] Invalid note ID: ${noteData.id} (must be 0-65535), skipping`);
         continue;
       }
 
@@ -850,12 +982,18 @@ export class Module {
       }
     }
 
-    // Sort by startTime
+    // Sort by startTime — exact comparison (a valueOf() subtraction collapses
+    // rationals that differ past double precision), with id tie-break so
+    // export renumbering stays deterministic.
     const sortByStartTime = (a, b) => {
       const aStart = a.getVariable('startTime');
       const bStart = b.getVariable('startTime');
-      if (!aStart || !bStart) return 0;
-      return aStart.valueOf() - bStart.valueOf();
+      if (!aStart || !bStart) return a.id - b.id;
+      try {
+        const cmp = aStart.compare(bStart);
+        if (cmp !== 0) return cmp;
+      } catch (e) { /* non-Fraction value — fall through to id order */ }
+      return a.id - b.id;
     };
 
     measureNotes.sort(sortByStartTime);
@@ -952,6 +1090,7 @@ export class Module {
 
     // Rebuild dependency graph
     this._dependencyGraph.clear();
+    this._depsRegGeneration++; // invalidate cached registration keys (e.g., reused baseNote)
     this._evaluationCache.clear();
     this._dirtyNotes.clear();
 
@@ -1010,25 +1149,31 @@ export class Module {
 
     let measureEnd = 0;
     if (measureNotes.length > 0) {
-      // Find last measure by startTime without full sort
+      // Find last measure by startTime without full sort — exact comparison,
+      // one lossy conversion at the end (a NaN from valueOf overflow here
+      // used to cascade into silent playback and a never-stopping playhead).
       let lastMeasure = measureNotes[0];
       let lastMeasureStart = lastMeasure.getVariable('startTime');
 
       for (let i = 1; i < measureNotes.length; i++) {
         const note = measureNotes[i];
         const noteStart = note.getVariable('startTime');
-        if (noteStart && lastMeasureStart && noteStart.valueOf() > lastMeasureStart.valueOf()) {
-          lastMeasure = note;
-          lastMeasureStart = noteStart;
+        if (noteStart && lastMeasureStart) {
+          try {
+            if (noteStart.compare(lastMeasureStart) > 0) {
+              lastMeasure = note;
+              lastMeasureStart = noteStart;
+            }
+          } catch (e) { /* non-Fraction value — keep current candidate */ }
         }
       }
 
       if (lastMeasureStart) {
-        measureEnd = lastMeasureStart.add(this.findMeasureLength(lastMeasure)).valueOf();
+        measureEnd = toNumber(lastMeasureStart.add(this.findMeasureLength(lastMeasure)));
       }
     }
 
-    // Compute last note end time
+    // Compute last note end time — exact add, then one conversion
     let lastNoteEnd = 0;
     for (const id in this.notes) {
       const note = this.notes[id];
@@ -1036,7 +1181,12 @@ export class Module {
         const noteStart = note.getVariable('startTime');
         const noteDuration = note.getVariable('duration');
         if (noteStart && noteDuration) {
-          const noteEnd = noteStart.valueOf() + noteDuration.valueOf();
+          let noteEnd;
+          try {
+            noteEnd = toNumber(noteStart.add(noteDuration));
+          } catch (e) {
+            noteEnd = toNumber(noteStart) + toNumber(noteDuration);
+          }
           if (noteEnd > lastNoteEnd) lastNoteEnd = noteEnd;
         }
       }

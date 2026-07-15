@@ -1,0 +1,87 @@
+{
+  "baseNote": {
+    "frequency": "263",
+    "startTime": "0",
+    "tempo": "120",
+    "beatsPerMeasure": "4"
+  },
+  "notes": [
+    {
+      "id": 1,
+      "startTime": "base.t",
+      "duration": "beat(base) * 2",
+      "frequency": "(9/8) * base.f",
+      "color": "rgba(128,128,128,0.7)"
+    },
+    {
+      "id": 2,
+      "startTime": "[1].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(6/5) * [1].f",
+      "color": "rgba(0,180,130,0.7)"
+    },
+    {
+      "id": 3,
+      "startTime": "[1].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(3/2) * [1].f",
+      "color": "rgba(220,60,60,0.7)"
+    },
+    {
+      "id": 4,
+      "startTime": "[1].t + beat(base) * 2",
+      "duration": "beat(base) * 2",
+      "frequency": "(4/3) * [1].f",
+      "color": "rgba(128,128,128,0.7)"
+    },
+    {
+      "id": 5,
+      "startTime": "[4].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(5/4) * [4].f",
+      "color": "rgba(0,200,80,0.7)"
+    },
+    {
+      "id": 6,
+      "startTime": "[4].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(3/2) * [4].f",
+      "color": "rgba(220,60,60,0.7)"
+    },
+    {
+      "id": 7,
+      "startTime": "[4].t",
+      "duration": "beat(base) * 2",
+      "frequency": "(7/4) * [4].f",
+      "color": "rgba(70,120,230,0.7)"
+    },
+    {
+      "id": 8,
+      "startTime": "[4].t + beat(base) * 2",
+      "duration": "beat(base) * 4",
+      "frequency": "(2/3) * [4].f",
+      "color": "rgba(128,128,128,0.7)"
+    },
+    {
+      "id": 9,
+      "startTime": "[8].t",
+      "duration": "beat(base) * 4",
+      "frequency": "(5/4) * [8].f",
+      "color": "rgba(0,200,80,0.7)"
+    },
+    {
+      "id": 10,
+      "startTime": "[8].t",
+      "duration": "beat(base) * 4",
+      "frequency": "(3/2) * [8].f",
+      "color": "rgba(220,60,60,0.7)"
+    },
+    {
+      "id": 11,
+      "startTime": "[8].t",
+      "duration": "beat(base) * 4",
+      "frequency": "(2/1) * [8].f",
+      "color": "rgba(128,128,128,0.7)"
+    }
+  ]
+}

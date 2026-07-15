@@ -1,380 +1,190 @@
-# Working with Octaves
+---
+title: Octave Manipulation
+description: Move notes by octaves with the ▲/▼ arrows and by hand with ratios and the power operator, and read the workspace's dotted octave guides.
+---
 
-Learn techniques for octave manipulation using frequency ratios and the power operation.
+# Octave Manipulation
 
-## The Octave Ratio
+The octave is the simplest interval there is: **2/1**. Double a frequency and you are an octave up; halve it and you are an octave down. This tutorial covers the one-click way, the by-hand way, and how to read octaves off the screen.
 
-An octave is the simplest frequency ratio: **2:1**
+**Prerequisites:** [Note Dependencies](/tutorials/intermediate/dependencies).
 
-When you double a frequency, you go up one octave:
-- 440 Hz × 2 = 880 Hz (one octave up)
-- 440 Hz × 4 = 1760 Hz (two octaves up)
-- 440 Hz ÷ 2 = 220 Hz (one octave down)
+## The ▲/▼ arrows
 
-## Basic Octave Operations
+Every note with a frequency carries a narrow column on its **left inner edge**, split in half: **▲** in the upper half, **▼** in the lower. Click a half and the note's frequency expression is multiplied by an interval.
 
-### One Octave Up
+The same pair of buttons appears in the note widget, at the right end of the **frequency** row's `Evaluated:` line.
 
-```
-[1].f * 2
-```
+**Out of the box, ▲ is ×2 and ▼ is ×1/2 — an octave up and an octave down.** Hover a widget button and the tooltip tells you exactly what it will do: `Transpose up ×2`, `Transpose down ×1/2`.
 
-### One Octave Down
+::: warning The arrows are not octave-only
+The interval is a setting, not a law. **Settings → Arrows** (the gear in the top bar) has quick-pick chips for a fifth (3/2), a fourth (4/3), a major third (5/4), a whole tone (9/8) and a syntonic comma (81/80), plus a numerator/denominator pair you can type into. The ratio must be built from whole numbers, must not be 1, and is clamped between 1/16 and 16. The tooltips follow — set the up interval to 3/2 and the button reads `Transpose up ×3/2`.
 
-```
-[1].f / 2
-```
+The rest of this page assumes the default 2/1, because that is what ships. If your arrows are doing something other than octaves, that is why. See [Transposing with Arrows](/user-guide/notes/transposing).
+:::
 
-### Multiple Octaves
+You can also switch the arrows off entirely in that tab, in which case the ▲/▼ glyphs and their click zones disappear from every note, and the widget buttons are not rendered at all.
 
-```
-// Two octaves up (multiply by 4)
-[1].f * 4
+## What the arrows do to your expression
 
-// Three octaves down (divide by 8)
-[1].f / 8
-```
+Try it. Create a note with frequency `base.f`, then click ▲.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+| Expression | You click | It becomes |
+|---|---|---|
+| `base.f` | ▲ | `2 * base.f` |
+| `2 * base.f` | ▲ | `4 * base.f` |
+| `4 * base.f` | ▼ | `2 * base.f` |
+| `2 * base.f` | ▼ | `base.f` |
 
-```javascript
-// One octave up
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(2))
+The factor is **folded into the expression's coefficient**, not stacked in front of it. Up-then-down returns you to exactly `base.f` — not `(1/2) * 2 * base.f`. Press ▲ ten times and the expression is `1024 * base.f`, not a tower of multiplications.
 
-// One octave down
-module.getNoteById(1).getVariable('frequency').div(new Fraction(2))
+Power terms are left alone, so a TET note keeps its shape:
 
-// Two octaves up (multiply by 4)
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(4))
+| Expression | You click | It becomes |
+|---|---|---|
+| `base.f * 2^(7/12)` | ▲ | `2 * base.f * 2^(7/12)` |
 
-// Three octaves down (divide by 8)
-module.getNoteById(1).getVariable('frequency').div(new Fraction(8))
-```
+The `2^(7/12)` is untouched, so the note stays a 12-TET fifth — it just moved up an octave.
 
-</details>
+::: warning
+This folding applies to DSL expressions. A note stored in the old method-chain format *and* containing a `.pow(` call is instead wrapped on every press, so repeated arrow clicks genuinely nest multipliers in it. That is deliberate — folding would destroy the power term — but it means "up then down restores the expression" holds for DSL notes, not for legacy TET ones. Everything the app writes today is DSL.
+:::
 
-## Using the Power Operation
+## Arrows move whole structures
 
-For variable octave shifts, use `^`:
+Because dependents follow their parents, an arrow on a *root* moves everything anchored to it.
 
-```
-// n octaves up: frequency × 2^n
-[1].f * 2^n
+1. Build a major triad rooted at Note 1: root `base.f`, third `(5/4) * [1].f`, fifth `(3/2) * [1].f`.
+2. Select **Note 1** and click **▲**.
 
-// n octaves down: frequency × 2^(-n)
-[1].f * 2^(-n)
-```
+The whole chord jumps an octave. Notes 2 and 3 were not edited; their expressions still reference `[1].f`, and they came along. The same trick moves an entire progression if its later roots reference the first one — which is exactly how the shipped **Progressions** modules are built.
 
-### Examples
+::: info
+Arrows act on **one** note per click. There is no group transposition: selecting several notes and clicking an arrow is not a thing. Transposing a root is how you move many notes at once.
+:::
 
-```
-// 2 octaves up using pow
-frequency * 2^2  // × 4
+## Writing octaves by hand
 
-// 1 octave down using pow
-frequency * 2^(-1) // × 0.5
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// n octaves up: frequency × 2^n
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(2).pow(new Fraction(n)))
-
-// n octaves down: frequency × 2^(-n)
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(2).pow(new Fraction(-n)))
-
-// 2 octaves up using pow
-frequency.mul(new Fraction(2).pow(new Fraction(2)))  // × 4
-
-// 1 octave down using pow
-frequency.mul(new Fraction(2).pow(new Fraction(-1))) // × 0.5
-```
-
-</details>
-
-## Octave Equivalence
-
-Notes separated by octaves are considered "equivalent" in music. A perfect fifth above A4 (440 Hz) is E5 (660 Hz). You can also play:
-- E4 (330 Hz) - one octave below
-- E6 (1320 Hz) - one octave above
-
-### Bringing Notes into Range
-
-If a note is too high or low, shift it by octaves:
+Sometimes you want the octave inside a larger expression.
 
 ```
-// Original: way too high
-[1].f * (3/2)
-
-// Bring down an octave
-[1].f * (3/2) / 2
-
-// Same as:
-[1].f * (3/4)
+[1].f * 2        # one octave up
+[1].f / 2        # one octave down
+[1].f * 4        # two octaves up
+[1].f / 8        # three octaves down
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Original: way too high
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
-
-// Bring down an octave
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2)).div(new Fraction(2))
-
-// Same as:
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 4))
-```
-
-</details>
-
-## Building Octave Patterns
-
-### Octave Doubling (Parallel Octaves)
-
-Create a bass note that always plays an octave below the melody:
+Or with the power operator, which is the same thing spelled differently:
 
 ```
-// Melody note
-frequency: base.f * (3/2)
-
-// Bass note (same timing, one octave down)
-frequency: [MELODY_ID].f / 2
-startTime: [MELODY_ID].t
-duration: [MELODY_ID].d
+[1].f * 2^2      # × 4  — two octaves up
+[1].f * 2^(-1)   # × ½  — one octave down
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+::: warning No variables
+The DSL has **no variables**. `[1].f * 2^n` is not an expression — it is a parse error, because `n` is not anything the parser knows. The only things you can write are numbers, fraction literals, note references (`[N].f`, `base.f`), the three helpers (`beat`, `tempo`, `measure`), and the operators. If you want three octaves, write `2^3` or `8`.
 
-```javascript
-// Melody note
-frequency: module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
+Likewise a bare property name is not an expression: `frequency * 2` does not parse. You must say *whose* frequency — `base.f * 2` or `[1].f * 2`.
+:::
 
-// Bass note (same timing, one octave down)
-frequency: module.getNoteById(MELODY_ID).getVariable('frequency').div(new Fraction(2))
-startTime: module.getNoteById(MELODY_ID).getVariable('startTime')
-duration: module.getNoteById(MELODY_ID).getVariable('duration')
-```
-
-</details>
-
-### Arpeggiated Octaves
-
-Play the same note across multiple octaves in sequence:
+The power operator earns its keep in equal temperament, where the exponent is a fraction and no plain ratio will do:
 
 ```
-// Note 1: Root
-frequency: base.f
-startTime: base.t
-duration: beat(base) * (1/4)
-
-// Note 2: One octave up
-frequency: [1].f * 2
-startTime: [1].t + [1].d
-duration: beat(base) * (1/4)
-
-// Note 3: Two octaves up
-frequency: [2].f * 2
-startTime: [2].t + [2].d
-duration: beat(base) * (1/4)
-
-// Note 4: Back to root
-frequency: [1].f
-startTime: [3].t + [3].d
-duration: beat(base) * (1/4)
+base.f * 2^(7/12)     # a 12-TET fifth
+base.f * 2^(1/12)     # one 12-TET semitone
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+`^` binds tighter than `*`, so `[1].f * 2^(1/12)` means `[1].f * (2^(1/12))`, which is what you want. See [Microtonal Composition](/tutorials/advanced/microtonal).
 
-```javascript
-// Note 1: Root
-frequency: module.baseNote.getVariable('frequency')
-startTime: module.baseNote.getVariable('startTime')
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 4))
+## The octave guides
 
-// Note 2: One octave up
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(2))
-startTime: module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 4))
+Look at the workspace background: faint dotted horizontal lines, each with a label at the left.
 
-// Note 3: Two octaves up
-frequency: module.getNoteById(2).getVariable('frequency').mul(new Fraction(2))
-startTime: module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 4))
+They mark octaves. The line labelled **BaseNote** sits at the BaseNote's frequency; the ones above it are labelled `+1`, `+2`, and so on, each one a doubling; below it, `-1`, `-2`, each a halving.
 
-// Note 4: Back to root
-frequency: module.getNoteById(1).getVariable('frequency')
-startTime: module.getNoteById(3).getVariable('startTime').add(module.getNoteById(3).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 4))
-```
+**They re-anchor to whatever you select.** Click a note that has a frequency and the `0` line jumps to *that* note's pitch and its label changes to `Note [N]`. The other lines follow — so the guides now show you the octaves of the note you are working on, and you can see at a glance whether two notes are an octave apart.
 
-</details>
+## Octave equivalence and reduction
 
-## Octaves with Intervals
+Any interval wider than an octave can be folded back into one by halving.
 
-### Compound Intervals
+| Compound interval | Ratio | Reduced | Ratio |
+|---|---|---|---|
+| Major 9th | 9/4 | Major 2nd | 9/8 |
+| Minor 10th | 12/5 | Minor 3rd | 6/5 |
+| Perfect 11th | 8/3 | Perfect 4th | 4/3 |
+| Perfect 12th | 3/1 | Perfect 5th | 3/2 |
 
-A compound interval spans more than an octave. For example, a "9th" is an octave plus a second:
+To reduce, divide by 2 until the ratio lands between 1 and 2:
 
 ```
-// Major 9th = octave (2/1) × major 2nd (9/8) = 9/4
-[1].f * (9/4)
+[1].f * (9/4) / 2
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Save that and the app simplifies it for you — it stores `[1].f * (9/8)`. The simplifier folds rational coefficients automatically, so you can write the arithmetic the way you think about it and let the app tidy up.
 
-```javascript
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(9, 4))
-```
+The reverse is just as easy: to voice a third an octave up, multiply the third by two and write `[1].f * (5/2)`.
 
-</details>
+## Practical: an octave-spanning chord
 
-### Reducing to Simple Intervals
+A wide voicing, all four notes rooted at Note 1 so the whole thing transposes as a unit.
 
-Any interval can be reduced to within one octave:
+Create the root from the BaseNote, then add each of the other three **At Start** from Note 1:
 
-| Compound Interval | Ratio | Simple Equivalent |
-|-------------------|-------|-------------------|
-| Major 9th | 9/4 | Major 2nd (9/8) |
-| Minor 10th | 12/5 | Minor 3rd (6/5) |
-| Perfect 11th | 8/3 | Perfect 4th (4/3) |
-| Perfect 12th | 3/1 | Perfect 5th (3/2) |
+| Note | Voice | Frequency |
+|---|---|---|
+| 1 | root, low | `base.f / 2` |
+| 2 | fifth | `[1].f * (3/2)` |
+| 3 | third, an octave up | `[1].f * (5/2)` |
+| 4 | root, two octaves up | `[1].f * 4` |
 
-```
-// Major 9th (compound)
-frequency * (9/4)
+Play it. Now select Note 1 and press ▲ — the whole voicing lifts an octave and stays a chord.
 
-// Reduced to Major 2nd (same pitch class, lower octave)
-frequency * (9/8)
-```
+## Exercises
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+### 1. Octave doubling
 
-```javascript
-// Major 9th (compound)
-frequency.mul(new Fraction(9, 4))
+Give a melody note (say Note 4) a bass partner an octave below that follows it everywhere:
 
-// Reduced to Major 2nd (same pitch class, lower octave)
-frequency.mul(new Fraction(9, 8))
-```
+| Property | Expression |
+|---|---|
+| frequency | `[4].f / 2` |
+| startTime | `[4].t` |
+| duration | `[4].d` |
 
-</details>
+Now move, resize or transpose Note 4. The bass tracks all three.
 
-## Practical Example: Octave-Spanning Chord
+### 2. Arpeggiated octaves
 
-Build a wide voicing of a C major chord:
+Four sixteenth notes climbing by octaves and falling back. Set every duration to `beat(base) * (1/4)`.
 
-```
-// C3 (root, low)
-frequency: base.f / 2  // 220 Hz
-startTime: base.t
-duration: beat(base) * 2
+| Note | Frequency | Start time |
+|---|---|---|
+| 1 | `base.f` | `base.t` |
+| 2 | `[1].f * 2` | `[1].t + [1].d` |
+| 3 | `[2].f * 2` | `[2].t + [2].d` |
+| 4 | `[1].f` | `[3].t + [3].d` |
 
-// G3 (fifth, mid-low)
-frequency: [1].f * (3/2)  // 330 Hz
-startTime: [1].t
-duration: [1].d
+### 3. Turn the arrows into fifths
 
-// E4 (third, mid)
-frequency: [1].f * (5/2)  // 550 Hz
-startTime: [1].t
-duration: [1].d
+Open **Settings → Arrows** and click the **Fifth 3/2** quick-pick chip. The cents readout shows 702.0¢. Now select a note and press ▲ repeatedly: `base.f`, then `(3/2) * base.f`, then `(9/4) * base.f`. You are stacking fifths — the raw material of Pythagorean tuning.
 
-// C5 (octave, high)
-frequency: [1].f * 4  // 880 Hz
-startTime: [1].t
-duration: [1].d
-```
+Click **Octave 2/1** to put it back.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+### 4. Prove the round trip
 
-```javascript
-// C3 (root, low)
-frequency: module.baseNote.getVariable('frequency').div(new Fraction(2))  // 220 Hz
-startTime: module.baseNote.getVariable('startTime')
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
+Select a note and press ▲ five times, then ▼ five times. Read the `Raw:` field. It should be the expression you started with, character for character.
 
-// G3 (fifth, mid-low)
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))  // 330 Hz
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
+## What you learned
 
-// E4 (third, mid)
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 2))  // 550 Hz
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
+- The ▲/▼ arrows apply an interval that defaults to the octave and is configurable.
+- Arrow factors fold into the coefficient, so transposition is reversible.
+- The DSL has no variables — write `2^3`, never `2^n`.
+- The octave guides re-anchor to the selected note.
+- Transposing a root moves everything anchored to it.
 
-// C5 (octave, high)
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(4))  // 880 Hz
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
-```
+## Next
 
-</details>
-
-## Tips for Working with Octaves
-
-### 1. Keep Reference Notes in a Comfortable Range
-
-Start with frequencies in the middle range (200-800 Hz) and adjust from there.
-
-### 2. Use Consistent Octave References
-
-When multiple notes need to be in the same octave, reference a common note:
-
-```
-// All notes in this phrase reference the same octave anchor (Note 1)
-
-// Note A: Major third above anchor
-frequency: [1].f * (5/4)
-
-// Note B: Perfect fifth above anchor
-frequency: [1].f * (3/2)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// All notes in this phrase reference the same octave anchor
-const anchorFreq = module.getNoteById(1).getVariable('frequency')
-
-// Note A: Major third above anchor
-frequency: anchorFreq.mul(new Fraction(5, 4))
-
-// Note B: Perfect fifth above anchor
-frequency: anchorFreq.mul(new Fraction(3, 2))
-```
-
-</details>
-
-### 3. Hear the Full Range
-
-Test your composition with notes spanning multiple octaves to ensure balance.
-
-## Common Octave Ratios Quick Reference
-
-| Operation | Ratio | Expression |
-|-----------|-------|------------|
-| 1 octave up | 2/1 | `* 2` |
-| 1 octave down | 1/2 | `/ 2` |
-| 2 octaves up | 4/1 | `* 4` |
-| 2 octaves down | 1/4 | `/ 4` |
-| 3 octaves up | 8/1 | `* 8` |
-| 3 octaves down | 1/8 | `/ 8` |
-
-## Next Steps
-
-- [Measure-Based Timing](./measures) - Tempo and beat dependencies
-- [Microtonal Composition](/tutorials/advanced/microtonal) - Beyond standard tuning
-- [Tuning Systems](/user-guide/tuning/ratios) - Understanding pure ratios
-
+- [Working with Measures](/tutorials/intermediate/measures) — structure in time
+- [Microtonal Composition](/tutorials/advanced/microtonal) — where `^` becomes essential
+- [Transposing with Arrows](/user-guide/notes/transposing) — every arrow setting, in full

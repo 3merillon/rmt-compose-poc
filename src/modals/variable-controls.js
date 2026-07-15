@@ -10,7 +10,10 @@ import { decompileToDSL, isDSLSyntax, compileDSL } from '../dsl/index.js';
 import { ExpressionCompiler } from '../expression-compiler.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
 import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
+import { settingsStore } from '../settings/settings-store.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
+import { toNumber } from '../utils/fraction-num.js';
+import { hugeFractionDisplay } from './fraction-display.js';
 
 // Singleton compiler for safe evaluation
 const safeCompiler = new ExpressionCompiler();
@@ -49,30 +52,45 @@ function buildEvaluatedDiv(value) {
   evaluatedDiv.className = 'evaluated-value';
 
   let displayValue = 'null';
+  let exactTitle = '';
   if (value?.evaluated !== null && value?.evaluated !== undefined) {
     const ev = value.evaluated;
-    // Check if this is a directly corrupted (irrational) value from WASM
-    const isDirectlyCorrupted = ev._irrational || ev._floatValue !== undefined;
+    // Check if this is a directly corrupted (irrational) value — either flagged
+    // per-property by the dependency graph, or marked on the value by WASM
+    const isDirectlyCorrupted = value.isCorrupted || ev._irrational || ev._floatValue !== undefined;
     // Check if this is transitively corrupted (depends on a corrupted note) - for display only
     const isTransitivelyCorrupted = value.isTransitivelyCorrupted;
 
     if (isDirectlyCorrupted) {
       // Display as float with reasonable precision
-      // Prefer _floatValue (exact irrational), fall back to valueOf() (approximated fraction)
-      const floatVal = ev._floatValue !== undefined ? ev._floatValue : (typeof ev.valueOf === 'function' ? ev.valueOf() : ev);
+      // Prefer _floatValue (exact irrational), fall back to the approximated fraction
+      const floatVal = ev._floatValue !== undefined ? ev._floatValue : toNumber(ev, NaN);
       displayValue = `≈${Number(floatVal).toPrecision(8)}`;
       evaluatedDiv.classList.add('corrupted-value');
     } else if (isTransitivelyCorrupted) {
       // Transitively corrupted: show fraction with ≈ prefix to indicate it's an approximation
-      displayValue = `≈${String(ev)}`;
+      const huge = hugeFractionDisplay(ev);
+      if (huge) {
+        displayValue = huge.text;
+        exactTitle = huge.title;
+      } else {
+        displayValue = `≈${String(ev)}`;
+      }
       evaluatedDiv.classList.add('corrupted-value');
     } else {
-      displayValue = String(ev);
+      const huge = hugeFractionDisplay(ev);
+      if (huge) {
+        displayValue = huge.text;
+        exactTitle = huge.title;
+      } else {
+        displayValue = String(ev);
+      }
     }
   }
 
   // SECURITY: Escape displayValue to prevent XSS
   evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${escapeHtml(displayValue)}`;
+  if (exactTitle) evaluatedDiv.title = exactTitle;
   return evaluatedDiv;
 }
 
@@ -120,14 +138,41 @@ function buildRawEditor(initialRaw, note = null, key = null) {
   saveButton.textContent = 'Save';
   saveButton.style.display = 'none';
 
+  // Inline error readout for rejected saves (bad syntax, self-reference,
+  // circular dependency, ...). Hidden until showError() is called; cleared
+  // on the next edit or save attempt.
+  const errorDiv = document.createElement('div');
+  errorDiv.className = 'raw-value-error';
+  Object.assign(errorDiv.style, {
+    display: 'none',
+    color: 'var(--rmt-danger, #ff0000)',
+    fontSize: '0.85em',
+    marginTop: '4px',
+    whiteSpace: 'pre-wrap'
+  });
+
+  function showError(message) {
+    errorDiv.textContent = message;
+    errorDiv.style.display = 'block';
+    rawInput.style.borderColor = 'var(--rmt-danger, #ff0000)';
+  }
+
+  function clearError() {
+    errorDiv.textContent = '';
+    errorDiv.style.display = 'none';
+    rawInput.style.borderColor = '';
+  }
+
   rawInput.addEventListener('input', () => {
     saveButton.style.display = 'inline-block';
+    clearError();
   });
 
   rawDiv.appendChild(label);
   rawDiv.appendChild(rawInput);
   rawDiv.appendChild(saveButton);
-  return { rawDiv, rawInput, saveButton };
+  rawDiv.appendChild(errorDiv);
+  return { rawDiv, rawInput, saveButton, showError, clearError };
 }
 
 // Helper to build canonical duration expression: beatUnit * (n/d)
@@ -141,7 +186,8 @@ function computeDurationExpr(multiplierNum, multiplierDen = 1, useDSL = false) {
   return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${multiplierNum}, ${multiplierDen}))`;
 }
 
-// Multiply two rational values and reduce (n1/d1) * (n2/d2)
+// Multiply two rational values and reduce (n1/d1) * (n2/d2).
+// Operands are the fixed picker constants (≤ 7/4), so Number math is exact.
 function mulFrac(n1, d1, n2, d2) {
   let n = n1 * n2;
   let d = d1 * d2;
@@ -161,35 +207,35 @@ function ensureModalsStyleInjected() {
       appearance: none !important;
       -webkit-appearance: none !important;
       background-color: #222 !important;
-      color: #ffa800 !important;
-      border: 1px solid #ffa800 !important;
+      color: var(--rmt-accent, #ffa800) !important;
+      border: 1px solid var(--rmt-accent, #ffa800) !important;
       border-radius: 4px !important;
       color-scheme: dark !important;
     }
     .instrument-select:focus {
       background-color: #222 !important;
-      color: #ffa800 !important;
+      color: var(--rmt-accent, #ffa800) !important;
       outline: none !important;
     }
     .instrument-select option {
       background-color: #222 !important;
-      color: #ffa800 !important;
+      color: var(--rmt-accent, #ffa800) !important;
     }
     .duration-note-lengths .note-btn,
     .duration-note-lengths .dot-btn {
       transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
     }
     .duration-note-lengths .note-btn.selected {
-      background-color: #ff0000 !important;
-      border-color: #ffa800 !important;
+      background-color: var(--rmt-danger, #ff0000) !important;
+      border-color: var(--rmt-accent, #ffa800) !important;
     }
     .duration-note-lengths .note-btn:hover {
-      border-color: #ffa800 !important;
-      box-shadow: 0 0 5px #ffa800;
+      border-color: var(--rmt-accent, #ffa800) !important;
+      box-shadow: 0 0 5px var(--rmt-accent, #ffa800);
     }
     .duration-note-lengths .dot-btn {
       color: #fff;
-      border: 1px solid rgba(255,168,0,0.4);
+      border: 1px solid rgba(var(--rmt-accent-rgb), 0.4);
       background: #444;
       border-radius: 4px;
       width: 26px; height: 26px;
@@ -197,12 +243,12 @@ function ensureModalsStyleInjected() {
       cursor: pointer;
     }
     .duration-note-lengths .dot-btn.selected {
-      background-color: #ff0000 !important;
-      border-color: #ffa800 !important;
+      background-color: var(--rmt-danger, #ff0000) !important;
+      border-color: var(--rmt-accent, #ffa800) !important;
     }
     .duration-note-lengths .dot-btn:hover {
-      border-color: #ffa800 !important;
-      box-shadow: 0 0 5px #ffa800;
+      border-color: var(--rmt-accent, #ffa800) !important;
+      box-shadow: 0 0 5px var(--rmt-accent, #ffa800);
     }
     .duration-note-lengths .dot-btn.selected:hover {
       box-shadow: none !important;
@@ -271,7 +317,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
       if (idx === selectedBaseIdx) btn.classList.add('selected');
       else btn.classList.remove('selected');
       // reset dynamic hover styles
-      btn.style.borderColor = btn.classList.contains('selected') ? '#ffa800' : 'rgba(255,168,0,0.4)';
+      btn.style.borderColor = btn.classList.contains('selected') ? 'var(--rmt-accent, #ffa800)' : 'rgba(var(--rmt-accent-rgb), 0.4)';
       btn.style.boxShadow = 'none';
     });
     dotButtons.forEach((btn, idx) => {
@@ -292,7 +338,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
     btn.className = 'note-btn';
     Object.assign(btn.style, {
       background: '#444',
-      border: '1px solid #ffa800',
+      border: '1px solid var(--rmt-accent, #ffa800)',
       borderRadius: '4px',
       padding: '0',
       cursor: 'pointer',
@@ -311,13 +357,13 @@ function createDurationSelector(rawInput, saveButton, note, value) {
 
     btn.addEventListener('mouseenter', () => {
       if (!btn.classList.contains('selected')) {
-        btn.style.borderColor = '#ffa800';
-        btn.style.boxShadow = '0 0 5px #ffa800';
+        btn.style.borderColor = 'var(--rmt-accent, #ffa800)';
+        btn.style.boxShadow = '0 0 5px var(--rmt-accent, #ffa800)';
       }
     });
     btn.addEventListener('mouseleave', () => {
       if (!btn.classList.contains('selected')) {
-        btn.style.borderColor = '#ffa800';
+        btn.style.borderColor = 'var(--rmt-accent, #ffa800)';
         btn.style.boxShadow = 'none';
       }
     });
@@ -373,21 +419,21 @@ function createDurationSelector(rawInput, saveButton, note, value) {
       // Prefer evaluated beats for robustness (handles newly dropped modules and any formatting)
       let mNum = 1, mDen = 1, found = false;
 
-      // 1) Use evaluated duration + tempo to compute beats exactly
+      // 1) Use evaluated duration + tempo to compute beats (tolerance matching is approximate)
       try {
         const moduleInstance = getModule();
-        const durationVal = (value && value.evaluated && typeof value.evaluated.valueOf === 'function')
-          ? value.evaluated.valueOf()
-          : (note && typeof note.getVariable === 'function' ? note.getVariable('duration')?.valueOf?.() : undefined);
+        const durationVal = (value && value.evaluated != null)
+          ? toNumber(value.evaluated, NaN)
+          : (note && typeof note.getVariable === 'function' ? toNumber(note.getVariable('duration'), NaN) : NaN);
 
-        const tempoVal = moduleInstance?.findTempo?.(note)?.valueOf?.();
+        const tempoVal = toNumber(moduleInstance?.findTempo?.(note), NaN);
 
         if (isFinite(durationVal) && isFinite(tempoVal) && tempoVal > 0) {
           const beatLen = 60 / tempoVal;
           const beats = durationVal / beatLen;
           const frac = new Fraction(beats);
-          mNum = frac.n;
-          mDen = frac.d;
+          mNum = toNumber(frac.n);
+          mDen = toNumber(frac.d);
           found = true;
         }
       } catch {}
@@ -482,14 +528,14 @@ function createDurationSelector(rawInput, saveButton, note, value) {
             // Evaluate using safe binary evaluator
             const evaluator = new BinaryEvaluator(moduleInstance);
             const val = evaluator.evaluate(binary, evalCache);
-            const durationSec = (val && typeof val.valueOf === 'function') ? val.valueOf() : Number(val);
-            const tempoVal = moduleInstance?.findTempo?.(note)?.valueOf?.();
+            const durationSec = toNumber(val, NaN);
+            const tempoVal = toNumber(moduleInstance?.findTempo?.(note), NaN);
             if (isFinite(durationSec) && isFinite(tempoVal) && tempoVal > 0) {
               const beatLen = 60 / tempoVal;
               const beats = durationSec / beatLen;
               const frac = new Fraction(beats);
-              mNum = frac.n;
-              mDen = frac.d;
+              mNum = toNumber(frac.n);
+              mDen = toNumber(frac.d);
               found = true;
             }
           }
@@ -546,343 +592,6 @@ function createDurationSelector(rawInput, saveButton, note, value) {
   return container;
 }
 
-/**
- * Measure duration editor for measure notes (edits beatsPerMeasure on the measure)
- * - Shows evaluated length in beats and seconds
- * - Provides note-length preset buttons (whole/half/quarter/eighth/sixteenth) with dotted modifiers
- * - Commits by writing beatsPerMeasure / beatsPerMeasureString on the selected measure note
- */
-function createMeasureBeatsSelector(note, measureId, externalFunctions) {
-  ensureModalsStyleInjected();
-
-  const moduleInstance = getModule();
-  if (!moduleInstance) return document.createElement('div');
-
-  const measureNote = (() => {
-    try { return moduleInstance.getNoteById(Number(measureId)); } catch { return null; }
-  })();
-
-  const container = document.createElement('div');
-  container.className = 'measure-duration-editor';
-  Object.assign(container.style, {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '6px',
-    marginTop: '6px',
-    marginBottom: '2px'
-  });
-
-  // Evaluated readout
-  const evalRow = document.createElement('div');
-  evalRow.className = 'evaluated-value';
-  try {
-    const mlVal = moduleInstance.findMeasureLength(measureNote);
-    const seconds = (mlVal && typeof mlVal.valueOf === 'function') ? Number(mlVal.valueOf()) : Number(mlVal);
-    const tempoVal = moduleInstance.findTempo(measureNote || moduleInstance.baseNote);
-    const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
-    const beatLen = 60 / tempo;
-    const beats = seconds / beatLen;
-    const beatsFrac = new Fraction(beats);
-    // SECURITY: Ensure fraction numerator/denominator are valid numbers
-    const safeN = Number.isFinite(Number(beatsFrac.n)) ? beatsFrac.n : 0;
-    const safeD = Number.isFinite(Number(beatsFrac.d)) && Number(beatsFrac.d) !== 0 ? beatsFrac.d : 1;
-    evalRow.innerHTML = `<span class="value-label">Measure Duration:</span> ${seconds.toFixed(4)}s (${safeN}/${safeD} beats)`;
-  } catch {
-    evalRow.innerHTML = `<span class="value-label">Measure Duration:</span> —`;
-  }
-  container.appendChild(evalRow);
-
-  // Presets
-  const presetsRow = document.createElement('div');
-  presetsRow.className = 'duration-note-lengths';
-  Object.assign(presetsRow.style, {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '8px',
-    flexWrap: 'wrap'
-  });
-
-  const basePicks = [
-    { title: 'Whole',   img: '/images/whole.png',    n: 4,   d: 1 },
-    { title: 'Half',    img: '/images/half.png',     n: 2,   d: 1 },
-    { title: 'Quarter', img: '/images/quarter.png',  n: 1,   d: 1 },
-    { title: 'Eighth',  img: '/images/eighth.png',   n: 1,   d: 2 },
-    { title: 'Sixteenth',img: '/images/sixteenth.png', n: 1, d: 4 }
-  ];
-
-  const dotPicks = [
-    { label: '.',  n: 3, d: 2 },   // 1.5x
-    { label: '..', n: 7, d: 4 }    // 1.75x
-  ];
-
-  let selectedBaseIdx = -1;
-  let selectedDotIdx  = -1;
-
-  const baseButtons = [];
-  const dotButtons = [];
-
-  function mulFrac(n1, d1, n2, d2) {
-    let n = n1 * n2;
-    let d = d1 * d2;
-    const gcd = (a, b) => { a = Math.abs(a); b = Math.abs(b); while (b) { const t = b; b = a % b; a = t; } return a; };
-    const g = gcd(n, d);
-    return [n / g, d / g];
-  }
-
-  function renderSelection() {
-    baseButtons.forEach((btn, idx) => {
-      if (idx === selectedBaseIdx) btn.classList.add('selected');
-      else btn.classList.remove('selected');
-      btn.style.borderColor = btn.classList.contains('selected') ? '#ffa800' : 'rgba(255,168,0,0.4)';
-      btn.style.boxShadow = 'none';
-    });
-    dotButtons.forEach((btn, idx) => {
-      if (idx === selectedDotIdx) btn.classList.add('selected');
-      else btn.classList.remove('selected');
-    });
-  }
-
-  function commitBeats(n, d) {
-    try {
-      pauseIfPlaying();
-      if (!measureNote) return;
-      const raw = `new Fraction(${n}, ${d})`;
-      // Set the expression string directly - the Note class will compile it to binary
-      measureNote.setVariable('beatsPerMeasureString', raw);
-
-      // Recompile updated note and dependents so functions are in sync
-      recompileNoteAndDependents(measureNote.id);
-
-      // Evaluate and refresh visuals
-      const evaluated = moduleInstance.evaluateModule();
-      setEvaluatedNotes(evaluated);
-      if (typeof externalFunctions.updateVisualNotes === 'function') {
-        externalFunctions.updateVisualNotes(evaluated);
-      }
-      if (typeof externalFunctions.createMeasureBars === 'function') {
-        externalFunctions.createMeasureBars();
-      }
-
-      // Refresh variables panel
-      refreshModals(null, measureNote.id);
-
-      // History snapshot
-      try {
-        const snap = getModule().createModuleJSON();
-        try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
-        eventBus.emit('history:capture', { label: `Edit measure duration Measure ${measureNote.id}`, snapshot: snap });
-      } catch {}
-    } catch (err) {
-      console.error('Error updating beatsPerMeasure for measure', measureId, err);
-    }
-  }
-
-  // Base buttons
-  const baseGroup = document.createElement('div');
-  Object.assign(baseGroup.style, { display: 'flex', gap: '6px', alignItems: 'center' });
-
-  basePicks.forEach((p, idx) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.title = `${p.title} (beats)`;
-    btn.setAttribute('aria-label', `${p.title} beats`);
-    btn.className = 'note-btn';
-    Object.assign(btn.style, {
-      background: '#444',
-      border: '1px solid #ffa800',
-      borderRadius: '4px',
-      padding: '0',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      width: '26px',
-      height: '26px'
-    });
-
-    const img = document.createElement('img');
-    img.src = p.img;
-    img.alt = `${p.title} icon`;
-    Object.assign(img.style, { display: 'block', width: '18px', height: '18px', pointerEvents: 'none' });
-    btn.appendChild(img);
-
-    btn.addEventListener('mouseenter', () => {
-      if (!btn.classList.contains('selected')) {
-        btn.style.borderColor = '#ffa800';
-        btn.style.boxShadow = '0 0 5px #ffa800';
-      }
-    });
-    btn.addEventListener('mouseleave', () => {
-      if (!btn.classList.contains('selected')) {
-        btn.style.borderColor = '#ffa800';
-        btn.style.boxShadow = 'none';
-      }
-    });
-
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      selectedBaseIdx = idx;
-      renderSelection();
-      let n = p.n, d = p.d;
-      if (selectedDotIdx >= 0) {
-        const mod = dotPicks[selectedDotIdx];
-        [n, d] = mulFrac(n, d, mod.n, mod.d);
-      }
-      commitBeats(n, d);
-    });
-
-    baseGroup.appendChild(btn);
-    baseButtons.push(btn);
-  });
-
-  // Dot buttons
-  const dotsGroup = document.createElement('div');
-  Object.assign(dotsGroup.style, { display: 'flex', gap: '6px', alignItems: 'center', marginLeft: '6px' });
-
-  dotPicks.forEach((p, idx) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.title = `${p.label} dotted`;
-    btn.setAttribute('aria-label', `${p.label} dotted`);
-    btn.className = 'dot-btn';
-    btn.textContent = p.label;
-
-    btn.addEventListener('click', (e) => {
-      e.preventDefault();
-      // Toggle dot
-      if (selectedDotIdx === idx) selectedDotIdx = -1;
-      else selectedDotIdx = idx;
-      renderSelection();
-      // If a base is already selected, immediately commit new beats
-      if (selectedBaseIdx >= 0) {
-        let n = basePicks[selectedBaseIdx].n, d = basePicks[selectedBaseIdx].d;
-        if (selectedDotIdx >= 0) {
-          const mod = dotPicks[selectedDotIdx];
-          [n, d] = mulFrac(n, d, mod.n, mod.d);
-        }
-        commitBeats(n, d);
-      }
-    });
-
-    dotsGroup.appendChild(btn);
-    dotButtons.push(btn);
-  });
-
-  // Small input to enter arbitrary beats (e.g., 5/4, 7/8)
-  const customRow = document.createElement('div');
-  Object.assign(customRow.style, { display: 'flex', alignItems: 'center', gap: '6px' });
-  const lbl = document.createElement('span');
-  lbl.textContent = 'Beats per measure:';
-  Object.assign(lbl.style, { color: '#ffa800' });
-  const inp = document.createElement('input');
-  inp.type = 'text';
-  inp.placeholder = 'e.g. 3/2, 5/4, 7/8';
-  Object.assign(inp.style, {
-    background: '#222',
-    color: '#fff',
-    border: '1px solid #ffa800',
-    borderRadius: '4px',
-    padding: '4px 6px'
-  });
-  const btnSave = document.createElement('button');
-  btnSave.className = 'raw-value-save';
-  btnSave.textContent = 'Save';
-  btnSave.style.display = 'inline-block';
-  btnSave.addEventListener('click', () => {
-    const val = (inp.value || '').trim();
-    if (!val) return;
-    let n = 0, d = 1;
-    if (val.includes('/')) {
-      const parts = val.split('/');
-      // SECURITY: Validate exactly 2 parts for fraction format
-      if (parts.length !== 2) {
-        console.warn('[RMT Security] Invalid fraction format: expected exactly one "/"');
-        return;
-      }
-      // SECURITY: Pre-validate that parts look like numbers before parsing
-      // Allow integers, decimals, and negative numbers - supports arbitrary precision fractions
-      const numPattern = /^-?\d+(\.\d+)?$/;
-      if (!numPattern.test(parts[0].trim()) || !numPattern.test(parts[1].trim())) {
-        console.warn('[RMT Security] Invalid fraction format: parts must be numeric');
-        return;
-      }
-      n = parseFloat(parts[0]);
-      d = parseFloat(parts[1]);
-    } else {
-      // SECURITY: Pre-validate single number format
-      const numPattern = /^-?\d+(\.\d+)?$/;
-      if (!numPattern.test(val)) {
-        console.warn('[RMT Security] Invalid number format');
-        return;
-      }
-      const f = parseFloat(val);
-      if (!isNaN(f)) {
-        const frac = new Fraction(f);
-        n = frac.n; d = frac.d;
-      }
-    }
-    if (!isFinite(n) || !isFinite(d) || d === 0) return;
-    const frac = new Fraction(n, d);
-    commitBeats(frac.n, frac.d);
-  });
-
-  customRow.appendChild(lbl);
-  customRow.appendChild(inp);
-  customRow.appendChild(btnSave);
-
-  presetsRow.appendChild(baseGroup);
-  presetsRow.appendChild(dotsGroup);
-
-  container.appendChild(presetsRow);
-  container.appendChild(customRow);
-
-  // Preselect current beats if possible
-  try {
-    const currentBeats = (() => {
-      const own = measureNote?.variables?.beatsPerMeasureString;
-      if (own && typeof own === 'string') {
-        const m = own.match(/new\s+Fraction\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)/);
-        if (m) return new Fraction(parseFloat(m[1]), parseFloat(m[2]));
-      }
-      // Inherit from base if not set:  module.baseNote.beatsPerMeasure
-      const b = moduleInstance?.baseNote?.variables?.beatsPerMeasureString;
-      if (b && typeof b === 'string') {
-        const m = b.match(/new\s+Fraction\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)/);
-        if (m) return new Fraction(parseFloat(m[1]), parseFloat(m[2]));
-      }
-      // Fallback from evaluated length + tempo
-      const mlVal = moduleInstance.findMeasureLength(measureNote);
-      const seconds = (mlVal && typeof mlVal.valueOf === 'function') ? Number(mlVal.valueOf()) : Number(mlVal);
-      const tempoVal = moduleInstance.findTempo(measureNote || moduleInstance.baseNote);
-      const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
-      const beatLen = 60 / tempo;
-      return new Fraction(seconds / beatLen);
-    })();
-
-    // Try match presets
-    const m = currentBeats.n / currentBeats.d;
-    const tol = 1e-2;
-    let best = { base: -1, dot: -1, diff: Infinity };
-    basePicks.forEach((b, bi) => {
-      const baseVal = b.n / b.d;
-      let diff = Math.abs(m - baseVal);
-      if (diff < best.diff && diff <= tol) best = { base: bi, dot: -1, diff };
-      dotPicks.forEach((d, di) => {
-        const val = (b.n * d.n) / (b.d * d.d);
-        const dd = Math.abs(m - val);
-        if (dd < best.diff && dd <= tol) best = { base: bi, dot: di, diff: dd };
-      });
-    });
-    if (best.base >= 0) {
-      selectedBaseIdx = best.base;
-      selectedDotIdx = best.dot;
-      renderSelection();
-    }
-  } catch {}
-
-  return container;
-}
-
 export function createMeasureDurationRow(note, measureId, externalFunctions) {
   ensureModalsStyleInjected();
 
@@ -907,7 +616,7 @@ export function createMeasureDurationRow(note, measureId, externalFunctions) {
   variableValueDiv.className = 'variable-value';
 
   // Initial RAW expression (prefer measure override, fallback to base)
-  let initialRaw = 'new Fraction(4)';
+  let initialRaw = '4';
   try {
     if (measureNote?.variables?.beatsPerMeasureString) {
       initialRaw = measureNote.variables.beatsPerMeasureString;
@@ -930,7 +639,7 @@ export function createMeasureDurationRow(note, measureId, externalFunctions) {
       pauseIfPlaying();
       if (!measureNote) return;
 
-      const raw = (rawInput.value || '').trim() || 'new Fraction(4)';
+      const raw = (rawInput.value || '').trim() || '4';
       // Set the expression string directly - the Note class will compile it to binary
       measureNote.setVariable('beatsPerMeasureString', raw);
 
@@ -1018,8 +727,8 @@ function buildInstrumentControl(value, note, externalFunctions) {
   Object.assign(select.style, {
     padding: '4px',
     backgroundColor: '#222',
-    color: '#ffa800',
-    border: '1px solid #ffa800',
+    color: 'var(--rmt-accent, #ffa800)',
+    border: '1px solid var(--rmt-accent, #ffa800)',
     borderRadius: '4px',
     width: '100%',
     marginTop: '5px',
@@ -1036,77 +745,6 @@ function buildInstrumentControl(value, note, externalFunctions) {
     }
     select.appendChild(opt);
   });
-
-  // Build a custom dark dropdown and hide native select to prevent white flash
-  const wrapper = document.createElement('div');
-  Object.assign(wrapper.style, { position: 'relative', width: '100%' });
-
-  // Hide native select but keep it in DOM for value + events
-  // keep native select visible
-  wrapper.appendChild(select);
-
-  const dropdownBtn = document.createElement('div');
-  Object.assign(dropdownBtn.style, {
-    padding: '6px 8px',
-    backgroundColor: '#222',
-    color: '#ffa800',
-    border: '1px solid #ffa800',
-    borderRadius: '4px',
-    width: '100%',
-    marginTop: '5px',
-    cursor: 'pointer',
-    userSelect: 'none'
-  });
-  dropdownBtn.textContent = String(value?.evaluated || '');
-
-  const menu = document.createElement('div');
-  Object.assign(menu.style, {
-    position: 'absolute',
-    top: '100%',
-    left: '0',
-    right: '0',
-    backgroundColor: '#222',
-    color: '#ffa800',
-    border: '1px solid #ffa800',
-    borderRadius: '4px',
-    marginTop: '4px',
-    zIndex: '99999',
-    display: 'none',
-    maxHeight: '180px',
-    overflowY: 'auto',
-    boxShadow: '0 0 6px rgba(255,168,0,0.3)'
-  });
-
-  Array.from(select.options).forEach((opt) => {
-    const item = document.createElement('div');
-    item.textContent = opt.textContent || opt.value;
-    Object.assign(item.style, {
-      padding: '6px 8px',
-      cursor: 'pointer',
-      borderBottom: '1px solid rgba(255,168,0,0.2)'
-    });
-    item.addEventListener('mouseenter', () => { item.style.backgroundColor = '#333'; });
-    item.addEventListener('mouseleave', () => { item.style.backgroundColor = 'transparent'; });
-    item.addEventListener('click', (e) => {
-      e.stopPropagation();
-      select.value = opt.value;
-      dropdownBtn.textContent = String(opt.value);
-      // propagate change via existing listeners
-      const ev = new Event('input', { bubbles: true });
-      select.dispatchEvent(ev);
-      menu.style.display = 'none';
-    });
-    menu.appendChild(item);
-  });
-
-  dropdownBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    menu.style.display = (menu.style.display === 'block') ? 'none' : 'block';
-  });
-  document.addEventListener('click', () => { menu.style.display = 'none'; }, { capture: true });
-
-  wrapper.appendChild(dropdownBtn);
-  wrapper.appendChild(menu);
 
   const saveButton = document.createElement('button');
   saveButton.className = 'raw-value-save';
@@ -1178,12 +816,28 @@ function buildInstrumentControl(value, note, externalFunctions) {
 }
 
 function addFrequencyOctaveButtons(parent, note) {
+  // Respect the Settings → Arrows toggle: when arrows are disabled, don't
+  // render the note-widget ▲/▼ buttons at all.
+  let arrowsCfg = null;
+  try { arrowsCfg = settingsStore.get('arrows'); } catch { arrowsCfg = null; }
+  if (arrowsCfg && arrowsCfg.enabled === false) {
+    return;
+  }
+  // Build a human-readable interval label for tooltips (e.g. "×3/2" / "×2/3").
+  const fmtRatio = (r) => {
+    if (!r) return '';
+    // Loose compare: settings ratios are plain Numbers, but tolerate 1n too
+    return r.d == 1 ? `×${r.n}` : `×${r.n}/${r.d}`;
+  };
+  const upLabel = arrowsCfg && arrowsCfg.up ? fmtRatio(arrowsCfg.up) : '×2';
+  const downLabel = arrowsCfg && arrowsCfg.down ? fmtRatio(arrowsCfg.down) : '×1/2';
+
   const container = document.createElement('div');
   container.style.display = 'flex';
   container.style.flexDirection = 'column';
   container.style.marginLeft = 'auto';
 
-  const mkBtn = (cls, text, dir) => {
+  const mkBtn = (cls, text, dir, tip) => {
     const btn = document.createElement('button');
     btn.className = `octave-button ${cls}`;
     Object.assign(btn.style, {
@@ -1191,7 +845,7 @@ function addFrequencyOctaveButtons(parent, note) {
       height: '26px',
       padding: '0',
       backgroundColor: '#444',
-      border: '1px solid rgba(255,168,0,0.4)',
+      border: '1px solid rgba(var(--rmt-accent-rgb), 0.4)',
       borderRadius: '4px',
       cursor: 'pointer',
       display: 'flex',
@@ -1202,14 +856,15 @@ function addFrequencyOctaveButtons(parent, note) {
       marginBottom: cls.includes('up') ? '4px' : '0',
     });
     btn.textContent = text;
+    if (tip) btn.title = tip;
 
     // Harmonized hover effect: orange border + glow like duration icons
     btn.addEventListener('mouseenter', () => {
-      btn.style.borderColor = '#ffa800';
-      btn.style.boxShadow = '0 0 5px #ffa800';
+      btn.style.borderColor = 'var(--rmt-accent, #ffa800)';
+      btn.style.boxShadow = '0 0 5px var(--rmt-accent, #ffa800)';
     });
     btn.addEventListener('mouseleave', () => {
-      btn.style.borderColor = 'rgba(255,168,0,0.4)';
+      btn.style.borderColor = 'rgba(var(--rmt-accent-rgb), 0.4)';
       btn.style.boxShadow = 'none';
     });
 
@@ -1223,8 +878,8 @@ function addFrequencyOctaveButtons(parent, note) {
     return btn;
   };
 
-  const up = mkBtn('octave-up-widget', '▲', 'up');
-  const down = mkBtn('octave-down-widget', '▼', 'down');
+  const up = mkBtn('octave-up-widget', '▲', 'up', `Transpose up ${upLabel}`);
+  const down = mkBtn('octave-down-widget', '▼', 'down', `Transpose down ${downLabel}`);
 
   container.appendChild(up);
   container.appendChild(down);
@@ -1256,9 +911,10 @@ export function createVariableControls(key, value, note, measureId, externalFunc
     variableValueDiv.appendChild(evaluatedDiv);
 
     // Raw editor (pass note and key for DSL conversion)
-    const { rawDiv, rawInput, saveButton } = buildRawEditor(value?.raw ?? '', note, key);
+    const { rawDiv, rawInput, saveButton, showError, clearError } = buildRawEditor(value?.raw ?? '', note, key);
     saveButton.addEventListener('click', () => {
       try {
+        clearError();
         pauseIfPlaying();
         const moduleInstance = getModule();
         const currentNoteId = measureId !== null && measureId !== undefined ? measureId : note.id;
@@ -1290,7 +946,8 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         let originalDuration;
         if (key === 'duration') {
           try {
-            originalDuration = note.getVariable('duration')?.valueOf();
+            const dv = note.getVariable('duration');
+            if (dv != null) originalDuration = toNumber(dv, NaN);
           } catch {}
         }
 
@@ -1328,7 +985,8 @@ export function createVariableControls(key, value, note, measureId, externalFunc
 
         // Trigger dependent duration updates if provided by external functions
         if (key === 'duration' && typeof externalFunctions.checkAndUpdateDependentNotes === 'function' && originalDuration !== undefined) {
-          const updatedDuration = note.getVariable('duration')?.valueOf();
+          const udv = note.getVariable('duration');
+          const updatedDuration = udv != null ? toNumber(udv, NaN) : undefined;
           if (Math.abs((updatedDuration ?? 0) - (originalDuration ?? 0)) > 0.001) {
             externalFunctions.checkAndUpdateDependentNotes(currentNoteId, originalDuration, updatedDuration);
           }
@@ -1357,6 +1015,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         } catch {}
       } catch (err) {
         console.error('Error saving variable', key, 'for note', note?.id, ':', err);
+        showError(err?.message || 'Could not save expression');
       }
     });
 

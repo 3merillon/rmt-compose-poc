@@ -1,0 +1,116 @@
+{
+  "schema": 1,
+  "name": "piano",
+  "displayName": "Upright Piano",
+  "license": {
+    "id": "CC0-1.0",
+    "source": "VSCO-2 Community Edition",
+    "author": "Versilian Studios — recorded by Sam Gossner & Simon Dalzell; sample cutting by Elan Hickler/Soundemote",
+    "url": "https://github.com/sgossner/VSCO-2-CE"
+  },
+  "gainDb": 2,
+  "envelope": {
+    "attack": 0.004,
+    "release": 0.25
+  },
+  "zones": [
+    {
+      "root": "C1",
+      "rootHz": 32.703,
+      "lowHz": 0,
+      "highHz": 40.03,
+      "url": "C1.m4a"
+    },
+    {
+      "root": "G1",
+      "rootHz": 48.999,
+      "lowHz": 40.03,
+      "highHz": 56.611,
+      "url": "G1.m4a"
+    },
+    {
+      "root": "C2",
+      "rootHz": 65.406,
+      "lowHz": 56.611,
+      "highHz": 80.061,
+      "url": "C2.m4a"
+    },
+    {
+      "root": "G2",
+      "rootHz": 97.999,
+      "lowHz": 80.061,
+      "highHz": 113.223,
+      "url": "G2.m4a"
+    },
+    {
+      "root": "C3",
+      "rootHz": 130.813,
+      "lowHz": 113.223,
+      "highHz": 160.122,
+      "url": "C3.m4a"
+    },
+    {
+      "root": "G3",
+      "rootHz": 195.998,
+      "lowHz": 160.122,
+      "highHz": 226.447,
+      "url": "G3.m4a"
+    },
+    {
+      "root": "C4",
+      "rootHz": 261.626,
+      "lowHz": 226.447,
+      "highHz": 320.244,
+      "url": "C4.m4a"
+    },
+    {
+      "root": "G4",
+      "rootHz": 391.995,
+      "lowHz": 320.244,
+      "highHz": 452.893,
+      "url": "G4.m4a"
+    },
+    {
+      "root": "C5",
+      "rootHz": 523.251,
+      "lowHz": 452.893,
+      "highHz": 640.487,
+      "url": "C5.m4a"
+    },
+    {
+      "root": "G5",
+      "rootHz": 783.991,
+      "lowHz": 640.487,
+      "highHz": 905.786,
+      "url": "G5.m4a"
+    },
+    {
+      "root": "C6",
+      "rootHz": 1046.502,
+      "lowHz": 905.786,
+      "highHz": 1280.975,
+      "url": "C6.m4a"
+    },
+    {
+      "root": "G6",
+      "rootHz": 1567.982,
+      "lowHz": 1280.975,
+      "highHz": 1811.572,
+      "url": "G6.m4a"
+    },
+    {
+      "root": "C7",
+      "rootHz": 2093.005,
+      "lowHz": 1811.572,
+      "highHz": 2561.95,
+      "url": "C7.m4a"
+    },
+    {
+      "root": "G7",
+      "rootHz": 3135.963,
+      "lowHz": 2561.95,
+      "highHz": 20000,
+      "url": "G7.m4a"
+    }
+  ]
+}

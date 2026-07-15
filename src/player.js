@@ -1,5 +1,5 @@
 import Fraction from 'fraction.js';
-import { Module, invalidateModuleEndTimeCache as invalidateModuleEndTimeCacheGlobal } from './module.js';
+import { Module, invalidateModuleEndTimeCache as invalidateModuleEndTimeCacheGlobal, setDefaultInstrument } from './module.js';
 import { modals } from './modals/index.js';
 import { updateStackClickSelectedNote } from './stack-click.js';
 import { eventBus } from './utils/event-bus.js';
@@ -10,8 +10,43 @@ import { Workspace } from './renderer/webgl2/workspace.js';
 import { menuBar } from './menu/menu-bar.js';
 import { isDSLSyntax } from './dsl/index.js';
 import { escapeHtml } from './utils/html-escape.js';
+import { settingsStore } from './settings/settings-store.js';
+import { scaleStep } from './settings/settings-schema.js';
+import { themeManager } from './theme/theme-manager.js';
+import { showGroupWidget, hideGroupWidget } from './modals/group-widget.js';
+import { registerPanel, raisePanel } from './utils/panel-stack.js';
+import { toNumber } from './utils/fraction-num.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
+
+// Exact expression fragments from a Fraction — BigInt template interpolation
+// prints every digit, so these stay exact at any magnitude.
+function fracToDSL(f) {
+  const n = f.s * f.n;
+  return f.d === 1n ? `${n}` : `(${n}/${f.d})`;
+}
+function fracToLegacy(f) {
+  const n = f.s * f.n;
+  return f.d === 1n ? `new Fraction(${n})` : `new Fraction(${n}, ${f.d})`;
+}
+function fracIsOne(f) {
+  return f.s === 1n && f.n === 1n && f.d === 1n;
+}
+
+// Exact beat offset between two exact start times: (t - t0) * tempo / 60,
+// clamped at zero. Returns a Fraction; falls back to a float-derived one only
+// when an input is not a Fraction.
+function exactBeatOffset(tFrac, t0Frac, tempoFrac) {
+  try {
+    const diff = tFrac.sub(t0Frac);
+    if (diff.s < 0n) return new Fraction(0);
+    return diff.mul(tempoFrac).div(60);
+  } catch (e) {
+    const beat = 60 / toNumber(tempoFrac, 60);
+    const off = Math.max(0, toNumber(tFrac) - toNumber(t0Frac)) / beat;
+    try { return new Fraction(off); } catch { return new Fraction(Math.round(off * 4), 4); }
+  }
+}
 
 // Defer heavy UI sync without feature flags or polyfills
 // Use requestAnimationFrame to guarantee next-frame execution even when idle callbacks are throttled.
@@ -31,11 +66,46 @@ document.addEventListener('DOMContentLoaded', async function() {
     const INITIAL_VOLUME = 0.2, ATTACK_TIME_RATIO = 0.1, DECAY_TIME_RATIO = 0.1, SUSTAIN_LEVEL = 0.7, RELEASE_TIME_RATIO = 0.2, GENERAL_VOLUME_RAMP_TIME = 0.2, OSCILLATOR_POOL_SIZE = 64, DRAG_THRESHOLD = 5;
     
     let currentTime = 0, playheadTime = 0, isPlaying = false, isPaused = false, isFadingOut = false, totalPausedTime = 0, isTrackingEnabled = false, isDragging = false, dragStartX = 0, dragStartY = 0, isLocked = false, lastSelectedNote = null, originalNoteOrder = new Map();
-    
+
+    // Loop playback — the hidden mode behind shift-click / long-press on Play.
+    // Ephemeral, like isTrackingEnabled and isLocked: never persisted, gone on reload.
+    //
+    // `isLoopEnabled` is the user's armed MODE and survives a seek (stop(false));
+    // pause, the edit paths that pause, and the Stop button all disarm it.
+    // `loopPeriod` is the transport's frozen module-end for the playback in flight,
+    // and is the single predicate the playhead uses to decide "wrap instead of stop".
+    // They are deliberately separate: the mode can be armed with nothing playing
+    // (loopPeriod 0), and it stays > 0 through the final pass after the mode is
+    // disarmed — that pass still has to wrap correctly if it started mid-module.
+    let isLoopEnabled = false;   // mode armed → the .looping icon
+    let isLoopDisarming = false; // toggled off; the engine is finishing the current pass
+    let loopEndAudioTime = null; // absolute audioContext time that final pass ends
+    let loopPeriod = 0;          // frozen getModuleEndTime() for the active playback; 0 = don't wrap
+    let playbackBaseTime = 0;    // baseStartTime of the active playback (to arm mid-play)
+
     let stackClickState = { lastClickPosition: null, stackedNotes: [], currentIndex: -1 };
+    // Workspace density. The Scale Controls widget and Settings → Scale are two
+    // views of these two numbers; `scale.*` in the settings store is the source of
+    // truth, so seed from it here — before the first GL sync reads them — and a
+    // reload comes back at the density you left.
     let xScaleFactor = 1.0, yScaleFactor = 1.0;
-    
+    try {
+        const persistedScale = settingsStore.get('scale');
+        if (persistedScale) {
+            if (typeof persistedScale.x === 'number') xScaleFactor = persistedScale.x;
+            if (typeof persistedScale.y === 'number') yScaleFactor = persistedScale.y;
+        }
+    } catch {}
+
     let glWorkspace = null;
+
+    // Multi-note selection (marquee / shift-click). Holds note ids, never the base
+    // note (0) — it is not marquee-selectable and must never be group-deletable.
+    // Declared HERE, above the GL bootstrap, on purpose: the bootstrap's sync() call
+    // reads selection state, and a `let` declared further down would be in its TDZ
+    // (which the bootstrap's try/catch would swallow, leaving the highlight dead).
+    const multiSelection = new Set();
+
     // Suppress playhead recentering during X-scale adjustments to avoid 1-frame pop
     let __rmtScalingXActive = false;
     // While dragging/resizing, feed temp overrides each frame so animation loop does not overwrite preview
@@ -147,273 +217,166 @@ document.addEventListener('DOMContentLoaded', async function() {
     `;
     document.head.appendChild(lockStyles);
   
+    // Both scale axes flow through applyXScale/applyYScale: the widget's sliders,
+    // Settings → Scale, and a limits edit that clamps an out-of-range value all
+    // arrive here by way of the settings store, so exactly one place knows how to
+    // move the workspace.
+    function applyXScale(next) {
+        if (typeof next !== 'number' || !isFinite(next) || next === xScaleFactor) return;
+
+        __rmtScalingXActive = true;
+        // Ensure playhead draws at viewport center during scaling when tracking is enabled
+        try {
+            if (isTrackingEnabled) {
+                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
+                    glWorkspace.renderer.setTrackingMode(true);
+                }
+            }
+        } catch {}
+
+        const oldScale = xScaleFactor;
+        xScaleFactor = next;
+        // Immediately update renderer scale factors to keep playhead world-x in sync this frame
+        try {
+            if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+            }
+        } catch {}
+        // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
+        try {
+            if (isTrackingEnabled && glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                const rect = glWorkspace.containerEl.getBoundingClientRect();
+                const centerX = rect.width * 0.5;
+                const s = glWorkspace.camera.scale || 1;
+                glWorkspace.camera.tx = centerX - s * (playheadTime * (200 * xScaleFactor));
+                if (glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+                }
+            }
+        } catch {}
+        updateVisualNotes(evaluatedNotes);
+        createMeasureBars();
+        // Ensure GL overlays/text/regions refresh immediately on scale change by bumping view epoch
+        try {
+            if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+            }
+        } catch {}
+
+        // Keep the same time (sec) under the screen center after x-scale changes
+        try {
+            if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
+                const rect = glWorkspace.containerEl.getBoundingClientRect();
+                const centerX = rect.width * 0.5;
+                const s = glWorkspace.camera.scale || 1;
+                if (isTrackingEnabled) {
+                    // When tracking, keep playhead centered to avoid any pop
+                    glWorkspace.camera.tx = centerX - s * (playheadTime * (200 * xScaleFactor));
+                } else {
+                    // Preserve the same world time under the screen center
+                    const worldXCenter = (centerX - glWorkspace.camera.tx) / s;
+                    const secCenter = worldXCenter / (200 * oldScale);
+                    glWorkspace.camera.tx = centerX - s * (secCenter * (200 * xScaleFactor));
+                }
+                if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
+            }
+        } catch {}
+
+        // Clear scaling flag on next frame to suppress one recenter in updatePlayhead
+        try {
+            requestAnimationFrame(() => { __rmtScalingXActive = false; });
+        } catch {
+            setTimeout(() => { __rmtScalingXActive = false; }, 0);
+        }
+        try { updatePlayhead(); } catch {}
+    }
+
+    function applyYScale(next) {
+        if (typeof next !== 'number' || !isFinite(next) || next === yScaleFactor) return;
+
+        yScaleFactor = next;
+        // Immediately update renderer scale factors so Y-dependent overlays stay consistent
+        try {
+            if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
+                glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
+            }
+        } catch {}
+        updateVisualNotes(evaluatedNotes);
+        updateBaseNotePosition();
+        // Bump view epoch so GL overlays that depend on viewport epoch refresh on Y-scale changes
+        try {
+            if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
+            }
+        } catch {}
+    }
+
     const createScaleControls = () => {
         const existingContainer = document.getElementById('scale-controls');
         const existingToggle = document.getElementById('scale-controls-toggle');
-        
+
         if (existingContainer) existingContainer.remove();
         if (existingToggle) existingToggle.remove();
-        
+
         const scaleControlsContainer = document.createElement('div');
         scaleControlsContainer.id = 'scale-controls';
         scaleControlsContainer.className = 'scale-controls';
-        
+
         const toggleButton = document.createElement('div');
         toggleButton.className = 'scale-controls-toggle';
         toggleButton.id = 'scale-controls-toggle';
         toggleButton.title = 'Scale Controls';
-        
+
+        // The rails are a setting now, not a hardcoded attribute: Settings → Scale
+        // can widen them by orders of magnitude, and applyScaleSettings() retunes
+        // these sliders when it does.
+        const lim = settingsStore.get('scale.limits') || {};
         scaleControlsContainer.innerHTML = `
           <div class="y-scale-slider-container">
-            <input type="range" id="y-scale-slider" min="0.3" max="5" step="0.1" value="1.0">
+            <input type="range" id="y-scale-slider" min="${lim.yMin}" max="${lim.yMax}" step="${scaleStep(lim.yMin, lim.yMax)}" value="${yScaleFactor}">
           </div>
           <div class="x-scale-slider-container">
-            <input type="range" id="x-scale-slider" min="0.3" max="2" step="0.1" value="1.0">
+            <input type="range" id="x-scale-slider" min="${lim.xMin}" max="${lim.xMax}" step="${scaleStep(lim.xMin, lim.xMax)}" value="${xScaleFactor}">
           </div>
         `;
-        
+
         document.body.appendChild(scaleControlsContainer);
         document.body.appendChild(toggleButton);
-        
+
         const xScaleSlider = document.getElementById('x-scale-slider');
         const yScaleSlider = document.getElementById('y-scale-slider');
-      
-        const handlers = { xInput: null, yInput: null, xChange: null, yChange: null, toggle: null };
-      
-        function throttle(func, limit) {
-            let inThrottle;
-            return function() {
-                const args = arguments;
-                const context = this;
-                if (!inThrottle) {
-                    func.apply(context, args);
-                    inThrottle = true;
-                    setTimeout(() => inThrottle = false, limit);
-                }
-            };
-        }
-      
-        handlers.xInput = (e) => {
-            __rmtScalingXActive = true;
-            // Ensure playhead draws at viewport center during scaling when tracking is enabled
-            try {
-                if (isTrackingEnabled) {
-                    if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
-                        glWorkspace.renderer.setTrackingMode(true);
-                    }
-                }
-            } catch {}
 
-            
-            const oldScale = xScaleFactor;
-            xScaleFactor = parseFloat(e.target.value);
-            // Immediately update renderer scale factors to keep playhead world-x in sync this frame
-            try {
-                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
-                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                }
-            } catch {}
-            // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
-            try {
-                if (isTrackingEnabled) {
-                    const neu = xScaleFactor;
-                    if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
-                        const rect = glWorkspace.containerEl.getBoundingClientRect();
-                        const centerX = rect.width * 0.5;
-                        const s = glWorkspace.camera.scale || 1;
-                        const x = playheadTime * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * x;
-                        if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                            glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                        }
-                    } else {
-                    }
-                }
-            } catch {}
-            updateVisualNotes(evaluatedNotes);
-            createMeasureBars();
-            // Ensure GL overlays/text/regions refresh immediately on scale change by bumping view epoch
-            try {
-                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } 
-            } catch {}
-            
-            // Keep the same time (sec) under the screen center after x-scale changes
-            try {
-                const old = oldScale;
-                const neu = xScaleFactor;
-                if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
-                    const rect = glWorkspace.containerEl.getBoundingClientRect();
-                    const centerX = rect.width * 0.5;
-                    const s = glWorkspace.camera.scale || 1;
-                    if (isTrackingEnabled) {
-                        // When tracking, keep playhead centered to avoid any pop
-                        const x = playheadTime * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * x;
-                    } else {
-                        // Preserve the same world time under the screen center
-                        const worldXCenter = (centerX - glWorkspace.camera.tx) / s;
-                        const secCenter = worldXCenter / (200 * old);
-                        const newWorldX = secCenter * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * newWorldX;
-                    }
-                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
-                } else {
-                }
-            } catch {}
+        // These sliders only WRITE the setting; the store subscriber below is what
+        // applies it. That single funnel is what keeps the widget and the Settings
+        // panel on the same number, whichever one you touch. ('input' alone: it
+        // already covers dragging, clicking the track and the arrow keys.)
+        const handlers = {
+            xInput: (e) => {
+                const v = parseFloat(e.target.value);
+                if (isFinite(v)) settingsStore.set('scale.x', v);
+            },
+            yInput: (e) => {
+                const v = parseFloat(e.target.value);
+                if (isFinite(v)) settingsStore.set('scale.y', v);
+            },
+            toggle: () => { toggleScaleControls(); },
+        };
 
-            // Clear scaling flag on next frame to suppress one recenter in updatePlayhead
-            try {
-                requestAnimationFrame(() => { __rmtScalingXActive = false; });
-            } catch {
-                setTimeout(() => { __rmtScalingXActive = false; }, 0);
-            }
-            try { updatePlayhead(); } catch {}
-        };
-      
-        handlers.yInput = (e) => {
-            yScaleFactor = parseFloat(e.target.value);
-            // Immediately update renderer scale factors so Y-dependent overlays stay consistent
-            try {
-                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
-                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                }
-            } catch {}
-            updateVisualNotes(evaluatedNotes);
-            updateBaseNotePosition();
-            // Bump view epoch so GL overlays that depend on viewport epoch refresh on Y-scale changes
-            try {
-                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } 
-            } catch {}
-        };
-      
-        handlers.xChange = (e) => {
-            __rmtScalingXActive = true;
-            // Ensure playhead draws at viewport center during scaling when tracking is enabled
-            try {
-                if (isTrackingEnabled) {
-                    if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
-                        glWorkspace.renderer.setTrackingMode(true);
-                    }
-                }
-            } catch {}
-
-            
-            const oldScale = xScaleFactor;
-            xScaleFactor = parseFloat(e.target.value);
-            // Immediately update renderer scale factors to keep playhead world-x in sync this frame
-            try {
-                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
-                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                }
-            } catch {}
-            // Pre-adjust camera/viewport before any redraw when tracking to avoid one-frame pop
-            try {
-                if (isTrackingEnabled) {
-                    const neu = xScaleFactor;
-                    if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
-                        const rect = glWorkspace.containerEl.getBoundingClientRect();
-                        const centerX = rect.width * 0.5;
-                        const s = glWorkspace.camera.scale || 1;
-                        const x = playheadTime * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * x;
-                        if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                            glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                        }
-                    } else {
-                    }
-                }
-            } catch {}
-            updateVisualNotes(evaluatedNotes);
-            createMeasureBars();
-            // Ensure GL overlays/text/regions refresh immediately on scale change by bumping view epoch
-            try {
-                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } 
-            } catch {}
-            
-            // Keep the same time (sec) under the screen center after x-scale changes
-            try {
-                const old = oldScale;
-                const neu = xScaleFactor;
-                if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
-                    const rect = glWorkspace.containerEl.getBoundingClientRect();
-                    const centerX = rect.width * 0.5;
-                    const s = glWorkspace.camera.scale || 1;
-                    if (isTrackingEnabled) {
-                        // When tracking, keep playhead centered to avoid any pop
-                        const x = playheadTime * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * x;
-                    } else {
-                        // Preserve the same world time under the screen center
-                        const worldXCenter = (centerX - glWorkspace.camera.tx) / s;
-                        const secCenter = worldXCenter / (200 * old);
-                        const newWorldX = secCenter * (200 * neu);
-                        glWorkspace.camera.tx = centerX - s * newWorldX;
-                    }
-                    if (typeof glWorkspace.camera.onChange === 'function') glWorkspace.camera.onChange();
-                } else {
-                }
-            } catch {}
-
-            // Clear scaling flag on next frame to suppress one recenter in updatePlayhead
-            try {
-                requestAnimationFrame(() => { __rmtScalingXActive = false; });
-            } catch {
-                setTimeout(() => { __rmtScalingXActive = false; }, 0);
-            }
-            try { updatePlayhead(); } catch {}
-        };
-      
-        handlers.yChange = (e) => {
-            yScaleFactor = parseFloat(e.target.value);
-            // Immediately update renderer scale factors so Y-dependent overlays stay consistent
-            try {
-                if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setScaleFactors === 'function') {
-                    glWorkspace.renderer.setScaleFactors(xScaleFactor, yScaleFactor);
-                }
-            } catch {}
-            updateVisualNotes(evaluatedNotes);
-            updateBaseNotePosition();
-            // Bump view epoch so GL overlays that depend on viewport epoch refresh on Y-scale changes
-            try {
-                if (glWorkspace && glWorkspace.renderer && glWorkspace.camera && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
-                    glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
-                } 
-            } catch {}
-        };
-        
-        handlers.toggle = () => {
-            toggleScaleControls();
-        };
-      
         xScaleSlider.addEventListener('input', handlers.xInput);
         yScaleSlider.addEventListener('input', handlers.yInput);
-        xScaleSlider.addEventListener('change', handlers.xChange);
-        yScaleSlider.addEventListener('change', handlers.yChange);
         toggleButton.addEventListener('click', handlers.toggle);
-        
+
         scaleControlsContainer.handlers = handlers;
-        
-        return { 
-            container: scaleControlsContainer, 
+
+        return {
+            container: scaleControlsContainer,
             toggle: toggleButton,
+            xSlider: xScaleSlider,
+            ySlider: yScaleSlider,
             cleanup: () => {
-                if (xScaleSlider) {
-                    xScaleSlider.removeEventListener('input', handlers.xInput);
-                    xScaleSlider.removeEventListener('change', handlers.xChange);
-                }
-                if (yScaleSlider) {
-                    yScaleSlider.removeEventListener('input', handlers.yInput);
-                    yScaleSlider.removeEventListener('change', handlers.yChange);
-                }
-                if (toggleButton) {
-                    toggleButton.removeEventListener('click', handlers.toggle);
-                }
+                if (xScaleSlider) xScaleSlider.removeEventListener('input', handlers.xInput);
+                if (yScaleSlider) yScaleSlider.removeEventListener('input', handlers.yInput);
+                if (toggleButton) toggleButton.removeEventListener('click', handlers.toggle);
             }
         };
     };
@@ -455,8 +418,35 @@ document.addEventListener('DOMContentLoaded', async function() {
     })();
     
     const scaleControls = createScaleControls();
-   
-   
+
+    // Everything that writes `scale.*` lands here — the widget's own sliders, the
+    // Settings panel, "Reset all" — so the two views can never drift apart: apply
+    // the values, retune the sliders' rails if the limits moved, and re-seed
+    // whichever knob the user is NOT currently holding.
+    function applyScaleSettings() {
+        const sc = settingsStore.get('scale') || {};
+        const lim = sc.limits || {};
+        const tune = (slider, lo, hi) => {
+            if (!slider || !isFinite(lo) || !isFinite(hi)) return;
+            slider.min = lo;
+            slider.max = hi;
+            slider.step = scaleStep(lo, hi);
+        };
+        tune(scaleControls.xSlider, lim.xMin, lim.xMax);
+        tune(scaleControls.ySlider, lim.yMin, lim.yMax);
+        applyYScale(sc.y);
+        applyXScale(sc.x);
+        if (scaleControls.xSlider && scaleControls.xSlider !== document.activeElement) {
+            scaleControls.xSlider.value = xScaleFactor;
+        }
+        if (scaleControls.ySlider && scaleControls.ySlider !== document.activeElement) {
+            scaleControls.ySlider.value = yScaleFactor;
+        }
+    }
+    settingsStore.subscribe(({ path }) => {
+        if (!path || path === 'scale' || path.indexOf('scale.') === 0) applyScaleSettings();
+    });
+
     function batchClassOperation(elements, classesToAdd = [], classesToRemove = []) {
         if (!elements || elements.length === 0) return;
         
@@ -520,7 +510,10 @@ document.addEventListener('DOMContentLoaded', async function() {
               if (snap) {
                 localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
               }
-            } catch {}
+            } catch (e) {
+              // A silent failure here means the autosave quietly stops
+              console.error('[RMT] Autosave failed (visibilitychange):', e);
+            }
         }
     });
   
@@ -736,28 +729,30 @@ document.addEventListener('DOMContentLoaded', async function() {
         });
     }
   
-    function deleteNoteKeepDependencies(noteId) {
+    // Liberate a note's dependents — updateDependentRawExpressions() INLINES this note's
+    // own expressions into theirs, so they keep their evaluated positions — and then
+    // remove the note. Because liberation is substitution, it composes: deleting a whole
+    // group one note at a time gives the same result in any order.
+    //
+    // Deliberately no evaluate/render/snapshot: the caller owns those, so a group delete
+    // batches them and lands as ONE undo entry.
+    function liberateAndRemoveNoteGL(noteId) {
         const selectedNote = myModule.getNoteById(noteId);
-        if (!selectedNote) return;
-        
+        if (!selectedNote) return false;
+
         let selectedRaw = {};
         ["startTime", "duration", "frequency"].forEach(varName => {
             if (selectedNote.variables[varName + "String"]) {
                 selectedRaw[varName] = selectedNote.variables[varName + "String"];
             } else {
+                // Emit the parseable two-arg form — a single argument
+                // containing a slash ('new Fraction(3/2)') never parsed.
                 const frac = selectedNote.getVariable(varName);
-                let fracStr;
-                if (frac == null) {
-                    fracStr = (varName === "frequency") ? "1/1" : "0/1";
-                } else if (frac && typeof frac.toFraction === "function") {
-                    fracStr = frac.toFraction();
+                if (frac != null && typeof frac.toFraction === "function") {
+                    selectedRaw[varName] = fracToLegacy(frac);
                 } else {
-                    fracStr = frac.toString();
+                    selectedRaw[varName] = (varName === "frequency") ? "new Fraction(1, 1)" : "new Fraction(0, 1)";
                 }
-                if (!fracStr.includes("/")) {
-                    fracStr = fracStr + "/1";
-                }
-                selectedRaw[varName] = "new Fraction(" + fracStr + ")";
             }
         });
         
@@ -776,13 +771,18 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (noteId !== 0) {
             delete myModule.notes[noteId];
             delete myModule._evaluationCache[noteId];
-            
+
             const dependents = myModule.getDependentNotes(noteId);
             dependents.forEach(depId => {
                 myModule.markNoteDirty(depId);
             });
         }
-        
+        return true;
+    }
+
+    function deleteNoteKeepDependencies(noteId) {
+        if (!liberateAndRemoveNoteGL(noteId)) return;
+
         evaluatedNotes = myModule.evaluateModule();
         setEvaluatedNotes(evaluatedNotes);
         updateVisualNotes(evaluatedNotes);
@@ -790,6 +790,36 @@ document.addEventListener('DOMContentLoaded', async function() {
         clearSelection();
         invalidateModuleEndTimeCache();
         try { captureSnapshot(`Delete Note ${noteId} (keep deps)`); } catch {}
+    }
+
+    // GROUP delete. Policy: dependents OUTSIDE the group are LIBERATED, not deleted —
+    // each deleted note's expressions are inlined into whatever still references them,
+    // so those notes keep their positions. Destructive only to what was selected.
+    // The base note can never be a member of the selection, so it can never be deleted.
+    // ONE undo entry.
+    function deleteMultiSelection() {
+        const ids = [...multiSelection]
+            .map(Number)
+            .filter((id) => Number.isFinite(id) && id !== 0 && myModule.getNoteById(id));
+        if (!ids.length) return;
+
+        try { eventBus.emit('player:requestPause'); } catch {}
+
+        for (const id of ids) {
+            try {
+                liberateAndRemoveNoteGL(id);
+            } catch (e) {
+                try { console.warn('group delete failed for note', id, e); } catch {}
+            }
+        }
+
+        evaluatedNotes = myModule.evaluateModule();
+        setEvaluatedNotes(evaluatedNotes);
+        updateVisualNotes(evaluatedNotes);
+        createMeasureBars();
+        clearSelection();          // drops both the single selection and the group
+        invalidateModuleEndTimeCache();
+        try { captureSnapshot(`Delete ${ids.length} Notes`); } catch {}
     }
 
     function checkAndUpdateDependentNotes(noteId, oldDuration, newDuration) {
@@ -800,8 +830,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         const baseStartVal = myModule.baseNote.getVariable('startTime');
         if (!noteStartVal || !baseStartVal) return;
 
-        const noteStartTime = noteStartVal.valueOf();
-        const baseNoteStartTime = baseStartVal.valueOf();
+        const noteStartTime = toNumber(noteStartVal);
+        const baseNoteStartTime = toNumber(baseStartVal);
         const dependentNotes = myModule.getDependentNotes(noteId);
         
         dependentNotes.forEach(depId => {
@@ -812,7 +842,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             const durationSubMatch = startTimeString.match(new RegExp(`module\\.getNoteById\\(${noteId}\\)\\.getVariable\\('startTime'\\)\\.add\\(module\\.getNoteById\\(${noteId}\\)\\.getVariable\\('duration'\\)\\)\\.sub\\(.*?\\)`));
             
             if (durationSubMatch) {
-                const depStartTime = depNote.getVariable('startTime').valueOf();
+                const depStartTime = toNumber(depNote.getVariable('startTime'));
                 
                 if (depStartTime < noteStartTime) {
                     
@@ -828,8 +858,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                             const parent = myModule.getNoteById(parentId);
                             
                             if (parent) {
-                                const parentStartTime = parent.getVariable('startTime').valueOf();
-                                
+                                const parentStartTime = toNumber(parent.getVariable('startTime'));
+
                                 if (parentStartTime <= depStartTime) {
                                     suitableParent = parent;
                                     break;
@@ -853,28 +883,28 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     let newRaw;
                     const depUseDSL = isDSLSyntax(depNote.variables?.startTimeString || '');
+                    const baseTempoFrac = myModule.baseNote.getVariable('tempo');
+                    const depStartFrac = depNote.getVariable('startTime');
 
                     if (suitableParent === myModule.baseNote) {
-                        const offset = Math.max(depStartTime, baseNoteStartTime) - baseNoteStartTime;
-                        const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-                        const beatLength = 60 / baseTempo;
-                        const beatOffset = offset / beatLength;
-                        const offsetFraction = new Fraction(beatOffset);
+                        // Exact beat offset from the exact start times — a float
+                        // delta here loses deep-chain exactness on every repair.
+                        const offsetFraction = exactBeatOffset(depStartFrac, baseStartVal, baseTempoFrac);
 
                         if (depUseDSL) {
-                            if (Math.abs(beatOffset) < 1e-10) {
+                            if (offsetFraction.n === 0n) {
                                 newRaw = 'base.t';
                             } else {
-                                const fracStr = (offsetFraction.d === 1) ? `${offsetFraction.n}` : `(${offsetFraction.n}/${offsetFraction.d})`;
-                                const beatMul = (offsetFraction.n === 1 && offsetFraction.d === 1) ? 'beat(base)' : `beat(base) * ${fracStr}`;
+                                const beatMul = fracIsOne(offsetFraction) ? 'beat(base)' : `beat(base) * ${fracToDSL(offsetFraction)}`;
                                 newRaw = `base.t + ${beatMul}`;
                             }
                         } else {
-                            newRaw = simplifyStartTime(`module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
+                            newRaw = simplifyStartTime(`module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetFraction.s * offsetFraction.n}, ${offsetFraction.d})))`, myModule);
                         }
                     } else {
-                        const parentStartTime = suitableParent.getVariable('startTime').valueOf();
-                        const parentDuration = suitableParent.getVariable('duration')?.valueOf() || 0;
+                        const parentStartFrac = suitableParent.getVariable('startTime');
+                        const parentStartTime = toNumber(parentStartFrac);
+                        const parentDuration = toNumber(suitableParent.getVariable('duration'), 0);
                         const parentEndTime = parentStartTime + parentDuration;
 
                         const pRef = depUseDSL ? `[${suitableParent.id}]` : null;
@@ -887,19 +917,14 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(module.getNoteById(${suitableParent.id}).getVariable('duration'))`, myModule);
                             }
                         } else {
-                            const offset = Math.max(depStartTime, parentStartTime) - parentStartTime;
-                            const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-                            const beatLength = 60 / baseTempo;
-                            const beatOffset = offset / beatLength;
-                            const offsetFraction = new Fraction(beatOffset);
+                            const offsetFraction = exactBeatOffset(depStartFrac, parentStartFrac, baseTempoFrac);
 
                             if (depUseDSL) {
-                                const fracStr = (offsetFraction.d === 1) ? `${offsetFraction.n}` : `(${offsetFraction.n}/${offsetFraction.d})`;
                                 const beatRef = `beat([${suitableParent.id}])`;
-                                const beatMul = (offsetFraction.n === 1 && offsetFraction.d === 1) ? beatRef : `${beatRef} * ${fracStr}`;
+                                const beatMul = fracIsOne(offsetFraction) ? beatRef : `${beatRef} * ${fracToDSL(offsetFraction)}`;
                                 newRaw = `${pRef}.t + ${beatMul}`;
                             } else {
-                                newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${suitableParent.id}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
+                                newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${suitableParent.id}))).mul(new Fraction(${offsetFraction.s * offsetFraction.n}, ${offsetFraction.d})))`, myModule);
                             }
                         }
                     }
@@ -985,18 +1010,23 @@ document.addEventListener('DOMContentLoaded', async function() {
             note.variables.startTime && !note.variables.duration && !note.variables.frequency
         );
         if (measureNotes.length > 0) {
+            // Exact ordering with id tie-break; a valueOf() subtraction here
+            // collapses rationals that differ past double precision, and a
+            // NaN comparator key would leave loop/transport end times wrong.
             measureNotes.sort((a, b) => {
                 const aStart = a.getVariable('startTime');
                 const bStart = b.getVariable('startTime');
-                if (!aStart || !bStart) return 0;
-                return aStart.valueOf() - bStart.valueOf();
+                if (!aStart || !bStart) return a.id - b.id;
+                try {
+                    const cmp = aStart.compare(bStart);
+                    if (cmp !== 0) return cmp;
+                } catch (e) { /* non-Fraction value — fall through */ }
+                return a.id - b.id;
             });
             const lastMeasure = measureNotes[measureNotes.length - 1];
             const lastMeasureStart = lastMeasure.getVariable('startTime');
             if (lastMeasureStart) {
-                measureEnd = lastMeasureStart
-                    .add(myModule.findMeasureLength(lastMeasure))
-                    .valueOf();
+                measureEnd = toNumber(lastMeasureStart.add(myModule.findMeasureLength(lastMeasure)));
             }
         }
 
@@ -1006,7 +1036,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                 const noteStart = note.getVariable('startTime');
                 const noteDuration = note.getVariable('duration');
                 if (!noteStart || !noteDuration) return;
-                const noteEnd = noteStart.valueOf() + noteDuration.valueOf();
+                let noteEnd;
+                try {
+                    noteEnd = toNumber(noteStart.add(noteDuration));
+                } catch (e) {
+                    noteEnd = toNumber(noteStart) + toNumber(noteDuration);
+                }
                 if (noteEnd > lastNoteEnd) {
                     lastNoteEnd = noteEnd;
                 }
@@ -1101,6 +1136,115 @@ document.addEventListener('DOMContentLoaded', async function() {
                     });
                 } catch {}
 
+                // Dev perf harness hook: expose workspace/renderer for sync-isolation
+                // + redraw timing. Perf-gated (?perf in the URL) so production is untouched.
+                try {
+                    if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('perf')) {
+                        window.__rmtWorkspace = glWorkspace;
+                        window.__rmtRenderer = glWorkspace.renderer;
+                    }
+                } catch {}
+
+                // Apply the persisted note-arrows toggle to the renderer, and
+                // keep it in sync with live Settings changes.
+                try {
+                    const applyArrowsEnabled = () => {
+                        try {
+                            const enabled = settingsStore.get('arrows.enabled') !== false;
+                            const r = glWorkspace && glWorkspace.renderer;
+                            if (r) {
+                                // Setter, not a bare assignment: hiding the arrows frees their
+                                // column and the id/fraction reflow into it, so the cached label
+                                // layout has to be invalidated, not merely redrawn.
+                                if (typeof r.setDrawNoteArrows === 'function') r.setDrawNoteArrows(enabled);
+                                else { r.drawNoteArrows = enabled; r.needsRedraw = true; }
+                            }
+                        } catch {}
+                    };
+                    applyArrowsEnabled();
+                    eventBus.on('settings:changed', ({ path }) => {
+                        if (!path || path === 'arrows' || path.indexOf('arrows.enabled') === 0 || path === '') {
+                            applyArrowsEnabled();
+                        }
+                    });
+                } catch {}
+
+                // Master volume: initialize the transport slider from the
+                // persisted setting, keep the two in sync, and apply to the
+                // audio graph. (Previously the slider and the Settings → Audio
+                // master-volume control were disconnected; the graph is now the
+                // single applier via audio.masterVolume.)
+                try {
+                    const syncVolumeUI = (v) => {
+                        try {
+                            if (!(typeof v === 'number') || !isFinite(v)) return;
+                            if (domCache.volumeSlider) domCache.volumeSlider.value = v;
+                        } catch {}
+                    };
+                    const persistedVol = settingsStore.get('audio.masterVolume');
+                    if (typeof persistedVol === 'number') {
+                        syncVolumeUI(persistedVol);
+                        setVolume(persistedVol);
+                    }
+                    // Persist on release (change fires once at drag end — avoids
+                    // localStorage churn during the drag).
+                    if (domCache.volumeSlider) {
+                        domCache.volumeSlider.addEventListener('change', (e) => {
+                            try { settingsStore.set('audio.masterVolume', parseFloat(e.target.value)); } catch {}
+                        });
+                    }
+                    // Reflect changes made elsewhere (Settings panel / reset).
+                    eventBus.on('settings:changed', ({ path, value, settings }) => {
+                        if (path === 'audio.masterVolume' || path === 'audio' || path === '') {
+                            const v = path === 'audio.masterVolume'
+                                ? value
+                                : (settings && settings.audio && settings.audio.masterVolume);
+                            if (typeof v === 'number') { syncVolumeUI(v); setVolume(v); }
+                        }
+                    });
+                } catch {}
+
+                // Default instrument: notes that don't resolve to an explicit or
+                // inherited instrument use the configured default (was hardcoded
+                // 'sine-wave'). Applies to fresh playbacks after a change.
+                try {
+                    const applyDefaultInstrument = () => {
+                        try {
+                            const di = settingsStore.get('audio.defaultInstrument');
+                            if (typeof di === 'string' && di) setDefaultInstrument(di);
+                        } catch {}
+                    };
+                    applyDefaultInstrument();
+                    eventBus.on('settings:changed', ({ path }) => {
+                        if (path === 'audio.defaultInstrument' || path === 'audio' || path === '') {
+                            applyDefaultInstrument();
+                        }
+                    });
+                } catch {}
+
+                // Theme system: apply CSS variables + note geometry from
+                // Settings → Appearance, re-syncing the renderer when geometry
+                // (height/border/corner) changes.
+                try {
+                    themeManager.init({
+                        renderer: glWorkspace.renderer,
+                        requestResync: () => {
+                            try {
+                                if (glWorkspace) {
+                                    glWorkspace.sync({
+                                        evaluatedNotes,
+                                        module: myModule,
+                                        xScaleFactor,
+                                        yScaleFactor,
+                                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
+                                    });
+                                }
+                                if (typeof createMeasureBars === 'function') createMeasureBars();
+                            } catch {}
+                        }
+                    });
+                } catch (e) { try { console.warn('theme init failed', e); } catch {} }
+
                 // No DOM viewport; Workspace camera owns zoom/pan
 
 
@@ -1111,7 +1255,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                   const cy = rect.top  + rect.height * 0.5;
                   const offX = rect.left;
                   const offY = rect.top;
-                  const baseNoteFreqInit = myModule.baseNote?.getVariable?.('frequency')?.valueOf?.() ?? 440;
+                  const baseNoteFreqInit = toNumber(myModule.baseNote?.getVariable?.('frequency'), 440) || 440;
                   const baseYInit = frequencyToY(baseNoteFreqInit);
                   const s = 1.0;
                   // Camera uses container-local translation; Workspace camera publishes an affine basis via getBasis()
@@ -1145,6 +1289,29 @@ document.addEventListener('DOMContentLoaded', async function() {
                       try {
                         const nowTs = (performance && performance.now) ? performance.now() : Date.now();
                         if (containerEl.__rmtSuppressClickUntil && nowTs < containerEl.__rmtSuppressClickUntil) {
+                          event.stopPropagation();
+                          event.preventDefault();
+                          return;
+                        }
+
+                        // Shift-click refines the group: toggle the top-most note/measure
+                        // under the pointer in or out of the selection. This MUST run before
+                        // the stack-cycling block below — cycling would fight the toggle,
+                        // advancing the stack index on every shift-click.
+                        if (event.shiftKey && !isLocked) {
+                          try {
+                            // Notes only — shift-clicking a measure bar or the base note
+                            // does nothing (they are not group-selectable).
+                            const hit = (glWorkspace && typeof glWorkspace.pickAt === 'function')
+                              ? glWorkspace.pickAt(event.clientX, event.clientY, 3)
+                              : null;
+                            if (hit && hit.type === 'note' && hit.id != null) {
+                              toggleMultiSelectId(Number(hit.id));
+                            }
+                            // Shift on empty background is a no-op: it must NOT clear the
+                            // group (the user is mid-refinement, and a stray miss would
+                            // throw the whole selection away).
+                          } catch {}
                           event.stopPropagation();
                           event.preventDefault();
                           return;
@@ -1195,6 +1362,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                         if (targetEntry) {
                           const t = targetEntry.type;
                           const tid = Number(targetEntry.id);
+
+                          // A plain (unmodified) click deselects everything, then selects the
+                          // one thing under the pointer — including when a group is live.
+                          try { clearMultiSelection(); } catch {}
 
                           if (t === 'note') {
                             const note = myModule.getNoteById(tid);
@@ -1834,7 +2005,7 @@ if (canvasEl) {
                     list.forEach(cid => {
                       try {
                         const n = myModule.getNoteById(Number(cid));
-                        const s = Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
+                        const s = toNumber(n.getVariable('startTime'), 0);
                         if (s < bestStart) { bestStart = s; best = cid; }
                       } catch {}
                     });
@@ -2042,10 +2213,28 @@ if (canvasEl) {
     function clearSelection() {
         modals.clearSelection();
         currentSelectedNote = null;
+        // A plain click clears the group too — "clear" means clear.
+        try { clearMultiSelection(); } catch {}
         // Update WebGL renderer selection ordering
         try { syncRendererSelection(); } catch {}
     }
-      
+
+    // A history restore replaces the module wholesale (cleanupCurrentModule + loadFromJSON),
+    // so every selection the UI is holding points at Note objects that no longer exist. Drop
+    // it before the teardown, or the note widget stays open showing the OLD note's
+    // expression, and committing a field from it writes into a dead note and snapshots the
+    // result. Registered here because clearSelection() is scoped to this closure, and it
+    // runs before the restore handler itself (listeners fire in registration order).
+    //
+    // Every other module-swapping path already clears explicitly; the restore path only ever
+    // got away with it because the mouse Undo lived in the "+" menu, which the global
+    // mouseup treats as "outside" — so the selection was cleared incidentally, a beat before
+    // the click landed. Ctrl+Z never had that accident, and the module bar's Undo does not
+    // either (it is allow-listed, so that using it does not wipe the selection).
+    try {
+        eventBus.on('history:requestRestore', () => { try { clearSelection(); } catch (e) {} });
+    } catch (e) {}
+
     domCache.closeWidgetBtn.addEventListener('click', () => {
         clearSelection();
     });
@@ -2133,18 +2322,21 @@ if (canvasEl) {
         const baseNoteFreq = myModule.baseNote.getVariable('frequency');
         let numerator, denominator;
         if (baseNoteFreq instanceof Fraction) {
-            numerator = baseNoteFreq.n;
-            denominator = baseNoteFreq.d;
+            // Sign belongs to the numerator; elide huge digit runs so the
+            // circle stays readable (exact value lives in the Raw field)
+            const elide = (s) => s.length > 12 ? `${s.slice(0, 6)}…${s.slice(-4)}` : s;
+            numerator = elide((baseNoteFreq.s * baseNoteFreq.n).toString());
+            denominator = elide(baseNoteFreq.d.toString());
         } else {
-            numerator = baseNoteFreq.toString();
+            numerator = String(baseNoteFreq);
             denominator = '1';
         }
-        
+
         const fractionElements = document.querySelector('.base-note-fraction');
         if (fractionElements) {
             const numeratorDisplay = fractionElements.querySelector('.fraction-numerator');
             const denominatorDisplay = fractionElements.querySelector('.fraction-denominator');
-            
+
             if (numeratorDisplay && denominatorDisplay) {
                 numeratorDisplay.textContent = numerator;
                 denominatorDisplay.textContent = denominator;
@@ -2157,7 +2349,7 @@ if (canvasEl) {
         return;
     }
     
-    let baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+    let baseNoteFreq = toNumber(myModule.baseNote.getVariable('frequency'), 440);
     let baseNoteY = frequencyToY(baseNoteFreq);
     
     let baseNoteDisplay = createBaseNoteDisplay();
@@ -2279,10 +2471,10 @@ if (canvasEl) {
             if (ev && baseEv && ev.frequency && baseEv.frequency) {
                 const f = ev.frequency instanceof Fraction
                     ? ev.frequency
-                    : new Fraction(typeof ev.frequency?.valueOf === 'function' ? ev.frequency.valueOf() : ev.frequency);
+                    : new Fraction(toNumber(ev.frequency, 1));
                 const b = baseEv.frequency instanceof Fraction
                     ? baseEv.frequency
-                    : new Fraction(typeof baseEv.frequency?.valueOf === 'function' ? baseEv.frequency.valueOf() : baseEv.frequency);
+                    : new Fraction(toNumber(baseEv.frequency, 1));
 
                 const ratio = (typeof f.div === 'function') ? f.div(b) : new Fraction(f).div(b);
                 let fracStr = (typeof ratio.toFraction === 'function') ? ratio.toFraction() : String(ratio);
@@ -2302,9 +2494,9 @@ if (canvasEl) {
             if (!baseVal) return "1/1";
 
             const f = (freqVal instanceof Fraction) ? freqVal
-                : new Fraction(typeof freqVal.valueOf === 'function' ? freqVal.valueOf() : Number(freqVal));
+                : new Fraction(toNumber(freqVal, 1));
             const b = (baseVal instanceof Fraction) ? baseVal
-                : new Fraction(typeof baseVal.valueOf === 'function' ? baseVal.valueOf() : Number(baseVal));
+                : new Fraction(toNumber(baseVal, 1));
 
             const ratio = (typeof f.div === 'function') ? f.div(b) : new Fraction(f).div(b);
             let fracStr = (typeof ratio.toFraction === 'function') ? ratio.toFraction() : String(ratio);
@@ -2336,19 +2528,21 @@ if (canvasEl) {
         affectedIds.forEach(id => {
             const depNote = myModule.getNoteById(id);
             if (depNote && typeof depNote.getVariable === 'function') {
-                originalValues[id] = new Fraction(depNote.getVariable('startTime').valueOf());
+                // Keep the exact Fraction — no float hop needed for comparison
+                originalValues[id] = depNote.getVariable('startTime');
             }
         });
         const savedStartFunc = draggedNote.variables.startTime;
         draggedNote.variables.startTime = () => newDraggedStart;
-        
+
         const moved = [];
         const tol = new Fraction(1, 10000);
         affectedIds.forEach(id => {
             const depNote = myModule.getNoteById(id);
             if (depNote && typeof depNote.getVariable === 'function') {
-                let newVal = new Fraction(depNote.getVariable('startTime').valueOf());
-                if (newVal.sub(originalValues[id]).abs().compare(tol) > 0) {
+                const newVal = depNote.getVariable('startTime');
+                if (newVal && originalValues[id] &&
+                    newVal.sub(originalValues[id]).abs().compare(tol) > 0) {
                     moved.push({ note: depNote, newStart: newVal });
                 }
             }
@@ -2499,15 +2693,17 @@ function __parseDSLFrequencyExpression(expr, debug) {
       continue;
     }
 
-    // Fraction coefficient: (a/b) or just a number
+    // Fraction coefficient: (a/b) or just a number — BigInt-exact parse
+    // (parseInt silently truncates digit runs past 2^53, e.g. after ~53
+    // octave-arrow presses)
     const fracMatch = tok.match(/^\(?\s*(-?\d+)\s*\/\s*(\d+)\s*\)?$/);
     if (fracMatch) {
-      coeff = coeff.mul(new Fraction(parseInt(fracMatch[1], 10), parseInt(fracMatch[2], 10)));
+      coeff = coeff.mul(new Fraction(BigInt(fracMatch[1]), BigInt(fracMatch[2])));
       continue;
     }
     const numMatch = tok.match(/^(-?\d+)$/);
     if (numMatch) {
-      coeff = coeff.mul(new Fraction(parseInt(numMatch[1], 10)));
+      coeff = coeff.mul(new Fraction(BigInt(numMatch[1]), 1n));
       continue;
     }
 
@@ -2623,8 +2819,9 @@ function parseFrequencyExpressionLocal(exprText, moduleInstance) {
   // Check if right is a fraction constant: new Fraction(a) or new Fraction(a, b)
   const fracMatch = right.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
   if (fracMatch) {
-    const num = parseInt(fracMatch[1], 10);
-    const den = fracMatch[2] ? parseInt(fracMatch[2], 10) : 1;
+    // BigInt-exact: parseInt truncates coefficient digit runs past 2^53
+    const num = BigInt(fracMatch[1]);
+    const den = fracMatch[2] ? BigInt(fracMatch[2]) : 1n;
     const leftParsed = parseFrequencyExpressionLocal(left, moduleInstance);
     if (leftParsed) {
       leftParsed.algebra.coeff = leftParsed.algebra.coeff.mul(new Fraction(num, den));
@@ -2635,8 +2832,8 @@ function parseFrequencyExpressionLocal(exprText, moduleInstance) {
   // Check if left is a fraction constant (e.g., new Fraction(3,2).mul(expr))
   const fracMatchLeft = left.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
   if (fracMatchLeft) {
-    const num = parseInt(fracMatchLeft[1], 10);
-    const den = fracMatchLeft[2] ? parseInt(fracMatchLeft[2], 10) : 1;
+    const num = BigInt(fracMatchLeft[1]);
+    const den = fracMatchLeft[2] ? BigInt(fracMatchLeft[2]) : 1n;
     const rightParsed = parseFrequencyExpressionLocal(right, moduleInstance);
     if (rightParsed) {
       rightParsed.algebra.coeff = rightParsed.algebra.coeff.mul(new Fraction(num, den));
@@ -2765,7 +2962,8 @@ function multiplyAlgebrasLocal(a, b) {
     }
   }
 
-  const newPowers = [...map.values()].filter(p => p.expNum !== 0).sort((x, y) => x.base - y.base);
+  const newPowers = [...map.values()].filter(p => p.expNum !== 0)
+    .sort((x, y) => (x.base < y.base ? -1 : x.base > y.base ? 1 : 0));
   return { coeff: newCoeff, powers: newPowers };
 }
 
@@ -2795,7 +2993,8 @@ function divideAlgebrasLocal(a, b) {
     }
   }
 
-  const newPowers = [...map.values()].filter(p => p.expNum !== 0).sort((x, y) => x.base - y.base);
+  const newPowers = [...map.values()].filter(p => p.expNum !== 0)
+    .sort((x, y) => (x.base < y.base ? -1 : x.base > y.base ? 1 : 0));
   return { coeff: newCoeff, powers: newPowers };
 }
 
@@ -2808,9 +3007,7 @@ function algebraToExpressionLocal(algebra, anchorRef, useDSL) {
     const parts = [];
 
     if (!algebra.coeff.equals(1)) {
-      const c = algebra.coeff;
-      const val = c.s * c.n;
-      parts.push(c.d === 1 ? `${val}` : `(${val}/${c.d})`);
+      parts.push(fracToDSL(algebra.coeff));
     }
 
     parts.push(anchorRef); // e.g. "base.f" or "[3].f"
@@ -2829,12 +3026,7 @@ function algebraToExpressionLocal(algebra, anchorRef, useDSL) {
 
   // Add coefficient if not 1
   if (!algebra.coeff.equals(1)) {
-    const c = algebra.coeff;
-    if (c.d === 1) {
-      parts.push(`new Fraction(${c.s * c.n})`);
-    } else {
-      parts.push(`new Fraction(${c.s * c.n}, ${c.d})`);
-    }
+    parts.push(fracToLegacy(algebra.coeff));
   }
 
   // Add each power term
@@ -2885,7 +3077,7 @@ function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
       if (debug) console.log('[AlgebraRebuild] Failed to parse:', exprText);
       return null;
     }
-    if (debug) console.log('[AlgebraRebuild] Parsed:', JSON.stringify(parsed, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+    if (debug) console.log('[AlgebraRebuild] Parsed:', JSON.stringify(parsed, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
 
     const exprIsDSL = isDSLSyntax(exprText);
     const anchorRef = exprIsDSL
@@ -2899,7 +3091,7 @@ function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
       if (debug) console.log('[AlgebraRebuild] Failed to trace oldRef:', oldRefId);
       return null;
     }
-    if (debug) console.log('[AlgebraRebuild] oldRefAlgebra:', JSON.stringify(oldRefAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+    if (debug) console.log('[AlgebraRebuild] oldRefAlgebra:', JSON.stringify(oldRefAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
 
     // Get the new anchor's algebra relative to baseNote
     const newAnchorAlgebra = traceFrequencyAlgebraToBaseNote(newAnchor.id, moduleInstance);
@@ -2907,18 +3099,18 @@ function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
       if (debug) console.log('[AlgebraRebuild] Failed to trace newAnchor:', newAnchor.id);
       return null;
     }
-    if (debug) console.log('[AlgebraRebuild] newAnchorAlgebra:', JSON.stringify(newAnchorAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+    if (debug) console.log('[AlgebraRebuild] newAnchorAlgebra:', JSON.stringify(newAnchorAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
 
     // The note's absolute algebra (relative to baseNote) is:
     // noteAbsoluteAlgebra = parsed.algebra * oldRefAlgebra
     const noteAbsoluteAlgebra = multiplyAlgebrasLocal(parsed.algebra, oldRefAlgebra);
-    if (debug) console.log('[AlgebraRebuild] noteAbsoluteAlgebra:', JSON.stringify(noteAbsoluteAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+    if (debug) console.log('[AlgebraRebuild] noteAbsoluteAlgebra:', JSON.stringify(noteAbsoluteAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
 
     // To express relative to newAnchor, we need:
     // noteAbsoluteAlgebra = newRelativeAlgebra * newAnchorAlgebra
     // So: newRelativeAlgebra = noteAbsoluteAlgebra / newAnchorAlgebra
     const newRelativeAlgebra = divideAlgebrasLocal(noteAbsoluteAlgebra, newAnchorAlgebra);
-    if (debug) console.log('[AlgebraRebuild] newRelativeAlgebra:', JSON.stringify(newRelativeAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+    if (debug) console.log('[AlgebraRebuild] newRelativeAlgebra:', JSON.stringify(newRelativeAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
 
     // Generate the new expression
     const result = algebraToExpressionLocal(newRelativeAlgebra, anchorRef, exprIsDSL);
@@ -2950,15 +3142,22 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
     const anchorFreq = newAnchor.getVariable('frequency');
     if (!noteFreq || !anchorFreq) return null;
 
-    const noteVal = typeof noteFreq.valueOf === 'function' ? noteFreq.valueOf() : Number(noteFreq);
-    const anchorVal = typeof anchorFreq.valueOf === 'function' ? anchorFreq.valueOf() : Number(anchorFreq);
+    // Exact ratio when both values are rational — this is what keeps
+    // retargeted frequencies exact at any chain depth.
+    let exactRatio = null;
+    if (noteFreq instanceof Fraction && anchorFreq instanceof Fraction && anchorFreq.n !== 0n) {
+      try { exactRatio = noteFreq.div(anchorFreq); } catch { exactRatio = null; }
+    }
+
+    const noteVal = toNumber(noteFreq, NaN);
+    const anchorVal = toNumber(anchorFreq, NaN);
 
     if (!isFinite(noteVal) || !isFinite(anchorVal) || Math.abs(anchorVal) < 1e-12) return null;
 
     const ratio = noteVal / anchorVal;
 
     // If ratio is 1, just reference anchor directly
-    if (Math.abs(ratio - 1) < 1e-9) {
+    if (exactRatio ? exactRatio.equals(1) : Math.abs(ratio - 1) < 1e-9) {
       return useDSL ? anchorRef : `${anchorRef}.getVariable('frequency')`;
     }
 
@@ -2996,14 +3195,20 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
             const simpDen = denom / g;
 
             if (simpDen === 1) {
-              // Integer power of base
+              // Integer power of base — computed in BigInt so the emitted
+              // multiplier keeps every digit (Math.pow overflows past 2^53)
               if (simpNum === 0) {
                 return useDSL ? anchorRef : `${anchorRef}.getVariable('frequency')`;
               }
-              const multiplier = Math.pow(config.base, simpNum);
+              const multiplier = BigInt(config.base) ** BigInt(Math.abs(simpNum));
+              if (simpNum > 0) {
+                return useDSL
+                  ? `${multiplier} * ${anchorRef}`
+                  : `new Fraction(${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
+              }
               return useDSL
-                ? `${multiplier} * ${anchorRef}`
-                : `new Fraction(${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
+                ? `(1/${multiplier}) * ${anchorRef}`
+                : `new Fraction(1, ${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
             }
             const expStr = `(${simpNum}/${simpDen})`;
             return useDSL
@@ -3033,15 +3238,16 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
             const simpTetDen = defaultDenom / g;
 
             let expr;
+            const tetMultStr = (b, e) => `${BigInt(b) ** BigInt(Math.abs(e))}`;
             if (useDSL) {
               const parts = [];
               if (remainingFrac.n !== remainingFrac.d) {
-                parts.push(remainingFrac.d === 1 ? `${remainingFrac.n}` : `(${remainingFrac.n}/${remainingFrac.d})`);
+                parts.push(fracToDSL(remainingFrac));
               }
               parts.push(anchorRef);
               if (simpTetDen === 1) {
                 if (simpTetNum !== 0) {
-                  parts.push(`${Math.pow(base, simpTetNum)}`);
+                  parts.push(simpTetNum > 0 ? tetMultStr(base, simpTetNum) : `(1/${tetMultStr(base, simpTetNum)})`);
                 }
               } else {
                 parts.push(`${base} ^ (${simpTetNum}/${simpTetDen})`);
@@ -3052,15 +3258,16 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
 
               if (simpTetDen === 1) {
                 if (simpTetNum !== 0) {
-                  const tetMult = Math.pow(base, simpTetNum);
-                  expr = `new Fraction(${tetMult}).mul(${expr})`;
+                  expr = simpTetNum > 0
+                    ? `new Fraction(${tetMultStr(base, simpTetNum)}).mul(${expr})`
+                    : `new Fraction(1, ${tetMultStr(base, simpTetNum)}).mul(${expr})`;
                 }
               } else {
                 expr = `${expr}.mul(new Fraction(${base}).pow(new Fraction(${simpTetNum}, ${simpTetDen})))`;
               }
 
               if (remainingFrac.n !== remainingFrac.d) {
-                expr = `new Fraction(${remainingFrac.n}, ${remainingFrac.d}).mul(${expr})`;
+                expr = `${fracToLegacy(remainingFrac)}.mul(${expr})`;
               }
             }
 
@@ -3080,24 +3287,27 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
       return `${anchorRef}.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(${tetPart / g}, ${12 / g})))`;
     }
 
-    // Clean case or anchor is also corrupt - use rational fraction
+    // Clean case or anchor is also corrupt - use rational fraction.
+    // The exact ratio of the two evaluated Fractions is preferred; a
+    // float-derived one is only a fallback for non-Fraction values.
     try {
-      const ratioFrac = new Fraction(ratio);
-      // Verify precision
-      if (Math.abs(ratioFrac.valueOf() - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-9) {
+      const ratioFrac = exactRatio || new Fraction(ratio);
+      if (exactRatio || Math.abs(ratioFrac.valueOf() - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-9) {
         if (useDSL) {
-          const fracStr = ratioFrac.d === 1 ? `${ratioFrac.n}` : `(${ratioFrac.n}/${ratioFrac.d})`;
-          return `${fracStr} * ${anchorRef}`;
+          return `${fracToDSL(ratioFrac)} * ${anchorRef}`;
         }
-        return `new Fraction(${ratioFrac.n}, ${ratioFrac.d}).mul(${anchorRef}.getVariable('frequency'))`;
+        return `${fracToLegacy(ratioFrac)}.mul(${anchorRef}.getVariable('frequency'))`;
       }
     } catch {}
 
-    // Fallback: use float (shouldn't happen often)
-    if (useDSL) {
-      return `${ratio} * ${anchorRef}`;
-    }
-    return `new Fraction(${ratio}).mul(${anchorRef}.getVariable('frequency'))`;
+    // Fallback: approximate the float as an exact fraction (a raw float
+    // literal can stringify to scientific notation, which never re-parses)
+    try {
+      const approx = new Fraction(ratio);
+      return useDSL
+        ? `${fracToDSL(approx)} * ${anchorRef}`
+        : `${fracToLegacy(approx)}.mul(${anchorRef}.getVariable('frequency'))`;
+    } catch { return null; }
   } catch { return null; }
 }
 
@@ -3116,8 +3326,14 @@ function __findNextMeasureInChainGL(measure) {
       if (startTimeString.includes(legacyLinkPattern) || startTimeString.includes(dslLinkPattern)) chainLinks.push(n);
     }
     if (chainLinks.length === 0) return null;
-    // Sort by startTime and return earliest (there should typically be only one chain link)
-    chainLinks.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
+    // Sort by startTime and return earliest (there should typically be only
+    // one chain link). toNumber never yields NaN, and the id tie-break keeps
+    // the pick deterministic when starts collapse to the same double.
+    chainLinks.sort((a, b) => {
+      const sa = toNumber(a.getVariable('startTime'), 0);
+      const sb = toNumber(b.getVariable('startTime'), 0);
+      return sa < sb ? -1 : sa > sb ? 1 : a.id - b.id;
+    });
     return chainLinks[0];
   } catch { return null; }
 }
@@ -3126,11 +3342,11 @@ function selectSuitableParentForStartGL(note, newStartSec) {
   try {
     const tol = 1e-2;
     let parent = __parseParentFromStartTimeStringGL(note);
-    let parentStart = Number(parent.getVariable('startTime').valueOf() || 0);
-    const baseStart = Number(myModule.baseNote.getVariable('startTime').valueOf() || 0);
+    let parentStart = toNumber(parent.getVariable('startTime'), 0);
+    const baseStart = toNumber(myModule.baseNote.getVariable('startTime'), 0);
 
     // Keep original parent when effectively no movement
-    if (Math.abs(newStartSec - Number(note.getVariable('startTime').valueOf() || 0)) < tol) {
+    if (Math.abs(newStartSec - toNumber(note.getVariable('startTime'), 0)) < tol) {
       return parent;
     }
 
@@ -3143,14 +3359,13 @@ function selectSuitableParentForStartGL(note, newStartSec) {
         while (advanced) {
           advanced = false;
           // measure end = start + measureLength(cur)
-          const mlVal = myModule.findMeasureLength(cur);
-          const ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal);
+          const ml = toNumber(myModule.findMeasureLength(cur), 0);
           const end = curStart + ml;
           if (newStartSec >= end - tol) {
             const next = __findNextMeasureInChainGL(cur);
             if (next) {
               cur = next;
-              curStart = Number(next.getVariable('startTime').valueOf() || 0);
+              curStart = toNumber(next.getVariable('startTime'), 0);
               parent = cur;
               parentStart = curStart;
               advanced = true;
@@ -3180,7 +3395,7 @@ function selectSuitableParentForStartGL(note, newStartSec) {
 
       for (let i = 0; i < chain.length; i++) {
         const anc = chain[i];
-        const ancStart = Number(anc.getVariable('startTime').valueOf() || 0);
+        const ancStart = toNumber(anc.getVariable('startTime'), 0);
         if (newStartSec >= ancStart - tol) {
           parent = anc;
           parentStart = ancStart;
@@ -3205,26 +3420,34 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
     const noteRaw = note?.variables?.startTimeString || '';
     const useDSL = isDSLSyntax(noteRaw);
 
-    const parentStart = Number(parent.getVariable('startTime').valueOf() || 0);
+    const parentStartFrac = parent.getVariable('startTime');
+    const parentStart = toNumber(parentStartFrac, 0);
     let delta = newStartSec - parentStart;
 
     // Check alignment to parent end (duration)
     let hasDur = false, durSec = 0;
     try {
       const d = parent.getVariable('duration');
-      if (d) { hasDur = true; durSec = Number(d.valueOf ? d.valueOf() : d); }
+      if (d) { hasDur = true; durSec = toNumber(d, 0); }
     } catch {}
 
-    const tempoVal = myModule.findTempo(parent);
-    const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
-    const beatLen = 60 / tempo;
-    const offsetBeats = delta / beatLen;
+    const tempoFrac = myModule.findTempo(parent);
 
+    // The gesture position (newStartSec) is inherently a float — it crosses
+    // into exact arithmetic exactly once here. The parent's exact start and
+    // tempo never go through a float, so deep-chain positions stay exact.
     let frac;
     try {
-      frac = new Fraction(Math.abs(offsetBeats));
+      const offsetBeatsFrac = new Fraction(newStartSec).sub(parentStartFrac).mul(tempoFrac).div(60);
+      frac = offsetBeatsFrac.abs();
     } catch {
-      frac = new Fraction(Math.round(Math.abs(offsetBeats) * 4), 4);
+      const tempo = toNumber(tempoFrac, 120) || 120;
+      const offsetBeats = Math.abs(delta) / (60 / tempo);
+      try {
+        frac = new Fraction(offsetBeats);
+      } catch {
+        frac = new Fraction(Math.round(offsetBeats * 4), 4);
+      }
     }
 
     if (useDSL) {
@@ -3236,8 +3459,7 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
       } else if (Math.abs(delta) < 0.001) {
         raw = `${pRef}.t`;
       } else {
-        const fracStr = (frac.d === 1) ? `${frac.n}` : `(${frac.n}/${frac.d})`;
-        const beatMul = (frac.n === 1 && frac.d === 1) ? beatRef : `${beatRef} * ${fracStr}`;
+        const beatMul = fracIsOne(frac) ? beatRef : `${beatRef} * ${fracToDSL(frac)}`;
         if (delta >= 0) {
           raw = `${pRef}.t + ${beatMul}`;
         } else {
@@ -3253,9 +3475,9 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
     if (hasDur && durSec > 0 && Math.abs(delta - durSec) < 0.01) {
       raw = `${parentRef}.getVariable('startTime').add(${parentRef}.getVariable('duration'))`;
     } else if (delta >= 0) {
-      raw = `${parentRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.n}, ${frac.d})))`;
+      raw = `${parentRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.s * frac.n}, ${frac.d})))`;
     } else {
-      raw = `${parentRef}.getVariable('startTime').sub(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.n}, ${frac.d})))`;
+      raw = `${parentRef}.getVariable('startTime').sub(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.s * frac.n}, ${frac.d})))`;
     }
 
     const simplified = simplifyStartTime(raw, myModule);
@@ -3274,7 +3496,7 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
         let anc = __parseParentFromStartTimeStringGL(note);
         const tol = 1e-6;
         while (anc && anc.id !== 0) {
-          const st = Number(anc.getVariable('startTime').valueOf() || 0);
+          const st = toNumber(anc.getVariable('startTime'), 0);
           // Skip measure bars when we need frequency (measures have no frequency expression)
           const isMeasure = __isMeasureNoteGL(anc);
           if (st <= cutoffSec + tol && (!requireFrequency || !isMeasure)) return anc;
@@ -3291,13 +3513,13 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
           }
         }
         if (!anc) anc = myModule.baseNote;
-        const st2 = Number(anc.getVariable('startTime').valueOf() || 0);
+        const st2 = toNumber(anc.getVariable('startTime'), 0);
         return (st2 <= cutoffSec + tol) ? anc : myModule.baseNote;
       } catch { return myModule.baseNote; }
     }
 
     const movedId = movedNote.id;
-    const movedStart = Number(movedNote.getVariable('startTime').valueOf() || 0);
+    const movedStart = toNumber(movedNote.getVariable('startTime'), 0);
     const dependents = myModule.getDependentNotes(movedId) || [];
 
     // Get dependency graph for corruption checks
@@ -3318,7 +3540,7 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
       if (!__freqReferencesNoteId(fRaw, movedId)) return;
       const fIsDSL = isDSLSyntax(fRaw);
 
-      const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
+      const depStart = toNumber(dep.getVariable('startTime'), 0);
       // If dependent starts earlier than referenced (moved) note, swap to a valid ancestor at/before depStart
       if (depStart < movedStart - 1e-6) {
         const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, true); // requireFrequency=true to skip measure bars
@@ -3378,7 +3600,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         let anc = __parseParentFromStartTimeStringGL(note);
         const tol = 1e-6;
         while (anc && anc.id !== 0) {
-          const st = Number(anc.getVariable('startTime').valueOf() || 0);
+          const st = toNumber(anc.getVariable('startTime'), 0);
           // Skip measure bars when we need frequency (measures have no frequency expression)
           const isMeasure = __isMeasureNoteGL(anc);
           if (st <= cutoffSec + tol && (!requireFrequency || !isMeasure)) return anc;
@@ -3395,20 +3617,20 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           }
         }
         if (!anc) anc = myModule.baseNote;
-        const st2 = Number(anc.getVariable('startTime').valueOf() || 0);
+        const st2 = toNumber(anc.getVariable('startTime'), 0);
         return (st2 <= cutoffSec + tol) ? anc : myModule.baseNote;
       } catch { return myModule.baseNote; }
     }
 
     const movedId = movedNote.id;
-    const movedStart = Number(movedNote.getVariable('startTime').valueOf() || 0);
+    const movedStart = toNumber(movedNote.getVariable('startTime'), 0);
     const dependents = myModule.getDependentNotes(movedId) || [];
 
     dependents.forEach(depId => {
       const dep = myModule.getNoteById(Number(depId));
       if (!dep) return;
 
-      const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
+      const depStart = toNumber(dep.getVariable('startTime'), 0);
       if (!(depStart < movedStart - 1e-6)) return;
 
       // For startTime/duration, measure bars are valid (they have startTime)
@@ -3530,6 +3752,37 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         return 0;
     }
 
+    // Fold a rational factor into a legacy expression's leading coefficient.
+    // Handles exactly the wrapper shape the octave arrows emit for .pow()
+    // expressions — `new Fraction(a, b).mul(<rest>)` with the .mul( paren closing
+    // at the very end — so repeated presses rescale one coefficient (and unwrap
+    // entirely at 1/1) instead of nesting a new .mul() wrapper per press, the
+    // same folding the DSL branch gets from scaleDSL. Any other shape gets one
+    // wrapper, which the next press then folds into.
+    function foldFactorIntoLegacyCoefficient(expr, num, den) {
+        const src = String(expr).trim();
+        const m = /^new Fraction\((\d+)(?:\s*,\s*(\d+))?\)\.mul\(/.exec(src);
+        if (m && src.endsWith(')')) {
+            const inner = src.slice(m[0].length, -1);
+            // The slice is the whole .mul() argument only if its parens balance —
+            // a close for the .mul( paren before the final character means the
+            // leading fraction is not a free coefficient (e.g. `X.mul(Y).pow(Z)`).
+            let depth = 0, balanced = true;
+            for (const ch of inner) {
+                if (ch === '(') depth++;
+                else if (ch === ')' && --depth < 0) { balanced = false; break; }
+            }
+            if (balanced && depth === 0) {
+                // BigInt-exact parse: Number() would round the folded
+                // coefficient after ~53 doublings and each press compounds it
+                const coeff = new Fraction(BigInt(m[1]), m[2] !== undefined ? BigInt(m[2]) : 1n)
+                    .mul(new Fraction(num, den));
+                return coeff.equals(1) ? inner : `${fracToLegacy(coeff)}.mul(${inner})`;
+            }
+        }
+        return `new Fraction(${num}, ${den}).mul(${src})`;
+    }
+
     function handleOctaveChange(noteId, direction) {
         const note = myModule.getNoteById(parseInt(noteId, 10));
         if (!note) {
@@ -3544,8 +3797,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         const selectedNote = currentSelectedNote;
         const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
 
-        const factor = direction === 'up' ? { n: 2, d: 1 } :
-                       direction === 'down' ? { n: 1, d: 2 } : null;
+        // Arrow interval is user-configurable (Settings → Arrows). Defaults to
+        // the octave (up ×2/1, down ×1/2). When arrows are disabled entirely we
+        // ignore the change (defense in depth behind the UI gating).
+        let arrowsCfg;
+        try { arrowsCfg = settingsStore.get('arrows'); } catch { arrowsCfg = null; }
+        if (arrowsCfg && arrowsCfg.enabled === false) {
+            return;
+        }
+        const upR = (arrowsCfg && arrowsCfg.up) || { n: 2, d: 1 };
+        const downR = (arrowsCfg && arrowsCfg.down) || { n: 1, d: 2 };
+        const factor = direction === 'up' ? { n: upR.n, d: upR.d } :
+                       direction === 'down' ? { n: downR.n, d: downR.d } : null;
         if (!factor) {
             console.error(`Invalid direction: ${direction}`);
             return;
@@ -3563,19 +3826,21 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (!rawExpression) {
                 // No raw expression to preserve; fallback to numeric exact fraction.
                 const newFrequency = currentFrequency.mul(new Fraction(factor.n, factor.d));
-                const newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
+                const newRaw = fracToLegacy(newFrequency);
                 note.setVariable('frequencyString', newRaw);
             } else if (isDSLSyntax(rawExpression)) {
-                // DSL expression: wrap with DSL multiplication syntax
-                // e.g., base.f -> 2 * base.f (octave up) or (1/2) * base.f (octave down)
-                const factorStr = factor.d === 1 ? `${factor.n}` : `(${factor.n}/${factor.d})`;
-                const wrapped = `${factorStr} * ${rawExpression}`;
-                note.setVariable('frequencyString', wrapped);
+                // Fold the factor into the expression's coefficient instead of
+                // prepending another multiplier, so stepping up and back down
+                // returns to `base.f` rather than `(1/2) * 2 * base.f`. Any power
+                // term (TET) is left alone: the coefficient never enters it.
+                const multiplied = multiplyExpressionByFraction(rawExpression, factor.n, factor.d, 'frequency', myModule);
+                note.setVariable('frequencyString', multiplied);
             } else if (rawExpression.includes('.pow(')) {
-                // Corrupted note with .pow() - wrap in multiplication to preserve the TET expression
-                // Don't simplify as it would destroy the .pow() expression
-                const wrapped = `new Fraction(${factor.n}, ${factor.d}).mul(${rawExpression})`;
-                note.setVariable('frequencyString', wrapped);
+                // Corrupted note with .pow() — don't simplify (it would destroy the
+                // .pow() expression). Fold the factor into the leading coefficient
+                // instead of stacking another .mul() wrapper per press.
+                const folded = foldFactorIntoLegacyCoefficient(rawExpression, factor.n, factor.d);
+                note.setVariable('frequencyString', folded);
             } else {
                 // Multiply and simplify robustly while preserving anchors
                 const multiplied = multiplyExpressionByFraction(rawExpression, factor.n, factor.d, 'frequency', myModule);
@@ -3753,10 +4018,26 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
             
             if (isPlaying && !isPaused && !isFadingOut) {
-                playheadTime = Math.min(audioContext.currentTime - currentTime + totalPausedTime, moduleEndTime);
-                if (playheadTime >= moduleEndTime) {
-                    stop(false);
-                    return;
+                const elapsed = audioContext.currentTime - currentTime + totalPausedTime;
+                if (loopPeriod > 0) {
+                    // Looping. The audio pump wraps on its own, so the playhead just
+                    // follows the same clock modulo the pass length — it never restarts
+                    // playback, which is what keeps the seam gapless.
+                    if (isLoopDisarming && loopEndAudioTime != null &&
+                        audioContext.currentTime >= loopEndAudioTime) {
+                        // The mode was switched off mid-pass; this is that pass's end.
+                        // Park at the module end and stop, exactly like a normal finish.
+                        playheadTime = moduleEndTime;
+                        stop(false);
+                        return;
+                    }
+                    playheadTime = elapsed <= 0 ? 0 : elapsed % loopPeriod;
+                } else {
+                    playheadTime = Math.min(elapsed, moduleEndTime);
+                    if (playheadTime >= moduleEndTime) {
+                        stop(false);
+                        return;
+                    }
                 }
             }
             
@@ -3788,12 +4069,16 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 } else {
                 }
             } else {
-                // When tracking is disabled, release X-lock for workspace camera
+                // When tracking is disabled, release X-lock for workspace camera.
+                // Only on the actual transition: this runs every rAF, and pushing a camera
+                // change when nothing moved marked the whole scene dirty 60x a second.
                 if (glWorkspace && glWorkspace.camera) {
                     try {
-                        glWorkspace.camera.lockX = false;
-                        if (typeof glWorkspace.camera.onChange === 'function') {
-                            glWorkspace.camera.onChange();
+                        if (glWorkspace.camera.lockX) {
+                            glWorkspace.camera.lockX = false;
+                            if (typeof glWorkspace.camera.onChange === 'function') {
+                                glWorkspace.camera.onChange();
+                            }
                         }
                     } catch {}
                 }
@@ -3874,6 +4159,343 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
     }
 
+    // ── Multi-note selection ────────────────────────────────────────────────────
+
+    // Open the note widget on a note, GL-only (there is no DOM note element to anchor
+    // to, so we fall back to document.body — showNoteVariables tolerates that).
+    function showNoteVariablesForNote(note) {
+        const anchor = document.querySelector(
+            `.note-content[data-note-id="${CSS.escape(String(note.id))}"], ` +
+            `.measure-bar-triangle[data-note-id="${CSS.escape(String(note.id))}"]`
+        ) || document.body;
+        if (__isMeasureNoteGL(note)) showNoteVariables(note, anchor, note.id);
+        else showNoteVariables(note, anchor);
+    }
+
+    // The single selection and the group are ONE selection with two presentations, not
+    // two independent things. This is the only place that decides which you get:
+    //
+    //   >= 2 notes -> group widget; the note widget is dismissed, because with a group
+    //                 live there is no "current" note for it to describe.
+    //      1 note  -> NOT a group. Normalized back to an ordinary single selection
+    //                 (orange ring + note widget), no matter how you got there — a
+    //                 lone shift-click or a marquee that happened to catch one note.
+    //      0 notes -> neither.
+    //
+    // Every mutation of `multiSelection` ends here.
+    function syncMultiSelection() {
+        // Normalize FIRST, so a one-note group never reaches the renderer as a group
+        // (it would draw a white group ring on top of the orange selection ring).
+        if (multiSelection.size === 1) {
+            const only = myModule.getNoteById([...multiSelection][0]);
+            multiSelection.clear();
+            try { glWorkspace?.renderer?.setMultiSelection?.(multiSelection); } catch {}
+            try { hideGroupWidget(); } catch {}
+            if (only) {
+                currentSelectedNote = only;
+                try { syncRendererSelection(); } catch {}
+                try { showNoteVariablesForNote(only); } catch {}
+                return;
+            }
+        }
+
+        try { glWorkspace?.renderer?.setMultiSelection?.(multiSelection); } catch {}
+        try { glWorkspace?.requestRender?.(); } catch {}
+
+        if (multiSelection.size >= 2) {
+            // modals.clearSelection() (not our own clearSelection()) — we want the note
+            // widget gone without recursing back into the group state we are setting up.
+            try { modals.clearSelection(); } catch {}
+            currentSelectedNote = null;
+            try { syncRendererSelection(); } catch {}
+            try {
+                showGroupWidget({
+                    count: multiSelection.size,
+                    onCopyToModules: () => copySelectionToModules(),
+                    onDeleteAll: () => deleteMultiSelection(),
+                    onClear: () => { clearSelection(); }
+                });
+            } catch {}
+        } else {
+            try { hideGroupWidget(); } catch {}
+        }
+    }
+
+    function clearMultiSelection() {
+        if (multiSelection.size === 0) return;
+        multiSelection.clear();
+        syncMultiSelection();
+    }
+
+    // Is this id eligible for the group? Notes only.
+    //
+    // The base note is excluded for the obvious reason (it must never be group-deletable).
+    // MEASURE BARS are excluded because a measure's startTime IS its link in the measure
+    // chain: a group move can't re-anchor it (that reflows the grid under the whole score)
+    // and can't leave it behind either (the group tears on drop). Supporting them halfway
+    // was worse than not supporting them, so they are out of multi-select entirely — they
+    // are still selectable, movable and deletable on their own, as before.
+    function isGroupSelectable(id) {
+        const n = Number(id);
+        if (!Number.isFinite(n) || n === 0) return false;
+        const note = myModule.getNoteById(n);
+        return !!note && !__isMeasureNoteGL(note);
+    }
+
+    // ids: iterable of note ids. additive => union with the existing set.
+    function setMultiSelectionIds(ids, additive = false) {
+        if (!additive) multiSelection.clear();
+        for (const raw of (ids || [])) {
+            if (isGroupSelectable(raw)) multiSelection.add(Number(raw));
+        }
+        syncMultiSelection();
+    }
+
+    function toggleMultiSelectId(id) {
+        const n = Number(id);
+        if (multiSelection.has(n)) {           // always allow removal
+            multiSelection.delete(n);
+            syncMultiSelection();
+            return;
+        }
+        if (!isGroupSelectable(n)) return;     // measures / base can never join
+
+        // Shift-clicking a note while ANOTHER note is already normally selected has to
+        // promote that note into the group first — otherwise "click one, shift-click a
+        // second" would end up with a group of one (the second), silently dropping the
+        // note the user started from.
+        if (multiSelection.size === 0 && currentSelectedNote
+            && Number(currentSelectedNote.id) !== n
+            && isGroupSelectable(currentSelectedNote.id)) {
+            multiSelection.add(Number(currentSelectedNote.id));
+        }
+
+        multiSelection.add(n);
+        syncMultiSelection();
+    }
+
+    // Walk a note's startTime ANCESTOR chain and report whether it touches `ids`.
+    //
+    // This is the heart of group move. A selected note whose chain reaches another
+    // selected note is a RIDER: that ancestor's move already displaces it by exactly
+    // the same delta, because every link is `[parent].t + offset` and we never touch
+    // the offsets. Applying the delta to a rider as well would DOUBLE-MOVE it.
+    //
+    // It must be the whole chain, not just the direct anchor. Counter-example:
+    // A is selected; X is NOT selected and is anchored to A; M is selected and
+    // anchored to X. M's direct anchor (X) is outside the selection, but X follows A,
+    // so M already rides. Testing only the direct anchor would move M twice.
+    function __startChainTouchesSetGL(note, ids) {
+        let cur = __parseParentFromStartTimeStringGL(note);
+        const seen = new Set();
+        let guard = 0;
+        while (cur && guard++ < 256) {
+            const cid = Number(cur.id);
+            if (ids.has(cid)) return true;
+            if (cid === 0 || seen.has(cid)) return false;     // reached base, or a cycle
+            seen.add(cid);
+            cur = __parseParentFromStartTimeStringGL(cur);
+        }
+        return false;
+    }
+
+    // Partition a selection for a group move:
+    //   MOVERS – no selected note anywhere in their startTime ancestor chain, so
+    //            nothing else displaces them. These get the delta applied.
+    //   RIDERS – anchored (transitively) to a selected note. Left completely
+    //            untouched; they inherit the delta for free.
+    // Notes OUTSIDE the selection are never touched either: they follow their anchors,
+    // exactly as they do for a single-note drag.
+    // Every note id an expression names (DSL `[N]` and legacy `getNoteById(N)`).
+    // __extractNoteRefFromRaw() returns only the FIRST; for export we need all of them,
+    // because an expression is only safe to copy verbatim if EVERY note it names travels
+    // with it.
+    function __extractAllNoteRefsFromRaw(raw) {
+        const out = new Set();
+        if (!raw || typeof raw !== 'string') return out;
+        for (const m of raw.matchAll(/\[(\d+)\]/g)) out.add(parseInt(m[1], 10));
+        for (const m of raw.matchAll(/getNoteById\(\s*(\d+)\s*\)/g)) out.add(parseInt(m[1], 10));
+        return out;
+    }
+
+    // Build a self-contained module JSON from a selection, preserving its tree.
+    //
+    // The copy is ROOTED at the earliest selected note, which lands exactly on the new
+    // module's baseNote (`base.t`). Everything else keeps its offset from that note, so
+    // dropping the module somewhere else reproduces the layout verbatim — which is what
+    // the import path expects, since it maps the module's baseNote onto the drop target.
+    //
+    // WHICH EXPRESSIONS SURVIVE VERBATIM, AND WHICH ARE REBUILT:
+    //
+    //   An expression is copied verbatim (ids renumbered) iff every note it names is also
+    //   in the selection. THAT is what conserves the branching — `[A].t + [A].d` stays
+    //   `[A].t + [A].d`, so the copy keeps the same relationships, not just the same
+    //   coordinates. If it reaches outside the selection the reference would dangle, so
+    //   it is rebuilt from the note's EVALUATED value against the new baseNote instead:
+    //   the note keeps its position/pitch/length even though it lost its anchor.
+    //
+    //   startTime is stricter. A note whose start-anchor chain LEAVES the selection is a
+    //   root and is always rebuilt as `base.t + beat(base) * k`, even when its expression
+    //   names no note at all (e.g. `base.t + beat(base) * 4`). Copied verbatim that would
+    //   pin it to its original absolute time instead of to wherever the module is dropped.
+    //   This is the same MOVER/RIDER split group move uses — a root is a mover.
+    //
+    // The new baseNote is a COPY of the current one (same frequency, tempo, meter), so
+    // `base.f`, `beat(base)` and `tempo(base)` keep meaning exactly what they meant and
+    // pitches survive as ratios rather than as frozen numbers.
+    function buildModuleFromSelection(ids) {
+        const S = new Set([...(ids || [])].map(Number).filter((id) => Number.isFinite(id) && id !== 0));
+        const notes = [...S]
+            .map((id) => myModule.getNoteById(id))
+            .filter((n) => n && !__isMeasureNoteGL(n));
+        if (!notes.length) return null;
+
+        const startOf = (n) => toNumber(n.getVariable('startTime'), 0);
+        notes.sort((a, b) => (startOf(a) - startOf(b)) || (Number(a.id) - Number(b.id)));
+        const t0 = startOf(notes[0]);
+
+        // Renumber 1..N in time order; 0 stays reserved for the baseNote.
+        const idMap = new Map();
+        notes.forEach((n, i) => idMap.set(Number(n.id), i + 1));
+
+        const base = myModule.baseNote;
+        const tempoFrac = myModule.findTempo(base);
+        const baseTempo = toNumber(tempoFrac, 120) || 120;
+        const beatLen = 60 / baseTempo;
+        const baseFreqFrac = base.getVariable('frequency');
+        const baseFreq = toNumber(baseFreqFrac, 0);
+        const t0Frac = notes[0].getVariable('startTime');
+
+        const frac = (x) => {
+            try { return new Fraction(x); }
+            catch { return new Fraction(Math.round(Number(x) * 1000), 1000); }
+        };
+        const fracStr = fracToDSL;
+
+        const renumber = (raw) => String(raw)
+            .replace(/\[(\d+)\]/g, (m, d) => {
+                const nid = idMap.get(parseInt(d, 10));
+                return nid ? `[${nid}]` : m;
+            })
+            .replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, (m, d) => {
+                const nid = idMap.get(parseInt(d, 10));
+                return nid ? `module.getNoteById(${nid})` : m;
+            });
+
+        // Does this expression name only notes that are coming with us? (base — id 0 — is
+        // always fine: the copy carries its own base.)
+        const selfContained = (raw) => {
+            if (!raw) return false;
+            for (const ref of __extractAllNoteRefsFromRaw(raw)) {
+                if (ref !== 0 && !S.has(ref)) return false;
+            }
+            return true;
+        };
+
+        const outNotes = [];
+        for (const n of notes) {
+            const e = { id: idMap.get(Number(n.id)) };
+            const sRaw = n.variables?.startTimeString || '';
+            const dRaw = n.variables?.durationString || '';
+            const fRaw = n.variables?.frequencyString || '';
+
+            // startTime — verbatim only for a RIDER whose expression stays inside the set.
+            if (__startChainTouchesSetGL(n, S) && selfContained(sRaw)) {
+                e.startTime = renumber(sRaw);
+            } else {
+                // Exact beat offset from exact Fractions; float diff only as fallback
+                let k;
+                try { k = exactBeatOffset(n.getVariable('startTime'), t0Frac, tempoFrac); }
+                catch { k = frac((startOf(n) - t0) / beatLen); }
+                e.startTime = (k.n === 0n) ? 'base.t' : `base.t + beat(base) * ${fracStr(k)}`;
+            }
+
+            // duration
+            if (dRaw && selfContained(dRaw)) {
+                e.duration = renumber(dRaw);
+            } else if (n.getVariable('duration') != null) {
+                const durFrac = n.getVariable('duration');
+                const durSec = toNumber(durFrac, 0);
+                if (isFinite(durSec) && durSec > 0) {
+                    let beats;
+                    try { beats = durFrac.mul(tempoFrac).div(60); }
+                    catch { beats = frac(durSec / beatLen); }
+                    e.duration = beats.equals(1) ? 'beat(base)' : `beat(base) * ${fracStr(beats)}`;
+                }
+            }
+
+            // frequency — silences legitimately have none, so only emit when there is one.
+            if (fRaw && selfContained(fRaw)) {
+                e.frequency = renumber(fRaw);
+            } else if (n.getVariable('frequency') != null) {
+                const freqFrac = n.getVariable('frequency');
+                const f = toNumber(freqFrac, 0);
+                if (isFinite(f) && f > 0 && baseFreq > 0) {
+                    let r;
+                    try { r = freqFrac.div(baseFreqFrac); }
+                    catch { r = frac(f / baseFreq); }
+                    e.frequency = r.equals(1) ? 'base.f' : `${fracStr(r)} * base.f`;
+                }
+            }
+
+            if (n.properties.color) e.color = n.properties.color;
+            if (n.properties.instrument) e.instrument = n.properties.instrument;
+            outNotes.push(e);
+        }
+
+        // Copy the current baseNote's own expressions — it is the tree's root, so it can
+        // never reference a note, which makes them safe to reuse as-is. startTime is
+        // forced to 0: the earliest copied note sits ON the base.
+        const baseOut = {};
+        for (const v of ['frequency', 'tempo', 'beatsPerMeasure', 'measureLength']) {
+            const raw = base.variables?.[v + 'String'];
+            if (typeof raw === 'string' && raw.trim()) {
+                baseOut[v] = raw;
+            } else {
+                const bv = base.getVariable(v);
+                if (bv instanceof Fraction) {
+                    baseOut[v] = fracToDSL(bv);
+                } else {
+                    const val = toNumber(bv, NaN);
+                    if (isFinite(val)) baseOut[v] = String(val);
+                }
+            }
+        }
+        baseOut.startTime = '0';
+        if (base.properties.instrument) baseOut.instrument = base.properties.instrument;
+
+        return { baseNote: baseOut, notes: outNotes };
+    }
+
+    // Group action: copy the selection into the module library's Custom section.
+    function copySelectionToModules() {
+        try {
+            const data = buildModuleFromSelection(multiSelection);
+            if (!data) return;
+            const n = data.notes.length;
+            const name = menuBar.addCustomModule(`Selection (${n} note${n === 1 ? '' : 's'})`, data);
+            if (name) {
+                try { menuBar.notify(`Copied to Custom modules as "${name}"`, 'success'); } catch {}
+            }
+        } catch (e) {
+            console.warn('copySelectionToModules failed', e);
+        }
+    }
+
+    function classifyGroupMoveGL(ids) {
+        const movers = [], riders = [];
+        for (const raw of ids) {
+            const n = myModule.getNoteById(Number(raw));
+            if (!n || Number(n.id) === 0) continue;
+            // Backstop: measures cannot enter the selection (see isGroupSelectable), but
+            // if one ever did, re-anchoring it would reflow the measure grid.
+            if (__isMeasureNoteGL(n)) continue;
+            if (__startChainTouchesSetGL(n, ids)) riders.push(n);
+            else movers.push(n);
+        }
+        return { movers, riders };
+    }
+
     // Use shared AudioEngine nodes; legacy fallbacks removed
     const { audioContext, generalVolumeGainNode, compressor, instrumentManager } = audioEngine.nodes();
     
@@ -3900,13 +4522,30 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         if (fromTime === null) {
             fromTime = playheadTime;
         }
-        if (fromTime >= getModuleEndTime()) {
+        const endTime = getModuleEndTime();
+        if (fromTime >= endTime) {
             fromTime = 0;
         }
 
-        preparePlayback(fromTime).then(async (preparedNotes) => {
+        const wantLoop = isLoopEnabled && endTime > 0;
+
+        // The loop body has to be its own note list. preparePlayback(fromTime) offsets
+        // every startTime by fromTime AND truncates a note that straddles fromTime, so
+        // a mid-module list is only valid for the pass it was built for. When starting
+        // from 0 the two are the same list — share the promise rather than evaluating
+        // the module twice.
+        const firstPass = preparePlayback(fromTime);
+        const loopPass = wantLoop
+            ? (fromTime === 0 ? firstPass : preparePlayback(0))
+            : Promise.resolve(null);
+
+        Promise.all([firstPass, loopPass]).then(async ([preparedNotes, loopNotes]) => {
             try {
-                const baseStartTime = audioEngine.play(preparedNotes, { initialVolume: INITIAL_VOLUME });
+                const loop = (wantLoop && loopNotes && loopNotes.length)
+                    ? { period: endTime, notes: loopNotes, firstCycleAudioLength: endTime - fromTime }
+                    : null;
+
+                const baseStartTime = audioEngine.play(preparedNotes, { initialVolume: INITIAL_VOLUME, loop });
 
                 isPlaying = true;
                 isPaused = false;
@@ -3915,8 +4554,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 playheadTime = fromTime;
                 totalPausedTime = 0;
 
+                playbackBaseTime = baseStartTime;
+                // Only wrap if the engine actually armed — it refuses an empty or
+                // degenerate module, and the playhead must agree with it. When it
+                // refuses, drop the armed mode with it: otherwise the icon keeps
+                // orbiting while playback won't actually loop.
+                loopPeriod = audioEngine.isLooping() ? endTime : 0;
+                if (isLoopEnabled && loopPeriod === 0) isLoopEnabled = false;
+                isLoopDisarming = false;
+                loopEndAudioTime = null;
+
                 domCache.ppElement.classList.remove('loading');
-                domCache.ppElement.classList.add('open');
+                updatePlayIcon();
             } catch (e) {
                 console.error('Playback failed', e);
             }
@@ -3929,8 +4578,23 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         isFadingOut = true;
 
         const currentPauseTime = audioContext.currentTime - currentTime;
-        playheadTime = currentPauseTime + totalPausedTime;
+        let pos = currentPauseTime + totalPausedTime;
+        // Wrap into the module. After the first pass this clock runs past the module
+        // end, and play() treats a fromTime >= end as "start over" — so pausing on
+        // pass 3 and hitting play would silently jump to 0 instead of resuming.
+        if (loopPeriod > 0) pos = pos <= 0 ? 0 : (pos % loopPeriod);
+        playheadTime = pos;
         totalPausedTime += currentPauseTime;
+
+        // Pause leaves the mode entirely. Engaging an endless loop should always be a
+        // deliberate act — shift-click or long-press, every time — never something you
+        // fall back into by pressing play on a transport that happens to still
+        // remember it. (This also means the edit paths that pause playback drop the
+        // loop, which is the same rule and the same reasoning.)
+        isLoopEnabled = false;
+        loopPeriod = 0;
+        isLoopDisarming = false;
+        loopEndAudioTime = null;
 
         audioEngine.pauseFade(GENERAL_VOLUME_RAMP_TIME).then(() => {
             isPlaying = false;
@@ -3940,27 +4604,129 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             isFadingOut = false;
         });
 
-        domCache.ppElement.classList.remove('open');
+        // Pausing a loop drops the orbit and shows the play triangle. The mode was
+        // disarmed above, so the next play is an ordinary single pass.
+        updatePlayIcon();
     }
 
     function stop(resetPlayhead = true) {
-        if (!isPlaying && !isPaused && playheadTime === 0) return;
-        
+        // Above the early-out below: a real stop must disarm the mode even when the
+        // transport is already parked at 0, or the Stop button stops being an escape
+        // hatch out of loop mode. resetPlayhead === false means a seek or play()'s own
+        // self-restart — a position change, not a mode change — so the mode survives.
+        if (resetPlayhead) {
+            isLoopEnabled = false;
+        }
+        loopPeriod = 0;
+        isLoopDisarming = false;
+        loopEndAudioTime = null;
+
+        if (!isPlaying && !isPaused && playheadTime === 0) {
+            updatePlayIcon();
+            return;
+        }
+
         if (resetPlayhead) {
             playheadTime = 0;
             totalPausedTime = 0;
         }
-        
+
         isPlaying = false;
         isPaused = false;
         isFadingOut = false;
-        
-        domCache.ppElement.classList.remove('open');
-        
+
+        updatePlayIcon();
+
         try { audioEngine.stopAll(); } catch {}
         cleanupAudio();
-        
+
         updatePlayhead();
+    }
+
+    // ── Loop playback ────────────────────────────────────────────────────────────
+    // Hidden mode: shift-click or long-press Play. The three bars of the play icon
+    // shrink to dashes and orbit a lemniscate while it runs.
+
+    // The play button has four states, and all four are derived here from the
+    // transport rather than being poked at each call site — that is what keeps the
+    // transitions between them honest:
+    //
+    //   (none)          stopped / paused  → play triangle
+    //   .open           playing           → red pause bars
+    //   .open .looping  looping           → red dashes orbiting a lemniscate
+    //   .looping        stopped, armed    → the same orbit over a parked transport
+    //
+    // .looping tracks the ARMED mode, playing or not. A background tap parks the
+    // transport but deliberately keeps the loop armed (see stop(false)); the dashes
+    // keep orbiting over the parked transport so the next play looping is announced,
+    // not a surprise. The Stop button is the escape hatch that disarms — and pause
+    // disarms too (see pause()), so a paused transport shows the plain triangle.
+    function updatePlayIcon() {
+        const playing = isPlaying && !isPaused;
+        if (domCache.ppElement) {
+            domCache.ppElement.classList.toggle('open', playing);
+            domCache.ppElement.classList.toggle('looping', isLoopEnabled);
+        }
+        if (domCache.playPauseBtn) {
+            domCache.playPauseBtn.title = isLoopEnabled
+                ? 'Loop playback — shift-click or long-press to exit'
+                : 'Play/Pause';
+        }
+    }
+
+    function toggleLoop() {
+        if (!isLoopEnabled) {
+            isLoopEnabled = true;
+            updatePlayIcon();
+
+            // The gesture is "play this on a loop", not merely "arm a mode" — so from a
+            // stopped or paused transport it starts playing too. play() reads the flag
+            // we just set and hands the loop straight to the engine.
+            if (!isPlaying || isPaused) {
+                play(playheadTime);
+                return;
+            }
+
+            const endTime = getModuleEndTime();
+            if (!(endTime > 0)) return;
+
+            // Arming mid-playback: the engine needs a full-module note list to use as
+            // the loop body, and the rel-time at which the pass in flight ends. Module
+            // time t sits at audioContext time (currentTime + t), so that pass ends
+            // firstLen seconds after the playback's base.
+            preparePlayback(0).then((loopNotes) => {
+                // The user may have toggled off, paused or stopped while we evaluated.
+                if (!isLoopEnabled || !isPlaying || isPaused || isFadingOut) return;
+                const firstLen = (currentTime + endTime) - playbackBaseTime;
+                if (!(firstLen > 0)) return;
+                if (audioEngine.armLoop({ period: endTime, notes: loopNotes, firstCycleAudioLength: firstLen })) {
+                    loopPeriod = endTime;
+                    isLoopDisarming = false;
+                    loopEndAudioTime = null;
+                }
+            }).catch(() => {});
+            return;
+        }
+
+        // Disarm. The icon morphs back to the red pause bars immediately — the toggle
+        // has to register now, not in thirty seconds — while the audio keeps playing
+        // the current pass out to its end and stops there.
+        isLoopEnabled = false;
+        updatePlayIcon();
+
+        if (isPlaying && !isPaused && !isFadingOut && audioEngine.isLooping()) {
+            const endsAt = audioEngine.disarmLoop();
+            if (endsAt != null) {
+                loopEndAudioTime = endsAt;
+                isLoopDisarming = true;
+                // loopPeriod stays set: the final pass may have begun mid-module and
+                // the playhead still has to wrap it.
+                return;
+            }
+        }
+        loopPeriod = 0;
+        isLoopDisarming = false;
+        loopEndAudioTime = null;
     }
 
     function setVolume(value) {
@@ -3984,6 +4750,25 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
     });
 
+    // The "+" menu closes when you click AWAY from it — into the workspace, the
+    // module bar, the transport. It must NOT close when you click one of its PEER
+    // panels: clicking the settings panel while the menu is open means "bring the
+    // settings panel forward", not "dismiss the menu". The four panels are meant to
+    // layer, and a menu that evaporates the instant you touch the panel in front of
+    // it cannot be layered with anything.
+    //
+    // This is the same allow-list, for the same reason, as the one clearSelection
+    // uses a few lines below — a non-modal panel is not "outside".
+    const PEER_PANELS = '.rmt-set-panel, #settingsGearBtn, #note-widget, #group-widget, .delete-confirm-overlay';
+
+    function closeGeneralWidgetOnOutsideClick(event) {
+        const t = event.target;
+        if (domCache.generalWidget.contains(t) || domCache.dropdownButton.contains(t)) return;
+        if (t && t.closest && t.closest(PEER_PANELS)) return;
+        domCache.plusminus.classList.remove('open');
+        domCache.generalWidget.classList.remove('open');
+    }
+
     document.addEventListener('mouseup', (event) => {
         if (!isDragging) {
             // Suppress global clearSelection if a GL octave action just occurred
@@ -3994,18 +4779,32 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 suppressClear = !!(cont && cont.__rmtSuppressClickUntil && Math.sign(cont.__rmtSuppressClickUntil - nowTs) === 1);
             } catch {}
             if (!suppressClear &&
+                // A shift-click is a REFINEMENT of the group, never a "clear everything".
+                // Without this it wipes the selection here, and the click handler that
+                // follows then "toggles" into an empty set — leaving exactly the one note
+                // you shift-clicked. (Plain clicks survive this handler only by accident:
+                // it clears, and the click handler immediately re-selects.)
+                !event.shiftKey &&
                 !domCache.noteWidget.contains(event.target) &&
                 !event.target.closest('.note-rect') &&
                 !event.target.closest('#baseNoteCircle') &&
                 !event.target.closest('.measure-bar-triangle') &&
                 !event.target.closest('.delete-confirm-overlay') &&
+                // The settings panel is non-modal: working in it must not drop
+                // the note selection out from under you (nor must opening it).
+                !event.target.closest('.rmt-set-panel') &&
+                !event.target.closest('#settingsGearBtn') &&
+                // Same for the group-actions widget: clicking its own buttons must
+                // not wipe the very selection those buttons act on.
+                !event.target.closest('#group-widget') &&
+                // And for the module bar's toolbar (search + undo/redo): it is chrome, like
+                // the settings gear. Reaching for Undo, or for the search field to find a
+                // module to drop, must not drop the selection out from under you first.
+                !event.target.closest('.library-toolbar') &&
                 !event.target.closest('.octave-button')) {
                 clearSelection();
             }
-            if (!domCache.generalWidget.contains(event.target) && !domCache.dropdownButton.contains(event.target)) {
-                domCache.plusminus.classList.remove('open');
-                domCache.generalWidget.classList.remove('open');
-            }
+            closeGeneralWidgetOnOutsideClick(event);
             // Close Load Module dropdown when clicking outside
             const dd = document.getElementById('loadModuleDropdown');
             const lb = domCache.loadModuleBtn;
@@ -4045,18 +4844,32 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 suppressClear = !!(cont && cont.__rmtSuppressClickUntil && Math.sign(cont.__rmtSuppressClickUntil - nowTs) === 1);
             } catch {}
             if (!suppressClear &&
+                // A shift-click is a REFINEMENT of the group, never a "clear everything".
+                // Without this it wipes the selection here, and the click handler that
+                // follows then "toggles" into an empty set — leaving exactly the one note
+                // you shift-clicked. (Plain clicks survive this handler only by accident:
+                // it clears, and the click handler immediately re-selects.)
+                !event.shiftKey &&
                 !domCache.noteWidget.contains(event.target) &&
                 !event.target.closest('.note-rect') &&
                 !event.target.closest('#baseNoteCircle') &&
                 !event.target.closest('.measure-bar-triangle') &&
                 !event.target.closest('.delete-confirm-overlay') &&
+                // The settings panel is non-modal: working in it must not drop
+                // the note selection out from under you (nor must opening it).
+                !event.target.closest('.rmt-set-panel') &&
+                !event.target.closest('#settingsGearBtn') &&
+                // Same for the group-actions widget: clicking its own buttons must
+                // not wipe the very selection those buttons act on.
+                !event.target.closest('#group-widget') &&
+                // And for the module bar's toolbar (search + undo/redo): it is chrome, like
+                // the settings gear. Reaching for Undo, or for the search field to find a
+                // module to drop, must not drop the selection out from under you first.
+                !event.target.closest('.library-toolbar') &&
                 !event.target.closest('.octave-button')) {
                 clearSelection();
             }
-            if (!domCache.generalWidget.contains(event.target) && !domCache.dropdownButton.contains(event.target)) {
-                domCache.plusminus.classList.remove('open');
-                domCache.generalWidget.classList.remove('open');
-            }
+            closeGeneralWidgetOnOutsideClick(event);
             const dd = document.getElementById('loadModuleDropdown');
             const lb = domCache.loadModuleBtn;
             if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
@@ -4066,10 +4879,20 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         isDragging = false;
     });
 
+    // The "+" menu is a floating panel like the note widget, the group widget and
+    // the settings panel: it shares their band and their click-to-front rule.
+    registerPanel(domCache.generalWidget);
+    domCache.generalWidget.addEventListener('mousedown', () => raisePanel(domCache.generalWidget));
+    domCache.generalWidget.addEventListener('touchstart', () => raisePanel(domCache.generalWidget), { passive: true });
+
     domCache.dropdownButton.addEventListener('click', (event) => {
         event.stopPropagation();
+        const opening = !domCache.generalWidget.classList.contains('open');
         domCache.plusminus.classList.toggle('open');
         domCache.generalWidget.classList.toggle('open');
+        // Last opened wins — so the menu lands ON TOP of a settings panel parked
+        // over the + button, instead of unrolling invisibly behind it.
+        if (opening) raisePanel(domCache.generalWidget);
     });
 
     domCache.volumeSlider.addEventListener('touchstart', function() {
@@ -4168,8 +4991,99 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
         } catch {}
 
-    domCache.playPauseBtn.addEventListener('click', () => {
-        if (isPlaying) {
+    // Play button. A plain click is play/pause; shift-click or a long-press toggles
+    // the hidden loop mode. Same 500 ms / 8 px feel as the workspace's long-press
+    // (Workspace.MARQUEE_LONG_PRESS_MS / _SLOP_PX) so the gesture is learnable.
+    const PP_LONG_PRESS_MS = 500;
+    const PP_LONG_PRESS_SLOP_PX = 8;
+    let ppPressTimer = null;
+    let ppLongPressFired = false;
+
+    function ppCancelLongPress() {
+        if (ppPressTimer) { clearTimeout(ppPressTimer); ppPressTimer = null; }
+    }
+
+    // Swallow the click a long-press leaves behind. The button is still down when the
+    // press fires, so a click is still coming, and #playPauseBtn's own handler would
+    // read it as play/pause — you would toggle the mode and start playback in one
+    // gesture. Capture phase, because that handler must never see the event.
+    function ppSuppressTrailingClick() {
+        const eat = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            clearTimeout(disarm);
+        };
+        document.addEventListener('click', eat, { capture: true, once: true });
+        // If no click ever arrives (pointercancel, released off the button), don't
+        // leave the eater armed to swallow the user's next real click.
+        const disarm = setTimeout(() => {
+            document.removeEventListener('click', eat, { capture: true });
+        }, 700);
+    }
+
+    domCache.playPauseBtn.addEventListener('pointerdown', (event) => {
+        if (event.button != null && event.button !== 0) return;
+
+        // Unlock audio HERE, in the gesture itself. The long-press below starts
+        // playback from a timer, which is not a user gesture, so the resume() buried
+        // in preparePlayback() comes too late for mobile Safari — the first
+        // long-press on a fresh page would toggle the mode and play nothing, while
+        // every long-press after some other tap worked. Must stay synchronous.
+        try { audioEngine.unlock(); } catch {}
+
+        ppCancelLongPress();
+        ppLongPressFired = false;
+
+        const startX = event.clientX, startY = event.clientY;
+
+        const onMove = (e) => {
+            if (Math.abs(e.clientX - startX) > PP_LONG_PRESS_SLOP_PX ||
+                Math.abs(e.clientY - startY) > PP_LONG_PRESS_SLOP_PX) {
+                ppCancelLongPress();
+            }
+        };
+        const onUp = () => {
+            ppCancelLongPress();
+            document.removeEventListener('pointermove', onMove, true);
+            document.removeEventListener('pointerup', onUp, true);
+            document.removeEventListener('pointercancel', onUp, true);
+            if (ppLongPressFired) ppSuppressTrailingClick();
+        };
+        document.addEventListener('pointermove', onMove, true);
+        document.addEventListener('pointerup', onUp, true);
+        document.addEventListener('pointercancel', onUp, true);
+
+        ppPressTimer = setTimeout(() => {
+            ppPressTimer = null;
+            ppLongPressFired = true;
+            // The document-level mouseup/pointerup handlers clear the note selection
+            // for anything not in their allow-list, and the top bar is not in it. The
+            // release that ends this press must not wipe the user's selection.
+            try {
+                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+                if (cont) cont.__rmtSuppressClickUntil = performance.now() + 400;
+            } catch {}
+            toggleLoop();
+        }, PP_LONG_PRESS_MS);
+    });
+
+    // A touch long-press otherwise raises the iOS callout / Android context menu at
+    // ~500 ms — exactly when the gesture fires.
+    domCache.playPauseBtn.addEventListener('contextmenu', (event) => event.preventDefault());
+
+    domCache.playPauseBtn.addEventListener('click', (event) => {
+        // `detail > 0` means a real pointer click. A focused <button> also fires a
+        // synthetic click on Shift+Space (detail === 0), which would otherwise toggle
+        // the mode by accident right after any normal click.
+        if (event.shiftKey && event.detail > 0) {
+            toggleLoop();
+            return;
+        }
+        // `isPlaying` stays true through the pause fade (pause() only drops it when
+        // the fade promise resolves), so it alone would route a click landing in
+        // that window to pause() — which early-returns on isPaused, eating the
+        // click. A paused transport must always offer play.
+        if (isPlaying && !isPaused) {
             pause();
         } else {
             play(playheadTime);
@@ -4181,7 +5095,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     });
 
     domCache.volumeSlider.addEventListener('input', (event) => {
-        setVolume(event.target.value);
+        const v = parseFloat(event.target.value);
+        setVolume(v);
+        // Live echo for any UI mirroring this value (Settings → Audio). The store
+        // write stays on 'change' (drag end) so we don't hammer localStorage, but
+        // an open settings panel should track the knob as it moves, not after.
+        try { eventBus.emit('audio:masterVolumeInput', { value: v }); } catch {}
     });
 
     if (domCache.loadModuleBtn && domCache.loadModuleInput) {
@@ -4487,6 +5406,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     document.body.appendChild(errorMsg);
                     setTimeout(() => errorMsg.remove(), 3000);
                 });
+            }).catch((error) => {
+                // Reading or parsing the file failed (e.g. a non-JSON file was
+                // picked) — without this catch it is an unhandled rejection and
+                // the user gets no feedback at all.
+                console.error('Error reading module file:', error);
+                notify(`Error loading module: ${error.message}`, 'error');
             });
         } catch (error) {
             console.error('Error reading module file:', error);
@@ -4683,73 +5608,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         modals.invalidateDependencyGraphCache();
     }
 
-    const TOP_HEADER_HEIGHT = 50;
-    const MIN_BUFFER = 20;
-    let widgetInitiallyOpened = false;
-
     function updateNoteWidgetHeight() {
         modals.updateNoteWidgetHeight();
     }
-      
+
     updateNoteWidgetHeight();
-
-    function startDrag(e) {
-        if (e.target.classList.contains('note-widget-close')) return;
-        isDragging = true;
-        e.preventDefault();
-        const rect = widget.getBoundingClientRect();
-        
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-        dragOffsetX = clientX - rect.left;
-        dragOffsetY = clientY - rect.top;
-        
-        document.addEventListener('mousemove', duringDrag);
-        document.addEventListener('touchmove', duringDrag, {passive: false});
-        document.addEventListener('mouseup', endDrag);
-        document.addEventListener('touchend', endDrag);
-    }
-
-    function duringDrag(e) {
-        if (!isDragging) return;
-        e.preventDefault();
-        
-        let clientX = e.clientX;
-        let clientY = e.clientY;
-        if (e.touches && e.touches.length > 0) {
-            clientX = e.touches[0].clientX;
-            clientY = e.touches[0].clientY;
-        }
-        
-        let newLeft = clientX - dragOffsetX;
-        let newTop = clientY - dragOffsetY;
-        
-        const widgetRect = widget.getBoundingClientRect();
-        const maxLeft = window.innerWidth - widgetRect.width - MIN_BUFFER;
-        newLeft = Math.max(MIN_BUFFER, Math.min(newLeft, maxLeft));
-        
-        const headerHeight = widget.querySelector('.note-widget-header')?.getBoundingClientRect().height || TOP_HEADER_HEIGHT;
-        const minTop = TOP_HEADER_HEIGHT + MIN_BUFFER;
-        const maxTop = window.innerHeight - headerHeight - MIN_BUFFER;
-        newTop = Math.max(minTop, Math.min(newTop, maxTop));
-        
-        widget.style.left = newLeft + "px";
-        widget.style.top = newTop + "px";
-        
-        updateNoteWidgetHeight();
-    }
-
-    function endDrag(e) {
-        isDragging = false;
-        document.removeEventListener('mousemove', duringDrag);
-        document.removeEventListener('touchmove', duringDrag);
-        document.removeEventListener('mouseup', endDrag);
-        document.removeEventListener('touchend', endDrag);
-    }
 
     const lockButton = document.getElementById('lockButton');
     const lockIcon = lockButton.querySelector('.lock-icon');
@@ -4938,27 +5801,36 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           try { syncRendererSelection(); } catch {}
         } catch {}
       });
-      // Persist latest module snapshot on every history capture
-      eventBus.on('history:capture', ({ snapshot }) => {
-        try { localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snapshot)); } catch {}
+      // Persist latest module snapshot on every history capture. Reuse the shared
+      // pre-serialized string when the emitter provided one (Phase 8 dedupe).
+      eventBus.on('history:capture', ({ snapshot, snapshotStr }) => {
+        try {
+          const s = (typeof snapshotStr === 'string') ? snapshotStr : JSON.stringify(snapshot);
+          localStorage.setItem('rmt:moduleSnapshot:v1', s);
+        } catch (e) {
+          console.error('[RMT] Autosave failed (history capture):', e);
+        }
       });
     } catch (e) {
       console.warn('eventBus subscription failed', e);
     }
 
       // GL Workspace: commit handlers for move/resize coming from webgl2/workspace.js
-      eventBus.on('workspace:noteMoveCommit', ({ noteId, newStartSec }) => {
-        try {
-          if (noteId == null || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
-          const n = myModule.getNoteById(Number(noteId));
-          if (!n) return;
-
-          // Pause playback during edit if needed
-          try { eventBus.emit('player:requestPause'); } catch {}
+      // Re-anchor ONE note's startTime — and, to preserve their evaluated values, its
+      // frequency and duration anchors — to a new absolute time. This is the entire
+      // body of the single-note move commit, lifted out verbatim so GROUP move can
+      // reuse the algebra per mover instead of forking it.
+      //
+      // It deliberately does NOT retarget dependents, re-evaluate, re-render or
+      // snapshot. The caller owns those, so a group move can do them ONCE for the
+      // whole batch and land as a single undo entry.
+      function commitNoteStartGL(n, newStartSec) {
+          if (!n || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
+          const noteId = n.id;
 
           // Capture original before remap for debug/validation
           const oldRaw = n.variables.startTimeString || '';
-          const oldStart = Number(n.getVariable('startTime').valueOf() || 0);
+          const oldStart = toNumber(n.getVariable('startTime'), 0);
 
           // Legacy-like remapping: select suitable parent and emit relative startTime expression
           const parent = selectSuitableParentForStartGL(n, newStartSec);
@@ -5026,7 +5898,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                   const tol = 1e-6;
                   let guard = 0;
                   while (anc && anc.id !== 0 && guard++ < 128) {
-                    const st = Number(anc.getVariable('startTime')?.valueOf?.() || 0);
+                    const st = toNumber(anc.getVariable('startTime'), 0);
                     // Skip measure bars when we need frequency (measures have no frequency expression)
                     const isMeasure = __isMeasureNoteGL(anc);
                     if (st <= Number(cutoffSec) + tol && (!requireFrequency || !isMeasure)) break;
@@ -5071,41 +5943,33 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // No corruption involved - safe to use ratio-based rebuilding with simplification
                 const curFv = n.getVariable('frequency');
                 const ancFv = anchor.getVariable('frequency');
-                const curVal = (curFv && typeof curFv.valueOf === 'function') ? curFv.valueOf() : Number(curFv);
-                const ancVal = (ancFv && typeof ancFv.valueOf === 'function') ? ancFv.valueOf() : Number(ancFv);
 
-                if (isFinite(curVal) && isFinite(ancVal) && Math.abs(ancVal) > 1e-12) {
-                  let ratio;
-                  try { ratio = new Fraction(curVal).div(new Fraction(ancVal)); }
-                  catch { ratio = new Fraction(curVal / ancVal); }
+                // Exact ratio of the two evaluated Fractions — the old float
+                // round-trip (new Fraction(valueOf())) fabricated nearby wrong
+                // ratios once values passed 2^53.
+                let ratio = null;
+                if (curFv instanceof Fraction && ancFv instanceof Fraction && ancFv.n !== 0n) {
+                  try { ratio = curFv.div(ancFv); } catch { ratio = null; }
+                }
+                if (!ratio) {
+                  const curVal = toNumber(curFv, NaN);
+                  const ancVal = toNumber(ancFv, NaN);
+                  if (isFinite(curVal) && isFinite(ancVal) && Math.abs(ancVal) > 1e-12) {
+                    try { ratio = new Fraction(curVal / ancVal); } catch { ratio = null; }
+                  }
+                }
 
+                if (ratio) {
                   const fIsDSL = fRaw0 && isDSLSyntax(fRaw0);
                   let rawFreq;
                   if (fIsDSL) {
                     const aRef = (anchor.id === 0) ? 'base.f' : `[${anchor.id}].f`;
-                    try {
-                      const r = (typeof ratio.valueOf === 'function') ? ratio.valueOf() : (ratio.n / ratio.d);
-                      if (Math.abs(r - 1) < 1e-6) {
-                        rawFreq = aRef;
-                      } else {
-                        const fracStr = ratio.d === 1 ? `${ratio.n}` : `(${ratio.n}/${ratio.d})`;
-                        rawFreq = `${fracStr} * ${aRef}`;
-                      }
-                    } catch {
-                      rawFreq = aRef;
-                    }
+                    rawFreq = ratio.equals(1) ? aRef : `${fracToDSL(ratio)} * ${aRef}`;
                   } else {
                     const anchorRef = (anchor.id === 0) ? "module.baseNote" : `module.getNoteById(${anchor.id})`;
-                    try {
-                      const r = (typeof ratio.valueOf === 'function') ? ratio.valueOf() : (ratio.n / ratio.d);
-                      if (Math.abs(r - 1) < 1e-6) {
-                        rawFreq = `${anchorRef}.getVariable('frequency')`;
-                      } else {
-                        rawFreq = `new Fraction(${ratio.n}, ${ratio.d}).mul(${anchorRef}.getVariable('frequency'))`;
-                      }
-                    } catch {
-                      rawFreq = `${anchorRef}.getVariable('frequency')`;
-                    }
+                    rawFreq = ratio.equals(1)
+                      ? `${anchorRef}.getVariable('frequency')`
+                      : `${fracToLegacy(ratio)}.mul(${anchorRef}.getVariable('frequency'))`;
                   }
 
                   let simplifiedF;
@@ -5174,7 +6038,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                   const tol = 1e-6;
                   let guard = 0;
                   while (anc && anc.id !== 0 && guard++ < 128) {
-                    const st = Number(anc.getVariable('startTime')?.valueOf?.() || 0);
+                    const st = toNumber(anc.getVariable('startTime'), 0);
                     if (st <= Number(cutoffSec) + tol) break;
                     const raw = (anc.variables && anc.variables.startTimeString) || '';
                     const ref = __extractNoteRefFromRaw(raw);
@@ -5192,28 +6056,33 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
               const anchorDur = __resolveAncestorAtOrBeforeLocalDur(refNote, newStartSec);
 
-              // Preserve numeric duration in seconds while re-anchoring to anchorDur's tempo
+              // Preserve the duration while re-anchoring to anchorDur's tempo.
+              // Both operands are exact Fractions, so beats = dur * tempo / 60
+              // stays exact at any depth (the old float beatLen division lost
+              // exactness on every move commit).
               const durVal = n.getVariable('duration');
-              const durSec = (durVal && typeof durVal.valueOf === 'function') ? durVal.valueOf() : Number(durVal);
+              const durSec = toNumber(durVal, NaN);
 
               if (isFinite(durSec) && durSec >= 0) {
                 const tempoVal = myModule.findTempo(anchorDur);
-                const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
-                const beatLen = 60 / tempo;
-                const beats = durSec / beatLen;
 
                 let bf;
-                try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
+                try {
+                  bf = durVal.mul(tempoVal).div(60);
+                } catch {
+                  const tempo = toNumber(tempoVal, 120) || 120;
+                  const beats = durSec / (60 / tempo);
+                  try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
+                }
 
                 const dIsDSL = dRaw0 && isDSLSyntax(dRaw0);
                 let rawDur;
                 if (dIsDSL) {
                   const beatRef = (anchorDur.id === 0) ? 'beat(base)' : `beat([${anchorDur.id}])`;
-                  const fracStr = bf.d === 1 ? `${bf.n}` : `(${bf.n}/${bf.d})`;
-                  rawDur = (bf.n === bf.d) ? beatRef : `${beatRef} * ${fracStr}`;
+                  rawDur = bf.equals(1) ? beatRef : `${beatRef} * ${fracToDSL(bf)}`;
                 } else {
                   const anchorRef = (anchorDur.id === 0) ? "module.baseNote" : `module.getNoteById(${anchorDur.id})`;
-                  rawDur = `new Fraction(60).div(module.findTempo(${anchorRef})).mul(new Fraction(${bf.n}, ${bf.d}))`;
+                  rawDur = `new Fraction(60).div(module.findTempo(${anchorRef})).mul(new Fraction(${bf.s * bf.n}, ${bf.d}))`;
                 }
 
                 let simplifiedD;
@@ -5226,20 +6095,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           // Ensure evaluation cache sees the edited note
           try { myModule.markNoteDirty(n.id); } catch {}
+      }
 
-          // Retarget dependents that would reference a future-starting note
-          try { retargetDependentStartAndDurationOnTemporalViolationGL(n); } catch {}
-          try { retargetDependentFrequencyOnTemporalViolationGL(n); } catch {}
-
-          evaluatedNotes = myModule.evaluateModule();
-          setEvaluatedNotes(evaluatedNotes);
-          updateVisualNotes(evaluatedNotes);
-          createMeasureBars();
-          invalidateModuleEndTimeCache();
-          try { captureSnapshot("Move Note " + noteId); } catch {}
-          // Keep existing selection; sync renderer selection ordering without changing it
-          try { syncRendererSelection(); } catch {}
-          // Refresh variable modal if visible and selection exists (fallback to document.body when DOM anchor hidden in GL-only mode)
+      // Re-open the note widget on whatever is currently selected (GL-only: there is
+      // no DOM note element, so we fall back to document.body as the anchor).
+      function refreshNoteWidgetForSelection() {
           try {
             const widget = document.getElementById('note-widget');
             const isVisible = !!(widget && widget.classList && widget.classList.contains('visible'));
@@ -5262,8 +6122,121 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               }
             }
           } catch {}
+      }
+
+      eventBus.on('workspace:noteMoveCommit', ({ noteId, newStartSec }) => {
+        try {
+          if (noteId == null || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
+          const n = myModule.getNoteById(Number(noteId));
+          if (!n) return;
+
+          // Pause playback during edit if needed
+          try { eventBus.emit('player:requestPause'); } catch {}
+
+          commitNoteStartGL(n, newStartSec);
+
+          // Retarget dependents that would reference a future-starting note
+          try { retargetDependentStartAndDurationOnTemporalViolationGL(n); } catch {}
+          try { retargetDependentFrequencyOnTemporalViolationGL(n); } catch {}
+
+          evaluatedNotes = myModule.evaluateModule();
+          setEvaluatedNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          invalidateModuleEndTimeCache();
+          try { captureSnapshot("Move Note " + noteId); } catch {}
+          // Keep existing selection; sync renderer selection ordering without changing it
+          try { syncRendererSelection(); } catch {}
+          refreshNoteWidgetForSelection();
         } catch (e) {
           console.warn('workspace:noteMoveCommit failed', e);
+        }
+      });
+
+      // Long-press on a note (touch): the same refinement a shift-click does on desktop —
+      // toggle that note in or out of the group.
+      eventBus.on('workspace:multiSelectToggle', ({ id }) => {
+        try {
+          if (isLocked) return;
+          toggleMultiSelectId(Number(id));
+        } catch (e) {
+          console.warn('workspace:multiSelectToggle failed', e);
+        }
+      });
+
+      // Marquee released: the workspace hands us the ids it crossed. This is the ONLY
+      // writer of the authoritative selection for a marquee — the live highlight during
+      // the drag was just a renderer-side preview.
+      eventBus.on('workspace:marqueeCommit', ({ ids, additive }) => {
+        try {
+          if (isLocked) return;
+          setMultiSelectionIds(Array.isArray(ids) ? ids : [], !!additive);
+        } catch (e) {
+          console.warn('workspace:marqueeCommit failed', e);
+        }
+      });
+
+      // GROUP move. `ids` = the live multi-selection, `deltaSec` = the time delta the
+      // drag resolved to. Lands as ONE undo entry.
+      //
+      // THE RULE — see classifyGroupMoveGL(): apply the delta ONLY to MOVERS (selected
+      // notes with no selected note anywhere in their startTime ancestor chain). RIDERS
+      // (anchored transitively to another selected note) are left completely untouched:
+      // their anchor's move already displaces them by exactly the same delta, because
+      // every link is `[parent].t + offset` and we never rewrite the offsets. Touching
+      // a rider would double-move it.
+      //
+      // Notes OUTSIDE the selection are likewise never rewritten — they follow their
+      // anchors, exactly as they do for a single-note drag. That is the app's semantics,
+      // not an oversight.
+      eventBus.on('workspace:groupMoveCommit', ({ ids, deltaSec }) => {
+        try {
+          if (!Array.isArray(ids) || !ids.length) return;
+          if (typeof deltaSec !== 'number' || !isFinite(deltaSec) || deltaSec === 0) return;
+
+          try { eventBus.emit('player:requestPause'); } catch {}
+
+          const S = new Set(ids.map(Number).filter((v) => Number.isFinite(v) && v !== 0));
+          if (!S.size) return;
+
+          const { movers } = classifyGroupMoveGL(S);
+          if (!movers.length) return;
+
+          // Snapshot every mover's CURRENT start before mutating anything. A mover's
+          // ancestors are static by construction (no selected note in its chain), so
+          // these reads are order-independent — but taking them up front keeps the
+          // batch deterministic regardless of commit order.
+          const baseStart = toNumber(myModule.baseNote.getVariable('startTime'), 0);
+          const plan = movers.map((n) => ({
+            n,
+            newStart: toNumber(n.getVariable('startTime'), 0) + deltaSec
+          }));
+
+          // Never drag the group before the base note: clamp the whole batch by the
+          // same amount so its internal spacing survives.
+          let clamp = 0;
+          for (const p of plan) clamp = Math.max(clamp, baseStart - p.newStart);
+          if (clamp > 0) for (const p of plan) p.newStart += clamp;
+
+          for (const p of plan) commitNoteStartGL(p.n, p.newStart);
+
+          // Same repair pass the single-note move runs, once per mover.
+          for (const p of plan) {
+            try { retargetDependentStartAndDurationOnTemporalViolationGL(p.n); } catch {}
+            try { retargetDependentFrequencyOnTemporalViolationGL(p.n); } catch {}
+          }
+
+          evaluatedNotes = myModule.evaluateModule();
+          setEvaluatedNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes);
+          createMeasureBars();
+          invalidateModuleEndTimeCache();
+          try { captureSnapshot(`Move ${S.size} Notes`); } catch {}
+          try { syncRendererSelection(); } catch {}
+          try { syncMultiSelection(); } catch {}
+          refreshNoteWidgetForSelection();
+        } catch (e) {
+          console.warn('workspace:groupMoveCommit failed', e);
         }
       });
 
@@ -5275,36 +6248,33 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           try { eventBus.emit('player:requestPause'); } catch {}
 
-          const tempo = myModule.baseNote?.getVariable?.('tempo')?.valueOf?.() ?? 120;
+          const tempo = toNumber(myModule.baseNote?.getVariable?.('tempo'), 120) || 120;
           const beatLen = 60 / tempo;
 
-          const oldDuration = n.getVariable('duration')?.valueOf?.() ?? 0;
+          const oldDuration = toNumber(n.getVariable('duration'), 0);
 
+          // The sixteenth snap is deliberate gesture quantization — the
+          // snapped beat count is always an exact quarter multiple, so the
+          // Fraction below is exact regardless of tempo.
           const beats = newDurationSec / beatLen;
           const sixteenth = 0.25;
           const snappedBeats = Math.max(sixteenth, Math.round(beats / sixteenth) * sixteenth);
 
-          let beatsFrac;
-          try {
-            beatsFrac = new Fraction(snappedBeats);
-          } catch {
-            beatsFrac = new Fraction(Math.round(snappedBeats * 4), 4);
-          }
+          const beatsFrac = new Fraction(Math.round(snappedBeats * 4), 4);
 
           const dRaw = n.variables?.durationString;
           const dIsD = dRaw && isDSLSyntax(dRaw);
           let simplified;
           if (dIsD) {
-            const fracStr = beatsFrac.d === 1 ? `${beatsFrac.n}` : `(${beatsFrac.n}/${beatsFrac.d})`;
-            simplified = (beatsFrac.n === beatsFrac.d) ? 'beat(base)' : `beat(base) * ${fracStr}`;
+            simplified = beatsFrac.equals(1) ? 'beat(base)' : `beat(base) * ${fracToDSL(beatsFrac)}`;
           } else {
-            const raw = "new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(" + beatsFrac.n + ", " + beatsFrac.d + "))";
+            const raw = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFrac.s * beatsFrac.n}, ${beatsFrac.d}))`;
             simplified = simplifyDuration(raw, myModule);
           }
 
           n.setVariable('durationString', simplified);
 
-          const updatedDuration = n.getVariable('duration')?.valueOf?.() ?? newDurationSec;
+          const updatedDuration = toNumber(n.getVariable('duration'), newDurationSec);
 
           // Propagate to dependents when appropriate
           try { checkAndUpdateDependentNotes(n.id, oldDuration, updatedDuration); } catch {}
@@ -5395,8 +6365,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
              try {
                const n = myModule.getNoteById(Number(id));
                const st = n && n.getVariable && n.getVariable('startTime');
-               return Number(st && st.valueOf ? st.valueOf() : 0);
-             } catch { return 0; }
+               return toNumber(st, 0);
+             } catch (e) {
+               console.warn('measure chain: startTime evaluation failed for note', id, e);
+               return 0;
+             }
            };
            // Check if a dependent is a chain link (uses findMeasureLength/measure()) vs an anchor (starts new chain)
            const isChainLinkById = (depId, parentId) => {
@@ -5436,7 +6409,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
              break;
            }
            const pushWithStart = (n) => {
-             try { out.push({ id: Number(n.id), startSec: Number(n.getVariable('startTime')?.valueOf?.() ?? 0) }); }
+             try { out.push({ id: Number(n.id), startSec: toNumber(n.getVariable('startTime'), 0) }); }
              catch { out.push({ id: Number(n.id), startSec: 0 }); }
            };
            pushWithStart(cur);
@@ -5457,9 +6430,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                  if (sts.includes(linkPattern) || sts.includes(dslLinkPattern)) candidates.push(nn);
                }
              } catch {}
-             // Sort by startTime and return earliest (there should typically be only one chain link)
+             // Sort by startTime and return earliest (there should typically
+             // be only one chain link); id tie-break keeps the pick
+             // deterministic when starts collapse to the same double.
              candidates.sort((a, b) => {
-               try { return a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf(); } catch { return 0; }
+               const sa = toNumber(a.getVariable && a.getVariable('startTime'), 0);
+               const sb = toNumber(b.getVariable && b.getVariable('startTime'), 0);
+               return sa < sb ? -1 : sa > sb ? 1 : a.id - b.id;
              });
              return candidates.length > 0 ? candidates[0] : null;
            };
@@ -5507,9 +6484,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (baseAnchored) {
               // Do NOT modify BaseNote beats. Anchor this measure directly to BaseNote with an explicit offset.
               const base = myModule.baseNote;
-              const baseStart = Number(base.getVariable('startTime')?.valueOf?.() || 0);
-              const tempoVal = myModule.findTempo(base);
-              const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+              const baseStart = toNumber(base.getVariable('startTime'), 0);
+              const tempo = toNumber(myModule.findTempo(base), 120) || 120;
               const beatLen = 60 / tempo;
 
               let gapSec = Math.max(0, Number(newStartSec) - baseStart);
@@ -5518,15 +6494,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               // Allow exact origin: round to nearest 1/16th without enforcing a minimum > 0
               beats = Math.max(0, Math.round(beats / sixteenth) * sixteenth);
 
-              let bf; try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(Math.max(0, beats) * 4), 4); }
+              // Snapped beats are exact quarter multiples
+              const bf = new Fraction(Math.round(beats * 4), 4);
               const noteUseDSL0 = isDSLSyntax(raw);
               let newRaw;
               if (noteUseDSL0) {
                 if (beats === 0) {
                   newRaw = 'base.t';
                 } else {
-                  const fracStr = (bf.d === 1) ? `${bf.n}` : `(${bf.n}/${bf.d})`;
-                  const beatMul = (bf.n === 1 && bf.d === 1) ? 'beat(base)' : `beat(base) * ${fracStr}`;
+                  const beatMul = fracIsOne(bf) ? 'beat(base)' : `beat(base) * ${fracToDSL(bf)}`;
                   newRaw = `base.t + ${beatMul}`;
                 }
               } else {
@@ -5534,7 +6510,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // If at origin, emit exactly base start to avoid add(... * 0) jitter
                 newRaw = (beats === 0)
                   ? `${baseRef}.getVariable('startTime')`
-                  : `${baseRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${baseRef})).mul(new Fraction(${bf.n}, ${bf.d})))`;
+                  : `${baseRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${baseRef})).mul(new Fraction(${bf.s * bf.n}, ${bf.d})))`;
               }
               const simplifiedStart = noteUseDSL0 ? newRaw : simplifyStartTime(newRaw, myModule);
               note.setVariable('startTimeString', simplifiedStart);
@@ -5549,7 +6525,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               try {
                 if (cand && cand.id === 0) {
                   const base = myModule.baseNote;
-                  const baseStart = Number(base.getVariable('startTime')?.valueOf?.() || 0);
+                  const baseStart = toNumber(base.getVariable('startTime'), 0);
                   if (Math.abs(Number(newStartSec) - baseStart) < 1e-6) {
                     const noteUseDSL = isDSLSyntax(note?.variables?.startTimeString || '');
                     raw2 = noteUseDSL ? "base.t" : "module.baseNote.getVariable('startTime')";
@@ -5580,22 +6556,24 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
            // Subsequent measure: adjust previous measure's beats so its END equals newStartSec, then anchor current to prev END
            const prevMeta = chain[idx - 1];
            const prev = myModule.getNoteById(Number(prevMeta.id));
-           const prevStart = Number(prevMeta.startSec || prev.getVariable('startTime')?.valueOf?.() || 0);
-           const tempoVal = myModule.findTempo(prev);
-           const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+           const prevStart = Number.isFinite(prevMeta.startSec) && prevMeta.startSec !== 0
+             ? prevMeta.startSec
+             : toNumber(prev.getVariable('startTime'), 0);
+           const tempo = toNumber(myModule.findTempo(prev), 120) || 120;
            const beatLen = 60 / tempo;
- 
+
            let gapSec = Math.max(0, Number(newStartSec) - prevStart);
            // snap to sixteenth
            let beats = gapSec / beatLen;
            const sixteenth = 0.25;
            beats = Math.max(sixteenth, Math.round(beats / sixteenth) * sixteenth);
- 
-           let bf; try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
+
+           // Snapped beats are exact quarter multiples
+           const bf = new Fraction(Math.round(beats * 4), 4);
            const noteUseDSL = isDSLSyntax(note?.variables?.startTimeString || '');
            const rawBeats = noteUseDSL
-             ? ((bf.d === 1) ? `${bf.n}` : `(${bf.n}/${bf.d})`)
-             : `new Fraction(${bf.n}, ${bf.d})`;
+             ? fracToDSL(bf)
+             : `new Fraction(${bf.s * bf.n}, ${bf.d})`;
            try {
              prev.setVariable('beatsPerMeasureString', rawBeats);
              try { myModule.markNoteDirty(prev.id); } catch {}
@@ -5664,9 +6642,17 @@ function captureSnapshot(label = 'Change') {
       ? myModule.createModuleJSON()
       : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
     if (snap) {
+      // Serialize once and share the string with both the history store and the
+      // localStorage autosave (Phase 8 dedupe: previously each captured module was
+      // JSON.stringify'd 2-3x per user action).
+      let snapStr = null;
+      try { snapStr = JSON.stringify(snap); } catch (e) {
+        // One failed stringify silently kills BOTH undo capture and autosave
+        console.error('[RMT] Snapshot serialization failed:', e);
+      }
       // Ensure a baseline exists so the very first user action (color edit, drag) can be undone independently
-      try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
-      eventBus.emit('history:capture', { label, snapshot: snap });
+      try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap, snapshotStr: snapStr }); } catch {}
+      eventBus.emit('history:capture', { label, snapshot: snap, snapshotStr: snapStr });
     }
   } catch (e) {}
 }
@@ -5681,7 +6667,9 @@ try {
       if (snap) {
         localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
       }
-    } catch {}
+    } catch (e) {
+      console.error('[RMT] Autosave failed (beforeunload):', e);
+    }
   });
 } catch {}
 
@@ -5691,7 +6679,7 @@ const redoBtn = document.getElementById('redoBtn');
 if (undoBtn) undoBtn.addEventListener('click', () => { try { eventBus.emit('history:undo'); } catch {} });
 if (redoBtn) redoBtn.addEventListener('click', () => { try { eventBus.emit('history:redo'); } catch {} });
 
-// Keyboard shortcuts: Ctrl/Cmd+Z (Undo), Ctrl/Cmd+Y (Redo)
+// Keyboard shortcuts: Ctrl/Cmd+Z (Undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (Redo)
 document.addEventListener('keydown', (e) => {
   const el = e.target;
   const tag = (el && el.tagName) ? el.tagName.toLowerCase() : '';
@@ -5700,7 +6688,10 @@ document.addEventListener('keydown', (e) => {
   const isMeta = e.ctrlKey || e.metaKey;
   if (!isMeta) return;
   const key = (e.key || '').toLowerCase();
-  if (key === 'z') {
+  if (key === 'z' && e.shiftKey) {
+    e.preventDefault();
+    try { eventBus.emit('history:redo'); } catch {}
+  } else if (key === 'z') {
     e.preventDefault();
     try { eventBus.emit('history:undo'); } catch {}
   } else if (key === 'y') {
@@ -5765,7 +6756,9 @@ try {
         if (snap) {
           localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
         }
-      } catch {}
+      } catch (e) {
+        console.error('[RMT] Autosave failed (post-restore):', e);
+      }
 
       if (source === 'undo') notify(`Undid: ${label}`, 'success');
       else if (source === 'redo') notify(`Redid: ${label}`, 'success');

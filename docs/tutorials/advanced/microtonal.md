@@ -1,435 +1,292 @@
+---
+title: Microtonal Composition
+description: Compose in 19-TET, 31-TET, quarter tones, just intonation and Bohlen-Pierce using exact ratios and the shipped Scale Systems modules.
+---
+
 # Microtonal Composition
 
-Explore music beyond the standard 12-note scale using RMT Compose's powerful ratio and equal temperament systems.
+Write music outside 12-tone equal temperament. RMT Compose stores every pitch as an **expression**,
+not a number, so a tuning system is something you write down rather than something you configure.
 
-## What is Microtonal Music?
+**Prerequisites:** [Octave Manipulation](/tutorials/intermediate/octaves) — you will use ratios and
+the `^` operator throughout.
 
-Microtonal music uses intervals smaller than the standard semitone, or uses tuning systems that divide the octave differently than the familiar 12-tone equal temperament (12-TET).
+## Start with what ships
 
-RMT Compose excels at microtonal composition because it works with **exact ratios** rather than fixed pitch values.
+Before you hand-enter a scale, check the library. The **Scale Systems** section holds six
+ready-made tuning systems, and **Intervals** holds 46 just ratios with their cents and limit
+family attached.
 
-## Pure Intervals vs Equal Temperament
+| Scale Systems module | Notes | Step written as |
+|---|---|---|
+| 12-TET | 13 | `[N-1].f * 2 ^ (1/12)` |
+| 19-TET | 20 | `[N-1].f * 2 ^ (1/19)` |
+| 31-TET | 32 | `[N-1].f * 2 ^ (1/31)` |
+| Bohlen–Pierce | 14 | `[N-1].f * 3 ^ (1/13)` |
+| Tesla | 81 | successive odd harmonics over 9 |
+| Mixed-Base | 12 | alternating 2-, 3- and 5-based steps |
 
-### The Problem with 12-TET
+Each scale is **chained**: note 1 sits on `base.f`, and every later note is the previous note's
+frequency times one step. Lifting one note carries every note after it. Drag the module onto a
+note and the whole scale re-roots onto that note.
 
-Standard 12-TET divides the octave into 12 equal parts. Each semitone is exactly 2^(1/12) = ~1.0595. This creates slight deviations from pure ratios:
+::: tip Find things by ratio, not by scrolling
+The magnifier at the left of the module bar's toolbar opens a search field
+(`Search name, ratio, tag…`). It matches the module name, its **ratio**, its **cents**, its
+**family** (`3-limit`, `7-limit`, `comma`, …) and its **tags** — so typing `7/4`, `septimal` or
+`comma` narrows 79 modules to the handful you want. Matches surface even inside collapsed
+sections. Closing the field always clears the query.
+:::
 
-| Interval | Pure Ratio | Pure Cents | 12-TET Cents | Difference |
-|----------|------------|------------|--------------|------------|
-| Major Third | 5/4 | 386.3 | 400 | +13.7 |
-| Perfect Fifth | 3/2 | 702.0 | 700 | -2.0 |
-| Minor Seventh | 7/4 | 968.8 | 1000 | +31.2 |
+## Pure intervals vs equal temperament
 
-### Pure Ratios in RMT Compose
+12-TET divides the octave into 12 equal parts, each `2^(1/12)` ≈ 1.0595. That is a compromise:
+every interval except the octave is slightly off its pure ratio.
 
-Use exact ratios for pure, beatless intervals:
+| Interval | Pure ratio | Pure cents | 12-TET cents | Error |
+|---|---|---|---|---|
+| Just major 3rd | 5/4 | 386.3 | 400 | +13.7 |
+| Perfect 5th | 3/2 | 702.0 | 700 | −2.0 |
+| Harmonic 7th | 7/4 | 968.8 | 1000 | +31.2 |
+
+Pure ratios are written as fraction literals:
 
 ```
-// Pure major third (5:4)
-base.f * (5/4)
-
-// Pure perfect fifth (3:2)
-base.f * (3/2)
-
-// Pure harmonic seventh (7:4)
-base.f * (7/4)
+base.f * (5/4)          # just major third
+base.f * (3/2)          # perfect fifth
+base.f * (7/4)          # harmonic seventh
 ```
+
+The parentheses are part of the fraction literal. `(5/4)` is an exact rational; `5/4` written bare
+is a division that still evaluates exactly, but the literal form is what the app itself writes and
+what round-trips through a save.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// Pure major third (5:4)
 module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
-
-// Pure perfect fifth (3:2)
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-
-// Pure harmonic seventh (7:4)
-module.baseNote.getVariable('frequency').mul(new Fraction(7, 4))
 ```
-
 </details>
 
-## Alternative Equal Temperaments
+## Equal temperaments
+
+An n-TET step is `2 ^ (1/n)`. Take `k` of them with `2 ^ (k/n)`.
 
 ### 19-TET
 
-Divides the octave into 19 equal parts. Better approximation of pure thirds than 12-TET.
-
 ```
-// 19-TET semitone
-2^(1/19)
-
-// 19-TET major third (6 steps)
-base.f * 2^(6/19)
-
-// 19-TET perfect fifth (11 steps)
-base.f * 2^(11/19)
+base.f * 2^(3/19)       # major second  (3 steps)
+base.f * 2^(6/19)       # major third   (6 steps)
+base.f * 2^(11/19)      # perfect fifth (11 steps)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// 19-TET semitone
-new Fraction(2).pow(new Fraction(1, 19))
-
-// 19-TET major third (6 steps)
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(6, 19)))
-
-// 19-TET perfect fifth (11 steps)
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(11, 19)))
-```
-
-</details>
+19-TET's major third is 378.9¢ — 7.4 cents *flat* of pure, where 12-TET is 13.7 cents sharp.
 
 ### 31-TET
 
-Divides the octave into 31 equal parts. Excellent approximation of many pure intervals.
-
 ```
-// 31-TET semitone
-2^(1/31)
-
-// 31-TET major third (10 steps)
-base.f * 2^(10/31)
-
-// 31-TET perfect fifth (18 steps)
-base.f * 2^(18/31)
+base.f * 2^(10/31)      # major third   (10 steps)
+base.f * 2^(18/31)      # perfect fifth (18 steps)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+31-TET's major third lands within a cent of 5/4, which is why it is the classic meantone-adjacent
+temperament for just-sounding harmony.
 
-```javascript
-// 31-TET semitone
-new Fraction(2).pow(new Fraction(1, 31))
+### 24-TET (quarter tones)
 
-// 31-TET major third (10 steps)
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(10, 31)))
-
-// 31-TET perfect fifth (18 steps)
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(18, 31)))
-```
-
-</details>
-
-### 24-TET (Quarter Tones)
-
-Divides the octave into 24 equal parts, adding quarter tones between standard semitones.
+No 24-TET module ships — write it directly:
 
 ```
-// Quarter tone up from A
-base.f * 2^(1/24)
-
-// Standard semitone in 24-TET
-base.f * 2^(2/24)
+base.f * 2^(1/24)       # quarter tone up
+base.f * 2^(2/24)       # one 12-TET semitone
+base.f * 2^(3/24)       # three-quarter tone
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Quarter tone up from A
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(1, 24)))
-
-// Standard semitone in 24-TET
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(2, 24)))
-```
-
-</details>
-
-## Bohlen-Pierce Scale
-
-A unique non-octave scale based on the 3:1 ratio (tritave) divided into 13 equal parts.
-
-```
-// Bohlen-Pierce step
-3^(1/13)
-
-// Example: 5 BP steps above base
-base.f * 3^(5/13)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Bohlen-Pierce step
-new Fraction(3).pow(new Fraction(1, 13))
-
-// Example: 5 BP steps above base
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(3).pow(new Fraction(5, 13)))
-```
-
-</details>
-
-### Why Bohlen-Pierce?
-
-- Built around 3:1 instead of 2:1
-- Better approximation of odd harmonics (3:1, 5:3, 7:3)
-- Completely different sound palette from octave-based scales
-
-## Just Intonation
-
-Pure intervals derived from simple ratios. Build scales using only whole-number ratios.
-
-### 5-Limit Just Intonation
-
-Uses ratios with prime factors 2, 3, and 5 only:
-
-```javascript
-// Just major scale
-C:  1/1     // Unison
-D:  9/8     // Major second
-E:  5/4     // Major third
-F:  4/3     // Perfect fourth
-G:  3/2     // Perfect fifth
-A:  5/3     // Major sixth
-B:  15/8    // Major seventh
-C': 2/1     // Octave
-```
-
-```
-// E (major third)
-base.f * (5/4)
-
-// G (perfect fifth)
-base.f * (3/2)
-
-// A (major sixth)
-base.f * (5/3)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// E (major third)
-module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
-
-// G (perfect fifth)
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-
-// A (major sixth)
-module.baseNote.getVariable('frequency').mul(new Fraction(5, 3))
-```
-
-</details>
-
-### 7-Limit Just Intonation
-
-Adds the seventh harmonic for bluesy intervals:
-
-```
-// Harmonic seventh (flat seventh)
-base.f * (7/4)
-
-// Septimal minor third
-base.f * (7/6)
-
-// Septimal tritone
-base.f * (7/5)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Harmonic seventh (flat seventh)
-module.baseNote.getVariable('frequency').mul(new Fraction(7, 4))
-
-// Septimal minor third
-module.baseNote.getVariable('frequency').mul(new Fraction(7, 6))
-
-// Septimal tritone
-module.baseNote.getVariable('frequency').mul(new Fraction(7, 5))
-```
-
-</details>
-
-## Building a Microtonal Composition
-
-> **Tip**: Use the Module Bar's **"Drop at:"** toggle to speed up composition:
-> - **End mode**: Chain notes sequentially (great for scales and melodies)
-> - **Start mode**: Stack notes at the same time (great for chords)
-
-### Example: 19-TET Melody
-
-```
-// Note 1: Root
-frequency: base.f
-startTime: 0
-duration: 1
-
-// Note 2: 19-TET major second (3 steps)
-frequency: [1].f * 2^(3/19)
-startTime: [1].t + [1].d
-duration: 1
-
-// Note 3: 19-TET major third (6 steps)
-frequency: [1].f * 2^(6/19)
-startTime: [2].t + [2].d
-duration: 1
-
-// Note 4: 19-TET perfect fourth (8 steps)
-frequency: [1].f * 2^(8/19)
-startTime: [3].t + [3].d
-duration: 1
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Note 1: Root
-frequency: module.baseNote.getVariable('frequency')
-startTime: new Fraction(0)
-duration: new Fraction(1)
-
-// Note 2: 19-TET major second (3 steps)
-frequency: module.getNoteById(1).getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(3, 19)))
-startTime: module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-duration: new Fraction(1)
-
-// Note 3: 19-TET major third (6 steps)
-frequency: module.getNoteById(1).getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(6, 19)))
-startTime: module.getNoteById(2).getVariable('startTime')
-  .add(module.getNoteById(2).getVariable('duration'))
-duration: new Fraction(1)
-
-// Note 4: 19-TET perfect fourth (8 steps)
-frequency: module.getNoteById(1).getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(8, 19)))
-startTime: module.getNoteById(3).getVariable('startTime')
-  .add(module.getNoteById(3).getVariable('duration'))
-duration: new Fraction(1)
-```
-
-</details>
-
-### Example: Just Intonation Chord
-
-```
-// Root
-frequency: base.f
-startTime: 0
-duration: 2
-
-// Pure major third
-frequency: [1].f * (5/4)
-startTime: [1].t
-duration: [1].d
-
-// Pure perfect fifth
-frequency: [1].f * (3/2)
-startTime: [1].t
-duration: [1].d
-
-// Harmonic seventh (for a dominant seventh chord)
-frequency: [1].f * (7/4)
-startTime: [1].t
-duration: [1].d
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Root
-frequency: module.baseNote.getVariable('frequency')
-startTime: new Fraction(0)
-duration: new Fraction(2)
-
-// Pure major third
-frequency: module.getNoteById(1).getVariable('frequency')
-  .mul(new Fraction(5, 4))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
-
-// Pure perfect fifth
-frequency: module.getNoteById(1).getVariable('frequency')
-  .mul(new Fraction(3, 2))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
-
-// Harmonic seventh (for a dominant seventh chord)
-frequency: module.getNoteById(1).getVariable('frequency')
-  .mul(new Fraction(7, 4))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
-```
-
-</details>
-
-## The ≈ Symbol
-
-When you use irrational values (like 2^(1/12)), RMT Compose displays ≈ before the frequency value:
-
-```
-≈ 466.16 Hz
-```
-
-This indicates the displayed value is an approximation of an algebraically exact value. The internal computation preserves full precision through the SymbolicPower system.
-
-## Comparing Tuning Systems
-
-### Hear the Difference
-
-Create the same melody in different tunings:
-
-1. **12-TET version**: Use `2^(N/12)`
-2. **Just intonation version**: Use pure ratios like `5/4`, `3/2`
-3. **19-TET version**: Use `2^(N/19)`
-
-Compare the sound quality, especially on sustained chords.
-
-### Interval Comparison Table
+::: warning `^` binds tighter than `*`
+`base.f * 2 ^ (1/12)` parses as `base.f * (2^(1/12))`, which is what you want. But `2^3^2` is
+`2^(3^2)` — the power operator is **right**-associative. Parenthesise when in doubt.
+:::
+
+### Interval comparison
 
 | Interval | Pure | 12-TET | 19-TET | 31-TET |
-|----------|------|--------|--------|--------|
-| Major 2nd | 9/8 | 2^(2/12) | 2^(3/19) | 2^(5/31) |
-| Major 3rd | 5/4 | 2^(4/12) | 2^(6/19) | 2^(10/31) |
-| Perfect 4th | 4/3 | 2^(5/12) | 2^(8/19) | 2^(13/31) |
-| Perfect 5th | 3/2 | 2^(7/12) | 2^(11/19) | 2^(18/31) |
-| Major 6th | 5/3 | 2^(9/12) | 2^(14/19) | 2^(23/31) |
+|---|---|---|---|---|
+| Major 2nd | `(9/8)` | `2^(2/12)` | `2^(3/19)` | `2^(5/31)` |
+| Major 3rd | `(5/4)` | `2^(4/12)` | `2^(6/19)` | `2^(10/31)` |
+| Perfect 4th | `(4/3)` | `2^(5/12)` | `2^(8/19)` | `2^(13/31)` |
+| Perfect 5th | `(3/2)` | `2^(7/12)` | `2^(11/19)` | `2^(18/31)` |
+| Major 6th | `(5/3)` | `2^(9/12)` | `2^(14/19)` | `2^(23/31)` |
 
-## Tips for Microtonal Composition
+## Bohlen–Pierce
 
-### 1. Start with Familiar Structures
+A non-octave scale. The period is the **tritave** (3/1), divided into 13 equal steps:
 
-Build chords and scales you know, then substitute microtonal intervals.
+```
+base.f * 3^(1/13)       # one BP step
+base.f * 3^(5/13)       # five BP steps
+base.f * 3^(13/13)      # the tritave — exactly 3 x base
+```
 
-### 2. Trust Your Ears
+BP is built on odd harmonics (3, 5, 7, 9) rather than the even ones an octave-based scale
+emphasises, which gives it a distinctly clarinet-friendly, hollow palette. The shipped
+**Bohlen–Pierce** module is 14 notes: the root plus all 13 steps to the tritave.
 
-Numbers guide you, but the sound is what matters. Experiment!
+## Just intonation
 
-### 3. Use Pure Intervals for Sustained Sounds
+### 5-limit
 
-Irrational TET intervals can cause subtle beating on long notes. Pure ratios sound smoother.
+Ratios whose prime factors are only 2, 3 and 5.
 
-### 4. Explore the Module Library
+| Degree | Ratio | Cents | Ships as |
+|---|---|---|---|
+| Unison | 1/1 | 0 | Unison |
+| Major 2nd | 9/8 | 203.9 | Major 2nd |
+| Major 3rd | 5/4 | 386.3 | Just major 3rd |
+| Perfect 4th | 4/3 | 498.0 | Perfect 4th |
+| Perfect 5th | 3/2 | 702.0 | Perfect 5th |
+| Major 6th | 5/3 | 884.4 | Just major 6th |
+| Major 7th | 15/8 | 1088.3 | Just major 7th |
+| Octave | 2/1 | 1200 | Octave |
 
-Load pre-built TET scales from the Module Bar to experiment quickly.
+```
+base.f * (5/4)          # E
+base.f * (3/2)          # G
+base.f * (5/3)          # A
+```
 
-### 5. Document Your Discoveries
+### 7-limit and beyond
 
-Save interesting microtonal modules with descriptive names for future use.
+The seventh harmonic gives the "barbershop" seventh; 11 and 13 give neutral intervals that sit
+between major and minor.
 
-## Next Steps
+| Name | Ratio | Cents | Family |
+|---|---|---|---|
+| Septimal minor 3rd | 7/6 | 266.9 | 7-limit |
+| Septimal tritone | 7/5 | 582.5 | 7-limit |
+| Harmonic 7th | 7/4 | 968.8 | 7-limit |
+| Undecimal neutral 3rd | 11/9 | 347.4 | higher |
+| Undecimal neutral 7th | 11/6 | 1049.4 | higher |
+| Tridecimal neutral 2nd | 13/12 | 138.6 | higher |
+| Tridecimal neutral 6th | 13/8 | 840.5 | higher |
 
-- [SymbolicPower Algebra](/tutorials/advanced/symbolic-power) - Deep dive into irrational number handling
-- [Complex Dependencies](/tutorials/advanced/complex-dependencies) - Build sophisticated note relationships
-- [Microtonal Experiments](/tutorials/workflows/microtonal-experiments) - Practical experimentation workflow
+All seven ship as interval modules. So do the six commas — Syntonic (81/80), Septimal (64/63),
+Pythagorean (531441/524288), Enharmonic diesis (128/125), Diaschisma (2048/2025) and
+Schisma (32805/32768).
 
+## Building a microtonal composition
+
+::: tip Drop mode: Start / End
+The drop-mode buttons in the module bar's toolbar — ⇤ and ⇥, just left of Undo/Redo —
+decide where a dropped module lands relative to the target note. Exactly one is lit at a time.
+
+- **End** (⇥) — the module's notes are pushed past the target note's end. Chains scales and melodies.
+- **Start** (⇤) — the module's notes share the target's start time. Stacks chords.
+
+Default is **Start**. Note that dropping onto the **BaseNote** ignores the drop mode entirely.
+:::
+
+### A 19-TET melody, by hand
+
+Four notes, each starting where the previous one ends, each pitched off note 1:
+
+| Note | frequency | startTime | duration |
+|---|---|---|---|
+| 1 | `base.f` | `base.t` | `beat(base)` |
+| 2 | `[1].f * 2^(3/19)` | `[1].t + [1].d` | `beat(base)` |
+| 3 | `[1].f * 2^(6/19)` | `[2].t + [2].d` | `beat(base)` |
+| 4 | `[1].f * 2^(8/19)` | `[3].t + [3].d` | `beat(base)` |
+
+Create every note from the **ADD NOTE / SILENCE** section of a widget. Note 1 comes from the
+BaseNote's widget, which has no **At Start** / **At End** toggle — it always writes `base.t` — and
+whose button reads **Create**. Notes 2–4 come from the previous note's widget: pick **Note**, pick
+**At End**, then press **Create Note**. Then open each variable's `Raw:` field and type the
+expression above. Edits take effect when you press **Save**, not while you type.
+
+### A just dominant seventh
+
+All four notes share note 1's start and length; only the pitch differs.
+
+| Note | frequency | startTime | duration |
+|---|---|---|---|
+| 1 (root) | `base.f` | `base.t` | `beat(base) * 2` |
+| 2 (major 3rd) | `[1].f * (5/4)` | `[1].t` | `[1].d` |
+| 3 (fifth) | `[1].f * (3/2)` | `[1].t` | `[1].d` |
+| 4 (harmonic 7th) | `[1].f * (7/4)` | `[1].t` | `[1].d` |
+
+Because every tone hangs off note 1, moving or retuning note 1 moves the whole chord. That is the
+same structure the shipped **Harmonic 7th** chord module uses (4:5:6:7).
+
+## What `≈` and the hatching mean
+
+Type `base.f * 2^(1/12)` and two things happen.
+
+**In the note widget**, the `Evaluated:` line shows a value with a `≈` prefix, in italic amber.
+
+**In the workspace**, the note rectangle is hatched:
+
+| Hatch | Meaning |
+|---|---|
+| **Crosshatch** (two diagonals) | The note's *own* expression produced an irrational value |
+| **Single diagonal** | The note is clean, but something it depends on is not |
+
+Both cases display `≈`. The hatching is what tells them apart.
+
+::: warning `≈` means approximated, not merely rounded
+When a `^` produces a genuinely irrational result, the evaluator converts it straight back to a
+rational approximation and marks the property corrupted. The stored value really is an
+approximation — subsequent arithmetic works on the approximation, not on a symbolic form.
+
+A power that resolves to a rational is *not* corrupted: `2^(12/12)` is exactly 2, and `4^(1/2)` is
+exactly 2. Only genuinely irrational powers hatch.
+
+[Understanding SymbolicPower](/tutorials/advanced/symbolic-power) works through exactly where the
+line falls and how much error accumulates when you chain irrational steps.
+:::
+
+## Listening well
+
+### Turn reverb off
+
+Reverb is **on by default** (25% wet, 1.8 s decay). It smears the beating you are trying to hear.
+Open the Settings panel from the top-bar gear, go to the **Audio** tab and switch off
+**Enable reverb** before any tuning comparison.
+
+![The Audio tab of the Settings panel, showing the Enable reverb toggle, room size, decay, damping, pre-delay and reverb amount controls](/img/settings-audio.png)
+
+### Use sustained notes
+
+Beating between two nearly-in-tune pitches takes time to become audible. Give test notes at least
+a couple of beats. `beat(base) * 4` is a reasonable starting length.
+
+### Pick a timbre that reveals it
+
+A `sine-wave` shows the beat rate between two fundamentals most cleanly; `organ` and `violin` add
+harmonics that expose roughness higher up. Set the default in Settings → Audio →
+**Default instrument**, or set one note's instrument from its widget. The full listening rig —
+all nine instruments and the settings worth changing — is in
+[Microtonal Experiments](/tutorials/workflows/microtonal-experiments).
+
+### Loop it
+
+Shift-click (or long-press) the **Play** button to loop playback. Park on a sustained dyad and let
+it beat at you indefinitely while you retune the upper note.
+
+## Save what you find
+
+Select the notes of a scale you like — shift-drag a marquee across them on desktop, or long-press
+and drag on touch — then press **Copy to Modules** in the group widget. The selection lands in the
+library's **Custom** section as a module, rooted at its earliest note, with the dependency tree
+intact. Drag it back onto any note to transpose the whole thing.
+
+::: warning Copy to Modules drops note colours and instruments
+The copied module keeps pitches, times and durations as relationships, but per-note `color` and
+`instrument` are **not** carried across. Re-set them after you drop the copy back in.
+:::
+
+## Next
+
+- [Understanding SymbolicPower](/tutorials/advanced/symbolic-power) — what "exact" really covers
+- [Microtonal Experiments](/tutorials/workflows/microtonal-experiments) — a structured listening workflow
+- [Exploring Intervals](/tutorials/workflows/intervals) — systematic study of the 46 shipped intervals
+- [Bohlen-Pierce](/user-guide/tuning/bohlen-pierce) and [Custom TET](/user-guide/tuning/custom-tet) — reference

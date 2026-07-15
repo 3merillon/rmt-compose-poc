@@ -1,135 +1,142 @@
+---
+title: Top Bar
+description: The RMT Compose top bar — play, stop, volume, reset view, playhead tracking, the settings gear, and the "+" main menu.
+---
+
 # Top Bar
 
-The **Top Bar** contains transport controls, playback settings, and access to the main menu.
+The top bar is where you start and stop playback, control the camera, and reach the Settings panel and the main menu. Transport controls sit on the left, view and menu controls on the right.
+
+![The RMT Compose top bar: play, stop and a volume slider on the left; reset-view, the playhead-tracking toggle, a settings gear and a "+" menu button on the right](/img/top-bar.png)
 
 ## Layout
 
-From left to right:
+Left to right:
 
-| Element | Description |
-|---------|-------------|
-| Play/Pause | Start or pause playback |
-| Stop | Stop playback and reset to beginning |
-| Volume | Adjust playback volume |
-| Reset View | Center workspace on BaseNote |
-| Tracking | Toggle playhead tracking mode |
-| Menu | Open the main menu |
-| Lock | Toggle note editing lock |
+| Control | What it does |
+|---|---|
+| **Play / Pause** | Start or pause playback. Shift-click or long-press for loop playback. |
+| **Stop** | Stop playback, return the playhead to the start, and disarm loop mode. |
+| **Volume** | Master volume, silent to full. |
+| **Reset View** | Recentre the camera on the BaseNote, keeping the zoom. |
+| **Playhead Tracking** | Toggle. Locks the camera's horizontal axis and keeps the playhead centred. |
+| **Settings** (gear) | Open or close the Settings panel. |
+| **"+"** | Open or close the main menu. |
 
-## Transport Controls
-
-### Play/Pause Button
-
-A single button that toggles between states:
-- **Play (▶)**: Starts playback from the current position
-- **Pause (⏸)**: Button transforms to pause icon during playback; click to pause
-- **Resume**: Click the play button again to continue from where you paused
-
-### Stop Button
-
-- **Stop (■)**: Halts playback completely
-- **Reset**: The playhead returns to the beginning (time = 0)
-
-### Volume Slider
-
-- **Range**: 0 (muted) to 1 (full volume)
-- **Real-time**: Adjustments take effect immediately during playback
-
-::: tip
-Start with a lower volume when exploring new modules - some can be surprisingly loud!
+::: info Two controls that are not up here
+The **lock** is a floating padlock at the **bottom-right** of the viewport — see [Locking](/user-guide/interface/workspace#locking). The **scale controls** are the small dot at the **bottom-left** — see [Scale controls](/user-guide/interface/workspace#scale-controls-density).
 :::
 
-## View Controls
+## Transport
 
-### Reset View Button
+### Play / Pause
 
-- **Function**: Centers the workspace on the BaseNote
-- **Disabled when**: Playhead tracking is enabled (tracking controls the view)
+One button, four states:
 
-### Tracking Toggle
+| Icon | State |
+|---|---|
+| Play triangle | Stopped or paused. |
+| Red pause bars | Playing. |
+| Red dashes orbiting a figure-8 | Playing on a **loop**. |
+| Red dashes orbiting while stopped | Loop is **armed** for the next play — this is what a seek during a loop leaves behind. |
 
-When enabled:
-- The workspace automatically scrolls to keep the playhead centered
-- Reset View button is disabled
-- Useful for long compositions
+Playback starts from wherever the playhead is. Click empty canvas to move the playhead first.
 
-When disabled:
-- The workspace stays fixed
-- Playhead moves across the static view
-- You can pan and zoom freely
+#### Loop playback
 
-## Main Menu
+**Shift-click** the Play button, or **long-press** it (hold for 500 ms without moving), to toggle loop playback. The button's tooltip changes to `Loop playback — shift-click or long-press to exit` while it is armed.
 
-Click the **hamburger icon (☰)** to open the main menu.
+- Arming loop from a stopped or paused transport also **starts playback** — the gesture means "play this on a loop".
+- Disarming flips the icon back straight away, but the audio **plays the current pass out to its end** and stops there rather than cutting off.
+- Pausing a loop **disarms it** — that is why the button shows the ordinary play triangle. The next play is a single pass; re-arm with the gesture if you want the loop back.
+- **Stop** disarms the loop outright too — it is the escape hatch out of the mode.
+- Loop mode is not saved. It is gone on reload.
 
-### Menu Options
+### Stop
 
-| Option | Description |
-|--------|-------------|
-| **Undo** | Undo the last change |
-| **Redo** | Redo the last undone change |
-| **Reorder Module** | Reindex notes by start time (measures first, then notes) |
-| **Save Module** | Export the current module as JSON |
-| **Load Module** | Import a module from file (replaces current workspace) |
+Halts playback, resets the playhead to the beginning, and disarms loop mode.
 
-### Undo/Redo
+### Volume
 
-- **Undo (Ctrl/Cmd + Z)**: Reverts the most recent change
-- **Redo (Ctrl/Cmd + Y)**: Reapplies an undone change
-- **History limit**: Up to 50 states are remembered
+A slider from silent to full. It applies while you drag and is **saved** when you release.
 
-### Save Module
+It is the same number as **Settings → Audio → Master volume**, which shows it as a percentage — silence is 0%, full is 100%. Move either one and the other follows.
 
-1. Click **Save Module**
-2. A JSON file (`module.json`) downloads to your computer
+The signal runs through a real audio graph with a **limiter enabled by default**, and **reverb enabled by default**. See [Audio and Effects](/user-guide/playback/audio).
 
-### Load Module
+## View controls
 
-Opens a submenu with options:
+### Reset View
 
-| Option | Description |
-|--------|-------------|
-| **Load from file** | Opens a file picker to select a JSON module |
-| **Reset to Default Module** | Loads the built-in default composition (Bach's Neverending Canon) |
+Recentres the camera on the BaseNote. Zoom is untouched — this is a pan, not a zoom reset. Use it when panning has left you looking at empty space.
+
+While **Playhead Tracking** is on, this button is greyed out and its tooltip reads `Reset disabled while tracking`.
+
+### Playhead Tracking
+
+Off by default, and never saved — it is off again after a reload.
+
+When on, the camera locks its horizontal axis: the playhead stays pinned to the centre of the viewport and the music scrolls past it. You cannot pan sideways while tracking is on, and zooming re-centres on the middle of the viewport instead of the pointer. Vertical panning still works.
+
+See [Playhead Tracking](/user-guide/playback/tracking).
+
+## Settings
+
+The **gear** opens the Settings panel. It is the only way in — there is no "Settings…" entry in the menu.
+
+The gear rotates on hover and turns red while the panel is open. The panel is **floating, draggable by its header, and not modal**: leave it open and keep composing. It has five tabs — **Appearance, Arrows, Audio, Library, Scale** — and every change takes effect immediately; there is no OK or Apply button.
+
+Press `Escape` with focus inside the panel to close it. See [Settings](/user-guide/interface/settings).
+
+## The "+" menu
+
+The **"+"** button opens the main menu. Its two bars rotate together into a single red **minus** while the menu is open. (There is no hamburger icon anywhere in the app.)
+
+| Entry | What it does |
+|---|---|
+| **Undo** | Undo the last change. Disabled when there is nothing to undo. |
+| **Redo** | Redo the last undone change. |
+| **Reorder Module** | Reindex the notes by start time. Asks for confirmation first: *"Reorder the current module? This will reindex notes. Proceed?"* |
+| **Save Module** | Download the current module as `module.json`. |
+| **Load Module ▾** | Open a submenu. |
+| ↳ **Load Module from file…** | Pick a `.json` module from disk. |
+| ↳ **Reset Default Module** | Load the built-in default module. Asks for confirmation; the reset can be undone from history. |
 
 ::: warning
-Loading a module replaces the current workspace content. Save your work first if needed!
+Loading a module **replaces** the workspace. Save first if you want to keep what you have.
 :::
 
-## Lock Button
+Undo and redo are also on `Ctrl/Cmd + Z` and `Ctrl/Cmd + Y`, and there is a second pair of undo/redo buttons in the [module bar](/user-guide/interface/module-bar) toolbar. All of them drive the same history.
 
-The lock icon toggles note editing:
-
-- **Unlocked (🔓)**: Notes can be moved, resized, and edited
-- **Locked (🔒)**: Notes are view-only; prevents accidental changes
-
-This is useful when:
-- Presenting a composition
-- Exploring without making changes
-- Preventing accidental modifications to a finished piece
-
-## Footer Links
+### Footer
 
 At the bottom of the menu:
 
-| Link | Destination |
-|------|-------------|
-| **Documentation** | Full documentation site (docs.rmt.world) |
-| **Donate** | Support the project (Stripe) |
-| **License** | View the RMT-PNC license |
+| Link | Goes to |
+|---|---|
+| **Documentation** | `docs.rmt.world` |
+| **Donate** | Stripe |
+| **License (MIT)** | The licence page, which also lists third-party notices |
 
-## Keyboard Shortcuts
+Plus the copyright line, `© 2026 Cyril Monkewitz`.
 
-These shortcuts work anywhere in the app:
+## Panels stack, they do not fight
 
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl/Cmd + Z` | Undo |
-| `Ctrl/Cmd + Y` | Redo |
+The "+" menu, the [note widget](/user-guide/interface/variable-widget), the group widget and the Settings panel are peers in one z-order stack, and **whichever one you last opened or touched comes to the front**. Clicking one of them never closes another, and never clears your note selection.
+
+The note widget and the group widget are the one exception: they are two presentations of the same selection, so growing it to two or more notes swaps the note widget for the group widget, and shrinking it back to one swaps them the other way.
+
+Clicking anywhere else — the canvas, the bars — closes the "+" menu.
 
 ## Tips
 
-1. **Use keyboard shortcuts** for undo/redo - it's faster than opening the menu
-2. **Save to file for backup** - the current module persists in browser storage across reloads, but saving to a file is more secure if you clear browser data
-3. **Enable tracking** for long compositions you want to follow during playback
-4. **Lock when presenting** to avoid accidental edits during demonstrations
+1. `Ctrl/Cmd + Z` is faster than opening the menu.
+2. The current module is kept in browser storage and comes back when you reload — but a file saved with **Save Module** is the only copy that survives clearing your browser data.
+3. Turn tracking on before playing a long piece.
+4. Lock the canvas before you demo — the padlock is at the bottom-right, not up here. See [Locking](/user-guide/interface/workspace#locking).
+
+## Next
+
+- [Settings](/user-guide/interface/settings) — the five tabs behind the gear
+- [Transport Controls](/user-guide/playback/transport) — playback in full
+- [Workspace](/user-guide/interface/workspace) — the canvas everything else acts on

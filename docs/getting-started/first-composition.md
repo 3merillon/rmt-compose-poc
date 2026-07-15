@@ -1,69 +1,87 @@
+---
+title: Your First Composition
+description: Build a three-note melody — root, fifth, octave — from an empty workspace, play it, and save it. About five minutes.
+---
+
 # Your First Composition
 
-In this tutorial, you'll create a simple three-note melody in under 5 minutes. No prior music theory knowledge required!
+You'll start from an empty workspace, create three notes — a root, a perfect fifth and an octave — play them, and save the result. No music theory needed.
 
 ## Step 1: Open RMT Compose
 
-Go to [rmt.world](https://rmt.world) or start your local development server.
+Go to [rmt.world](https://rmt.world), or run `npm run dev` locally and open `http://localhost:3000`.
 
-You'll see the workspace with the **default module** loaded - a complex composition demonstrating the app's capabilities.
+The app boots with the **default module** already loaded: 169 notes, with the BaseNote at 263 Hz and tempo 100. Play it, drag things around, get a feel for it. Then clear it out.
 
-## Step 2: Reset to a Clean Slate
+![The RMT Compose workspace: notes as coloured rectangles on a frequency/time grid, with the orange BaseNote circle at the left](/img/workspace-overview.png)
 
-Let's start fresh:
+## Step 2: Clear the workspace
 
-1. Click the **BaseNote** (orange circle at position 0)
-2. The **Variable Widget** appears at the bottom (a resizable pull-up window)
-3. Scroll down in the Variable Widget
-4. Click **"Clean Slate"**
+1. Click the **orange circle** on the left of the workspace. That's the **BaseNote**.
+2. A card appears in the bottom-left titled **BaseNote Variables**. This is the [Note Widget](/user-guide/interface/variable-widget) — it shows every variable of whatever you have selected, and it's where you edit them. Drag it by its header if it's in your way; close it with the **×**.
+3. Scroll to the bottom of the widget, to the **DELETE ALL NOTES** section.
+4. Click **Clean Slate** and confirm.
 
-This resets the workspace to a minimal state with just the BaseNote.
+Everything disappears except the BaseNote.
 
-::: tip
-The "Reset to Default Module" option in the menu loads Bach's Neverending Canon transcription - great for exploring, but complex for a first tutorial! Feel free to play around with it first to see what RMT Compose can do.
+::: info The BaseNote is not a note
+The BaseNote (id 0) makes no sound. It is the reference every other note is measured against: it holds the base **frequency**, **startTime**, **tempo** and **beatsPerMeasure** for the whole module. To hear anything, you have to add notes that reference it.
+
+In the default module those values are 263 Hz, 0, tempo 100, 4 beats per measure.
 :::
 
-::: info Understanding the BaseNote
-The **BaseNote** (orange circle) is a reference point, not an actual playable note. It defines the base frequency, tempo, and other defaults that other notes can reference. To hear sound, you need to add notes that reference it.
+## Step 3: Read the workspace
+
+| What you see | What it is |
+|---|---|
+| **Vertical axis (Y)** | Frequency. Higher on screen = higher pitch. |
+| **Horizontal axis (X)** | Time. Further right = later. |
+| **Coloured rectangles** | Playable notes. |
+| **Orange circle** | The BaseNote. |
+| **Dotted horizontal lines** | Octave guides, relative to the selected note (or the BaseNote if nothing is selected). |
+| **Triangles along the bottom** | Measure bars. |
+| **Dark rectangles with a dashed border** | Silences — notes with a start time and a duration but no frequency. |
+
+## Step 4: Create the root note
+
+With the BaseNote still selected, scroll the note widget to the section headed **ADD NOTE / SILENCE**.
+
+![The note widget's ADD NOTE / SILENCE section, showing the Note/Silence radios and the Frequency, Duration and Start Time expression fields](/img/note-widget.png)
+
+You'll see:
+
+- a **Note** / **Silence** pair of radio buttons — leave it on **Note**
+- three expression fields, each already filled in for you, each showing a live **Evaluated:** value above the **Raw:** box you type into
+
+For a note created from the BaseNote, the defaults are:
+
+| Field | Expression | Meaning |
+|---|---|---|
+| Frequency | `base.f` | the BaseNote's frequency — 263 Hz |
+| Duration | `beat(base)` | one beat, at the BaseNote's tempo |
+| Start Time | `base.t` | the BaseNote's start time — 0 |
+
+Leave all three alone and click **Create**.
+
+A note appears. It plays at the base frequency, for one beat, starting at time zero.
+
+::: tip There is no "At Start / At End" here
+Those options appear only when you create a note *from another note* — they say where the new note attaches. The BaseNote is the origin, so there is nothing to attach to, and the button just reads **Create**. On any other note it reads **Create Note**.
 :::
 
-## Step 3: Understand the Workspace
+## Step 5: Create the fifth
 
-The workspace shows notes on a **frequency/time grid**:
-
-- **Vertical axis (Y)**: Frequency - higher pitches are higher on screen
-- **Horizontal axis (X)**: Time - notes to the right play later
-- **Note rectangles**: Each colored rectangle is a playable note
-- **Dashed lines**: Octave guides (show octaves relative to the selected note, or the BaseNote if nothing is selected)
-- **Orange circle**: The BaseNote (reference point, not playable)
-- **Triangles at bottom**: Measure bars - notes with startTime and measure-based duration
-- **Dark rectangles with dashed border**: Silences (startTime/duration only, no frequency)
-
-After "Clean Slate", you'll see only the BaseNote. Let's add some notes!
-
-## Step 4: Add Your First Note
-
-1. Click the **BaseNote** (orange circle) to select it
-2. The **Variable Widget** appears at the bottom
-3. Find the **"Add Note"** section
-4. Select **"Note"** as the type
-5. Select **"At End"** for the link position
-6. Click **"Create Note"**
-
-A new note appears! This is your first playable note - it references the BaseNote's frequency.
-
-## Step 5: Add a Second Note (Perfect Fifth)
-
-1. With the first note still selected, select **"At End"** (to link to the end of the first note) or **"At Start"** (to play at the same start time)
-2. Click **"Create Note"**
-3. A second note appears, starting after the first one ends
-4. Now let's change its pitch to a **perfect fifth** (ratio 3/2)
-5. Find **"frequency"** in the Variable Widget
-6. Replace the expression with:
+1. Click your new note in the workspace. The widget retitles to **Note [1] Variables**.
+2. Scroll to **ADD NOTE / SILENCE** again. This time there is an extra pair of radios: **At Start** / **At End**. **At End** is already selected — that's what you want, so the new note plays *after* this one.
+3. Look at the **Frequency** field. It is prefilled with `[1].f` — **the parent's frequency, not the base's**. New notes inherit the pitch of the note you created them from, which is why they start out at the same height. Replace it with:
 
 ```
 base.f * (3/2)
 ```
+
+4. Click **Create Note**.
+
+The second note lands a perfect fifth above the first, starting exactly where the first one ends — because its Start Time was prefilled as `[1].t + [1].d`, "note 1's start plus note 1's duration". That reference is a **dependency**: move note 1 and note 2 follows it.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
@@ -73,83 +91,102 @@ module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 ```
 </details>
 
-7. Click **Save**
+## Step 6: Create the octave
 
-The note moves up to the 3/2 position - a perfect fifth above the BaseNote.
-
-## Step 6: Add a Third Note (Octave)
-
-1. With the second note selected, select **"At End"** and click **"Create Note"**
-2. A third note appears
-3. Change its **frequency** expression to:
+1. Select note 2.
+2. In **ADD NOTE / SILENCE**, leave **At End** selected.
+3. Replace the **Frequency** field with:
 
 ```
 base.f * 2
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+4. Click **Create Note**.
 
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(2))
-```
-</details>
+Three notes: 1/1, 3/2, 2/1. Root, fifth, octave.
 
-4. Click **Save**
+## Step 7: Play it
 
-The note moves to the octave position (2/1 ratio).
+Click **Play** (▶) in the [top bar](/user-guide/interface/top-bar). The playhead sweeps across and you hear the three notes in sequence.
 
-## Step 7: Play Your Composition
+::: tip Loop it
+**Shift-click Play**, or press and hold it for half a second, to arm **loop playback**. The play icon's three bars shrink into dashes and orbit a figure-8 while looping. Shift-click or long-press again to leave loop mode — the current pass finishes, then playback stops.
+:::
 
-Click **Play** (▶) to hear your three-note melody:
-1. Root (1/1 - same as BaseNote frequency)
-2. Perfect fifth (3/2)
-3. Octave (2/1)
+[Transport Controls](/user-guide/playback/transport) covers stop, pause and the playhead.
 
-Congratulations! You've created your first RMT composition!
+## Step 8: Change things
 
-## Step 8: Experiment
+### Edit an existing expression
 
-Try these modifications:
+Select a note. In the widget, each variable has a **Raw:** box. Type a new expression and click **Save** — the Save button only appears once you've typed something.
 
-### Change the base frequency
-1. Click the **BaseNote** (orange circle)
-2. Find **"frequency"** and change it from `440` to `330`
-3. Play again - same intervals, different starting pitch!
+::: warning Changes apply on save, not while you type
+And if an expression doesn't compile, the reason appears in red under the Save button and the box gets a red border. The note doesn't change until the expression is fixed.
+:::
 
-### Try different ratios
-Common musical intervals as ratios:
+More in [Editing Notes](/user-guide/notes/editing-notes).
+
+### Transpose the whole piece
+
+Click the BaseNote, change its **frequency** from `263` to `330`, and Save. Every note moves with it. The intervals are untouched, because they were never absolute numbers in the first place — that is the whole point of the tool.
+
+### Nudge one note up or down
+
+The **frequency** row of a selected note has **▲** and **▼** buttons. By default they multiply the frequency by 2 and by 1/2 — an octave up and down. That interval is configurable: open [Settings](/user-guide/interface/settings) (the gear in the top bar) → **Arrows** and set the up interval to anything from 1/16 to 16. Set it to 3/2 and the arrows transpose by fifths. See [Transposing with Arrows](/user-guide/notes/transposing).
+
+### Change a duration
+
+The **duration** row has five note-length buttons — **Whole**, **Half**, **Quarter**, **Eighth**, **Sixteenth** — plus two dot buttons: `.` multiplies by 3/2, `..` by 7/4. Quarter is one beat, so it writes `beat(base)`; a dotted eighth writes `beat(base) * (3/4)`.
+
+### Try other intervals
 
 | Interval | Ratio | Expression |
 |----------|-------|------------|
 | Major third | 5/4 | `base.f * (5/4)` |
 | Minor third | 6/5 | `base.f * (6/5)` |
 | Perfect fourth | 4/3 | `base.f * (4/3)` |
-| Minor seventh | 7/4 | `base.f * (7/4)` |
+| Harmonic seventh | 7/4 | `base.f * (7/4)` |
+| 12-TET semitone | 2^(1/12) | `base.f * 2^(1/12)` |
 
-### Adjust duration
-Use the **duration icons** (whole, half, quarter notes) in the Variable Widget to change note lengths.
+A 12-TET semitone is irrational, so that last note displays with a leading **≈** and is hatched on the canvas. That is expected — see [the ≈ symbol](/getting-started/concepts#the-symbol-approximation).
 
-## Step 9: Save Your Work
+### Undo
 
-Don't lose your creation:
+Three ways, all equivalent: the keyboard — **Ctrl/Cmd + Z** to undo, **Ctrl/Cmd + Y** or **Ctrl/Cmd + Shift + Z** to redo — the **Undo** / **Redo** entries in the **+** menu, or the Undo/Redo buttons at the right of the [module bar](/user-guide/interface/module-bar)'s toolbar.
 
-1. Click the **hamburger menu** (☰)
-2. Select **Save Module**
-3. A JSON file downloads to your computer
+## Step 9: Select several notes at once
 
-You can load this file later via **Load Module** > **Load from file**.
+- **Shift + drag** on empty background rubber-bands a **marquee** over the notes inside it.
+- **Shift + click** a note toggles it in or out of the selection.
+- On a touchscreen, a **long-press** does the job of Shift: hold on empty space to marquee, hold on a note to toggle it.
 
-## What You've Learned
+With more than one note selected, a **group widget** appears. It offers **Copy to Modules** — which saves the selection into the module library's Custom section, rooted at its earliest note and with its dependency tree intact — and **Delete all**. Dragging any note in the group drags the whole group.
 
-- The **workspace** displays notes on a frequency/time grid
-- The **BaseNote** is the reference point for all ratios
-- **Expressions** define note properties mathematically
-- Notes can **depend** on each other through expressions
-- **Ratios** like 3/2 and 5/4 create musical intervals
+![A marquee rubber-band drawn over several notes, with the selected notes highlighted](/img/multi-select-marquee.png)
 
-## Next Steps
+[Selection & Group Editing](/user-guide/notes/selection) has the rest.
 
-- Read [Core Concepts](./concepts) to understand the theory
-- Explore the [User Guide](/user-guide/) for detailed feature documentation
-- Try the [Build a Major Scale](/tutorials/beginner/major-scale) tutorial
+## Step 10: Save your work
+
+1. Click the **+** button at the far right of the top bar. Its two bars rotate flat into a red **–** and the main menu drops down.
+2. Click **Save Module**.
+3. A file called `module.json` downloads. Every save uses that same name, so rename the file if you plan to keep more than one — see [Saving Modules](/user-guide/modules/saving-modules).
+
+To bring it back later: **+** → **Load Module ▾** → **Load Module from file…**
+
+The same submenu holds **Reset Default Module**, which restores the composition the app boots with. It's undoable.
+
+## What you've learned
+
+- The **BaseNote** is the reference; it makes no sound.
+- Every note property is an **expression** — `base.f * (3/2)`, `beat(base)`, `[1].t + [1].d`.
+- New notes are created from the **ADD NOTE / SILENCE** section of the note widget, and inherit the pitch of the note you create them from.
+- Referencing another note creates a **dependency**: change the parent, the child follows.
+- Ratios like 3/2 and 5/4 are stored exactly, so transposing is a single edit.
+
+## Next steps
+
+- [Core Concepts](/getting-started/concepts) — the theory under all of this
+- [Build a Major Scale](/tutorials/beginner/major-scale) — the next tutorial
+- [User Guide](/user-guide/) — every feature, in detail
