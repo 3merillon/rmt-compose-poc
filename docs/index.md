@@ -110,6 +110,6 @@ Start with [Your First Composition](/getting-started/first-composition) — thre
 
 RMT Compose is free and open source under the **MIT License**. If you find it useful, consider supporting its development:
 
-<a href="https://buy.stripe.com/7sYeV7aW70eG75I9N6bAs00" target="_blank" style="display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #e89191 0%, #d66b6b 100%); color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 16px 0;">
+<a href="https://buy.stripe.com/7sYeV7aW70eG75I9N6bAs00" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #e89191 0%, #d66b6b 100%); color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: 600; margin: 16px 0;">
   ❤️ Donate
 </a>
