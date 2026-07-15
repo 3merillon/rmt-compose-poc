@@ -1035,6 +1035,12 @@ export class Workspace {
           // Initialize caches
           this._interaction.cachedParentChain = null;
           this._interaction.cachedAncestorChain = null;
+          // Group drags must re-decorate AFTER the rebuild above: it just clobbered
+          // cachedDependents with the grabbed note's own dependents, which detaches the
+          // glyph atlas (fraction labels, octave arrows) from the rest of the selection.
+          // Desktop decorates after building the full state (see the pointerdown path);
+          // promotion has to do the same or the two drag caches disagree.
+          if (this._interaction.groupMode) this._decorateAsGroupDrag(this._interaction);
 
           // Seed per-interaction parent/ancestor caches for note drags (move/resize) on promotion
           try {
