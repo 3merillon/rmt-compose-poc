@@ -9,7 +9,7 @@ import { chromium } from 'playwright';
 
 const argv = process.argv.slice(2);
 const flag = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
-const URL_BASE = flag('--url', 'http://localhost:3001');
+const URL_BASE = flag('--url', 'http://localhost:3000');
 const MODULE = flag('--module', 'voices-100000');
 const ITER = Number(flag('--iter', 10));
 

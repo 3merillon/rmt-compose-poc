@@ -1,226 +1,254 @@
+---
+title: Pull Requests
+description: How to get a change into RMT Compose — branch, what to run before you submit, the real commit convention, and what a reviewer checks.
+---
+
 # Pull Requests
 
-Guidelines for contributing to RMT Compose via pull requests.
+Contributions are welcome. The project is [MIT](https://github.com/3merillon/rmt-compose-poc/blob/main/LICENSE.md);
+by opening a pull request you agree that your contribution ships under it.
 
-## Before You Start
+## Before you start
 
-1. **Check existing issues** - Your change may already be in progress
-2. **Open an issue first** for significant changes to discuss approach
-3. **Fork the repository** to your GitHub account
+1. **Check the open issues** — your change may already be in flight.
+2. **Open an issue first** for anything substantial, so the approach can be agreed before you build it.
+3. **Fork the repository.**
 
-## Development Workflow
+Read [Development Setup](/developer/contributing/setup) first if you have not run the app yet — the
+Node version requirement bites, and `npm run build` needs Rust.
 
-### 1. Create a Branch
+## 1. Branch
+
+Pull requests target **`main`**.
 
 ```bash
-# Update main
 git checkout main
 git pull origin main
-
-# Create feature branch
-git checkout -b feature/your-feature-name
+git checkout -b fix/measure-drag-anchor
 ```
 
-Branch naming:
-- `feature/` - New features
-- `fix/` - Bug fixes
-- `docs/` - Documentation
-- `refactor/` - Code refactoring
+There is no enforced branch-naming convention in the repo. Use a short name that says what the
+change is.
 
-### 2. Make Changes
+## 2. Make the change
 
-- Follow [Code Style](/developer/contributing/code-style) guidelines
-- Keep commits focused and atomic
-- Write clear commit messages
+Follow [Code Style](/developer/contributing/code-style). Two invariants a reviewer will check before
+anything else:
 
-### 3. Test Your Changes
+- **Both expression formats.** Any code that writes an expression must detect whether the note is
+  written in DSL or legacy syntax (`isDSLSyntax()`) and emit in the same one.
+- **Defaults preserve behavior.** A new setting must default to what the app already does, so a fresh
+  user sees no change.
+
+Keep commits focused. Do not reformat code you are not changing — there is no formatter config in
+this repo, and a reflowed file buries the real diff.
+
+## 3. Test
+
+### Always: `npm test`
 
 ```bash
-# Run development server
-npm run dev
-
-# Test manually:
-# - Create notes
-# - Edit expressions
-# - Play audio
-# - Save/load modules
-# - Test edge cases
-
-# Build to check for errors
-npm run build
+npm test
 ```
 
-### 4. Commit
+This runs `scripts/validate-modules.mjs` against all 79 shipped library modules — structure,
+expression syntax, self-containment, finite evaluation, and ratio/cents agreement. It is the repo's
+only automated gate, and it is **mandatory** for any change to the DSL, the expression compiler, the
+evaluator, or `public/modules/`.
+
+There is no unit-test suite. "Run the tests" means this.
+
+### Always: a production bundle
 
 ```bash
-git add .
-git commit -m "Add feature description"
+npx vite build
 ```
 
-#### Commit Message Format
+::: warning Do not use `npm run build` unless you have Rust
+`npm run build` is `npm run wasm:build && vite build` — it shells out to `wasm-pack` and fails
+without a Rust toolchain. `npx vite build` is what the deploy actually runs, and it is the check you
+want.
+:::
 
-```
-<type>: <short description>
-
-<optional longer description>
-
-<optional footer>
-```
-
-Types:
-- `feat` - New feature
-- `fix` - Bug fix
-- `docs` - Documentation
-- `refactor` - Code refactoring
-- `perf` - Performance improvement
-- `test` - Tests
-- `chore` - Build/tooling
-
-Examples:
-```
-feat: Add 19-TET scale support
-
-Implements 19-tone equal temperament using SymbolicPower
-for irrational frequency ratios.
-
-Closes #42
-```
-
-```
-fix: Prevent circular dependency crash
-
-Check for cycles before adding dependency to graph.
-```
-
-### 5. Push and Create PR
+### Always: the app, in a browser
 
 ```bash
-git push origin feature/your-feature-name
+npm run dev   # http://localhost:3000
 ```
 
-Then create a Pull Request on GitHub.
+::: warning Restart Vite before you verify
+Vite HMR intermittently strands this app's boot path after a batch of `src/` edits: no notes load,
+`getModule()` returns `null`, and there is **no console error**. It looks like a regression you
+caused. It is not. Kill every running Vite server and start a fresh one before you trust what the
+browser shows you.
+:::
 
-## Pull Request Guidelines
+Exercise the paths your change touches, and check the console for errors and warnings. Silent
+`console.warn`s matter here — a failed expression compile degrades to a constant `0` rather than
+throwing.
 
-### Title
+### Renderer changes: measure and pixel-diff
 
-Clear, concise description of the change:
-- "Add support for Bohlen-Pierce scale"
-- "Fix audio glitch when pausing playback"
-- "Improve expression compilation performance"
+Project rule: **a renderer change is never accepted on eyeballing.** Gated redraws have already
+unmasked real bugs that a full-rebuild-every-frame renderer was hiding.
+
+With `npm run dev` running:
+
+```bash
+npm run perf:gen                                                       # stress modules (gitignored)
+node scripts/perf/visual-regress.mjs --url http://localhost:3000 --capture   # on main
+# ... apply your change ...
+node scripts/perf/visual-regress.mjs --url http://localhost:3000 --compare
+node scripts/perf/bench-render.mjs   --url http://localhost:3000 voices-5000
+node scripts/perf/bench-drag.mjs     --url http://localhost:3000 --module hub-5000 --steps 200
+node scripts/perf/converge.mjs       --url http://localhost:3000
+```
+
+- **Pass `--url` explicitly.** The scripts' built-in defaults point at ports 5173 and 3001; the dev
+  server is on 3000.
+- The pixel-diff tolerance is **300 px by default, not 0** — MSAA resolution is not bit-deterministic
+  across runs, so a zero gate would be permanently red. Do not "fix" a passing diff by tightening it.
+- `converge.mjs` (does one redraw produce the final image?) is non-negotiable now that idle frames
+  are gated: a pass that needs a second frame leaves the user staring at a stale one.
+
+Paste the before/after numbers into the PR.
+
+### Documentation changes
+
+```bash
+npm run docs:build
+```
+
+Dead links fail the build (`ignoreDeadLinks: false`), so this doubles as your link check. Root-relative
+links, no `.md` extension: `[Dependencies](/user-guide/notes/dependencies)`.
+
+### Module-library changes
+
+Anything added to or changed under `public/modules/` must be reachable from the v2 manifest
+`public/modules/library.json` and must pass `npm test`. Several sections are generated —
+`npm run gen:intervals`, `scripts/gen-chords-progressions.mjs`, `scripts/gen-melodies.mjs` — so
+change the generator, not just its output.
+
+## 4. Commit
+
+The convention practiced in this repo is a short descriptive subject in the present tense, often
+prefixed with the subsystem, followed by a body that explains **why**. Recent history:
+
+```
+Fold arrow multipliers into the coefficient instead of stacking them
+Note widget: keep your place in the list when it rebuilds
+Library: fix Save UI / Load UI dropping module metadata
+Fix BaseNote frequency collapsing to 0 on octave arrows
+```
+
+Conventional-Commits prefixes (`feat:`, `chore:`) are **not** used here. Write the sentence.
+
+A good body says what was broken and why the fix is the right one:
+
+```
+Fix BaseNote frequency collapsing to 0 on octave arrows
+
+The arrow handler multiplied the compiled expression, but a BaseNote
+frequency has no coefficient term to multiply, so the fold produced an
+empty product. Guard the base case and scale the literal instead.
+```
+
+## 5. Push and open the PR
+
+```bash
+git push origin fix/measure-drag-anchor
+```
 
 ### Description
 
-Use this template:
-
 ```markdown
 ## Summary
-Brief description of what this PR does.
+What this changes and why.
 
 ## Changes
-- Added X
-- Modified Y
-- Removed Z
+- ...
 
 ## Testing
-How to test these changes:
-1. Step one
-2. Step two
+- `npm test` — pass
+- `npx vite build` — pass
+- Manual: <the paths you exercised, in which browsers>
+- Perf (renderer changes only): before/after numbers, visual-regress result
 
-## Screenshots
-(if applicable)
-
-## Related Issues
+## Related issues
 Closes #123
 ```
 
 ### Checklist
 
-Before submitting:
+- [ ] `npm test` passes
+- [ ] `npx vite build` succeeds
+- [ ] No new console errors or warnings
+- [ ] Tested in a Chromium browser and in Firefox
+- [ ] **Touch tested** if the change goes anywhere near interaction — the app has a substantial touch
+      path (long-press multi-select, touch-driven module bar, mobile viewport handling). A desktop-only
+      check will not catch a touch regression.
+- [ ] Expression-writing code handles **both** DSL and legacy
+- [ ] New settings default to the existing behavior
+- [ ] Renderer changes measured **and** pixel-diffed
+- [ ] User-facing changes update the relevant page under `docs/user-guide/`
+- [ ] New dependency or bundled asset? `THIRD_PARTY_NOTICES.md` updated
 
-- [ ] Code follows style guidelines
-- [ ] No console errors or warnings
-- [ ] Tested in latest Chrome and Firefox
-- [ ] Documentation updated (if needed)
-- [ ] Commit messages are clear
+## Code review
 
-## Code Review
+Reviewers look for:
 
-### What Reviewers Look For
+- **Correctness** — does it do what it claims, including at the edges?
+- **The two-format invariant** — see above. This is the most common defect in expression code.
+- **Defaults** — no behavior change for an existing user who has not touched a setting.
+- **Performance** — no new per-frame allocation on a drag path; no work that scales with the module
+  rather than with what is on screen.
+- **Honest docs** — if the change makes a doc page wrong, fix the page in the same PR.
 
-- **Correctness** - Does it work as intended?
-- **Code quality** - Is it readable and maintainable?
-- **Performance** - Any obvious performance issues?
-- **Edge cases** - Are edge cases handled?
-- **Documentation** - Are complex parts documented?
+Push fixes as new commits during review rather than force-pushing, so reviewers can see what moved.
+Resolve conversations once addressed.
 
-### Responding to Feedback
+## Types of contribution
 
-- Address all comments
-- Push fixes as new commits (don't force push during review)
-- Mark conversations as resolved when addressed
+### Bug fixes
 
-## After Merge
+Reproduce it, state the reproduction in the PR, then fix it. If the bug is in expression handling or
+the module library, add a module (or a stress case) that would have caught it.
 
-### Cleanup
+### New features
 
-```bash
-# Switch to main
-git checkout main
+Discuss in an issue first. Update the user guide if the feature is user-facing, and remember the
+defaults rule: a feature that changes what an existing user sees on first load needs an explicit
+decision, not a silent default.
 
-# Update main
-git pull origin main
+### Performance improvements
 
-# Delete local branch
-git branch -d feature/your-feature-name
-
-# Delete remote branch (usually done automatically)
-git push origin --delete feature/your-feature-name
-```
-
-### Follow Up
-
-- Verify the change works in production
-- Monitor for any reported issues
-- Update documentation if needed
-
-## Types of Contributions
-
-### Bug Fixes
-
-1. Reproduce the bug
-2. Write a clear description
-3. Include steps to reproduce
-4. Add fix with test case
-
-### New Features
-
-1. Discuss in an issue first
-2. Consider backward compatibility
-3. Update documentation
-4. Add to user guide if user-facing
+Include before/after numbers from the harness — `npm run perf:bench` for evaluation, the Playwright
+scripts under `scripts/perf/` for rendering and interaction. State which module and which script.
+"Feels faster" is not a measurement. See [Performance](/developer/performance).
 
 ### Documentation
 
-1. Check for accuracy
-2. Include examples
-3. Update screenshots if UI changed
-4. Test all code examples
+Docs are VitePress markdown under `docs/`. The house rules: **DSL first** (legacy method-chain syntax
+only inside a `<details>` block), and **document only what ships** — if a control does nothing or a
+path is blocked, say so.
 
-### Performance Improvements
+## Getting help
 
-1. Include before/after benchmarks
-2. Explain the optimization
-3. Ensure no functionality changes
+- **Questions** — open a [Discussion](https://github.com/3merillon/rmt-compose-poc/discussions).
+- **Bugs** — open an [Issue](https://github.com/3merillon/rmt-compose-poc/issues).
+- **Security** — do not open a public issue. The repo publishes no `SECURITY.md` and no security
+  contact; reach the maintainer privately through GitHub.
 
-## Getting Help
+## After merge
 
-- **Questions**: Open a [Discussion](https://github.com/3merillon/rmt-compose-poc/discussions)
-- **Bugs**: Open an [Issue](https://github.com/3merillon/rmt-compose-poc/issues)
-- **Security**: Email privately (don't open public issue)
+```bash
+git checkout main
+git pull origin main
+git branch -d fix/measure-drag-anchor
+```
 
-## See Also
+## See also
 
-- [Development Setup](/developer/contributing/setup) - Environment setup
-- [Code Style](/developer/contributing/code-style) - Style guidelines
-- [GitHub Flow](https://guides.github.com/introduction/flow/) - Git workflow
+- [Development Setup](/developer/contributing/setup) — environment, scripts, the perf harness
+- [Code Style](/developer/contributing/code-style) — the conventions and the project invariants
+- [System Architecture](/developer/architecture/overview) — where things live

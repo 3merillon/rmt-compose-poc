@@ -1,431 +1,320 @@
+---
+title: Module Format
+description: How a module JSON file is put together — the baseNote, the notes array, the three note kinds, expression strings, colours, instruments, ids, and the load-time limits.
+---
+
 # Module Format
 
-This page documents the JSON schema used by RMT Compose modules.
+A module is a composition stored as JSON. This page explains the format from an author's point of view: what you write, what the app writes back, and what it refuses.
 
-## Overview
+For the exhaustive field-by-field reference, see [Module JSON Schema](/reference/module-schema).
 
-Modules are JSON files containing:
-- A `baseNote` object with default values
-- A `notes` array with note definitions
-- Optional metadata
+## Two keys, and only two
 
-## Complete Schema
+A module file has exactly two top-level keys.
 
 ```json
 {
-  "baseNote": {
-    "frequency": "<expression>",
-    "startTime": "<expression>",
-    "tempo": "<expression>",
-    "beatsPerMeasure": "<expression>",
-    "instrument": "<string>"
-  },
-  "notes": [
-    {
-      "id": "<number>",
-      "frequency": "<expression>",
-      "startTime": "<expression>",
-      "duration": "<expression>",
-      "color": "<css-color>",
-      "instrument": "<string>"
-    }
-  ],
-  "measures": [
-    {
-      "id": "<number>",
-      "startTime": "<expression>",
-      "beatsPerMeasure": "<expression>"
-    }
-  ]
+  "baseNote": { },
+  "notes": [ ]
 }
 ```
 
-## BaseNote Properties
+| Key | Type | What it is |
+|---|---|---|
+| `baseNote` | object | The root reference note. It is note id **0**. |
+| `notes` | array | A flat array of note objects. |
 
-The `baseNote` object provides default values for the module.
+That is the whole structure. There is **no** `measures` array, no `version`, no `name`, no `author`, no `parentId`. A module carries no metadata at all — the library gets a module's display name from the [library manifest](#shipping-a-module-in-the-repo) or from the uploaded file's name, never from inside the file.
 
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `frequency` | expression | Yes | Reference frequency (Hz) |
-| `startTime` | expression | Yes | Reference start time |
-| `tempo` | expression | Yes | Beats per minute |
-| `beatsPerMeasure` | expression | No | Time signature numerator |
-| `instrument` | string | No | Default instrument |
+Every musical value is an **expression string**, never a number. That is the point of the format: relationships survive, so changing the BaseNote moves everything that depends on it.
 
-### Example BaseNote
-
-```json
-{
-  "baseNote": {
-    "frequency": "440",
-    "startTime": "0",
-    "tempo": "120",
-    "beatsPerMeasure": "4",
-    "instrument": "sine-wave"
-  }
-}
-```
-
-<details>
-<summary>Legacy JavaScript syntax (also supported)</summary>
-
-```json
-{
-  "baseNote": {
-    "frequency": "new Fraction(440)",
-    "startTime": "new Fraction(0)",
-    "tempo": "new Fraction(120)",
-    "beatsPerMeasure": "new Fraction(4)",
-    "instrument": "sine-wave"
-  }
-}
-```
-</details>
-
-## Note Properties
-
-Each note in the `notes` array has these properties:
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `id` | number | Yes | Unique identifier (positive integer) |
-| `frequency` | expression | Yes | Pitch expression |
-| `startTime` | expression | Yes | When the note starts |
-| `duration` | expression | Yes | How long the note plays |
-| `color` | string | No | CSS color value |
-| `instrument` | string | No | Instrument name |
-
-### Example Note
-
-```json
-{
-  "id": 1,
-  "frequency": "base.f * (3/2)",
-  "startTime": "base.t",
-  "duration": "60 / tempo(base)",
-  "color": "rgba(255, 100, 100, 0.7)",
-  "instrument": "sine-wave"
-}
-```
-
-<details>
-<summary>Legacy JavaScript syntax (also supported)</summary>
-
-```json
-{
-  "id": 1,
-  "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
-  "startTime": "module.baseNote.getVariable('startTime')",
-  "duration": "new Fraction(60).div(module.findTempo(module.baseNote))",
-  "color": "rgba(255, 100, 100, 0.7)",
-  "instrument": "sine-wave"
-}
-```
-</details>
-
-## Expression Format
-
-Expressions are DSL strings that get compiled to bytecode. The modern DSL format is recommended, but legacy JavaScript syntax is also supported.
-
-### Constants
-
-```
-// Integer
-"440"
-
-// Fraction
-"3/2"
-
-// Negative
-"-1/4"
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-"new Fraction(440)"
-"new Fraction(3, 2)"
-"new Fraction(-1, 4)"
-```
-</details>
-
-### References
-
-```
-// BaseNote property
-"base.f"
-
-// Other note property
-"[5].t"
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-"module.baseNote.getVariable('frequency')"
-"module.getNoteById(5).getVariable('startTime')"
-```
-</details>
-
-### Operations
-
-```
-// Addition
-"a + b"
-
-// Subtraction
-"a - b"
-
-// Multiplication
-"a * b"
-
-// Division
-"a / b"
-
-// Power
-"a ^ b"
-
-// Negation
-"-a"
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-"a.add(b)"
-"a.sub(b)"
-"a.mul(b)"
-"a.div(b)"
-"a.pow(b)"
-"a.neg()"
-```
-</details>
-
-### Lookup Functions
-
-```
-// Find tempo (walks inheritance chain)
-"tempo(base)"
-
-// Find measure length
-"measure(base)"
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-"module.findTempo(module.baseNote)"
-"module.findMeasureLength(module.baseNote)"
-```
-</details>
-
-## Measure Properties
-
-Measures define time markers in the composition.
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `id` | number | Yes | Unique identifier |
-| `startTime` | expression | Yes | Position of the measure bar |
-| `beatsPerMeasure` | expression | No | Beats in this measure |
-
-### Example Measure
-
-```json
-{
-  "id": 1,
-  "startTime": "base.t + beat(base) * 4",
-  "beatsPerMeasure": "4"
-}
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```json
-{
-  "id": 1,
-  "startTime": "module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(4)))",
-  "beatsPerMeasure": "new Fraction(4)"
-}
-```
-</details>
-
-## Color Format
-
-Colors use CSS color syntax:
-
-```javascript
-// RGBA (recommended)
-"rgba(255, 100, 100, 0.7)"
-
-// RGB
-"rgb(255, 100, 100)"
-
-// Hex
-"#ff6464"
-
-// Named
-"red"
-```
-
-The alpha channel (0.7 in rgba) controls transparency.
-
-## Instrument Names
-
-Built-in instruments:
-
-| Name | Type | Description |
-|------|------|-------------|
-| `sine-wave` | Synth | Pure sine tone |
-| `square-wave` | Synth | Square wave |
-| `sawtooth-wave` | Synth | Sawtooth wave |
-| `triangle-wave` | Synth | Triangle wave |
-| `organ` | Synth | Organ-like |
-| `vibraphone` | Synth | Vibraphone-like |
-| `piano` | Sample | Piano samples |
-| `violin` | Sample | Violin samples |
-
-## ID Rules
-
-- **BaseNote**: Always ID 0 (implicit, not in notes array)
-- **Notes and Measures**: Positive integers, assigned sequentially as items are added
-- **Uniqueness**: All IDs must be unique within the module (notes and measures share the same ID space)
-- **Reordering**: Use **Reorder Module** to renumber all IDs sequentially (measures first, then notes)
-
-## Complete Example
+Here is a complete shipped module, `public/modules/intervals/3-2.json`:
 
 ```json
 {
   "baseNote": {
     "frequency": "263",
     "startTime": "0",
-    "tempo": "100",
+    "tempo": "60",
     "beatsPerMeasure": "4"
   },
   "notes": [
     {
       "id": 1,
-      "frequency": "base.f",
       "startTime": "base.t",
-      "duration": "60 / tempo(base)",
-      "color": "rgba(100, 150, 255, 0.7)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 2,
-      "frequency": "[1].f * (5/4)",
-      "startTime": "[1].t + [1].d",
-      "duration": "60 / tempo(base)",
-      "color": "rgba(255, 150, 100, 0.7)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 3,
-      "frequency": "[2].f * (6/5)",
-      "startTime": "[2].t + [2].d",
-      "duration": "60 / tempo(base) * 2",
-      "color": "rgba(150, 255, 100, 0.7)",
-      "instrument": "sine-wave"
+      "duration": "beat(base)",
+      "frequency": "(3/2) * base.f",
+      "color": "rgba(242,167,27,0.7)"
     }
   ]
 }
 ```
+
+One note: a perfect fifth above the base, one beat long, starting where the base starts.
+
+## The `baseNote` object
+
+Every field is optional. An omitted field falls back to the **class default** below — not to the values of the default module you see when you open the app (263 Hz, 100 BPM).
+
+| Field | Default if you omit it | Notes |
+|---|---|---|
+| `frequency` | `440` Hz | Shipped modules use `263`. |
+| `startTime` | `0` s | |
+| `tempo` | `60` BPM | |
+| `beatsPerMeasure` | `4` | The numerator of the time signature. |
+| `measureLength` | `60 / tempo × beatsPerMeasure` | Only five shipped modules set it explicitly — 12/19/31-TET, Bohlen–Pierce and Mixed-Base — as `beat(base) * base.bpm`. |
+| `color` | none | Accepted, but no shipped module uses it. |
+| `instrument` | none → the `audio.defaultInstrument` setting | Pins the timbre for everything that inherits from the base. |
+
+::: warning The BaseNote has no duration
+`duration` is not one of the BaseNote's defaults, and no shipped module sets `baseNote.duration`. Do not write one, and do not write expressions that read `base.d`.
+:::
+
+## The `notes` array
+
+| Field | Required | Notes |
+|---|---|---|
+| `id` | **yes** | Integer, `0 ≤ id ≤ 100000`. `0` is reserved for the BaseNote. |
+| `startTime` | in practice, yes | Seconds. |
+| `duration` | no | Seconds. Its absence is meaningful — see below. |
+| `frequency` | no | Hz. Its absence is meaningful — see below. |
+| `tempo` | no | Per-note override. |
+| `beatsPerMeasure` | no | Per-note override. This is how a measure bar carries a meter change. |
+| `measureLength` | no | Per-note override. |
+| `color` | no | e.g. `"rgba(242,167,27,0.7)"`. |
+| `instrument` | no | Inherited along the frequency chain when absent. |
+
+The six **expression keys** are exactly `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`. The three **non-expression keys** are `id`, `color`, `instrument`. Any other key in a note object is ignored — including the `_description` field that older versions of this page suggested. Nothing reads it, and it is dropped the first time you re-save.
+
+`tempo`, `beatsPerMeasure` and `measureLength` **fall back to the BaseNote** when a referenced note does not define them. `startTime`, `duration` and `frequency` do not fall back.
+
+### Note kinds are inferred, not declared
+
+There is no `type` field. What a note *is* follows from which expressions it has:
+
+| Kind | Rule |
+|---|---|
+| **Note** | `startTime` + `duration` + `frequency` |
+| **Silence** | `startTime` + `duration`, **no** `frequency` |
+| **Measure bar** | `startTime`, **no** `duration`, **no** `frequency` |
+
+All three live in the same `notes` array and share one id space.
+
+A measure bar is therefore a note you left two properties off. This is the measure chain from the default module — each bar starts one measure after the previous one:
+
+```json
+{ "id": 1, "startTime": "base.t" },
+{ "id": 2, "startTime": "[1].t + measure([1])" },
+{ "id": 3, "startTime": "[2].t + measure([2])" }
+```
+
+And this is a silence from `custom/canon base.json` — a quarter-beat of nothing:
+
+```json
+{ "id": 1, "startTime": "base.t", "duration": "beat(base) * (1/4)",
+  "color": "hsla(258, 70%, 60%, 0.7)" }
+```
+
+## Expression strings
+
+Expressions are text. They are compiled to **bytecode** and run on a stack machine — nothing in the load path uses `eval()` or `new Function()`.
+
+The **DSL** is the primary format. Every shipped module uses it.
+
+```
+base.f * (3/2)          # a fifth above the BaseNote
+(5/4) * [1].f           # a major third above note 1
+[1].t + [1].d           # start when note 1 ends
+[1].t + measure([1])    # one measure after note 1 starts
+beat(base)              # one beat long
+beat(base) * (3/4)      # a dotted eighth
+[1].f * 2 ^ (1/12)      # one 12-TET semitone above note 1
+```
+
+`#` starts a comment that runs to the end of the line. Comments **are** saved: the app writes an expression back as the source text you wrote, so a comment survives the round trip.
+
+### Property names
+
+| Property | Write it as |
+|---|---|
+| frequency | `f`, `freq`, `frequency` |
+| startTime | `t`, `s`, `start`, `startTime` |
+| duration | `d`, `dur`, `duration` |
+| tempo | `tempo` |
+| beatsPerMeasure | `bpm`, `beatsPerMeasure` |
+| measureLength | `ml`, `measureLength` |
+
+`base.f` and `[0].f` mean the same thing: the BaseNote is note 0.
+
+### Helper functions
+
+There are exactly three, and each takes a **bare note reference** — `base` or `[N]`, never an expression.
+
+| Call | Meaning |
+|---|---|
+| `beat(x)` | One beat of x's tempo, in seconds (`60 / tempo`) |
+| `tempo(x)` | x's tempo, in BPM |
+| `measure(x)` | x's measure length, in seconds |
+
+Use `beat(base)` for durations. It is what every shipped module and every expression the app writes for you uses.
+
+::: info Your expressions round-trip as written
+Saving writes back the **source text** of each expression, not a regeneration of it. `measure([1])` stays `measure([1])`, `tempo(base)` stays `tempo(base)`, spacing is preserved, and only the `[N]` references are renumbered by the reindex. An expression is rewritten in the app's own style only when the *app* generates a new one for you — a drag, a resize, an arrow click, a note-length button.
+:::
 
 <details>
-<summary>Legacy JavaScript syntax (also supported)</summary>
+<summary>Legacy JavaScript syntax</summary>
 
-```json
-{
-  "baseNote": {
-    "frequency": "new Fraction(263)",
-    "startTime": "new Fraction(0)",
-    "tempo": "new Fraction(100)",
-    "beatsPerMeasure": "new Fraction(4)"
-  },
-  "notes": [
-    {
-      "id": 1,
-      "frequency": "module.baseNote.getVariable('frequency')",
-      "startTime": "module.baseNote.getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote))",
-      "color": "rgba(100, 150, 255, 0.7)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 2,
-      "frequency": "module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))",
-      "startTime": "module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote))",
-      "color": "rgba(255, 150, 100, 0.7)",
-      "instrument": "sine-wave"
-    },
-    {
-      "id": 3,
-      "frequency": "module.getNoteById(2).getVariable('frequency').mul(new Fraction(6, 5))",
-      "startTime": "module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))",
-      "color": "rgba(150, 255, 100, 0.7)",
-      "instrument": "sine-wave"
-    }
-  ]
-}
+Method-chain expressions still load, and round-trip verbatim — saving does not convert them.
+
+```javascript
+module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
+module.getNoteById(1).getVariable('startTime')
+new Fraction(60).div(module.findTempo(module.baseNote))
 ```
+
+The two formats can be mixed in one file. The format is detected per expression string.
+
 </details>
 
-## Validation
+::: danger An expression neither compiler can read becomes `0`, silently
+There is no error toast for a bad expression. The compiler emits a constant `0`, logs a warning to the browser console, and the module loads anyway. A file that "loads successfully" is not a file that is musically correct — check the notes you expected actually appeared.
+:::
 
-When loading a module, RMT Compose validates:
+## Colours
 
-1. **JSON syntax**: Must be valid JSON
-2. **Required fields**: baseNote, notes array
-3. **Expression syntax**: All expressions must parse correctly
-4. **ID uniqueness**: No duplicate note IDs
-5. **Reference validity**: Referenced note IDs must exist
-6. **No circular dependencies**: No A→B→A reference chains
+Colours are checked against a whitelist, not parsed as general CSS. Accepted forms:
 
-## Common Errors
+| Form | Example |
+|---|---|
+| Hex | `#f2a71b`, `#fff`, `#f2a71bcc` |
+| RGB / RGBA | `rgba(242,167,27,0.7)` |
+| HSL / HSLA | `hsla(258, 70%, 60%, 0.7)` |
+| Named | `red`, `steelblue` — about 140 CSS names |
 
-### Invalid JSON
+Anything else is rejected with `invalid color value` when the module goes through the library validator. Shipped modules use `rgba()` with alpha, because the alpha channel is visible in the workspace.
+
+## Instruments
+
+`instrument` is a plain name string. The nine built-ins:
+
+| Name | Kind |
+|---|---|
+| `sine-wave` | Synth |
+| `square-wave` | Synth |
+| `sawtooth-wave` | Synth |
+| `triangle-wave` | Synth |
+| `organ` | Synth |
+| `vibraphone` | Synth |
+| `fm-epiano` | Synth — FM electric piano |
+| `piano` | Multisampled (VSCO2 Community Edition, CC0) |
+| `violin` | Multisampled (VSCO2 Community Edition, CC0) |
+
+A note with no `instrument` inherits one **along its frequency chain**: the app follows the note the `frequency` expression references, then that note's reference, and so on. If nothing in the chain pins an instrument, the note falls back to the `audio.defaultInstrument` setting (default `sine-wave`). The full lookup order, and its edge cases, are in [Instruments](/user-guide/playback/instruments#how-inheritance-works).
+
+That is why most of the scale-system modules put `"instrument": "sine-wave"` on their BaseNote — it fixes the timbre for the whole module instead of letting it follow whatever the listener set. (`scale-systems/tesla.json` is the exception: it pins nothing, so it plays with whatever default is set.)
+
+## Ids and reindexing
+
+Ids are yours to choose while you hand-write a file, but they will not survive:
+
+**Save Module always reindexes.** Measure bars are renumbered first (sorted by evaluated `startTime`), then the remaining notes (also by `startTime`), starting at id 1. Every `[N]` reference is rewritten to match. Notes are then written out sorted by id.
+
+So the ids in the file you download will generally differ from the ids you saw on screen, and from the ids you originally wrote. There is no byte-stable round trip. **Reorder Module** (in the **+** menu, behind a confirmation) applies the same renumbering to the live workspace.
+
+One more thing changes on the way out: the BaseNote gains a `measureLength` even if your file omitted it, written in legacy form because that is the class default.
+
+```json
+"measureLength": "new Fraction(60).div(module.findTempo(module.baseNote)).mul(module.baseNote.getVariable('beatsPerMeasure'))"
+```
+
+It is harmless — it compiles to the same bytecode as `beat(base) * base.bpm` — but it means a saved file is never "pure DSL".
+
+## Limits
+
+| Limit | Value |
+|---|---|
+| Max file size (**Load Module**) | 3 MB |
+| Max notes | 10 000 |
+| Max JSON nesting depth (**Load Module**) | 20 |
+| Valid note id | integer, 0 – 100 000 |
+| Max expression length | 10 000 characters |
+| Note ids blocked outright | `__proto__`, `constructor`, `prototype` |
+
+::: warning Note ids above 65 535 break references silently
+The loader accepts ids up to 100 000, but a reference is encoded as a 16-bit integer in the bytecode, so `[70000].f` wraps around. Keep your ids below 65 536.
+:::
+
+## What is checked, and where
+
+Different entry points run different checks. This trips people up, so it is worth stating plainly.
+
+| Entry point | Size | Structure | Expressions | Colors |
+|---|---|---|---|---|
+| **Load Module** (file → workspace) | 3 MB | depth ≤ 20, ≤ 10 000 notes | not checked | not checked |
+| **Library upload** (the `+` tile in the module bar) | — | full | checked | checked |
+| **Load UI** import | — | full, per embedded module | checked | checked |
+| **Copy to Modules** | — | full | checked | checked |
+| Dragging a library icon onto a note | — | sniff only | not checked | not checked |
+
+Two things that are **not** checked anywhere at load time:
+
+- **Dangling references.** `[99].f` when there is no note 99 loads fine and evaluates to a fallback (440 Hz for frequency, 0 s for start time, 1 s for duration).
+- **Circular dependencies.** `[1].f = [2].f` and `[2].f = [1].f` load. The evaluator logs `Dependency cycle detected!` to the console and leaves the affected notes unevaluated.
+
+Neither produces an error message on screen. If a note is missing or in the wrong place after a load, open the browser console.
+
+## Shipping a module in the repo
+
+Adding a module to the library that ships with the app takes two steps.
+
+1. Put the file under `public/modules/<section>/`, e.g. `public/modules/custom/my-module.json`.
+2. Add an item to that section's `items` array in **`public/modules/library.json`** — the single v2 manifest that describes the whole library.
 
 ```json
 {
-  "baseNote": {
-    frequency: "new Fraction(440)"  // Missing quotes on key
-  }
+  "file": "custom/my-module.json",
+  "name": "My Module",
+  "ratio": "3/2",
+  "cents": 701.955,
+  "family": "3-limit",
+  "tags": ["custom", "fifth"]
 }
 ```
 
-### Invalid Expression
+| Item field | Required | Used for |
+|---|---|---|
+| `file` | yes | Fetching the module; path is relative to `public/modules/` |
+| `name` | yes | The icon's label and the search index |
+| `ratio` | no | The fraction drawn on the icon |
+| `cents` | no | The caption under the fraction, when **Show cents** is on |
+| `family` | no | The icon's color, e.g. `3-limit`, `chord`, `melody`, `scale` |
+| `tags` | no | Matched by the module bar's search field |
 
-```json
-{
-  "frequency": "(3/2 * ("  // Syntax error - missing closing parens
-}
-```
+Then run `npm test`. It validates every module in the manifest: structure, expression syntax, self-containment (every `[N]` reference resolves inside the same file), finite evaluation — and, for a single-note interval module with a `ratio`, that the evaluated frequency really is `ratio × base` and that `cents` really is `1200·log2(ratio)`.
 
-### Circular Dependency
+Self-containment is what makes a module droppable. On import, its note 0 is remapped onto the note you dropped it on; a reference that pointed outside the file would have nothing to bind to.
 
-```json
-{
-  "notes": [
-    { "id": 1, "frequency": "[2].f" },
-    { "id": 2, "frequency": "[1].f" }
-  ]
-}
-```
+::: info The per-section `index.json` files are a fallback, not the way in
+`public/modules/<section>/index.json` is a bare array of filenames, read only when `library.json` is missing or not version 2. It knows about four sections and nothing else. Editing it will not add your module to the shipped library.
+:::
 
-### Missing Reference
+## Common mistakes
 
-```json
-{
-  "notes": [
-    { "id": 1, "frequency": "[99].f" }
-    // Note 99 doesn't exist!
-  ]
-}
-```
+**Writing a `measures` array.** There is no such key. A measure bar is a note with a `startTime` and nothing else. See [note kinds](#note-kinds-are-inferred-not-declared).
+
+**Writing `60 / tempo(base)` for a duration.** It becomes `0`. An expression that starts with a number is not detected as DSL, so it is routed to the legacy compiler, which cannot read it — the note gets a constant `0` and a console warning. Write `beat(base)`.
+
+**Using `//` for comments inside an expression.** The DSL comment character is `#`. `//` lexes as two division operators and fails to parse — which means the expression becomes `0`.
+
+**Assuming `[2].f = base.f * (3/2)` is valid.** The DSL has no assignment operator. An expression is only ever the right-hand side; the property it belongs to is the JSON key.
+
+**Using absolute numbers for pitch and time.** `"frequency": "394.5"` works, but the note is then frozen — it will not follow the BaseNote, and the module will not adapt when dropped onto another note. Write `(3/2) * base.f`.
+
+## See also
+
+- [Module JSON Schema](/reference/module-schema) — the exhaustive reference
+- [Expression Syntax](/reference/expressions/syntax) — the full grammar
+- [Creating Modules](/user-guide/modules/creating-modules) — building one in the app
+- [Saving Modules](/user-guide/modules/saving-modules) · [Loading Modules](/user-guide/modules/loading-modules)

@@ -1,298 +1,207 @@
+---
+title: Expressions
+description: Write note properties as expressions — fractions, references to other notes, beat(base), and TET powers — and understand what the app does with them.
+---
+
 # Expressions
 
-**Expressions** are the mathematical formulas that define note properties. Understanding expressions is key to mastering RMT Compose.
+Every note property is stored as an **expression**, not as a number. `440` is an expression. So is `base.f * (3/2)`. The app compiles them, works out the values, and recomputes everything downstream whenever a value changes.
 
-## What Are Expressions?
+This page is the practical introduction. The exhaustive grammar lives in the [Expression Syntax reference](/reference/expressions/syntax).
 
-Every note property (frequency, startTime, duration) is computed from an expression. Expressions can be:
-
-- **Constants**: Fixed values like `440` or `3/4`
-- **References**: Values from other notes like `[1].f` or `base.f`
-- **Computations**: Arithmetic on values like `* (3/2)`
-
-## Basic Syntax
-
-### Creating Fractions
-
-Fractions represent exact rational numbers:
+## The three ingredients
 
 ```
-// Integer (440/1)
-440
-
-// Fraction (3/2)
-3/2
-
-// Negative
--1/4
+440                # a literal — 440 Hz
+base.f             # a reference — the BaseNote's frequency
+base.f * (3/2)     # arithmetic on a reference — a perfect fifth above it
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+That is the whole language. Everything else is detail.
 
-```javascript
-new Fraction(440)
-new Fraction(3, 2)
-new Fraction(-1, 4)
-```
-</details>
+## Units: seconds, and the beat idiom
 
-### Referencing Notes
+`startTime` and `duration` are measured in **seconds**. Frequency is in **Hz**.
 
-Access other notes' properties:
+Music is not written in seconds, so the language gives you `beat(base)` — the length of one beat at the BaseNote's tempo, in seconds.
 
 ```
-// BaseNote's frequency
-base.f
-
-// Note 5's start time
-[5].t
-
-// Note 3's duration
-[3].d
+beat(base)              # one beat
+beat(base) * 4          # a whole note
+beat(base) * (1/2)      # an eighth note
+beat(base) * (3/4)      # a dotted eighth
+base.t + beat(base) * 2 # two beats after the BaseNote starts
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+::: warning `1` means one second
+At the default tempo of 100, one beat is `0.6` seconds — so `"duration": "1"` is a note about 1⅔ beats long, which is almost certainly not what you meant. Reach for `beat(base)`.
+:::
 
-```javascript
-module.baseNote.getVariable('frequency')
-module.getNoteById(5).getVariable('startTime')
-module.getNoteById(3).getVariable('duration')
-```
-</details>
+Every shipped module writes its durations this way, and so does the app: the note-length icon buttons in the widget emit `beat(base)` for a quarter, and `beat(base) * 2`, `beat(base) * (1/2)` and so on for the rest.
 
-### Arithmetic Operations
+## Literals
 
-Perform math on values:
+| You write | You get |
+|---|---|
+| `440` | the integer 440 |
+| `(3/2)` | the exact fraction 3/2 — **the parentheses are part of the literal** |
+| `0.5` | converted to a fraction at compile time |
+| `-2` | negation works as you'd expect |
 
-```
-// Addition
-a + b
+Fractions are exact rationals, all the way through. `(1/3)` is one third, not `0.3333`.
 
-// Subtraction
-a - b
+::: tip Prefer fractions to decimals
+A decimal is rationalised, and not always the way you would guess: `3.14159` compiles to `(9563/3044)`. If you want an exact value, write the fraction.
+:::
 
-// Multiplication
-a * b
+## Referencing other notes
 
-// Division
-a / b
+| Form | Meaning |
+|---|---|
+| `[5].f` | note 5's frequency |
+| `base.f` | the BaseNote's frequency |
+| `[0].f` | the same thing — note 0 **is** the BaseNote |
 
-// Negation
--a
+The property goes after the dot. The short names are the ones you will see everywhere:
 
-// Power (for TET systems)
-a ^ b
-```
+| Property | Short | Also accepted |
+|---|---|---|
+| frequency | `f` | `freq`, `frequency` |
+| startTime | `t` | `s`, `start`, `startTime` |
+| duration | `d` | `dur`, `duration` |
+| tempo | `tempo` | — |
+| beatsPerMeasure | `bpm` | `beatsPerMeasure` |
+| measureLength | `ml` | `measureLength` |
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+So `[3].d` is note 3's duration and `base.bpm` is the BaseNote's beats-per-measure. There is no `l` alias for duration.
 
-```javascript
-a.add(b)
-a.sub(b)
-a.mul(b)
-a.div(b)
-a.neg()
-a.pow(b)
-```
-</details>
+`tempo`, `bpm` and `ml` **fall back to the BaseNote** when the note you name doesn't define them — `[5].tempo` on a note with no tempo of its own gives you the BaseNote's tempo. `f`, `t` and `d` do not fall back.
 
-## Common Patterns
+## Arithmetic
 
-### Frequency Expressions
+`+`  `-`  `*`  `/`  `^`  and unary `-`, with the precedence you would expect from mathematics — except for one thing worth knowing:
 
-```
-// Exact frequency in Hz
-440
+::: info `^` binds tighter than `*`
+`base.f * 2^(1/12)` parses as `base.f * (2^(1/12))`, which is what you want. `^` is also right-associative, so `2^3^2` is `2^(3^2)`.
+:::
 
-// Relative to BaseNote (perfect fifth)
-base.f * (3/2)
+Use `(` `)` to group. Use `#` to start a comment — but note that **comments are dropped when the expression is saved**.
 
-// Relative to another note (major third above)
-[1].f * (5/4)
+## The three helper functions
 
-// 12-TET semitone (irrational)
-base.f * 2 ^ (1/12)
-```
+There are exactly three, and each takes a bare note reference (`base` or `[N]`) — not an expression.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+| Call | Gives you |
+|---|---|
+| `beat(x)` | one beat at x's tempo, in seconds |
+| `tempo(x)` | x's tempo |
+| `measure(x)` | x's measure length, in seconds |
 
-```javascript
-new Fraction(440)
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))
-```
-</details>
+::: info `tempo()` and `measure()` don't survive a save
+They compile to exactly the same thing as `x.tempo` and `x.ml`, and that's the form that comes back when the expression is redisplayed. Type `measure([1])` and it works, but the widget will show you `[1].ml` afterwards. **`beat()` is the one helper that round-trips** — write it and it stays written.
+:::
 
-### Start Time Expressions
+## The patterns you'll actually use
+
+**Pitch**
 
 ```
-// At the beginning
-0
-
-// Same time as BaseNote
-base.t
-
-// After Note 3 ends
-[3].t + [3].d
-
-// 2 beats after BaseNote
-base.t + 2
+base.f * (3/2)      # perfect fifth, just intonation
+base.f * (5/4)      # major third, just intonation
+[1].f * (9/8)       # whole tone above note 1
+base.f * 2^(7/12)   # perfect fifth, 12-TET
+base.f * 3^(1/13)   # one Bohlen-Pierce step
+440                 # an absolute pitch, tied to nothing
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(0)
-module.baseNote.getVariable('startTime')
-module.getNoteById(3).getVariable('startTime').add(module.getNoteById(3).getVariable('duration'))
-module.baseNote.getVariable('startTime').add(new Fraction(2))
-```
-</details>
-
-### Duration Expressions
+**Time**
 
 ```
-// Fixed: 1 beat
-1
-
-// Tempo-relative: Quarter note
-60 / tempo(base)
-
-// Tempo-relative: Half note
-60 / tempo(base) * 2
-
-// Same as another note
-[1].d
+base.t                    # start with the BaseNote
+[1].t + [1].d             # start the moment note 1 ends
+[1].t                     # start with note 1 (chord)
+[1].t + measure([1])      # start one measure after note 1
+base.t + beat(base) * 3   # three beats in
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(1)
-new Fraction(60).div(module.findTempo(module.baseNote))
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
-module.getNoteById(1).getVariable('duration')
-```
-</details>
-
-## Module Lookup Functions
-
-Special functions for finding inherited values:
+**Length**
 
 ```
-// Find tempo (walks up dependency chain to BaseNote)
-tempo(base)
-
-// Find measure length
-measure(base)
+beat(base)              # a quarter note
+beat(base) * (7/4)      # a double-dotted quarter
+[3].d                   # exactly as long as note 3 — and tied to it
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+## What the app does with what you typed
 
-```javascript
-module.findTempo(module.baseNote)
-module.findMeasureLength(module.baseNote)
-```
-</details>
+**It always shows you DSL.** Whatever format a note was authored in, the `Raw:` field decompiles it into the DSL. You will essentially never see the legacy method-chain syntax unless you open an old JSON file by hand — and saving a legacy row rewrites it as DSL.
 
-## Expression Evaluation
+**It simplifies on save.** Expressions are canonicalised into a rational coefficient times a product of powers:
 
-Expressions are:
+| You type | It saves |
+|---|---|
+| `2 * (1/2) * base.f` | `base.f` |
+| `base.f + base.f` | `2 * base.f` |
+| `4^(1/2) * base.f` | `2 * base.f` |
+| `2^(1/12) * 2^(1/12) * base.f` | `2^(1/6) * base.f` |
 
-1. **Compiled** to binary bytecode at load time
-2. **Evaluated** by a stack-based virtual machine
-3. **Cached** for performance
-4. **Re-evaluated** when dependencies change
+A rewrite is rejected and your original kept if it would change the value, so simplification can never quietly retune a note.
 
-### Evaluation Order
+**It re-evaluates in dependency order.** Change the BaseNote's frequency and every note that references it — directly or through a chain — updates. See [Dependencies](/user-guide/notes/dependencies).
 
-The dependency graph determines evaluation order:
+## Irrational values and the ≈ badge
 
-1. BaseNote is evaluated first
-2. Notes are evaluated in topological order (dependencies before dependents)
-3. If Note B depends on Note A, Note A is always evaluated first
+Equal temperament needs irrational numbers: `2^(1/12)` is not a fraction. The app cannot hold those exactly, so it flags them.
 
-## Error Handling
+A note whose frequency is irrational — or which depends on one that is — is called **corrupted**, and shows up two ways:
 
-### Syntax Errors
+- In the note widget, the **`Evaluated:`** value gets an **`≈`** prefix and turns italic amber.
+- In the workspace, the note is drawn with diagonal **hatching**. A **crosshatch** (both diagonals) means the note is *directly* irrational. A **single diagonal** means it *inherited* the problem from a note it depends on.
 
-Invalid expressions prevent saving:
+This is information, not an error. TET music is supposed to look like this. It is telling you where exactness stops. [Equal Temperament](/user-guide/tuning/equal-temperament) goes into what stays exact and what does not.
 
-```
-// Missing parenthesis - ERROR
-(3/2 * (5/4)
+::: info The ≈ badge only shows on the frequency row
+Start times and durations can be irrational too, but the widget doesn't mark them.
+:::
 
-// Correct
-(3/2) * (5/4)
-```
+## Things that go wrong
 
-### Circular Dependencies
+### A typo'd note ID is not an error
 
-Notes cannot depend on each other in a cycle:
+::: danger `[999].f` silently becomes 440 Hz
+Nothing validates that a referenced note exists. If the reference can't be resolved, the evaluator substitutes a default instead of complaining — **440 Hz** for a frequency, `0` for a start time, `1` for a duration. So a mistyped ID produces a plausible-sounding note rather than an error message. If a note is stubbornly sitting at 440 Hz, check its IDs.
+:::
 
-```
-// Note A depends on Note B
-[B].f * (3/2)
+### Self-references and cycles are rejected
 
-// Note B depends on Note A - ERROR!
-[A].f * (5/4)
-```
-
-### Invalid References
-
-Referencing a non-existent note causes an error:
+A note cannot reference itself, and two notes cannot reference each other in a loop. Both are caught before the expression is stored.
 
 ```
-// Note 999 doesn't exist - ERROR
-[999].f
+# On note 4 — rejected, a note cannot reference itself
+[4].f * (3/2)
+
+# On note 5, when note 6 already reads [5].f — rejected, that's a cycle
+[6].f * (3/2)
 ```
 
-## Irrational Values (TET)
+### Rejections are silent
 
-Power expressions can produce irrational results:
+When `Save` rejects an expression — bad syntax, self-reference, cycle — **nothing appears on screen**. The button stays, the field keeps your text, and the note doesn't change. The error goes to the browser console. If Save seems to do nothing, that is what happened.
 
-```
-// 2^(1/12) is irrational
-2 ^ (1/12)
-```
+## Expression versus value
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+| Term | Meaning |
+|---|---|
+| **Expression** | the formula — `base.f * (3/2)` |
+| **Value** | what it currently works out to — `394.5` Hz |
+| **`Raw:`** | the expression, in the widget |
+| **`Evaluated:`** | the value, in the widget |
 
-```javascript
-new Fraction(2).pow(new Fraction(1, 12))
-```
-</details>
+Retuning the BaseNote changes every *value* in the piece and no *expression* at all. That is the point of the whole system.
 
-These are stored as **SymbolicPower** objects, not floats:
+## Where to go next
 
-- Preserves algebraic structure
-- Combines like bases: `2^(1/12) × 2^(1/12) = 2^(1/6)`
-- Displayed with **≈** prefix
-
-## Expression vs. Value
-
-| Concept | Description |
-|---------|-------------|
-| **Expression** | The formula (e.g., `base.f * (3/2)`) |
-| **Value** | The computed result (e.g., `660 Hz`) |
-| **Raw** | The expression text in the Variable Widget |
-| **Evaluated** | The value shown in the Variable Widget |
-
-Changing the BaseNote frequency updates all evaluated values, but expressions stay the same.
-
-## Tips
-
-1. **Start simple**: Use constants first, add references as needed
-2. **Test incrementally**: Check the evaluated value after each change
-3. **Copy working expressions**: Use existing expressions as templates
-4. **Mind the parentheses**: Every `.` and `()` must be correct
-5. **Use Ctrl+Z**: Undo if an expression breaks something
+- [Expression Syntax reference](/reference/expressions/syntax) — the complete grammar.
+- [Frequency](/reference/properties/frequency), [Start Time](/reference/properties/start-time), [Duration](/reference/properties/duration) — property-by-property reference.
+- [Dependencies](/user-guide/notes/dependencies) — what a reference buys you.
+- [Pure Ratios](/user-guide/tuning/ratios) and [Equal Temperament](/user-guide/tuning/equal-temperament) — the two ways to write a pitch.

@@ -11,7 +11,7 @@
  *   npm run dev                                   # in another terminal
  *   node scripts/perf/bench-render.mjs                        # default ladder
  *   node scripts/perf/bench-render.mjs voices-20000           # one module
- *   node scripts/perf/bench-render.mjs --url http://localhost:5173
+ *   node scripts/perf/bench-render.mjs --url http://localhost:3000
  *   node scripts/perf/bench-render.mjs --json out.json        # machine-readable
  *   node scripts/perf/bench-render.mjs --headed               # watch it run
  *
@@ -26,7 +26,7 @@ const flag = (name, def = null) => {
   const i = argv.indexOf(name);
   return i >= 0 ? (argv[i + 1] ?? true) : def;
 };
-const URL_BASE = flag('--url', 'http://localhost:5173');
+const URL_BASE = flag('--url', 'http://localhost:3000');
 const HEADED = argv.includes('--headed');
 const JSON_OUT = flag('--json', null);
 const positional = argv.filter((a) => !a.startsWith('--') && argv[argv.indexOf(a) - 1] !== '--url' && argv[argv.indexOf(a) - 1] !== '--json');

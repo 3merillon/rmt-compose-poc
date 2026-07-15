@@ -84,7 +84,10 @@ export class Module {
       // unchanged at defaults). This is what makes the audio.defaultInstrument
       // setting reach the common inheriting-note case. A caller/JSON may still
       // pass an explicit `instrument` to pin the base note's timbre.
-      measureLength: "new Fraction(60).div(module.findTempo(module.baseNote)).mul(module.baseNote.getVariable('beatsPerMeasure'))",
+      // DSL form of 60/tempo(base) * base.bpm — compiles to the exact same
+      // bytecode (LOAD_CONST 60, LOAD_BASE tempo, DIV, LOAD_BASE bpm, MUL) as
+      // the old legacy method-chain string, but keeps saved modules pure DSL.
+      measureLength: 'beat(base) * base.bpm',
     };
 
     // Merge defaults with provided variables (convert functions to strings if needed)
@@ -566,6 +569,21 @@ export class Module {
    * Remove a note
    */
   removeNote(id) {
+    const numId = Number(id);
+    // Warn about dependents left dangling: a LOAD_REF to a removed note pushes
+    // hardcoded evaluator defaults (frequency 440, startTime 0, duration 1)
+    // with no error. The UI's delete paths liberate dependents first; this
+    // guards programmatic callers.
+    const dependents = this._dependencyGraph.getDependents(numId);
+    if (dependents && dependents.size > 0) {
+      const dangling = Array.from(dependents).filter(depId => depId !== numId && this.notes[depId]);
+      if (dangling.length > 0) {
+        console.warn(
+          `removeNote(${numId}): ${dangling.length} dependent note(s) left dangling: [${dangling.join(', ')}] — ` +
+          `their references to note ${numId} will now evaluate to hardcoded defaults`
+        );
+      }
+    }
     delete this.notes[id];
     this._evaluationCache.delete(id);
     this._dependencyGraph.removeNote(id);
@@ -848,9 +866,11 @@ export class Module {
       const noteId = parseInt(noteData.id, 10);
       const variables = {};
 
-      // SECURITY: Validate note ID to prevent prototype pollution and invalid values
-      if (isNaN(noteId) || !Number.isInteger(noteId) || noteId < 0 || noteId > 100000) {
-        console.warn(`[RMT Security] Invalid note ID: ${noteData.id}, skipping`);
+      // SECURITY: Validate note ID to prevent prototype pollution and invalid values.
+      // Cap at 65535: LOAD_REF encodes note ids as u16, so anything larger would
+      // silently truncate (e.g. [70000] binding to note 4464).
+      if (isNaN(noteId) || !Number.isInteger(noteId) || noteId < 0 || noteId > 65535) {
+        console.warn(`[RMT Security] Invalid note ID: ${noteData.id} (must be 0-65535), skipping`);
         continue;
       }
 

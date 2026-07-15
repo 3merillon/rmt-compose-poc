@@ -81,25 +81,30 @@ export class ExpressionCompiler {
     try {
       const ast = this.parse(textExpr);
       this.emitBytecode(ast, binary);
-    } catch (e) {
+    } catch (legacyError) {
       // The legacy parser failed. Before giving up, try the DSL compiler: the
       // routing check above is a regex sniff, not a parse, so it can misclassify
-      // a DSL expression as legacy. Falling straight through to the constant-0
-      // fallback would silently zero the note's value instead.
+      // a DSL expression as legacy.
+      let dslError;
       try {
         const dslBinary = compileDSL(textExpr);
         this._cacheSet(cacheKey, dslBinary);
         return dslBinary.clone();
-      } catch {
+      } catch (e2) {
         // Not valid DSL either — genuinely unparseable.
+        dslError = e2;
       }
 
-      // If parsing fails, create a fallback that returns 0
-      console.warn(`Failed to compile expression: ${textExpr}`, e);
-      binary.clear();
-      binary.sourceText = textExpr;
-      // Emit a constant 0
-      this.emitConstant(binary, 0, 1);
+      // Both parsers failed: propagate a real error instead of silently
+      // compiling to a constant 0 (which used to zero the note's value with
+      // no feedback and made every validator pass garbage). Load paths stay
+      // resilient — Note's constructor/_setExpression and batchSetExpressions
+      // catch per-note — while interactive paths (widget save, validators)
+      // surface the message.
+      console.error(`Failed to compile expression: ${textExpr}`, legacyError);
+      throw new Error(
+        `Unparseable expression: "${textExpr}" — legacy parser: ${legacyError.message}; DSL parser: ${dslError.message}`
+      );
     }
 
     this._cacheSet(cacheKey, binary);
@@ -307,9 +312,10 @@ export class ExpressionCompiler {
       return { type: 'baseRef', varName: trimmed };
     }
 
-    // Truly opaque - this shouldn't happen for valid expressions
-    console.warn(`Unable to parse expression: ${trimmed}`);
-    return { type: 'const', num: 0, den: 1 };
+    // Truly opaque — refuse to guess. Returning a constant 0 here silently
+    // zeroed the note's value; throw so compile() can propagate a real error
+    // (or retry the other syntax).
+    throw new Error(`Unable to parse expression fragment: ${trimmed}`);
   }
 
   /**

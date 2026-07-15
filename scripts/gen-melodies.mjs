@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Generate public-domain melodies (relational) + reorganize scale systems
- * (ROADMAP Phase 6.4b).
+ * Public-domain melodies for the module library.
  *
  * MELODIES are relational: every note frequency is a just-intonation scale
  * degree times base.f, and timing is measured from base.t in beats. So the whole
@@ -104,17 +104,20 @@ const MELODIES = [
     ],
   },
   {
+    // HAND-MAINTAINED (commit 30d8a64): seq below is stale; the JSON is never regenerated.
     file: 'amazing-grace.json', name: 'Amazing Grace', base: WALTZ_BASE,
     tags: ['hymn', 'pentatonic', 'major', 'public-domain'],
     seq: [['5_',1], ['1',2],['3',0.5],['1',0.5], ['3',2],['2',1], ['1',3], ['3',2],['3',1], ['5',3], ['5',2],['3',1], ['1',2],['3',0.5],['1',0.5], ['3',2],['2',1], ['1',3]],
   },
   {
+    // HAND-MAINTAINED (commit 30d8a64): seq below is stale; the JSON is never regenerated.
     file: 'greensleeves.json', name: 'Greensleeves', base: WALTZ_BASE,
     tags: ['renaissance', 'dorian', 'minor', 'public-domain'],
     // corrected per melody-verify workflow: ascending G#-A-B-C turn + half-cadence to low E
     seq: [['1',1],['b3',2],['4',1],['5',1.5],['6',0.5],['5',1],['4',2],['2',1],['7_',1.5],['1',0.5],['2',1],['b3',2],['1',1],['1',1.5],['7_',0.5],['5_',1]],
   },
   {
+    // HAND-MAINTAINED (commit 30d8a64): seq below is stale; the JSON is never regenerated.
     file: 'bach-minuet.json', name: 'Bach Minuet in G', base: WALTZ_BASE,
     tags: ['bach', 'baroque', 'classical', 'major', 'public-domain'],
     seq: [['5',2],['1',1],['2',1],['3',1],['4',1], ['5',2],['1',1],['1',2],['1',1], ['6',2],['4',1],['5',1],['6',1],['7',1], ['1^',2],['1',1],['1',2],['1',1]],
@@ -126,12 +129,23 @@ const MELODIES = [
   },
 ];
 
+// HAND-MAINTAINED melodies: commit 30d8a64 corrected these three JSON files
+// directly in public/modules/melodies/ without back-porting the fixes into the
+// seqs above. Never write them here — regenerating would clobber the hand-edits.
+// They still ship: they stay in melWanted (so cleanup keeps them) and in
+// melItems (so index.json/library.json list them).
+const HAND_MAINTAINED = new Set(['amazing-grace.json', 'bach-minuet.json', 'greensleeves.json']);
+
 // ================= write melodies =================
 if (!existsSync(melodiesDir)) mkdirSync(melodiesDir, { recursive: true });
 const melItems = [];
 const melWanted = new Set();
 for (const m of MELODIES) {
-  writeFileSync(join(melodiesDir, m.file), JSON.stringify(buildMelody(m.seq, m.base), null, 2) + '\n');
+  if (HAND_MAINTAINED.has(m.file)) {
+    console.log('skipped hand-maintained melody:', m.file);
+  } else {
+    writeFileSync(join(melodiesDir, m.file), JSON.stringify(buildMelody(m.seq, m.base), null, 2) + '\n');
+  }
   melWanted.add(m.file);
   melItems.push({ file: `melodies/${m.file}`, name: m.name, family: 'melody', tags: m.tags });
 }

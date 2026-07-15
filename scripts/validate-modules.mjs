@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Validate every shipped library module (ROADMAP Phase 6.5).
+ * Validate every shipped library module (npm test).
  *
  * For each module referenced by public/modules/library.json (v2 manifest):
  *   1. structure    — object with baseNote{} + notes[]

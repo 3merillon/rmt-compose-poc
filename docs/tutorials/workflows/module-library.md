@@ -1,523 +1,257 @@
-# Creating a Module Library
+---
+title: Building a Module Library
+description: How the shipped 79-module library is organised, how to add your own modules with Copy to Modules or uploads, and how to back up the layout.
+---
 
-Learn how to build, organize, and maintain a personal library of reusable modules.
+# Building a Module Library
 
-## Why Build a Module Library?
+The module bar is the strip of tiles under the top bar. It ships with a catalog, it is
+editable, and the fastest way to add to it is to select some notes and press one button.
 
-A well-organized module library lets you:
-- **Reuse patterns**: Save common chord progressions, scales, or rhythms
-- **Experiment faster**: Start from templates instead of scratch
-- **Share work**: Export modules for others to use
-- **Learn**: Study interesting modules you create or collect
+## What ships
 
-## Module Library Structure
+**79 modules in six sections.**
 
-Modules are organized in the Module Bar by category:
+| Section | Modules | What's in it |
+|---|---|---|
+| **Intervals** | 46 | Every just ratio from 1/1 to the 23rd harmonic, plus six commas |
+| **Chords** | 11 | Major, Minor, Dominant 7th, Harmonic 7th, Minor 7th, Major 7th, Diminished, Augmented, Sus4, Base-3 chord, Base-5 chord |
+| **Progressions** | 8 | ii–V–I, I–IV–V–I, I–vi–IV–V, V7–I, plus four cadences |
+| **Melodies** | 7 | Ode to Joy, Twinkle Twinkle, Frère Jacques, Amazing Grace, Greensleeves, Bach Minuet in G, Scarborough Fair |
+| **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
+| **Custom** | 1 | `canon base` — and where your own modules land |
+
+![The module bar showing coloured module tiles grouped into labelled sections](/img/module-library-icons.png)
+
+Tiles are drawn from the module's metadata. An interval shows its ratio as a stacked fraction with a
+cents caption (`3 / 2`, `702¢`); a chord shows its name with the colon ratio underneath
+(`Major`, `4:5:6`); everything else shows its name. The tile colour is its **family**:
+
+| Family | Colour |
+|---|---|
+| 3-limit | amber |
+| 5-limit | green |
+| 7-limit | blue |
+| higher (11–23-limit) | violet |
+| comma | grey |
+| chord | coral |
+| progression / cadence | magenta |
+| melody | teal |
+| scale | cyan |
+
+::: tip Search, don't scroll
+Click the **magnifier** at the left of the library toolbar to unfold the search field
+(`Search name, ratio, tag…`). It matches name, **ratio**, **cents**, **family** and **tags** — so
+`3/2`, `septimal` and `comma` all work as queries. Matches appear even inside collapsed sections.
+Closing the field (magnifier again, `Escape`, or blurring it while empty) always clears the query.
+:::
+
+## Getting your work into the library
+
+### The good way: Copy to Modules
+
+1. **Select the notes.** Shift-drag a marquee across empty background (desktop), or long-press empty
+   space and drag (touch). Shift-click / long-press individual notes to toggle them in or out.
+2. Two or more notes selected → the **group widget** appears with the count.
+3. Press **Copy to Modules**.
+
+The selection is saved into the **Custom** section as `Selection (N notes)` (uniquified with a
+trailing number if that name is taken), a toast confirms it, and the Custom section auto-expands if
+it was collapsed. The selection stays live — the action is non-destructive.
+
+What you get is a genuinely reusable module, not a snapshot:
+
+- The **earliest selected note becomes the root** and sits on the new module's BaseNote.
+- Expressions that reference only notes *inside* the selection are copied **verbatim** (ids
+  renumbered). So `[1].t + [1].d` stays `[1].t + [1].d` — internal branching survives.
+- Expressions that reached *outside* the selection would dangle, so they are rebuilt against the new
+  base as ratios and beat offsets: `k * base.f`, `base.t + beat(base) * k`, `beat(base) * k`.
+- The new BaseNote is a copy of your current one, so `base.f` and `beat(base)` keep meaning what
+  they meant, and pitches survive as **ratios** — which is what lets the copy transpose correctly
+  when you drop it on a different note.
+
+Drop the copy back onto the note it came from and it lands exactly on top of itself.
+
+::: warning Copy to Modules loses colours and instruments
+Per-note `color` and `instrument` are **not** carried into the copied module, and neither is the base
+note's instrument. Pitch, timing and structure survive; the look and the timbre do not. Re-set them
+after you drop the copy back in.
+:::
+
+::: info Copy to Modules is not undoable
+It writes to the library, not to your composition — so `Ctrl+Z` will not remove it. To get rid of a
+copy, delete its tile (the red **×** on the icon).
+:::
+
+### The other way: upload a file
+
+1. **+ menu** → **Save Module**. A file downloads, always named **`module.json`** — which is why you
+   have to rename it.
+2. Rename it descriptively.
+3. Click the dashed **`+` placeholder** at the end of any section. It is an **upload** button, not a
+   "new module" button — it opens a file picker (`.json` only).
+4. Pick your file. On success: `Module "NAME" uploaded successfully`.
+
+The file is validated on the way in: it must have a `baseNote` object and a `notes` array, at most
+10 000 notes, unique integer ids in 0…100000, and every expression and colour must pass validation.
+A bad file is rejected with `Invalid module: <errors>`.
+
+::: warning Save Module reindexes
+The exported file is not a byte-copy of what you were looking at. Everything is renumbered from 1 in
+one run: measures first (sorted by start time), then the notes (also sorted by start time), so a
+module with three measures hands its first note the id 4. Every `[N]` reference is rewritten to
+match. The music is identical; the ids are not.
+:::
+
+## Using a module
+
+Drag a tile out of the bar and drop it **on a note, on the BaseNote circle, or on a measure bar**.
+The module's notes are grafted in, with every `base.*` reference re-anchored to the drop target and
+its internal ids renumbered so nothing collides.
+
+| Drop target | Result |
+|---|---|
+| A note | Imported and re-rooted onto that note |
+| The BaseNote circle | Imported keeping its `base.*` anchors |
+| A measure bar | Timing anchors to the measure; **frequency stays on `base.f`** (a measure bar has no pitch) |
+| A silence | **Rejected** — *"Cannot drop onto a silence."* |
+| Empty background | **Rejected** — *"Drop onto a note or the BaseNote circle to import a module."* |
+
+::: warning You cannot drop a module onto empty workspace
+There is no "load it wherever" fallback. A drop that misses a note, the BaseNote or a measure bar
+produces an error toast and does nothing. Modules are always imported *onto a target*.
+:::
+
+### Drop at: Start / End
+
+The `Drop at:` toggle sits just above the action buttons. Default is **Start**.
+
+| Mode | Effect on a note |
+|---|---|
+| **Start** | The module's notes anchor to the target's **start time** |
+| **End** | The same, plus `+ [target].d` on the start expressions — the module lands at the target's **end** |
+
+Start stacks (chords). End chains (scales, melodies).
+
+**Dropping on the BaseNote ignores the toggle entirely.** The End adjustment only applies to a real
+note.
+
+An import is one undo entry (`Import Module at <id>`), and playback pauses first if it was running.
+
+## Organising the bar
+
+| Action | How |
+|---|---|
+| Collapse / expand a section | Click its label chip. `▾` = expanded, `▸` = collapsed with a count badge |
+| Reorder sections | Drag one label chip onto another |
+| Reorder modules | Drag a tile onto another tile — they **swap**, including across sections |
+| Move a module to another section | Drag it onto that section's `+` placeholder |
+| Delete a module | The red **×** on the tile → *Yes, Remove* |
+| Delete a section | The red **×** on its label chip → *Yes, Remove Category* |
+| Add a section | **Add Category** → type a name |
+| Resize the bar | Drag the small pull-tab hanging below it |
+
+Collapse state, section order and tile order all persist.
+
+::: info Sections are flat
+There is one level of section. No nested subcategories. With search matching ratios, families and
+tags, this matters much less than it used to.
+:::
+
+## Settings that affect the library
+
+Open the Settings panel from the **gear in the top bar**, then the **Library** tab:
+
+| Setting | Default | Range |
+|---|---|---|
+| **Icon size** | 56 px | 32–96, step 4 |
+| **Show cents** | on | — |
+
+Both apply live.
+
+![The Library tab of the Settings panel, with the Icon size slider and the Show cents toggle](/img/settings-library.png)
+
+## Undo and Redo
+
+The library toolbar has its own **Undo** and **Redo** buttons at the right end (`Ctrl+Z` / `Ctrl+Y`).
+They are the same history as the "+" menu's buttons — they exist so you can reach history without
+leaving the bar. Clicking them does not clear your note selection.
+
+## Backing up
+
+| Action | What it does |
+|---|---|
+| **Save UI** | Downloads the whole layout as **`ui-state.json`** — sections, order, collapse state, uploads, drop mode |
+| **Load UI** | Imports a `ui-state.json`. Every embedded module is re-validated; invalid ones are skipped and reported |
+| **Reload Defaults** | Confirms, then wipes your layout and rebuilds from the shipped catalog. Irreversible |
+
+The layout also **autosaves to browser localStorage** (key `ui-state`) — 200 ms after any structural
+change, every 30 seconds, and on page unload.
+
+::: warning Clearing browser data wipes your library layout
+Built-in modules are stored by reference and come back on their own. **Your uploads and
+Copy-to-Modules results are stored only in localStorage** — clearing site data destroys them. Press
+**Save UI** and keep the file if they matter.
+:::
+
+Good news: on every load, the stored layout is **reconciled against the shipped catalog**. Modules
+whose files no longer exist are dropped (no broken tiles), kept built-ins get fresh metadata, and
+newly-shipped modules and sections are appended — all without you pressing Reload Defaults. Your
+Custom section, your own sections and your uploads are always preserved.
+
+## Designing a module worth reusing
+
+### Anchor to `base`, not to numbers
 
 ```
-Module Bar
-├── Category 1
-│   ├── Module A
-│   ├── Module B
-│   └── Module C
-├── Category 2
-│   └── Module D
-└── Category 3
-    ├── Module E
-    └── Module F
+base.f * (5/4)          # transposes when the BaseNote changes
 ```
 
-## Creating Your First Module
-
-### Step 1: Build the Composition
-
-Create notes with the patterns you want to save:
-
 ```
-// Example: Major Triad module
-
-// Root
-frequency: base.f
-startTime: 0
-duration: 1
-
-// Major Third
-frequency: [1].f * (5/4)
-startTime: [1].t
-duration: [1].d
-
-// Perfect Fifth
-frequency: [1].f * (3/2)
-startTime: [1].t
-duration: [1].d
+263 * (5/4)             # frozen; a dead number
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+A module whose pitches are ratios of `base.f` re-roots correctly onto whatever note you drop it on.
+A module full of absolute frequencies does not.
 
-```javascript
-// Example: Major Triad module
+### Keep it self-contained
 
-// Root
-frequency: module.baseNote.getVariable('frequency')
-startTime: new Fraction(0)
-duration: new Fraction(1)
+Every `[N]` in a module must name a note **inside that module**. A reference that reaches outside
+would dangle the moment the module is imported somewhere else. This is enforced for every shipped
+module by `npm test`, and it is what lets a module be dropped onto both a note and the BaseNote.
 
-// Major Third
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
+### Build a real tree, not a flat list
 
-// Perfect Fifth
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
-```
+This is the design decision the shipped catalog is built on, and it is worth copying.
 
-</details>
+A chord is not three independent pitches. It is a **root plus relationships**: note 1 is `base.f`,
+and every chord tone is `(s/n) * [1].f`. A progression chains the roots — each later root is
+expressed from the *previous* root, and only the first root ever touches `base`.
 
-### Step 2: Save the Module
+The payoff: **octave-shifting the first root transposes the entire progression.** Every chord, every
+tone, follows, because everything downstream is defined relative to it.
 
-1. Click the **Menu** button (plus/minus icon) in the top bar
-2. Click **Save Module**
-3. A JSON file downloads to your computer (e.g., `module.json`)
-4. Rename the downloaded file descriptively: `major-triad-just.json`
-
-### Step 3: Add to Module Bar
-
-1. In the Module Bar, find the category where you want the module (e.g., **Chords**)
-2. Click the **+** placeholder icon in that category
-3. Select your saved JSON file
-4. The module appears in the category
-
-### Step 4: Test the Module
-
-1. Drag the module from the Module Bar onto a note in the workspace
-2. Verify all notes and dependencies load correctly
-3. Play to confirm the sound is correct
-
-## Organizing Categories
-
-### Default Categories
-
-The Module Bar comes with four built-in categories:
-
-| Category | Description |
-|----------|-------------|
-| **Intervals** | Single intervals (octave, fifth, third, etc.) |
-| **Chords** | Common chord voicings (major, minor, etc.) |
-| **Melodies** | Example sequences including TET scales |
-| **Custom** | Your personal module library |
-
-### Suggested Organization
-
-Since categories are currently flat (no nested subcategories), use naming conventions to organize:
+Compare a scale, which the Scale Systems modules build as a chain — each note is the previous note's
+frequency times one step:
 
 ```
-Scales (category)
-├── Major Scale C.json
-├── Major Scale D.json
-├── Minor Scale A.json
-├── Pentatonic C.json
-└── 19-TET Scale.json
-
-Chords (category)
-├── Major Triad.json
-├── Minor Triad.json
-├── Major 7th.json
-├── Dominant 7th.json
-└── Diminished.json
+[4].f * 2 ^ (1/12)
 ```
 
-**Tip**: Use descriptive filenames since module names in the Module Bar are derived from filenames.
-
-### Creating a New Category
-
-1. Click the **Add Category** button in the Module Bar
-2. Enter a name for the category (e.g., "My Progressions")
-3. The new category appears in the Module Bar
-4. Drag existing modules into it, or click **+** to upload new ones
-
-## Building Useful Templates
-
-### Scale Template
-
-Create a reusable scale that can be transposed:
-
-```
-// All notes depend on BaseNote.frequency
-// Transposing is as simple as changing BaseNote
-
-// Note 1: Root (unison)
-frequency: base.f
-
-// Note 2: Second
-frequency: base.f * (9/8)
-
-// Note 3: Third
-frequency: base.f * (5/4)
-
-// ... continue for full scale
-```
-
-**Why this works**: Changing BaseNote's frequency transposes the entire scale.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Note 1: Root (unison)
-frequency: module.baseNote.getVariable('frequency')
-
-// Note 2: Second
-frequency: module.baseNote.getVariable('frequency').mul(new Fraction(9, 8))
-
-// Note 3: Third
-frequency: module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
-```
-
-</details>
-
-### Chord Progression Template
-
-```
-// Chord 1: I (root position)
-// Notes 1-3: Triad based on BaseNote
-
-// Chord 2: IV (subdominant)
-// Notes 4-6: Triad based on base.f * (4/3)
-
-// Chord 3: V (dominant)
-// Notes 7-9: Triad based on base.f * (3/2)
-
-// Chord 4: I (return to tonic)
-// Notes 10-12: Copy of Chord 1 structure
-```
-
-### Rhythm Template
-
-```
-// Create beat references that other notes can follow
-
-// Beat 1 marker
-startTime: 0
-duration: beat(base)
-
-// Beat 2 marker
-startTime: [1].t + [1].d
-duration: beat(base)
-
-// ... continue for full measure
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Beat 1 marker
-startTime: new Fraction(0)
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Beat 2 marker
-startTime: module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-```
-
-</details>
-
-## Best Practices for Module Design
-
-### 1. Use BaseNote as the Root
-
-Always reference BaseNote for primary values:
-
-```
-// Good: Inherits from BaseNote (easy to customize)
-frequency: base.f * (...)
-
-// Less flexible: Hard-coded value
-frequency: 440 * (...)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Good: Inherits from BaseNote (easy to customize)
-frequency: module.baseNote.getVariable('frequency').mul(...)
-
-// Less flexible: Hard-coded value
-frequency: new Fraction(440).mul(...)
-```
-
-</details>
-
-### 2. Create Self-Contained Dependencies
-
-Modules should work independently:
-
-```
-// Good: Note 2 depends on Note 1 within the same module
-frequency: [1].f * (...)
-
-// Problematic: Depends on external note ID that may not exist
-frequency: [50].f * (...)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Good: Note 2 depends on Note 1 within the same module
-frequency: module.getNoteById(1).getVariable('frequency').mul(...)
-
-// Problematic: Depends on external note ID that may not exist
-frequency: module.getNoteById(50).getVariable('frequency').mul(...)
-```
-
-</details>
-
-### 3. Document Complex Modules
-
-Add a description when saving:
-- What the module does
-- How to customize it
-- Any special notes
-
-### 4. Test Before Saving
-
-1. Play through the module
-2. Try changing BaseNote values
-3. Verify all dependencies update correctly
-
-## Combining Modules
-
-### Module Bar Drop Mode
-
-The Module Bar has a **"Drop at:"** toggle that controls how modules integrate:
-
-- **Start mode**: Module notes are placed at the beginning of the target note (references `base.t` become `[target].t`). Ideal for **building chords** - stack modules at the same start time.
-- **End mode**: Module notes are placed at the end of the target note (references `base.t` become `[target].t + [target].d`). Ideal for **building scales** - chain modules sequentially.
-
-### Drag and Drop
-
-You can load multiple modules into one workspace:
-
-1. Drag Module A onto workspace
-2. Drag Module B onto workspace
-3. Both coexist (note IDs are reassigned to avoid conflicts)
-
-### Connecting Modules
-
-After loading multiple modules, create dependencies between them:
-
-```
-// Module A's note
-frequency: base.f  // ID assigned: 1
-
-// Module B's note (wants to follow Module A)
-// After B loads, find its new ID (e.g., 5)
-// Edit to reference Module A's note:
-frequency: [1].f * (3/2)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Module A's note
-frequency: module.baseNote.getVariable('frequency')  // ID assigned: 1
-
-// Module B's note (wants to follow Module A)
-// After B loads, find its new ID (e.g., 5)
-// Edit to reference Module A's note:
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
-```
-
-</details>
-
-## Saving and Loading
-
-### Save Your Current Workspace as a Module
-
-1. Click **Menu** (plus/minus icon) in the top bar
-2. Click **Save Module**
-3. A JSON file downloads to your computer
-4. Rename it descriptively (e.g., `major-triad-just.json`)
-
-### Add a Module to the Module Bar
-
-1. Find the category where you want the module
-2. Click the **+** placeholder icon
-3. Select your JSON file
-4. The module appears and can be dragged onto the workspace
-
-### Save Your Module Bar Layout
-
-To preserve your category organization and uploaded modules:
-
-1. Click **Save UI** in the Module Bar
-2. A `ui-state.json` file downloads
-3. This saves category order, module positions, and uploaded module data
-
-### Restore Your Module Bar Layout
-
-1. Click **Load UI** in the Module Bar
-2. Select a previously saved `ui-state.json` file
-3. Your categories and modules are restored
-
-### Module File Format
-
-Modules are saved as JSON with DSL expressions:
-
-```json
-{
-  "baseNote": {
-    "frequency": "440",
-    "startTime": "0",
-    "tempo": "120",
-    "beatsPerMeasure": "4"
-  },
-  "notes": [
-    {
-      "id": 1,
-      "frequency": "base.f",
-      "startTime": "base.t",
-      "duration": "beat(base)"
-    },
-    {
-      "id": 2,
-      "frequency": "base.f * (5/4)",
-      "startTime": "[1].t",
-      "duration": "[1].d"
-    }
-  ]
-}
-```
-
-## Module Maintenance
-
-### Updating a Module
-
-1. Drag the module onto the workspace
-2. Make your changes
-3. Click **Menu** > **Save Module**
-4. Delete the old version from Module Bar (click the red **×** on the module icon)
-5. Upload the new JSON file to the same category
-
-### Versioning
-
-For significant changes, save with version numbers in the filename:
-- `major-scale-v1.json`
-- `major-scale-v2-with-rhythm.json`
-
-### Cleaning Up
-
-- Click the red **×** on any module icon to remove it
-- Use **Reload Defaults** to reset to factory modules (warning: removes custom uploads)
-- Use **Save UI** before cleaning to back up your organization
-
-### Persistence
-
-The Module Bar auto-saves to browser localStorage:
-- Every 30 seconds
-- When the page closes
-- After any change (add, remove, reorder)
-
-**Note**: Clearing browser data will lose your Module Bar customizations. Use **Save UI** to create a backup file.
-
-## Example: Building a Complete Library
-
-### Day 1: Basic Intervals
-
-Create modules for each pure interval:
-- Unison (1/1)
-- Minor Second (16/15)
-- Major Second (9/8)
-- Minor Third (6/5)
-- Major Third (5/4)
-- Perfect Fourth (4/3)
-- Tritone (45/32)
-- Perfect Fifth (3/2)
-- Minor Sixth (8/5)
-- Major Sixth (5/3)
-- Minor Seventh (9/5)
-- Major Seventh (15/8)
-- Octave (2/1)
-
-### Day 2: Triads
-
-- Major Triad (1, 5/4, 3/2)
-- Minor Triad (1, 6/5, 3/2)
-- Diminished Triad (1, 6/5, 64/45)
-- Augmented Triad (1, 5/4, 25/16)
-
-### Day 3: Seventh Chords
-
-- Major 7th
-- Dominant 7th
-- Minor 7th
-- Half-Diminished 7th
-- Fully Diminished 7th
-
-### Day 4: Scales
-
-- Major Scale (all modes)
-- Natural Minor Scale
-- Harmonic Minor Scale
-- Pentatonic Scales
-
-### Day 5: TET Systems
-
-- 12-TET Chromatic Scale
-- 19-TET Scale
-- 31-TET Scale
-- Bohlen-Pierce Scale
-
-## Adding Modules Permanently (Local Development)
-
-To add modules that persist across all users (in the source code):
-
-1. Create your module JSON file
-2. Place it in the appropriate category folder:
-   ```
-   public/modules/custom/my-module.json
-   ```
-3. Edit that category's `index.json` to list your file:
-   ```json
-   [
-     "existing-module.json",
-     "my-module.json"
-   ]
-   ```
-4. Rebuild or refresh the app
-
-## Tips for Library Growth
-
-### 1. Save Early, Save Often
-
-Don't wait until something is perfect. Save works-in-progress.
-
-### 2. Name Files Descriptively
-
-Since module names come from filenames:
-- ✓ `major-seventh-chord.json`
-- ✓ `19-TET-scale.json`
-- ✗ `test.json`
-- ✗ `untitled.json`
-
-### 3. Back Up Regularly
-
-Use **Save UI** to export your Module Bar configuration before clearing browser data.
-
-### 4. Experiment
-
-Your library should grow from exploration. Save interesting accidents!
-
-## Next Steps
-
-- [Interval Exploration](/tutorials/workflows/intervals) - Systematically study intervals
-- [Microtonal Experiments](/tutorials/workflows/microtonal-experiments) - Build a microtonal collection
-- [Module Bar Reference](/user-guide/interface/module-bar) - Full Module Bar documentation
-
+Lift one note and every note after it follows.
+
+## Adding a module to the shipped catalog
+
+If you are working on RMT Compose itself, the shipped catalog is driven by a single v2 manifest,
+**`public/modules/library.json`** — the per-directory `index.json` files are a legacy fallback the
+live bar never reads. Put the module file under `public/modules/<section>/`, add an item entry to
+the manifest (its `name`, `ratio`, `cents`, `family` and `tags` drive the tile artwork and the
+search), and run `npm test` to validate it. The manifest format and full steps are in
+[Module Bar](/user-guide/interface/module-bar#adding-a-module-to-the-shipped-catalog).
+
+## Next
+
+- [Exploring Intervals](/tutorials/workflows/intervals) — the 46 intervals in detail
+- [Microtonal Experiments](/tutorials/workflows/microtonal-experiments) — building a microtonal collection
+- [Module Bar](/user-guide/interface/module-bar) — full interface reference
+- [Module Schema](/reference/module-schema) — every field in the file format

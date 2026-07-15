@@ -7,7 +7,7 @@
 import { chromium } from 'playwright';
 
 const URL_BASE = process.argv.includes('--url')
-  ? process.argv[process.argv.indexOf('--url') + 1] : 'http://localhost:3001';
+  ? process.argv[process.argv.indexOf('--url') + 1] : 'http://localhost:3000';
 
 const browser = await chromium.launch({ headless: true, args: ['--use-angle=default', '--enable-gpu'] });
 const page = await browser.newPage();

@@ -6,6 +6,7 @@
  */
 
 import { WASM_CONFIG } from './config.js';
+import { isEvaluatorHotSwapEnabled } from './evaluator-adapter.js';
 
 // WASM module reference
 let wasmModule = null;
@@ -44,6 +45,15 @@ export function onWasmReady(cb) {
 export async function initWasm() {
   if (wasmInitialized) {
     return wasmModule !== null;
+  }
+
+  // The WASM evaluator is opt-in (?evaluator=wasm — see evaluator-adapter.js).
+  // Without the opt-in nothing consumes the module, so skip the 384 KB
+  // fetch+instantiate entirely. Every boot-time caller (main.js,
+  // store/app-state.js and the auto-init below) funnels through here.
+  // Headless Node (benches/tests) has no window and passes the gate.
+  if (!isEvaluatorHotSwapEnabled()) {
+    return false;
   }
 
   try {
@@ -121,7 +131,8 @@ export function getWasmVersion() {
   return wasmModule?.version?.() ?? null;
 }
 
-// Auto-initialize if not in a test environment
+// Auto-initialize if not in a test environment. No-op unless the
+// ?evaluator=wasm opt-in is present — initWasm() gates the fetch.
 if (typeof window !== 'undefined') {
   // Defer initialization to avoid blocking
   setTimeout(() => {

@@ -1,281 +1,179 @@
+---
+title: Add Rhythm
+description: Work with beats, note durations, dotted notes and silences in RMT Compose to build a rhythmic phrase that survives a tempo change.
+---
+
 # Add Rhythm
 
-In this tutorial, you'll learn to work with timing and duration to create rhythmic patterns.
+You will build a four-note rhythmic phrase — quarter, eighth, eighth, half — and then change the tempo without touching a single note.
 
-## Objective
+**Prerequisites:** [Build a Major Scale](/tutorials/beginner/major-scale).
 
-Create a simple rhythmic melody using different note lengths.
+## Time in RMT Compose
 
-## Prerequisites
+Three properties carry the timing:
 
-- Completed [Build a Major Scale](./major-scale)
-- Understanding of beat-based timing
+| Property | What it is | Unit |
+|---|---|---|
+| `tempo` | beats per minute — a **BaseNote** property | BPM |
+| `startTime` | when the note begins | seconds |
+| `duration` | how long it sounds | seconds |
 
-## Understanding Time in RMT
-
-Time in RMT Compose is based on:
-
-| Property | Description | Unit |
-|----------|-------------|------|
-| **tempo** | Beats per minute | BPM |
-| **startTime** | When a note begins | Seconds |
-| **duration** | How long a note plays | Seconds |
-
-### Beat Duration Formula
+Start times and durations are in *seconds*, but you almost never write seconds. You write beats, and let `beat()` do the conversion:
 
 ```
-// Duration of one beat in seconds
-beatDuration = 60 / tempo
-
-// In RMT expression (preferred shorthand):
 beat(base)
-
-// Or equivalently:
-60 / tempo(base)
 ```
 
-At 120 BPM: 60/120 = 0.5 seconds per beat
+`beat(base)` is one beat at the BaseNote's tempo: 60 seconds divided by the tempo. At the default 100 BPM that is 0.6 seconds. Write durations as multiples of it and they stay musically correct at any tempo.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+::: warning
+Write the beat as `beat(base)`. Spelling the division out by hand does **not** work — the parser does not accept `60 / tempo(base)`, and the failure is silent.
+:::
 
-```javascript
-new Fraction(60).div(module.findTempo(module.baseNote))
-```
-
-</details>
-
-## Note Duration Reference
+## Duration reference
 
 | Note | Beats | Expression |
-|------|-------|------------|
+|---|---|---|
 | Whole | 4 | `beat(base) * 4` |
 | Half | 2 | `beat(base) * 2` |
 | Quarter | 1 | `beat(base)` |
-| Eighth | 0.5 | `beat(base) * (1/2)` |
-| Sixteenth | 0.25 | `beat(base) * (1/4)` |
-| Dotted quarter | 1.5 | `beat(base) * (3/2)` |
-| Triplet | 1/3 | `beat(base) * (1/3)` |
+| Eighth | 1/2 | `beat(base) * (1/2)` |
+| Sixteenth | 1/4 | `beat(base) * (1/4)` |
+| Dotted quarter | 3/2 | `beat(base) * (3/2)` |
+| Double-dotted quarter | 7/4 | `beat(base) * (7/4)` |
+| Triplet eighth | 1/3 | `beat(base) * (1/3)` |
 
-## Step 1: Set Up the BaseNote
+## Step 1: Clear the workspace
 
-1. Open RMT Compose
-2. Click the **BaseNote** (orange circle)
-3. In the Variable Widget, scroll down to the bottom and click **"Clean Slate"** to remove all notes except the BaseNote
-4. Verify the BaseNote settings are what you want:
-   - **frequency**: e.g. `440` (A4)
-   - **tempo**: e.g. `120` (120 BPM)
+Click the **BaseNote**, scroll to **DELETE ALL NOTES**, click **Clean Slate**, confirm.
 
-## Step 2: Create the Beat Duration Helper
+The BaseNote stays at 263 Hz, **100 BPM**, 4 beats per measure.
 
-First, understand the beat duration expression:
+## Step 2: The quarter note
 
-```
-// This expression equals one beat duration
-beat(base)
-```
+1. Click the **BaseNote** to reopen its widget.
+2. In **ADD NOTE / SILENCE**, the defaults are already what you want:
+   - **Frequency:** `base.f`
+   - **Duration:** `beat(base)`
+   - **Start Time:** `base.t`
+3. Click **Create**.
 
-We'll use this as the base for all durations.
+Note 1: one beat long.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+## Step 3: Two eighth notes
 
-```javascript
-new Fraction(60).div(module.findTempo(module.baseNote))
-```
+1. Select **Note 1**. Position stays on **At End**.
+2. Set **Frequency** to `base.f * (9/8)` and **Duration** to `beat(base) * (1/2)`.
+3. Click **Create Note**.
 
-</details>
+Note 2 starts where Note 1 ends (`[1].t + [1].d`, filled in for you) and lasts half a beat.
 
-## Step 3: Create a Rhythmic Pattern
+Now do it again from Note 2:
 
-Let's create: Quarter - Eighth - Eighth - Half
+1. Select **Note 2**. **At End**.
+2. **Frequency:** `base.f * (5/4)`. **Duration:** prefilled as `beat(base) * (1/2)` — inherited from Note 2, so leave it.
+3. Click **Create Note**.
 
-### Note 1: Quarter Note
+## Step 4: The half note
 
-1. With the BaseNote selected, in **"Add Note / Silence"** section, select **"Note"**, click **"Create Note"**
-2. Select the new note and set Frequency: `base.f` (root)
-3. StartTime: `base.t`
-4. Duration (1 beat):
+1. Select **Note 3**. **At End**.
+2. **Frequency:** `base.f * (3/2)`. **Duration:** `beat(base) * 2`.
+3. Click **Create Note**.
 
-```
-beat(base)
-```
+## Step 5: Listen
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Press **Play**. You should hear: *taa — ti-ti — taaaa*.
 
-```javascript
-new Fraction(60).div(module.findTempo(module.baseNote))
-```
+The four durations add up to 1 + ½ + ½ + 2 = 4 beats — exactly one 4/4 measure. In the workspace, Note 4 is twice as wide as Note 1, and Notes 2 and 3 are half as wide.
 
-</details>
+::: tip
+**Shift-click Play** (or long-press it) to loop the phrase. The play icon's bars shrink into dashes that orbit a figure-8 while the loop runs. Shift-click again to exit.
+:::
 
-### Note 2: First Eighth Note
+## Step 6: Change the tempo
 
-1. Add note after Note 1 (select Note 1, use **"At End"**)
-2. Frequency: `base.f * (9/8)` (Re)
-3. StartTime: `[1].t + [1].d`
-4. Duration (0.5 beats):
+1. Click the **BaseNote**.
+2. On the **tempo** row, set the `Raw:` field to `60`.
+3. Click **Save**.
 
-```
-beat(base) * (1/2)
-```
+Everything slows down and stays in proportion. You wrote every duration as a multiple of `beat(base)`, and every start time as "when the previous note ends" — so the rhythm is a set of relationships, not a set of timestamps.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Try `160`. Then put it back to `100`.
 
-```javascript
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
-```
+## Duration without typing
 
-</details>
+Two faster ways to set a duration.
 
-### Note 3: Second Eighth Note
+**The icon buttons.** Select a note, find the **duration** row, and click one of the five note-length icons: whole, half, quarter, eighth, sixteenth. The two dot buttons multiply what you picked — `.` by 3/2, `..` by 7/4 — and clicking a selected dot again removes it.
 
-1. Add note after Note 2 (select Note 2, use **"At End"**)
-2. Frequency: `base.f * (5/4)` (Mi)
-3. StartTime: `[2].t + [2].d`
-4. Duration (0.5 beats):
+::: warning
+The icon buttons write the expression into the `Raw:` field and reveal the **Save** button. They do **not** commit. You still have to click **Save**.
+:::
 
-```
-beat(base) * (1/2)
-```
+The widget pre-highlights the icon matching the note's current duration. If the duration is not one of the five (a triplet, say), no icon lights up. That is correct, not a bug.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+**Dragging.** Grab a note's **right edge** in the workspace — the cursor becomes a horizontal resize arrow — and drag. The duration follows, and the note's expression is rewritten for you in beats. Dragging the note's **body** moves it in time instead.
 
-```javascript
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
-```
+## Silences are real notes
 
-</details>
+To put a rest in your phrase, do not fake it with an inaudible frequency. Use a silence.
 
-### Note 4: Half Note
+1. Select the note the rest should follow.
+2. In **ADD NOTE / SILENCE**, switch the kind radio from **Note** to **Silence**.
 
-1. Add note after Note 3 (select Note 3, use **"At End"**)
-2. Frequency: `base.f * (3/2)` (Sol)
-3. StartTime: `[3].t + [3].d`
-4. Duration (2 beats):
+   The Frequency field disappears — that is what a silence *is*: a note with a start time and a duration and no frequency.
+3. Set the **Duration** to how long the rest should last.
+4. Click **Create Note**.
 
-```
-beat(base) * 2
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
-```
-
-</details>
-
-## Verification
-
-1. Click **Play**
-2. You should hear: short - quick quick - looong
-3. Total duration: 1 + 0.5 + 0.5 + 2 = 4 beats (one measure at 4/4)
-
-### Visual Check
-
-In the workspace:
-- Note 1 is medium width
-- Notes 2 and 3 are half as wide
-- Note 4 is twice as wide as Note 1
-
-## Using Duration Quick Controls
-
-Instead of typing expressions, use the Variable Widget duration presets:
-
-1. Select a note
-2. Find the **duration** row
-3. Click the note-length icon buttons:
-   - Whole note (4 beats)
-   - Half note (2 beats)
-   - Quarter note (1 beat)
-   - Eighth note (1/2 beat)
-   - Sixteenth note (1/4 beat)
-
-4. Use the dot buttons (`.` or `..`) for dotted notes:
-   - Single dot = 1.5× duration
-   - Double dot = 1.75× duration
+The silence takes an id and appears in the workspace with a dashed outline. Its widget is titled **Silence [N] Variables**. Notes can reference its `startTime` and `duration` like any other note, so a silence chains a phrase exactly the way a sounding note does.
 
 ## Exercises
 
-### Exercise 1: Different Tempo
+### 1. Dotted rhythm
 
-1. Change BaseNote tempo to `60` (60 BPM)
-2. Play - the rhythm is the same but slower!
-3. The relationships are preserved
+Select Note 1. On the duration row, click the **quarter** icon, then the **`.`** dot. The Raw field becomes `beat(base) * (3/2)`. Click **Save**. Now shorten Note 2 to a sixteenth so the bar still adds up.
 
-### Exercise 2: Syncopation
+### 2. Triplets
 
-Create an off-beat accent:
+Set three consecutive notes to `beat(base) * (1/3)`. Three notes in the space of one beat. No icon will highlight for these — expected.
 
-1. Make Note 2 start half a beat late
-2. Make Note 1 duration 1.5 beats
-3. Overlap creates syncopation
+### 3. Syncopation
 
-### Exercise 3: Triplets
+Give Note 1 a duration of `beat(base) * (3/2)`. Because Notes 2, 3 and 4 are chained with `[N].t + [N].d`, they all shift later automatically, and the accents land off the beat.
 
-Create triplet rhythm (3 notes in the space of 2):
+### 4. Rest on the downbeat
+
+Insert a silence of `beat(base)` before Note 1's material and watch the whole phrase slide right, still intact.
+
+## Chaining, in one line
+
+Every note after the first uses this start time:
 
 ```
-// Triplet duration (1/3 of a beat)
-beat(base) * (1/3)
+[1].t + [1].d
 ```
+
+"Start when Note 1 ends." The **At End** radio writes it for you. It is the single most useful expression in the app — change any duration anywhere in the chain and everything downstream re-flows.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 3))
+module.getNoteById(1).getVariable('startTime')
+  .add(module.getNoteById(1).getVariable('duration'))
 ```
-
 </details>
 
-### Exercise 4: Rest Simulation
+## What you learned
 
-Create the effect of a rest:
+- `beat(base)` converts beats to seconds, so durations survive a tempo change.
+- The duration icons and dots write an expression; **Save** commits it.
+- Dragging a note's right edge resizes it; dragging its body moves it.
+- Silences are a first-class note kind, created from the same section.
 
-1. Make a note's duration shorter than the gap before the next note
-2. Or: create a silent note (set a very low frequency that won't be heard)
+## Next
 
-## Chaining Rhythms
-
-For complex rhythms, use note references:
-
-```
-// Note 5 starts when Note 4 ends
-[4].t + [4].d
-```
-
-This creates a chain where timing flows automatically.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(4).getVariable('startTime')
-  .add(module.getNoteById(4).getVariable('duration'))
-```
-
-</details>
-
-## Save Your Module
-
-1. **Menu** > **Save Module**
-2. Name it `rhythmic-pattern.json`
-
-## What You Learned
-
-- How tempo, startTime, and duration relate
-- Creating different note lengths
-- Chaining notes for sequential rhythm
-- Using quick controls for duration
-
-## Next Steps
-
-- [Note Dependencies](../intermediate/dependencies) - Create smarter timing chains
-- [Working with Measures](../intermediate/measures) - Add measure structure
-- Combine rhythm with [chords](./major-triad) for fuller arrangements
+- [Working with Measures](/tutorials/intermediate/measures) — measure chains and time signatures
+- [Note Dependencies](/tutorials/intermediate/dependencies) — the general rule behind chaining
+- [Transport Controls](/user-guide/playback/transport) — play, stop, loop, playhead tracking

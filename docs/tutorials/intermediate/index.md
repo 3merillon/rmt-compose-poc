@@ -1,42 +1,43 @@
+---
+title: Intermediate Tutorials
+description: Dependencies, octave and interval arrows, and measure chains — the three tutorials that turn note-by-note editing into relational composition.
+---
+
 # Intermediate Tutorials
 
-Build on the basics with more advanced techniques.
+The beginner tutorials had you type each note. These three teach you to make notes *follow* each other, so that one edit moves many.
 
-## In This Section
+## In this section
 
-### [Chaining Notes with Dependencies](./dependencies)
-Learn how to create musical relationships between notes using expressions that reference other notes. Build dynamic compositions where changes cascade through your music.
+### [Note Dependencies](/tutorials/intermediate/dependencies)
 
-### [Working with Octaves](./octaves)
-Master octave manipulation using frequency ratios and the power operation. Learn techniques for building octave-spanning chords and bringing notes into comfortable ranges.
+Write expressions that reference other notes. Read the coloured dependency lines. Break a chain deliberately with **Liberate Dependencies** or **Evaluate to BaseNote** when you need a note to stand alone.
 
-### [Measure-Based Timing](./measures)
-Work with tempo, beats, and measures to create rhythmically structured compositions. Learn the formulas for converting between beats and seconds.
+### [Octave Manipulation](/tutorials/intermediate/octaves)
+
+Use the ▲/▼ arrows on a note — which default to the octave but apply any interval you choose in **Settings → Arrows** — and write octave arithmetic by hand with `*`, `/` and `^`. Read the dotted octave guides in the workspace.
+
+### [Working with Measures](/tutorials/intermediate/measures)
+
+Build measure chains from the note widget, set a per-measure time signature, and place notes by measure and beat instead of by absolute time.
 
 ## Prerequisites
 
-Before starting these tutorials, make sure you've completed:
-- [Your First Composition](/getting-started/first-composition) - Basic note creation
-- [Core Concepts](/getting-started/concepts) - Understanding ratios and expressions
-- [Beginner Tutorials](/tutorials/beginner/) - Scales, chords, and melody basics
+- [Your First Composition](/getting-started/first-composition)
+- [Core Concepts](/getting-started/concepts)
+- The three [beginner tutorials](/tutorials/) — scales, chords, rhythm
 
-## What You'll Learn
+## Recommended order
 
-After completing these tutorials, you'll be able to:
-- Create notes that automatically update when their dependencies change
-- Transpose entire sections by changing a single root note
-- Build octave-spanning voicings and arpeggios
-- Structure compositions using tempo and measure relationships
-- Chain timing so notes play in sequence
+Dependencies first. Octaves and Measures both lean on it, and neither leans on the other.
 
-## Recommended Order
+## What you will be able to do
 
-1. **Dependencies** - Foundation for all relational composition
-2. **Octaves** - Frequency manipulation basics
-3. **Measures** - Rhythmic structure and tempo
+- Make a note's pitch, start time or duration follow another note's.
+- Transpose a chord or a whole progression by moving one root.
+- Structure a piece in measures, including odd meters.
+- Get a note *out* of a dependency chain without losing its position.
 
-## Next Steps
+## Next
 
-After mastering these concepts, continue to:
-- [Advanced Tutorials](/tutorials/advanced/) - Microtonal composition, SymbolicPower, complex dependencies
-
+[Advanced Tutorials](/tutorials/advanced/) — microtonal tunings, the algebra behind TET, and branching dependency structures.

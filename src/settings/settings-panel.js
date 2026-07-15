@@ -5,9 +5,9 @@
  * note-variables widget: it stays open while you keep composing, is dragged by
  * its header, and shares that widget's chrome and stacking level (1200/1201,
  * above the menu bars, below the confirm overlays at 2000). It is opened from
- * the top-bar gear and from the main-menu "Settings…" entry.
+ * the top-bar gear button (#settingsGearBtn).
  *
- * Four tabs — Appearance, Arrows, Audio, Library — each writing through to
+ * Five tabs — Appearance, Arrows, Audio, Library, Scale — each writing through to
  * `settingsStore` on every change (live preview, no OK/Apply). Per-tab and
  * global reset, both behind a confirmation.
  *
@@ -256,13 +256,26 @@ function buildAppearanceTab(container) {
     presetSel.appendChild(o);
   }
   presetSel.addEventListener('change', () => {
+    // Capture the choice FIRST: the overrides write below fires syncControls,
+    // whose syncer re-seeds this select back to the still-stored themeId — if
+    // the select is unfocused, reading presetSel.value afterwards would revert.
+    const themeId = presetSel.value;
     settingsStore.set('appearance.overrides', {});
-    settingsStore.set('appearance.themeId', presetSel.value);
+    // Apply the preset's declared note geometry too, like its colors — the
+    // schema always fills appearance.note, so the theme-manager fallback to
+    // preset.geometry can never fire on its own.
+    const geo = getPreset(themeId).geometry;
+    settingsStore.set('appearance.note', {
+      heightWU: geo.noteHeightWU,
+      borderPxAtZoom1: geo.borderPxAtZoom1,
+      roundedCornerPxAtZoom1: geo.roundedCornerPxAtZoom1,
+    });
+    settingsStore.set('appearance.themeId', themeId);
     // The color pickers re-seed themselves from the new preset via syncControls
     // (driven by the store subscription) — no rebuild, so the select keeps focus.
   });
   addSync(presetSel, () => { presetSel.value = settingsStore.get('appearance.themeId'); });
-  container.appendChild(row('Theme', presetSel, 'Presets apply a full color set; pick one, then customize below.'));
+  container.appendChild(row('Theme', presetSel, 'Presets apply a full color set and note geometry; pick one, then customize below.'));
 
   container.appendChild(row('Note height', slider('appearance.note.heightWU', 8, 60, 1, (v) => `${v} wu`), 'Bar thickness in world units.'));
   container.appendChild(row('Border thickness', slider('appearance.note.borderPxAtZoom1', 0, 6, 0.5, (v) => `${v} px`)));
@@ -328,6 +341,39 @@ function buildArrowsTab(container) {
   });
   ratioWrap.append(nIn, slash, dIn, centsOut);
   container.appendChild(row('Up interval (ratio)', ratioWrap, 'Down applies the reciprocal in reciprocal mode.'));
+
+  // Ratio editor for "down" — mirrors the up editor, shown only in independent
+  // mode (in reciprocal mode `down` auto-derives and the row would just lie).
+  const down = settingsStore.get('arrows.down');
+  const downWrap = el('div', 'rmt-set-ratio');
+  const dnIn = el('input'); dnIn.type = 'number'; dnIn.min = 1; dnIn.className = 'rmt-set-number'; dnIn.value = down.n;
+  const downSlash = el('span', 'rmt-set-ratio-slash', '/');
+  const ddIn = el('input'); ddIn.type = 'number'; ddIn.min = 1; ddIn.className = 'rmt-set-number'; ddIn.value = down.d;
+  const downCentsOut = el('span', 'rmt-set-cents', `${cents(down.n, down.d).toFixed(1)}¢`);
+  const commitDown = () => {
+    const n = parseInt(dnIn.value, 10), d = parseInt(ddIn.value, 10);
+    settingsStore.set('arrows.down', { n, d, label: null });
+    const v = settingsStore.get('arrows.down');
+    dnIn.value = v.n; ddIn.value = v.d;
+    downCentsOut.textContent = `${cents(v.n, v.d).toFixed(1)}¢`;
+  };
+  dnIn.addEventListener('change', commitDown);
+  ddIn.addEventListener('change', commitDown);
+  addSync(null, () => {
+    const v = settingsStore.get('arrows.down');
+    if (dnIn !== document.activeElement) dnIn.value = v.n;
+    if (ddIn !== document.activeElement) ddIn.value = v.d;
+    downCentsOut.textContent = `${cents(v.n, v.d).toFixed(1)}¢`;
+  });
+  downWrap.append(dnIn, downSlash, ddIn, downCentsOut);
+  const downRow = row('Down interval (ratio)', downWrap, 'Only used in independent mode.');
+  container.appendChild(downRow);
+  // Show/hide with the mode, live — the tab is not rebuilt on a mode change.
+  const syncDownRow = () => {
+    downRow.style.display = settingsStore.get('arrows.mode') === 'independent' ? '' : 'none';
+  };
+  syncDownRow();
+  addSync(null, syncDownRow);
 
   // Quick-pick chips
   const chips = el('div', 'rmt-set-chips');

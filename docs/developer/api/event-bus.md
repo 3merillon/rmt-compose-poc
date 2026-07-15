@@ -1,64 +1,55 @@
+---
+title: EventBus
+description: Reference for the EventBus in src/utils/event-bus.js and the complete catalogue of events RMT Compose actually emits.
+---
+
 # EventBus
 
-The EventBus provides a simple publish-subscribe system for decoupled communication between components.
-
-## Overview
+`EventBus` (`src/utils/event-bus.js`) is a small, dependency-free, synchronous publish/subscribe
+bus. It is how subsystems that must not import each other — the renderer and `player.js`, the
+settings panel and the audio graph, the module bar and the history stack — talk.
 
 ```javascript
 import { eventBus } from './utils/event-bus.js'
 
-// Subscribe
-eventBus.on('player:invalidateModuleEndTimeCache', () => {
-  // Handle event
+const off = eventBus.on('history:stackChanged', ({ canUndo, canRedo }) => {
+  undoBtn.disabled = !canUndo
+  redoBtn.disabled = !canRedo
 })
 
-// Publish
-eventBus.emit('player:invalidateModuleEndTimeCache')
+// later
+off()
 ```
+
+`eventBus` is a shared singleton. The `EventBus` class is exported too, if you want a private bus.
 
 ## API
 
 ### on()
 
 ```javascript
-eventBus.on(event, handler)
+const off = eventBus.on(event, handler)
 ```
 
-Subscribe to an event.
+Subscribes, and **returns an unsubscribe function**. That return value is the idiomatic cleanup
+path in this codebase — `src/settings/settings-panel.js` collects them in a `disposers` array and
+calls them when the panel is torn down.
 
 | Parameter | Type | Description |
-|-----------|------|-------------|
-| `event` | string | Event name |
-| `handler` | function | Callback function |
+|---|---|---|
+| `event` | string | Topic name |
+| `handler` | function | Called with whatever `emit()` passes |
 
-Returns: `void`
-
-Example:
-```javascript
-eventBus.on('note:changed', (noteId, property) => {
-  console.log(`Note ${noteId} ${property} changed`)
-})
-```
+Returns: `Function` — call it to unsubscribe.
 
 ### once()
 
 ```javascript
-eventBus.once(event, handler)
+const off = eventBus.once(event, handler)
 ```
 
-Subscribe to an event, automatically unsubscribing after first call.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `event` | string | Event name |
-| `handler` | function | Callback function |
-
-Example:
-```javascript
-eventBus.once('module:loaded', (module) => {
-  initializeUI(module)
-})
-```
+Fires at most once, then unsubscribes itself (in a `finally`, so a throwing handler still gets
+removed). Also returns an unsubscribe function, for cancelling before the event arrives.
 
 ### off()
 
@@ -66,19 +57,7 @@ eventBus.once('module:loaded', (module) => {
 eventBus.off(event, handler)
 ```
 
-Unsubscribe from an event.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `event` | string | Event name |
-| `handler` | function | The exact handler to remove |
-
-Example:
-```javascript
-const handler = () => console.log('fired')
-eventBus.on('test', handler)
-eventBus.off('test', handler)
-```
+Removes one handler by identity. Removing the last handler for a topic deletes the topic.
 
 ### emit()
 
@@ -86,164 +65,163 @@ eventBus.off('test', handler)
 eventBus.emit(event, ...args)
 ```
 
-Publish an event with optional arguments.
+**Synchronous.** Handlers run in subscription order, on a snapshot of the listener set, so
+subscribing or unsubscribing inside a handler is safe. Every handler is wrapped in a `try/catch`:
+one that throws is logged (`[event-bus] Handler error for "<event>":`) and the rest still run.
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `event` | string | Event name |
-| `...args` | any | Arguments passed to handlers |
-
-Example:
-```javascript
-eventBus.emit('player:timeUpdate', currentTime)
-```
+By convention every event in this app carries **one object argument**, not a positional list.
 
 ### listeners()
 
 ```javascript
-const handlers = eventBus.listeners(event)
-// → Set<function>
+eventBus.listeners(event)  // → Function[] (an Array, not a Set)
 ```
 
-Get all handlers for an event.
+### size()
+
+```javascript
+eventBus.size()  // → number of topics with at least one listener
+```
 
 ### clear()
 
 ```javascript
-eventBus.clear(event)  // Clear handlers for event
-eventBus.clear()       // Clear all handlers
+eventBus.clear('some:event')  // drop that topic's handlers
+eventBus.clear()              // drop everything
 ```
 
-Remove handlers.
+::: info There is no wildcard matching
+`component:action` is a naming discipline, nothing more. The bus does no prefix matching — you
+cannot subscribe to `workspace:*`. Event names are compared with strict equality.
+:::
 
-## Events in RMT Compose
+## Event catalogue
 
-### Core Events
+This is every topic in `src/` at the current commit. Payloads are exact.
 
-| Event | Arguments | Description |
-|-------|-----------|-------------|
-| `player:invalidateModuleEndTimeCache` | - | Module changed, invalidate caches |
-| `player:timeUpdate` | `time: number` | Playback position changed |
-| `player:play` | - | Playback started |
-| `player:pause` | - | Playback paused |
-| `player:stop` | - | Playback stopped |
+### player
 
-### UI Events
+| Event | Payload | Emitted by | Consumed by |
+|---|---|---|---|
+| `player:invalidateModuleEndTimeCache` | — | `Note._notifyChange()` — any expression or property change | `player.js` (recompute end time, reposition measure bars) |
+| `player:requestPause` | — | modals, workspace commits, history restore, the note widget | `player.js` — stops playback before a mutating edit |
+| `player:octaveChange` | `{ noteId, direction: 'up' \| 'down' }` | the ▲/▼ arrows (note widget and canvas), the perf harness | `player.js` — applies the arrow interval to the frequency expression |
+| `player:selectNote` | `{ noteId }` | note/measure creation, so the new note lands selected | `player.js` |
+| `player:importModuleAtTarget` | `{ targetNoteId, moduleData, clientX, clientY }` | the module bar, when a library icon is dropped on a note | `player.js` — grafts the module in |
 
-| Event | Arguments | Description |
-|-------|-----------|-------------|
-| `selection:changed` | `noteIds: Set` | Selection changed |
-| `viewport:changed` | `bounds: object` | Camera moved/zoomed |
+### history (undo / redo)
 
-## Implementation Details
+| Event | Payload | Emitted by | Consumed by |
+|---|---|---|---|
+| `history:capture` | `{ label, snapshot, snapshotStr? }` | every undoable action | `store/history.js` (push) **and** `player.js` (write the localStorage autosave) |
+| `history:seedIfEmpty` | `{ label: 'Initial', snapshot, snapshotStr? }` | the same call sites, just before `history:capture` | `store/history.js` |
+| `history:undo` / `history:redo` | — | the module-bar buttons, the + menu buttons, Ctrl/⌘+Z and Ctrl/⌘+Y | `store/history.js` |
+| `history:requestRestore` | `{ snapshot, source: 'undo' \| 'redo', label }` | `HistoryManager` | `player.js` — rebuilds the module from the snapshot; also clears the selection |
+| `history:stackChanged` | `{ undo, redo, canUndo, canRedo }` | `HistoryManager`, after every push/undo/redo | the undo/redo buttons in the module bar and the + menu |
 
-### Internal Structure
+### workspace (canvas gestures → authoritative commit)
+
+The WebGL2 workspace previews a gesture on the GPU and emits a commit event on release;
+`player.js` owns the module and writes the expression.
+
+| Event | Payload | Emitted on |
+|---|---|---|
+| `workspace:noteMoveCommit` | `{ noteId, newStartSec }` | drag of a single note |
+| `workspace:groupMoveCommit` | `{ ids, deltaSec }` | drag of a multi-selection |
+| `workspace:noteResizeCommit` | `{ noteId, newDurationSec }` | drag of a note's right edge |
+| `workspace:measureResizeCommit` | `{ measureId, newStartSec }` | drag of a measure bar |
+| `workspace:marqueeCommit` | `{ ids, additive }` | marquee release — **emitted even when `ids` is empty**, so a drag across nothing clears the selection |
+| `workspace:multiSelectToggle` | `{ id }` | long-press on a note (the touch path into multi-select) |
+
+All six are consumed by `player.js`.
+
+### settings
+
+| Event | Payload | Emitted by | Consumed by |
+|---|---|---|---|
+| `settings:changed` | `{ path, value, settings }` — `path` is dotted, e.g. `'audio.defaultInstrument'` | `settingsStore` on every write | `player.js` (audio graph, default instrument, theme), the note widget |
+| `settings:loaded` | `{ settings }` | `settingsStore`, once, a microtask after construction | nothing today — the panel and `player.js` pull with `settingsStore.get()` instead |
+| `settings:panelToggled` | `{ open }` | the settings panel, on open/close | `main.js` |
+
+A `settings:changed` handler must check `path` — it fires for *every* setting:
 
 ```javascript
-class EventBus {
-  constructor() {
-    this._events = new Map()  // Map<string, Set<function>>
+eventBus.on('settings:changed', ({ path }) => {
+  if (path === 'audio.defaultInstrument' || path === 'audio' || path === '') {
+    applyDefaultInstrument()
   }
-}
+})
 ```
 
-### Handler Isolation
+### modals (the note / measure widget)
 
-Errors in one handler don't affect others:
+| Event | Payload | Emitted by | Consumed by |
+|---|---|---|---|
+| `modals:show` | `{ noteId, isMeasure }` | the widget, when it opens for a note | `player.js` |
+| `modals:cleared` | — | the widget, when it closes | `player.js` subscribes, but the handler is an empty placeholder — nothing happens today |
+| `modals:requestRefresh` | `{ note, measureId, clickedElement }` | `player.js` and the widget's own controls, after a commit | the widget — rebuilds itself in place |
+| `modals:init` | — | the widget, once | nothing today |
 
-```javascript
-emit(event, ...args) {
-  const handlers = this._events.get(event)
-  if (!handlers) return
+### audio
 
-  // Clone to allow modifications during iteration
-  for (const handler of [...handlers]) {
-    try {
-      handler(...args)
-    } catch (e) {
-      console.error(`Error in ${event} handler:`, e)
-    }
-  }
-}
-```
+| Event | Payload | Emitted by | Consumed by |
+|---|---|---|---|
+| `audio:masterVolumeInput` | `{ value }` (0-1) | the top-bar volume slider, live during the drag | the Audio tab of the settings panel, so the two sliders track each other |
 
-### Memory Management
-
-```javascript
-// Remove handler when component unmounts
-componentWillUnmount() {
-  eventBus.off('event', this.handler)
-}
-```
+The transport slider only *writes* the `audio.masterVolume` setting when the drag ends, so this
+event exists to carry the mid-drag echo that `settings:changed` cannot.
 
 ## Patterns
 
-### Component Communication
+### Cleanup
+
+Keep the unsubscribe function. There is no React here and no component lifecycle — a panel that is
+rebuilt without dropping its subscriptions leaks a handler per rebuild.
 
 ```javascript
-// Component A (publisher)
-noteEditor.on('save', () => {
-  eventBus.emit('note:updated', this.noteId)
-})
+const disposers = []
 
-// Component B (subscriber)
-noteList.init(() => {
-  eventBus.on('note:updated', (id) => {
-    this.refreshNote(id)
-  })
-})
+function build() {
+  disposers.push(eventBus.on('settings:changed', onSettings))
+  disposers.push(eventBus.on('history:stackChanged', onHistory))
+}
+
+function destroy() {
+  disposers.forEach((off) => off())
+  disposers.length = 0
+}
 ```
 
-### Async Events
+### Emitting defensively
+
+Most call sites wrap `emit()` in a `try/catch`, because the bus is imported into code paths that
+also run outside the browser (the Node perf benches):
 
 ```javascript
-// Emit doesn't wait for handlers
-eventBus.emit('data:loading')
-await fetchData()
-eventBus.emit('data:loaded', data)
+try { eventBus.emit('player:requestPause') } catch {}
 ```
 
 ### Debugging
 
 ```javascript
-// Log all events
-const originalEmit = eventBus.emit.bind(eventBus)
+const realEmit = eventBus.emit.bind(eventBus)
 eventBus.emit = (event, ...args) => {
-  console.log(`[Event] ${event}`, args)
-  originalEmit(event, ...args)
+  console.log('[event]', event, args)
+  realEmit(event, ...args)
 }
 ```
 
-## Best Practices
+## Adding an event
 
-1. **Use namespaced events**: `component:action` format
-2. **Clean up subscriptions**: Always `off()` when done
-3. **Avoid heavy handlers**: Keep handlers fast
-4. **Don't rely on order**: Handler order is undefined
-5. **Use `once()` for one-time events**: Prevents leaks
+1. Name it `subsystem:action` — the subsystems in use are `player`, `history`, `workspace`,
+   `settings`, `modals`, `audio`.
+2. Pass a single object payload.
+3. Emit from the subsystem that owns the fact; consume where the reaction belongs. The workspace
+   never writes expressions; it emits a commit and lets `player.js` do it.
+4. Add it to the table above.
 
-## Example: Custom Event
+## See also
 
-```javascript
-// Define event
-const EVENTS = {
-  MODULE_SAVED: 'module:saved'
-}
-
-// Emit when saving
-async function saveModule(module) {
-  const json = module.toJSON()
-  await downloadFile(json)
-  eventBus.emit(EVENTS.MODULE_SAVED, module)
-}
-
-// Listen for save
-eventBus.on(EVENTS.MODULE_SAVED, (module) => {
-  showNotification('Module saved!')
-})
-```
-
-## See Also
-
-- [Data Flow](/developer/architecture/data-flow) - Event flow in the system
-- [Module Class](/developer/api/module) - Module events
+- [Data Flow](/developer/architecture/data-flow) — how a gesture becomes an expression
+- [Module Class](/developer/api/module) — `Module` emits nothing; `Note` emits one event
+- [Settings](/user-guide/interface/settings) — what `settings:changed` paths correspond to

@@ -144,10 +144,6 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
         clickedElement.classList.add('selected');
     }
     
-    if (note !== moduleInstance.baseNote && effectiveNoteId !== undefined) {
-        highlightDependencies(effectiveNoteId);
-    }
-    
     const variables = collectVariables(note, measureId, moduleInstance);
     
     Object.entries(variables).forEach(([key, value]) => {
@@ -216,38 +212,6 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     try { eventBus.emit('modals:show', { noteId: effectiveNoteId, isMeasure: measureId !== null }); } catch (e) {}
 }
 
-function highlightDependencies(selfNoteId) {
-    const elementMap = new Map();
-    
-    const allHighlightableElements = document.querySelectorAll('.note-content, .base-note-circle, .measure-bar-triangle');
-    allHighlightableElements.forEach(el => {
-        const id = el.getAttribute('data-note-id');
-        if (id) {
-            if (!elementMap.has(id)) {
-                elementMap.set(id, []);
-            }
-            elementMap.get(id).push(el);
-        }
-    });
-    
-    const directDeps = getModule().getDirectDependencies(selfNoteId).filter(depId => depId !== selfNoteId);
-    const dependents = getModule().getDependentNotes(selfNoteId).filter(depId => depId !== selfNoteId);
-    
-    directDeps.forEach(depId => {
-        const elements = elementMap.get(String(depId));
-        if (elements) {
-            elements.forEach(el => el.classList.add('dependency'));
-        }
-    });
-    
-    dependents.forEach(depId => {
-        const elements = elementMap.get(String(depId));
-        if (elements) {
-            elements.forEach(el => el.classList.add('dependent'));
-        }
-    });
-}
-
 function collectVariables(note, measureId, moduleInstance) {
     let variables = {};
     const module = moduleInstance || (typeof getModule === 'function' ? getModule() : null);
@@ -280,10 +244,14 @@ function collectVariables(note, measureId, moduleInstance) {
         });
 
         if (!variables.instrument) {
+            const hasOwnInstrument = note.properties.instrument != null;
+            const resolvedInstrument = hasOwnInstrument
+                ? note.getVariable('instrument')
+                : module.findInstrument(note);
             variables.instrument = {
-                evaluated: note.getVariable('instrument') || 'sine-wave',
-                raw: note.getVariable('instrument') || 'sine-wave',
-                isInherited: false,
+                evaluated: resolvedInstrument,
+                raw: resolvedInstrument,
+                isInherited: !hasOwnInstrument,
                 isCorrupted: false
             };
         }
@@ -471,7 +439,7 @@ export function showDeleteConfirmation(noteId) {
     const message = document.createElement('p');
     // SECURITY: Escape noteId to prevent XSS
     message.innerHTML = "Are you sure you want to <strong>DELETE</strong> Note[<span class='modal-note-id'>"
-        + escapeHtml(noteId) + "</span>] and <span class='modal-delete-all'>DELETE ALL</span> its Dependencies (notes highlighted in red)?";
+        + escapeHtml(noteId) + "</span>] and <span class='modal-delete-all'>DELETE ALL</span> its Dependencies (the notes linked to it by dependency lines in the workspace)?";
     modal.appendChild(message);
 
     const btnContainer = document.createElement('div');
@@ -563,7 +531,7 @@ export function showCleanSlateConfirmation() {
     modal.className = 'delete-confirm-modal';
 
     const message = document.createElement('p');
-    message.innerHTML = "Are you sure you want to <span class='modal-delete-all'>DELETE ALL</span> notes except the base note? This action cannot be undone.";
+    message.innerHTML = "Are you sure you want to <span class='modal-delete-all'>DELETE ALL</span> notes except the base note? You can undo this with Ctrl/Cmd+Z.";
     modal.appendChild(message);
 
     const btnContainer = document.createElement('div');

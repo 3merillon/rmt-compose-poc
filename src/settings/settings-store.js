@@ -113,13 +113,15 @@ class SettingsStore {
   /**
    * Set a value at a dot path, re-validate the whole tree, persist, and emit.
    * Re-validation keeps derived invariants (e.g. reciprocal arrow `down`) and
-   * clamps out-of-range values.
+   * clamps out-of-range values; the pre-edit tree is passed along so an invalid
+   * edit heals back to the user's previous value, not the schema default.
    * @param {string} path
    * @param {any} value
    */
   set(path, value) {
+    const prev = deepClone(this._settings);
     setAtPath(this._settings, path, value);
-    this._settings = validateSettings(this._settings);
+    this._settings = validateSettings(this._settings, prev);
     this._persist();
     // Emit the (possibly coerced) canonical value at the path.
     this._emit(path, getAtPath(this._settings, path));
@@ -132,8 +134,9 @@ class SettingsStore {
    * @param {object} value
    */
   setSection(section, value) {
+    const prev = deepClone(this._settings);
     this._settings[section] = value;
-    this._settings = validateSettings(this._settings);
+    this._settings = validateSettings(this._settings, prev);
     this._persist();
     this._emit(section, getAtPath(this._settings, section));
     return this.get(section);

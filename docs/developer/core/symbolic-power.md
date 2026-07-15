@@ -1,305 +1,231 @@
+---
+title: SymbolicPower
+description: The algebraic representation of irrationals like 2^(1/12) — its real API, where it is actually live in the shipping app, and where it is not.
+---
+
 # SymbolicPower
 
-**SymbolicPower** represents irrational numbers (like 2^(1/12)) algebraically, preserving their mathematical structure through arithmetic operations.
+**SymbolicPower** represents an irrational value by its algebraic structure instead of its numeric value:
 
-## The Problem
-
-Equal temperament systems require irrational frequencies:
-
-```javascript
-// 12-TET semitone = 2^(1/12)
-Math.pow(2, 1/12) = 1.0594630943592953
+```
+value = coefficient × base₁^exp₁ × base₂^exp₂ × … × baseₙ^expₙ
 ```
 
-If we store this as a float:
-- Precision lost after many operations
-- 12 semitones ≠ exactly 2 (drift)
-- Cannot distinguish 2^(1/12) from 2^(2/24)
+`src/binary-evaluator.js:20-266`.
 
-If we try Fraction approximation:
-- 2^(1/12) ≈ 196/185 (terrible approximation)
-- Gets worse with multiplication
+## The problem
 
-## The Solution
-
-Store the **algebraic form**, not the numeric value:
+Equal temperament needs irrational frequency ratios:
 
 ```javascript
-// Instead of: 1.0594630943592953
-// Store: { coefficient: 1, powers: [{base: 2, exp: 1/12}] }
+Math.pow(2, 1/12) === 1.0594630943592953   // 12-TET semitone
+```
 
+Store that as a float and you lose precision with every operation: multiply it by itself twelve times and you do **not** get exactly 2. Approximate it as a rational instead — the evaluator's `POW` lands on `2739815/2586041` — and the error compounds under multiplication, so twelve of them still miss 2.
+
+## The solution
+
+Store the algebraic form. `2^(1/12)` is not a number to be computed; it is a *base* and an *exponent* to be carried around.
+
+```javascript
+SymbolicPower.fromPower(2, new Fraction(1, 12))
+// { coefficient: Fraction(1), powers: [ { base: 2, exp: Fraction(1, 12) } ] }
+```
+
+Multiplication then merges like bases by **adding exponents**, so `2^(1/12) × 2^(1/12)` is `2^(1/6)` exactly — no float ever enters the calculation.
+
+::: danger This is not what happens during evaluation
+Read the next section before you build anything on that promise. In the shipping app, `SymbolicPower` **does not survive a single opcode boundary** on the evaluator's stack. The class is real and correct; the evaluator does not use it the way this section implies.
+:::
+
+## What actually happens at runtime
+
+`OP.POW` (`binary-evaluator.js:1070-1094`) builds a `MusicValue`, calls `pow()`, and then — if the result is irrational — **flattens it back to an approximated rational and pushes that**:
+
+```javascript
+if (powResult.isCorrupted()) {
+  this._lastEvalWasCorrupted = true;
+  const frac = new Fraction(powResult.toFloat());   // ← float → Fraction
+  this.push(this.pool.alloc(frac.s * frac.n, frac.d));
+}
+```
+
+Verified against the running VM:
+
+```
+2^(1/12)  →  Fraction 2739815 / 2586041   (≈ 1.0594630943592929)
+2^(7/12)  →  Fraction 2126312 / 1419143   (≈ 1.4983070768766784)
+4^(1/2)   →  Fraction 2 / 1                exactly — see below
+```
+
+So the evaluator's stack holds **only pooled `Fraction`s**. Every consumer downstream of `POW` — `MUL`, `DIV`, the evaluation cache, the renderer, the audio engine — sees `2739815/2586041`, not `2^(1/12)`. Multiplying twelve of them together does not give exactly 2.
+
+What survives the flattening is not the algebra but the **flag**: `_lastEvalWasCorrupted`, which becomes the note's `corruptionFlags` bit, which becomes the crosshatch you see on the canvas. That flag is the entire payoff of the `POW` design in the shipping app.
+
+::: info Rational powers are exact
+`MusicValue.pow()` calls `tryRationalPower()` (`:551`) first, which handles integer exponents and **perfect n-th roots**. `4^(1/2)` really is `2`, exactly, and is **not** flagged as corrupted. Only genuinely irrational powers corrupt.
+
+`SymbolicPower` is only constructed at all when the base is a **positive integer** (`:515`). A non-integer or negative base falls straight to `MusicValue.irrational` — a plain f64.
+:::
+
+### Where the algebra *is* live
+
+`src/dsl/simplify.js`. This is an independent re-implementation of the same normal form, and it runs on **save**, not on evaluation. Its header (`:1-21`) states the contract: a value is a rational coefficient times a product of `base^exp` terms, like bases merge, and coefficients never migrate into a power term.
+
+That is what makes these rewrites happen when you save a variable:
+
+| You type | It is saved as |
+|---|---|
+| `2 * (1/2) * base.f` | `base.f` |
+| `base.f + base.f` | `2 * base.f` |
+| `4^(1/2) * base.f` | `2 * base.f` — the perfect root folds; the note stays **un**corrupted |
+| `2^(1/12) * 2^(1/12) * base.f` | `2^(1/6) * base.f` — like bases merge; still corrupted |
+| `2 * base.f * 2^(7/12)` | unchanged — the coefficient stays out of the power |
+
+A rewrite is rejected and the original kept if re-evaluating it moves the value (relative tolerance `1e-12`) or **flips the corruption flag** (`src/utils/simplify.js:128-155`).
+
+The same machinery backs the ▲/▼ interval arrows (Settings → Arrows; default up ×2/1, down ×1/2 — they are not octave-only): `scaleDSL()` folds the arrow's factor into the expression's rational coefficient rather than prepending a multiplier, so up-then-down returns to exactly `base.f` and a TET note stays TET. Verified:
+
+```
+scaleDSL('base.f', 2, 1)                    → 2 * base.f
+scaleDSL('2 * base.f', 1, 2)                → base.f
+scaleDSL('base.f * 2^(7/12)', 3, 2)         → (3/2) * base.f * 2^(7/12)
+```
+
+## API
+
+`SymbolicPower` (`binary-evaluator.js:20-266`). Note the field is **`exp`**, not `exponent`.
+
+```javascript
 class SymbolicPower {
-  coefficient: Fraction;  // Rational multiplier
-  powers: Power[];        // Array of {base, exponent} pairs
+  coefficient;   // Fraction
+  powers;        // [{ base: number, exp: Fraction }]  — base is a positive integer
+
+  static fromPower(base, exp)   // :35  — base^exp, coefficient 1
+  static fromRational(frac)     // :42  — a rational, no power terms
+
+  toFloat()                     // :49  — f64, for audio and rendering
+  isRational()                  // :60  — no powers, or every exp has d === 1
+  toRationalFraction()          // :67  — Fraction if rational, else null
+  normalize()                   // :86  — drop zero exponents, sort by base
+
+  mul(other)                    // :98  — merge like bases by adding exponents
+  div(other)
+  pow(frac)
 }
 ```
 
-## Class Structure
+There is no `simplify()`, no `fromFraction()`, no `valueOf()`, and no `isCorrupted()` on this class. (`isCorrupted()` is on `MusicValue` — `:327`.)
+
+### 12-TET octave closure
 
 ```javascript
-class SymbolicPower {
-  constructor(coefficient, powers) {
-    this.coefficient = coefficient;  // Fraction
-    this.powers = powers;            // [{base: number, exponent: Fraction}]
-  }
-
-  // Factory for power expressions
-  static fromPower(base, exponent) {
-    return new SymbolicPower(
-      new Fraction(1),
-      [{ base, exponent }]
-    );
-  }
-
-  // Factory for rational values
-  static fromFraction(fraction) {
-    return new SymbolicPower(fraction, []);
-  }
-}
-```
-
-## Arithmetic Operations
-
-### Multiplication
-
-When multiplying, combine like bases:
-
-```javascript
-// 2^(1/12) × 2^(1/12)
-//   = 2^(1/12 + 1/12)
-//   = 2^(2/12)
-//   = 2^(1/6)
-
-mul(other) {
-  // Multiply coefficients
-  const newCoeff = this.coefficient.mul(other.coefficient);
-
-  // Combine powers
-  const newPowers = new Map();
-
-  for (const p of this.powers) {
-    const existing = newPowers.get(p.base) || new Fraction(0);
-    newPowers.set(p.base, existing.add(p.exponent));
-  }
-
-  for (const p of other.powers) {
-    const existing = newPowers.get(p.base) || new Fraction(0);
-    newPowers.set(p.base, existing.add(p.exponent));
-  }
-
-  // Convert back to array, removing zero exponents
-  const powers = [];
-  for (const [base, exp] of newPowers) {
-    if (!exp.equals(0)) {
-      powers.push({ base, exponent: exp });
-    }
-  }
-
-  return new SymbolicPower(newCoeff, powers);
-}
-```
-
-### Division
-
-Subtract exponents:
-
-```javascript
-// 2^(5/12) ÷ 2^(3/12) = 2^(2/12) = 2^(1/6)
-
-div(other) {
-  // Equivalent to multiply by inverse
-  const inverseCoeff = new Fraction(1).div(other.coefficient);
-  const inversePowers = other.powers.map(p => ({
-    base: p.base,
-    exponent: p.exponent.neg()
-  }));
-  const inverse = new SymbolicPower(inverseCoeff, inversePowers);
-  return this.mul(inverse);
-}
-```
-
-### Resolving to Rational
-
-If all exponents sum to integers, the result is rational:
-
-```javascript
-// 2^(1/12) × 2^(11/12) = 2^(12/12) = 2^1 = 2
-
-simplify() {
-  let coeff = this.coefficient;
-  const remainingPowers = [];
-
-  for (const p of this.powers) {
-    if (p.exponent.d === 1) {
-      // Integer exponent: can compute exactly
-      coeff = coeff.mul(new Fraction(Math.pow(p.base, p.exponent.n)));
-    } else {
-      remainingPowers.push(p);
-    }
-  }
-
-  return new SymbolicPower(coeff, remainingPowers);
-}
-```
-
-## Example: 12-TET Octave
-
-```javascript
-// Start with one semitone
 const semitone = SymbolicPower.fromPower(2, new Fraction(1, 12));
-// { coefficient: 1, powers: [{base: 2, exponent: 1/12}] }
 
-// Multiply 12 times
 let octave = semitone;
-for (let i = 1; i < 12; i++) {
-  octave = octave.mul(semitone);
-}
+for (let i = 1; i < 12; i++) octave = octave.mul(semitone);
+// → { coefficient: 1, powers: [ { base: 2, exp: 1/1 } ] }
 
-// Result:
-// { coefficient: 1, powers: [{base: 2, exponent: 12/12}] }
-
-// Simplify:
-octave = octave.simplify();
-// { coefficient: 2, powers: [] }
-
-// It's exactly 2! No floating-point drift.
+octave.isRational();            // true   — the exponent's denominator is 1
+octave.toRationalFraction();    // Fraction 2/1 — exactly 2
 ```
 
-## Multi-Base Support
+`mul()` alone leaves you with `2^1`; `toRationalFraction()` is the step that collapses it to the rational `2`. Verified by running the real class.
 
-Different TET systems can coexist:
+### Multi-base
+
+Bases that cannot be combined algebraically are kept separate:
 
 ```javascript
-// 12-TET third: 2^(4/12)
-const tetThird = SymbolicPower.fromPower(2, new Fraction(4, 12));
+const tetThird = SymbolicPower.fromPower(2, new Fraction(4, 12));  // 12-TET major third
+const bpStep   = SymbolicPower.fromPower(3, new Fraction(1, 13));  // Bohlen-Pierce step
 
-// Bohlen-Pierce: 3^(1/13)
-const bpStep = SymbolicPower.fromPower(3, new Fraction(1, 13));
-
-// Combine them
-const combined = tetThird.mul(bpStep);
-// { coefficient: 1, powers: [
-//     {base: 2, exponent: 1/3},
-//     {base: 3, exponent: 1/13}
-// ]}
+tetThird.mul(bpStep);
+// { coefficient: 1, powers: [ {base: 2, exp: 1/3}, {base: 3, exp: 1/13} ] }
 ```
 
-Bases are kept separate because they can't be combined algebraically.
+`normalize()` sorts `powers` by base and drops zero exponents, so the representation is canonical.
 
-## Numeric Approximation
+## Corruption, end to end
 
-For display and audio, convert to decimal:
-
-```javascript
-valueOf() {
-  let value = this.coefficient.valueOf();
-  for (const p of this.powers) {
-    value *= Math.pow(p.base, p.exponent.valueOf());
-  }
-  return value;
-}
-
-// 2^(1/12).valueOf() ≈ 1.0594630943592953
-```
-
-## Corruption Tracking
-
-When a SymbolicPower has non-empty `powers`, it's "corrupted" (irrational):
+The `CORRUPT` bitmask (`src/binary-note.js:55-62`):
 
 ```javascript
-isCorrupted() {
-  return this.powers.length > 0;
-}
-```
-
-The evaluator sets corruption flags:
-
-```javascript
-const CORRUPT = {
-  START_TIME:       0x01,
-  DURATION:         0x02,
-  FREQUENCY:        0x04,
-  TEMPO:            0x08,
+export const CORRUPT = {
+  START_TIME:        0x01,
+  DURATION:          0x02,
+  FREQUENCY:         0x04,
+  TEMPO:             0x08,
   BEATS_PER_MEASURE: 0x10,
-  MEASURE_LENGTH:   0x20,
+  MEASURE_LENGTH:    0x20,
 };
 ```
 
-Notes with corrupted frequency display the **≈** prefix.
+The path from an irrational power to a pixel:
 
-## Rust Implementation
+```
+POW produces an irrational
+  → BinaryEvaluator._lastEvalWasCorrupted = true           binary-evaluator.js:1085
+  → evaluateNote() ORs the property's bit into corruptionFlags   :1272-1274
+  → Module._updateCorruptionFlags()                        module.js:636-659
+      → DependencyGraph.setCorruptionFlags(id, flags)      dependency-graph.js:1659
+  → RendererAdapter.sync() → a_corruptionType per note     renderer.js:823-898
+  → the shader hatches the note
+```
 
-The WASM version mirrors this in Rust:
+On the canvas:
+
+| `a_corruptionType` | Meaning | Visual |
+|---|---|---|
+| `0.0` | clean | none |
+| `1.0` | transitively corrupted — depends on something corrupt | single 45° diagonal hatch |
+| `2.0` | directly corrupted — corrupt, with no corrupt dependency | crosshatch |
+
+In the note widget, a transitively-corrupted **frequency** displays as `≈<fraction>` with the `corrupted-value` class (`src/modals/variable-controls.js:66-69`; `public/styles.css:1307-1310`).
+
+::: warning The high-precision float readout is WASM-only
+The widget's *directly*-corrupted branch (`≈3.1414850`, eight significant figures) keys on `ev._irrational` / `ev._floatValue` (`variable-controls.js:56`), and those fields are **only ever set by the WASM evaluator adapter** (`src/wasm/evaluator-adapter.js:908-909`). On the default JS path they are never set, so that branch never fires — you get the `≈<fraction>` transitive branch instead. Do not promise the float readout.
+:::
+
+## The Rust mirror
+
+`rust/src/value.rs:20-40`. The struct is **`PowerTerm`**, and `base` is a `u32` — matching the JS rule that only positive integer bases become symbolic:
 
 ```rust
-// rust/src/value.rs
-
-pub struct SymbolicPower {
-    pub coefficient: Fraction,
-    pub powers: Vec<Power>,
-}
-
-pub struct Power {
-    pub base: i64,
+pub struct PowerTerm {
+    pub base: u32,
     pub exponent: Fraction,
 }
 
-impl SymbolicPower {
-    pub fn mul(&self, other: &SymbolicPower) -> SymbolicPower {
-        // Same algorithm as JavaScript
-    }
+pub struct SymbolicPower {
+    pub coefficient: Fraction,
+    pub powers: Vec<PowerTerm>,
 }
 ```
 
-## Performance
+The Rust evaluator's stack really does hold `Value::{Rational, Irrational, Symbolic}`, so it preserves the symbolic form across operations where the JS VM flattens. But that path is **opt-in and currently unusable** — see [WASM Overview](/developer/wasm/overview). Every user today is on the JS path.
 
-SymbolicPower operations are more expensive than Fraction:
+## Scale systems
 
-| Operation | Fraction | SymbolicPower |
-|-----------|----------|---------------|
-| Multiply | ~100ns | ~500ns |
-| Memory | 24 bytes | ~80 bytes |
+The modules that exercise this live in the module library's **Scale Systems** section (`public/modules/scale-systems/`), not at the top level: `TET-12`, `TET-19`, `TET-31`, `BP-13`, `Mixed-Base`, `tesla`.
 
-But the algebraic preservation is worth it for:
-- Exact TET arithmetic
-- No accumulating drift
-- Proper 12-note octave closure
-
-## Use Cases
-
-### TET Scales
-
-```javascript
-// Create 12-TET chromatic scale
-const step = SymbolicPower.fromPower(2, new Fraction(1, 12));
-let freq = SymbolicPower.fromFraction(new Fraction(440));
-
-for (let i = 0; i < 12; i++) {
-  notes.push(freq);
-  freq = freq.mul(step);
-}
-// notes[12] = 880 exactly
+```
+[1].f * 2^(1/12)     # one 12-TET semitone above note 1
+[1].f * 2^(1/31)     # one 31-TET step above note 1
+[1].f * 3^(1/13)     # one Bohlen-Pierce step (13 equal divisions of the 3:1 tritave)
 ```
 
-### Bohlen-Pierce
+`Mixed-Base` is the interesting one: it mixes bases 2, 3 and 5 in a single module, and even within a single expression —
 
-```javascript
-// 13 equal divisions of tritave (3:1)
-const bpStep = SymbolicPower.fromPower(3, new Fraction(1, 13));
+```
+[7].f * 2 ^ (-1/12) * 3 ^ (-1/13)
 ```
 
-### Custom Systems
+— which is exactly the case the multi-base `powers` array and `normalize()` exist for.
 
-```javascript
-// 31-TET for better thirds
-const step31 = SymbolicPower.fromPower(2, new Fraction(1, 31));
+## See also
 
-// 53-TET for near-perfect fifths
-const step53 = SymbolicPower.fromPower(2, new Fraction(1, 53));
-```
-
-## See Also
-
-- [Equal Temperament](/user-guide/tuning/equal-temperament) - User documentation
-- [Binary Evaluator](./binary-evaluator) - How SymbolicPower is created
-- [Custom TET](/user-guide/tuning/custom-tet) - Creating custom systems
+- [Binary Evaluator](/developer/core/binary-evaluator) — where `POW` builds and then discards a `SymbolicPower`
+- [Dependency Graph](/developer/core/dependency-graph) — where corruption flags are stored and made transitive
+- [Equal Temperament](/user-guide/tuning/equal-temperament) — the user-facing guide
+- [Custom TET](/user-guide/tuning/custom-tet) — building your own system

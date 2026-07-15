@@ -1,79 +1,116 @@
+---
+title: Reference
+description: Reference documentation for RMT Compose — the expression language, note properties, the module JSON format, and the internal bytecode.
+---
+
 # Reference
 
-Complete reference documentation for RMT Compose expressions, properties, and formats.
+Exhaustive documentation for the expression language, note properties, and file formats. If you
+are looking for how to *do* something, start with the [User Guide](/user-guide/). This section
+tells you what is true.
 
-## Expression Language
+## Expression language
 
-- **[Syntax](./expressions/syntax)** - Complete expression syntax reference
-- **[Fraction API](./expressions/fraction-api)** - Fraction.js methods
-- **[Module API](./expressions/module-api)** - Module reference methods
-- **[Operators](./expressions/operators)** - Arithmetic operations
+- [Syntax](/reference/expressions/syntax) — the complete grammar: tokens, literals, references,
+  functions, operators, precedence, error behaviour
+- [Operators](/reference/expressions/operators) — per-operator semantics and result types
+- [Module API](/reference/expressions/module-api) — note references and built-in functions
+- [Fraction API](/reference/expressions/fraction-api) — exact numbers, and the legacy
+  `new Fraction()` compatibility surface
 
-## Note Properties
+## Note properties
 
-- **[frequency](./properties/frequency)** - Pitch expressions
-- **[startTime](./properties/start-time)** - Timing expressions
-- **[duration](./properties/duration)** - Length expressions
-- **[tempo](./properties/tempo)** - Beats per minute
-- **[beatsPerMeasure](./properties/beats-per-measure)** - Time signature
+- [frequency](/reference/properties/frequency) — pitch
+- [startTime](/reference/properties/start-time) — when a note begins
+- [duration](/reference/properties/duration) — how long it lasts
+- [tempo](/reference/properties/tempo) — beats per minute
+- [beatsPerMeasure](/reference/properties/beats-per-measure) — meter
 
-## Other References
+The sixth property, `measureLength`, has no page of its own: it is derived from `tempo` and
+`beatsPerMeasure` and has no UI. It is covered under
+[tempo](/reference/properties/tempo#tempo-and-measure-length).
 
-- **[Module JSON Schema](./module-schema)** - Complete JSON format
-- **[Glossary](./glossary)** - Term definitions
+## Formats
 
-## Quick Reference Tables
+- [Module JSON Schema](/reference/module-schema) — the saved-module format
+- [Settings Reference](/reference/settings-reference) — every setting, its default and its range
+- [Glossary](/reference/glossary) — term definitions
 
-### Common Ratios
+## Quick reference
 
-| Interval | Ratio | Expression |
-|----------|-------|------------|
-| Unison | 1/1 | `new Fraction(1)` |
-| Minor second | 16/15 | `new Fraction(16, 15)` |
-| Major second | 9/8 | `new Fraction(9, 8)` |
-| Minor third | 6/5 | `new Fraction(6, 5)` |
-| Major third | 5/4 | `new Fraction(5, 4)` |
-| Perfect fourth | 4/3 | `new Fraction(4, 3)` |
-| Tritone | 45/32 | `new Fraction(45, 32)` |
-| Perfect fifth | 3/2 | `new Fraction(3, 2)` |
-| Minor sixth | 8/5 | `new Fraction(8, 5)` |
-| Major sixth | 5/3 | `new Fraction(5, 3)` |
-| Minor seventh | 9/5 | `new Fraction(9, 5)` |
-| Major seventh | 15/8 | `new Fraction(15, 8)` |
-| Octave | 2/1 | `new Fraction(2)` |
+The exhaustive tables live on the pages that own them. These are the ones you look up most.
 
-### TET Steps
+- **Just-intonation ratios** — the interval-to-expression table is on
+  [frequency](/reference/properties/frequency#just-intonation-ratios). For the musical reasoning,
+  see [Pure Ratios](/user-guide/tuning/ratios).
 
-| System | Expression |
-|--------|------------|
-| 12-TET semitone | `new Fraction(2).pow(new Fraction(1, 12))` |
-| 19-TET step | `new Fraction(2).pow(new Fraction(1, 19))` |
-| 31-TET step | `new Fraction(2).pow(new Fraction(1, 31))` |
-| BP-13 step | `new Fraction(3).pow(new Fraction(1, 13))` |
+### Equal-temperament steps
 
-### Duration Values
+| System | One step | Value |
+|---|---|---|
+| 12-TET | `2^(1/12)` | ≈ 1.059463 |
+| 19-TET | `2^(1/19)` | ≈ 1.037155 |
+| 31-TET | `2^(1/31)` | ≈ 1.022611 |
+| Bohlen-Pierce (13 divisions of the tritave) | `3^(1/13)` | ≈ 1.088182 |
 
-| Note | Beats | Expression (at tempo) |
-|------|-------|----------------------|
-| Whole | 4 | `beat.mul(new Fraction(4))` |
-| Half | 2 | `beat.mul(new Fraction(2))` |
-| Quarter | 1 | `beat` |
-| Eighth | 0.5 | `beat.mul(new Fraction(1, 2))` |
-| Sixteenth | 0.25 | `beat.mul(new Fraction(1, 4))` |
+`n` steps is `2^(n/12)`, `2^(n/19)`, and so on. All of these are irrational, so a note using one
+is flagged corrupted and drawn crosshatched. See [Operators](/reference/expressions/operators).
 
-Where `beat = new Fraction(60).div(module.findTempo(module.baseNote))`
+### Note lengths
 
-### Keyboard Shortcuts
+| Note | Beats | Expression |
+|---|---|---|
+| Whole | 4 | `beat(base) * 4` |
+| Half | 2 | `beat(base) * 2` |
+| Quarter | 1 | `beat(base)` |
+| Eighth | 1/2 | `beat(base) * (1/2)` |
+| Sixteenth | 1/4 | `beat(base) * (1/4)` |
+| Dotted quarter | 3/2 | `beat(base) * (3/2)` |
+
+`beat(x)` is one beat of `x` in seconds — that is, `60 / tempo(x)`. It is what the note-length
+buttons in the note widget write for you. The full table, including dotted values, is on
+[duration](/reference/properties/duration#standard-note-values).
+
+### Property shortnames
+
+| Property | Accepted spellings | Saved as |
+|---|---|---|
+| frequency | `f`, `freq`, `frequency` | `f` |
+| startTime | `t`, `s`, `start`, `startTime` | `t` |
+| duration | `d`, `dur`, `duration` | `d` |
+| tempo | `tempo` | `tempo` |
+| beatsPerMeasure | `bpm`, `beatsPerMeasure` | `bpm` |
+| measureLength | `ml`, `measureLength` | `ml` |
+
+### Keyboard shortcuts
 
 | Action | Windows/Linux | Mac |
-|--------|---------------|-----|
+|---|---|---|
 | Undo | Ctrl+Z | Cmd+Z |
 | Redo | Ctrl+Y | Cmd+Y |
 
-### Variable Indices (Internal)
+Both are ignored while the focus is in a text field, so they never fight with editing an
+expression.
 
-| Index | Variable |
-|-------|----------|
+### Pointer gestures
+
+| Action | Gesture |
+|---|---|
+| Marquee-select notes | Shift + drag on empty background |
+| Add or remove one note from the selection | Shift + click the note |
+| Loop playback | Shift + click **Play** |
+
+See [Keyboard Shortcuts](/user-guide/interface/keyboard-shortcuts) for the full list.
+
+## Internals
+
+These are implementation details. You do not need them to use the app, but they are stable and
+they are what the file format and the evaluator agree on.
+
+### Variable indices
+
+| Index | Property |
+|---|---|
 | 0 | startTime |
 | 1 | duration |
 | 2 | frequency |
@@ -81,19 +118,56 @@ Where `beat = new Fraction(60).div(module.findTempo(module.baseNote))`
 | 4 | beatsPerMeasure |
 | 5 | measureLength |
 
-### Bytecode Opcodes (Internal)
+### Corruption flags
 
-| Opcode | Hex | Description |
-|--------|-----|-------------|
-| LOAD_CONST | 0x01 | Push Fraction constant |
-| LOAD_REF | 0x02 | Push note variable |
-| LOAD_BASE | 0x03 | Push baseNote variable |
-| LOAD_CONST_BIG | 0x04 | Push BigInt Fraction |
-| ADD | 0x10 | Addition |
-| SUB | 0x11 | Subtraction |
-| MUL | 0x12 | Multiplication |
-| DIV | 0x13 | Division |
-| NEG | 0x14 | Negation |
-| POW | 0x15 | Power |
-| FIND_TEMPO | 0x20 | Tempo lookup |
-| FIND_MEASURE | 0x21 | Measure length lookup |
+A bitmask, one bit per property, recording which of a note's values came out irrational.
+
+| Flag | Property |
+|---|---|
+| `0x01` | startTime |
+| `0x02` | duration |
+| `0x04` | frequency |
+| `0x08` | tempo |
+| `0x10` | beatsPerMeasure |
+| `0x20` | measureLength |
+
+### Bytecode opcodes
+
+| Opcode | Byte | Effect |
+|---|---|---|
+| `LOAD_CONST` | `0x01` | Push a constant fraction (two 32-bit integers) |
+| `LOAD_REF` | `0x02` | Push a property of note N (16-bit id, 8-bit variable index) |
+| `LOAD_BASE` | `0x03` | Push a property of the BaseNote (8-bit variable index) |
+| `LOAD_CONST_BIG` | `0x04` | Push a constant fraction with arbitrary-precision parts |
+| `ADD` | `0x10` | Pop 2, push sum |
+| `SUB` | `0x11` | Pop 2, push difference |
+| `MUL` | `0x12` | Pop 2, push product |
+| `DIV` | `0x13` | Pop 2, push quotient |
+| `NEG` | `0x14` | Pop 1, push negation |
+| `POW` | `0x15` | Pop base and exponent, push the power; may set a corruption flag |
+| `FIND_TEMPO` | `0x20` | Defined, **never emitted** |
+| `FIND_MEASURE` | `0x21` | Defined, **never emitted** |
+| `FIND_INSTRUMENT` | `0x22` | Defined, **never emitted**, not implemented in the evaluator |
+| `DUP` | `0x30` | Defined, **never emitted** |
+| `SWAP` | `0x31` | Defined, **never emitted** |
+
+`tempo(x)` and `measure(x)` compile to a plain property load, not to `FIND_TEMPO` /
+`FIND_MEASURE`. `beat(x)` compiles to `LOAD_CONST 60`, a tempo load, then `DIV`.
+
+### Fallbacks and limits
+
+| Thing | Value |
+|---|---|
+| Value used when a reference cannot be resolved | startTime 0, duration 1, frequency 440, tempo 60, beatsPerMeasure 4, measureLength 4 |
+| Division by zero at evaluation time | Result 1, plus a console warning |
+| An expression neither compiler can parse | Constant 0, plus a console warning |
+| Decimal → fraction, largest denominator | 10 000 |
+| Constant fits `LOAD_CONST` when both parts are within | −2 147 483 648 to 2 147 483 647 |
+| Maximum expression length accepted on import | 10 000 characters |
+| Compiled-expression cache | 4 000 entries, least-recently-used eviction |
+
+## See also
+
+- [Binary Evaluator](/developer/core/binary-evaluator) — how the bytecode runs
+- [Expression Compiler](/developer/core/expression-compiler) — how text becomes bytecode
+- [Dependency Graph](/developer/core/dependency-graph) — how references become edges

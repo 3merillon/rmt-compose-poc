@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Stress-module generator for the perf harness (ROADMAP.md Phase 0.2).
+ * Stress-module generator for the perf harness.
  *
  * Emits large modules with deep/wide/intertwined dependency structures into
  * public/modules/perf/ (NOT listed in any library manifest, so they never

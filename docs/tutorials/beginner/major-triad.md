@@ -1,221 +1,184 @@
+---
+title: Create a Major Triad
+description: Build a three-note just-intonation major chord in RMT Compose using At Start positioning, rooted so the whole chord transposes together.
+---
+
 # Create a Major Triad
 
-In this tutorial, you'll build a major chord (triad) using just intonation ratios.
+You will build a major chord whose three notes sound at once — and whose two upper notes are anchored to the root, so moving the root moves the chord.
 
-## Objective
+**Prerequisites:** [Build a Major Scale](/tutorials/beginner/major-scale), or equivalent comfort with the note widget.
 
-Create a three-note major chord where all notes play simultaneously.
+## The chord
 
-## Prerequisites
+| Voice | Interval | Ratio above the root |
+|---|---|---|
+| Root | unison | 1/1 |
+| Third | just major third | 5/4 |
+| Fifth | perfect fifth | 3/2 |
 
-- Completed [Build a Major Scale](./major-scale) or equivalent experience
-- Understanding of ratios for thirds and fifths
+## Root it properly
 
-## The Major Triad
+There are two ways to write a chord, and only one of them is worth learning.
 
-A major triad consists of:
-
-| Note | Interval | Ratio | Decimal |
-|------|----------|-------|---------|
-| Root | Unison | 1/1 | 1.000 |
-| Third | Major third | 5/4 | 1.250 |
-| Fifth | Perfect fifth | 3/2 | 1.500 |
-
-## Step 1: Set Up the BaseNote
-
-1. Open RMT Compose
-2. Click the **BaseNote** (orange circle)
-3. In the Variable Widget, scroll down to the bottom and click **"Clean Slate"** to remove all notes except the BaseNote
-4. Verify the BaseNote settings are what you want:
-   - **frequency**: e.g. `440` (A4)
-   - **tempo**: e.g. `120` (120 BPM)
-
-## Step 2: Create the Root
-
-1. With the BaseNote selected
-2. In **"Add Note / Silence"** section, select **"Note"**, then click **"Create Note"**
-3. Select the new note
-4. Set frequency:
+**Anchored to the BaseNote** — each tone is a ratio of `base.f`:
 
 ```
 base.f
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency')
-```
-</details>
-
-5. Set duration to a whole note:
-
-```
-beat(base) * 4
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(4))
-```
-</details>
-
-6. Click **Save**
-
-## Step 3: Create the Third
-
-1. With the root selected, click **"Create Note"** in **"Add Note / Silence"** (with **"At Start"** selected)
-2. Select the new note
-3. Set frequency (major third = 5/4):
-
-```
 base.f * (5/4)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
-```
-</details>
-
-4. Keep the same duration and start time
-5. Click **Save**
-
-## Step 4: Create the Fifth
-
-1. Select the root note again
-2. Click **"Create Note"** in **"Add Note / Silence"** (with **"At Start"** selected)
-3. Select the new note
-4. Set frequency (perfect fifth = 3/2):
-
-```
 base.f * (3/2)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+**Anchored to the root** — the root is a ratio of `base.f`, and the tones are ratios of *the root*:
 
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 ```
-</details>
+base.f
+(5/4) * [1].f
+(3/2) * [1].f
+```
 
-5. Click **Save**
+Both sound identical. But in the second, the chord is a *structure*: retune or transpose Note 1 and the third and fifth follow it, staying a chord. In the first, they do not — they are three independent pitches that happen to line up.
 
-## Verification
+Every chord module shipped in the library uses the second form. So will you.
 
-1. Click **Play**
-2. You should hear all three notes at once - a major chord!
-3. The chord should sound bright and happy
+## Step 1: Clear the workspace
 
-### Visual Check
+1. Click the **BaseNote** (the orange circle).
+2. Scroll to **DELETE ALL NOTES** and click **Clean Slate**, then **Yes, Clean Slate**.
 
-In the workspace, all three notes should:
-- Start at the same time (aligned vertically)
-- Have different vertical positions (different frequencies)
-- Be stacked: Root → Third → Fifth (bottom to top)
+The BaseNote keeps its defaults: 263 Hz, 100 BPM.
 
-## Understanding the Sound
+## Step 2: Create the root
 
-The major triad sounds consonant because:
-- 5/4 and 3/2 are simple ratios
-- They align with the natural harmonic series
-- The frequencies have many common overtones
+1. Click the **BaseNote** again to reopen its widget.
+2. Scroll to **ADD NOTE / SILENCE**. Kind stays on **Note**.
+3. Set the fields:
+   - **Frequency:** `base.f`
+   - **Duration:** `beat(base) * 2` (a half note — long enough to hear the chord ring)
+   - **Start Time:** `base.t`
+4. Click **Create**.
 
-Compare with [12-TET](/user-guide/tuning/12-tet):
-- TET major third = 2^(4/12) ≈ 1.26 (slightly sharp)
-- Just major third = 5/4 = 1.25 (pure)
+You now have Note 1, selected, with its widget open.
+
+## Step 3: Create the third — At Start
+
+This is the step that makes it a chord rather than a melody.
+
+1. With **Note 1** selected, scroll to **ADD NOTE / SILENCE**.
+2. Change the position radio from **At End** to **At Start**.
+
+   Watch the **Start Time** field: it changes from `[1].t + [1].d` to `[1].t`. The new note will start *when Note 1 starts*, not after it.
+3. Replace the **Frequency** field with:
+
+```
+(5/4) * [1].f
+```
+
+4. Leave **Duration** as it is — it prefilled from Note 1, so the two notes are the same length.
+5. Click **Create Note**.
+
+::: warning
+If you forget to switch to **At Start**, you get an arpeggio, not a chord. The position radio defaults to **At End** every time the widget rebuilds.
+:::
+
+## Step 4: Create the fifth
+
+1. Select **Note 1** again — the root. Not Note 2.
+2. In **ADD NOTE / SILENCE**, set the position to **At Start** again.
+3. Frequency:
+
+```
+(3/2) * [1].f
+```
+
+4. Click **Create Note**.
+
+## Step 5: Listen and look
+
+Press **Play**. Three notes, one chord.
+
+In the workspace all three notes should be stacked vertically at the same horizontal position, with the same width. Click Note 1 and you will see **orange** dependency lines running to Notes 2 and 3 — thin ones, because they are what *depends on* Note 1. Thick lines would be what Note 1 depends on.
+
+## Step 6: Move the whole chord with one click
+
+The payoff.
+
+1. Select **Note 1** (the root).
+2. Click the **▲** arrow — either the one on the left edge of the note in the workspace, or the one on the frequency row of the widget.
+
+The entire chord jumps up an octave. Notes 2 and 3 were never touched: their expressions still say `(5/4) * [1].f` and `(3/2) * [1].f`, and they followed the root for free.
+
+Click **▼** to come back down. Note 1's expression returns to exactly `base.f` — the arrows fold their factor into the expression's coefficient rather than stacking multipliers in front of it.
+
+::: tip
+The arrow interval is **not fixed to the octave**. It defaults to ×2 up and ×1/2 down, but **Settings → Arrows** lets you pick any ratio — a fifth, a whole tone, a syntonic comma. Set it to `3/2` and ▲ moves the whole chord up a fifth. See [Transposing with Arrows](/user-guide/notes/transposing).
+:::
+
+## The one-drag alternative
+
+The chord you just built ships as a module.
+
+1. In the module library, expand **Chords** (11 modules).
+2. Set **Drop at:** to **Start**, so the chord lands *at* the note you drop on rather than after it.
+3. Drag **Major** onto any note.
+
+The module is exactly the structure you built: a root on `base.f`, and tones written `(5/4) * [1].f` and `(3/2) * [1].f`. Dropping it on a note re-roots the whole chord onto that note.
+
+## Chord reference
+
+The ratios the shipped chord modules actually use, all relative to the root:
+
+| Module | Colon ratio | Tones |
+|---|---|---|
+| Major | 4:5:6 | 1/1, 5/4, 3/2 |
+| Minor | 10:12:15 | 1/1, 6/5, 3/2 |
+| Diminished | 5:6:7 | 1/1, 6/5, 7/5 |
+| Augmented | 16:20:25 | 1/1, 5/4, 25/16 |
+| Sus4 | 6:8:9 | 1/1, 4/3, 3/2 |
+| Major 7th | 8:10:12:15 | 1/1, 5/4, 3/2, 15/8 |
+| Minor 7th | 10:12:15:18 | 1/1, 6/5, 3/2, 9/5 |
+| Dominant 7th | 36:45:54:64 | 1/1, 5/4, 3/2, 16/9 |
+| Harmonic 7th | 4:5:6:7 | 1/1, 5/4, 3/2, 7/4 |
+| Base-3 chord | 3:5:7:9 | 1/1, 5/3, 7/3, 3/1 |
+| Base-5 chord | 5:7:9:11 | 1/1, 7/5, 9/5, 11/5 |
+
+::: info
+The **Dominant 7th** takes 16/9 for its seventh, not 7/4. That is deliberate: 16/9 against the 5/4 third yields the classic 64/45 tritone. The chord built on 7/4 is a different animal, and ships separately as **Harmonic 7th**.
+:::
 
 ## Exercises
 
-### Exercise 1: Minor Triad
+### 1. Minor triad
 
-Change the third from major (5/4) to minor (6/5):
+Select Note 2 and change its frequency to `(6/5) * [1].f`. Save. The chord turns minor, and the root and fifth never moved.
 
-```
-base.f * (6/5)
-```
+### 2. Add the octave
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Select the root, **At Start**, frequency `2 * [1].f`. A fuller, more open chord.
 
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(6, 5))
-```
-</details>
+### 3. First inversion
 
-The chord now sounds sad/dark!
+Put the third in the bass by dropping it an octave. Select Note 2 and press **▼** once — its expression becomes `(5/8) * [1].f`, an octave below the third. The chord is now voiced third-fifth-root.
 
-### Exercise 2: Add the Octave
+### 4. A two-chord progression
 
-1. Add a fourth note at the same time
-2. Set frequency to 2/1:
+1. Select the root, set the position to **At End**, frequency `(3/2) * [1].f`, and click **Create Note**. That is a new root a fifth up, starting when the first chord ends.
+2. Build a third and a fifth on it with **At Start**, using `(5/4) * [N].f` and `(3/2) * [N].f` where N is your new root's id.
 
-```
-base.f * 2
-```
+You have a V chord after a I chord. Because the second root references the first, transposing Note 1 still moves everything. That chaining is exactly how the shipped **Progressions** modules are built.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+### 5. Save it
 
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(2))
-```
-</details>
+Marquee-select the chord (shift-drag across it) and click **Copy to Modules** in the group widget. It lands in the library's **Custom** section, root intact, ready to drop onto any note.
 
-This creates a fuller sound.
+## What you learned
 
-### Exercise 3: Chord Inversion
+- **At Start** stacks notes into a chord; **At End** chains them into a melody.
+- Anchoring chord tones to the root, not the BaseNote, makes the chord a movable object.
+- One click on the root's ▲ arrow transposes the whole structure.
 
-Create a first inversion (third in the bass):
+## Next
 
-| Note | Expression |
-|------|------------|
-| Third (bass) | `baseNote × 5/4` |
-| Fifth | `baseNote × 3/2` |
-| Root (high) | `baseNote × 2` |
-
-### Exercise 4: Chord Progression
-
-Create a second chord that plays after the first:
-
-1. Create a new root at `startTime = firstChord.startTime + firstChord.duration`
-2. Build a chord on that root
-3. You now have a two-chord progression!
-
-## Save Your Module
-
-1. **Menu** > **Save Module**
-2. Name it `major-triad-just.json`
-
-## Chord Reference
-
-Other common chords in just intonation:
-
-| Chord | Ratios |
-|-------|--------|
-| Major | 1/1, 5/4, 3/2 |
-| Minor | 1/1, 6/5, 3/2 |
-| Diminished | 1/1, 6/5, 36/25 |
-| Augmented | 1/1, 5/4, 25/16 |
-| Major 7th | 1/1, 5/4, 3/2, 15/8 |
-| Dominant 7th | 1/1, 5/4, 3/2, 7/4 |
-| Minor 7th | 1/1, 6/5, 3/2, 9/5 |
-
-## What You Learned
-
-- Creating simultaneous notes using "At Start" positioning
-- The ratios that make a major chord
-- How to verify chord structure visually and aurally
-- The difference between major and minor thirds
-
-## Next Steps
-
-- [Add Rhythm](./rhythm) - Create rhythmic patterns
-- [Note Dependencies](../intermediate/dependencies) - Link chords together
-- Explore the [Chords](/user-guide/modules/loading-modules) category in the Module Bar
+- [Add Rhythm](/tutorials/beginner/rhythm) — give the chords a groove
+- [Note Dependencies](/tutorials/intermediate/dependencies) — the general rule behind `[1].f`
+- [Selection & Group Editing](/user-guide/notes/selection) — marquees, group drag, Copy to Modules

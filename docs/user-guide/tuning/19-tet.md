@@ -1,182 +1,140 @@
+---
+title: 19-TET
+description: Nineteen-tone equal temperament in RMT Compose — near-just thirds and sixths, split accidentals, and the shipped 19-TET module.
+---
+
 # 19-TET
 
-**19-TET** (19-Tone Equal Temperament) divides the octave into 19 equal steps. It offers better approximations of pure thirds than 12-TET while remaining relatively accessible.
-
-## Overview
+19-TET divides the octave into nineteen equal steps of 63.16 cents. It buys you thirds and sixths that are almost exactly just, and it pays for them with a fifth that is 7 cents flat. It is the cheapest good answer to 12-TET's worst problem.
 
 | Property | Value |
-|----------|-------|
+|---|---|
 | Steps per octave | 19 |
-| Step ratio | 2^(1/19) ≈ 1.03716 |
-| Octave ratio | 2:1 (exact) |
+| Step ratio | `2 ^ (1/19)` ≈ 1.037155 |
+| Step size | 63.16 cents |
+| Octave | 2/1, exact |
 
-## Why 19-TET?
+## What it fixes
 
-19-TET was explored by Renaissance theorists and has these advantages:
+12-TET's major third is 13.7 cents sharp. 19-TET's is 7.4 cents flat — half the error, in the other direction. But the real prize is elsewhere:
 
-1. **Better major thirds**: 6 steps = 2^(6/19) ≈ 1.2447 (vs just 5/4 = 1.25)
-2. **Better minor thirds**: 5 steps = 2^(5/19) ≈ 1.2002 (vs just 6/5 = 1.20)
-3. **Good fifths**: 11 steps = 2^(11/19) ≈ 1.4946 (vs just 3/2 = 1.50)
-4. **More notes**: Microtonal possibilities
+| Interval | Steps | 19-TET cents | Just ratio | Just cents | Error |
+|---|---|---|---|---|---|
+| Minor third | 5 | 315.8 | 6/5 | 315.6 | **+0.1¢** |
+| Major sixth | 14 | 884.2 | 5/3 | 884.4 | **−0.1¢** |
+| Major third | 6 | 378.9 | 5/4 | 386.3 | −7.4¢ |
+| Minor sixth | 13 | 821.1 | 8/5 | 813.7 | +7.4¢ |
+| Perfect fifth | 11 | 694.7 | 3/2 | 702.0 | −7.2¢ |
+| Perfect fourth | 8 | 505.3 | 4/3 | 498.0 | +7.2¢ |
 
-## Expression Syntax
+The **minor third and major sixth are essentially pure** — a tenth of a cent off, which is nothing. They have to be: 5 + 14 = 19 steps and 6/5 × 5/3 = 2, so the two errors are equal and opposite by construction.
 
-### Single Step
+The fifth is the price. Seven cents flat is audible as a slight slackness in open fifths, which is the standard complaint about 19-TET.
 
-```
-// One 19-TET step
-2^(1/19)
-```
+## Every interval
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+| Interval | Steps | Cents | Nearest just ratio | Error |
+|---|---|---|---|---|
+| Chromatic semitone (C→C♯) | 1 | 63.2 | 25/24 | −7.5¢ |
+| Minor second (diatonic) | 2 | 126.3 | 16/15 | +14.6¢ |
+| Major second | 3 | 189.5 | 9/8 | −14.4¢ |
+| Minor third | 5 | 315.8 | 6/5 | +0.1¢ |
+| Major third | 6 | 378.9 | 5/4 | −7.4¢ |
+| Perfect fourth | 8 | 505.3 | 4/3 | +7.2¢ |
+| Augmented fourth | 9 | 568.4 | 45/32 | −21.8¢ |
+| Diminished fifth | 10 | 631.6 | 64/45 | +21.8¢ |
+| Perfect fifth | 11 | 694.7 | 3/2 | −7.2¢ |
+| Minor sixth | 13 | 821.1 | 8/5 | +7.4¢ |
+| Major sixth | 14 | 884.2 | 5/3 | −0.1¢ |
+| Minor seventh | 16 | 1010.5 | 9/5 | −7.1¢ |
+| Major seventh | 17 | 1073.7 | 15/8 | −14.6¢ |
+| Octave | 19 | 1200 | 2/1 | 0 |
 
-```javascript
-new Fraction(2).pow(new Fraction(1, 19))
-```
-</details>
+::: info The minor second is *larger* than a 12-TET semitone
+Two 19-TET steps is 126.3 cents — a quarter of a semitone wider than 12-TET's 100. The *small* semitone in 19-TET is the one-step chromatic semitone at 63.2 cents. Nineteen has two different semitones, and that is the whole point (see below).
+:::
 
-### Multiple Steps
+## Split accidentals
 
-```
-// Major third (6 steps in 19-TET)
-2^(6/19)
+In 12-TET, C♯ and D♭ are the same key on the piano. In 19-TET they are not:
 
-// Perfect fifth (11 steps in 19-TET)
-2^(11/19)
-```
+- C → C♯ is one step (63.2¢).
+- D♭ → D is also one step.
+- C♯ to D♭ is one step apart — **they are different pitches**, and C♯ is *below* D♭.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+The nineteen steps are the seven naturals, plus a sharp and a flat for each of the five that take them, plus E♯/F♭ and B♯/C♭. That is 7 + 10 + 2 = 19. Nothing collapses.
 
-```javascript
-// Major third (6 steps in 19-TET)
-new Fraction(2).pow(new Fraction(6, 19))
+This is what makes 19-TET a real meantone temperament rather than a curiosity: it notates the way Renaissance and early Baroque music was actually *meant*, where a D♯ and an E♭ were different notes with different functions.
 
-// Perfect fifth (11 steps in 19-TET)
-new Fraction(2).pow(new Fraction(11, 19))
-```
-</details>
-
-### Applying to BaseNote
-
-```
-// Note at 6 steps above BaseNote (major third)
-base.f * 2^(6/19)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(
-  new Fraction(2).pow(new Fraction(6, 19))
-)
-```
-</details>
-
-## Intervals in 19-TET
-
-| Interval | 19-TET Steps | 12-TET equivalent | Quality |
-|----------|-------------|-------------------|---------|
-| Minor second | 2 | ~1 | Smaller |
-| Major second | 3 | ~2 | Similar |
-| Minor third | 5 | ~3 | Very good |
-| Major third | 6 | ~4 | Very good |
-| Perfect fourth | 8 | ~5 | Good |
-| Tritone | 9-10 | ~6 | Two options |
-| Perfect fifth | 11 | ~7 | Good |
-| Minor sixth | 13 | ~8 | Very good |
-| Major sixth | 14 | ~9 | Very good |
-| Minor seventh | 16 | ~10 | Good |
-| Major seventh | 17 | ~11 | Good |
-| Octave | 19 | 12 | Perfect |
-
-## Comparison with Just Intonation
-
-| Interval | Just | 19-TET | Cents off |
-|----------|------|--------|-----------|
-| Perfect fifth | 3/2 | 2^(11/19) | -7.2 |
-| Major third | 5/4 | 2^(6/19) | -7.4 |
-| Minor third | 6/5 | 2^(5/19) | +0.1 |
-| Major sixth | 5/3 | 2^(14/19) | +7.3 |
-
-The thirds are significantly better than 12-TET!
-
-## Using the TET-19 Module
-
-1. Open the **Module Bar**
-2. Find **Melodies** category
-3. Drag **TET-19** onto the workspace
-
-## Building a 19-TET Scale
+## Writing 19-TET expressions
 
 ```
-// Each note references the previous
-note2.frequency = [1].f * 2^(1/19)
-note3.frequency = [2].f * 2^(1/19)
-// ... continue for all 19 notes
+2 ^ (1/19)              # one step
+2 ^ (6/19)              # major third (6 steps)
+2 ^ (11/19)             # perfect fifth (11 steps)
+base.f * 2 ^ (6/19)     # a major third above the BaseNote
+[1].f * 2 ^ (1/19)      # one step above note 1
+```
+
+A 19-TET major triad:
+
+```
+base.f                  # root
+base.f * 2 ^ (6/19)     # major third
+base.f * 2 ^ (11/19)    # fifth
 ```
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// Each note references the previous
-note2.frequency = note1.frequency.mul(
-  new Fraction(2).pow(new Fraction(1, 19))
-)
-note3.frequency = note2.frequency.mul(
-  new Fraction(2).pow(new Fraction(1, 19))
-)
-// ... continue for all 19 notes
+module.baseNote.getVariable('frequency')
+module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(6, 19)))
+module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(11, 19)))
 ```
 </details>
 
-## Musical Applications
+## The shipped module
 
-### Better Harmony
+The library's **Scale Systems** section ships a **19-TET** module (file `scale-systems/TET-19.json`; the tile reads **19-TET**).
 
-19-TET's thirds sound closer to pure intervals:
-- Major triads have a warmer, more consonant sound
-- Minor triads are closer to the natural minor third
+| | |
+|---|---|
+| Notes | 20 — nineteen steps plus the note you start on |
+| Base frequency | 440 Hz |
+| Tempo | 100 |
+| Beats per measure | 4 |
+| Instrument | `sine-wave` |
+| Note duration | `beat(base) * (1/2)` |
+| Step | `[n].f * 2 ^ (1/19)` |
 
-### Microtonal Exploration
+Note 1 is `base.f`; every later note is the previous one times `2 ^ (1/19)`. It is a chain, so moving note 1 moves the whole scale.
 
-The extra 7 notes per octave enable:
-- Finer pitch distinctions
-- New melodic possibilities
-- Unique scales not available in 12-TET
+To load it, drag the tile from **Scale Systems** (or search `19` or the `microtonal` tag with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-### Split Accidentals
+All nineteen steps after the first show a **≈** prefix and cross-hatching, because `2^(k/19)` is irrational. The fraction beside the ≈ is the note's approximate ratio to the BaseNote.
 
-In 19-TET, sharps and flats are distinct:
-- C# ≠ Db (they're different pitches!)
-- This enables enharmonic distinctions
+## Working in 19-TET
+
+**Start with triads.** Play a 12-TET major triad and a 19-TET one back to back. The 19-TET minor third is the one that stops beating.
+
+**Minor keys are the sweet spot.** With a pure minor third and a pure major sixth, 19-TET flatters minor-mode harmony more than major.
+
+**The fifth wants company.** A bare open fifth exposes the −7.2¢ error. Fill it in — the third covers it.
+
+**The arrows cannot walk the scale.** The ▲/▼ arrows apply a rational interval you set in **Settings → Arrows** — the octave by default, but any ratio of positive integers in `[1/16, 16]`. A 19-TET step is not one of those. To move a note by one degree, edit the exponent.
 
 ## Challenges
 
-### Different Intervals
+**Notation.** Standard staff notation handles 19 pitches better than you would expect — the split accidentals map onto ♯ and ♭ directly — but there is no standard for what to do beyond that.
 
-Musicians familiar with 12-TET need to relearn interval fingerings.
+**Instruments.** Almost nothing acoustic is built for 19-TET, which is precisely why you would compose it here.
 
-### Limited Instruments
+**Retraining.** Interval sizes in steps are all different. Six steps is a major third, not four.
 
-Few acoustic instruments are built for 19-TET. RMT Compose is ideal for exploring it.
+## Next steps
 
-### Notation
-
-Standard notation doesn't represent 19 pitches well. New notation systems exist but aren't standardized.
-
-## Tips
-
-1. **Start with triads** - Hear how much better the thirds sound
-2. **Use the module** - Load TET-19 to hear the scale
-3. **Compare with 12-TET** - Play the same melody in both systems
-4. **Explore new scales** - 19-TET enables scales impossible in 12-TET
-
-## Next Steps
-
-- Try [31-TET](./31-tet) for even higher resolution
-- Explore [Bohlen-Pierce](./bohlen-pierce) for a completely different approach
-- Create your own system with [Custom TET](./custom-tet)
+- [31-TET](/user-guide/tuning/31-tet) — better fifths, plus septimal intervals
+- [12-TET](/user-guide/tuning/12-tet) — the comparison case
+- [Pure Ratios](/user-guide/tuning/ratios) — what 19-TET's thirds are chasing
+- [Custom TET](/user-guide/tuning/custom-tet) — build your own division

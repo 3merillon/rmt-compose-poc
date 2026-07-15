@@ -1,410 +1,332 @@
-# Interval Exploration
+---
+title: Exploring Intervals
+description: A systematic workflow for studying musical intervals using the 46 interval modules that ship with RMT Compose.
+---
 
-A systematic workflow for understanding and experimenting with musical intervals using RMT Compose.
+# Exploring Intervals
 
-## What Are Intervals?
+An interval is a frequency ratio. RMT Compose ships **46 of them** as one-drag modules, each
+carrying its ratio, its cents and its limit family. This is a workflow for hearing them all.
 
-An interval is the distance between two pitches. In RMT Compose, intervals are expressed as frequency ratios:
+## Set up an interval lab
 
-| Interval | Ratio | Cents | Description |
-|----------|-------|-------|-------------|
-| Unison | 1/1 | 0 | Same pitch |
-| Minor Second | 16/15 | 112 | Half step |
-| Major Second | 9/8 | 204 | Whole step |
-| Minor Third | 6/5 | 316 | Sad quality |
-| Major Third | 5/4 | 386 | Happy quality |
-| Perfect Fourth | 4/3 | 498 | Open sound |
-| Tritone | 45/32 | 590 | Tense, unstable |
-| Perfect Fifth | 3/2 | 702 | Strong consonance |
-| Minor Sixth | 8/5 | 814 | Somewhat dark |
-| Major Sixth | 5/3 | 884 | Bright |
-| Minor Seventh | 9/5 | 1018 | Jazzy tension |
-| Major Seventh | 15/8 | 1088 | Leading tone |
-| Octave | 2/1 | 1200 | Same note, higher |
+Two notes, sounding together, one of which you retune.
 
-## Setting Up an Interval Lab
+| Note | frequency | startTime | duration |
+|---|---|---|---|
+| 1 (reference) | `base.f` | `base.t` | `beat(base) * 4` |
+| 2 (the interval) | `[1].f * (3/2)` | `[1].t` | `[1].d` |
 
-### Step 1: Create the Reference Note
+Create both from the **ADD NOTE / SILENCE** section of a widget. Note 1 comes from the BaseNote's
+widget — it has no **At Start** / **At End** toggle, and its button reads **Create**. Note 2 comes
+from note 1's widget: pick **Note**, pick **At Start** so it stacks, then **Create Note**. To try a
+different interval, edit note 2's `frequency` in its `Raw:` field and press **Save**.
 
-```
-// Note 1: Reference pitch
-frequency: base.f
-startTime: 0
-duration: 2
-```
-
-### Step 2: Create the Interval Note
-
-```
-// Note 2: Interval above reference
-frequency: [1].f * (3/2)  // Perfect fifth
-startTime: [1].t
-duration: [1].d
-```
-
-### Step 3: Experiment
-
-Change the ratio in Note 2 to hear different intervals. Both notes play simultaneously for direct comparison.
+Note 2 is defined against note 1, so it follows note 1 anywhere. Note 1 is your movable reference.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// Note 1: Reference pitch
-frequency: module.baseNote.getVariable('frequency')
-startTime: new Fraction(0)
-duration: new Fraction(2)
-
-// Note 2: Interval above reference
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))  // Perfect fifth
+// Note 2: a perfect fifth above note 1
+frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
 startTime: module.getNoteById(1).getVariable('startTime')
-duration: module.getNoteById(1).getVariable('duration')
+duration:  module.getNoteById(1).getVariable('duration')
 ```
-
 </details>
 
-## Workflow: Systematic Interval Study
+### Before you listen: turn reverb off
 
-### Phase 1: Perfect Consonances
+Reverb is **on by default**. It blurs the beating that tells you an interval is out of tune. Open the
+Settings panel from the top-bar gear → **Audio** → switch off **Enable reverb**.
 
-Start with the most stable intervals:
+Then shift-click (or long-press) **Play** to loop, and let the dyad sustain while you listen.
 
-```
-// Unison
-* (1/1)
+## The shipped intervals
 
-// Octave
-* 2
+Every ratio below exists as a module. Search the library bar's magnifier by ratio (`5/4`), by family
+(`7-limit`) or by tag (`comma`) to find one instantly.
 
-// Perfect Fifth
-* (3/2)
+### 3-limit (Pythagorean) — 11 modules
 
-// Perfect Fourth
-* (4/3)
-```
+Prime factors 2 and 3 only. Everything is built from stacked fifths.
 
-**Listen for**: Clarity, lack of beating, stability
+| Name | Ratio | Cents |
+|---|---|---|
+| Unison | 1/1 | 0 |
+| Major 2nd | 9/8 | 203.91 |
+| Pythagorean minor 3rd | 32/27 | 294.14 |
+| Pythagorean major 3rd | 81/64 | 407.82 |
+| Perfect 4th | 4/3 | 498.05 |
+| Pythagorean tritone | 729/512 | 611.73 |
+| Perfect 5th | 3/2 | 701.96 |
+| Pythagorean major 6th | 27/16 | 905.87 |
+| Pythagorean minor 7th | 16/9 | 996.09 |
+| Pythagorean major 7th | 243/128 | 1109.78 |
+| Octave | 2/1 | 1200 |
 
-### Phase 2: Imperfect Consonances
+### 5-limit (classic just) — 10 modules
 
-Move to pleasing but less stable intervals:
+Add the prime 5, and thirds become sweet.
 
-```
-// Major Third
-* (5/4)
+| Name | Ratio | Cents |
+|---|---|---|
+| Just minor 2nd | 16/15 | 111.73 |
+| Minor whole tone | 10/9 | 182.40 |
+| Just minor 3rd | 6/5 | 315.64 |
+| Just major 3rd | 5/4 | 386.31 |
+| Just augmented 4th | 45/32 | 590.22 |
+| Just diminished 5th | 64/45 | 609.78 |
+| Just minor 6th | 8/5 | 813.69 |
+| Just major 6th | 5/3 | 884.36 |
+| Just minor 7th | 9/5 | 1017.60 |
+| Just major 7th | 15/8 | 1088.27 |
 
-// Minor Third
-* (6/5)
+### 7-limit (septimal) — 10 modules
 
-// Major Sixth
-* (5/3)
+The seventh harmonic. Bluesy, barbershop, "locked".
 
-// Minor Sixth
-* (8/5)
-```
+| Name | Ratio | Cents |
+|---|---|---|
+| Septimal whole tone | 8/7 | 231.17 |
+| Septimal minor 3rd | 7/6 | 266.87 |
+| Septimal major 3rd | 9/7 | 435.08 |
+| Septimal tritone | 7/5 | 582.51 |
+| Septimal tritone (wide) | 10/7 | 617.49 |
+| Septimal narrow 5th | 32/21 | 729.22 |
+| Septimal minor 6th | 14/9 | 764.92 |
+| Septimal major 6th | 12/7 | 933.13 |
+| Harmonic 7th | 7/4 | 968.83 |
+| Septimal major 7th | 63/32 | 1172.74 |
 
-**Listen for**: Warmth, color, character differences
+### Higher limits (11–23) — 9 modules
 
-### Phase 3: Dissonances
+Neutral intervals — genuinely between major and minor.
 
-Explore tension-creating intervals:
+| Name | Ratio | Cents |
+|---|---|---|
+| 17th harmonic | 17/16 | 104.96 |
+| Tridecimal neutral 2nd | 13/12 | 138.57 |
+| 19th harmonic | 19/16 | 297.51 |
+| Undecimal neutral 3rd | 11/9 | 347.41 |
+| Undecimal tritone | 11/8 | 551.32 |
+| 23rd harmonic | 23/16 | 628.27 |
+| Tridecimal diminished 5th | 13/9 | 636.62 |
+| Tridecimal neutral 6th | 13/8 | 840.53 |
+| Undecimal neutral 7th | 11/6 | 1049.36 |
 
-```
-// Major Second
-* (9/8)
+### Commas — 6 modules
 
-// Minor Second
-* (16/15)
+The tiny gaps that make tuning systems necessary.
 
-// Major Seventh
-* (15/8)
+| Name | Ratio | Cents |
+|---|---|---|
+| Schisma | 32805/32768 | 1.95 |
+| Diaschisma | 2048/2025 | 19.55 |
+| Syntonic comma | 81/80 | 21.51 |
+| Pythagorean comma | 531441/524288 | 23.46 |
+| Septimal comma | 64/63 | 27.26 |
+| Enharmonic diesis | 128/125 | 41.06 |
 
-// Minor Seventh
-* (9/5)
+## A systematic pass
 
-// Tritone
-* (45/32)
-```
+### Phase 1 — perfect consonances
 
-**Listen for**: Tension, desire to resolve, roughness
+Drag each onto your reference note, in **Start** mode so it stacks:
 
-## Comparing Pure vs Tempered
+Unison (1/1) · Octave (2/1) · Perfect 5th (3/2) · Perfect 4th (4/3)
 
-### Setup
+**Listen for:** no beating at all. These are the intervals where the partials line up.
 
-Create two interval notes:
+### Phase 2 — imperfect consonances
 
-```
-// Note 2: Pure major third (5/4)
-frequency: [1].f * (5/4)
+Just major 3rd (5/4) · Just minor 3rd (6/5) · Just major 6th (5/3) · Just minor 6th (8/5)
 
-// Note 3: 12-TET major third (4 semitones)
-frequency: [1].f * 2^(4/12)
-```
+**Listen for:** warmth and colour. Still smooth, but with character.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+### Phase 3 — dissonances
 
-```javascript
-// Note 2: Pure major third (5/4)
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
+Major 2nd (9/8) · Just minor 2nd (16/15) · Just major 7th (15/8) · Just minor 7th (9/5) ·
+Just augmented 4th (45/32)
 
-// Note 3: 12-TET major third (4 semitones)
-frequency: module.getNoteById(1).getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(4, 12)))
-```
+**Listen for:** roughness, and the pull toward resolution.
 
-</details>
+### Phase 4 — the septimal world
 
-### Listen Carefully
+Septimal minor 3rd (7/6) · Septimal tritone (7/5) · Harmonic 7th (7/4)
 
-1. Play Note 1 + Note 2 (pure third) - smooth, beatless
-2. Play Note 1 + Note 3 (tempered third) - subtle beating
+**Listen for:** the 7/4 in particular. Against a 12-TET minor seventh it is 31 cents flat, and it
+locks in a way the tempered one never does.
 
-The difference is ~14 cents, audible on sustained tones.
+## Pure vs tempered
 
-## Interval Inversion
+Add a third note and compare the same interval two ways.
 
-Every interval has an inversion that completes the octave:
+| Note | frequency | Meaning |
+|---|---|---|
+| 1 | `base.f` | reference |
+| 2 | `[1].f * (5/4)` | pure major third — 386.3¢ |
+| 3 | `[1].f * 2^(4/12)` | 12-TET major third — 400¢ |
 
-| Interval | Ratio | Inversion | Ratio |
-|----------|-------|-----------|-------|
-| Minor 2nd | 16/15 | Major 7th | 15/8 |
-| Major 2nd | 9/8 | Minor 7th | 16/9 |
-| Minor 3rd | 6/5 | Major 6th | 5/3 |
-| Major 3rd | 5/4 | Minor 6th | 8/5 |
-| Perfect 4th | 4/3 | Perfect 5th | 3/2 |
-| Tritone | 45/32 | Tritone | 64/45 |
+Play 1+2: smooth, beatless. Play 1+3: a slow shimmer. The gap is 13.7 cents, and on a sustained tone
+it is unmistakable.
 
-### Exploring Inversions
+Note 3 will be **crosshatched** and its value shown with a `≈` prefix — that is the app telling you
+`2^(4/12)` is irrational and has been approximated. See
+[Understanding SymbolicPower](/tutorials/advanced/symbolic-power).
 
-```
-// Original: Major third above
-frequency: [1].f * (5/4)
+## Interval inversion
 
-// Inversion: Minor sixth below (same pitch class, lower octave)
-frequency: [1].f / (8/5)
-```
+An interval and its inversion sum to an octave: multiply the two ratios and you get 2/1.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+| Interval | Ratio | Inversion | Ratio | Product |
+|---|---|---|---|---|
+| Just minor 2nd | 16/15 | Just major 7th | 15/8 | 2/1 |
+| Major 2nd | 9/8 | Pythagorean minor 7th | 16/9 | 2/1 |
+| Just minor 3rd | 6/5 | Just major 6th | 5/3 | 2/1 |
+| Just major 3rd | 5/4 | Just minor 6th | 8/5 | 2/1 |
+| Perfect 4th | 4/3 | Perfect 5th | 3/2 | 2/1 |
+| Just augmented 4th | 45/32 | Just diminished 5th | 64/45 | 2/1 |
 
-```javascript
-// Original: Major third above
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
+::: info Two different minor sevenths, both real
+The inversion of the 9/8 major second is **16/9** (Pythagorean minor 7th, 996.09¢). The 5-limit
+minor seventh is **9/5** (1017.60¢). They differ by a syntonic comma (81/80), and **both ship**.
+Which one you want depends on how you got there — 16/9 if you inverted a whole tone, 9/5 if you
+stacked a minor third on a fifth.
+:::
 
-// Inversion: Minor sixth below (same pitch class, lower octave)
-frequency: module.getNoteById(1).getVariable('frequency').div(new Fraction(8, 5))
-```
-
-</details>
-
-## Compound Intervals
-
-Intervals larger than an octave:
-
-```
-// Minor 9th (octave + minor 2nd)
-* (32/15)
-
-// Major 9th (octave + major 2nd)
-* (9/4)
-
-// Minor 10th (octave + minor 3rd)
-* (12/5)
-
-// Major 10th (octave + major 3rd)
-* (5/2)
-
-// Perfect 11th (octave + perfect 4th)
-* (8/3)
-
-// Perfect 12th (octave + perfect 5th)
-* 3
-```
-
-## Interval Chains
-
-Build scales by stacking intervals:
-
-### Pythagorean Tuning (Stacking Fifths)
+To sound an inversion *below* the reference, divide:
 
 ```
-// Stack perfect fifths, reduce to one octave
-
-// C (root)
-* (1/1)
-
-// G (fifth)
-* (3/2)
-
-// D (brought down an octave: 3/2 × 3/2 ÷ 2 = 9/8)
-* (9/8)
-
-// A (9/8 × 3/2 = 27/16)
-* (27/16)
-
-// E (27/16 × 3/2 ÷ 2 = 81/64)
-* (81/64)
+[1].f / (8/5)           # a just minor sixth below note 1
 ```
 
-### Third-Based Tuning (5-Limit)
+## Compound intervals
 
-Use ratios with factors of 2, 3, and 5:
+Beyond the octave. Multiply the simple ratio by 2:
 
-```
-// Major scale using just thirds
-
-// C (root)
-* (1/1)
-
-// D (major second: 9/8)
-* (9/8)
-
-// E (major third: 5/4)
-* (5/4)
-
-// F (perfect fourth: 4/3)
-* (4/3)
-
-// G (perfect fifth: 3/2)
-* (3/2)
-
-// A (major sixth: 5/3)
-* (5/3)
-
-// B (major seventh: 15/8)
-* (15/8)
-```
-
-## Hearing the Harmonic Series
-
-The harmonic series contains all pure intervals:
+| Compound | Ratio | Built from |
+|---|---|---|
+| Minor 9th | 32/15 | 16/15 × 2 |
+| Major 9th | 9/4 | 9/8 × 2 |
+| Minor 10th | 12/5 | 6/5 × 2 |
+| Major 10th | 5/2 | 5/4 × 2 |
+| Perfect 11th | 8/3 | 4/3 × 2 |
+| Perfect 12th | 3/1 | 3/2 × 2 |
 
 ```
-// Fundamental
-* 1   // 440 Hz
-
-// 2nd harmonic (octave)
-* 2   // 880 Hz
-
-// 3rd harmonic (octave + fifth)
-* 3   // 1320 Hz
-
-// 4th harmonic (two octaves)
-* 4   // 1760 Hz
-
-// 5th harmonic (two octaves + major third)
-* 5   // 2200 Hz
-
-// 6th harmonic (two octaves + fifth)
-* 6   // 2640 Hz
-
-// 7th harmonic (two octaves + minor seventh - slightly flat)
-* 7   // 3080 Hz
+[1].f * (9/4)           # a major ninth above note 1
 ```
 
-### Reducing to One Octave
+Or drag the Major 2nd module on and press the note's **▲** arrow once — the default arrow interval
+is ×2, so it becomes a major ninth. The arrows fold the factor into the coefficient rather than
+stacking multipliers, so ▲ then ▼ returns you to exactly where you were.
 
-Bring harmonics into the same octave by dividing by powers of 2 until the ratio is between 1 and 2:
+## The harmonic series
 
-```
-// 3rd harmonic → fifth: 3 ÷ 2 = 3/2
-* (3/2)
+Every pure interval hides in the harmonic series. Multiply the fundamental by an integer:
 
-// 5th harmonic → major third: 5 ÷ 4 = 5/4
-* (5/4)
+| Harmonic | Expression | Interval above the fundamental |
+|---|---|---|
+| 1 | `base.f` | fundamental |
+| 2 | `base.f * 2` | octave |
+| 3 | `base.f * 3` | octave + fifth |
+| 4 | `base.f * 4` | two octaves |
+| 5 | `base.f * 5` | two octaves + major 3rd |
+| 6 | `base.f * 6` | two octaves + fifth |
+| 7 | `base.f * 7` | two octaves + harmonic 7th |
 
-// 7th harmonic → harmonic seventh: 7 ÷ 4 = 7/4
-* (7/4)
-```
+Build all seven as notes stacked on the same start time and you have a harmonic stack you can hear
+as a single timbre.
 
-## Interval Quality Exploration
+### Reducing to one octave
 
-### Consonance vs Dissonance
+Divide by powers of 2 until the ratio sits between 1 and 2 — which is where the simple ratios come
+from:
 
-Create a progression from most consonant to most dissonant:
+| Harmonic | Reduced | Name |
+|---|---|---|
+| 3 | 3/2 | Perfect 5th |
+| 5 | 5/4 | Just major 3rd |
+| 7 | 7/4 | Harmonic 7th |
+| 9 | 9/8 | Major 2nd |
+| 11 | 11/8 | Undecimal tritone |
+| 13 | 13/8 | Tridecimal neutral 6th |
 
-```
-// Most consonant
-* 1        // Unison
-* 2        // Octave
-* (3/2)    // Fifth
-* (4/3)    // Fourth
-* (5/4)    // Major third
-* (6/5)    // Minor third
+That table *is* the odd-harmonic logic behind the shipped **Base-3 chord** (3:5:7:9) and
+**Base-5 chord** (5:7:9:11), and behind the 81-note **Tesla** scale, which walks the odd harmonics
+9, 11, 13 … 169 over 9.
 
-// More dissonant
-* (9/8)    // Major second
-* (16/15)  // Minor second
-* (45/32)  // Tritone
-```
+## Interval chains
 
-### Character Comparison
+### Pythagorean: stack fifths
 
-Compare intervals with similar sizes but different qualities:
+Each note is a fifth above the previous, folded back down an octave when it overshoots:
 
-```
-// Major vs Minor Third
-* (5/4)    // Major: bright
-* (6/5)    // Minor: dark
+| Note | frequency | Absolute ratio |
+|---|---|---|
+| 1 | `base.f` | 1/1 |
+| 2 | `[1].f * (3/2)` | 3/2 |
+| 3 | `[2].f * (3/2) / 2` | 9/8 |
+| 4 | `[3].f * (3/2)` | 27/16 |
+| 5 | `[4].f * (3/2) / 2` | 81/64 |
 
-// Major vs Minor Second
-* (9/8)    // Major: open
-* (16/15)  // Minor: tight
+Because each note is written against the *previous* one, retuning note 1 shifts the entire chain.
 
-// Major vs Minor Seventh
-* (15/8)   // Major: leading
-* (9/5)    // Minor: bluesy
-```
+Stack twelve fifths and you land a **Pythagorean comma** (531441/524288, 23.46¢) above seven
+octaves — not on them. That gap is why equal temperament exists, and it is one of the six comma
+modules.
 
-## Using the Module Bar for Intervals
+### 5-limit: a just major scale
 
-> **Tip**: The Module Bar's **"Drop at:"** toggle speeds up interval exploration:
-> - **Start mode**: Stack interval notes at the same time for harmonic comparison (chords)
-> - **End mode**: Chain intervals sequentially for melodic comparison (sequences)
+All degrees against the base:
 
-When you've saved interval modules to your library, you can quickly drop them onto your workspace to build chords or progressions.
+| Degree | frequency |
+|---|---|
+| C | `base.f` |
+| D | `base.f * (9/8)` |
+| E | `base.f * (5/4)` |
+| F | `base.f * (4/3)` |
+| G | `base.f * (3/2)` |
+| A | `base.f * (5/3)` |
+| B | `base.f * (15/8)` |
+| C′ | `base.f * 2` |
 
-## Saving Your Discoveries
+Every note hangs off the base, so changing `base.f` transposes the whole scale.
 
-### Create an Interval Module Library
+## Save what you learn
 
-Save each interval as a module:
+Don't rebuild the interval library — it already exists. Do save the **combinations** you find.
 
-1. Build the two-note interval
-2. Save as "Interval - [Name] ([Ratio])"
-3. Organize in an "Intervals" category
-
-### Example Naming
-
-- "Interval - Perfect Fifth (3/2)"
-- "Interval - Major Third (5/4)"
-- "Interval - Harmonic Seventh (7/4)"
+Select the notes of a chord or a chain you like (shift-drag a marquee), then press **Copy to
+Modules** in the group widget. It lands in the library's **Custom** section, rooted at its earliest
+note, with the internal dependency tree intact — so dropping it on any note transposes the whole
+thing correctly.
 
 ## Exercises
 
-### Exercise 1: Identify by Sound
+**1 — Identify by sound.** Collapse every section except Intervals. Drag a tile onto your reference
+note without reading its label, play, and guess. The tooltip (`Perfect 5th  (3/2, 702¢)`) gives you
+the answer.
 
-1. Create all 12 intervals in separate modules
-2. Close your eyes, load a random one
-3. Try to identify the interval
+**2 — Build the four triads.** On one root, stack:
 
-### Exercise 2: Build a Chord
+| Triad | Third | Fifth |
+|---|---|---|
+| Major | `(5/4)` | `(3/2)` |
+| Minor | `(6/5)` | `(3/2)` |
+| Diminished | `(6/5)` | `(7/5)` |
+| Augmented | `(5/4)` | `(25/16)` |
 
-1. Choose a root note
-2. Add intervals to build: Major, Minor, Diminished, Augmented triads
-3. Listen to how interval combinations create chord quality
+Then compare with the shipped **Major**, **Minor**, **Diminished** and **Augmented** chord
+modules — those are the exact ratios they use.
 
-### Exercise 3: Compare TET Systems
+**3 — Rank the temperaments.** Build a major third four ways on the same root: `(5/4)`, `2^(4/12)`,
+`2^(6/19)`, `2^(10/31)`. Play each against the root. Rank them by how close to beatless they sound,
+then check your ranking against the cents: 386.3, 400, 378.9, 387.1.
 
-1. Build the same interval in pure, 12-TET, 19-TET, and 31-TET
-2. Play each version
-3. Note which TET best approximates the pure interval
+## Next
 
-## Next Steps
-
-- [Microtonal Experiments](/tutorials/workflows/microtonal-experiments) - Apply intervals to microtonal music
-- [Chaining Notes](/tutorials/intermediate/dependencies) - Build complex interval relationships
-- [Tuning Systems](/user-guide/tuning/ratios) - Deeper tuning theory
-
+- [Microtonal Experiments](/tutorials/workflows/microtonal-experiments) — structured listening
+- [Microtonal Composition](/tutorials/advanced/microtonal) — write in these tunings
+- [Ratios](/user-guide/tuning/ratios) — the theory

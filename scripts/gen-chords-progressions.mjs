@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generate chords + progressions + cadences (ROADMAP Phase 6.4).
+ * Generate chords + progressions + cadences for the module library.
  *
  * THE SUBTREE RULE (RMT-native relational harmony):
  *   - Each chord is a subtree rooted at its chord ROOT note.

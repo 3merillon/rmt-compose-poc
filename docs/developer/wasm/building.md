@@ -1,277 +1,226 @@
+---
+title: Building WASM
+description: Rebuild the rmt-core Rust crate, sync the artifacts into src/wasm, and commit them — because Vercel never runs wasm-pack.
+---
+
 # Building WASM
 
-This guide covers building the Rust WASM module for RMT Compose.
+You only need this page if you change something under `rust/`. The app builds and deploys without a
+Rust toolchain, because the compiled artifacts are **committed**.
+
+::: danger Commit the synced artifacts or your change does not ship
+`npm run wasm:build` writes `rust/pkg/` (gitignored) and then copies two files into `src/wasm/`
+(committed). Vercel runs plain `vite build` — it never runs `wasm-pack`. **The committed
+`src/wasm/rmt_core.js` and `src/wasm/rmt_core_bg.wasm` are what ships.** If you rebuild the crate and
+forget to commit them, the deploy silently keeps serving the old binary and nothing tells you.
+:::
 
 ## Prerequisites
 
-### Rust Toolchain
-
-Install Rust via rustup:
-
 ```bash
+# Rust, via rustup
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
 
-### wasm-pack
-
-Install wasm-pack for building and packaging:
-
-```bash
+# wasm-pack
 cargo install wasm-pack
+
+# the WASM target (wasm-pack will add it for you, but this is the manual form)
+rustup target add wasm32-unknown-unknown
 ```
 
-### Verify Installation
+The repo pins no toolchain: there is no `rust-toolchain.toml` and no `rust-version` in
+`Cargo.toml`, so there is no declared MSRV. The last combination recorded as working (during the
+July 2026 WASM investigation) is **cargo 1.87 / wasm-pack 0.13.1**.
 
-```bash
-rustc --version    # rustc 1.70.0 or later
-wasm-pack --version  # 0.12.0 or later
-```
-
-## Project Structure
-
-```
-rust/
-├── Cargo.toml         # Rust package manifest
-├── Cargo.lock         # Locked dependencies
-├── src/
-│   ├── lib.rs         # Main entry point
-│   ├── fraction.rs    # Fraction arithmetic
-│   ├── evaluator.rs   # Binary evaluator
-│   ├── compiler.rs    # Expression compiler
-│   ├── bytecode.rs    # Bytecode definitions
-│   └── graph.rs       # Dependency graph
-└── pkg/               # Build output (generated)
-    ├── rmt_core.js
-    ├── rmt_core_bg.wasm
-    └── rmt_core.d.ts
-```
-
-## Building
-
-### Development Build
-
-```bash
-cd rust
-wasm-pack build --target web --dev
-```
-
-- Includes debug symbols
-- No optimizations
-- Faster compilation
-
-### Production Build
-
-```bash
-cd rust
-wasm-pack build --target web --release
-```
-
-- Optimized for size and speed
-- No debug symbols
-- Slower compilation
-
-### Via npm
+## Build
 
 ```bash
 npm run wasm:build
 ```
 
-This runs the production build as part of the main build process.
+which is exactly:
 
-## Build Targets
+```bash
+cd rust && wasm-pack build --target web --out-dir pkg && cd .. && node scripts/sync-wasm.mjs
+```
 
-| Target | Output | Use Case |
-|--------|--------|----------|
-| `web` | ES modules | Browser with bundler |
-| `bundler` | CommonJS | Webpack/Rollup |
-| `nodejs` | CommonJS | Node.js |
-| `no-modules` | Global | Browser without modules |
+Two things happen, and the second one is the one people forget:
 
-RMT Compose uses `web` for native ES module support.
+1. `wasm-pack build --target web` compiles the crate into `rust/pkg/`. wasm-pack defaults to a
+   **release** build — there is no `--release` flag in the script and you do not need one.
+2. `scripts/sync-wasm.mjs` copies `rmt_core.js` and `rmt_core_bg.wasm` from `rust/pkg/` into
+   `src/wasm/`, printing one line per file:
 
-## Cargo.toml Configuration
+   ```
+   synced rmt_core.js (42725 bytes) -> src/wasm/
+   synced rmt_core_bg.wasm (384008 bytes) -> src/wasm/
+   ```
+
+Then:
+
+```bash
+git add src/wasm/rmt_core.js src/wasm/rmt_core_bg.wasm
+```
+
+If you built the crate by hand (`cd rust && wasm-pack build --target web --out-dir pkg`), run the
+copy step on its own:
+
+```bash
+npm run wasm:sync
+```
+
+It exits 1 with `No build found in <pkgDir> — run \`npm run wasm:build\` first.` if `rust/pkg/` is
+empty.
+
+::: warning `npm run build` requires Rust
+The root `build` script is `npm run wasm:build && vite build`, so it fails at step one on a machine
+without Rust and wasm-pack. To bundle the app without touching the crate, run `npx vite build` —
+that is precisely what Vercel does. See [Build & Deploy](/developer/contributing/build-and-deploy).
+:::
+
+## What gets copied, and what does not
+
+`scripts/sync-wasm.mjs` copies exactly two files:
+
+| File | Size | Copied to `src/wasm/`? |
+|---|---|---|
+| `rmt_core_bg.wasm` | 384,008 bytes | Yes — this is the binary the app loads |
+| `rmt_core.js` | 42,725 bytes | Yes — the wasm-bindgen glue the app imports |
+| `rmt_core.d.ts` | ~15 KB | **No** — `src/` is plain JS; the typings stay in `rust/pkg/` |
+| `rmt_core_bg.wasm.d.ts`, `package.json`, `LICENSE.md` | — | **No** |
+
+`rust/pkg/` and `rust/target/` are both gitignored (`.gitignore:24-26`).
+
+::: info Ignore `rust/pkg/package.json`
+wasm-pack regenerates it, and it still carries a pre-relicense `"license"` string. It is never
+published and never shipped. The authoritative licence is `license = "MIT"` in `rust/Cargo.toml`.
+:::
+
+## Crate layout
+
+```
+rust/
+├── Cargo.toml
+├── Cargo.lock
+├── LICENSE.md
+├── src/
+│   ├── lib.rs        # re-exports, #[wasm_bindgen(start)] init(), version()
+│   ├── fraction.rs   # Fraction (num-rational BigRational)
+│   ├── value.rs      # Value, SymbolicPower, PowerTerm, corruption flags
+│   ├── bytecode.rs   # opcodes
+│   ├── evaluator.rs  # Evaluator, PersistentEvaluator, EvaluatedNote
+│   ├── graph.rs      # DependencyGraph
+│   └── compiler.rs   # ExpressionCompiler (legacy method-chain grammar only)
+└── pkg/              # wasm-pack output — GITIGNORED
+```
+
+## Cargo.toml
+
+This is the real one. Note `opt-level = 3`:
 
 ```toml
 [package]
-name = "rmt_core"
-version = "1.0.0"
+name = "rmt-core"
+version = "0.1.0"
 edition = "2021"
+description = "Rust/WASM core for RMT Compose - high-performance expression evaluation"
+license = "MIT"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
-js-sys = "0.3"
-web-sys = { version = "0.3", features = ["console"] }
+num-rational = "0.4"
 num-bigint = "0.4"
 num-traits = "0.2"
+num-integer = "0.1"
+serde = { version = "1.0", features = ["derive"] }
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["console"] }
+console_error_panic_hook = "0.1"
 
-[profile.release]
-opt-level = "z"      # Optimize for size
-lto = true           # Link-time optimization
-codegen-units = 1    # Better optimization
-```
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
 
-## wasm-bindgen Attributes
-
-### Exposing Functions
-
-```rust
-use wasm_bindgen::prelude::*;
-
-#[wasm_bindgen]
-pub fn compile(source: &str) -> Result<JsValue, JsError> {
-    // ...
-}
-```
-
-### Exposing Structs
-
-```rust
-#[wasm_bindgen]
-pub struct Evaluator {
-    // Private fields
-    #[wasm_bindgen(skip)]
-    cache: HashMap<u32, Value>,
-}
-
-#[wasm_bindgen]
-impl Evaluator {
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> Evaluator {
-        Evaluator { cache: HashMap::new() }
-    }
-
-    pub fn evaluate(&mut self, bytecode: &[u8]) -> JsValue {
-        // ...
-    }
-}
-```
-
-### Console Logging (Debug)
-
-```rust
-use web_sys::console;
-
-console::log_1(&"Debug message".into());
-```
-
-## Optimization
-
-### Size Optimization
-
-Add to Cargo.toml:
-
-```toml
-[profile.release]
-opt-level = "z"
-lto = true
-```
-
-### Speed Optimization
-
-```toml
 [profile.release]
 opt-level = 3
 lto = true
+
+[profile.dev]
+opt-level = 1
 ```
 
-### wasm-opt
+::: warning Do not "optimize for size"
+The project deliberately builds for **speed** (`opt-level = 3`), not size (`opt-level = "z"`). The
+crate exists to make evaluation fast; a smaller, slower binary defeats its only purpose. If you need
+to shrink the payload, the honest lever is to stop shipping the binary on the default path at all —
+today it is fetched on every load and, with the evaluator
+[blocked](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked), never used.
+:::
 
-Further optimize with wasm-opt (included in wasm-pack):
+## Debug builds
 
 ```bash
-wasm-opt -O3 -o optimized.wasm input.wasm
+cd rust
+wasm-pack build --target web --out-dir pkg --dev   # debug symbols, [profile.dev] (opt-level 1)
+npm run wasm:sync                                   # then sync, from the repo root
 ```
 
-## Output Files
+`lib.rs` calls `console_error_panic_hook::set_once()` from its `#[wasm_bindgen(start)]` function, so
+a Rust panic arrives in the browser console with a symbolicated stack. To print from Rust:
 
-After building:
-
-| File | Size | Purpose |
-|------|------|---------|
-| `rmt_core_bg.wasm` | ~150KB | WebAssembly binary |
-| `rmt_core.js` | ~10KB | JS bindings |
-| `rmt_core.d.ts` | ~5KB | TypeScript definitions |
-
-## Using the Build
-
-### In JavaScript
-
-```javascript
-import init, { Evaluator, Compiler } from './pkg/rmt_core.js'
-
-async function setup() {
-  await init()  // Load WASM
-
-  const compiler = new Compiler()
-  const evaluator = new Evaluator()
-}
+```rust
+use web_sys::console;
+console::log_1(&"registering note".into());
 ```
 
-### With Vite
+Remember to re-sync and (if you want it in the browser) commit — the dev server loads
+`src/wasm/rmt_core.js`, not `rust/pkg/`.
 
-Vite handles WASM automatically:
+## Verifying a build
 
-```javascript
-// vite.config.js
-export default {
-  // WASM support built-in
-}
+There is no unit-test runner in this repo (`npm test` validates the module library, not Rust). The
+WASM checks are these two Node scripts:
+
+```bash
+# hot-swap end to end: build a Module before WASM init finishes,
+# then verify the upgrade and identical evaluation results
+node scripts/perf/test-wasm-swap.mjs
+
+# run the WASM evaluator against a stress module
+npm run perf:gen                                     # generate the stress modules first
+node scripts/perf/bench-node.mjs chain-1000 --wasm
 ```
+
+Both shim `fetch` for `file://` `.wasm` URLs, because Node's `fetch` cannot load the URL that
+wasm-bindgen's init produces.
+
+Both pass. The browser is where it breaks — see
+[the hang dossier](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked) before you
+spend time chasing it.
+
+## There is no WASM CI
+
+The repo has no `.github/` directory and no CI pipeline of any kind, and Vercel does not build the
+crate. Nothing regenerates `src/wasm/` for you. The committed artifacts are only as fresh as the
+last person who ran `npm run wasm:build` and committed the result.
 
 ## Troubleshooting
 
-### "wasm-pack not found"
+| Symptom | Fix |
+|---|---|
+| `wasm-pack: command not found` | `cargo install wasm-pack` |
+| `target wasm32-unknown-unknown not found` | `rustup target add wasm32-unknown-unknown` |
+| `No build found in …/rust/pkg` from `wasm:sync` | Run `npm run wasm:build` — you have no wasm-pack output to copy |
+| `npm run build` fails immediately on a fresh clone | You have no Rust toolchain. Use `npx vite build` |
+| Your Rust change has no effect in the browser | You did not run the sync step, or you did not restart the dev server. Check the mtime of `src/wasm/rmt_core_bg.wasm` |
+| Your Rust change has no effect **in production** | You did not commit `src/wasm/` |
 
-```bash
-cargo install wasm-pack
-```
+## See also
 
-### "target wasm32-unknown-unknown not found"
-
-```bash
-rustup target add wasm32-unknown-unknown
-```
-
-### Build fails with memory error
-
-Increase Node memory:
-
-```bash
-NODE_OPTIONS=--max-old-space-size=4096 npm run wasm:build
-```
-
-### WASM module too large
-
-Enable size optimization:
-
-```toml
-[profile.release]
-opt-level = "z"
-```
-
-## Continuous Integration
-
-Example GitHub Actions workflow:
-
-```yaml
-- name: Install Rust
-  uses: actions-rs/toolchain@v1
-  with:
-    toolchain: stable
-    target: wasm32-unknown-unknown
-
-- name: Install wasm-pack
-  run: cargo install wasm-pack
-
-- name: Build WASM
-  run: npm run wasm:build
-```
-
-## See Also
-
-- [WASM Overview](/developer/wasm/overview) - Architecture
-- [JS/WASM Adapters](/developer/wasm/adapters) - Integration
+- [WASM Overview](/developer/wasm/overview) — what the crate contains and why the evaluator is off
+- [JS/WASM Adapters](/developer/wasm/adapters) — the JS layer that loads and wraps it
+- [Build & Deploy](/developer/contributing/build-and-deploy) — the full script inventory and the two Vercel projects
 - [wasm-pack documentation](https://rustwasm.github.io/wasm-pack/)

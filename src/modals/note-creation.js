@@ -498,8 +498,19 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
           ? note.variables.color()
           : note.variables.color;
       } else {
+        // Random hue; saturation comes from the active theme's
+        // noteDefaultSaturation token (published by theme-manager as
+        // --rmt-note-default-saturation). 0.7 is the classic-orange value,
+        // kept as the fallback so an unthemed boot is pixel-identical.
         const hue = Math.floor(Math.random() * 360);
-        vars.color = `hsla(${hue}, 70%, 60%, 0.7)`;
+        let sat = 0.7;
+        try {
+          const raw = getComputedStyle(document.documentElement)
+            .getPropertyValue('--rmt-note-default-saturation');
+          const v = parseFloat(raw);
+          if (Number.isFinite(v) && v >= 0 && v <= 1) sat = v;
+        } catch {}
+        vars.color = `hsla(${hue}, ${Math.round(sat * 100)}%, 60%, 0.7)`;
       }
 
       const newNote = module.addNote(vars);

@@ -40,7 +40,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Loop playback — the hidden mode behind shift-click / long-press on Play.
     // Ephemeral, like isTrackingEnabled and isLocked: never persisted, gone on reload.
     //
-    // `isLoopEnabled` is the user's armed MODE and survives pause, seek and edits.
+    // `isLoopEnabled` is the user's armed MODE and survives a seek (stop(false));
+    // pause, the edit paths that pause, and the Stop button all disarm it.
     // `loopPeriod` is the transport's frozen module-end for the playback in flight,
     // and is the single predicate the playhead uses to decide "wrap instead of stop".
     // They are deliberately separate: the mode can be armed with nothing playing
@@ -3685,6 +3686,35 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         return 0;
     }
 
+    // Fold a rational factor into a legacy expression's leading coefficient.
+    // Handles exactly the wrapper shape the octave arrows emit for .pow()
+    // expressions — `new Fraction(a, b).mul(<rest>)` with the .mul( paren closing
+    // at the very end — so repeated presses rescale one coefficient (and unwrap
+    // entirely at 1/1) instead of nesting a new .mul() wrapper per press, the
+    // same folding the DSL branch gets from scaleDSL. Any other shape gets one
+    // wrapper, which the next press then folds into.
+    function foldFactorIntoLegacyCoefficient(expr, num, den) {
+        const src = String(expr).trim();
+        const m = /^new Fraction\((\d+)(?:\s*,\s*(\d+))?\)\.mul\(/.exec(src);
+        if (m && src.endsWith(')')) {
+            const inner = src.slice(m[0].length, -1);
+            // The slice is the whole .mul() argument only if its parens balance —
+            // a close for the .mul( paren before the final character means the
+            // leading fraction is not a free coefficient (e.g. `X.mul(Y).pow(Z)`).
+            let depth = 0, balanced = true;
+            for (const ch of inner) {
+                if (ch === '(') depth++;
+                else if (ch === ')' && --depth < 0) { balanced = false; break; }
+            }
+            if (balanced && depth === 0) {
+                const coeff = new Fraction(Number(m[1]), m[2] !== undefined ? Number(m[2]) : 1)
+                    .mul(new Fraction(num, den));
+                return coeff.equals(1) ? inner : `new Fraction(${coeff.n}, ${coeff.d}).mul(${inner})`;
+            }
+        }
+        return `new Fraction(${num}, ${den}).mul(${src})`;
+    }
+
     function handleOctaveChange(noteId, direction) {
         const note = myModule.getNoteById(parseInt(noteId, 10));
         if (!note) {
@@ -3738,10 +3768,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 const multiplied = multiplyExpressionByFraction(rawExpression, factor.n, factor.d, 'frequency', myModule);
                 note.setVariable('frequencyString', multiplied);
             } else if (rawExpression.includes('.pow(')) {
-                // Corrupted note with .pow() - wrap in multiplication to preserve the TET expression
-                // Don't simplify as it would destroy the .pow() expression
-                const wrapped = `new Fraction(${factor.n}, ${factor.d}).mul(${rawExpression})`;
-                note.setVariable('frequencyString', wrapped);
+                // Corrupted note with .pow() — don't simplify (it would destroy the
+                // .pow() expression). Fold the factor into the leading coefficient
+                // instead of stacking another .mul() wrapper per press.
+                const folded = foldFactorIntoLegacyCoefficient(rawExpression, factor.n, factor.d);
+                note.setVariable('frequencyString', folded);
             } else {
                 // Multiply and simplify robustly while preserving anchors
                 const multiplied = multiplyExpressionByFraction(rawExpression, factor.n, factor.d, 'frequency', myModule);
@@ -4327,8 +4358,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 }
             }
 
-            if (n.color) e.color = n.color;
-            if (n.instrument) e.instrument = n.instrument;
+            if (n.properties.color) e.color = n.properties.color;
+            if (n.properties.instrument) e.instrument = n.properties.instrument;
             outNotes.push(e);
         }
 
@@ -4346,7 +4377,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
         }
         baseOut.startTime = '0';
-        if (base.instrument) baseOut.instrument = base.instrument;
+        if (base.properties.instrument) baseOut.instrument = base.properties.instrument;
 
         return { baseNote: baseOut, notes: outNotes };
     }
@@ -4440,8 +4471,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
                 playbackBaseTime = baseStartTime;
                 // Only wrap if the engine actually armed — it refuses an empty or
-                // degenerate module, and the playhead must agree with it.
+                // degenerate module, and the playhead must agree with it. When it
+                // refuses, drop the armed mode with it: otherwise the icon keeps
+                // orbiting while playback won't actually loop.
                 loopPeriod = audioEngine.isLooping() ? endTime : 0;
+                if (isLoopEnabled && loopPeriod === 0) isLoopEnabled = false;
                 isLoopDisarming = false;
                 loopEndAudioTime = null;
 
@@ -4485,8 +4519,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             isFadingOut = false;
         });
 
-        // Pausing a loop drops the orbit and shows the play triangle. The mode stays
-        // armed, so pressing play picks the loop back up where it left off.
+        // Pausing a loop drops the orbit and shows the play triangle. The mode was
+        // disarmed above, so the next play is an ordinary single pass.
         updatePlayIcon();
     }
 
@@ -4528,22 +4562,25 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     // Hidden mode: shift-click or long-press Play. The three bars of the play icon
     // shrink to dashes and orbit a lemniscate while it runs.
 
-    // The play button has three states, and all three are derived here from the
+    // The play button has four states, and all four are derived here from the
     // transport rather than being poked at each call site — that is what keeps the
     // transitions between them honest:
     //
     //   (none)          stopped / paused  → play triangle
     //   .open           playing           → red pause bars
     //   .open .looping  looping           → red dashes orbiting a lemniscate
+    //   .looping        stopped, armed    → the same orbit over a parked transport
     //
-    // .looping tracks LOOP PLAYBACK, not the armed mode. Pausing a loop therefore
-    // shows the ordinary play triangle (you paused — the button should offer play),
-    // while isLoopEnabled quietly survives so hitting play resumes the loop.
+    // .looping tracks the ARMED mode, playing or not. A background tap parks the
+    // transport but deliberately keeps the loop armed (see stop(false)); the dashes
+    // keep orbiting over the parked transport so the next play looping is announced,
+    // not a surprise. The Stop button is the escape hatch that disarms — and pause
+    // disarms too (see pause()), so a paused transport shows the plain triangle.
     function updatePlayIcon() {
         const playing = isPlaying && !isPaused;
         if (domCache.ppElement) {
             domCache.ppElement.classList.toggle('open', playing);
-            domCache.ppElement.classList.toggle('looping', isLoopEnabled && playing);
+            domCache.ppElement.classList.toggle('looping', isLoopEnabled);
         }
         if (domCache.playPauseBtn) {
             domCache.playPauseBtn.title = isLoopEnabled
@@ -4957,7 +4994,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             toggleLoop();
             return;
         }
-        if (isPlaying) {
+        // `isPlaying` stays true through the pause fade (pause() only drops it when
+        // the fade promise resolves), so it alone would route a click landing in
+        // that window to pause() — which early-returns on isPaused, eating the
+        // click. A paused transport must always offer play.
+        if (isPlaying && !isPaused) {
             pause();
         } else {
             play(playheadTime);
@@ -5280,6 +5321,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     document.body.appendChild(errorMsg);
                     setTimeout(() => errorMsg.remove(), 3000);
                 });
+            }).catch((error) => {
+                // Reading or parsing the file failed (e.g. a non-JSON file was
+                // picked) — without this catch it is an unhandled rejection and
+                // the user gets no feedback at all.
+                console.error('Error reading module file:', error);
+                notify(`Error loading module: ${error.message}`, 'error');
             });
         } catch (error) {
             console.error('Error reading module file:', error);
@@ -6538,7 +6585,7 @@ const redoBtn = document.getElementById('redoBtn');
 if (undoBtn) undoBtn.addEventListener('click', () => { try { eventBus.emit('history:undo'); } catch {} });
 if (redoBtn) redoBtn.addEventListener('click', () => { try { eventBus.emit('history:redo'); } catch {} });
 
-// Keyboard shortcuts: Ctrl/Cmd+Z (Undo), Ctrl/Cmd+Y (Redo)
+// Keyboard shortcuts: Ctrl/Cmd+Z (Undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (Redo)
 document.addEventListener('keydown', (e) => {
   const el = e.target;
   const tag = (el && el.tagName) ? el.tagName.toLowerCase() : '';
@@ -6547,7 +6594,10 @@ document.addEventListener('keydown', (e) => {
   const isMeta = e.ctrlKey || e.metaKey;
   if (!isMeta) return;
   const key = (e.key || '').toLowerCase();
-  if (key === 'z') {
+  if (key === 'z' && e.shiftKey) {
+    e.preventDefault();
+    try { eventBus.emit('history:redo'); } catch {}
+  } else if (key === 'z') {
     e.preventDefault();
     try { eventBus.emit('history:undo'); } catch {}
   } else if (key === 'y') {

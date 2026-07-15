@@ -135,6 +135,12 @@ class ThemeManager {
       setRgb('--rmt-accent-rgb', tokens.accent);
       setRgb('--rmt-bg-rgb', tokens.bg);
       setRgb('--rmt-danger-rgb', tokens.danger);
+      // Numeric token: the saturation new notes' random colors are born with
+      // (read back by note-creation.js). Published as a CSS var so consumers
+      // don't need to import the theme system.
+      if (typeof tokens.noteDefaultSaturation === 'number' && Number.isFinite(tokens.noteDefaultSaturation)) {
+        rootStyle.setProperty('--rmt-note-default-saturation', String(tokens.noteDefaultSaturation));
+      }
     } catch (e) {
       console.warn('[theme] CSS var apply failed', e);
     }

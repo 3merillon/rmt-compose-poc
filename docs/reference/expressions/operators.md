@@ -1,288 +1,274 @@
+---
+title: Operators
+description: Every operator in the RMT Compose expression DSL — semantics, precedence, associativity, result types, and the bytecode each one compiles to.
+---
+
 # Operators
 
-Complete reference for arithmetic operations in RMT Compose expressions.
-
-## DSL Operators
-
-The DSL syntax uses familiar mathematical operators:
-
-```
-base.f * (3/2) * (5/4) / 2
-```
+The expression DSL has six operators. All of them work on exact rational values.
 
 | Operator | Meaning | Example |
-|----------|---------|---------|
-| `+` | Addition | `base.t + 1` |
+|---|---|---|
+| `+` | Addition | `[5].t + [5].d` |
 | `-` | Subtraction | `[3].t - (1/2)` |
 | `*` | Multiplication | `base.f * (3/2)` |
-| `/` | Division | `base.d / 2` |
-| `^` | Power | `2 ^ (1/12)` |
+| `/` | Division | `[1].d / 2` |
+| `^` | Power | `2^(1/12)` |
 | `-` (prefix) | Negation | `-base.f` |
 
-## Legacy Method Chaining
+## Precedence and associativity
 
-The legacy syntax uses method chaining:
+Loosest first. Tighter binds first.
 
-```javascript
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(3, 2))
-  .mul(new Fraction(5, 4))
-  .div(new Fraction(2))
+| Level | Operators | Associativity |
+|---|---|---|
+| 1 | `+` `-` (binary) | Left |
+| 2 | `*` `/` | Left |
+| 3 | `-` (prefix) | Prefix |
+| 4 | `^` | **Right** |
+| 5 | Literals, `[N].p`, `base.p`, `beat(x)`, `( … )` | — |
+
+| Expression | Parses as | Value |
+|---|---|---|
+| `[1].f * 2^(1/12)` | `[1].f * (2^(1/12))` | one semitone above note 1 |
+| `-2^2` | `-(2^2)` | −4 |
+| `2^3^2` | `2^(3^2)` | 512 |
+| `2^-1` | `2^(-1)` | 1/2 |
+| `2 * 3 + 4` | `(2 * 3) + 4` | 10 |
+| `[1].t - [2].t - [3].t` | `([1].t - [2].t) - [3].t` | left-associative |
+
+Parentheses override all of this.
+
+## Addition: `+`
+
+```
+1 + 2                  # 3
+(1/2) + (1/3)          # 5/6
+[5].t + [5].d          # the moment note 5 ends
+base.t + beat(base)    # one beat after the BaseNote starts
 ```
 
-## Basic Arithmetic
-
-### Addition: `+` / `.add()`
-
-Adds two values:
-
-```
-# DSL
-1 + 2                    // 3
-(1/2) + (1/3)           // 5/6
-[5].t + [5].d           // Start when note 5 ends
-```
+Exact. `(1/2) + (1/3)` is `5/6`, not `0.8333…`.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-a.add(b)
-new Fraction(1).add(new Fraction(2))  // 3
-new Fraction(1, 2).add(new Fraction(1, 3))  // 5/6
-module.getNoteById(5).getVariable('startTime').add(module.getNoteById(5).getVariable('duration'))
+new Fraction(1, 2).add(new Fraction(1, 3))
+module.getNoteById(5).getVariable('startTime')
+  .add(module.getNoteById(5).getVariable('duration'))
 ```
 </details>
 
-### Subtraction: `-` / `.sub()`
-
-Subtracts one value from another:
+## Subtraction: `-`
 
 ```
-# DSL
-5 - 2                    // 3
-(3/4) - (1/4)           // 1/2
-[3].t - (1/2)           // Offset a note 0.5 seconds earlier
+5 - 2                  # 3
+(3/4) - (1/4)          # 1/2
+[3].t - (1/2)          # half a second before note 3 starts
 ```
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-a.sub(b)
-new Fraction(5).sub(new Fraction(2))  // 3
-new Fraction(3, 4).sub(new Fraction(1, 4))  // 1/2
+new Fraction(5).sub(new Fraction(2))
 module.getNoteById(3).getVariable('startTime').sub(new Fraction(1, 2))
 ```
 </details>
 
-### Multiplication: `*` / `.mul()`
-
-Multiplies two values:
+## Multiplication: `*`
 
 ```
-# DSL
-3 * 2                    // 6
-(3/2) * (5/4)           // 15/8
-base.f * (3/2)          // Perfect fifth above BaseNote
+3 * 2                  # 6
+(3/2) * (5/4)          # 15/8
+base.f * (3/2)         # a perfect fifth above the BaseNote
+beat(base) * 2         # two beats
 ```
+
+Multiplication is how you build intervals. See [Pure Ratios](/user-guide/tuning/ratios).
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-a.mul(b)
-new Fraction(3).mul(new Fraction(2))  // 6
-new Fraction(3, 2).mul(new Fraction(5, 4))  // 15/8
+new Fraction(3, 2).mul(new Fraction(5, 4))
 module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 ```
 </details>
 
-### Division: `/` / `.div()`
-
-Divides one value by another:
+## Division: `/`
 
 ```
-# DSL
-6 / 2                    // 3
-(3/2) / 3               // 1/2
-60 / tempo(base)        // Beat duration from tempo
+6 / 2                  # 3
+(3/2) / 3              # 1/2
+[3].f / 2              # an octave below note 3
+base.f / (3/2)         # a fifth below the BaseNote
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-a.div(b)
-new Fraction(6).div(new Fraction(2))  // 3
-new Fraction(3, 2).div(new Fraction(3))  // 1/2
-new Fraction(60).div(module.findTempo(module.baseNote))
-```
-</details>
-
-### Negation: `-` (prefix) / `.neg()`
-
-Returns the negative of a value:
-
-```
-# DSL
--5                       // -5
--(-3/2)                 // 3/2
--base.f                 // Negated frequency
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-a.neg()
-new Fraction(5).neg()  // -5
-new Fraction(-3, 2).neg()  // 3/2
-```
-</details>
-
-### Power: `^` / `.pow()`
-
-Raises a value to a power:
-
-```
-# DSL - Integer powers (exact)
-2 ^ 3                    // 8
-3 ^ 2                    // 9
-2 ^ (-1)                // 1/2
-
-# DSL - Fractional powers (irrational)
-2 ^ (1/2)               // √2 ≈ 1.414
-2 ^ (1/12)              // 12-TET semitone ≈ 1.0595
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-a.pow(b)
-new Fraction(2).pow(new Fraction(3))   // 8
-new Fraction(3).pow(new Fraction(2))   // 9
-new Fraction(2).pow(new Fraction(-1))  // 1/2
-new Fraction(2).pow(new Fraction(1, 2))   // √2 ≈ 1.414
-new Fraction(2).pow(new Fraction(1, 12))  // 12-TET semitone ≈ 1.0595
-```
-</details>
-
-::: warning Irrational Results
-Fractional exponents produce irrational numbers. These are displayed with the **≈** prefix and handled using [SymbolicPower](/developer/core/symbolic-power).
+::: warning Division by zero is not an error
+`5 / 0` compiles. At evaluation the result is **1**, and a warning goes to the browser console.
+The value is wrong and nothing on screen says so. `(5/0)` behaves the same way — it is not read
+as a fraction literal, it falls back to a grouped division.
 :::
 
-## Operator Precedence
-
-Operations are evaluated left-to-right through method chaining. Use parentheses to control order:
-
-```javascript
-// Evaluated as: ((a × b) + c)
-a.mul(b).add(c)
-
-// Evaluated as: (a × (b + c))
-a.mul(b.add(c))
-```
-
-Standard mathematical precedence:
-
-1. Parentheses (grouping via nested expressions)
-2. Power (`.pow()`)
-3. Negation (`.neg()`)
-4. Multiplication/Division (`.mul()`, `.div()`)
-5. Addition/Subtraction (`.add()`, `.sub()`)
-
-## Bytecode Opcodes
-
-Internally, operators compile to stack-based bytecode:
-
-| Operation | Opcode | Hex |
-|-----------|--------|-----|
-| Addition | ADD | 0x10 |
-| Subtraction | SUB | 0x11 |
-| Multiplication | MUL | 0x12 |
-| Division | DIV | 0x13 |
-| Negation | NEG | 0x14 |
-| Power | POW | 0x15 |
-
-## Common Musical Patterns
-
-### Intervals as Multiplication
-
-```
-# DSL
-base.f * 2              // Octave (2:1)
-base.f * (3/2)          // Perfect fifth (3:2)
-base.f * (4/3)          // Perfect fourth (4:3)
-base.f * (5/4)          // Major third (5:4)
-base.f * (6/5)          // Minor third (6:5)
-```
-
-### Intervals as Division (Downward)
-
-```
-# DSL
-base.f / 2              // Octave down
-base.f / (3/2)          // Fifth down
-base.f * (2/3)          // Fifth down (equivalent)
-```
-
-### Compound Intervals
-
-```
-# DSL
-base.f * 2 * (5/4)      // Major tenth (octave + major third)
-base.f * (5/2)          // Major tenth (simplified)
-base.f * 4              // Two octaves
-```
-
-### TET Calculations
-
-```
-# DSL - n semitones in 12-TET
-base.f * 2 ^ (n/12)
-
-# n steps in 19-TET
-base.f * 2 ^ (n/19)
-
-# n steps in Bohlen-Pierce (13 divisions of tritave)
-base.f * 3 ^ (n/13)
-```
+For a beat duration, write `beat(base)`. It compiles to `60 / tempo(base)` and, unlike the long
+form, it survives a save as `beat(base)`.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// n semitones in 12-TET
-freq.mul(new Fraction(2).pow(new Fraction(n, 12)))
-
-// n steps in 19-TET
-freq.mul(new Fraction(2).pow(new Fraction(n, 19)))
-
-// n steps in Bohlen-Pierce (13 divisions of tritave)
-freq.mul(new Fraction(3).pow(new Fraction(n, 13)))
+new Fraction(3, 2).div(new Fraction(3))
+new Fraction(60).div(module.findTempo(module.baseNote))   // one beat
 ```
 </details>
 
-## Error Conditions
+## Negation: `-` (prefix)
 
-### Division by Zero
-
-```javascript
-new Fraction(5).div(new Fraction(0))  // Error
+```
+-5                     # -5
+-(3/2)                 # -3/2
+-base.f                # negated frequency
 ```
 
-### Invalid Operands
+Prefix `-` binds tighter than `*` and `/` but looser than `^`, so `-2^2` is `-4`.
 
-```javascript
-// These will fail:
-new Fraction(3).mul("2")      // String not allowed
-new Fraction(3).add(undefined) // Undefined not allowed
+::: warning No legacy equivalent you can type
+`.neg()` appears in some old expressions but the legacy parser **cannot read it** — a saved
+`new Fraction(5).neg()` silently compiles to `0`. Write `-5` in DSL, or `new Fraction(-5)` in
+legacy.
+:::
+
+## Power: `^`
+
+`a ^ b` raises `a` to the power `b`. Both operands must evaluate to rationals. `^` is
+right-associative and binds tighter than every other operator.
+
+```
+2 ^ 3                  # 8
+3 ^ 2                  # 9
+2 ^ (-1)               # 1/2
+4 ^ (1/2)              # 2 — a perfect square root, still exact
+2 ^ (1/12)             # the 12-TET semitone — irrational
+3 ^ (1/13)             # one Bohlen-Pierce step — irrational
 ```
 
-## See Also
+### What `^` produces
 
-- [Expression Syntax](/reference/expressions/syntax) - Full syntax reference
-- [Fraction API](/reference/expressions/fraction-api) - Fraction methods
-- [Binary Evaluator](/developer/core/binary-evaluator) - Bytecode execution
+The result type depends on the exponent, and it is the single most consequential thing about
+this operator.
+
+| Case | Result | Property is |
+|---|---|---|
+| Integer exponent (`2^3`, `2^-1`) | Exact rational | clean |
+| Fractional exponent with an exact root (`4^(1/2)` → 2, `8^(1/3)` → 2) | Exact rational | clean |
+| Fractional exponent with no exact root (`2^(1/12)`) | Irrational, approximated to a rational | **corrupted** |
+
+A property whose value came out irrational is flagged **corrupted**. That flag is what drives
+the visuals and the display:
+
+- The note is drawn with a **crosshatch** — a note that merely *depends* on a corrupted note
+  gets a single diagonal hatch instead.
+- The value in the note widget is prefixed with **`≈`** to say "this is an approximation".
+
+Corruption is not damage. Every equal-tempered scale in the module library is built out of
+corrupted notes. It is a marker that the value is no longer an exact ratio, which means it can
+no longer be reasoned about as one. See [SymbolicPower](/developer/core/symbolic-power).
+
+::: tip Perfect roots stay clean
+`4^(1/2)` is 2 exactly, so the note is not corrupted — and the simplifier will rewrite the
+expression to `2`. Only genuinely irrational powers corrupt.
+:::
+
+<details>
+<summary>Legacy JavaScript syntax</summary>
+
+```javascript
+new Fraction(2).pow(new Fraction(3))      // 8
+new Fraction(2).pow(new Fraction(-1))     // 1/2
+new Fraction(2).pow(new Fraction(1, 12))  // 12-TET semitone
+```
+</details>
+
+## Worked patterns
+
+### Intervals as multiplication
+
+```
+base.f * 2             # octave (2:1)
+base.f * (3/2)         # perfect fifth (3:2)
+base.f * (4/3)         # perfect fourth (4:3)
+base.f * (5/4)         # major third (5:4)
+base.f * (6/5)         # minor third (6:5)
+```
+
+### Intervals downward
+
+```
+base.f / 2             # an octave down
+base.f / (3/2)         # a fifth down
+base.f * (2/3)         # a fifth down — the same thing
+```
+
+### Compound intervals
+
+```
+base.f * 2 * (5/4)     # major tenth (octave plus major third)
+base.f * (5/2)         # major tenth, in one ratio
+base.f * 4             # two octaves
+```
+
+### Equal temperament
+
+```
+base.f * 2^(1/12)      # one step of 12-TET
+base.f * 2^(7/12)      # seven steps — the 12-TET fifth
+base.f * 2^(1/19)      # one step of 19-TET
+base.f * 3^(1/13)      # one step of Bohlen-Pierce (13 divisions of the tritave)
+```
+
+Chaining these from note to note is the usual way to build a scale: note 2 is
+`[1].f * 2^(1/12)`, note 3 is `[2].f * 2^(1/12)`, and so on. See
+[Equal Temperament](/user-guide/tuning/equal-temperament).
+
+## Bytecode
+
+Operators compile to a stack machine. This is what an expression becomes:
+
+| Operator | Opcode | Byte | Effect |
+|---|---|---|---|
+| `+` | `ADD` | `0x10` | pop 2, push sum |
+| `-` | `SUB` | `0x11` | pop 2, push difference |
+| `*` | `MUL` | `0x12` | pop 2, push product |
+| `/` | `DIV` | `0x13` | pop 2, push quotient (0 divisor → push 1) |
+| `-` (prefix) | `NEG` | `0x14` | pop 1, push negation |
+| `^` | `POW` | `0x15` | pop base and exponent, push the power; may set the corruption flag |
+
+The built-in functions have no opcodes of their own. `tempo(x)` and `measure(x)` compile to a
+plain property load (`LOAD_BASE` / `LOAD_REF`); `beat(x)` compiles to `LOAD_CONST 60`, then the
+tempo load, then `DIV`. The `FIND_TEMPO` (`0x20`), `FIND_MEASURE` (`0x21`),
+`FIND_INSTRUMENT` (`0x22`), `DUP` (`0x30`) and `SWAP` (`0x31`) opcodes are defined but no
+compiler emits them.
+
+See [Binary Evaluator](/developer/core/binary-evaluator) for how the bytecode runs.
+
+## Error conditions
+
+There are fewer real errors than you would expect, and more silent wrong answers.
+
+| What you write | What happens |
+|---|---|
+| `1 +`, `base.`, `a & b` | Rejected on save. Reason goes to the browser console; nothing appears on screen |
+| `5 / 0` | Accepted. Evaluates to **1** with a console warning |
+| `2^(1/12)` | Accepted. Irrational — the property is flagged corrupted |
+| Anything neither compiler can parse | Silently compiles to constant **`0`** with a console warning |
+
+Check the `Evaluated:` line in the note widget after saving. It is the only feedback you get.
+
+## See also
+
+- [Expression Syntax](/reference/expressions/syntax) — the full grammar
+- [Fraction API](/reference/expressions/fraction-api) — exactness, and the legacy surface
+- [Module API](/reference/expressions/module-api) — references and built-in functions
+- [Binary Evaluator](/developer/core/binary-evaluator) — bytecode execution

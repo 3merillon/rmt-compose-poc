@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * End-to-end test of the WASM evaluator hot-swap (ROADMAP.md Phase 1 P1).
+ * End-to-end test of the WASM evaluator hot-swap (currently blocked in the browser; see docs/developer/wasm/overview.md).
  *
  * Reproduces the browser race headlessly: constructs a Module BEFORE WASM
  * init completes (so it starts on the JS fallback), then completes WASM init

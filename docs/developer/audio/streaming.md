@@ -1,265 +1,270 @@
+---
+title: Streaming Scheduler
+description: The just-in-time note pump inside AudioEngine.play() — a sorted list, a 2 s lookahead, 100 ms batches, and a cycle-aware loop that never tears anything down at the seam.
+---
+
 # Streaming Scheduler
 
-The streaming scheduler enables efficient playback of compositions by scheduling notes just-in-time rather than all at once.
+The scheduler creates Web Audio voices about **2 seconds** before they sound, in **100 ms** batches,
+instead of building every oscillator up front. A ten-minute piece costs the same at press-Play as a
+ten-second one.
 
-## Overview
+::: warning There is no `StreamingScheduler` class
+Do not go looking for one. The scheduler is a **closure** — `const pump = () => {…}` — over a mutable
+state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:258-353`). There is no
+scheduler file, no scheduler object, and no `scheduler.debug` flag.
+:::
 
-Traditional approach (problematic):
-```javascript
-// Creates ALL oscillators upfront - blocks main thread, uses memory
-for (note of allNotes) {
-  createAndScheduleOscillator(note)
-}
+## The state object
+
+`play()` builds one object, `s`, and the pump mutates it in place. `disarmLoop()` writes to it from
+outside. It is exposed as `audioEngine._streamingState` for the test harness.
+
+| Field | Meaning |
+|---|---|
+| `stopped` | Set by `_stopStreaming()`. The pump checks it and bails. |
+| `timerId` | The pending `setTimeout` handle. |
+| `baseStartTime` | Absolute ctx time at which pass 0 begins — `ctx.currentTime + 0.1`. |
+| `initialVolume` | Per-note envelope peak. |
+| `list` | The note array of the pass **currently being scheduled**. |
+| `nextIndex` | How far into `list` the pump has got. |
+| `cycle` | `0` = the initial (possibly partial) pass. |
+| `cycleStart` | Playback-relative time at which `list`'s pass begins. |
+| `looping`, `period`, `loopNotes`, `firstLen` | Installed by `_applyLoop()`. |
+| `cutRel`, `loopEndTime` | Set by `disarmLoop()`: the final seam. Nothing at or after it sounds. |
+| `pump` | The closure itself, so `armLoop()` can restart it. |
+
+## Two time bases
+
+Mixing these up is the easy bug in this file.
+
+| Name | Definition |
+|---|---|
+| `rel` | Playback-relative seconds: `ctx.currentTime − baseStartTime`. |
+| `cycleStart` | The `rel`-time at which the current pass begins. |
+
+A note's **absolute** start is therefore:
+
+```
+baseStartTime + cycleStart + noteData.startTime
 ```
 
-Streaming approach (used by RMT Compose):
+which is exactly what gets passed to `_scheduleNote(noteData, s.baseStartTime + s.cycleStart, …)`.
+
+## The pump
+
 ```javascript
-// Creates oscillators incrementally - responsive, memory efficient
-scheduleLoop() {
-  scheduleNotesWithinLookahead()
-  if (moreNotesToSchedule) {
-    setTimeout(scheduleLoop, INTERVAL)
+const pump = () => {
+  if (this._streamingState !== s || s.stopped) return;
+  s.timerId = null;
+
+  const rel = this.audioContext.currentTime - s.baseStartTime;
+  const targetTime = rel + LOOKAHEAD;      // the horizon
+  let more = true;
+
+  for (let guard = 0; guard < MAX_CYCLES_PER_BATCH; guard++) {
+    let horizonReached = false;
+
+    // Drain the current pass up to the horizon.
+    while (s.nextIndex < s.list.length) {
+      const noteData = s.list[s.nextIndex];
+      const at = s.cycleStart + noteData.startTime;
+
+      if (s.cutRel != null && at >= s.cutRel - SEAM_EPS) { more = false; break; }
+      if (at > targetTime) { horizonReached = true; break; }
+
+      if (noteData.frequency && noteData.instrument) {          // skip measure markers
+        this._scheduleNote(noteData, s.baseStartTime + s.cycleStart, s.initialVolume);
+      }
+      s.nextIndex++;
+    }
+    if (!more || horizonReached) break;
+    if (!s.looping) { more = false; break; }
+
+    // Advance to the next pass.
+    const nextStart = s.firstLen + s.cycle * s.period;
+    if (nextStart > targetTime) break;      // beyond the horizon; pick it up next batch
+
+    s.cycle++;
+    s.cycleStart = nextStart;
+    s.list = s.loopNotes;
+    s.nextIndex = 0;
   }
-}
+
+  if (more) s.timerId = setTimeout(pump, BATCH_INTERVAL);
+};
 ```
 
-## Architecture
+Three things in there are load-bearing.
 
+**The list is sorted and consumed by index.** `preparePlayback()` sorts by `startTime`, so the inner
+`while` can break the moment it finds a note past the horizon — everything after it is later still.
+`nextIndex++` advances; nothing is spliced or deleted.
+
+**The pass advance is multiplicative, not accumulative.**
+
+```javascript
+const nextStart = s.firstLen + s.cycle * s.period;   // NOT cycleStart += period
 ```
-preparePlayback()
-       ↓
-  noteDataList (lightweight)
-       ↓
-    play()
-       ↓
-  scheduleLoop() ←─────┐
-       ↓               │
-  schedule notes       │
-  within lookahead     │
-       ↓               │
-  setTimeout ──────────┘
-```
+
+An accumulator drifts, and it must agree *exactly* with the `nextStart > targetTime` test below it.
+If it doesn't, a whole pass lands in the past and every note of it fires at once.
+
+**`more` tracks "this playback still has notes at some point", not "still has notes right now".** A
+non-looping pass sets `more = false` only when the list is exhausted, at which point the pump retires
+— that is up to `LOOKAHEAD` before the last note actually sounds. The pre-loop scheduler stopped the
+moment the last note was *scheduled*, which is precisely what a naive loop gets wrong: it plays once
+and quits (and for a module shorter than the lookahead, it quits immediately).
 
 ## Constants
 
-```javascript
-const LOOKAHEAD = 2.0          // Schedule 2 seconds ahead
-const SCHEDULE_INTERVAL = 100  // Check every 100ms
-const MIN_NOTE_DURATION = 0.01 // Minimum 10ms notes
-```
+| Constant | Value | Scope |
+|---|---|---|
+| `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:266`) |
+| `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:267`) — not `SCHEDULE_INTERVAL` |
+| `RELEASE_TAIL` | **0.15 s** | local inside `_scheduleNote()` (`:523`) |
+| `MIN_LOOP_PERIOD` | **0.05 s** | module-level (`:10`) |
+| `MAX_CYCLES_PER_BATCH` | **64** | module-level (`:14`) |
+| `SEAM_EPS` | **1e-6** | module-level (`:16`) |
+| `DECLICK_FADE` | **0.02 s** | module-level (`:6`) |
 
-## Scheduler Implementation
+There is no `MIN_NOTE_DURATION`. Short notes are handled by the envelope's attack/release floors and
+its 1 ms duration floor — see
+[the envelope core](/developer/audio/instruments#the-envelope-core).
 
-### Main Loop
+`MAX_CYCLES_PER_BATCH` is a **backstop, not the real bound**. The pump's own "next pass is past the
+horizon" break already bounds the cycle count at `LOOKAHEAD / MIN_LOOP_PERIOD`. The guard is there so
+that a future arithmetic bug degrades into a glitch rather than a hung tab.
 
-```javascript
-class StreamingScheduler {
-  constructor(audioEngine) {
-    this.audioEngine = audioEngine
-    this.pendingNotes = []
-    this.nextNoteIndex = 0
-    this.isPlaying = false
-  }
+## Note data
 
-  start(noteDataList, baseStartTime) {
-    this.pendingNotes = noteDataList.sort((a, b) => a.startTime - b.startTime)
-    this.nextNoteIndex = 0
-    this.baseStartTime = baseStartTime
-    this.isPlaying = true
-    this.scheduleLoop()
-  }
-
-  scheduleLoop() {
-    if (!this.isPlaying) return
-
-    const currentTime = this.audioEngine.audioContext.currentTime
-    const scheduleUntil = currentTime + LOOKAHEAD
-
-    // Schedule all notes within the lookahead window
-    while (this.nextNoteIndex < this.pendingNotes.length) {
-      const note = this.pendingNotes[this.nextNoteIndex]
-      const absoluteStart = this.baseStartTime + note.startTime
-
-      if (absoluteStart > scheduleUntil) {
-        break  // This and future notes are beyond lookahead
-      }
-
-      this.audioEngine._scheduleNote(note, this.baseStartTime)
-      this.nextNoteIndex++
-    }
-
-    // Continue if more notes to schedule
-    if (this.nextNoteIndex < this.pendingNotes.length) {
-      this.timeoutId = setTimeout(() => this.scheduleLoop(), SCHEDULE_INTERVAL)
-    } else {
-      this.isPlaying = false
-    }
-  }
-
-  stop() {
-    this.isPlaying = false
-    clearTimeout(this.timeoutId)
-  }
-}
-```
-
-### Note Data Structure
-
-Lightweight representation for scheduling:
+The pump consumes plain objects from
+[`preparePlayback()`](/developer/audio/audio-engine#prepareplayback):
 
 ```javascript
 {
-  id: 1,              // Note ID
-  startTime: 0.5,     // Seconds from composition start
-  duration: 0.25,     // Duration in seconds
-  frequency: 440,     // Frequency in Hz
-  instrument: 'sine'  // Instrument name
+  id: 3,
+  startTime: 0.5,      // seconds, relative to the pass start
+  duration: 0.25,
+  frequency: 440,      // null for measure markers
+  instrument: 'piano', // null for measure markers
+  panPos: 0.33         // null for measure markers
 }
 ```
 
-This is much smaller than full Note objects with expressions.
+Measure markers carry only a `startTime`. The pump skips them explicitly
+(`if (noteData.frequency && noteData.instrument)`), so they cost an index increment and nothing else.
 
-## Timing Precision
+## Looping
 
-### Web Audio Timing
-
-Web Audio API provides sample-accurate timing:
-
-```javascript
-// Schedule precisely at audioContext time
-oscillator.start(audioContext.currentTime + 0.5)
-oscillator.stop(audioContext.currentTime + 0.75)
-```
-
-### Lookahead Buffer
-
-The 2-second lookahead ensures:
-- Notes are scheduled before they need to play
-- JavaScript timing jitter doesn't affect audio timing
-- Smooth playback even during garbage collection
-
-### Schedule Interval
-
-100ms interval balances:
-- Responsiveness (new notes scheduled quickly)
-- CPU usage (not checking too often)
-- Lookahead coverage (multiple checks per lookahead window)
-
-## Memory Management
-
-### Oscillator Lifecycle
+Looping lives **entirely inside the scheduler**. The transport does not drive it; `player.js` just
+hands `play()` a descriptor and then asks the engine whether the loop actually armed.
 
 ```javascript
-// Oscillator is automatically garbage collected after:
-oscillator.onended = () => {
-  this.activeOscillators.delete(oscillator)
-  // oscillator disconnected and released
-}
+audioEngine.play(firstPassNotes, {
+  initialVolume: 0.2,
+  loop: {
+    period: moduleEndTime,          // the pass length
+    notes: loopBodyNotes,           // preparePlayback(0) — a full pass
+    firstCycleAudioLength: moduleEndTime - fromTime
+  }
+});
 ```
 
-### Pending Notes Array
+Two note lists, because they are genuinely different: the first pass comes from
+`preparePlayback(fromTime)` — its start times are offset, and a note straddling `fromTime` has been
+truncated — so it is only valid for that one pass. The loop body comes from `preparePlayback(0)`.
+When `fromTime === 0` the promise is shared rather than evaluated twice.
 
-Notes are removed from consideration as scheduled:
-```javascript
-this.nextNoteIndex++  // Simply advance index, no splice needed
-```
+### Why the seam is gapless
 
-## Playback Control
+When the current pass is fully scheduled, the pump advances `cycleStart` and keeps going. **The wrap
+is just another batch.** Nothing is torn down: the instrument buses, the convolver and the limiter in
+[`AudioGraph`](/developer/audio/audio-graph) are persistent, and the voices from the outgoing pass are
+still in `activeOscillators` with their release tails scheduled. So a note's release and its reverb
+tail ring across the boundary exactly as they would mid-module.
 
-### Pause
+::: danger Do not implement looping by calling play() again
+`play()` re-anchors at `ctx.currentTime + 0.1` and `_stopStreaming()`s the pass in flight — a **≥100 ms
+hole** every lap, plus a cut tail. The pump's wrap exists precisely to avoid this.
+:::
 
-```javascript
-pause() {
-  this.stop()  // Stop scheduler
-  this.audioEngine.pauseFade(0.2)  // Fade out playing notes
-}
-```
+### Disarming
 
-### Resume
+`disarmLoop()` computes the next seam with `_nextSeamRel(rel, s)` — the first pass boundary
+**strictly after** `rel` — writes it into `s.cutRel` / `s.loopEndTime`, and calls
+`_cancelScheduledFrom(loopEndTime)`.
 
-```javascript
-resume(fromTime) {
-  // Find first note after fromTime
-  this.nextNoteIndex = this.pendingNotes.findIndex(
-    n => n.startTime >= fromTime
-  )
-  this.baseStartTime = this.audioEngine.audioContext.currentTime - fromTime
-  this.isPlaying = true
-  this.scheduleLoop()
-}
-```
+The 2 s lookahead means voices for the *next* pass may already exist — and for a module shorter than
+the lookahead, voices for several passes. They are cancelled by **absolute start time**, not by cycle
+index: around a seam the active set holds voices from two passes at once, so "which pass is this voice
+in" can only be answered from its own scheduled time. The scheduler's `cycle` counter runs ahead of
+the pass you can hear, and is the wrong thing to ask.
 
-### Seek
+Cancelling is **silent, with no fade**. A voice whose start is still in the future and whose `stop()`
+is moved to its own `start()` never produces a sample. Voices already sounding are left alone — their
+release and reverb tail belong to the pass that is still playing.
 
-```javascript
-seek(toTime) {
-  this.stop()
-  this.audioEngine.stopAll()
+### Refusals
 
-  // Reset to position
-  this.nextNoteIndex = this.pendingNotes.findIndex(
-    n => n.startTime >= toTime
-  )
-  this.baseStartTime = this.audioEngine.audioContext.currentTime - toTime
-  this.scheduleLoop()
-}
-```
+`_applyLoop()` refuses to arm — and playback then just runs once and stops — when:
 
-## Edge Cases
+- the period is non-finite, or `< MIN_LOOP_PERIOD` (50 ms);
+- the note array is empty;
+- no note has both a `frequency` and an `instrument` (an all-measure-marker module).
 
-### Overlapping Notes
+These are not cosmetic guards. An empty list or a zero period makes the inner `while` a no-op, so
+every iteration of the `for` "exhausts" the pass and advances a cycle. With a **NaN** period the
+`nextStart > targetTime` break never fires either — every comparison with NaN is false — and the tab
+hangs outright.
 
-Notes that overlap in time are scheduled independently:
+## Voice teardown
 
-```javascript
-// Note 1: startTime=0, duration=1
-// Note 2: startTime=0.5, duration=1
-// Both scheduled, both play with overlap
-```
-
-### Very Short Notes
-
-Minimum duration prevents audio glitches:
+Each scheduled voice is tracked as `{ voice, gainNode, panner, startTime }` in the
+`activeOscillators` `Set`. Cleanup is **dual**:
 
 ```javascript
-const duration = Math.max(note.duration, MIN_NOTE_DURATION)
+voice.onended = () => { ended = true; cleanup(); };
+setTimeout(() => { if (!ended) cleanup(); },
+           (start + duration + RELEASE_TAIL - ctx.currentTime) * 1000 + 60);
 ```
 
-### Very Long Notes
+The `onended` path is preferred; the timer is a backstop for wrapper voices that do not forward
+`onended`. `cleanup()` checks Set membership first, so exactly one teardown runs no matter which
+fires — and so a voice already removed by `stopAll()` or `_cancelScheduledFrom()` is not torn down
+twice.
 
-Long notes are scheduled with the full duration:
+## Pause, resume and seek
 
-```javascript
-// Note with 60-second duration
-// Scheduled once, plays for full duration
-oscillator.start(startTime)
-oscillator.stop(startTime + 60)
+None of these are scheduler methods. There is no `scheduler.pause()`, `resume(fromTime)` or
+`seek(toTime)`.
+
+| Action | What actually happens |
+|---|---|
+| Pause | `audioEngine.pauseFade()` — 200 ms fade, then `stopAll(0)`. The streaming state is dropped. |
+| Stop | `audioEngine.stopAll()` — 20 ms declick fade, then teardown. |
+| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:4402`). |
+| Seek | Same: stop, then prepare and play from the new time. |
+
+There is no seek-within-a-running-pump. Every position change is a fresh `play()`.
+
+## Verifying a change
+
+Screenshots cannot show that the pump keeps handing out voices past the end of a module. Drive the
+real app instead:
+
+```bash
+npm run dev
+node scripts/perf/shot-loop-playback.mjs --url http://localhost:3000
 ```
 
-## Performance Metrics
+`scripts/perf/shot-loop-playback.mjs` is a Playwright harness that asserts the seam arithmetic, the
+wrap, the disarm cut, the play-button gestures, arming mid-playback without a restart, and the
+first-touch audio unlock. It is not wired to an npm script; run it with `node`.
 
-| Scenario | Notes | Memory | CPU |
-|----------|-------|--------|-----|
-| 100 notes | ~10KB | ~1% | |
-| 1000 notes | ~100KB | ~2% | |
-| 10000 notes | ~1MB | ~5% | |
+## See also
 
-Memory scales linearly with note count. CPU usage depends on concurrent playing notes, not total notes.
-
-## Debugging
-
-```javascript
-// Enable scheduler logging
-scheduler.debug = true
-
-// Logs:
-// [Scheduler] Scheduled note 1 at 0.5s
-// [Scheduler] Scheduled note 2 at 0.75s
-// [Scheduler] Loop iteration, 50 notes remaining
-```
-
-## See Also
-
-- [Audio Engine](/developer/audio/audio-engine) - Core audio system
-- [Instruments](/developer/audio/instruments) - Sound generation
-- [Transport Controls](/user-guide/playback/transport) - User controls
+- [Audio Engine](/developer/audio/audio-engine) — `play()`, the loop API, and the click-free contract
+- [Audio Graph](/developer/audio/audio-graph) — the persistent nodes that make the seam gapless
+- [Instruments](/developer/audio/instruments) — what `_scheduleNote()` builds a voice from
+- [Transport Controls](/user-guide/playback/transport) — the user-facing side, including loop playback

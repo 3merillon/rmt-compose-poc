@@ -4,7 +4,7 @@
  * checked by eye: every note's centre must stay on its frequency line (the dashed
  * octave guides / BaseNote line) regardless of how thin or thick notes are.
  *
- * Usage: node scripts/perf/shot-heights.mjs [--url http://localhost:3001]
+ * Usage: node scripts/perf/shot-heights.mjs [--url http://localhost:3000]
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,7 +12,7 @@ import { chromium } from 'playwright';
 
 const argv = process.argv.slice(2);
 const flag = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
-const URL_BASE = flag('--url', 'http://localhost:3001');
+const URL_BASE = flag('--url', 'http://localhost:3000');
 const HEIGHTS = String(flag('--heights', '8,22,44')).split(',').map(Number);
 const OUT = 'scripts/perf/__visual__/heights';
 mkdirSync(OUT, { recursive: true });

@@ -11,7 +11,7 @@
  *   node scripts/perf/visual-regress.mjs --capture           # write baseline
  *   node scripts/perf/visual-regress.mjs --compare           # diff vs baseline
  *   node scripts/perf/visual-regress.mjs --compare --out dir # where diffs land
- *   ... --url http://localhost:3001  --module chords-dense
+ *   ... --url http://localhost:3000  --module chords-dense
  *
  * Exits non-zero if any scene differs beyond --tolerance (default 0 pixels).
  */
@@ -23,7 +23,7 @@ import { PNG } from 'pngjs';
 
 const argv = process.argv.slice(2);
 const flag = (n, d = null) => { const i = argv.indexOf(n); return i >= 0 ? (argv[i + 1] ?? true) : d; };
-const URL_BASE = flag('--url', 'http://localhost:3001');
+const URL_BASE = flag('--url', 'http://localhost:3000');
 const MODULES = String(flag('--modules', 'defaultModule,chords-dense,voices-5000')).split(',');
 const CAPTURE = argv.includes('--capture');
 const OUT = String(flag('--out', 'scripts/perf/__visual__'));

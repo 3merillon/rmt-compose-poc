@@ -4,8 +4,9 @@
  *
  * Design rule (project invariant): every default here MUST reproduce exactly
  * the app's pre-settings behavior, so a fresh user or a wiped store looks and
- * behaves identically to before. In particular reverb and stereo default OFF
- * (the engine was mono/dry), and the arrow interval defaults to the octave.
+ * behaves identically to before. Deliberate exception: reverb defaults ON
+ * (user decision 2026-07-12 — see `audio.reverb` below). Stereo still defaults
+ * OFF (the engine was mono), and the arrow interval defaults to the octave.
  *
  * The store persists a versioned envelope under `rmt:settings:v1`. When the
  * schema grows, bump SETTINGS_VERSION and add a migration in `migrate()`.
@@ -141,10 +142,16 @@ function validateScaleRange(rawLo, rawHi, defLo, defHi) {
 /**
  * Validate a settings object against the schema, coercing invalid fields to
  * defaults. Always returns a complete, safe settings object.
+ *
+ * When `prev` (the last known-good tree) is given, an invalid arrow ratio
+ * heals to the value the user previously had instead of the schema default —
+ * so a bad edit doesn't silently replace a carefully-set interval with the
+ * octave. Load/migrate paths pass no `prev` and behave as before.
  * @param {any} raw - possibly-partial, possibly-corrupt input
+ * @param {object} [prev] - previous validated settings, used as ratio fallback
  * @returns {object}
  */
-export function validateSettings(raw) {
+export function validateSettings(raw, prev) {
   const d = defaultSettings();
   if (!raw || typeof raw !== 'object') return d;
 
@@ -158,13 +165,14 @@ export function validateSettings(raw) {
   d.appearance.note.roundedCornerPxAtZoom1 = clampNum(an.roundedCornerPxAtZoom1, 0, 20, d.appearance.note.roundedCornerPxAtZoom1);
 
   const ar = src.arrows || {};
+  const prevAr = (prev && prev.arrows) || {};
   d.arrows.enabled = asBool(ar.enabled, d.arrows.enabled);
   d.arrows.mode = ar.mode === 'independent' ? 'independent' : 'reciprocal';
-  d.arrows.up = validateRatio(ar.up, d.arrows.up);
+  d.arrows.up = validateRatio(ar.up, validateRatio(prevAr.up, d.arrows.up));
   if (d.arrows.mode === 'reciprocal') {
     d.arrows.down = { n: d.arrows.up.d, d: d.arrows.up.n, label: null };
   } else {
-    d.arrows.down = validateRatio(ar.down, d.arrows.down);
+    d.arrows.down = validateRatio(ar.down, validateRatio(prevAr.down, d.arrows.down));
   }
 
   const au = src.audio || {};

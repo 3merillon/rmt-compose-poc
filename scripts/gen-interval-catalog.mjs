@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generate the interval catalog (ROADMAP Phase 6.3).
+ * Generate the interval catalog for the module library.
  *
  * Emits one single-note module per interval into public/modules/intervals/,
  * (re)writes the legacy intervals/index.json array, and patches the `intervals`

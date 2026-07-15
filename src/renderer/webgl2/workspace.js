@@ -7,7 +7,6 @@
 
 import { RendererAdapter } from './renderer.js';
 import { CameraController } from './camera-controller.js';
-import { Picking } from './picking.js';
 import { eventBus } from '../../utils/event-bus.js';
 
 /**
@@ -104,38 +103,11 @@ export class Workspace {
       return false;
     }
 
-    // Initialize GPU picking scaffold against renderer canvas (if available)
-    try {
-      this.picking = new Picking();
-      this.picking.init(this.renderer.gl, this.renderer.canvas);
-    } catch {}
-
     // Immediately feed basis from our camera controller
     try { this.renderer.updateViewportBasis(this.camera.getBasis()); } catch {}
 
     // Default cursor
     try { this.containerEl.style.cursor = 'default'; } catch {}
-
-    // Advise camera whether a single-finger pan should be allowed at touch start.
-    // Return false when the initial contact is on a note (so we do not pan before drag starts).
-    try {
-      if (this.camera) {
-        this.camera.shouldAllowSingleFingerPanStart = (ev) => {
-          try {
-            // Prefer precise subregion hit (notes)
-            if (this.renderer && typeof this.renderer.hitTestSubRegion === 'function') {
-              const sub = this.renderer.hitTestSubRegion(ev.clientX, ev.clientY);
-              if (sub && sub.id) return false; // on a note: block pan
-            }
-            // Fallback: mixed pick
-            const hit = this.pickAt(ev.clientX, ev.clientY, 2);
-            if (hit && hit.type === 'note') return false; // on a note: block pan
-          } catch {}
-          // Background or anything else -> allow pan
-          return true;
-        };
-      }
-    } catch {}
 
     // Pointer down to start interactions (move/resize/octave)
     this._onPointerDown = (e) => {

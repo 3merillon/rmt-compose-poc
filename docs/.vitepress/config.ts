@@ -4,8 +4,9 @@ export default defineConfig({
   title: 'RMT Compose',
   description: 'Documentation for Relative Music Theory Compose - A ratio-based music composition tool',
 
-  // Ignore dead links during development (some pages are planned but not yet created)
-  ignoreDeadLinks: true,
+  // Dead links fail the build. Every page here is expected to exist — if a link
+  // breaks, we want to know at build time, not from a reader.
+  ignoreDeadLinks: false,
 
   // Sitemap for Google indexing
   sitemap: {
@@ -59,10 +60,13 @@ export default defineConfig({
           items: [
             { text: 'Overview', link: '/user-guide/' },
             { text: 'Workspace', link: '/user-guide/interface/workspace' },
-            { text: 'Module Bar', link: '/user-guide/interface/module-bar' },
             { text: 'Top Bar', link: '/user-guide/interface/top-bar' },
-            { text: 'Variable Widget', link: '/user-guide/interface/variable-widget' },
-            { text: 'Keyboard Shortcuts', link: '/user-guide/interface/keyboard-shortcuts' }
+            { text: 'Module Bar', link: '/user-guide/interface/module-bar' },
+            { text: 'Note Widget', link: '/user-guide/interface/variable-widget' },
+            { text: 'Settings', link: '/user-guide/interface/settings' },
+            { text: 'Themes & Appearance', link: '/user-guide/interface/themes' },
+            { text: 'Keyboard Shortcuts', link: '/user-guide/interface/keyboard-shortcuts' },
+            { text: 'Mobile', link: '/user-guide/interface/mobile' }
           ]
         },
         {
@@ -71,6 +75,8 @@ export default defineConfig({
           items: [
             { text: 'Creating Notes', link: '/user-guide/notes/creating-notes' },
             { text: 'Editing Notes', link: '/user-guide/notes/editing-notes' },
+            { text: 'Selection & Group Editing', link: '/user-guide/notes/selection' },
+            { text: 'Transposing with Arrows', link: '/user-guide/notes/transposing' },
             { text: 'Expressions', link: '/user-guide/notes/expressions' },
             { text: 'Dependencies', link: '/user-guide/notes/dependencies' }
           ]
@@ -92,6 +98,7 @@ export default defineConfig({
           text: 'Modules',
           collapsed: false,
           items: [
+            { text: 'The Module Library', link: '/user-guide/modules/module-library' },
             { text: 'Loading Modules', link: '/user-guide/modules/loading-modules' },
             { text: 'Saving Modules', link: '/user-guide/modules/saving-modules' },
             { text: 'Creating Modules', link: '/user-guide/modules/creating-modules' },
@@ -104,7 +111,8 @@ export default defineConfig({
           items: [
             { text: 'Transport Controls', link: '/user-guide/playback/transport' },
             { text: 'Playhead Tracking', link: '/user-guide/playback/tracking' },
-            { text: 'Instruments', link: '/user-guide/playback/instruments' }
+            { text: 'Instruments', link: '/user-guide/playback/instruments' },
+            { text: 'Audio & Reverb', link: '/user-guide/playback/audio' }
           ]
         }
       ],
@@ -175,6 +183,7 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: 'Module JSON Schema', link: '/reference/module-schema' },
+            { text: 'Settings Reference', link: '/reference/settings-reference' },
             { text: 'Glossary', link: '/reference/glossary' }
           ]
         }
@@ -207,7 +216,7 @@ export default defineConfig({
           items: [
             { text: 'WebGL2 Renderer', link: '/developer/rendering/webgl2-renderer' },
             { text: 'Camera Controller', link: '/developer/rendering/camera-controller' },
-            { text: 'GPU Picking', link: '/developer/rendering/picking' }
+            { text: 'Picking', link: '/developer/rendering/picking' }
           ]
         },
         {
@@ -215,8 +224,18 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: 'Audio Engine', link: '/developer/audio/audio-engine' },
+            { text: 'Signal Graph', link: '/developer/audio/audio-graph' },
+            { text: 'Reverb', link: '/developer/audio/reverb' },
             { text: 'Instruments', link: '/developer/audio/instruments' },
             { text: 'Streaming Scheduler', link: '/developer/audio/streaming' }
+          ]
+        },
+        {
+          text: 'Deep Dives',
+          collapsed: false,
+          items: [
+            { text: 'Performance', link: '/developer/performance' },
+            { text: 'Theming', link: '/developer/theming' }
           ]
         },
         {
@@ -243,6 +262,7 @@ export default defineConfig({
           collapsed: false,
           items: [
             { text: 'Development Setup', link: '/developer/contributing/setup' },
+            { text: 'Build & Deploy', link: '/developer/contributing/build-and-deploy' },
             { text: 'Code Style', link: '/developer/contributing/code-style' },
             { text: 'Pull Requests', link: '/developer/contributing/pull-requests' }
           ]

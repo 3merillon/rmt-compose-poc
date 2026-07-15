@@ -1,75 +1,46 @@
+---
+title: Playhead Tracking
+description: Keep the playhead centred while a module plays, and understand what tracking does to panning, zooming and Reset View.
+---
+
 # Playhead Tracking
 
-**Playhead tracking** automatically scrolls the workspace to keep the playhead centered during playback.
+**Playhead tracking** pins the playhead to the horizontal centre of the workspace. Instead of the playhead travelling across a fixed view, the view travels under a fixed playhead.
 
-## Enabling Tracking
+## Turning it on
 
-1. Find the **Tracking toggle** in the top bar
-2. Click to enable (toggle becomes highlighted)
-3. The workspace will now follow the playhead
+The toggle is in the **right-hand group of the top bar**, between **Reset View** and the settings gear — not next to the transport, which is on the left.
 
-## How It Works
+![The top bar: transport on the left; Reset View, the playhead-tracking toggle and the settings gear on the right](/img/top-bar.png)
 
-When tracking is enabled:
-- The workspace scrolls horizontally as the playhead moves
-- The playhead stays near the center of the view
-- You can see upcoming notes before they play
+Click it and the workspace **immediately** recentres on the playhead, whether or not anything is playing. It is not a playback-only mode.
 
-When tracking is disabled:
-- The workspace stays fixed
-- The playhead moves across the static view
-- You must manually pan to see different parts
+It starts **off** every session. Tracking is never saved — a reload comes back with it off, even though your scale, theme and volume are restored.
 
-## When to Use Tracking
+## What changes while tracking is on
 
-### Enable tracking when:
+| | Tracking off | Tracking on |
+|---|---|---|
+| Horizontal pan | Free | **Locked** — at all times, playing or not |
+| Vertical pan | Free | Free |
+| Zoom | Anchored under the pointer / pinch centre | Anchored to the **horizontal centre of the view** |
+| Reset View | Works | Disabled (dimmed, tooltip `Reset disabled while tracking`) |
+| Changing the horizontal scale | Keeps the time under the screen centre fixed | Keeps the **playhead** centred |
 
-- Your composition is longer than one screen width
-- You want to follow along during playback
-- You're reviewing a piece from start to finish
-- You're presenting or demonstrating a composition
+Two of these surprise people:
 
-### Disable tracking when:
+**Horizontal panning is locked the whole time**, not only during playback. With tracking on and the transport stopped, dragging sideways does nothing. Vertical dragging still works, so you can still move through the frequency axis.
 
-- You want to watch a specific section repeatedly
-- You're editing while partially playing
-- Your composition fits on one screen
-- You want to manually control the view
+**Zoom stops following your cursor.** With the horizontal axis locked, zooming is anchored to the middle of the viewport instead of the point under the pointer, so the view cannot drift sideways out from under the playhead. On touch, pinch-zoom re-centres the same way and one-finger panning becomes vertical-only.
 
-## Interaction with Other Controls
+## Turning it off
 
-### Reset View Button
+Unchecking the toggle releases the lock and hands the view back to you. **Your previous view is not restored** — the workspace stays exactly where tracking left it. If you want to get back to the BaseNote, use Reset View, which becomes available again.
 
-When tracking is enabled:
-- The **Reset View** button is disabled
-- Tracking controls the view automatically
-- Disable tracking to use Reset View
+## Using it
 
-### Pan and Zoom
+Turn tracking on to listen through a piece that is wider than the screen, and off to stay parked on one section while you work. You can toggle it mid-playback, as often as you like, without stopping the audio.
 
-When tracking is enabled:
-- Horizontal panning is overridden during playback (vertical panning still works)
-- Zooming still works
-- When playback stops, your last manual position is restored
+Because the playhead is always centred, the right half of the screen is the near future: you see notes approach before you hear them.
 
-### Stop Button
-
-When you click Stop:
-- Playback stops
-- The playhead resets to the beginning (time = 0)
-- Tracking remains enabled for the next play
-
-## Visual Indicators
-
-| State | Indicator |
-|-------|-----------|
-| Tracking ON | Toggle highlighted/active |
-| Tracking OFF | Toggle dim/inactive |
-| Reset View disabled | Button grayed out |
-
-## Tips
-
-1. **Disable while editing** - Turn off tracking when making changes to notes
-2. **Enable for full playback** - Turn on tracking when listening through an entire composition
-3. **Use vertical pan** - You can still pan vertically to see different frequency ranges while tracking
-4. **Toggle mid-playback** - You can turn tracking on or off during playback without stopping
+See [Transport Controls](/user-guide/playback/transport) for playback itself, including how to move the playhead by clicking the workspace background.

@@ -1,236 +1,225 @@
+---
+title: startTime
+description: Reference for the startTime property - aliases, defaults, valid expressions, dragging, measure chains, and worked examples.
+---
+
 # startTime
 
-The `startTime` property defines when a note begins playing, measured in seconds from the start of the composition.
+`startTime` is when a note begins, in **seconds from the start of the composition**. Like every
+note property it is stored as an expression string, compiled to bytecode, and evaluated with exact
+rational arithmetic.
 
-## Default Value
+Almost every note in a real module expresses its start *relative to another note* rather than as an
+absolute number. That is what makes a composition editable: move one note and everything anchored
+to it follows.
+
+## Aliases
+
+| Write | Meaning |
+|---|---|
+| `t` | canonical short form — what the app writes and what the widget shows |
+| `s` | accepted, rewritten to `t` on save |
+| `start` | accepted, rewritten to `t` on save |
+| `startTime` | accepted, rewritten to `t` on save |
+
+`base.t` and `[0].t` are the same thing: note id 0 *is* the BaseNote.
+
+## Defaults
+
+| Situation | Value |
+|---|---|
+| BaseNote in a module created from scratch | `0` |
+| BaseNote in `defaultModule.json` | `0` |
+| A note with no `startTime` expression | none — the note is never scheduled |
+| An expression referencing a note whose startTime cannot be resolved | `0` (silent fallback, console warning only) |
+
+`startTime` does **not** inherit: `[5].t` on a note with no startTime expression falls back to the
+hard-coded `0`, it does not walk up to a parent.
+
+## Where you edit it
+
+- **The note widget.** Select the note; the `startTime` row has an `Evaluated:` readout and a
+  `Raw:` input with a `Save` button. Edits apply on **Save**, not while typing. An invalid
+  expression is dropped silently (the error goes to the console only).
+- **Dragging.** Drag a note's body left or right. Notes only move horizontally — dragging never
+  changes pitch.
+- **Group drag.** With several notes selected, dragging one applies the same time delta to every
+  selected note that is not already anchored to another selected note. Notes anchored to a moved
+  note are left alone: they follow their anchor anyway, and rewriting them would double-move them.
+- **Measure triangles.** A measure bar's start is dragged by its triangle handle.
+
+### What a drag writes
+
+Dragging snaps the start to a **quarter of a beat** — a sixteenth note, when a beat is a quarter —
+and clamps it so it can never land before the
+BaseNote. The app then picks the nearest suitable **anchor** — the ancestor (or, going forward
+along a measure chain, the next measure) that starts at or before the new position — and writes the
+start relative to it:
+
+| Situation | Expression written |
+|---|---|
+| Dropped exactly at the anchor's start | `[P].t` |
+| Dropped exactly at the anchor's end | `[P].t + [P].d` |
+| Dropped elsewhere | `[P].t + beat([P]) * (n/d)` (or `- beat([P]) * (n/d)`) |
+
+When the anchor is the BaseNote, `[P]` is written as `base`. Moving a note can also rewrite *other*
+notes' expressions: if a move would leave a note referencing a note that now starts after it, the
+app re-anchors that dependent to an earlier note.
+
+## Expression examples
+
+### Absolute time
 
 ```
-0  // Starts at the beginning
-```
-
-## Expression Examples
-
-### Fixed Time
-
-```
-0       // Start immediately
-1       // Start at 1 second
-(5/2)   // Start at 2.5 seconds
+0        # start of the composition
+1        # one second in
+(5/2)    # 2.5 seconds in
 ```
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-new Fraction(0)     // Start immediately
-new Fraction(1)     // Start at 1 second
-new Fraction(5, 2)  // Start at 2.5 seconds
+new Fraction(0)
+new Fraction(1)
+new Fraction(5, 2)
 ```
 </details>
 
-### Relative to BaseNote
+### Relative to the BaseNote
 
 ```
-// Same start as BaseNote
-base.t
-
-// One second after BaseNote
-base.t + 1
+base.t                       # same start as the BaseNote
+base.t + 1                   # one second after it
+base.t + beat(base) * (1/4)  # a quarter of a beat after it (a sixteenth note)
 ```
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// Same start as BaseNote
 module.baseNote.getVariable('startTime')
-
-// One second after BaseNote
 module.baseNote.getVariable('startTime').add(new Fraction(1))
 ```
 </details>
 
-### Sequential Notes
+### Sequential notes
 
-The most common pattern chains notes sequentially:
+The single most common pattern — start when note 1 ends:
 
 ```
-// Start when previous note ends
-[prev].t + [prev].d
+[1].t + [1].d
 ```
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// Start when previous note ends
-module.getNoteById(prev).getVariable('startTime')
-  .add(module.getNoteById(prev).getVariable('duration'))
+module.getNoteById(1).getVariable('startTime')
+  .add(module.getNoteById(1).getVariable('duration'))
 ```
 </details>
 
-### Beat-Relative Timing
+### Beat- and measure-relative
 
 ```
-// Start at beat 2 (tempo-aware)
-60 / tempo(base) * 2
-
-// Start at measure 2
-measure(base) * 2
+beat(base) * 2         # two beats after time zero
+base.t + beat(base)    # one beat after the BaseNote
+[3].t + beat(base)     # one beat after note 3 starts
+[1].t + measure([1])   # one measure after note 1 starts
 ```
+
+`beat(x)` is `60 / tempo(x)` in seconds. `measure(x)` is `x`'s measure length in seconds.
+
+::: tip
+`measure([1])` is written back as `[1].ml` when the module is saved — the two compile to identical
+bytecode. `beat()` is the one helper the decompiler reconstructs, so it survives a save.
+:::
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// Start at beat 2 (tempo-aware)
-new Fraction(60).div(module.findTempo(module.baseNote))
-  .mul(new Fraction(2))
-
-// Start at measure 2
-module.findMeasureLength(module.baseNote)
-  .mul(new Fraction(2))
-```
-</details>
-
-### Offset from Another Note
-
-```
-// Start 0.5 seconds after Note 3 starts
-[3].t + (1/2)
-
-// Start 1 beat after Note 3 starts
-[3].t + 60 / tempo(base)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Start 0.5 seconds after Note 3 starts
-module.getNoteById(3).getVariable('startTime')
-  .add(new Fraction(1, 2))
-
-// Start 1 beat after Note 3 starts
 module.getNoteById(3).getVariable('startTime')
   .add(new Fraction(60).div(module.findTempo(module.baseNote)))
+
+module.getNoteById(1).getVariable('startTime')
+  .add(module.findMeasureLength(module.getNoteById(1)))
 ```
 </details>
 
-### Simultaneous Notes (Chords)
+### Simultaneous notes (chords)
+
+Give every note of the chord the same start:
 
 ```
-// Same start time as Note 1 (plays together)
 [1].t
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Same start time as Note 1 (plays together)
-module.getNoteById(1).getVariable('startTime')
-```
-</details>
-
-## Common Patterns
-
-### Building a Melody
+### A melody
 
 ```
-// Note 1: starts at 0
-0
+# note 1
+base.t
 
-// Note 2: starts when Note 1 ends
+# note 2
 [1].t + [1].d
 
-// Note 3: starts when Note 2 ends
+# note 3
 [2].t + [2].d
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+::: warning
+There is no `[prev]` reference. A note reference must be a literal, non-negative integer id:
+`[2].t`, not `[prev].t`.
+:::
 
-```javascript
-// Note 1: starts at 0
-new Fraction(0)
+## Measure bars and measure chains
 
-// Note 2: starts when Note 1 ends
-module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
+A note that has a `startTime` but **no `duration` and no `frequency`** is a **measure bar**. It is
+drawn as a vertical dashed line, it never sounds, and it is the backbone of the timing grid. A
+measure chain is just measure bars linked through `startTime`:
 
-// Note 3: starts when Note 2 ends
-module.getNoteById(2).getVariable('startTime')
-  .add(module.getNoteById(2).getVariable('duration'))
-```
-</details>
-
-### Building a Chord
-
-```
-// All notes share the same start time
-// Notes 2, 3, 4 reference Note 1:
-[1].t
+```json
+{ "id": 1, "startTime": "base.t" },
+{ "id": 2, "startTime": "[1].t + measure([1])" },
+{ "id": 3, "startTime": "[2].t + measure([2])" }
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// All notes share the same start time
-// Notes 2, 3, 4 reference Note 1:
-module.getNoteById(1).getVariable('startTime')
-```
-</details>
-
-### Staggered Entry (Arpeggio)
-
-```
-// Each note starts 0.1 seconds after the previous
-[prev].t + (1/10)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Each note starts 0.1 seconds after the previous
-module.getNoteById(prev).getVariable('startTime')
-  .add(new Fraction(1, 10))
-```
-</details>
-
-## Visualization
-
-- **Horizontal position** on the workspace represents time
-- Notes further right start later
-- The X-axis scales as: `seconds * 200 * xScaleFactor`
-- The **playhead** (vertical line) shows current playback position
+Because each link uses the *previous measure's own* measure length, giving a single measure bar its
+own `beatsPerMeasure` changes the length of that bar and shifts every later one. See
+[beatsPerMeasure](/reference/properties/beats-per-measure).
 
 ## Dependencies
 
-When startTime references another note, both notes are linked:
+Referencing another note's start creates a **startTime dependency**:
 
 ```
-// Changing Note 1's timing affects Note 2
-[1].t + [1].d
+[1].t + [1].d      # depends on BOTH note 1's startTime and its duration
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+That expression makes this note follow note 1 when note 1 is *moved* and when it is *resized*.
 
-```javascript
-// Changing Note 1's timing affects Note 2
-module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-```
-</details>
+Select a note and the workspace outlines the notes involved: **teal** for startTime, **orange** for
+frequency, **purple** for duration. A thick outline is a note the selection depends on; a thin
+outline is a note that depends on the selection.
 
-This creates dependencies on both `startTime` and `duration` of Note 1.
+## In the workspace
 
-## See Also
+- Horizontal position is `seconds * 200 * xScaleFactor`.
+- The **playhead** is the vertical line that tracks playback position.
+- The **vertical dashed lines** are measure bars, drawn from the measure chain.
 
-- [duration](/reference/properties/duration) - Note length
-- [tempo](/reference/properties/tempo) - Speed in BPM
-- [Creating Notes](/user-guide/notes/creating-notes) - Adding notes
-- [Dependencies](/user-guide/notes/dependencies) - Linking notes
+## In playback
+
+A note is scheduled only if it has both a `startTime` and a `duration`. Its voice starts at
+`startTime` (offset by wherever playback began) and its envelope runs entirely inside
+`[startTime, startTime + duration]`.
+
+## See also
+
+- [duration](/reference/properties/duration)
+- [tempo](/reference/properties/tempo)
+- [beatsPerMeasure](/reference/properties/beats-per-measure)
+- [Creating Notes](/user-guide/notes/creating-notes)
+- [Dependencies](/user-guide/notes/dependencies)

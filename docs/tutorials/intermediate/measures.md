@@ -1,515 +1,181 @@
-# Measure-Based Timing
+---
+title: Working with Measures
+description: Build measure chains from the note widget, set per-measure time signatures, and position notes by measure and beat instead of absolute time.
+---
 
-Learn how to work with tempo, beats, and measures to create rhythmically structured compositions.
+# Working with Measures
 
-## Understanding Tempo in RMT Compose
+Measures are the dashed vertical lines that divide the workspace into bars. They are notes — a special kind, with a start time and nothing else — and you build them into chains, where each bar starts where the last one ended.
 
-Tempo is stored in the `tempo` property as beats per minute (BPM). The BaseNote has a default tempo of 60 BPM.
+**Prerequisites:** [Note Dependencies](/tutorials/intermediate/dependencies), [Add Rhythm](/tutorials/beginner/rhythm).
 
-### Finding the Tempo
+## Tempo lives on the BaseNote
 
-Use `tempo(note)` to get the effective tempo for any note:
+Click the **BaseNote** and you get rows for `startTime`, `frequency`, **`tempo`**, **`beatsPerMeasure`**, and `instrument`. The defaults:
 
-```
-tempo(base)  // Returns 60 by default
-```
+| Property | Default |
+|---|---|
+| `tempo` | `100` BPM |
+| `beatsPerMeasure` | `4` |
 
-This walks up the dependency chain to find the nearest defined tempo.
+Click any ordinary note and you get `startTime`, `duration`, `frequency`, `color` and `instrument` — **no tempo row**. Tempo is a property of the piece, not of a note.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.findTempo(module.baseNote)  // Returns Fraction(60) by default
-```
-
-</details>
-
-## Converting Beats to Seconds
-
-The fundamental formula:
+From tempo, two derived quantities fall out:
 
 ```
-seconds = beats × (60 / tempo)
+beat(base)              # one beat, in seconds: 60 / tempo
+measure(base)           # one measure, in seconds: beatsPerMeasure × 60 / tempo
 ```
 
-In expression form, use the `beat()` helper for cleaner code:
+At the defaults, `beat(base)` is 0.6 s and `measure(base)` is 2.4 s.
+
+::: info Helpers are input sugar
+You type `measure(base)` and `tempo(base)`; the app stores the same bytecode as `base.ml` and `base.tempo`, and that is what the `Raw:` field will show you afterwards. `beat()` is the one helper that survives the round trip and is displayed back to you as `beat(...)`. All three forms are equivalent — do not be surprised when your `measure([1])` reappears as `[1].ml`.
+:::
+
+## Build a measure chain
+
+1. Click the **BaseNote**, **Clean Slate** the workspace, and click the BaseNote again.
+2. Find the row labelled **Add New Measure Chain** and click **Add**.
+
+A dashed vertical line appears at time 0 with a small triangle at the top. That triangle is the measure's handle. The widget re-opens on it, titled **Measure [1] Variables**.
+
+3. With Measure 1 selected, the widget now offers **Add Measure**. Click **Add**.
+
+Measure 2 appears one measure-length later. Click **Add** again for Measure 3, and again for Measure 4.
+
+::: info
+**Add Measure** only appears on the **last** measure of a chain. If you select a measure in the middle, the button is not there — you cannot insert a bar into the middle of a chain from the widget.
+:::
+
+Select any measure and read its `startTime`:
 
 ```
-// One beat at current tempo (preferred)
-beat(base)
-
-// Two beats
-beat(base) * 2
-
-// Half beat
-beat(base) * (1/2)
+[1].t + [1].ml
 ```
 
-The `beat(base)` helper is equivalent to `60 / tempo(base)`.
+"Start where measure 1 starts, plus measure 1's length." That is the chain. Each bar depends on the one before it, so lengthening any bar pushes every later bar along.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+## A measure widget is nearly empty
 
-```javascript
-// One beat at current tempo
-new Fraction(60).div(module.findTempo(module.baseNote))
+Click a measure triangle and you get:
 
-// Two beats
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
+- a **startTime** row,
+- a **Measure Duration** row,
+- **Add Measure**, if it is the last in its chain,
+- **EVALUATE** (Evaluate to BaseNote only — no Liberate),
+- **DELETE NOTE**.
 
-// Half beat
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
-```
+No frequency, no duration, no colour, no instrument, and no **ADD NOTE / SILENCE** section. You cannot hang a note directly off a measure bar from the widget — but you *can* drag a library module onto one, and you can reference it from any note's expression.
 
-</details>
+## Change a time signature
 
-## Setting Note Duration by Beats
+The **Measure Duration** row edits that measure's `beatsPerMeasure` — how many beats the bar holds.
 
-### Whole Note (4 beats)
+1. Click **Measure 3**'s triangle.
+2. In the **Measure Duration** row, the `Raw:` field shows `4` (inherited from the BaseNote).
+3. Change it to `3`.
+4. Click **Save**.
 
-```
-duration: beat(base) * 4
-```
+Measure 3 becomes a 3-beat bar. It visibly narrows, and **Measure 4 and everything after it slide left**, because they are chained to it. You have a 4/4, 4/4, 3/4, 4/4 piece.
 
-### Half Note (2 beats)
+::: warning
+The Save button on this row is hidden until you type in the field, and the row has no `Evaluated:` readout — you get the raw value only. Odd meters work too: `(7/8)` and `(5/4)` are both valid.
+:::
 
-```
-duration: beat(base) * 2
-```
+To change the whole piece's meter instead, set `beatsPerMeasure` on the **BaseNote**. Every measure that has not overridden it follows.
 
-### Quarter Note (1 beat)
+## Positioning notes by measure
 
-```
-duration: beat(base)
-```
+### On a bar line
 
-### Eighth Note (1/2 beat)
+The cleanest way to say "start at measure 3" is to reference measure 3. Put this in the note's **startTime**:
 
 ```
-duration: beat(base) * (1/2)
+[3].t
 ```
 
-### Sixteenth Note (1/4 beat)
+This is robust: it stays correct even if you change the length of measure 1 or 2. Use it.
+
+### Counting from the BaseNote
 
 ```
-duration: beat(base) * (1/4)
+base.t                          # measure 1
+base.t + measure(base)          # measure 2
+base.t + measure(base) * 2      # measure 3
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+::: warning
+This arithmetic only works while **every** measure is the same length. The moment you give one bar a different `beatsPerMeasure`, `measure(base) * 2` stops being "the start of measure 3". Reference the measure bar instead.
+:::
 
-```javascript
-// Whole Note (4 beats)
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(4))
+### A beat inside a measure
 
-// Half Note (2 beats)
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
-
-// Quarter Note (1 beat)
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Eighth Note (1/2 beat)
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
-
-// Sixteenth Note (1/4 beat)
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 4))
-```
-
-</details>
-
-## Working with Measures
-
-### Measure Length
-
-A measure's length depends on:
-1. **Tempo** - How fast beats occur
-2. **beatsPerMeasure** - How many beats in each measure (time signature numerator)
+Beat 3 of measure 2 — two beats past the bar line:
 
 ```
-// Measure length in seconds
-measure(base)
-
-// Or manually:
-// beatsPerMeasure × (60 / tempo)
-4 * (60 / tempo(base))
+[2].t + beat(base) * 2
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Beats are counted from zero, so "beat 3" is `* 2`.
 
-```javascript
-// Measure length in seconds
-module.findMeasureLength(module.baseNote)
+## Practical: a kick-snare pattern
 
-// Or manually:
-// beatsPerMeasure × (60 / tempo)
-new Fraction(4).mul(new Fraction(60).div(module.findTempo(module.baseNote)))
-```
+Four bars of the workspace, a note on beat 1 and beat 3 of each.
 
-</details>
+Build a measure chain of four bars first, then create notes from the BaseNote and set their start times:
 
-### Positioning Notes by Measure
+| Note | startTime | duration |
+|---|---|---|
+| Kick, bar 1 | `[1].t` | `beat(base)` |
+| Snare, bar 1 | `[1].t + beat(base) * 2` | `beat(base)` |
+| Kick, bar 2 | `[2].t` | `beat(base)` |
+| Snare, bar 2 | `[2].t + beat(base) * 2` | `beat(base)` |
 
-#### Start of Measure 1
+Now change the BaseNote's tempo. The bars, the kicks and the snares all move together, and the pattern stays a pattern. Change measure 2's **Measure Duration** to `3` and the second bar's snare lands correctly inside the shorter bar, while measure 3 slides left to meet it.
 
-```
-startTime: 0
-```
+## On per-note tempo
 
-#### Start of Measure 2
+::: warning There is no tempo change mid-composition
+The note widget exposes no `tempo` field on an ordinary note, so **a tempo change cannot be authored in the app**. Tempo is a BaseNote property, and one piece has one tempo.
 
-```
-startTime: measure(base)
-```
+You may see `beat([1])` in an expression — the app writes that form itself when you drag a note. It reads note 1's tempo and, because no ordinary note can carry one, falls back to the BaseNote's. So in practice `beat([N])` and `beat(base)` give the same answer for every note you can build in the app.
+:::
 
-#### Start of Measure N
+## One duration this page adds
 
-```
-// Measure N (0-indexed)
-startTime: measure(base) * N
-```
+The note-length table — whole through triplet eighth, all as multiples of `beat(base)` — is in
+[Add Rhythm](/tutorials/beginner/rhythm#duration-reference). Measures add one entry to it: a
+duration of one full bar is `measure(base)`, or equivalently `beat(base) * base.bpm`. Both are
+tempo-independent, like every duration written in beats.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+## Exercises
 
-```javascript
-// Start of Measure 1
-startTime: new Fraction(0)
+### 1. A waltz
 
-// Start of Measure 2
-startTime: module.findMeasureLength(module.baseNote)
+Set the BaseNote's `beatsPerMeasure` to `3` and its `tempo` to `150`. Build a four-bar chain and put a note on each beat. Compare with the shipped **Greensleeves** and **Bach Minuet in G** melodies in the library, both of which are in 3.
 
-// Start of Measure N (0-indexed)
-startTime: module.findMeasureLength(module.baseNote).mul(new Fraction(N))
-```
+### 2. A hemiola
 
-</details>
+Give measures 1 and 2 a Measure Duration of `3`, and measure 3 a Measure Duration of `2`. Watch the chain re-flow.
 
-### Beat Offsets Within Measures
+### 3. Two chains
 
-Position a note at beat 3 of measure 2:
+From the **BaseNote**, click **Add New Measure Chain** a second time. You get a second chain starting at `base.t`, independent of the first. Both anchor to the BaseNote; neither depends on the other.
 
-```
-// Measure 2 starts at one measure length
-// Beat 3 is 2 beats into the measure (0-indexed)
-startTime: measure(base) + beat(base) * 2
-```
+### 4. Drop a melody onto a bar line
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Drag **Ode to Joy** from the library's **Melodies** section onto a measure triangle. Its timing anchors to that bar; its pitches stay anchored to `base.f`, because a measure bar has no frequency to inherit.
 
-```javascript
-startTime: module.findMeasureLength(module.baseNote)
-  .add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2)))
-```
+## What you learned
 
-</details>
+- Tempo and `beatsPerMeasure` live on the BaseNote; ordinary notes have neither.
+- Measure chains are built with **Add New Measure Chain** and **Add Measure**, and each bar depends on the one before it.
+- **Measure Duration** sets a per-measure time signature.
+- Reference a bar (`[3].t`) rather than counting measure lengths.
 
-## Practical Example: 4/4 Drum Pattern
+## Next
 
-Build a simple kick-snare pattern:
-
-```
-// Set tempo to 120 BPM in BaseNote
-// BaseNote: tempo = 120
-
-// Beat helper (for reference)
-// 1 beat at 120 BPM = 60/120 = 0.5 seconds
-
-// Kick on beat 1 (measure 1)
-startTime: base.t
-duration: beat(base)
-
-// Snare on beat 3 (measure 1)
-startTime: base.t + beat(base) * 2
-duration: beat(base)
-
-// Kick on beat 1 (measure 2)
-startTime: base.t + measure(base)
-duration: beat(base)
-
-// Snare on beat 3 (measure 2)
-startTime: base.t + measure(base) + beat(base) * 2
-duration: beat(base)
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Set tempo to 120 BPM in BaseNote
-// BaseNote: tempo = new Fraction(120)
-
-// Beat helper (for reference)
-// 1 beat at 120 BPM = 60/120 = 0.5 seconds
-
-// Kick on beat 1 (measure 1)
-startTime: module.baseNote.getVariable('startTime')
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Snare on beat 3 (measure 1)
-startTime: module.baseNote.getVariable('startTime')
-  .add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2)))
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Kick on beat 1 (measure 2)
-startTime: module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Snare on beat 3 (measure 2)
-startTime: module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))
-  .add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2)))
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-```
-
-</details>
-
-## Chaining Rhythmic Notes
-
-### Sequential Quarter Notes
-
-```
-// Note 1: Beat 1
-startTime: base.t
-duration: beat(base)
-
-// Note 2: Beat 2 (starts after Note 1)
-startTime: [1].t + [1].d
-duration: beat(base)
-
-// Note 3: Beat 3 (starts after Note 2)
-startTime: [2].t + [2].d
-duration: beat(base)
-```
-
-### Mixed Rhythms
-
-```
-// Half note (2 beats)
-duration: beat(base) * 2
-
-// Followed by two quarter notes (1 beat each)
-// ...chain as above
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Note 1: Beat 1
-startTime: module.baseNote.getVariable('startTime')
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Note 2: Beat 2 (starts after Note 1)
-startTime: module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Note 3: Beat 3 (starts after Note 2)
-startTime: module.getNoteById(2).getVariable('startTime')
-  .add(module.getNoteById(2).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Half note (2 beats)
-duration: new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
-```
-
-</details>
-
-## Changing Tempo Mid-Composition
-
-You can set a different tempo for a note, and all notes that depend on it will inherit that tempo.
-
-### Creating a Tempo Change
-
-```
-// Note at new tempo section
-tempo: 140  // New tempo: 140 BPM
-startTime: base.t + measure(base) * 4  // Starts at measure 5
-duration: beat(base)  // Uses inherited tempo
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Note at new tempo section
-tempo: new Fraction(140)  // New tempo: 140 BPM
-startTime: module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote).mul(new Fraction(4)))  // Starts at measure 5
-duration: new Fraction(60).div(module.findTempo(module.baseNote))  // Uses inherited tempo
-```
-
-</details>
-
-### Notes Inheriting New Tempo
-
-When notes reference a note with a custom tempo:
-
-```
-// This note inherits tempo from Note 5 (which has tempo = 140)
-duration: beat([5])
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-duration: new Fraction(60).div(module.findTempo(module.getNoteById(5)))
-```
-
-</details>
-
-## Time Signatures
-
-### 4/4 Time (Default)
-
-- 4 beats per measure
-- Quarter note gets the beat
-
-```
-beatsPerMeasure: 4
-```
-
-### 3/4 Time (Waltz)
-
-- 3 beats per measure
-- Quarter note gets the beat
-
-```
-beatsPerMeasure: 3
-```
-
-### 6/8 Time
-
-- 6 beats per measure (compound duple)
-- Eighth note gets the beat
-
-```
-beatsPerMeasure: 6
-// Adjust duration calculations for eighth note = 1 beat
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// 4/4 Time
-beatsPerMeasure: new Fraction(4)
-
-// 3/4 Time (Waltz)
-beatsPerMeasure: new Fraction(3)
-
-// 6/8 Time
-beatsPerMeasure: new Fraction(6)
-```
-
-</details>
-
-## Practical Example: Tempo Hierarchy
-
-Build a composition with verse and chorus at different tempos:
-
-```
-// BaseNote: tempo = 100 BPM, beatsPerMeasure = 4
-
-// Verse root note (inherits BaseNote tempo)
-// ID: 1
-frequency: base.f
-startTime: base.t
-duration: beat(base)
-
-// More verse notes depend on Note 1...
-
-// Chorus root note (new tempo)
-// ID: 10
-frequency: base.f
-tempo: 120  // Faster chorus!
-startTime: base.t + measure(base) * 8  // After 8 measures of verse
-duration: beat([10])  // Uses its own tempo
-
-// Chorus notes depend on Note 10 and use its tempo
-startTime: [10].t + [10].d
-duration: beat([10])  // Uses 120 BPM
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// BaseNote: tempo = 100 BPM, beatsPerMeasure = 4
-
-// Verse root note (inherits BaseNote tempo)
-// ID: 1
-frequency: module.baseNote.getVariable('frequency')
-startTime: module.baseNote.getVariable('startTime')
-duration: new Fraction(60).div(module.findTempo(module.baseNote))
-
-// More verse notes depend on Note 1...
-
-// Chorus root note (new tempo)
-// ID: 10
-frequency: module.baseNote.getVariable('frequency')
-tempo: new Fraction(120)  // Faster chorus!
-startTime: module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote).mul(new Fraction(8)))  // After 8 measures of verse
-duration: new Fraction(60).div(module.findTempo(module.getNoteById(10)))  // Uses its own tempo
-
-// Chorus notes depend on Note 10 and use its tempo
-startTime: module.getNoteById(10).getVariable('startTime')
-  .add(module.getNoteById(10).getVariable('duration'))
-duration: new Fraction(60).div(module.findTempo(module.getNoteById(10)))  // Uses 120 BPM
-```
-
-</details>
-
-## Quick Reference: Note Durations
-
-At 60 BPM (1 beat = 1 second):
-
-| Note Type | Beats | Duration Expression |
-|-----------|-------|---------------------|
-| Whole | 4 | `beat(base) * 4` |
-| Half | 2 | `beat(base) * 2` |
-| Quarter | 1 | `beat(base)` |
-| Eighth | 1/2 | `beat(base) * (1/2)` |
-| Sixteenth | 1/4 | `beat(base) * (1/4)` |
-| Triplet eighth | 1/3 | `beat(base) * (1/3)` |
-| Dotted quarter | 1.5 | `beat(base) * (3/2)` |
-
-## Tips for Rhythmic Composition
-
-### 1. Start with Tempo in BaseNote
-
-Set your base tempo early - changing it later will cascade through all dependent notes.
-
-### 2. Create a Beat Reference
-
-Consider creating a dedicated "beat reference" note that other notes can depend on for consistent timing.
-
-### 3. Use Measure Calculations
-
-For complex pieces, position notes by measure and beat rather than absolute time:
-
-```
-// Measure 3, Beat 2
-startTime: base.t + measure(base) * 2 + beat(base)  // Measures 1-2 + 1 beat
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Measure 3, Beat 2
-startTime: module.baseNote.getVariable('startTime')
-  .add(module.findMeasureLength(module.baseNote).mul(new Fraction(2)))  // Measures 1-2
-  .add(new Fraction(60).div(module.findTempo(module.baseNote)))  // + 1 beat
-```
-
-</details>
-
-## Next Steps
-
-- [Microtonal Composition](/tutorials/advanced/microtonal) - Explore non-standard tunings
-- [Complex Dependencies](/tutorials/advanced/complex-dependencies) - Advanced note relationships
-- [Module Library Creation](/tutorials/workflows/module-library) - Build reusable modules
-
+- [Microtonal Composition](/tutorials/advanced/microtonal) — alternative tunings
+- [Complex Dependencies](/tutorials/advanced/complex-dependencies) — deeper structures
+- [beatsPerMeasure reference](/reference/properties/beats-per-measure) — the property in full

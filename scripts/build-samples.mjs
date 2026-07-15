@@ -1,5 +1,5 @@
 /**
- * build-samples.mjs (ROADMAP.md Phase 5a)
+ * build-samples.mjs
  *
  * Produces the built-in multisampled instruments from open, clearly-licensed
  * sources (VSCO2 Community Edition, CC0) into public/samples/<name>/:
@@ -14,7 +14,7 @@
  *
  * Velocity: the app has no per-note dynamics, so one layer per zone is used.
  * The manifest schema reserves an optional `velLayers[]` for a future
- * note-dynamics feature (see ROADMAP), so layers can be added without a
+ * note-dynamics feature, so layers can be added without a
  * migration or re-slicing existing zones.
  */
 

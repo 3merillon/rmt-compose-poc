@@ -180,17 +180,33 @@ export class MultisampleInstrument {
     };
   }
 
-  getEnvelopeSettings() {
-    return {
+  /**
+   * Envelope for applyVoiceEnvelope, honoring the manifest's `envelope` block.
+   * The manifest declares absolute seconds (`attack`, `release`); when the note
+   * duration is known they override the default ratios below. The ratio keys
+   * (`attackTimeRatio` etc.) may also be declared directly in the manifest.
+   * @param {number} [duration] note length in seconds
+   */
+  getEnvelopeSettings(duration) {
+    const env = {
       attackTimeRatio: 0.02,
       decayTimeRatio: 0,
       sustainLevel: 1,
       releaseTimeRatio: 0.12,
     };
+    const e = this.envelope || {};
+    for (const k of Object.keys(env)) {
+      if (e[k] != null && isFinite(e[k])) env[k] = +e[k];
+    }
+    if (isFinite(duration) && duration > 0) {
+      if (e.attack != null && isFinite(e.attack) && e.attack >= 0) env.attackTimeRatio = e.attack / duration;
+      if (e.release != null && isFinite(e.release) && e.release >= 0) env.releaseTimeRatio = e.release / duration;
+    }
+    return env;
   }
 
   applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0) {
     // Reuse the shared click-free envelope; samples hold at full then release.
-    applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.gain, this.getEnvelopeSettings());
+    applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.gain, this.getEnvelopeSettings(duration));
   }
 }

@@ -1,329 +1,280 @@
+---
+title: Binary Evaluator
+description: The stack VM that executes note bytecode — the fraction pool, silent defaults, corruption flagging, and the incremental evaluator's Kahn topological sort.
+---
+
 # Binary Evaluator
 
-The **Binary Evaluator** is a stack-based virtual machine that executes compiled bytecode expressions.
+`src/binary-evaluator.js` is a stack-based virtual machine that executes the bytecode produced by the [expression compiler](/developer/core/expression-compiler). It exports four things:
 
-## Overview
+| Export | Role |
+|---|---|
+| `BinaryEvaluator` | the stack VM (`:722`) |
+| `IncrementalEvaluator` | dirty tracking + Kahn topological sort (`:1341`) |
+| `MusicValue` | rational / irrational / symbolic value wrapper (`:274`) |
+| `SymbolicPower` | algebraic form of an irrational power (`:20`) — see [SymbolicPower](/developer/core/symbolic-power) |
 
-```
-Bytecode → Stack VM → Fraction or SymbolicPower
-```
+::: info This is the path that actually runs
+A browser session runs the **JavaScript** evaluator. The WASM evaluator exists but its hot-swap is opt-in via `?evaluator=wasm` (`src/wasm/evaluator-adapter.js:36-40`, and the comment at `src/module.js:57-60`), and that path currently hangs the main thread on a full re-evaluation cycle. Everything on this page describes the shipping JS path. See [WASM Overview](/developer/wasm/overview).
+:::
 
-**Location**: `src/binary-evaluator.js`
-
-## Architecture
-
-### Stack Machine
-
-The evaluator maintains:
-
-- **Stack**: Array of values (Fraction or SymbolicPower)
-- **PC**: Program counter (byte index)
-- **Pool**: Reusable Fraction objects
+## The machine
 
 ```javascript
 class BinaryEvaluator {
   constructor(module) {
     this.module = module;
-    this.stack = new Array(32);
-    this.sp = 0;  // Stack pointer
+    this.stack = new Array(32);      // doubles on overflow
+    this.stackTop = 0;
     this.pool = new FractionPool(256);
+    this.generation = 0;
+    this.cache = new Map();          // noteId -> evaluated result
+    this._lastEvalWasCorrupted = false;
   }
 }
 ```
 
-### Evaluation Loop
+The stack holds **only pooled `Fraction`s**. `SymbolicPower` appears transiently inside the `POW` handler and never survives it (see [POW](#pow-and-corruption)).
 
-```javascript
-evaluate(expr, cache = null) {
-  let pc = 0;
-  const bytecode = expr.bytecode;
+`evaluate(expr, evalCache)` (`:880`) walks the bytecode with a `pc` cursor and returns the single remaining stack value.
 
-  while (pc < bytecode.length) {
-    const op = bytecode[pc++];
+## Value resolution — `LOAD_REF` and `LOAD_BASE`
 
-    switch (op) {
-      case OP.LOAD_CONST: {
-        const num = this.readInt32(bytecode, pc); pc += 4;
-        const den = this.readInt32(bytecode, pc); pc += 4;
-        this.push(this.pool.alloc(num, den));
-        break;
-      }
+There is **no recursion**. Topological order guarantees a note's dependencies are already in the cache by the time it is evaluated. `LOAD_REF` (`:919-983`) resolves in this order:
 
-      case OP.ADD: {
-        const b = this.pop();
-        const a = this.pop();
-        this.push(this.pool.allocFrom(a.add(b)));
-        break;
-      }
+1. the caller's `evalCache` entry for that note id;
+2. the evaluator's own internal `cache` (`getCachedValue()`);
+3. **for `TEMPO`, `BEATS_PER_MEASURE` and `MEASURE_LENGTH` only** — the same two lookups again against note **0**, the BaseNote (`:946-963`);
+4. a **hard-coded default**.
 
-      // ... more opcodes
-    }
-  }
+Step 3 is the inheritance rule users feel: `[5].tempo` on a note with no tempo expression yields the BaseNote's tempo. `startTime`, `duration` and `frequency` do **not** inherit.
 
-  return this.pop();
-}
-```
+::: warning Unresolvable references do not throw — they get a default
+| Property | Default pushed |
+|---|---|
+| `startTime` | `0` |
+| `duration` | `1` |
+| `frequency` | `440` |
+| `tempo` | `60` |
+| `beatsPerMeasure` | `4` |
+| `measureLength` | `4` |
 
-## Value Types
+(`binary-evaluator.js:965-977`.) Delete a note and its dependents keep evaluating against these — a dependent's frequency silently becomes 440 Hz. `Module.removeNote()` does not rewrite dependents.
+:::
 
-### Fraction
+## Runtime behaviour of the other opcodes
 
-Most evaluations produce Fraction values (from Fraction.js):
+| Situation | What happens |
+|---|---|
+| `DIV` with a zero divisor | `console.warn('Division by zero in binary evaluator, using 1')` and pushes `1` (`:1052-1060`) |
+| Stack depth ≠ 1 at the end | `console.warn('Stack has N items after evaluation, expected 1')`, returns the top (`:1200-1204`) |
+| `pop()` on an empty stack | throws `Stack underflow in binary evaluator` (`:838-843`) |
+| `peek()` on an empty stack | throws `Stack empty in binary evaluator` |
+| Unknown opcode byte | throws `Unknown opcode: 0x..` (`:1195-1196`) |
 
-```javascript
-// Exact rational number
-new Fraction(3, 2)  // 3/2 = 1.5
-```
+`FIND_TEMPO`, `FIND_MEASURE`, `DUP` and `SWAP` have cases in the switch but **no compiler emits them**, so they are unreachable. `FIND_INSTRUMENT` has no case at all.
 
-Properties:
-- Arbitrary precision numerator/denominator
-- Exact arithmetic (no rounding)
-- Automatically simplified (GCD reduction)
+## `POW` and corruption
 
-### SymbolicPower
-
-For irrational values (TET systems), the evaluator uses SymbolicPower:
-
-```javascript
-// 2^(1/12) - an irrational number
-SymbolicPower {
-  coefficient: Fraction(1),
-  powers: [{ base: 2, exponent: Fraction(1, 12) }]
-}
-```
-
-See [SymbolicPower](./symbolic-power) for details.
-
-### MusicValue Wrapper
-
-The evaluator wraps values in a MusicValue that tracks corruption:
-
-```javascript
-class MusicValue {
-  constructor(value, corruption = 0) {
-    this.value = value;      // Fraction or SymbolicPower
-    this.corruption = corruption;  // Bitmask
-  }
-}
-```
-
-Corruption flags indicate which properties contain irrational values.
-
-## Opcodes
-
-### Load Operations
-
-| Opcode | Bytes | Stack Effect | Description |
-|--------|-------|--------------|-------------|
-| LOAD_CONST | 9 | → value | Push Fraction(num, den) |
-| LOAD_CONST_BIG | var | → value | Push BigInt Fraction |
-| LOAD_REF | 4 | → value | Push note property |
-| LOAD_BASE | 2 | → value | Push baseNote property |
-
-### Arithmetic Operations
-
-| Opcode | Bytes | Stack Effect | Description |
-|--------|-------|--------------|-------------|
-| ADD | 1 | a, b → sum | a + b |
-| SUB | 1 | a, b → diff | a - b |
-| MUL | 1 | a, b → prod | a × b |
-| DIV | 1 | a, b → quot | a ÷ b |
-| NEG | 1 | a → neg | -a |
-| POW | 1 | a, b → pow | a^b |
-
-### Lookup Operations
-
-| Opcode | Bytes | Stack Effect | Description |
-|--------|-------|--------------|-------------|
-| FIND_TEMPO | var | note → tempo | Find inherited tempo |
-| FIND_MEASURE | var | note → len | Find measure length |
-
-## LOAD_REF Implementation
-
-```javascript
-case OP.LOAD_REF: {
-  const noteId = this.readUint16(bytecode, pc); pc += 2;
-  const varIdx = bytecode[pc++];
-
-  // Get from cache or evaluate recursively
-  let noteCache = cache?.get(noteId);
-  if (!noteCache) {
-    const note = this.module.getNoteById(noteId);
-    noteCache = this.evaluateNote(note, cache);
-    cache?.set(noteId, noteCache);
-  }
-
-  // Extract the requested variable
-  const value = noteCache[VAR_NAMES[varIdx]];
-  this.push(value);
-  break;
-}
-```
-
-## POW Implementation
-
-The POW opcode handles both rational and irrational results:
+`OP.POW` (`:1070-1094`) is the only place a value can leave the rationals.
 
 ```javascript
 case OP.POW: {
-  const exp = this.pop();
+  const exp  = this.pop();
   const base = this.pop();
+  const powResult = MusicValue.rational(new Fraction(base.s * base.n, base.d))
+                      .pow(MusicValue.rational(new Fraction(exp.s * exp.n, exp.d)));
 
-  // Check if result is rational
-  if (this.isRationalPower(base, exp)) {
-    // Compute exact Fraction result
-    const result = this.computeRationalPower(base, exp);
-    this.push(result);
+  if (powResult.isCorrupted()) {
+    this._lastEvalWasCorrupted = true;
+    const frac = new Fraction(powResult.toFloat());   // ← float-derived approximation
+    this.push(this.pool.alloc(frac.s * frac.n, frac.d));
   } else {
-    // Create SymbolicPower for irrational result
-    const sp = SymbolicPower.fromPower(base.valueOf(), exp);
-    this.push(sp);
-    this.markCorrupted();  // Flag as irrational
+    const frac = powResult.fraction;
+    this.push(this.pool.alloc(frac.s * frac.n, frac.d));
   }
   break;
 }
 ```
 
-## Fraction Pool
+`MusicValue.pow()` (`:505-537`) tries `tryRationalPower()` first — an exact integer power, or a perfect n-th root. If that succeeds the result is an exact `Fraction` and **nothing is corrupted**: `4^(1/2)` is `2`, cleanly.
 
-To reduce garbage collection during interactive operations:
+If it fails, and the base is a positive integer, it builds a `SymbolicPower`. That symbolic value is then **immediately flattened back to an approximated rational** by the branch above. Verified against the running VM:
+
+```
+2^(1/12)  →  Fraction 2739815/2586041   (≈1.0594630943592929), _lastEvalWasCorrupted = true
+4^(1/2)   →  Fraction 2/1               exactly, not corrupted
+```
+
+Everything downstream — `MUL`, `DIV`, the cache, the renderer, the audio engine — sees that approximation. The corruption *flag* is what survives, not the algebra.
+
+### `MusicValue`
 
 ```javascript
-class FractionPool {
-  constructor(size) {
-    this.pool = new Array(size);
-    this.index = 0;
-    for (let i = 0; i < size; i++) {
-      this.pool[i] = new Fraction(0);
-    }
+class MusicValue {
+  constructor(type, data) {   // type: 'rational' | 'irrational' | 'symbolic'
+    this.fraction;   // Fraction   — when rational
+    this.float;      // number     — when irrational
+    this.symbolic;   // SymbolicPower — when symbolic
   }
-
-  alloc(num, den) {
-    const f = this.pool[this.index];
-    this.index = (this.index + 1) % this.pool.length;
-    f.s = num < 0 ? -1 : 1;
-    f.n = Math.abs(num);
-    f.d = den;
-    return f;
-  }
-
-  allocFrom(other) {
-    return this.alloc(other.s * other.n, other.d);
-  }
+  isCorrupted() { return this.type === 'irrational' || this.type === 'symbolic'; }
 }
 ```
 
-Benefits:
-- No allocation during evaluation
-- Reduced GC pauses
-- Smooth 60fps during dragging
+It carries **no corruption bitmask**. Corruption bits are accumulated per-note by `evaluateNote()`, not by the value.
 
-## Incremental Evaluator
+## The fraction pool
 
-For efficiency, only dirty notes are re-evaluated:
+`FractionPool` (`:654-717`) is a **bump allocator**, not a ring buffer:
 
 ```javascript
-class IncrementalEvaluator {
-  constructor(module, evaluator) {
-    this.module = module;
-    this.evaluator = evaluator;
-    this.cache = new Map();
-    this.dirty = new Set();
-  }
+alloc(n = 0, d = 1) {
+  if (this.index >= this.pool.length) { /* grow: double the pool */ }
+  const f = this.pool[this.index++];   // hand out the next slot and mutate it
+  f.s = …; f.n = …; f.d = …;
+  return f;
+}
+reset() { this.index = 0; }            // rewind — called once per batch
+```
 
-  markDirty(noteId) {
-    // Mark this note and all dependents as dirty
-    this.dirty.add(noteId);
-    const dependents = this.module.getDependencyGraph().getDependents(noteId);
-    for (const dep of dependents) {
-      this.dirty.add(dep);
-    }
-  }
+`IncrementalEvaluator.evaluateDirty()` calls `evaluator.beginBatch()` (`:1427`), which calls `pool.reset()`. Everything allocated during the previous batch is recycled at that instant.
 
-  evaluateDirty() {
-    if (this.dirty.size === 0) return this.cache;
+::: danger Never cache a pooled fraction
+`reset()` rewinds the index, so the next batch mutates the very objects the last batch handed out. `evaluateNote()` copies every result into a fresh `new Fraction(...)` before storing it (`:1263-1266`). If you add a code path that keeps a value returned by `evaluate()` across a batch boundary, copy it first.
+:::
 
-    // Sort dirty notes by dependency order
-    const sorted = this.topoSort(this.dirty);
+## `evaluateNote()`
 
-    // Evaluate in sequence
-    for (const noteId of sorted) {
-      const note = this.module.getNoteById(noteId);
-      const result = this.evaluator.evaluateNote(note, this.cache);
-      this.cache.set(noteId, result);
-    }
+`:1214-1328`. Evaluates one note's six expressions in a fixed order and returns:
 
-    this.dirty.clear();
-    return this.cache;
-  }
+```javascript
+{
+  startTime, duration, frequency, tempo, beatsPerMeasure, measureLength,
+  corruptionFlags   // u8 bitmask
 }
 ```
 
-## Evaluation Cache Structure
+Order: **tempo → beatsPerMeasure → frequency → measureLength → startTime → duration** (`:1286-1295`). Expressions within a note may reference each other — `measureLength` reads the `tempo` evaluated a moment earlier — so the in-progress result object is written into the shared cache *before* evaluation begins:
 
 ```javascript
-// Cache maps noteId to evaluated properties
-cache.get(noteId) = {
-  startTime: Fraction,
-  duration: Fraction,
-  frequency: Fraction | SymbolicPower,
-  tempo: Fraction,
-  beatsPerMeasure: Fraction,
-  corruption: number  // Bitmask
-}
+const workingCache = evalCache || new Map();
+workingCache.set(note.id, result);   // :1232-1233
 ```
 
-## Error Handling
+::: tip The per-note cache copy is gone
+This used to clone the whole evaluation cache for every note, which made a full evaluation **O(N²)**. Under topological order every dependency is already final before its dependent runs, and the caller overwrites the same key with the finished result — so writing straight into the shared map is safe. The rationale is in the source comment at `:1225-1231`.
+:::
 
-### Stack Underflow
+After each property, if `_lastEvalWasCorrupted` was set by a `POW`, the matching bit is OR-ed into `corruptionFlags`. The bits are the `CORRUPT` mask from `binary-note.js:55-62`: `startTime 0x01`, `duration 0x02`, `frequency 0x04`, `tempo 0x08`, `beatsPerMeasure 0x10`, `measureLength 0x20`.
+
+### The synthetic `measureLength`
+
+If `measureLength` was not explicitly defined **and** the note is a measure bar (has `startTime`, no `duration`, no `frequency`) or is the BaseNote, it is computed as `beatsPerMeasure / tempo * 60` and stored as a **plain duck-typed object**, not a `Fraction` (`:1302-1322`):
 
 ```javascript
-pop() {
-  if (this.sp <= 0) {
-    throw new Error('Stack underflow');
-  }
-  return this.stack[--this.sp];
-}
+{ s: 1, n: Math.round(v * 1e6), d: 1e6, valueOf: () => v }
 ```
 
-### Invalid Reference
+It has `valueOf()` and `s`/`n`/`d`, which is enough for the VM and the renderer — but it is not a `Fraction`, so `instanceof` checks and `Fraction` methods on it will fail. Regular notes skip this entirely.
+
+## Incremental evaluation
 
 ```javascript
-const note = this.module.getNoteById(noteId);
-if (!note) {
-  throw new Error(`Note ${noteId} not found`);
-}
+new IncrementalEvaluator(module, dependencyGraph, evaluator)   // :1342
 ```
 
-### Circular Dependency
+Fields: `graph`, `evaluator`, `dirty` (a `Set`), `cache` (`Map<noteId, result>`), `generation`.
 
-Prevented by the dependency graph, not the evaluator. If somehow triggered:
+| Method | Effect |
+|---|---|
+| `invalidate(noteId)` (`:1369`) | marks the note **and all transitive dependents** dirty, via `graph.getAllDependents()`. Bumps `generation`. |
+| `markDirtyOnly(noteId)` (`:1388`) | marks dirty **without** re-registration or bytecode invalidation. |
+| `invalidateAll()` (`:1395`) | clears both caches, bumps generation, marks every note dirty |
+| `evaluateDirty()` (`:1421`) | `beginBatch()` → `topoSort(dirty)` → `evaluateNote()` in order → clear dirty → return the cache |
+| `getEvaluatedNote(id)`, `isCacheValid()` | accessors |
+
+`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` uses it for dependents whose *values* changed but whose *bytecode* did not — including the BaseNote-dependents branch (`src/module.js:215-235`) and the batch path (`:311-316`). It was added to reach parity with the WASM evaluator; before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
+
+### `topoSort()` — Kahn's algorithm
+
+`:1454-1552`. Not a recursive DFS.
+
+1. For each dirty note, count its dependencies **that are also in the dirty set** — that is its in-degree.
+2. A note that references the BaseNote gets an **implicit extra in-degree edge from note 0**, but only when note 0 is itself dirty (`graph.getBaseNoteDependents()`). The BaseNote is not a real edge in the graph — recording it would be a self-cycle — so the sort simulates it.
+3. Zero-degree notes go into a queue, **sorted numerically** so the order is deterministic and note 0 goes first.
+4. Processing a note decrements its dependents. Processing note **0** additionally releases every BaseNote dependent.
+5. The queue is walked with an index cursor, not `shift()`.
+
+On a cycle (`:1526-1549`) it does **not** throw:
 
 ```javascript
-if (evaluating.has(noteId)) {
-  throw new Error(`Circular dependency detected at note ${noteId}`);
-}
+console.warn('Dependency cycle detected! Some notes could not be evaluated.');
+// dumps up to 10 stuck notes with their unresolved deps, then:
+// appends the remaining notes (sorted by id) to the result anyway
 ```
+
+The stuck notes still get evaluated — against whatever stale or default values are reachable. Cycles are meant to be prevented upstream, by `validateExpression()` in `src/modals/validation.js`.
+
+## From corruption flag to pixels
+
+This is the whole point of tracking corruption, and it crosses four files:
+
+```
+POW produces an irrational
+  → BinaryEvaluator._lastEvalWasCorrupted = true          binary-evaluator.js:1085
+  → evaluateNote ORs the property's bit into corruptionFlags   :1272-1274
+  → Module._updateCorruptionFlags() pushes it into the graph   module.js:636-659
+      → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1659
+  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:823-898
+      0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
+  → the note widget prefixes the frequency with ≈             variable-controls.js:64-69
+```
+
+`_updateCorruptionFlags` is scoped to the dirty set, not all notes.
 
 ## Performance
 
-### Benchmark (1000 notes)
+Do not quote numbers that are not measured. Two harnesses exist:
 
-| Operation | Time |
-|-----------|------|
-| Full evaluation | ~50ms |
-| Single note change | ~0.5ms |
-| Drag preview (20 affected) | ~1ms |
+- `npm run perf:bench` → `scripts/perf/bench-node.mjs`. Headless Node, **JS evaluator only** — no renderer, no WASM.
+- `?perf=1` in the browser → `window.__rmtPerf` (`src/dev/perf-harness.js`), with `measureEval()`, `measureCommit()`, `report()`.
 
-### Optimization Techniques
+One run of `npm run perf:bench` on the generated stress modules (`npm run perf:gen`). The shapes are defined in `scripts/perf/generate-stress-module.mjs:179-183`:
 
-1. **Pool allocation**: No new Fraction per operation
-2. **Incremental evaluation**: Only dirty notes
-3. **Topological sort**: Correct evaluation order
-4. **Cache reuse**: Across multiple evaluations
+| Module | Notes / depth | Full eval (p50) | Mid-chain commit (p50) | BaseNote edit (p50) |
+|---|---|---|---|---|
+| `chain-1000` | 1000 / depth 1000 | 3.01 ms | 0.77 ms | 1.19 ms |
+| `fan-1000` | 1000 / depth 1 | 1.87 ms | 0.01 ms | 1.03 ms |
+| `lattice-1000` | 1000 / 10 chains × 100 | 2.23 ms | 0.84 ms | 1.08 ms |
+| `chords-dense` | 800 / 200 chords, roots chained | 1.50 ms | 0.57 ms | 0.72 ms |
 
-## See Also
+::: warning These are one machine's numbers
+Absolute values move with the host, and the p95s in the harness output run 2-4× the p50s. Re-run the bench rather than quoting this table — the evaluation table in [Performance](/developer/performance) is a *different run* of the same bench, and the two disagree by a few tenths of a millisecond for exactly this reason. What is stable is the *shape*: `fan-1000`'s mid-chain commit is ~100× cheaper than `chain-1000`'s, because nothing depends on the note you edited.
+:::
 
-- [Expression Compiler](./expression-compiler) - How bytecode is generated
-- [SymbolicPower](./symbolic-power) - Irrational number handling
-- [Dependency Graph](./dependency-graph) - Dependency tracking
+Depth, not note count, is what costs: the incremental evaluator only touches the dirty closure, and a deep chain has a much larger one.
+
+## Exact values
+
+| Thing | Value | Source |
+|---|---|---|
+| VM stack | 32 entries, doubles | `binary-evaluator.js:727` |
+| Fraction pool (evaluator) | 256, doubles when exhausted | `:731` (class default is 128, `:655`) |
+| Fraction backing | `fraction.js@4.3.7` — `n`/`d`/`s` are **doubles**, not BigInt | `node_modules/fraction.js/fraction.js` |
+| Note id in bytecode | `u16` → max **65535** | `binary-note.js:117-121` |
+| Note id accepted on load | integer `0 … 100000` | `module.js:852` |
+
+::: warning `fraction.js` is not arbitrary precision
+The package ships a BigInt variant (`bigfraction.js`) but nothing imports it. The default export is double-backed. Exact rational arithmetic, yes; unbounded, no — a product like `(81/80)^1000` overflows.
+:::
+
+::: warning Note ids above 65 535 wrap silently
+The JSON loader accepts ids up to 100 000, but `LOAD_REF` writes a `u16`. No guard exists.
+:::
+
+## See also
+
+- [Expression Compiler](/developer/core/expression-compiler) — where the bytecode comes from
+- [Dependency Graph](/developer/core/dependency-graph) — where `getAllDependents()` and the corruption flags live
+- [SymbolicPower](/developer/core/symbolic-power) — what `POW` builds, and what happens to it
+- [WASM Overview](/developer/wasm/overview) — the other evaluator, and why it is off

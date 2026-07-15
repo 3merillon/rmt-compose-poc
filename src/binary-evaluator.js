@@ -1052,6 +1052,10 @@ export class BinaryEvaluator {
           // Check for division by zero
           if (b.n === 0) {
             console.warn('Division by zero in binary evaluator, using 1');
+            // Flag the result as corrupted so the note's property picks up a
+            // corruption flag (same path POW uses for irrational results) —
+            // the substituted 1 is not the expression's real value.
+            this._lastEvalWasCorrupted = true;
             this.push(this.pool.alloc(1, 1));
           } else {
             const result = a.div(b);

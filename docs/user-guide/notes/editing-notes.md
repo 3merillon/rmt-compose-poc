@@ -1,62 +1,78 @@
+---
+title: Editing Notes
+description: Move, resize and transpose notes in the workspace, edit their expressions in the note widget, change instruments, and delete safely.
+---
+
 # Editing Notes
 
-Learn how to modify existing notes in your composition.
+Click a note and the [note widget](/user-guide/interface/variable-widget) opens on it. From there you can rewrite any of its expressions; in the workspace itself you can drag it, resize it, and step it by an interval.
 
-## Selecting Notes
+::: tip Edits apply on Save
+Typing in a `Raw:` field changes nothing. The **`Save`** button appears the moment you type, and the edit only lands when you press it. The one exception is the ADD NOTE / SILENCE section, whose `Evaluated:` previews are live.
+:::
 
-Before editing, select a note:
+## Selecting a note
 
-1. **Click** on a note rectangle in the workspace
-2. The note is highlighted
-3. The **Variable Widget** appears with editable properties
+Click the note. It gets an orange ring and the widget opens, titled `Note [7] Variables`, `Silence [7] Variables`, `Measure [7] Variables` or `BaseNote Variables` depending on what you clicked.
 
-## Visual Editing (Workspace)
+- Click the **same spot again** to cycle through overlapping notes stacked under the pointer.
+- Click **empty background** to clear the selection, close the widget, and move the playhead.
+- If the **padlock** — the small lock button pinned to the bottom-right corner of the window — is engaged, clicking a note does nothing at all: the widget cannot be opened and nothing can be dragged. The padlock starts unlocked.
 
-### Moving Notes
+Selecting **two or more** notes swaps the note widget for the group widget. See [Selection & Group Editing](/user-guide/notes/selection).
 
-1. Select a note by clicking on it
-2. **Drag the center** of the note rectangle
-3. The note moves in time (horizontal) and frequency (vertical)
-4. Release to place at the new position
+## In the workspace
 
-**Grid snapping**: Notes snap to sixteenth-note intervals in time.
+![The workspace with a note selected, showing its ring, the ▲/▼ arrow column on its left edge and the resize tab on its right](/img/workspace-overview.png)
 
-**Dependency preview**: Notes that depend on this one show their projected new positions.
+### Moving a note
 
-### Resizing Notes (Duration)
+Drag the **body** of the note. The cursor becomes a grabbing hand.
 
-1. Select a note
-2. **Drag the right edge** (resize handle)
-3. The duration changes
-4. Dependent notes (those starting after this one ends) update their positions
+- A drag moves the note **in time only**. Dragging up and down does not change the pitch — pitch is set by the frequency expression or by the arrows.
+- Start times **snap to a sixteenth** — a quarter of a beat, using the tempo in effect at that note.
+- A note can never be dragged earlier than the BaseNote's start time.
+- Notes whose **start time** depends on the note you are dragging preview their new positions as you move.
 
-### Octave Transposition
+Dropping the note rewrites its `startTime` expression to land where you let go.
 
-1. Select a note
-2. Look for the **+** and **-** octave regions above and below the note
-3. Click **+** to transpose up one octave (multiply frequency by 2)
-4. Click **-** to transpose down one octave (divide frequency by 2)
+### Resizing a note
 
-## Property Editing (Variable Widget)
+Every note has a full-height **pull-tab** along its inner right edge. Hover it and the cursor becomes `ew-resize`; drag it to change the note's `duration`.
 
-### Editing Frequency
+- Duration **snaps to a sixteenth**, and cannot go below one sixteenth.
+- Notes that start when this one ends move along with the new end.
 
-**Quick method**: Use octave +/- buttons
+### Transposing with the arrows
 
-**Expression method**:
-1. Find the **frequency** row
-2. Click on the **Raw** field
-3. Enter a new expression:
+Every note carries a narrow column on its **left inner edge**, split into an upper **▲** half and a lower **▼** half. Click a half to multiply that note's frequency by an interval.
+
+::: warning The arrows are not octave buttons
+They apply a **user-chosen ratio**, set in **Settings → Arrows**. The default is the octave — ▲ multiplies by `2/1`, ▼ by `1/2` — but set the up interval to `3/2` and ▲ transposes by a perfect fifth. The workspace glyphs are always `▲`/`▼`; they never show the ratio.
+:::
+
+- Arrows act on **one note** — the one you clicked. There is no group transpose and no keyboard shortcut.
+- **Silences have no arrows** (they have no frequency).
+- The **BaseNote** is drawn as a circle and has no workspace arrows, but the widget's ▲/▼ buttons work on it. Transposing the BaseNote transposes the whole composition.
+- Arrows can be **switched off entirely** in Settings → Arrows, which removes both the glyphs and their hit zones.
+
+[Transposing with Arrows](/user-guide/notes/transposing) is the full account: the interval settings, the quick-pick ratios, and how the factor is folded into the expression's coefficient instead of being stacked in front of it.
+
+## In the note widget
+
+Each property gets a row with an **`Evaluated:`** readout (what it currently works out to) and a **`Raw:`** field (the expression). The Raw field **always shows DSL**, even for a note that was authored in the legacy method-chain format.
+
+::: warning A rejected expression fails silently
+If an expression is invalid, self-referencing, or would create a cycle, pressing `Save` does nothing visible — the error only reaches the browser console and the field keeps your text. If Save appears to do nothing, that is why. The only exception is `color`, which pops an alert.
+:::
+
+### Frequency
 
 ```
-// Major third above BaseNote
-base.f * (5/4)
-
-// Perfect fifth above Note 3
-[3].f * (3/2)
-
-// Exact frequency in Hz
-440
+base.f * (5/4)      # just major third above the BaseNote
+[3].f * (3/2)       # perfect fifth above note 3
+440                 # an exact frequency in Hz
+base.f * 2^(7/12)   # a 12-TET fifth above the BaseNote
 ```
 
 <details>
@@ -69,187 +85,127 @@ new Fraction(440)
 ```
 </details>
 
-4. Click **Save**
-
-### Editing Start Time
-
-1. Find the **startTime** row
-2. Click on the **Raw** field
-3. Enter a new expression:
+### Start time
 
 ```
-// Start at time 0
-0
-
-// Start when Note 2 ends
-[2].t + [2].d
-
-// Start 2 beats after BaseNote
-base.t + 2
+base.t                    # start with the BaseNote
+[2].t + [2].d             # start when note 2 ends
+base.t + beat(base) * 2   # two beats after the BaseNote
 ```
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-new Fraction(0)
+module.baseNote.getVariable('startTime')
 module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))
-module.baseNote.getVariable('startTime').add(new Fraction(2))
 ```
 </details>
 
-4. Click **Save**
+### Duration
 
-### Editing Duration
+The duration row has a strip of note-length icons above the Raw field.
 
-**Quick method**: Use the note-length icons (whole, half, quarter, eighth, sixteenth)
+| Button | Length |
+|---|---|
+| Whole | 4 beats |
+| Half | 2 beats |
+| Quarter | 1 beat |
+| Eighth | 1/2 beat |
+| Sixteenth | 1/4 beat |
+| `.` | multiplies the chosen length by 3/2 |
+| `..` | multiplies the chosen length by 7/4 |
 
-**Dot modifiers**: Add 50% or 75% to the duration
+Clicking an icon **writes the expression into the Raw field and reveals `Save`. It does not commit** — you still press Save. The dots toggle: click the selected dot again to remove it.
 
-**Expression method**:
-1. Find the **duration** row
-2. Click on the **Raw** field
-3. Enter a new expression:
+The widget highlights whichever icon matches the note's current duration. A duration that no icon can express — a triplet, say — leaves all of them unhighlighted.
 
 ```
-// 1 beat
-1
-
-// Half note (2 beats) at current tempo
-60 / tempo(base) * 2
-
-// Same duration as Note 3
-[3].d
+beat(base)              # a quarter note
+beat(base) * 2          # a half note
+beat(base) * (3/4)      # a dotted eighth
+[3].d                   # the same length as note 3, and tied to it
 ```
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-new Fraction(1)
+new Fraction(60).div(module.findTempo(module.baseNote))
 new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
 module.getNoteById(3).getVariable('duration')
 ```
 </details>
 
-4. Click **Save**
-
-### Changing Instrument
-
-1. Find the **instrument** dropdown
-2. Select from available instruments:
-   - **Sine wave** (default)
-   - **Square wave**
-   - **Sawtooth wave**
-   - **Triangle wave**
-   - **Organ**
-   - **Vibraphone**
-   - **Piano** (sample)
-   - **Violin** (sample)
-
-**Instrument Inheritance:**
-
-Instruments propagate through **frequency dependencies**. If a note doesn't have its own instrument set, it inherits from the note its frequency depends on:
-
-- **BaseNote** → Sets the default instrument for all notes that depend on it
-- **Note with own instrument** → Overrides inheritance; its dependents inherit from it
-- **Note without own instrument** → Inherits from its frequency parent
-
-Example: If BaseNote uses "Piano" and Note 1's frequency is `base.f * (3/2)`, Note 1 inherits "Piano". If you set Note 1 to "Violin", any notes whose frequency depends on Note 1 will inherit "Violin".
-
-To reset a note to use inherited instrument, click **"Use Inherited"** in the instrument section.
-
-### Changing Color
-
-1. Find the **color** field
-2. Enter a CSS color value:
-
-```
-rgba(255, 100, 100, 0.7)  // Red, 70% opacity
-rgba(100, 200, 100, 0.7)  // Green
-#ff6600                    // Orange (hex)
-```
-
-## Batch Operations
-
-### Evaluate to BaseNote
-
-Converts all references to direct BaseNote-relative expressions:
-
-1. Select a note
-2. Click **"Evaluate to BaseNote"** in the Variable Widget
-
-This simplifies complex dependency chains.
-
-### Evaluate Module
-
-Evaluates all notes in the module at once:
-
-1. Open the Variable Widget on any note
-2. Click **"Evaluate Module"**
-
-Useful for "flattening" a module before sharing.
-
-## Deleting Notes
-
-### Safe Delete
-
-1. Select the note
-2. Click **"Delete and Keep Dependencies"**
-3. The note is removed
-4. Dependent notes update their references
-
-### Cascade Delete
-
-1. Select the note
-2. Click **"Delete and Remove Dependencies"**
-3. The note AND all notes that depend on it are removed
-
-::: danger Check Dependencies First
-Look at the dependency lines before deleting. Cascade delete can remove many notes.
+::: tip `1` is not one beat
+`1` is one **second**. At the default tempo of 100 that is closer to 1.67 beats. Use `beat(base)` for a beat.
 :::
 
-### Liberate Dependencies
+### Instrument
 
-**"Liberate Dependencies"** rewrites all notes that depend on the selected note to bypass it, substituting the selected note's expressions directly into the dependent notes. This is useful for:
+The `INSTRUMENT` row shows either **`Current:`** (the note has its own instrument) or **`Inherited:`** in grey (it is borrowing one), and a dropdown listing the nine registered instruments by their raw ids, alphabetically:
 
-- **Moving a note independently**: After liberating, you can move or edit the note without affecting notes that previously depended on it
-- **Breaking dependency chains**: Remove a note from the middle of a chain while preserving the chain's behavior
-- **Pre-delete preparation**: Liberate first, then delete safely
+`fm-epiano`, `organ`, `piano`, `sawtooth-wave`, `sine-wave`, `square-wave`, `triangle-wave`, `vibraphone`, `violin`
 
-**How it works:**
+`piano` and `violin` are multisampled instruments; the other seven are synthesised.
 
-If Note 2's startTime is `[1].t + [1].d` (depends on Note 1), and Note 1's expressions are:
-- startTime: `base.t`
-- duration: `beat(base)`
+**Inheritance follows the frequency reference.** A note with no instrument of its own uses the instrument of the note its *frequency* points at, recursively. Set note 1 to `violin`, and every note whose frequency is `[1].f * …` plays as a violin unless it overrides it. A note that reaches the BaseNote and finds no instrument there falls back to the **global default in Settings → Audio**, which ships as `sine-wave`.
 
-After liberating Note 1, Note 2's startTime becomes `base.t + beat(base)` - the references to Note 1 are replaced with Note 1's actual expressions, bypassing Note 1 in the dependency chain.
+If a note has its own instrument — and it isn't the BaseNote — a **`Use Inherited`** button appears next to the dropdown. It clears the override and puts the note back on inheritance.
 
-::: info Edge Case
-If the liberated note has a raw value (no expression) for a property, that raw value will be substituted directly. For example, if Note 1's duration is just `1` (a constant), dependents will get `1` substituted in.
+See [Instruments](/user-guide/playback/instruments).
+
+### Colour
+
+Enter any CSS colour: `rgba(255, 100, 100, 0.7)`, `#ff6600`, `hsla(200, 70%, 60%, 0.7)`, or a named colour. An unparseable value pops an alert rather than failing silently.
+
+## Reshaping the dependency graph
+
+The widget's **EVALUATE** section holds three buttons. Which ones appear depends on what you selected. Each asks for confirmation first.
+
+| Button | Available on | What it does |
+|---|---|---|
+| **`Liberate Dependencies`** | notes and silences | Rewrites every note that references this one so it references what *this* note references instead. The note itself survives, now with nothing depending on it. |
+| **`Evaluate to BaseNote`** | every note except the BaseNote — including measure bars | Rewrites this note's start time, duration and frequency so they reference only the BaseNote. TET power terms are preserved rather than flattened into an ugly fraction. |
+| **`Evaluate Module`** | the BaseNote only | Does the same to every note in the module at once. |
+
+`Liberate Dependencies` is not offered on measure bars. `Evaluate to BaseNote` is not offered on the BaseNote — it is already there.
+
+Both operations are explained in full on [Dependencies](/user-guide/notes/dependencies).
+
+## Deleting
+
+The **DELETE NOTE** section offers two buttons, and they are very different:
+
+| Button | Effect |
+|---|---|
+| **`Keep Dependencies`** | The note is removed, and everything that referenced it is **liberated** first — their expressions absorb this note's expressions, so they keep their positions, lengths and pitches. |
+| **`Delete Dependencies`** | The note **and every note that depends on it** are removed. This cascades. |
+
+On the **BaseNote** the section is **DELETE ALL NOTES** instead, with a single **`Clean Slate`** button that removes every note except the BaseNote.
+
+::: danger Cascade delete can take out a lot
+`Delete Dependencies` follows the whole dependent chain, not just the direct children. Select the note first and look at the thin dependency lines running out of it — those are what will go. If you are not sure, use `Keep Dependencies`.
 :::
 
-1. Select the note
-2. Click **"Liberate Dependencies"**
-3. Dependent notes now reference whatever the liberated note referenced (bypassing it in the dependency chain)
-
-::: tip
-"Delete and Keep Dependencies" performs the same operation automatically during deletion. Use "Liberate Dependencies" when you want to keep the note but break its dependent relationships.
+::: tip Clean Slate is undoable
+The confirmation dialog claims the action cannot be undone. It can — `Clean Slate` captures an undo snapshot like everything else, and Ctrl/Cmd+Z brings your notes back.
 :::
 
-## Undo/Redo
+## Undo and redo
 
-All edits can be undone:
+| Action | Shortcut | Button |
+|---|---|---|
+| Undo | `Ctrl/Cmd + Z` | Undo, in the module bar |
+| Redo | `Ctrl/Cmd + Y` | Redo, in the module bar |
 
-- **Undo**: `Ctrl/Cmd + Z`
-- **Redo**: `Ctrl/Cmd + Y`
+- The history holds the **last 50 changes**.
+- Redo is `Ctrl/Cmd + Y`. `Ctrl + Shift + Z` is **not** redo — the shift is ignored, so it undoes.
+- The shortcuts are ignored while your cursor is in a text field, so `Ctrl+Z` inside a `Raw:` box undoes your typing, not your composition.
 
-History is maintained for up to 50 changes.
+## Where to go next
 
-## Tips
-
-1. **Edit expressions carefully** - Syntax errors prevent saving
-2. **Watch the evaluated value** - Verify your expression produces the expected result
-3. **Use dependencies wisely** - They enable powerful cascading changes
-4. **Liberate before deleting** - Preserve dependent notes when removing their source
-5. **Test with playback** - Hear your changes to verify they sound correct
+- [Expressions](/user-guide/notes/expressions) — the syntax for the Raw fields.
+- [Dependencies](/user-guide/notes/dependencies) — the coloured lines, and what breaks when you delete.
+- [Selection & Group Editing](/user-guide/notes/selection) — marquee, group drag, group delete.
+- [Transposing with Arrows](/user-guide/notes/transposing) — choosing the arrow interval.

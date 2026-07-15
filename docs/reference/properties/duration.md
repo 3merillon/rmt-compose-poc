@@ -1,204 +1,204 @@
+---
+title: duration
+description: Reference for the duration property - aliases, defaults, the note-length buttons, resizing, valid expressions, and worked examples.
+---
+
 # duration
 
-The `duration` property defines how long a note plays, measured in seconds.
+`duration` is how long a note lasts, in **seconds**. Like every note property it is stored as an
+expression string, compiled to bytecode, and evaluated with exact rational arithmetic.
 
-## Default Value
+Durations are almost always written in beats — `beat(base) * (3/4)` — rather than in seconds, so
+that changing the tempo re-times the whole composition.
+
+## Aliases
+
+| Write | Meaning |
+|---|---|
+| `d` | canonical short form — what the app writes and what the widget shows |
+| `dur` | accepted, rewritten to `d` on save |
+| `duration` | accepted, rewritten to `d` on save |
+
+There is no `l` or `len` alias. `[1].d` and `[1].duration` compile to identical bytecode.
+
+## Defaults
+
+| Situation | Value |
+|---|---|
+| A note with no `duration` expression, and no `frequency` | it is a **measure bar** — no length, drawn as a vertical dashed line |
+| A note with a `duration` but no `frequency` | it is a **silence** — occupies time, never sounds |
+| The BaseNote | **has no duration at all** by default |
+| An expression referencing a note whose duration cannot be resolved | `1` second (silent fallback, console warning only) |
+
+::: warning `base.d` is a trap
+The BaseNote has no `duration` — not in the class defaults, and not in any shipped module. `base.d`
+compiles fine, but it reads an empty expression and evaluates to the `1`-second fallback, not to
+anything you set. Anchor durations to `beat(base)` or to a real note instead.
+:::
+
+`duration` does **not** inherit: `[5].d` on a note with no duration expression falls back to `1`, it
+does not walk up to a parent.
+
+## Where you edit it
+
+![The note widget open on a note, showing the Evaluated and Raw rows and the note-length buttons](/img/note-widget.png)
+
+- **The `Raw:` input.** Type an expression, press **Save**. Edits apply on Save, not while typing.
+  An invalid expression is dropped silently — the error only reaches the browser console.
+- **The note-length buttons** under the duration row (see below).
+- **The right edge of the note.** Drag the pull tab on a note's right edge to resize it. The new
+  length snaps to a **quarter of a beat** — a sixteenth note, when a beat is a quarter — with a
+  minimum of one quarter-beat, and is written as `beat(base) * (n/d)`.
+
+### The note-length buttons
+
+Five icon buttons pick a base length, and two dot buttons multiply it:
+
+| Button | Beats | Factor |
+|---|---|---|
+| Whole | 4 | ×4 |
+| Half | 2 | ×2 |
+| Quarter | 1 | ×1 |
+| Eighth | 1/2 | ×1/2 |
+| Sixteenth | 1/4 | ×1/4 |
+| `.` (dot) | — | ×3/2 |
+| `..` (double dot) | — | ×7/4 |
+
+The dot buttons toggle, and combine with whichever length is selected: quarter + `.` gives 3/2 of a
+beat, eighth + `.` gives 3/4, quarter + `..` gives 7/4.
+
+Clicking a button **fills the `Raw:` field** with the corresponding expression and reveals `Save`.
+Nothing changes until you press **Save**. The selection is pre-highlighted to match the note's
+current length whenever that length is one the buttons can express.
+
+## Expression examples
+
+### Beat-relative (the normal case)
 
 ```
-1  // 1 second
+beat(base)             # one beat  (a quarter note)
+beat(base) * 4         # four beats  (a whole note)
+beat(base) * 2         # two beats  (a half note)
+beat(base) * (1/2)     # half a beat  (an eighth note)
+beat(base) * (1/4)     # a quarter beat  (a sixteenth note)
+beat(base) * (3/2)     # a dotted quarter
+beat(base) * (3/4)     # a dotted eighth
 ```
 
-## Expression Examples
+`beat(x)` compiles to `60 / tempo(x)`. It is the only helper the decompiler reconstructs, so it
+survives a save unchanged.
 
-### Fixed Duration
-
-```
-1       // 1 second
-2       // 2 seconds
-(1/2)   // 0.5 seconds
-```
+::: danger Write the multiplier after the beat, not before
+`beat(base) * 2` is fine. `2 * beat(base)` is **silently compiled to 0**: a lone helper call is only
+recognised as DSL when it leads the expression. See
+[tempo](/reference/properties/tempo#the-beat-unit).
+:::
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-new Fraction(1)     // 1 second
-new Fraction(2)     // 2 seconds
-new Fraction(1, 2)  // 0.5 seconds
+new Fraction(60).div(module.findTempo(module.baseNote))
+new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(4))
+new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
 ```
 </details>
 
-### Beat-Relative Duration
+### Standard note values
+
+| Note | Beats | Expression |
+|---|---|---|
+| Whole | 4 | `beat(base) * 4` |
+| Dotted half | 3 | `beat(base) * 3` |
+| Half | 2 | `beat(base) * 2` |
+| Dotted quarter | 3/2 | `beat(base) * (3/2)` |
+| Quarter | 1 | `beat(base)` |
+| Dotted eighth | 3/4 | `beat(base) * (3/4)` |
+| Eighth | 1/2 | `beat(base) * (1/2)` |
+| Sixteenth | 1/4 | `beat(base) * (1/4)` |
+
+### Measure-relative
 
 ```
-// One beat (tempo-aware)
-60 / tempo(base)
-
-// Two beats
-60 / tempo(base) * 2
-
-// Half beat (eighth note)
-60 / tempo(base) * (1/2)
-
-// Quarter beat (sixteenth note)
-60 / tempo(base) * (1/4)
+measure(base)          # one full measure
+measure(base) * (1/2)  # half a measure
+measure(base) * 2      # two measures
 ```
+
+`measure(x)` is saved as `x.ml` — the two compile to identical bytecode.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// One beat (tempo-aware)
-new Fraction(60).div(module.findTempo(module.baseNote))
-
-// Two beats
-new Fraction(60).div(module.findTempo(module.baseNote))
-  .mul(new Fraction(2))
-
-// Half beat (eighth note)
-new Fraction(60).div(module.findTempo(module.baseNote))
-  .mul(new Fraction(1, 2))
-
-// Quarter beat (sixteenth note)
-new Fraction(60).div(module.findTempo(module.baseNote))
-  .mul(new Fraction(1, 4))
-```
-</details>
-
-### Measure-Relative Duration
-
-```
-// One full measure
-measure(base)
-
-// Half a measure
-measure(base) * (1/2)
-
-// Two measures
-measure(base) * 2
-```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// One full measure
 module.findMeasureLength(module.baseNote)
-
-// Half a measure
 module.findMeasureLength(module.baseNote).mul(new Fraction(1, 2))
-
-// Two measures
-module.findMeasureLength(module.baseNote).mul(new Fraction(2))
 ```
 </details>
 
-### Same as Another Note
+### Absolute seconds
 
 ```
-// Same duration as Note 1
-[1].d
+1        # one second
+2        # two seconds
+(1/2)    # half a second
+```
 
-// Twice as long as Note 1
-[1].d * 2
+These ignore tempo. A composition written in absolute seconds will not re-time when you change the
+BaseNote tempo.
+
+### Relative to another note
+
+```
+[1].d          # same length as note 1
+[1].d * 2      # twice as long as note 1
 ```
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-// Same duration as Note 1
 module.getNoteById(1).getVariable('duration')
-
-// Twice as long as Note 1
 module.getNoteById(1).getVariable('duration').mul(new Fraction(2))
 ```
 </details>
 
-## Standard Note Values
-
-At a given tempo, common note durations:
-
-| Note | Beats | DSL Expression |
-|------|-------|----------------|
-| Whole | 4 | `beat(base) * 4` |
-| Half | 2 | `beat(base) * 2` |
-| Quarter | 1 | `beat(base)` |
-| Eighth | 0.5 | `beat(base) * (1/2)` |
-| Sixteenth | 0.25 | `beat(base) * (1/4)` |
-| Dotted half | 3 | `beat(base) * 3` |
-| Dotted quarter | 1.5 | `beat(base) * (3/2)` |
-
-Where `beat(base) = 60 / tempo(base)`
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-| Note | Beats | Legacy Expression |
-|------|-------|-------------------|
-| Whole | 4 | `beat.mul(new Fraction(4))` |
-| Half | 2 | `beat.mul(new Fraction(2))` |
-| Quarter | 1 | `beat` |
-| Eighth | 0.5 | `beat.mul(new Fraction(1, 2))` |
-| Sixteenth | 0.25 | `beat.mul(new Fraction(1, 4))` |
-| Dotted half | 3 | `beat.mul(new Fraction(3))` |
-| Dotted quarter | 1.5 | `beat.mul(new Fraction(3, 2))` |
-
-Where `beat = new Fraction(60).div(module.findTempo(module.baseNote))`
-</details>
-
-## Variable Widget Shortcuts
-
-The Variable Widget provides duration icons for quick selection:
-
-- **𝅝** Whole note (4 beats)
-- **𝅗𝅥** Half note (2 beats)
-- **♩** Quarter note (1 beat)
-- **♪** Eighth note (1/2 beat)
-- **𝅘𝅥𝅯** Sixteenth note (1/4 beat)
-
-These icons set tempo-relative durations automatically.
-
-## Visualization
-
-- **Note width** on the workspace represents duration
-- Longer notes appear wider
-- Width scales with the X-axis zoom level
-
-## Audio Behavior
-
-During playback:
-1. Oscillator starts at `startTime`
-2. Envelope (ADSR) is applied based on instrument settings
-3. Oscillator stops at `startTime + duration`
-
-The actual audible duration may be slightly different due to envelope release time.
-
 ## Dependencies
 
-Duration affects sequential note chains:
+Duration participates in dependencies in two directions.
+
+Referencing another note's duration links you to it:
 
 ```
-// Note 2 starts when Note 1 ends
-// Depends on Note 1's duration
-[1].t + [1].d
+[1].t + [1].d      # start when note 1 ends: depends on note 1's startTime AND duration
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Resizing note 1 therefore moves this note. Select a note and the workspace outlines the notes
+involved: **purple** for duration, **teal** for startTime, **orange** for frequency. A thick outline
+is a note the selection depends on; a thin outline is a note that depends on the selection. While
+you are resizing, the duration colour stays bright and the other two dim.
 
-```javascript
-// Note 2 starts when Note 1 ends
-// Depends on Note 1's duration
-module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-```
-</details>
+## In the workspace
 
-Changing Note 1's duration shifts when Note 2 starts.
+- A note's **width** is its duration; width scales with the X zoom.
+- Silences (duration but no frequency) are drawn with a dashed border ring.
 
-## See Also
+## In playback
 
-- [startTime](/reference/properties/start-time) - When notes play
-- [tempo](/reference/properties/tempo) - Speed in BPM
-- [Add Rhythm](/tutorials/beginner/rhythm) - Duration tutorial
+The instrument envelope is fitted **inside** `[startTime, startTime + duration]` and reaches zero at
+the end, so the audible length is the duration you wrote. Attack and release are proportional to
+the note's length (with 3 ms / 15 ms floors so very short notes do not click), and together they are
+capped at 90% of the note so there is always some body left.
+
+The voice itself is stopped 150 ms after the note ends — while it is already silent — so that
+exponential release curves finish cleanly. A running reverb tail can still be audible after that.
+
+Every voice runs through the signal graph: voice gain → optional stereo panner → per-instrument bus
+→ dry path plus a reverb send → master → limiter.
+
+## See also
+
+- [startTime](/reference/properties/start-time)
+- [tempo](/reference/properties/tempo)
+- [Add Rhythm](/tutorials/beginner/rhythm)
+- [Expression Syntax](/reference/expressions/syntax)

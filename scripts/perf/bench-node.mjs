@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Headless perf baseline runner (ROADMAP.md Phase 0.2).
+ * Headless perf baseline runner.
  *
  * Measures the JS evaluation path (Node has no WASM artifact wiring by
  * default and no renderer, so this benchmarks module evaluation only —
