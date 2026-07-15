@@ -23,25 +23,25 @@ Every shipped module JSON is DSL. The legacy parser exists so old modules still 
 
 ## Entry point
 
-`ExpressionCompiler.compile(textExpr, varName)` (`src/expression-compiler.js:53`) is the only door in. `Note._setExpression()` calls the module-level singleton `compiler` exported at `expression-compiler.js:1042`.
+`ExpressionCompiler.compile(textExpr, varName)` (`src/expression-compiler.js:54`) is the only door in. `Note._setExpression()` calls the module-level singleton `compiler` exported at `expression-compiler.js:982`.
 
 The routing is worth reading closely:
 
-1. **Cache probe.** On a hit the key is deleted and re-inserted (an LRU touch) and a **clone** is returned (`:56-63`).
-2. **`isDSLSyntax(textExpr)`** → `compileDSL()`. If the DSL compiler throws, it logs a warning and **falls through to the legacy parser** (`:66-75`).
+1. **Cache probe.** On a hit the key is deleted and re-inserted (an LRU touch) and a **clone** is returned (`:57-63`).
+2. **`isDSLSyntax(textExpr)`** → `compileDSL()`. If the DSL compiler throws, it logs a warning and **falls through to the legacy parser** (`:67-76`).
 3. **Legacy path** → `parse()` → `emitBytecode()`.
-4. If the *legacy* parser throws, it **retries `compileDSL()`** (`:89-96`). The routing check in step 2 is a regex sniff, not a parse, so it can misclassify a DSL expression as legacy; this retry is what lets a misclassified DSL string still compile.
-5. If both parsers fail, it logs `Failed to compile expression: …` via `console.error` and **throws** an `Error` whose message carries both parsers' failures (`:98-107`). There is no constant-0 fallback: interactive callers (the note widget's Save, the validators) surface the message, while the load paths catch per-note and leave the property unset.
+4. If the *legacy* parser throws, it **retries `compileDSL()`** (`:89-97`). The routing check in step 2 is a regex sniff, not a parse, so it can misclassify a DSL expression as legacy; this retry is what lets a misclassified DSL string still compile.
+5. If both parsers fail, it logs `Failed to compile expression: …` via `console.error` and **throws** an `Error` whose message carries both parsers' failures (`:105-108`). There is no constant-0 fallback: interactive callers (the note widget's Save, the validators) surface the message, while the load paths catch per-note and leave the property unset.
 
 `compile()` always returns `binary.clone()`, never the cached instance.
 
 ## The compile cache
 
 ```javascript
-const COMPILE_CACHE_MAX = 4000;  // src/expression-compiler.js:22
+const COMPILE_CACHE_MAX = 4000;  // src/expression-compiler.js:23
 ```
 
-A plain `Map` keyed on the raw expression text, used as an **LRU**: `_cacheSet()` evicts `cache.keys().next().value` — the oldest insertion — when at cap and the key is new (`:34-41`). The cap exists because drag and resize commits mint a fresh fraction string on every commit, so an unbounded cache grows for the life of the session.
+A plain `Map` keyed on the raw expression text, used as an **LRU**: `_cacheSet()` evicts `cache.keys().next().value` — the oldest insertion — when at cap and the key is new (`:35-42`). The cap exists because drag and resize commits mint a fresh fraction string on every commit, so an unbounded cache grows for the life of the session.
 
 ::: warning The cache is per-instance, not global
 `src/note.js` uses the exported singleton, but `src/modals/validation.js`, `src/modals/variable-controls.js`, `src/modals/note-creation.js`, `src/utils/safe-expression-validator.js` and `src/utils/simplify.js` each construct their **own** `new ExpressionCompiler()`. That is six independent 4000-entry caches in a running app. `clearCache()` only clears the one you call it on.
@@ -103,9 +103,9 @@ Exactly three (`constants.js:86`), arity 1, and the argument must be a **bare no
 
 | Call | Lowers to |
 |---|---|
-| `tempo(x)` | `LOAD_REF x, VAR.TEMPO` — byte-for-byte identical to `x.tempo` (`dsl/compiler.js:220-231`) |
-| `measure(x)` | `LOAD_REF x, VAR.MEASURE_LENGTH` — identical to `x.ml` (`:237-248`) |
-| `beat(x)` | `LOAD_CONST 60`, `tempo(x)`, `DIV` (`:254-261`) |
+| `tempo(x)` | `LOAD_REF x, VAR.TEMPO` — byte-for-byte identical to `x.tempo` (`dsl/compiler.js:211-222`) |
+| `measure(x)` | `LOAD_REF x, VAR.MEASURE_LENGTH` — identical to `x.ml` (`:228-239`) |
+| `beat(x)` | `LOAD_CONST 60`, `tempo(x)`, `DIV` (`:245-253`) |
 
 `beat(base)` is the idiomatic way to write one beat in seconds. Do not hand-write `60 / tempo(base)`.
 
@@ -137,7 +137,7 @@ export const OP = {
 ```
 
 ::: warning `FIND_*`, `DUP` and `SWAP` are never emitted
-No compiler produces them. The legacy `emitFindTempo` / `emitFindMeasure` (`expression-compiler.js:745-774`) lower to a plain `LOAD_BASE`/`LOAD_REF` with `VAR.TEMPO` or `VAR.MEASURE_LENGTH`, and the DSL compiler does the same. `FIND_TEMPO`, `FIND_MEASURE`, `DUP` and `SWAP` are implemented in the VM but unreachable from any compiled expression; `FIND_INSTRUMENT` is not even handled there. Treat them as reserved bytes.
+No compiler produces them. The legacy `emitFindTempo` / `emitFindMeasure` (`expression-compiler.js:685-716`) lower to a plain `LOAD_BASE`/`LOAD_REF` with `VAR.TEMPO` or `VAR.MEASURE_LENGTH`, and the DSL compiler does the same. `FIND_TEMPO`, `FIND_MEASURE`, `DUP` and `SWAP` are implemented in the VM but unreachable from any compiled expression; `FIND_INSTRUMENT` is not even handled there. Treat them as reserved bytes.
 :::
 
 ### Instruction encoding
@@ -170,10 +170,12 @@ export const VAR = {
 
 ### Constant emission
 
-`emitConstant()` (`expression-compiler.js:648`) and `emitFraction()` (`dsl/compiler.js:86-113`) both GCD-normalise the fraction, move the sign to the numerator, then pick the opcode by magnitude: `LOAD_CONST` if numerator and denominator both fit in i32 (`-2147483648 … 2147483647`), otherwise `LOAD_CONST_BIG`. There is no `constBig` AST node — the choice is made at emit time.
+`emitConstant()` (`expression-compiler.js:590`) and `emitFraction()` (`dsl/compiler.js:87-118`) both GCD-normalise the fraction **in BigInt** (`bigGcd` from `src/utils/fraction-num.js`), move the sign to the numerator, then pick the opcode by magnitude: `LOAD_CONST` if numerator and denominator both fit in i32 (`-2147483648 … 2147483647`), otherwise `LOAD_CONST_BIG`. There is no `constBig` AST node — the choice is made at emit time.
 
-::: info `LOAD_CONST_BIG` carries BigInts, but they do not survive
-The evaluator immediately downcasts: `new Fraction(numBig.toString(), denBig.toString())` (`binary-evaluator.js:914`), and `fraction.js@4.3.7` stores `n`/`d` as JS **doubles**. The big encoding preserves the *bytecode*, not the precision.
+Number literals are exact at any size in both parsers: the digits are parsed straight into a BigInt fraction by `decimalStringToBigFraction()` (`src/utils/fraction-num.js:36`), never through `parseFloat`. A decimal literal is **exact as written** — `3.14159` is `314159/100000` and `0.333333` is `333333/1000000`, not `1/3`.
+
+::: info `LOAD_CONST_BIG` carries BigInts, and they survive
+The evaluator decodes the variable-length BigInts straight into a pooled BigInt-backed fraction (`binary-evaluator.js:975-987`), so a big constant keeps every digit through parse → emit → decode → evaluate → decompile — `scripts/test-exactness.mjs` (part of `npm test`) proves it with a ~98-digit literal. The old path routed the decode through a double-backed `Fraction` constructor, which silently rounded anything past 2^53: the encoding preserved the *bytecode* but not the precision.
 :::
 
 ## `BinaryExpression`
@@ -191,7 +193,7 @@ The evaluator immediately downcasts: `new Fraction(numBig.toString(), denBig.toS
 
 Key methods: `addDependency()`, `getDependencySet()`, `getPropertyDependencies()` (scans the bytecode into a `Map<noteId, Set<varIndex>>` — this is where the [dependency graph](/developer/core/dependency-graph) gets its property-level edges), `referencesProperty()`, `isEmpty()`, `clone()`.
 
-A `LOAD_BASE` does **not** add note 0 as a dependency. Recording it would give the BaseNote a self-cycle; the `referencesBase` flag is tracked separately instead (comments at `expression-compiler.js:725-728`).
+A `LOAD_BASE` does **not** add note 0 as a dependency. Recording it would give the BaseNote a self-cycle; the `referencesBase` flag is tracked separately instead (comments at `expression-compiler.js:665-668`).
 
 ## The legacy parser
 
@@ -206,9 +208,11 @@ parse(expr)
               └ parseAtomic
 ```
 
-`parseAtomic` (`expression-compiler.js:172-319`) regex-matches, in order: `new Fraction(n[, d])`, `module.baseNote.getVariable('x')`, `module.getNoteById(N).getVariable('x')`, `module.findTempo(ref)`, `module.findMeasureLength(ref)`, the beat pattern `new Fraction(60).div(module.findTempo(ref))`, a bare number, a `.pow()` chain, a `new Fraction(...).mul(...)` chain, a bare variable name — and if none match, it **throws** (`Unable to parse expression fragment: …`), which is what lets `compile()` fall through to the DSL retry instead of guessing.
+`parseAtomic` (`expression-compiler.js:173-328`) regex-matches, in order: `new Fraction(n[, d])`, `module.baseNote.getVariable('x')`, `module.getNoteById(N).getVariable('x')`, `module.findTempo(ref)`, `module.findMeasureLength(ref)`, the beat pattern `new Fraction(60).div(module.findTempo(ref))`, a bare number, a `.pow()` chain, a `new Fraction(...).mul(...)` chain, a bare variable name — and if none match, it **throws** (`Unable to parse expression fragment: …`), which is what lets `compile()` fall through to the DSL retry instead of guessing.
 
-The legacy AST node types (`emitBytecode`, `:593-641`):
+Both parsers enforce the bytecode's u16 note-id range at parse time: a reference to an id above **65535** throws — `Note id N out of range (max 65535)` here (`expression-compiler.js:215-216`), `Note IDs must be integers between 0 and 65535` in the DSL (`dsl/parser.js:253`). It used to be silently truncated into a reference to a *different* note when `LOAD_REF` wrote its u16.
+
+The legacy AST node types (`emitBytecode`, `:535-584`):
 
 ```javascript
 { type: 'const',       num, den }
@@ -230,12 +234,12 @@ There are two, and they are not interchangeable.
 
 | Class | Singleton | Emits |
 |---|---|---|
-| `ExpressionDecompiler` (`expression-compiler.js:844`) | `decompiler` | **legacy** method-chain text |
-| `DSLExpressionDecompiler` (`:1051`) | `dslDecompiler` | **DSL** text (delegates to `decompileToDSL`) |
+| `ExpressionDecompiler` (`expression-compiler.js:784`) | `decompiler` | **legacy** method-chain text |
+| `DSLExpressionDecompiler` (`:991`) | `dslDecompiler` | **DSL** text (delegates to `decompileToDSL`) |
 
-`ExpressionDecompiler.decompile()` **returns `binary.sourceText` verbatim if it is set** (`:852-855`), so for anything compiled from text it is a pass-through; its stack-based path only runs for synthesised expressions.
+`ExpressionDecompiler.decompile()` **returns `binary.sourceText` verbatim if it is set** (`:793-795`), so for anything compiled from text it is a pass-through; its stack-based path only runs for synthesised expressions.
 
-The DSL decompiler (`src/dsl/decompiler.js`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. It pattern-matches `60 / <ref>.tempo` back into `beat(<ref>)` (`:112-119`, `:236-240`).
+The DSL decompiler (`src/dsl/decompiler.js`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. Constants come out of the bytecode as BigInts and are stringified directly (`pushConst`, `:207-213`), so a big constant is printed **digit-exact** — it used to be coerced through `Number()`, which rounded and could emit unparseable scientific notation. It pattern-matches `60 / <ref>.tempo` back into `beat(<ref>)` (`:113-119`, `:236-240`).
 
 The note widget's `Raw:` box always shows DSL: `convertToDSLDisplay()` decompiles the note's compiled bytecode regardless of the stored format (`src/modals/variable-controls.js:87-101`).
 
@@ -249,7 +253,7 @@ The note widget's `Raw:` box always shows DSL: `convertToDSLDisplay()` decompile
 | `base.freq`, `base.s`, `base.dur` | `base.f`, `base.t`, `base.d` |
 | `[0].f` | `base.f` |
 | `0.5 * base.f` | `(1/2) * base.f` |
-| `3.14159` | `(9563/3044)` |
+| `3.14159` | `(314159/100000)` — decimals are exact as written |
 | `base.f # a comment` | `base.f` — comments are dropped |
 | `2^-1` | `2^(-1)` |
 

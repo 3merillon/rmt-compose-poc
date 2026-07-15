@@ -12,6 +12,7 @@ import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
 import { escapeHtml } from '../utils/html-escape.js';
 import { isDSLSyntax } from '../dsl/index.js';
+import { toNumber } from '../utils/fraction-num.js';
 import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.js';
 import { raisePanel } from '../utils/panel-stack.js';
 import { viewportHeight } from '../utils/viewport.js';
@@ -212,6 +213,13 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     try { eventBus.emit('modals:show', { noteId: effectiveNoteId, isMeasure: measureId !== null }); } catch (e) {}
 }
 
+// Seed the Raw editor with a parseable exact form when no source string exists.
+// Fraction toString() prints repeating decimals like '0.(3)', which won't re-parse;
+// toFraction() gives 'n/d' which both expression formats accept.
+function rawValueSeed(v) {
+    return (v && typeof v.toFraction === 'function') ? v.toFraction() : String(v);
+}
+
 function collectVariables(note, measureId, moduleInstance) {
     let variables = {};
     const module = moduleInstance || (typeof getModule === 'function' ? getModule() : null);
@@ -237,7 +245,7 @@ function collectVariables(note, measureId, moduleInstance) {
             if (!key.endsWith('String') && key !== 'measureLength') {
                 variables[key] = {
                     evaluated: note.getVariable(key),
-                    raw: note.variables[key + 'String'] || note.variables[key].toString(),
+                    raw: note.variables[key + 'String'] || rawValueSeed(note.variables[key]),
                     isCorrupted: false // BaseNote is never corrupted
                 };
             }
@@ -286,7 +294,7 @@ function collectVariables(note, measureId, moduleInstance) {
                 } else {
                     variables[key] = {
                         evaluated: note.getVariable(key),
-                        raw: note.variables[key + 'String'] || note.variables[key].toString(),
+                        raw: note.variables[key + 'String'] || rawValueSeed(note.variables[key]),
                         isCorrupted: propertyCorrupted,
                         // For frequency, flag if transitively corrupted (for display purposes)
                         isTransitivelyCorrupted: key === 'frequency' && freqTransitivelyCorrupted
@@ -677,17 +685,15 @@ function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
             const refNote = moduleInstance.getNoteById(parseInt(noteId, 10));
             if (!refNote) return match;
 
-            const refStartTime = refNote.getVariable('startTime').valueOf();
-            const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
-            const beatLength = 60 / baseTempo;
-            const beatOffset = new Fraction(numerator, denominator).valueOf();
+            const refStartTime = refNote.getVariable('startTime');
+            const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
+            const baseTempo = moduleInstance.baseNote.getVariable('tempo');
+            const beatOffset = new Fraction(numerator.trim(), denominator.trim());
 
-            const absoluteTime = refStartTime + (beatOffset * beatLength);
-            const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
-            const offset = absoluteTime - baseStartTime;
-            const offsetBeats = offset / beatLength;
+            // offsetBeats = (refStart - baseStart) * tempo / 60 + beatOffset, exact
+            const offsetBeats = refStartTime.sub(baseStartTime).mul(baseTempo).div(60).add(beatOffset);
 
-            return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetBeats})))`;
+            return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${toFractionString(offsetBeats)}))`;
         });
 
         const noteRefRegex = /module\.getNoteById\((\d+)\)\.getVariable\('([^']+)'\)/g;
@@ -731,31 +737,34 @@ function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
 }
 
 // ===== Feature: Evaluate to BaseNote =====
-// Helper to convert a decimal to a clean Fraction string (legacy format)
+// Helper to convert an exact value (Fraction preferred, number tolerated) to a
+// clean Fraction string (legacy format). BigInt fields interpolate digit-exact.
 function toFractionString(value) {
     try {
-        const frac = new Fraction(value);
+        const frac = value instanceof Fraction ? value : new Fraction(value);
         // Use the Fraction's built-in simplification
-        if (frac.d === 1) {
+        if (frac.d === 1n) {
             return `new Fraction(${frac.s * frac.n})`;
         }
         return `new Fraction(${frac.s * frac.n}, ${frac.d})`;
-    } catch {
+    } catch (e) {
         // Fallback for values that Fraction can't handle cleanly
+        console.warn('toFractionString: inexact fallback for', value, e?.message ?? e);
         return `new Fraction(${value})`;
     }
 }
 
-// Helper to convert a decimal to a DSL fraction/number string
+// Helper to convert an exact value to a DSL fraction/number string
 function toDSLFractionString(value) {
     try {
-        const frac = new Fraction(value);
+        const frac = value instanceof Fraction ? value : new Fraction(value);
         const val = frac.s * frac.n;
-        if (frac.d === 1) {
+        if (frac.d === 1n) {
             return `${val}`;
         }
         return `(${val}/${frac.d})`;
-    } catch {
+    } catch (e) {
+        console.warn('toDSLFractionString: inexact fallback for', value, e?.message ?? e);
         return `${value}`;
     }
 }
@@ -788,6 +797,8 @@ function createFrequencyAlgebra(coeff = new Fraction(1), powers = []) {
 
 /**
  * Merge power terms, combining like bases: base^a * base^b = base^(a+b)
+ * Bases and exponents are small TET integers (2/3/5, steps/divisions), so
+ * Number arithmetic stays exact here; only coefficients need BigInt Fractions.
  */
 function mergePowerTerms(a, b) {
     const map = new Map();
@@ -866,10 +877,11 @@ function parseFrequencyExpression(exprText) {
         const { left, right } = mulMatch;
 
         // Check if right is a fraction constant: new Fraction(a) or new Fraction(a, b)
+        // Coefficient digits parse as BigInt so they survive at any magnitude
         const fracMatch = right.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
         if (fracMatch) {
-            const num = parseInt(fracMatch[1], 10);
-            const den = fracMatch[2] ? parseInt(fracMatch[2], 10) : 1;
+            const num = BigInt(fracMatch[1]);
+            const den = fracMatch[2] ? BigInt(fracMatch[2]) : 1n;
             const leftParsed = parseFrequencyExpression(left);
             if (leftParsed) {
                 leftParsed.algebra.coeff = leftParsed.algebra.coeff.mul(new Fraction(num, den));
@@ -880,8 +892,8 @@ function parseFrequencyExpression(exprText) {
         // Check if left is a fraction constant
         const fracMatchLeft = left.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
         if (fracMatchLeft) {
-            const num = parseInt(fracMatchLeft[1], 10);
-            const den = fracMatchLeft[2] ? parseInt(fracMatchLeft[2], 10) : 1;
+            const num = BigInt(fracMatchLeft[1]);
+            const den = fracMatchLeft[2] ? BigInt(fracMatchLeft[2]) : 1n;
             const rightParsed = parseFrequencyExpression(right);
             if (rightParsed) {
                 rightParsed.algebra.coeff = rightParsed.algebra.coeff.mul(new Fraction(num, den));
@@ -1039,7 +1051,7 @@ function algebraToExpression(algebra, useDSL = false) {
     // Add coefficient if not 1
     if (!algebra.coeff.equals(1)) {
         const c = algebra.coeff;
-        if (c.d === 1) {
+        if (c.d === 1n) {
             parts.push(`new Fraction(${c.s * c.n})`);
         } else {
             parts.push(`new Fraction(${c.s * c.n}, ${c.d})`);
@@ -1076,7 +1088,7 @@ function algebraToExpressionDSL(algebra) {
     if (!algebra.coeff.equals(1)) {
         const c = algebra.coeff;
         const val = c.s * c.n;
-        const fracStr = (c.d === 1) ? `${val}` : `(${val}/${c.d})`;
+        const fracStr = (c.d === 1n) ? `${val}` : `(${val}/${c.d})`;
         result = `${result} * ${fracStr}`;
     }
 
@@ -1154,34 +1166,34 @@ function createTETFrequencyExpr(interval, useDSL = false) {
     return `module.baseNote.getVariable('frequency').mul(new Fraction(${base}).pow(new Fraction(${numerator}, ${denominator})))`;
 }
 
-// Create BaseNote-relative expression for startTime
+// Create BaseNote-relative expression for startTime.
+// Takes the exact evaluated Fraction; all offset algebra stays in Fraction
+// arithmetic so the emitted literal is digit-exact at any magnitude.
 function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance, useDSL = false) {
-    const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
-    const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
-    const beatLength = 60 / baseTempo;
+    const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
+    const baseTempo = moduleInstance.baseNote.getVariable('tempo');
 
-    const offsetSeconds = noteStartTime - baseStartTime;
-    const offsetBeats = offsetSeconds / beatLength;
+    // offsetBeats = (t - baseT) * tempo / 60
+    const offsetBeats = noteStartTime.sub(baseStartTime).mul(baseTempo).div(60);
 
-    if (Math.abs(offsetBeats) < 1e-10) {
+    if (offsetBeats.equals(0)) {
         return useDSL ? 'base.t' : `module.baseNote.getVariable('startTime')`;
     }
 
     if (useDSL) {
-        const fracStr = toDSLFractionString(Math.abs(offsetBeats));
+        const fracStr = toDSLFractionString(offsetBeats.abs());
         const beatMul = (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
-        return offsetBeats >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
+        return offsetBeats.compare(0) >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
     }
 
     const beatsFrac = toFractionString(offsetBeats);
     return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac}))`;
 }
 
-// Create BaseNote-relative expression for duration
-function createBaseNoteDurationExpr(durationSeconds, moduleInstance, useDSL = false) {
-    const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
-    const beatLength = 60 / baseTempo;
-    const durationBeats = durationSeconds / beatLength;
+// Create BaseNote-relative expression for duration (exact Fraction in)
+function createBaseNoteDurationExpr(duration, moduleInstance, useDSL = false) {
+    const baseTempo = moduleInstance.baseNote.getVariable('tempo');
+    const durationBeats = duration.mul(baseTempo).div(60);
 
     if (useDSL) {
         const fracStr = toDSLFractionString(durationBeats);
@@ -1192,14 +1204,14 @@ function createBaseNoteDurationExpr(durationSeconds, moduleInstance, useDSL = fa
     return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac})`;
 }
 
-// Create BaseNote-relative expression for frequency
+// Create BaseNote-relative expression for frequency (exact Fraction in)
 // Preserves POW expressions by tracing the dependency chain algebraically
 function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null, useDSL = false) {
-    const baseFreq = moduleInstance.baseNote.getVariable('frequency').valueOf();
-    const ratio = frequency / baseFreq;
+    const baseFreq = moduleInstance.baseNote.getVariable('frequency');
+    const ratio = frequency.div(baseFreq);
 
-    // If ratio is effectively 1, just reference baseNote directly
-    if (Math.abs(ratio - 1) < 1e-10) {
+    // If ratio is exactly 1, just reference baseNote directly
+    if (ratio.equals(1)) {
         return useDSL ? 'base.f' : `module.baseNote.getVariable('frequency')`;
     }
 
@@ -1220,8 +1232,9 @@ function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null, use
         }
     }
 
-    // Option 3: Try to detect TET interval from the ratio (for non-chain cases)
-    const tetInterval = detectTETInterval(ratio);
+    // Option 3: Try to detect TET interval from the ratio (for non-chain cases).
+    // TET detection is a float heuristic by design — approximate via toNumber.
+    const tetInterval = detectTETInterval(toNumber(ratio));
     if (tetInterval) {
         return createTETFrequencyExpr(tetInterval, useDSL);
     }
@@ -1255,20 +1268,18 @@ export function evaluateNoteToBaseNote(noteId) {
     for (const varName of variablesToProcess) {
         if (!note.variables[varName + 'String']) continue;
 
-        // Get the current evaluated value
+        // Get the current evaluated value (exact Fraction)
         const currentValue = note.getVariable(varName);
         if (currentValue == null) continue;
 
-        const value = currentValue.valueOf();
-
-        // Create the BaseNote-relative expression directly from the value
+        // Create the BaseNote-relative expression directly from the exact value
         let newExpr;
         if (varName === 'startTime') {
-            newExpr = createBaseNoteStartTimeExpr(value, moduleInstance, useDSL);
+            newExpr = createBaseNoteStartTimeExpr(currentValue, moduleInstance, useDSL);
         } else if (varName === 'duration') {
-            newExpr = createBaseNoteDurationExpr(value, moduleInstance, useDSL);
+            newExpr = createBaseNoteDurationExpr(currentValue, moduleInstance, useDSL);
         } else if (varName === 'frequency') {
-            newExpr = createBaseNoteFrequencyExpr(value, moduleInstance, note, useDSL);
+            newExpr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note, useDSL);
         }
 
         if (newExpr) {
@@ -1307,10 +1318,10 @@ export function evaluateEntireModule() {
     const moduleInstance = getModule();
     const noteIds = Object.keys(moduleInstance.notes).map(id => parseInt(id, 10)).filter(id => id !== 0);
 
-    // Pre-compute BaseNote reference values ONCE (avoid repeated lookups)
-    const baseStartTime = moduleInstance.baseNote.getVariable('startTime').valueOf();
-    const baseTempo = moduleInstance.baseNote.getVariable('tempo').valueOf();
-    const beatLength = 60 / baseTempo;
+    // Pre-compute BaseNote reference values ONCE (avoid repeated lookups);
+    // keep them as exact Fractions so all offset/ratio algebra stays exact
+    const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
+    const baseTempo = moduleInstance.baseNote.getVariable('tempo');
 
     // Collect all expression updates in a single pass
     const updates = [];
@@ -1332,17 +1343,16 @@ export function evaluateEntireModule() {
         if (note.hasExpression('startTime')) {
             const currentValue = note.getVariable('startTime');
             if (currentValue != null) {
-                const value = currentValue.valueOf();
-                const offsetSeconds = value - baseStartTime;
-                const offsetBeats = offsetSeconds / beatLength;
+                // offsetBeats = (t - baseT) * tempo / 60, exact
+                const offsetBeats = currentValue.sub(baseStartTime).mul(baseTempo).div(60);
 
                 let expr;
-                if (Math.abs(offsetBeats) < 1e-10) {
+                if (offsetBeats.equals(0)) {
                     expr = useDSL ? 'base.t' : `module.baseNote.getVariable('startTime')`;
                 } else if (useDSL) {
-                    const fracStr = toDSLFractionString(Math.abs(offsetBeats));
+                    const fracStr = toDSLFractionString(offsetBeats.abs());
                     const beatMul = (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
-                    expr = offsetBeats >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
+                    expr = offsetBeats.compare(0) >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
                 } else {
                     const beatsFrac = toFractionString(offsetBeats);
                     expr = `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac}))`;
@@ -1355,15 +1365,13 @@ export function evaluateEntireModule() {
         if (isMeasureNote && note.hasExpression('beatsPerMeasure')) {
             const currentValue = note.getVariable('beatsPerMeasure');
             if (currentValue != null) {
-                const beats = currentValue.valueOf();
-                const baseBeats = moduleInstance.baseNote.getVariable('beatsPerMeasure').valueOf();
+                const baseBeats = moduleInstance.baseNote.getVariable('beatsPerMeasure');
 
                 let expr;
-                if (Math.abs(beats - baseBeats) < 1e-10) {
+                if (baseBeats != null && currentValue.equals(baseBeats)) {
                     expr = useDSL ? 'base.bpm' : `module.baseNote.getVariable('beatsPerMeasure')`;
                 } else {
-                    const beatsFrac = useDSL ? toDSLFractionString(beats) : toFractionString(beats);
-                    expr = beatsFrac;
+                    expr = useDSL ? toDSLFractionString(currentValue) : toFractionString(currentValue);
                 }
                 updates.push({ noteId, varName: 'beatsPerMeasure', expr });
             }
@@ -1374,8 +1382,7 @@ export function evaluateEntireModule() {
             if (note.hasExpression('duration')) {
                 const currentValue = note.getVariable('duration');
                 if (currentValue != null) {
-                    const durationSeconds = currentValue.valueOf();
-                    const durationBeats = durationSeconds / beatLength;
+                    const durationBeats = currentValue.mul(baseTempo).div(60);
                     let expr;
                     if (useDSL) {
                         const fracStr = toDSLFractionString(durationBeats);
@@ -1391,8 +1398,7 @@ export function evaluateEntireModule() {
             if (note.hasExpression('frequency')) {
                 const currentValue = note.getVariable('frequency');
                 if (currentValue != null) {
-                    const frequency = currentValue.valueOf();
-                    const expr = createBaseNoteFrequencyExpr(frequency, moduleInstance, note, useDSL);
+                    const expr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note, useDSL);
                     updates.push({ noteId, varName: 'frequency', expr });
                 }
             }
@@ -1444,17 +1450,18 @@ export function liberateDependencies(noteId) {
         if (selectedNote.variables[varName + "String"]) {
             selectedRaw[varName] = selectedNote.variables[varName + "String"];
         } else {
+            // Emit the canonical two-arg form from the exact fields: digit-exact
+            // at any magnitude, and never toString()'s repeating decimals
             const frac = selectedNote.getVariable(varName);
-            let fracStr;
             if (frac == null) {
-                fracStr = (varName === "frequency") ? "1/1" : "0/1";
-            } else if (frac && typeof frac.toFraction === "function") {
-                fracStr = frac.toFraction();
+                selectedRaw[varName] = (varName === "frequency") ? "new Fraction(1, 1)" : "new Fraction(0, 1)";
             } else {
-                fracStr = frac.toString();
+                let f = frac;
+                if (!(f instanceof Fraction)) {
+                    f = new Fraction(typeof f.toFraction === "function" ? f.toFraction() : f);
+                }
+                selectedRaw[varName] = `new Fraction(${f.s * f.n}, ${f.d})`;
             }
-            if (!fracStr.includes("/")) fracStr = fracStr + "/1";
-            selectedRaw[varName] = "new Fraction(" + fracStr + ")";
         }
     });
 

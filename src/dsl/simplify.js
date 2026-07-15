@@ -128,7 +128,9 @@ function canonicalize(node, ctx) {
   switch (node.type) {
     case NodeType.NumberLiteral:
     case NodeType.FractionLiteral: {
-      const term = newTerm(new Fraction(node.numerator, node.denominator));
+      // Literal components are BigInt; the 'n/d' string form constructs
+      // exactly on any fraction.js backend.
+      const term = newTerm(new Fraction(`${node.numerator}/${node.denominator}`));
       term.coeffOrder = ctx.order++;
       return [term];
     }
@@ -167,7 +169,7 @@ function canonicalizeBinary(node, ctx) {
   if (op === '*' || op === '/') {
     const left = collapse(canonicalize(node.left, ctx), ctx);
     const right = collapse(canonicalize(node.right, ctx), ctx);
-    if (op === '/' && right.coeff.n === 0) throw new Bail(); // division by zero
+    if (op === '/' && right.coeff.equals(0)) throw new Bail(); // division by zero
     return [mulTerms(left, right, op === '/')];
   }
 
@@ -203,14 +205,13 @@ function canonicalizePow(node, ctx) {
 
     // Irrational. The evaluator only keeps a symbolic form for positive integer
     // bases; anything else degrades to a plain f64, which we must not reshape.
-    const baseValue = base.coeff.valueOf();
-    if (!Number.isInteger(baseValue) || baseValue <= 0) {
+    if (base.coeff.d !== 1n || base.coeff.s < 0n || base.coeff.n === 0n) {
       return termFromAtom(opaqueAtom(node), ctx);
     }
 
     const term = newTerm();
     const order = ctx.order++;
-    const str = String(baseValue);
+    const str = base.coeff.n.toString();
     term.factors.set(str, {
       key: str, str, prec: PREC.ATOMIC, exp, order, isConst: true,
     });
@@ -285,12 +286,12 @@ function mergeFactor(term, factor, exp) {
  */
 function normalizeFactors(term) {
   for (const [key, factor] of [...term.factors]) {
-    if (factor.exp.n === 0) {
+    if (factor.exp.equals(0)) {
       term.factors.delete(key);
       continue;
     }
-    if (factor.isConst && factor.exp.d === 1) {
-      term.coeff = term.coeff.mul(new Fraction(Number(factor.str)).pow(factor.exp));
+    if (factor.isConst && factor.exp.d === 1n) {
+      term.coeff = term.coeff.mul(new Fraction(factor.str).pow(factor.exp));
       term.coeffOrder = Math.min(term.coeffOrder, factor.order);
       term.factors.delete(key);
     }
@@ -316,12 +317,12 @@ function group(terms) {
     }
   }
 
-  return [...groups.values()].filter(term => term.coeff.n !== 0);
+  return [...groups.values()].filter(term => !term.coeff.equals(0));
 }
 
 /** base^exp as an exact rational, or null when irrational. Mirrors tryRationalPower. */
 function tryRationalPow(base, exp) {
-  if (exp.n === 0) return new Fraction(1);
+  if (exp.equals(0)) return new Fraction(1);
   try {
     return base.pow(exp); // fraction.js returns null when the result is irrational
   } catch {
@@ -427,7 +428,7 @@ function emitConstantAtom(frac) {
 /** Integers print bare; fractions print as `(n/d)`, which the lexer reads as one literal. */
 function emitConstant(frac) {
   const n = frac.s * frac.n;
-  return frac.d === 1 ? String(n) : `(${n}/${frac.d})`;
+  return frac.d === 1n ? String(n) : `(${n}/${frac.d})`;
 }
 
 function inMul({ str, prec }) {
@@ -466,7 +467,7 @@ function printNode(node) {
   switch (node.type) {
     case NodeType.NumberLiteral:
     case NodeType.FractionLiteral:
-      return emitConstant(new Fraction(node.numerator, node.denominator));
+      return emitConstant(new Fraction(`${node.numerator}/${node.denominator}`));
 
     case NodeType.NoteReference: {
       const target = node.noteId === 'base' ? 'base' : `[${node.noteId}]`;

@@ -13,10 +13,14 @@
  *   lattice-1000  10 chains x 100 notes, cross-linked every 10th note
  *   chords-dense  200 four-note chords; chord roots chain to each other,
  *                 members are subtrees of their root (true-relational shape)
+ *   comma-chain-400  deep chain of (81/80) steps: ratio products grow without
+ *                 bound, so numerator/denominator digit counts rise with depth
  *
- * Frequency ratios cycle through a product-1 sequence (3/2, 4/3, 1/2) so
- * exact fractions stay small at any depth (fraction.js uses doubles, so
- * unbounded ratio products like (81/80)^1000 would overflow).
+ * Most shapes cycle frequency ratios through a product-1 sequence (3/2, 4/3,
+ * 1/2) so exact fractions stay small at any depth — they isolate dependency-
+ * graph and op-count cost from operand size. comma-chain-400 is the deliberate
+ * opposite: BigInt arithmetic cost scales with digit count, and its unbounded
+ * (81/80)^k products measure exactly that.
  *
  * Usage: node scripts/perf/generate-stress-module.mjs [outDir]
  */
@@ -45,6 +49,22 @@ function chain(n) {
       startTime: k === 1 ? 'base.t' : `[${k - 1}].t + beat(base) / 4`,
       duration: 'beat(base)',
       frequency: k === 1 ? 'base.f' : `${CYCLE[(k - 2) % CYCLE.length]} * [${k - 1}].f`,
+      color: color(k)
+    });
+  }
+  return { baseNote: { ...BASE }, notes };
+}
+
+// Unbounded-magnitude chain: (81/80)^k never collapses, so each step adds
+// digits to the exact numerator/denominator. Arithmetic cost grows with depth.
+function commaChain(n) {
+  const notes = [];
+  for (let k = 1; k <= n; k++) {
+    notes.push({
+      id: k,
+      startTime: k === 1 ? 'base.t' : `[${k - 1}].t + beat(base) / 4`,
+      duration: 'beat(base)',
+      frequency: k === 1 ? 'base.f' : `(81/80) * [${k - 1}].f`,
       color: color(k)
     });
   }
@@ -181,6 +201,7 @@ const targets = {
   'fan-1000': fan(1000),
   'lattice-1000': lattice(10, 100),
   'chords-dense': chordsDense(200),
+  'comma-chain-400': commaChain(400),
   // Render-scaling ladder (bounded dep depth; see voicesShape).
   'voices-5000': voicesShape(5000),
   'voices-20000': voicesShape(20000),

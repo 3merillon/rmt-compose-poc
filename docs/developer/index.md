@@ -20,7 +20,7 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 | **Vite 7** | Dev server (port **3000**) and production bundler. |
 | **WebGL2** | The workspace. A hard requirement — `player.js` probes for a context and, without one, never constructs the `Workspace`. There is no DOM fallback renderer. |
 | **Web Audio API** | Synthesis, sample playback, the reverb/limiter signal graph. |
-| **fraction.js 4.3.7** | Exact rational arithmetic. Double-backed, **not** arbitrary precision. |
+| **fraction.js 5.3.4** | Exact rational arithmetic. BigInt-backed — arbitrary precision, at any magnitude and depth. |
 | **Rust → WASM** | An alternative evaluator core that ships in the bundle but is **off by default**. |
 | **VitePress** | This documentation site (`docs/`, deployed separately). |
 

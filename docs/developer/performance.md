@@ -61,12 +61,21 @@ with periodic multi-frame GC hitches all the way through.
 
 ### Evaluation — `npm run perf:bench` (Node, JS `BinaryEvaluator`)
 
+Measured on the BigInt-backed evaluator (fraction.js 5.x):
+
 | Module | Full eval (p50) | Mid-module commit (p50) | BaseNote edit (p50) |
 |---|---|---|---|
-| `chain-1000` (1000 notes, depth 1000) | 3.13 ms | 0.81 ms | 1.30 ms |
-| `fan-1000` (1000, depth 1) | 1.47 ms | 0.01 ms | 0.92 ms |
-| `lattice-1000` (1000, depth ~100) | 1.10 ms | 0.53 ms | 1.03 ms |
-| `chords-dense` (800, depth ~4) | 0.67 ms | 0.35 ms | 0.65 ms |
+| `chain-1000` (1000 notes, depth 1000) | 2.98 ms | 0.96 ms | 1.70 ms |
+| `fan-1000` (1000, depth 1) | 1.60 ms | 0.01 ms | 1.78 ms |
+| `lattice-1000` (1000, depth ~100) | 1.85 ms | 0.99 ms | 2.50 ms |
+| `chords-dense` (800, depth ~4) | 0.93 ms | 0.51 ms | 1.10 ms |
+| `comma-chain-400` (400, `(81/80)^k` growth) | 122.98 ms | 99.40 ms | 121.25 ms |
+
+`comma-chain-400` is the outlier by design. BigInt arithmetic costs time proportional to
+operand size, and its fractions grow without bound — ~760 digits by note 400 — so **digit
+count**, not note count, is what it measures. The four bounded shapes keep their fractions
+small at any depth, so they isolate graph and op-count cost; against the old double-backed
+fraction.js they moved by well under 2×.
 
 ## Idle is genuinely idle
 
@@ -367,12 +376,15 @@ never appear in the Module Bar.
 | `fan-1000` | Wide fan — every note depends directly on note `[1]`. Depth 1 |
 | `lattice-1000` | 10 chains × 100, cross-linked every 10th note |
 | `chords-dense` | 200 true-relational 4-note chords (800 notes) |
+| `comma-chain-400` | Deep chain of `(81/80)` steps — the ratio product never collapses, so fraction digit count grows linearly with depth. The digit-cost stress |
 | `hub-5000` | Drag worst case — one anchor with 4,999 direct dependents (`.t` and `.f`) |
 | `voices-5000` / `voices-20000` / `voices-100000` | Render-scaling ladder — 8 voices, dep depth ≤ 200, spread across time and frequency so the viewport cull is exercised |
 
-Frequency ratios cycle through a **product-1 sequence** (3/2, 4/3, 1/2) so exact fractions stay
-bounded at any depth — fraction.js uses doubles, and an unbounded product like `(81/80)^1000` would
-overflow.
+Frequency ratios in the other shapes cycle through a **product-1 sequence** (3/2, 4/3, 1/2) so
+exact fractions stay small at any depth — those shapes isolate dependency-graph and op-count
+cost. `comma-chain-400` is the deliberate opposite: fraction.js 5.x is BigInt-backed and exact
+at any magnitude (an unbounded product like `(81/80)^400` no longer overflows — it just grows),
+and this shape measures what that growth costs per operation.
 
 ::: warning The `voices-*` modules are gitignored.
 100,000 notes is a 16 MB JSON file, so `public/modules/perf/voices-*.json` is not in the repo. Run
@@ -382,8 +394,8 @@ overflow.
 ### Node evaluation benchmark
 
 ```bash
-npm run perf:bench                       # default module
-node scripts/perf/bench-node.mjs chain-1000
+npm run perf:bench                       # all five evaluation stress shapes
+node scripts/perf/bench-node.mjs chain-1000   # just one
 ```
 
 This measures **evaluation only** — Node has no renderer. It runs the JS evaluator.

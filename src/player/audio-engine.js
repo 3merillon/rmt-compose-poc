@@ -1,4 +1,4 @@
-import Fraction from 'fraction.js';
+import { toNumber } from '../utils/fraction-num.js';
 import { InstrumentManager } from '../instruments/instrument-manager.js';
 import { AudioGraph } from './audio-graph.js';
 
@@ -141,10 +141,10 @@ export class AudioEngine {
         let baseF = null;
         try {
           const baseCached = evalCache.get(0);
-          if (baseCached && baseCached.frequency) baseF = baseCached.frequency.valueOf();
+          if (baseCached && baseCached.frequency) baseF = toNumber(baseCached.frequency);
           else if (module.baseNote && typeof module.baseNote.getVariable === 'function') {
             const bf = module.baseNote.getVariable('frequency');
-            if (bf && typeof bf.valueOf === 'function') baseF = bf.valueOf();
+            if (bf != null) baseF = toNumber(bf);
           }
         } catch {}
         if (!(baseF > 0)) baseF = 440;
@@ -156,14 +156,14 @@ export class AudioEngine {
           const cached = evalCache.get(Number(id));
           if (!cached || !cached.startTime || !cached.duration) continue;
 
-          const noteStart = cached.startTime.valueOf();
-          const noteDuration = cached.duration.valueOf();
+          const noteStart = toNumber(cached.startTime);
+          const noteDuration = toNumber(cached.duration);
           const noteEnd = noteStart + noteDuration;
 
           if (noteEnd > fromTime && noteStart < moduleEndTime) {
             const adjustedStart = Math.max(0, noteStart - fromTime);
             const adjustedDuration = noteEnd - Math.max(noteStart, fromTime);
-            const freq = cached.frequency ? cached.frequency.valueOf() : null;
+            const freq = cached.frequency ? toNumber(cached.frequency) : null;
 
             noteDataList.push({
               id: note.id,
@@ -179,8 +179,9 @@ export class AudioEngine {
           }
         }
 
-        // Sort by start time for streaming playback
-        noteDataList.sort((a, b) => a.startTime - b.startTime);
+        // Sort by start time for streaming playback (id tie-break keeps the
+        // pump's scheduling order deterministic for simultaneous notes).
+        noteDataList.sort((a, b) => (a.startTime - b.startTime) || (a.id - b.id));
 
         const t2 = performance.now();
 

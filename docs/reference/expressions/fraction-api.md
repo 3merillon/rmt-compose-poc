@@ -59,19 +59,21 @@ before storage.
 ### Decimals become fractions
 
 There are no floating-point values in a stored expression. A decimal is rationalized at compile
-time — simple ones exactly, others by approximation with a maximum denominator of 10 000.
+time, **exactly as written**: the digits become the numerator over the matching power of ten,
+then the fraction is reduced.
 
 | You type | It is stored as |
 |---|---|
 | `0.5` | `(1/2)` |
 | `1.5` | `(3/2)` |
 | `0.1` | `(1/10)` |
-| `0.333333` | `(1/3)` |
-| `3.14159` | `(9563/3044)` |
+| `0.333333` | `(333333/1000000)` |
+| `3.14159` | `(314159/100000)` |
 
 ::: tip Prefer fraction literals
-`3.14159` becoming `(9563/3044)` is correct behaviour and still surprising. If a value has to
-be exact, write it as a fraction.
+A decimal can only spell a fraction whose denominator is a power of ten. `0.333333` is exactly
+`(333333/1000000)` — not `(1/3)`, and no number of extra 3s will reach it. If you mean a third,
+write `(1/3)`.
 :::
 
 ### Large numbers
@@ -80,11 +82,11 @@ Constants are stored as 32-bit integers when both parts fit between −2 147 483
 2 147 483 647, and are promoted to arbitrary-precision integers when they do not.
 `(3000000000/7)` and `(1/3000000000)` both work.
 
-::: warning Integer literals lose precision past 2^53
-The literal itself is read as a double before it becomes a fraction, so an integer larger than
-9 007 199 254 740 992 is rounded on the way in. `9007199254740993` is stored as
-`9007199254740992`. Arbitrary precision applies to the *stored* value and to arithmetic on it,
-not to the text you type.
+::: tip Integer literals are exact at any size
+A literal is parsed digit by digit into an arbitrary-precision integer — it never passes
+through a float — so `9007199254740993` is stored as exactly `9007199254740993`, and a
+hundred-digit numerator keeps all hundred digits. Arbitrary precision applies end to end:
+the text you type, the stored constant, and every arithmetic result.
 :::
 
 ## Exactness and irrationals
@@ -108,6 +110,10 @@ When a property's value comes out irrational it is flagged **corrupted**. The va
 the closest rational approximation, the note is drawn with a crosshatch, and the note widget
 prefixes the value with **`≈`**. A note that only *depends* on a corrupted note is drawn with a
 single diagonal hatch and also shows `≈`.
+
+Exact exponentiation is also capped for safety: an integer exponent above **65536**, or a result
+that would exceed roughly a megabit per component, is treated the same way — flagged and
+approximated rather than computed exactly. See [Operators](/reference/expressions/operators#power).
 
 This is how every equal-tempered scale in the module library is built. It is a marker, not a
 fault. See [Operators](/reference/expressions/operators) and

@@ -20,6 +20,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Fraction from 'fraction.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -85,6 +86,9 @@ async function validateModuleFile(relFile, meta) {
     if (!note) { fail(relFile, `note ${n.id} missing after load`); continue; }
     for (const prop of ['startTime', 'duration', 'frequency']) {
       if (n[prop] == null) continue; // silences/measure notes may omit some props
+      // Deliberate float gate: exact rationals can exceed double range, but a
+      // shipped value must still be representable as a finite double to be
+      // audible/renderable. valueOf() is the lossy boundary being tested here.
       let val;
       try { val = note.getVariable(prop)?.valueOf?.(); } catch (e) { val = NaN; }
       if (typeof val !== 'number' || !Number.isFinite(val)) fail(relFile, `note ${n.id}.${prop} evaluated to ${val} (not finite)`);
@@ -93,12 +97,17 @@ async function validateModuleFile(relFile, meta) {
 
   // Ratio / cents cross-check for single-note interval modules.
   if (meta && meta.ratio && /^\d+\/\d+$/.test(meta.ratio) && data.notes.length === 1) {
-    const [rn, rd] = meta.ratio.split('/').map(Number);
-    const baseF = mod.baseNote.getVariable('frequency').valueOf();
-    const got = mod.getNoteById(Number(data.notes[0].id)).getVariable('frequency').valueOf();
-    const expected = baseF * rn / rd;
-    if (Math.abs(got - expected) > 1e-6 * expected) fail(relFile, `frequency ${got} ≠ ratio ${meta.ratio}·base (${expected})`);
+    // Exact check: evaluated frequency must equal ratio·base as rationals.
+    try {
+      const baseF = mod.baseNote.getVariable('frequency');
+      const got = mod.getNoteById(Number(data.notes[0].id)).getVariable('frequency');
+      const expected = baseF.mul(new Fraction(meta.ratio));
+      if (!got.equals(expected)) fail(relFile, `frequency ${got.toFraction()} ≠ ratio ${meta.ratio}·base (${expected.toFraction()})`);
+    } catch (e) {
+      fail(relFile, `ratio cross-check threw: ${e.message}`);
+    }
     if (meta.cents != null) {
+      const [rn, rd] = meta.ratio.split('/').map(Number);
       const cents = 1200 * Math.log2(rn / rd);
       if (Math.abs(cents - meta.cents) > 0.01) fail(relFile, `manifest cents ${meta.cents} ≠ computed ${cents.toFixed(3)}`);
     }

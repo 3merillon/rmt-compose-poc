@@ -132,7 +132,7 @@ async function bench(name) {
 
 const targets = process.argv[2]
   ? [process.argv[2]]
-  : ['chain-1000', 'fan-1000', 'lattice-1000', 'chords-dense'];
+  : ['chain-1000', 'fan-1000', 'lattice-1000', 'chords-dense', 'comma-chain-400'];
 
 for (const t of targets) {
   await bench(t);

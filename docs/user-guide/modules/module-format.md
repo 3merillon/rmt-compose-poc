@@ -242,7 +242,7 @@ It is harmless — and because it is DSL, a pure-DSL file stays "pure DSL" when 
 | Max expression length | 10 000 characters |
 | Note ids blocked outright | `__proto__`, `constructor`, `prototype` |
 
-The id ceiling matches the bytecode: a reference is encoded as a 16-bit integer, and the loader rejects (skips, with a console warning) any id above 65 535 — so an id can never wrap to a different note.
+The id ceiling matches the bytecode: a reference is encoded as a 16-bit integer, the loader rejects (skips, with a console warning) any id above 65 535, and an expression like `[70000].f` is rejected when it compiles — so an id can never wrap to a different note.
 
 ## What is checked, and where
 

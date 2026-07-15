@@ -180,7 +180,9 @@ is used only when the numerator or denominator falls outside the i32 range
 
 `LOAD_REF` encodes the id as a `u16`, and `dependencies` is a `Uint16Array`.
 `Module.loadFromJSON()` guards the boundary: it rejects (skips, with a console warning) any note
-whose id is above 65535, so an id can never wrap.
+whose id is above 65535. Both expression parsers enforce the same range at compile time —
+`[70000].f` is a parse error (`src/dsl/parser.js:253`, `src/expression-compiler.js:215`) — so an
+id can never wrap.
 
 ## Worked example
 

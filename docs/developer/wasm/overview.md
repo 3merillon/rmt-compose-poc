@@ -75,8 +75,11 @@ pub struct Fraction {
 }
 ```
 
-Serialization goes through `FractionRepr { n: String, d: String, s: i8 }` — numerator and
-denominator as strings, so big integers survive the JS boundary.
+A string-based `FractionRepr { n: String, d: String, s: i8 }` is declared but not wired up:
+evaluated values actually cross the JS boundary as the u32-capped `FractionData`
+(`rust/src/evaluator.rs`), so numerators or denominators beyond u32 degrade to a float
+approximation. The bytecode channel is the exception — `LOAD_CONST_BIG` constants cross
+BigInt-exact in both directions.
 
 ### Value
 

@@ -7,6 +7,7 @@
 import { BinaryExpression, OP, VAR } from '../binary-note.js';
 import { NodeType } from './ast.js';
 import { DSLCompileError } from './errors.js';
+import { bigGcd } from '../utils/fraction-num.js';
 
 /**
  * DSL Compiler class
@@ -79,51 +80,41 @@ export class DSLCompiler {
   }
 
   /**
-   * Emit a fraction constant
-   * @param {number} num - Numerator
-   * @param {number} den - Denominator
+   * Emit a fraction constant, exact at any magnitude.
+   * @param {bigint|number} num - Numerator
+   * @param {bigint|number} den - Denominator
    */
   emitFraction(num, den) {
-    const MIN_I32 = -2147483648;
-    const MAX_I32 = 2147483647;
+    let finalNum = BigInt(num);
+    let finalDen = BigInt(den);
 
-    // Normalize the fraction using GCD
-    const gcd = this.gcd(Math.abs(num), Math.abs(den));
-    let finalNum = num / gcd;
-    let finalDen = den / gcd;
+    if (finalDen === 0n) {
+      throw new DSLCompileError('Division by zero in fraction constant');
+    }
 
-    // Ensure denominator is positive
-    if (finalDen < 0) {
+    // Ensure denominator is positive, then normalize with BigInt GCD
+    if (finalDen < 0n) {
       finalNum = -finalNum;
       finalDen = -finalDen;
     }
+    const gcd = bigGcd(finalNum, finalDen);
+    finalNum /= gcd;
+    finalDen /= gcd;
 
-    if (finalNum >= MIN_I32 && finalNum <= MAX_I32 &&
-        finalDen >= MIN_I32 && finalDen <= MAX_I32) {
+    const MIN_I32 = -2147483648n;
+    const MAX_I32 = 2147483647n;
+
+    if (finalNum >= MIN_I32 && finalNum <= MAX_I32 && finalDen <= MAX_I32) {
       // Use standard LOAD_CONST
       this.expr.writeByte(OP.LOAD_CONST);
-      this.expr.writeInt32(finalNum);
-      this.expr.writeInt32(finalDen);
+      this.expr.writeInt32(Number(finalNum));
+      this.expr.writeInt32(Number(finalDen));
     } else {
       // Use BigInt format for large values
       this.expr.writeByte(OP.LOAD_CONST_BIG);
-      this.expr.writeBigIntSigned(BigInt(finalNum));
-      this.expr.writeBigIntUnsigned(BigInt(Math.abs(finalDen)));
+      this.expr.writeBigIntSigned(finalNum);
+      this.expr.writeBigIntUnsigned(finalDen);
     }
-  }
-
-  /**
-   * Greatest common divisor
-   */
-  gcd(a, b) {
-    a = Math.abs(a);
-    b = Math.abs(b);
-    while (b) {
-      const t = b;
-      b = a % b;
-      a = t;
-    }
-    return a || 1;
   }
 
   /**

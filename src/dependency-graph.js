@@ -1886,8 +1886,14 @@ export class DependencyGraph {
 
       if (chainLinkDeps.length === 0) break;
 
-      // Sort by startTime and pick earliest (there should typically be only one chain link)
-      chainLinkDeps.sort((a, b) => a.startSec - b.startSec);
+      // Sort by startTime and pick earliest (there should typically be only one chain link).
+      // Three-way compare with an id tie-break keeps the pick deterministic even when a
+      // caller-supplied startSec is NaN or two starts collapse to the same float.
+      chainLinkDeps.sort((a, b) => {
+        if (a.startSec < b.startSec) return -1;
+        if (a.startSec > b.startSec) return 1;
+        return a.id - b.id;
+      });
       const next = chainLinkDeps[0];
 
       pushWithStart(next.id);

@@ -161,8 +161,10 @@ A bitmask, one bit per property, recording which of a note's values came out irr
 | Value used when a reference cannot be resolved | startTime 0, duration 1, frequency 440, tempo 60, beatsPerMeasure 4, measureLength 4 |
 | Division by zero at evaluation time | Result 1, plus a console warning; the property is flagged corrupted (crosshatch) |
 | An expression neither compiler can parse | Compile error — `console.error` plus a thrown message naming both parser failures; validators return `valid: false`; on a file load the note's property is left unset |
-| Decimal → fraction, largest denominator | 10 000 |
-| Constant fits `LOAD_CONST` when both parts are within | −2 147 483 648 to 2 147 483 647 |
+| Decimal → fraction | Exact as written — the digits over the matching power of ten, reduced (`0.333333` is `333333/1000000`) |
+| Constant fits `LOAD_CONST` when both parts are within | −2 147 483 648 to 2 147 483 647 (bigger constants use `LOAD_CONST_BIG`, exact at any size) |
+| Note id in a reference | 0 – 65 535, enforced when the expression compiles |
+| Exact `^` caps | Integer exponent ≤ 65 536 and result ≤ ~1 Mbit per component; past either, the value is approximated and flagged corrupted |
 | Maximum expression length accepted on import | 10 000 characters |
 | Compiled-expression cache | 4 000 entries, least-recently-used eviction |
 

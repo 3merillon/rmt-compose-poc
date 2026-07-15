@@ -58,7 +58,7 @@ export class SymbolicPower {
    * Check if this is purely rational (no irrational power terms)
    */
   isRational() {
-    return this.powers.length === 0 || this.powers.every(p => p.exp.d === 1);
+    return this.powers.length === 0 || this.powers.every(p => p.exp.d === 1n);
   }
 
   /**
@@ -69,12 +69,14 @@ export class SymbolicPower {
 
     let result = this.coefficient;
     for (const p of this.powers) {
-      // exp.d is 1, so this is an integer power
+      // exp.d is 1n, so this is an integer power — computed exactly in BigInt
       const intExp = p.exp.s * p.exp.n;
-      if (intExp >= 0) {
-        result = result.mul(new Fraction(Math.pow(p.base, intExp)));
+      const powered = bigIntPow(BigInt(p.base), intExp < 0n ? -intExp : intExp);
+      if (powered === null) return null; // beyond the DoS cap — treat as irrational
+      if (intExp >= 0n) {
+        result = result.mul(new Fraction(powered, 1n));
       } else {
-        result = result.div(new Fraction(Math.pow(p.base, -intExp)));
+        result = result.div(new Fraction(powered, 1n));
       }
     }
     return result;
@@ -85,9 +87,10 @@ export class SymbolicPower {
    */
   normalize() {
     // Filter out zero exponents
-    this.powers = this.powers.filter(p => p.exp.n !== 0);
-    // Sort by base
-    this.powers.sort((a, b) => a.base - b.base);
+    this.powers = this.powers.filter(p => p.exp.n !== 0n);
+    // Three-way compare: a subtraction comparator would throw via
+    // ToNumber if bases ever become BigInt.
+    this.powers.sort((a, b) => (a.base < b.base ? -1 : a.base > b.base ? 1 : 0));
     return this;
   }
 
@@ -115,7 +118,7 @@ export class SymbolicPower {
     }
 
     // Filter out zero exponents
-    const newPowers = [...powerMap.values()].filter(p => p.exp.n !== 0);
+    const newPowers = [...powerMap.values()].filter(p => p.exp.n !== 0n);
 
     return new SymbolicPower(newCoeff, newPowers).normalize();
   }
@@ -144,7 +147,7 @@ export class SymbolicPower {
       }
     }
 
-    const newPowers = [...powerMap.values()].filter(p => p.exp.n !== 0);
+    const newPowers = [...powerMap.values()].filter(p => p.exp.n !== 0n);
 
     return new SymbolicPower(newCoeff, newPowers).normalize();
   }
@@ -156,9 +159,16 @@ export class SymbolicPower {
   pow(exponent) {
     const exp = exponent instanceof Fraction ? exponent : new Fraction(exponent);
 
-    // Try to compute coefficient^exp as rational
+    // Try to compute coefficient^exp as rational; fall back to a float
+    // approximation (guarded — the 5.x constructor throws on NaN/Infinity)
     const coeffPow = tryRationalPower(this.coefficient, exp);
-    const newCoeff = coeffPow || new Fraction(Math.pow(this.coefficient.valueOf(), exp.valueOf()));
+    let newCoeff = coeffPow;
+    if (!newCoeff) {
+      const approx = Math.pow(this.coefficient.valueOf(), exp.valueOf());
+      newCoeff = Number.isFinite(approx)
+        ? new Fraction(approx)
+        : new Fraction(approx > 0 ? Number.MAX_VALUE : -Number.MAX_VALUE);
+    }
 
     const newPowers = this.powers.map(p => ({
       base: p.base,
@@ -210,7 +220,7 @@ export class SymbolicPower {
 
     // Add coefficient if not 1
     if (!this.coefficient.equals(1)) {
-      if (this.coefficient.d === 1) {
+      if (this.coefficient.d === 1n) {
         parts.push(`new Fraction(${this.coefficient.s * this.coefficient.n})`);
       } else {
         parts.push(`new Fraction(${this.coefficient.s * this.coefficient.n}, ${this.coefficient.d})`);
@@ -219,7 +229,7 @@ export class SymbolicPower {
 
     // Add each power term
     for (const p of this.powers) {
-      if (p.exp.d === 1) {
+      if (p.exp.d === 1n) {
         parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.exp.s * p.exp.n}))`);
       } else {
         parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.exp.s * p.exp.n}, ${p.exp.d}))`);
@@ -235,30 +245,38 @@ export class SymbolicPower {
   }
 
   /**
-   * Serialize to JSON-compatible object
+   * Serialize to JSON-compatible object.
+   * n/d serialize as decimal strings (JSON.stringify throws on BigInt), the
+   * same convention as the Rust BigRational boundary.
    */
   toJSON() {
     return {
       symbolic: true,
-      coefficient: { s: this.coefficient.s, n: this.coefficient.n, d: this.coefficient.d },
+      coefficient: {
+        s: Number(this.coefficient.s),
+        n: this.coefficient.n.toString(),
+        d: this.coefficient.d.toString(),
+      },
       powers: this.powers.map(p => ({
         base: p.base,
-        exp: { s: p.exp.s, n: p.exp.n, d: p.exp.d }
+        exp: { s: Number(p.exp.s), n: p.exp.n.toString(), d: p.exp.d.toString() }
       })),
       f: this.toFloat()
     };
   }
 
   /**
-   * Deserialize from JSON object
+   * Deserialize from JSON object.
+   * Accepts both the string form and legacy Number fields.
    */
   static fromJSON(json) {
     if (!json || !json.symbolic) return null;
 
-    const coeff = new Fraction(json.coefficient.s * json.coefficient.n, json.coefficient.d);
+    const toFrac = (o) => new Fraction(BigInt(o.s) * BigInt(o.n), BigInt(o.d));
+    const coeff = toFrac(json.coefficient);
     const powers = json.powers.map(p => ({
       base: p.base,
-      exp: new Fraction(p.exp.s * p.exp.n, p.exp.d)
+      exp: toFrac(p.exp)
     }));
 
     return new SymbolicPower(coeff, powers);
@@ -345,7 +363,9 @@ export class MusicValue {
       return SymbolicPower.fromRational(this.fraction);
     } else {
       // Irrational - cannot convert to symbolic, return as coefficient only
-      return new SymbolicPower(new Fraction(this.float), []);
+      // (guarded: the 5.x constructor throws on NaN/Infinity)
+      const f = Number.isFinite(this.float) ? this.float : 0;
+      return new SymbolicPower(new Fraction(f), []);
     }
   }
 
@@ -367,35 +387,43 @@ export class MusicValue {
   toFraction() {
     if (this.type === 'rational') {
       return this.fraction;
-    } else if (this.type === 'symbolic') {
+    }
+    // Approximate irrational/symbolic as a fraction. Guarded: the 5.x
+    // constructor throws on NaN/Infinity where 4.x silently made NaN values.
+    let approx;
+    if (this.type === 'symbolic') {
       // If symbolic is actually rational, return exact value
       const rational = this.symbolic.toRationalFraction();
       if (rational) return rational;
-      // Otherwise approximate
-      return new Fraction(this.symbolic.toFloat());
+      approx = this.symbolic.toFloat();
+    } else {
+      approx = this.float;
     }
-    // Approximate irrational as fraction
-    return new Fraction(this.float);
+    if (Number.isFinite(approx)) return new Fraction(approx);
+    if (Number.isNaN(approx)) return new Fraction(0);
+    return new Fraction(approx > 0 ? Number.MAX_VALUE : -Number.MAX_VALUE);
   }
 
   /**
-   * Get fraction components for compatibility with existing code
+   * Get fraction components for compatibility with existing code.
+   * Always BigInt (matching 5.x Fraction fields) so consumers never see
+   * mixed Number/BigInt types.
    */
   get s() {
     if (this.type === 'rational') return this.fraction.s;
     if (this.type === 'symbolic') {
       const f = this.symbolic.toFloat();
-      return f < 0 ? -1 : f > 0 ? 1 : 0;
+      return f < 0 ? -1n : f > 0 ? 1n : 0n;
     }
-    return this.float < 0 ? -1 : this.float > 0 ? 1 : 0;
+    return this.float < 0 ? -1n : this.float > 0 ? 1n : 0n;
   }
   get n() {
     if (this.type === 'rational') return this.fraction.n;
-    return 0;
+    return 0n;
   }
   get d() {
     if (this.type === 'rational') return this.fraction.d;
-    return 1;
+    return 1n;
   }
 
   /**
@@ -509,13 +537,15 @@ export class MusicValue {
       if (result) {
         return MusicValue.rational(result);
       }
-      // Irrational result: return symbolic to preserve base^exp structure
-      // Only create symbolic for positive integer bases
-      const baseVal = this.fraction.valueOf();
-      if (Number.isInteger(baseVal) && baseVal > 0) {
-        return MusicValue.symbolic(SymbolicPower.fromPower(baseVal, exponent.fraction));
+      // Irrational result: return symbolic to preserve base^exp structure.
+      // Only for positive integer bases below 2^53 — SymbolicPower stores
+      // base as a Number (bases are small TET integers in practice), and the
+      // exact field test avoids the valueOf rounding that a huge BigInt
+      // numerator would silently pass through.
+      if (this.fraction.d === 1n && this.fraction.s > 0n && this.fraction.n <= 9007199254740991n) {
+        return MusicValue.symbolic(SymbolicPower.fromPower(Number(this.fraction.n), exponent.fraction));
       }
-      // Non-integer or negative base: fall back to irrational
+      // Non-integer, negative, or oversized base: fall back to irrational
       return MusicValue.irrational(Math.pow(this.toFloat(), exponent.toFloat()));
     }
 
@@ -544,108 +574,133 @@ export class MusicValue {
   }
 }
 
+// DoS caps for exact exponentiation: BigInt ** with an unbounded exponent
+// can allocate gigabit integers or hang the tab (4.x just overflowed to
+// Infinity). Beyond either cap the power is treated as irrational — same UX
+// as an inexact root (corruption flag + float approximation).
+const MAX_POW_EXPONENT = 65536n;
+const MAX_POW_RESULT_BITS = 1048576n; // ~1 Mbit per component
+
+/**
+ * base ** exp for non-negative BigInt exp, or null when the result would
+ * exceed the DoS caps.
+ * @param {bigint} base
+ * @param {bigint} exp - non-negative
+ * @returns {bigint|null}
+ */
+function bigIntPow(base, exp) {
+  if (exp === 0n) return 1n;
+  if (exp > MAX_POW_EXPONENT) return null;
+  const mag = base < 0n ? -base : base;
+  if (mag > 1n) {
+    const bits = BigInt(mag.toString(2).length) * exp;
+    if (bits > MAX_POW_RESULT_BITS) return null;
+  }
+  return base ** exp;
+}
+
 /**
  * Try to compute base^(num/den) as a rational if possible
- * Returns Fraction if rational, null if irrational
+ * Returns Fraction if rational, null if irrational (or beyond the DoS caps)
  */
 function tryRationalPower(base, exp) {
   const expNum = exp.s * exp.n;
   const expDen = exp.d;
 
   // Zero exponent: always 1
-  if (expNum === 0) {
+  if (expNum === 0n) {
     return new Fraction(1, 1);
   }
 
   // Integer exponent: always rational
-  if (expDen === 1) {
+  if (expDen === 1n) {
     return rationalIntPower(base, expNum);
   }
 
   // Fractional exponent: check for perfect n-th root
   // base^(p/q) = (base^p)^(1/q)
   const basePowered = rationalIntPower(base, expNum);
+  if (!basePowered) return null;
   return tryPerfectNthRoot(basePowered, expDen);
 }
 
 /**
- * Compute base^n for integer n
+ * Compute base^n for BigInt integer n — exact at any magnitude within the
+ * DoS caps; null beyond them (callers treat that as irrational).
+ * @param {Fraction} base
+ * @param {bigint} n
  */
 function rationalIntPower(base, n) {
-  if (n === 0) {
+  if (n === 0n) {
     return new Fraction(1, 1);
   }
 
-  const absN = Math.abs(n);
-  let result = new Fraction(1, 1);
+  const absN = n < 0n ? -n : n;
+  const num = bigIntPow(base.s * base.n, absN);
+  const den = bigIntPow(base.d, absN);
+  if (num === null || den === null) return null;
 
-  // Simple repeated multiplication (could optimize with squaring)
-  for (let i = 0; i < absN; i++) {
-    result = result.mul(base);
+  if (n < 0n) {
+    if (num === 0n) return null; // 0^negative — no rational value
+    return new Fraction(den, num);
   }
-
-  if (n < 0) {
-    return result.inverse();
-  }
-  return result;
+  return new Fraction(num, den);
 }
 
 /**
  * Check if value has a perfect n-th root that is rational
  * Returns Fraction if perfect root, null otherwise
+ * @param {Fraction} value
+ * @param {bigint} n - root degree (≥ 2; fraction.js keeps d positive)
  */
 function tryPerfectNthRoot(value, n) {
-  if (n === 0) return null;
-  if (n === 1) return value;
+  if (n === 0n) return null;
+  if (n === 1n) return value;
 
-  const num = value.s * value.n;
-  const den = value.d;
-
-  const numAbs = Math.abs(num);
-
-  const numRoot = integerNthRoot(numAbs, n);
-  const denRoot = integerNthRoot(den, n);
+  const numRoot = integerNthRoot(value.n, n);
+  const denRoot = integerNthRoot(value.d, n);
 
   if (numRoot === null || denRoot === null) {
     return null;
   }
 
-  // Verify it's exact
-  if (Math.pow(numRoot, n) === numAbs && Math.pow(denRoot, n) === den) {
-    // Handle sign: odd roots preserve sign, even roots of negatives are not real
-    let sign;
-    if (num < 0) {
-      if (n % 2 === 1) {
-        sign = -1;
-      } else {
-        return null; // Even root of negative is not real
-      }
-    } else {
-      sign = 1;
+  // Handle sign: odd roots preserve sign, even roots of negatives are not real
+  if (value.s < 0n) {
+    if ((n & 1n) === 1n) {
+      return new Fraction(-numRoot, denRoot);
     }
-    return new Fraction(sign * numRoot, denRoot);
+    return null; // Even root of negative is not real
   }
-
-  return null;
+  return new Fraction(numRoot, denRoot);
 }
 
 /**
- * Integer n-th root if exact, null otherwise
+ * Exact integer n-th root via binary search (roots are verified exactly, so
+ * perfect roots of any magnitude are found — the old float version silently
+ * missed them past 2^53). Returns BigInt root or null when not exact.
+ * @param {bigint} value - non-negative
+ * @param {bigint} n - root degree ≥ 2
  */
 function integerNthRoot(value, n) {
-  if (value === 0) return 0;
-  if (value === 1 || n === 1) return value;
+  if (value === 0n) return 0n;
+  if (value === 1n) return 1n;
 
-  const root = Math.round(Math.pow(value, 1 / n));
+  const bitLen = BigInt(value.toString(2).length);
+  // root has about bitLen/n bits; +1 covers rounding
+  let hi = 1n << (bitLen / n + 1n);
+  let lo = 1n;
 
-  // Check root and neighbors (floating point might be slightly off)
-  for (let candidate = root - 1; candidate <= root + 1; candidate++) {
-    if (candidate >= 0 && Math.pow(candidate, n) === value) {
-      return candidate;
+  while (lo < hi) {
+    const mid = (lo + hi + 1n) >> 1n;
+    const p = mid ** n;
+    if (p === value) return mid;
+    if (p < value) {
+      lo = mid;
+    } else {
+      hi = mid - 1n;
     }
   }
-
-  return null;
+  return lo ** n === value ? lo : null;
 }
 
 /**
@@ -663,9 +718,13 @@ class FractionPool {
   }
 
   /**
-   * Get a Fraction from the pool, initializing with given values
+   * Get a Fraction from the pool, initializing with given values.
+   * Fields are ALWAYS written as BigInt — fraction.js 5.x is BigInt-backed
+   * and mixed Number/BigInt fields throw on the next arithmetic op.
+   * @param {bigint|number} n
+   * @param {bigint|number} d
    */
-  alloc(n = 0, d = 1) {
+  alloc(n = 0n, d = 1n) {
     if (this.index >= this.pool.length) {
       // Expand pool if needed
       const newSize = this.pool.length * 2;
@@ -675,25 +734,35 @@ class FractionPool {
     }
 
     const f = this.pool[this.index++];
-    // Reinitialize the Fraction
-    // Note: fraction.js stores {s: sign, n: numerator, d: denominator}
-    if (d < 0) {
-      f.s = n < 0 ? 1 : -1;
-      f.n = Math.abs(n);
-      f.d = Math.abs(d);
-    } else {
-      f.s = n < 0 ? -1 : 1;
-      f.n = Math.abs(n);
-      f.d = d;
+    let nn = typeof n === 'bigint' ? n : BigInt(n);
+    let dd = typeof d === 'bigint' ? d : BigInt(d);
+    if (dd < 0n) {
+      nn = -nn;
+      dd = -dd;
     }
+    // Note: fraction.js stores {s: sign, n: magnitude, d: denominator}
+    f.s = nn < 0n ? -1n : 1n;
+    f.n = nn < 0n ? -nn : nn;
+    f.d = dd;
     return f;
   }
 
   /**
-   * Create a Fraction from an existing Fraction (copy)
+   * Create a Fraction from an existing Fraction (copy).
+   * Tolerates duck-typed {s,n,d} values with Number fields (e.g. from the
+   * WASM adapter) by coercing them to BigInt.
    */
   allocFrom(frac) {
-    return this.alloc(frac.s * frac.n, frac.d);
+    if (typeof frac.n === 'bigint') {
+      const f = this.alloc(0n, 1n);
+      f.s = frac.s < 0n ? -1n : 1n;
+      f.n = frac.n < 0n ? -frac.n : frac.n;
+      f.d = frac.d;
+      return f;
+    }
+    // Number-backed duck value: round defensively (BigInt throws on
+    // non-integer doubles) — such values are quantized approximations anyway.
+    return this.alloc(BigInt(Math.round(frac.s * frac.n)), BigInt(Math.round(frac.d)));
   }
 
   /**
@@ -910,9 +979,9 @@ export class BinaryEvaluator {
           // Read unsigned denominator (variable length)
           const { value: denBig, bytesRead: denBytes } = this.readBigIntUnsigned(bytecode, pc);
           pc += denBytes;
-          // Create Fraction from BigInt using string constructor for large values
-          const frac = new Fraction(numBig.toString(), denBig.toString());
-          this.push(this.pool.allocFrom(frac));
+          // Push the exact BigInt pair straight into the pool — no Fraction
+          // construction, no precision loss at any magnitude.
+          this.push(this.pool.alloc(numBig, denBig));
           break;
         }
 
@@ -1049,8 +1118,8 @@ export class BinaryEvaluator {
         case OP.DIV: {
           const b = this.pop();
           const a = this.pop();
-          // Check for division by zero
-          if (b.n === 0) {
+          // Check for division by zero (pool fields are BigInt)
+          if (b.n === 0n) {
             console.warn('Division by zero in binary evaluator, using 1');
             // Flag the result as corrupted so the note's property picks up a
             // corruption flag (same path POW uses for irrational results) —
@@ -1087,12 +1156,11 @@ export class BinaryEvaluator {
           if (powResult.isCorrupted()) {
             // Track that this evaluation produced an irrational result
             this._lastEvalWasCorrupted = true;
-            // Approximate as fraction
-            const frac = new Fraction(powResult.toFloat());
-            this.push(this.pool.alloc(frac.s * frac.n, frac.d));
+            // Approximate as fraction (toFraction is guarded against the
+            // NaN/Infinity floats the 5.x constructor refuses)
+            this.push(this.pool.allocFrom(powResult.toFraction()));
           } else {
-            const frac = powResult.fraction;
-            this.push(this.pool.alloc(frac.s * frac.n, frac.d));
+            this.push(this.pool.allocFrom(powResult.fraction));
           }
           break;
         }
@@ -1171,14 +1239,15 @@ export class BinaryEvaluator {
             tempo = this.pool.alloc(60, 1); // Default 60 BPM
           }
 
-          // Compute measureLength = beatsPerMeasure / tempo * 60
-          // = beatsPerMeasure * 60 / tempo
-          const sixty = this.pool.alloc(60, 1);
-          const numerator = this.pool.alloc(1, 1);
-          numerator.mul(beatsPerMeasure);
-          numerator.mul(sixty);
-          numerator.div(tempo);
-          this.push(numerator);
+          // Compute measureLength = beatsPerMeasure * 60 / tempo.
+          // Fraction methods return new instances (they never mutate) — the
+          // old code discarded every result and pushed 1/1.
+          try {
+            const ml = beatsPerMeasure.mul(60).div(tempo);
+            this.push(this.pool.allocFrom(ml));
+          } catch (e) {
+            this.push(this.pool.alloc(4, 1));
+          }
           break;
         }
 
@@ -1317,12 +1386,16 @@ export class BinaryEvaluator {
         const baseCache = evalCache.get(0);
         if (baseCache) tempo = baseCache.tempo;
       }
-      // Compute measureLength = beatsPerMeasure / tempo * 60 using fast native math
-      const beatsVal = beats ? (typeof beats.valueOf === 'function' ? beats.valueOf() : Number(beats)) : 4;
-      const tempoVal = tempo ? (typeof tempo.valueOf === 'function' ? tempo.valueOf() : Number(tempo)) : 60;
-      const measureLenVal = (beatsVal / tempoVal) * 60;
-      // Store as simple object with s/n/d for compatibility, avoiding Fraction constructor
-      result.measureLength = { s: 1, n: Math.round(measureLenVal * 1000000), d: 1000000, valueOf: () => measureLenVal };
+      // Compute measureLength = beatsPerMeasure * 60 / tempo as an exact
+      // Fraction. The old duck-typed {s,n,d,valueOf} POJO quantized to 1e-6
+      // AND its Number fields would poison BigInt-backed consumers.
+      try {
+        const b = beats instanceof Fraction ? beats : new Fraction(4);
+        const t = tempo instanceof Fraction ? tempo : new Fraction(60);
+        result.measureLength = b.mul(60).div(t);
+      } catch (e) {
+        result.measureLength = new Fraction(4);
+      }
     }
 
     // Cache the result

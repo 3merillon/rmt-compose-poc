@@ -118,8 +118,10 @@ function validateLegacyExpression(moduleInstance, noteId, expr, variableType) {
             fracResult = result;
         } else if (typeof result === 'number') {
             fracResult = new Fraction(result);
-        } else if (typeof result.valueOf === 'function') {
-            fracResult = new Fraction(result.valueOf());
+        } else if (typeof result.toFraction === 'function') {
+            // MusicValue-style wrapper: toFraction() is exact (Fraction or 'n/d' string)
+            const exact = result.toFraction();
+            fracResult = exact instanceof Fraction ? exact : new Fraction(exact);
         } else {
             throw new Error('Expression must result in a Fraction or a number');
         }
@@ -130,10 +132,7 @@ function validateLegacyExpression(moduleInstance, noteId, expr, variableType) {
         }
 
         // Numeric-only expression: canonicalize to reduced Fraction literal
-        const s = fracResult.s || 1;
-        const n = fracResult.n || 0;
-        const d = fracResult.d || 1;
-        return `new Fraction(${s * n}, ${d})`;
+        return `new Fraction(${fracResult.s * fracResult.n}, ${fracResult.d})`;
     } catch (e) {
         console.error(`Error in expression validation for Note ${noteId}:`, e);
         throw new Error(`Invalid expression: ${e.message}`);

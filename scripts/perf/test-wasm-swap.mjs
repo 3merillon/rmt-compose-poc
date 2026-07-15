@@ -13,6 +13,7 @@
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import Fraction from 'fraction.js';
 
 // --- fetch shim for file:// wasm loading in Node ---
 const realFetch = globalThis.fetch;
@@ -68,11 +69,12 @@ for (const s of jsSamples) {
     same ? `${s.f} @ ${s.t}` : `js=${s.f}@${s.t} wasm=${w?.frequency?.toFraction()}@${w?.startTime?.toFraction()}`);
 }
 
-// 4) Base-note edit propagates on the WASM path.
-const before = wasmCache.get(1000).frequency.valueOf();
+// 4) Base-note edit propagates on the WASM path (exact: after = before · 2).
+const before = new Fraction(wasmCache.get(1000).frequency.toFraction());
 mod.baseNote.setVariable('frequencyString', '880');
-const after = mod.evaluateModule().get(1000).frequency.valueOf();
-check('base edit propagates through chain on WASM', after === before * 2, `${before} -> ${after}`);
+const after = new Fraction(mod.evaluateModule().get(1000).frequency.toFraction());
+check('base edit propagates through chain on WASM', after.equals(before.mul(2)),
+  `${before.toFraction()} -> ${after.toFraction()}`);
 
 // 5) A module created AFTER WASM is ready starts on WASM directly.
 const mod2 = await Module.loadFromJSON(data);

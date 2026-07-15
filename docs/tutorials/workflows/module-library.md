@@ -90,7 +90,8 @@ copy, delete its tile (the red **×** on the icon).
 4. Pick your file. On success: `Module "NAME" uploaded successfully`.
 
 The file is validated on the way in: it must have a `baseNote` object and a `notes` array, at most
-10 000 notes, unique integer ids in 0…100000, and every expression and colour must pass validation.
+10 000 notes, unique integer ids in 0…65535 (the same `u16` ceiling the loader and both expression
+parsers enforce), and every expression and colour must pass validation.
 A bad file is rejected with `Invalid module: <errors>`.
 
 ::: warning Save Module reindexes

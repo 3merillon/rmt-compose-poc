@@ -16,24 +16,32 @@ import { WASM_CONFIG, shouldUseWasm } from './config.js';
  * @returns {Object} Fraction instance
  */
 export function createFraction(num, den = 1) {
+  // fraction.js 5.x rejects a string numerator alongside a denominator
+  const jsFraction = () =>
+    typeof num === 'string' ? new FractionJS(num) : new FractionJS(num, den);
+
   if (shouldUseWasm('fractions') && isWasmAvailable()) {
     const wasm = getWasm();
     try {
       if (typeof num === 'string') {
         return wasm.Fraction.fromString(num);
       }
-      return new wasm.Fraction(Math.floor(num), Math.floor(den));
+      // fromString parses arbitrary-precision 'n/d'; the i32 constructor
+      // would reject BigInt and wrap anything >= 2^31
+      const n = typeof num === 'bigint' ? num : Math.floor(num);
+      const d = typeof den === 'bigint' ? den : Math.floor(den);
+      return wasm.Fraction.fromString(`${n}/${d}`);
     } catch (e) {
       if (WASM_CONFIG.fallbackOnError) {
         if (WASM_CONFIG.debug) {
           console.warn('WASM Fraction creation failed, using JS fallback:', e);
         }
-        return new FractionJS(num, den);
+        return jsFraction();
       }
       throw e;
     }
   }
-  return new FractionJS(num, den);
+  return jsFraction();
 }
 
 /**
@@ -49,16 +57,15 @@ export function toFractionJS(wasmFraction) {
     return wasmFraction;
   }
 
-  // Convert WASM Fraction to fraction.js
-  const s = wasmFraction.s;
-  const n = wasmFraction.n;
-  const d = wasmFraction.d;
-
-  const frac = new FractionJS(0);
-  frac.s = s;
-  frac.n = n;
-  frac.d = d;
-  return frac;
+  // Convert WASM Fraction to fraction.js. numeratorStr()/denominatorStr()
+  // are exact at any magnitude (the .n/.d getters saturate at u32::MAX);
+  // numeratorStr() is the absolute value, so the sign comes from .s.
+  const sign = wasmFraction.s < 0 ? '-' : '';
+  if (typeof wasmFraction.numeratorStr === 'function' &&
+      typeof wasmFraction.denominatorStr === 'function') {
+    return new FractionJS(`${sign}${wasmFraction.numeratorStr()}/${wasmFraction.denominatorStr()}`);
+  }
+  return new FractionJS(`${sign}${wasmFraction.n}/${wasmFraction.d}`);
 }
 
 /**
@@ -71,8 +78,8 @@ export function fromFractionJS(jsFraction) {
 
   if (shouldUseWasm('fractions') && isWasmAvailable()) {
     const wasm = getWasm();
-    const num = jsFraction.s * jsFraction.n;
-    return new wasm.Fraction(num, jsFraction.d);
+    // Template interpolation of BigInt fields is exact at any magnitude
+    return wasm.Fraction.fromString(`${jsFraction.s * jsFraction.n}/${jsFraction.d}`);
   }
 
   return jsFraction;
@@ -89,10 +96,12 @@ export function isFraction(value) {
   // Check for fraction.js
   if (value instanceof FractionJS) return true;
 
-  // Check for WASM Fraction (duck typing)
-  if (typeof value.s === 'number' &&
-      typeof value.n === 'number' &&
-      typeof value.d === 'number' &&
+  // Check for WASM Fraction or duck-typed fraction (fields are Numbers on
+  // the WASM side, BigInt on fraction.js 5.x instances from another realm)
+  const isField = (v) => typeof v === 'number' || typeof v === 'bigint';
+  if (isField(value.s) &&
+      isField(value.n) &&
+      isField(value.d) &&
       typeof value.add === 'function') {
     return true;
   }

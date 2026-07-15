@@ -1,5 +1,6 @@
 import Fraction from 'fraction.js';
 import { Note } from './note.js';
+import { toNumber } from './utils/fraction-num.js';
 import { DependencyGraph } from './dependency-graph.js';
 import { createEvaluator, createIncrementalEvaluator, isWasmBackedEvaluator, isEvaluatorHotSwapEnabled } from './wasm/evaluator-adapter.js';
 import { onWasmReady } from './wasm/index.js';
@@ -981,12 +982,18 @@ export class Module {
       }
     }
 
-    // Sort by startTime
+    // Sort by startTime — exact comparison (a valueOf() subtraction collapses
+    // rationals that differ past double precision), with id tie-break so
+    // export renumbering stays deterministic.
     const sortByStartTime = (a, b) => {
       const aStart = a.getVariable('startTime');
       const bStart = b.getVariable('startTime');
-      if (!aStart || !bStart) return 0;
-      return aStart.valueOf() - bStart.valueOf();
+      if (!aStart || !bStart) return a.id - b.id;
+      try {
+        const cmp = aStart.compare(bStart);
+        if (cmp !== 0) return cmp;
+      } catch (e) { /* non-Fraction value — fall through to id order */ }
+      return a.id - b.id;
     };
 
     measureNotes.sort(sortByStartTime);
@@ -1142,25 +1149,31 @@ export class Module {
 
     let measureEnd = 0;
     if (measureNotes.length > 0) {
-      // Find last measure by startTime without full sort
+      // Find last measure by startTime without full sort — exact comparison,
+      // one lossy conversion at the end (a NaN from valueOf overflow here
+      // used to cascade into silent playback and a never-stopping playhead).
       let lastMeasure = measureNotes[0];
       let lastMeasureStart = lastMeasure.getVariable('startTime');
 
       for (let i = 1; i < measureNotes.length; i++) {
         const note = measureNotes[i];
         const noteStart = note.getVariable('startTime');
-        if (noteStart && lastMeasureStart && noteStart.valueOf() > lastMeasureStart.valueOf()) {
-          lastMeasure = note;
-          lastMeasureStart = noteStart;
+        if (noteStart && lastMeasureStart) {
+          try {
+            if (noteStart.compare(lastMeasureStart) > 0) {
+              lastMeasure = note;
+              lastMeasureStart = noteStart;
+            }
+          } catch (e) { /* non-Fraction value — keep current candidate */ }
         }
       }
 
       if (lastMeasureStart) {
-        measureEnd = lastMeasureStart.add(this.findMeasureLength(lastMeasure)).valueOf();
+        measureEnd = toNumber(lastMeasureStart.add(this.findMeasureLength(lastMeasure)));
       }
     }
 
-    // Compute last note end time
+    // Compute last note end time — exact add, then one conversion
     let lastNoteEnd = 0;
     for (const id in this.notes) {
       const note = this.notes[id];
@@ -1168,7 +1181,12 @@ export class Module {
         const noteStart = note.getVariable('startTime');
         const noteDuration = note.getVariable('duration');
         if (noteStart && noteDuration) {
-          const noteEnd = noteStart.valueOf() + noteDuration.valueOf();
+          let noteEnd;
+          try {
+            noteEnd = toNumber(noteStart.add(noteDuration));
+          } catch (e) {
+            noteEnd = toNumber(noteStart) + toNumber(noteDuration);
+          }
           if (noteEnd > lastNoteEnd) lastNoteEnd = noteEnd;
         }
       }

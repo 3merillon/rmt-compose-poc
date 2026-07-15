@@ -12,6 +12,8 @@ import { BinaryEvaluator } from '../binary-evaluator.js';
 import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
 import { settingsStore } from '../settings/settings-store.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
+import { toNumber } from '../utils/fraction-num.js';
+import { hugeFractionDisplay } from './fraction-display.js';
 
 // Singleton compiler for safe evaluation
 const safeCompiler = new ExpressionCompiler();
@@ -50,6 +52,7 @@ function buildEvaluatedDiv(value) {
   evaluatedDiv.className = 'evaluated-value';
 
   let displayValue = 'null';
+  let exactTitle = '';
   if (value?.evaluated !== null && value?.evaluated !== undefined) {
     const ev = value.evaluated;
     // Check if this is a directly corrupted (irrational) value — either flagged
@@ -60,21 +63,34 @@ function buildEvaluatedDiv(value) {
 
     if (isDirectlyCorrupted) {
       // Display as float with reasonable precision
-      // Prefer _floatValue (exact irrational), fall back to valueOf() (approximated fraction)
-      const floatVal = ev._floatValue !== undefined ? ev._floatValue : (typeof ev.valueOf === 'function' ? ev.valueOf() : ev);
+      // Prefer _floatValue (exact irrational), fall back to the approximated fraction
+      const floatVal = ev._floatValue !== undefined ? ev._floatValue : toNumber(ev, NaN);
       displayValue = `≈${Number(floatVal).toPrecision(8)}`;
       evaluatedDiv.classList.add('corrupted-value');
     } else if (isTransitivelyCorrupted) {
       // Transitively corrupted: show fraction with ≈ prefix to indicate it's an approximation
-      displayValue = `≈${String(ev)}`;
+      const huge = hugeFractionDisplay(ev);
+      if (huge) {
+        displayValue = huge.text;
+        exactTitle = huge.title;
+      } else {
+        displayValue = `≈${String(ev)}`;
+      }
       evaluatedDiv.classList.add('corrupted-value');
     } else {
-      displayValue = String(ev);
+      const huge = hugeFractionDisplay(ev);
+      if (huge) {
+        displayValue = huge.text;
+        exactTitle = huge.title;
+      } else {
+        displayValue = String(ev);
+      }
     }
   }
 
   // SECURITY: Escape displayValue to prevent XSS
   evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${escapeHtml(displayValue)}`;
+  if (exactTitle) evaluatedDiv.title = exactTitle;
   return evaluatedDiv;
 }
 
@@ -170,7 +186,8 @@ function computeDurationExpr(multiplierNum, multiplierDen = 1, useDSL = false) {
   return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${multiplierNum}, ${multiplierDen}))`;
 }
 
-// Multiply two rational values and reduce (n1/d1) * (n2/d2)
+// Multiply two rational values and reduce (n1/d1) * (n2/d2).
+// Operands are the fixed picker constants (≤ 7/4), so Number math is exact.
 function mulFrac(n1, d1, n2, d2) {
   let n = n1 * n2;
   let d = d1 * d2;
@@ -402,21 +419,21 @@ function createDurationSelector(rawInput, saveButton, note, value) {
       // Prefer evaluated beats for robustness (handles newly dropped modules and any formatting)
       let mNum = 1, mDen = 1, found = false;
 
-      // 1) Use evaluated duration + tempo to compute beats exactly
+      // 1) Use evaluated duration + tempo to compute beats (tolerance matching is approximate)
       try {
         const moduleInstance = getModule();
-        const durationVal = (value && value.evaluated && typeof value.evaluated.valueOf === 'function')
-          ? value.evaluated.valueOf()
-          : (note && typeof note.getVariable === 'function' ? note.getVariable('duration')?.valueOf?.() : undefined);
+        const durationVal = (value && value.evaluated != null)
+          ? toNumber(value.evaluated, NaN)
+          : (note && typeof note.getVariable === 'function' ? toNumber(note.getVariable('duration'), NaN) : NaN);
 
-        const tempoVal = moduleInstance?.findTempo?.(note)?.valueOf?.();
+        const tempoVal = toNumber(moduleInstance?.findTempo?.(note), NaN);
 
         if (isFinite(durationVal) && isFinite(tempoVal) && tempoVal > 0) {
           const beatLen = 60 / tempoVal;
           const beats = durationVal / beatLen;
           const frac = new Fraction(beats);
-          mNum = frac.n;
-          mDen = frac.d;
+          mNum = toNumber(frac.n);
+          mDen = toNumber(frac.d);
           found = true;
         }
       } catch {}
@@ -511,14 +528,14 @@ function createDurationSelector(rawInput, saveButton, note, value) {
             // Evaluate using safe binary evaluator
             const evaluator = new BinaryEvaluator(moduleInstance);
             const val = evaluator.evaluate(binary, evalCache);
-            const durationSec = (val && typeof val.valueOf === 'function') ? val.valueOf() : Number(val);
-            const tempoVal = moduleInstance?.findTempo?.(note)?.valueOf?.();
+            const durationSec = toNumber(val, NaN);
+            const tempoVal = toNumber(moduleInstance?.findTempo?.(note), NaN);
             if (isFinite(durationSec) && isFinite(tempoVal) && tempoVal > 0) {
               const beatLen = 60 / tempoVal;
               const beats = durationSec / beatLen;
               const frac = new Fraction(beats);
-              mNum = frac.n;
-              mDen = frac.d;
+              mNum = toNumber(frac.n);
+              mDen = toNumber(frac.d);
               found = true;
             }
           }
@@ -809,7 +826,8 @@ function addFrequencyOctaveButtons(parent, note) {
   // Build a human-readable interval label for tooltips (e.g. "×3/2" / "×2/3").
   const fmtRatio = (r) => {
     if (!r) return '';
-    return r.d === 1 ? `×${r.n}` : `×${r.n}/${r.d}`;
+    // Loose compare: settings ratios are plain Numbers, but tolerate 1n too
+    return r.d == 1 ? `×${r.n}` : `×${r.n}/${r.d}`;
   };
   const upLabel = arrowsCfg && arrowsCfg.up ? fmtRatio(arrowsCfg.up) : '×2';
   const downLabel = arrowsCfg && arrowsCfg.down ? fmtRatio(arrowsCfg.down) : '×1/2';
@@ -928,7 +946,8 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         let originalDuration;
         if (key === 'duration') {
           try {
-            originalDuration = note.getVariable('duration')?.valueOf();
+            const dv = note.getVariable('duration');
+            if (dv != null) originalDuration = toNumber(dv, NaN);
           } catch {}
         }
 
@@ -966,7 +985,8 @@ export function createVariableControls(key, value, note, measureId, externalFunc
 
         // Trigger dependent duration updates if provided by external functions
         if (key === 'duration' && typeof externalFunctions.checkAndUpdateDependentNotes === 'function' && originalDuration !== undefined) {
-          const updatedDuration = note.getVariable('duration')?.valueOf();
+          const udv = note.getVariable('duration');
+          const updatedDuration = udv != null ? toNumber(udv, NaN) : undefined;
           if (Math.abs((updatedDuration ?? 0) - (originalDuration ?? 0)) > 0.001) {
             externalFunctions.checkAndUpdateDependentNotes(currentNoteId, originalDuration, updatedDuration);
           }

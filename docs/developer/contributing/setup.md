@@ -48,7 +48,7 @@ The everyday commands:
 | Script | Runs | Notes |
 |---|---|---|
 | `npm run dev` | `vite` | Dev server, port 3000, auto-opens. |
-| `npm test` | `node scripts/validate-modules.mjs` | Validates every shipped library module. The repo's only automated check. |
+| `npm test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs` | Validates every shipped library module, then proves exact arithmetic end to end. The repo's only automated check. |
 | `npm run build` | `npm run wasm:build && vite build` | **Requires Rust + wasm-pack.** Use `npx vite build` to bundle without Rust — see the warning below. |
 | `npm run perf:gen` / `npm run perf:bench` | `scripts/perf/…` | Generate the stress modules; run the headless evaluation benchmark. |
 | `npm run docs:dev` / `npm run docs:build` | `vitepress` | This documentation site. |
@@ -67,8 +67,8 @@ WASM artifacts in `src/wasm/`.
 
 ### `npm test`
 
-There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs
-`scripts/validate-modules.mjs`, which walks every item in the v2 manifest
+There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs two scripts.
+The first, `scripts/validate-modules.mjs`, walks every item in the v2 manifest
 `public/modules/library.json` and checks five things per module:
 
 1. **Structure** — a `baseNote` object and a `notes` array.
@@ -96,8 +96,13 @@ Validating modules across 6 sections...
 79 modules validated, 0 failure(s).
 ```
 
-It exits non-zero on any failure. Run it after **any** change to the DSL, the expression compiler,
-the evaluator, or anything under `public/modules/`.
+The second, `scripts/test-exactness.mjs`, proves the arbitrary-precision guarantee: a 200-note
+`(3/2)` chain must evaluate to its exact 98-digit numerator (checked against native BigInt) and
+survive the full compile → evaluate → decompile → save → load → re-evaluate round trip, and a
+~98-digit `(N/D)` literal must round-trip through `LOAD_CONST_BIG` digit-exact.
+
+`npm test` exits non-zero on any failure. Run it after **any** change to the DSL, the expression
+compiler, the evaluator, or anything under `public/modules/`.
 
 ::: warning A passing module is not a correct module
 `validateExpressionSyntax` rejects malformed expressions of **either** syntax — the compiler throws

@@ -1,4 +1,5 @@
 import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.js';
+import { toNumber } from '../../utils/fraction-num.js';
 /**
  * WebGL2 RendererAdapter
  * - Non-interactive overlay renderer for notes and playhead
@@ -633,15 +634,15 @@ export class RendererAdapter {
     try {
       const baseEv = getEv(0)?.frequency;
       if (baseEv != null) {
-        this._baseFreqCache = (typeof baseEv.valueOf === 'function') ? baseEv.valueOf() : Number(baseEv);
+        this._baseFreqCache = toNumber(baseEv, 440);
       } else {
         const bf = module.baseNote.getVariable('frequency');
-        this._baseFreqCache = (typeof bf?.valueOf === 'function') ? bf.valueOf() : Number(bf);
+        this._baseFreqCache = toNumber(bf, 0);
       }
     } catch {
       try {
         const bf = module.baseNote.getVariable('frequency');
-        this._baseFreqCache = (typeof bf?.valueOf === 'function') ? bf.valueOf() : Number(bf);
+        this._baseFreqCache = toNumber(bf, 0);
       } catch { this._baseFreqCache = 440; }
     }
 
@@ -650,24 +651,35 @@ export class RendererAdapter {
     // keep showing the previously known numerator/denominator instead of clearing it.
     try {
       let assigned = false;
+      // Huge components would draw one glyph per digit clipped by the circle mask;
+      // show head…tail instead. Anything at 12 digits or fewer renders verbatim.
+      const elide = (s) => {
+        const neg = s.charCodeAt(0) === 45 /* '-' */;
+        const digits = neg ? s.slice(1) : s;
+        if (digits.length <= 12) return s;
+        return (neg ? '-' : '') + digits.slice(0, 6) + '…' + digits.slice(-4);
+      };
       const assign = (n, d) => {
         if (n != null && d != null) {
-          this._baseFracNum = String(n);
-          this._baseFracDen = String(d);
+          this._baseFracNum = elide(String(n));
+          this._baseFracDen = elide(String(d));
           assigned = true;
         }
       };
       const coerceFrom = (src) => {
         if (!src) return;
-        if (typeof src.n === 'number' && typeof src.d === 'number') {
-          assign(src.n, src.d);
+        const nT = typeof src.n;
+        const dT = typeof src.d;
+        if ((nT === 'number' || nT === 'bigint') && (dT === 'number' || dT === 'bigint')) {
+          const sign = (src.s != null && src.s < 0) ? '-' : '';
+          assign(sign + String(src.n), String(src.d));
         } else if (typeof src.toFraction === 'function') {
           const fs = String(src.toFraction());
           const parts = fs.split('/');
           assign(parts[0] || fs, parts[1] || '1');
         } else {
-          const val = (typeof src.valueOf === 'function') ? src.valueOf() : src;
-          if (val != null && isFinite(Number(val))) assign(val, 1);
+          const val = toNumber(src, NaN);
+          if (isFinite(val)) assign(val, 1);
         }
       };
 
@@ -709,8 +721,8 @@ export class RendererAdapter {
         if (!hasStart || !hasDur) continue;
 
         // Prefer evaluated cache values to avoid stale data after module reorder
-        const startTimeRaw = ev?.startTime?.valueOf?.() ?? ev?.startTime ?? note.getVariable('startTime')?.valueOf?.();
-        const durationRaw  = ev?.duration?.valueOf?.() ?? ev?.duration ?? note.getVariable('duration')?.valueOf?.();
+        const startTimeRaw = (ev?.startTime != null) ? toNumber(ev.startTime, NaN) : toNumber(note.getVariable('startTime'), NaN);
+        const durationRaw  = (ev?.duration  != null) ? toNumber(ev.duration,  NaN) : toNumber(note.getVariable('duration'),  NaN);
         const freqRaw = ev?.frequency;
         // For irrational/corrupted frequencies (or large fractions that overflow u32),
         // use _floatValue if available for precision
@@ -719,12 +731,12 @@ export class RendererAdapter {
           if (freqRaw._irrational && freqRaw._floatValue !== undefined) {
             freqVal = freqRaw._floatValue;
           } else {
-            freqVal = freqRaw?.valueOf?.() ?? freqRaw;
+            freqVal = toNumber(freqRaw, null);
           }
         } else {
           const noteFreq = note.getVariable('frequency');
           if (noteFreq) {
-            freqVal = noteFreq._floatValue ?? noteFreq?.valueOf?.() ?? null;
+            freqVal = noteFreq._floatValue ?? toNumber(noteFreq, null);
           }
         }
 
@@ -3130,8 +3142,8 @@ export class RendererAdapter {
     try {
       const parent = this._findParentWithFrequency(module, note);
       if (parent) {
-        const f = parent.getVariable('frequency').valueOf();
-        return this._frequencyToY(f);
+        const fv = parent.getVariable('frequency');
+        if (fv != null) return this._frequencyToY(toNumber(fv, 0));
       }
     } catch {}
     return this._frequencyToY(this._baseFreqCache);
@@ -4683,14 +4695,14 @@ export class RendererAdapter {
           for (let i = 0; i < list.length; i++) {
             const st = list[i].getVariable('startTime');
             if (!st) continue;
-            const v = st.valueOf();
+            const v = toNumber(st, NaN);
             if (v > lastVal) { lastVal = v; lastMeasure = list[i]; }
           }
           if (lastMeasure) {
             const st = lastMeasure.getVariable('startTime');
             if (st) {
               const ml = module.findMeasureLength(lastMeasure);
-              measureEnd = st.add(ml).valueOf();
+              measureEnd = toNumber(st.add(ml), 0);
             }
           }
         }
@@ -4709,8 +4721,8 @@ export class RendererAdapter {
             if (!n) continue;
             if (hasVar(n, 'startTime') && hasVar(n, 'duration') && hasVar(n, 'frequency')) {
               try {
-                const s = n.getVariable('startTime').valueOf();
-                const d = n.getVariable('duration').valueOf();
+                const s = toNumber(n.getVariable('startTime'), 0);
+                const d = toNumber(n.getVariable('duration'), 0);
                 lastNoteEnd = Math.max(lastNoteEnd, s + d);
               } catch {}
             }
@@ -4730,7 +4742,10 @@ export class RendererAdapter {
 
       const measureNotes = this._collectMeasureNotes(module);
       for (let i = 0; i < measureNotes.length; i++) {
-        try { times.push(measureNotes[i].getVariable('startTime').valueOf()); } catch {}
+        try {
+          const st = measureNotes[i].getVariable('startTime');
+          if (st != null) times.push(toNumber(st, 0));
+        } catch {}
       }
 
       const endTime = this._computeModuleEndTime(module, measureNotes);
@@ -4821,9 +4836,11 @@ export class RendererAdapter {
           // Measure notes: have startTime but no duration/frequency
           if (n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency) {
             try {
-              const t = n.getVariable('startTime').valueOf();
-              triTimes.push(t);
-              triIds.push(Number(id));
+              const st = n.getVariable('startTime');
+              if (st != null) {
+                triTimes.push(toNumber(st, 0));
+                triIds.push(Number(id));
+              }
             } catch {}
           }
         }
@@ -4853,7 +4870,7 @@ export class RendererAdapter {
             try {
               const lastNote = module.getNoteById(lastId);
               const mlVal = module.findMeasureLength(lastNote);
-              mlSec = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+              mlSec = toNumber(mlVal, 0) || 0;
             } catch {}
             this._lastMeasureMeta = {
               id: lastId,
@@ -5039,7 +5056,7 @@ export class RendererAdapter {
                   } else {
                     const lastNote = this._moduleRef.getNoteById(Number(lastId));
                     const mlVal = this._moduleRef.findMeasureLength(lastNote);
-                    ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                    ml = toNumber(mlVal, 0) || 0;
                   }
                   endFromMeasures = Math.max(0, lastStart + ml);
                 }
@@ -5066,7 +5083,7 @@ export class RendererAdapter {
                 } else {
                   const lastNote = this._moduleRef.getNoteById(Number(lastId));
                   const mlVal = this._moduleRef.findMeasureLength(lastNote);
-                  ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                  ml = toNumber(mlVal, 0) || 0;
                 }
                 endFromMeasures = Math.max(0, lastStart + ml);
               }
@@ -5223,7 +5240,7 @@ const e = startSec + addDx + durSec;
           } else {
             const lastNote = this._moduleRef.getNoteById(Number(lastId));
             const mlVal = this._moduleRef.findMeasureLength(lastNote);
-            ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+            ml = toNumber(mlVal, 0) || 0;
           }
           endFromMeasures = Math.max(0, lastStart + ml);
         }
@@ -5248,7 +5265,7 @@ const e = startSec + addDx + durSec;
         } else {
           const lastNote = this._moduleRef.getNoteById(Number(lastId));
           const mlVal = this._moduleRef.findMeasureLength(lastNote);
-          ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+          ml = toNumber(mlVal, 0) || 0;
         }
         endFromMeasures = Math.max(0, lastStart + ml);
       }
@@ -8981,7 +8998,7 @@ try {
         if (this._selectedNoteIdForGuides != null && args && args.module && typeof args.module.getNoteById === 'function') {
           const sel = args.module.getNoteById(this._selectedNoteIdForGuides);
           if (sel && sel.getVariable && sel.getVariable('frequency')) {
-            const fv = sel.getVariable('frequency').valueOf();
+            const fv = toNumber(sel.getVariable('frequency'), NaN);
             if (fv != null && isFinite(fv)) {
               refFreq = fv;
               selectedHasFreq = true;

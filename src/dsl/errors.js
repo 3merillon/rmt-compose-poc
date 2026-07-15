@@ -144,7 +144,7 @@ export const ErrorMessages = {
    * @returns {string}
    */
   invalidNoteId(value) {
-    return `Invalid note ID '${value}'. Note IDs must be non-negative integers`;
+    return `Invalid note ID '${value}'. Note IDs must be integers between 0 and 65535`;
   },
 
   /**

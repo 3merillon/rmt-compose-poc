@@ -33,7 +33,7 @@ The DSL replaces the verbose legacy JavaScript syntax. Both formats compile to t
 ## Architecture
 
 - **DSL compiler** — expressions are lexed, parsed, validated, and compiled to compact binary bytecode. Legacy method-chain syntax (`.mul()/.pow()/...`) is auto-detected and still supported.
-- **Evaluation** — a stack-based VM walks the bytecode with `fraction.js` for exact rational arithmetic, backed by a Fraction pool to keep allocation off the drag path. Powers that resolve to an irrational value flag the note as *corrupted* (shown as `≈` in the note widget and cross-hatched on the canvas).
+- **Evaluation** — a stack-based VM walks the bytecode with `fraction.js` (BigInt-backed) for exact rational arithmetic at any magnitude and depth, backed by a Fraction pool to keep allocation off the drag path. Powers that resolve to an irrational value flag the note as *corrupted* (shown as `≈` in the note widget and cross-hatched on the canvas).
 - **Dependency tracking** — an inverted index gives O(1) forward and inverse lookup, split per property (startTime / duration / frequency). Drag previews move only the notes whose position actually depends on the note under the cursor.
 - **Incremental re-evaluation** — a Kahn topological sort over the dirty set only, not the whole module.
 - **Rendering** — every visual class (note bodies, rings, measure bars, dependency lines, glyphs) is one instanced draw call. Per-note overlay work is culled to the viewport, and the renderer redraws only when something changed: an idle canvas issues **zero draw calls**.

@@ -8,6 +8,7 @@
 import { RendererAdapter } from './renderer.js';
 import { CameraController } from './camera-controller.js';
 import { eventBus } from '../../utils/event-bus.js';
+import { toNumber } from '../../utils/fraction-num.js';
 
 /**
  * CameraController is provided by camera-controller.js
@@ -182,7 +183,7 @@ export class Workspace {
               const measureId = Number(mixedTop.id);
               const xScale = this.renderer.currentXScaleFactor || 1.0;
               const measureNote = this._module?.getNoteById?.(measureId);
-              const origStartSec = Number(measureNote?.getVariable?.('startTime')?.valueOf?.() ?? 0);
+              const origStartSec = toNumber(measureNote?.getVariable?.('startTime'), 0);
               const startWorldX = origStartSec * (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
               const ptr0 = this.screenToWorld(e.clientX, e.clientY);
               const pointerWX0 = (ptr0 && typeof ptr0.x === 'number') ? ptr0.x : startWorldX;
@@ -553,7 +554,7 @@ export class Workspace {
             let s0 = 0;
             try {
               const n = mod.getNoteById(Number(did));
-              s0 = n && n.getVariable ? n.getVariable('startTime').valueOf() : 0;
+              s0 = n && n.getVariable ? toNumber(n.getVariable('startTime'), 0) : 0;
             } catch {
               // Fallback to current renderer position (safe at pointerdown since no preview yet)
               try {
@@ -639,12 +640,12 @@ export class Workspace {
             let curA = parent0;
             let guardA = 0;
             while (curA && guardA++ < 1024) {
-              const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+              const st = toNumber(curA.getVariable?.('startTime'), 0);
               anc.push({ id: Number(curA.id || 0), startSec: st });
               if (Number(curA.id || 0) === 0) break;
               const rawA = curA?.variables?.startTimeString || '';
               if (rawA.includes('module.baseNote')) {
-                anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                 break;
               }
               const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
@@ -656,11 +657,11 @@ export class Workspace {
                 const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
                 const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
                 if (dslId >= 0) {
-                  if (dslId === 0) { anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                  if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
                   curA = mod?.getNoteById?.(dslId);
                   if (!curA) break;
                 } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                  anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                  anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                   break;
                 } else {
                   break;
@@ -684,7 +685,7 @@ export class Workspace {
               try {
                 const mnote = mod?.getNoteById?.(mid);
                 const mlVal = mod?.findMeasureLength?.(mnote);
-                ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                ml = toNumber(mlVal, 0) || 0;
               } catch {}
               list.push({ id: mid, startSec: st, endSec: st + ml });
               if (mid === Number(parent0.id)) idx = i;
@@ -1005,7 +1006,7 @@ export class Workspace {
               let s0 = 0;
               try {
                 const n = mod.getNoteById(Number(did));
-                s0 = n && n.getVariable ? n.getVariable('startTime').valueOf() : 0;
+                s0 = n && n.getVariable ? toNumber(n.getVariable('startTime'), 0) : 0;
               } catch {
                 try {
                   const idx = this.renderer._noteIdToIndex && this.renderer._noteIdToIndex.get
@@ -1074,12 +1075,12 @@ export class Workspace {
               let curA = parent0;
               let guardA = 0;
               while (curA && guardA++ < 1024) {
-                const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                const st = toNumber(curA.getVariable?.('startTime'), 0);
                 anc.push({ id: Number(curA.id || 0), startSec: st });
                 if (Number(curA.id || 0) === 0) break;
                 const rawA = curA?.variables?.startTimeString || '';
                 if (rawA.includes('module.baseNote')) {
-                  anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                  anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                   break;
                 }
                 const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
@@ -1091,11 +1092,11 @@ export class Workspace {
                   const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
                   const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
                   if (dslId >= 0) {
-                    if (dslId === 0) { anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                    if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
                     curA = mod?.getNoteById?.(dslId);
                     if (!curA) break;
                   } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                    anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                    anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                     break;
                   } else {
                     break;
@@ -1119,7 +1120,7 @@ export class Workspace {
                 try {
                   const mnote = mod?.getNoteById?.(mid);
                   const mlVal = mod?.findMeasureLength?.(mnote);
-                  ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                  ml = toNumber(mlVal, 0) || 0;
                 } catch {}
                 list.push({ id: mid, startSec: st, endSec: st + ml });
                 if (mid === Number(parent0.id)) idx = i;
@@ -1159,7 +1160,7 @@ export class Workspace {
             } else {
               tempoVal = mod?.findTempo?.(mod?.baseNote);
             }
-            const tempo = (tempoVal && typeof tempoVal.valueOf === 'function') ? tempoVal.valueOf() : tempoVal;
+            const tempo = toNumber(tempoVal, 0);
             if (tempo && isFinite(tempo) && tempo > 0) return 60 / tempo;
           } catch {}
           return 60 / 120; // fallback 120 BPM
@@ -1171,7 +1172,7 @@ export class Workspace {
           return Math.max(0, snappedBeats * bl);
         };
         const baseStart = (() => {
-          try { return this._module?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0; } catch { return 0; }
+          try { return toNumber(this._module?.baseNote?.getVariable?.('startTime'), 0); } catch { return 0; }
         })();
 
         // Build preview values
@@ -1324,7 +1325,7 @@ export class Workspace {
                       if (!isMeasure(nn)) continue;
                       const sts = nn.variables?.startTimeString || '';
                       if (sts.includes(legacyLink) || sts.includes(dslLink)) {
-                        const st = Number(nn.getVariable('startTime')?.valueOf?.() ?? Infinity);
+                        const st = toNumber(nn.getVariable('startTime'), Infinity);
                         if (st < bestStart) {
                           bestStart = st;
                           best = nn;
@@ -1335,8 +1336,8 @@ export class Workspace {
                   };
 
                   let parent = parseParent(note);
-                  let parentStart = Number(parent?.getVariable?.('startTime')?.valueOf?.() ?? 0);
-                  const origStart = Number(note.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                  let parentStart = toNumber(parent?.getVariable?.('startTime'), 0);
+                  const origStart = toNumber(note.getVariable?.('startTime'), 0);
 
                   // No change if effectively no movement
                   if (Math.abs(startSec - origStart) < tol) {
@@ -1350,13 +1351,13 @@ export class Workspace {
                       while (advanced) {
                         advanced = false;
                         const mlVal = mod.findMeasureLength(cur);
-                        const ml = Number(mlVal?.valueOf?.() ?? 0);
+                        const ml = toNumber(mlVal, 0);
                         const end = curStart + ml;
                         if (startSec >= end - tol) {
                           const next = findNextInChain(cur);
                           if (next) {
                             cur = next;
-                            curStart = Number(next.getVariable('startTime')?.valueOf?.() ?? 0);
+                            curStart = toNumber(next.getVariable('startTime'), 0);
                             parent = cur;
                             parentStart = curStart;
                             advanced = true;
@@ -1403,7 +1404,7 @@ export class Workspace {
 
                     for (let i = 0; i < ancestorChain.length; i++) {
                       const anc = ancestorChain[i];
-                      const ancStart = Number(anc?.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                      const ancStart = toNumber(anc?.getVariable?.('startTime'), 0);
                       if (startSec >= ancStart - tol) {
                         parent = anc;
                         break;
@@ -1506,7 +1507,7 @@ export class Workspace {
                   // Fallback: read from module if not in baseline (defensive, rare)
                   try {
                     const n = this._module?.getNoteById?.(did);
-                    baseStart = n && n.getVariable ? n.getVariable('startTime').valueOf() : 0;
+                    baseStart = n && n.getVariable ? toNumber(n.getVariable('startTime'), 0) : 0;
                   } catch { baseStart = 0; }
                 }
                 // Compute new previewed start from baseline + current delta
@@ -1580,7 +1581,7 @@ export class Workspace {
                     if (!isMeasure) continue;
                     let baseS = 0;
                     if (baseline && baseline.has(did)) baseS = baseline.get(did) || 0;
-                    else baseS = Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
+                    else baseS = toNumber(n.getVariable('startTime'), 0);
                     const nextS = Math.max(baseStart, baseS + shift);
                     measurePreview[did] = snapSixteenth(nextS);
                   } catch {}
@@ -2355,11 +2356,11 @@ export class Workspace {
       // then snaps back on drop.
       try {
         const mod = this._module;
-        const baseStart = Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() || 0);
+        const baseStart = toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) || 0;
         let minStart = Infinity;
         for (const id of st.groupIds) {
           const n = mod?.getNoteById?.(Number(id));
-          const s = Number(n?.getVariable?.('startTime')?.valueOf?.());
+          const s = toNumber(n?.getVariable?.('startTime'), NaN);
           if (Number.isFinite(s)) minStart = Math.min(minStart, s);
         }
         st.groupMinDeltaSec = Number.isFinite(minStart) ? (baseStart - minStart) : 0;
@@ -2388,7 +2389,7 @@ export class Workspace {
       // Tolerance for time comparisons
       const tol = 1e-2;
       // Resolve at-or-before Base start: prefer a measure starting exactly at startSec if present
-      const baseStart = Number(mod.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0);
+      const baseStart = toNumber(mod.baseNote?.getVariable?.('startTime'), 0);
       // Mirror commit-time semantics (player selectSuitableParentForStartGL): do not force a measure at base time in preview.
       // Resolution at t == baseStart should follow ancestry climbing; only clamp earlier-than-base to BaseNote (handled below).
 
@@ -2454,10 +2455,11 @@ export class Workspace {
           }
           if (!chainLinks.length) return null;
           chainLinks.sort((a, b) => {
-            const aStart = a.getVariable('startTime');
-            const bStart = b.getVariable('startTime');
-            if (!aStart || !bStart) return 0;
-            return aStart.valueOf() - bStart.valueOf();
+            const sa = toNumber(a.getVariable('startTime'), NaN);
+            const sb = toNumber(b.getVariable('startTime'), NaN);
+            if (sa < sb) return -1;
+            if (sa > sb) return 1;
+            return Number(a.id) - Number(b.id);
           });
           return chainLinks[0];
         } catch { return null; }
@@ -2465,8 +2467,8 @@ export class Workspace {
 
       // Current parent and starts
       let parent = parseParent(note);
-      let parentStart = Number(parent.getVariable('startTime')?.valueOf?.() ?? 0);
-      const origStart = Number(note.getVariable('startTime')?.valueOf?.() ?? parentStart);
+      let parentStart = toNumber(parent.getVariable('startTime'), 0);
+      const origStart = toNumber(note.getVariable('startTime'), parentStart);
 
       // If effectively no movement, keep current parent (avoid line flicker)
       if (Math.abs(startSec - origStart) < tol) {
@@ -2495,7 +2497,7 @@ export class Workspace {
               try {
                 const mnote = mod.getNoteById(mid);
                 const mlVal = mod.findMeasureLength(mnote);
-                ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal) || 0;
+                ml = toNumber(mlVal, 0) || 0;
               } catch {}
               list.push({ id: mid, startSec: st, endSec: st + ml });
               if (mid === Number(parent.id)) idxLocal = i;
@@ -2545,13 +2547,13 @@ export class Workspace {
                 let curA = parent;
                 let guardA = 0;
                 while (curA && guardA++ < 1024) {
-                  const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+                  const st = toNumber(curA.getVariable?.('startTime'), 0);
                   anc.push({ id: Number(curA.id || 0), startSec: st });
                   if (Number(curA.id || 0) === 0) break;
                   const rawA = curA?.variables?.startTimeString || '';
                   // Legacy
                   if (rawA.includes('module.baseNote')) {
-                    anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                    anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                     break;
                   }
                   const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
@@ -2564,11 +2566,11 @@ export class Workspace {
                     const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
                     const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
                     if (dslId >= 0) {
-                      if (dslId === 0) { anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                      if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
                       curA = mod.getNoteById(dslId);
                       if (!curA) break;
                     } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                      anc.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                      anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                       break;
                     } else {
                       break;
@@ -2591,13 +2593,13 @@ export class Workspace {
             let curA = parent;
             let guardA = 0;
             while (curA && guardA++ < 1024) {
-              const st = Number(curA.getVariable?.('startTime')?.valueOf?.() ?? 0);
+              const st = toNumber(curA.getVariable?.('startTime'), 0);
               arr.push({ id: Number(curA.id || 0), startSec: st });
               if (Number(curA.id || 0) === 0) break;
               const rawA = curA?.variables?.startTimeString || '';
               // Legacy
               if (rawA.includes('module.baseNote')) {
-                arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                 break;
               }
               const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
@@ -2610,11 +2612,11 @@ export class Workspace {
                 const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
                 const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
                 if (dslId >= 0) {
-                  if (dslId === 0) { arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) }); break; }
+                  if (dslId === 0) { arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
                   curA = mod.getNoteById(dslId);
                   if (!curA) break;
                 } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                  arr.push({ id: 0, startSec: Number(mod?.baseNote?.getVariable?.('startTime')?.valueOf?.() ?? 0) });
+                  arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
                   break;
                 } else {
                   break;
@@ -2687,8 +2689,9 @@ export class Workspace {
         const isMeasure = hasStart && !n.variables?.duration && !n.variables?.frequency;
         if (!isMeasure) continue;
         try {
-          const t = n.getVariable('startTime').valueOf();
-          out.push({ id: Number(idStr), startSec: Number(t) || 0 });
+          const st = n.getVariable('startTime');
+          if (st == null) continue;
+          out.push({ id: Number(idStr), startSec: toNumber(st, 0) || 0 });
         } catch {}
       }
       out.sort((a, b) => a.startSec - b.startSec);
@@ -2759,8 +2762,11 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       try {
         const n = mod.getNoteById(Number(id));
         const st = n && n.getVariable && n.getVariable('startTime');
-        return Number(st && st.valueOf ? st.valueOf() : 0);
-      } catch { return 0; }
+        return toNumber(st, 0);
+      } catch (err) {
+        console.warn('[workspace] startTime evaluation failed for note', id, err);
+        return 0;
+      }
     };
 
     // Check if a dependent is a chain link (uses findMeasureLength/measure()) vs an anchor (starts new chain)
@@ -2826,9 +2832,10 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     const chain = [];
     const pushWithStart = (n) => {
       try {
-        const t = Number(n.getVariable('startTime') && n.getVariable('startTime').valueOf ? n.getVariable('startTime').valueOf() : 0);
+        const t = toNumber(n.getVariable('startTime'), 0);
         chain.push({ id: Number(n.id), startSec: t });
-      } catch {
+      } catch (err) {
+        console.warn('[workspace] startTime evaluation failed for note', n && n.id, err);
         chain.push({ id: Number(n.id), startSec: 0 });
       }
     };
@@ -2853,9 +2860,11 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       } catch {}
       // Sort by startTime and return earliest (there should typically be only one chain link)
       candidates.sort((a, b) => {
-        const sa = Number(a.getVariable('startTime') && a.getVariable('startTime').valueOf ? a.getVariable('startTime').valueOf() : 0);
-        const sb = Number(b.getVariable('startTime') && b.getVariable('startTime').valueOf ? b.getVariable('startTime').valueOf() : 0);
-        return sa - sb;
+        const sa = toNumber(a.getVariable('startTime'), NaN);
+        const sb = toNumber(b.getVariable('startTime'), NaN);
+        if (sa < sb) return -1;
+        if (sa > sb) return 1;
+        return Number(a.id) - Number(b.id);
       });
       return candidates.length > 0 ? candidates[0] : null;
     };

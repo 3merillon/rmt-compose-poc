@@ -18,6 +18,7 @@
 
 import { TokenType, PropertyMap, HelperFunctions, isPropertyName, isHelperFunction, getCanonicalPropertyName } from './constants.js';
 import { DSLParseError, ErrorMessages } from './errors.js';
+import { decimalStringToBigFraction } from '../utils/fraction-num.js';
 import {
   NodeType,
   createNumberLiteral,
@@ -181,7 +182,7 @@ export class DSLParser {
           const denominator = this.parseSignedNumber();
           this.consume(TokenType.RPAREN, ErrorMessages.unclosedBracket('('));
 
-          if (denominator === 0) {
+          if (denominator === 0n) {
             throw new DSLParseError(ErrorMessages.divisionByZero(), lparen);
           }
 
@@ -203,12 +204,12 @@ export class DSLParser {
 
   /**
    * Parse a signed number (for fractions)
-   * @returns {number}
+   * @returns {bigint}
    */
   parseSignedNumber() {
-    let sign = 1;
+    let negative = false;
     if (this.match(TokenType.MINUS)) {
-      sign = -1;
+      negative = true;
     }
 
     if (!this.check(TokenType.NUMBER)) {
@@ -219,16 +220,16 @@ export class DSLParser {
     }
 
     const token = this.advance();
-    const value = parseFloat(token.value);
 
-    if (!Number.isInteger(value)) {
+    if (token.value.includes('.')) {
       throw new DSLParseError(
         `Fraction components must be integers, got '${token.value}'`,
         token
       );
     }
 
-    return sign * value;
+    const value = BigInt(token.value);
+    return negative ? -value : value;
   }
 
   /**
@@ -247,7 +248,9 @@ export class DSLParser {
     const idToken = this.advance();
     const noteId = parseInt(idToken.value, 10);
 
-    if (!Number.isInteger(noteId) || noteId < 0) {
+    // 65535 cap matches the u16 note-id field LOAD_REF writes — anything
+    // larger would silently truncate to a different note.
+    if (!Number.isInteger(noteId) || noteId < 0 || noteId > 65535) {
       throw new DSLParseError(
         ErrorMessages.invalidNoteId(idToken.value),
         idToken
@@ -338,7 +341,8 @@ export class DSLParser {
       const idToken = this.advance();
       const noteId = parseInt(idToken.value, 10);
 
-      if (!Number.isInteger(noteId) || noteId < 0) {
+      // Same u16 cap as noteReference().
+      if (!Number.isInteger(noteId) || noteId < 0 || noteId > 65535) {
         throw new DSLParseError(
           ErrorMessages.invalidNoteId(idToken.value),
           idToken
@@ -358,63 +362,21 @@ export class DSLParser {
   }
 
   /**
-   * Parse a number literal token into AST node
+   * Parse a number literal token into AST node.
+   * Exact at any magnitude: integers keep every digit, decimals become the
+   * exact fraction they spell ('0.333333' is 333333/1000000, not 1/3).
    * @param {Object} token - NUMBER token
    * @returns {Object} AST node
    */
   numberLiteral(token) {
-    const value = parseFloat(token.value);
-    const { numerator, denominator } = this.decimalToFraction(value);
-    return createNumberLiteral(value, numerator, denominator);
-  }
-
-  /**
-   * Convert decimal to fraction
-   * @param {number} value
-   * @returns {{numerator: number, denominator: number}}
-   */
-  decimalToFraction(value) {
-    if (Number.isInteger(value)) {
-      return { numerator: value, denominator: 1 };
+    const frac = decimalStringToBigFraction(token.value);
+    if (!frac) {
+      throw new DSLParseError(
+        ErrorMessages.unexpectedToken(token.value, 'number'),
+        token
+      );
     }
-
-    // Handle common decimal fractions
-    const tolerance = 1e-10;
-    const maxDen = 10000;
-
-    const simpleTests = [
-      [0.25, 1, 4], [0.5, 1, 2], [0.75, 3, 4],
-      [0.125, 1, 8], [0.375, 3, 8], [0.625, 5, 8], [0.875, 7, 8],
-      [0.2, 1, 5], [0.4, 2, 5], [0.6, 3, 5], [0.8, 4, 5],
-      [0.333333, 1, 3], [0.666666, 2, 3],
-      [0.1666666, 1, 6], [0.8333333, 5, 6],
-    ];
-
-    const absVal = Math.abs(value);
-    const sign = value < 0 ? -1 : 1;
-
-    for (const [dec, n, d] of simpleTests) {
-      if (Math.abs(absVal - dec) < tolerance) {
-        return { numerator: sign * n, denominator: d };
-      }
-    }
-
-    // Use approximation for other decimals
-    let bestNum = Math.round(value), bestDen = 1;
-    let bestErr = Math.abs(value - bestNum);
-
-    for (let d = 1; d <= maxDen; d++) {
-      const n = Math.round(value * d);
-      const err = Math.abs(value - n / d);
-      if (err < bestErr) {
-        bestNum = n;
-        bestDen = d;
-        bestErr = err;
-        if (err < tolerance) break;
-      }
-    }
-
-    return { numerator: bestNum, denominator: bestDen };
+    return createNumberLiteral(parseFloat(token.value), frac.num, frac.den);
   }
 
   // ─────────────────────────────────────────────────────────────────

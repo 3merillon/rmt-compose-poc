@@ -20,6 +20,7 @@ import { BinaryEvaluator } from '../binary-evaluator.js';
 import { isDSLSyntax, compileDSL } from '../dsl/index.js';
 import { simplifyDSL, scaleDSL } from '../dsl/simplify.js';
 import { validateExpressionSyntax } from './safe-expression-validator.js';
+import { toNumber, decimalStringToBigFraction } from './fraction-num.js';
 
 // Singleton compiler for safe evaluation
 const safeCompiler = new ExpressionCompiler();
@@ -54,9 +55,16 @@ export function multiplyExpressionByFraction(expr, num, den, kind, moduleInstanc
     const before = evaluateExpr(expr, moduleInstance);
     const after = evaluateExpr(scaled, moduleInstance);
     if (before && after && after.corrupted === before.corrupted) {
-      const expected = valueOf(before.value) * (num / den);
-      if (isFinite(expected) && closeEnough(valueOf(after.value), expected)) {
-        return scaled;
+      if (!before.corrupted && before.value instanceof Fraction && after.value instanceof Fraction) {
+        // Rational both sides: the fold must be exact, so compare exactly.
+        if (after.value.equals(before.value.mul(new Fraction(num, den)))) {
+          return scaled;
+        }
+      } else {
+        const expected = toNumber(before.value, NaN) * (num / den);
+        if (isFinite(expected) && closeEnough(toNumber(after.value, NaN), expected)) {
+          return scaled;
+        }
       }
     }
     // Fall back to an explicit multiplier, parenthesised so it applies to the
@@ -116,7 +124,8 @@ function _simplify(expr, kind, moduleInstance) {
 }
 
 /**
- * Safety evaluation: compile old/new; compare |a-b| <= 1e-12.
+ * Safety evaluation: compile old/new; rational results must match exactly,
+ * irrational (corrupted) ones within a 1e-12 relative tolerance.
  * If evaluation fails (e.g., missing refs during editing), we accept the simplified result
  * only when parse step was a no-op on opaque structures (we already kept opaque as-is).
  *
@@ -131,8 +140,11 @@ function safeEquivalent(oldExpr, newExpr, moduleInstance) {
     const b = evaluateExpr(newExpr, moduleInstance);
     if (a == null || b == null) return false;
     if (a.corrupted !== b.corrupted) return false;
-    const av = valueOf(a.value);
-    const bv = valueOf(b.value);
+    if (!a.corrupted && a.value instanceof Fraction && b.value instanceof Fraction) {
+      return a.value.equals(b.value);
+    }
+    const av = toNumber(a.value, NaN);
+    const bv = toNumber(b.value, NaN);
     if (!isFinite(av) || !isFinite(bv)) return false;
     return closeEnough(av, bv);
   } catch {
@@ -225,13 +237,6 @@ function evaluateExpr(expr, moduleInstance) {
   } catch {
     return null;
   }
-}
-
-function valueOf(x) {
-  if (x == null) return NaN;
-  if (typeof x === 'number') return x;
-  if (typeof x.valueOf === 'function') return x.valueOf();
-  return Number(x);
 }
 
 // =============== AST model ===============
@@ -432,7 +437,7 @@ function mergeAtomIntoProduct(prod, atom, op) {
       return prod;
     } else if (op === 'div') {
       // divide by fraction
-      if (atom.frac.n === 0) return null; // division by zero, bail
+      if (atom.frac.equals(0)) return null; // division by zero, bail
       prod.coeff = prod.coeff.div(atom.frac);
       return prod;
     }
@@ -480,13 +485,13 @@ function tryPromoteBeatUnit(prod) {
   // Check coefficient equals 60 (allow sign), and no other non-tempo anchors before promotion
   // We will convert coeff=±60 / tempo -> (sign)*1 * BEAT(ref)
   const absCoeff = prod.coeff.abs();
-  const is60 = absCoeff.n === 60 && absCoeff.d === 1;
+  const is60 = absCoeff.equals(60);
   if (!is60) {
     // We still can form BEAT * remaining coeff/60 if coeff is multiple of 60, but keep conservative for robustness.
     return prod;
   }
 
-  const sign = prod.coeff.s; // 1 or -1
+  const sign = prod.coeff.s < 0 ? -1 : 1;
 
   // Remove the tempo raw anchor
   const anchors = prod.anchors.slice();
@@ -556,7 +561,7 @@ function normalizeForKind(sumAst, kind) {
   // Remove exact zeros
   const terms = [];
   for (const [k, p] of grouped.entries()) {
-    if (p.coeff.n === 0) continue;
+    if (p.coeff.equals(0)) continue;
     terms.push(p);
   }
 
@@ -615,7 +620,7 @@ function mergeLikeBasePowAnchors(anchors) {
   }
 
   // Sort merged POW anchors by base for deterministic output
-  mergedPow.sort((a, b) => a.base - b.base);
+  mergedPow.sort((a, b) => (a.base < b.base ? -1 : a.base > b.base ? 1 : 0));
 
   return [...mergedPow, ...nonPow];
 }
@@ -647,7 +652,7 @@ function emitProduct(prod, kind) {
     // sign * (opaque)
     const sign = prod.coeff.s;
     const abs = prod.coeff.abs();
-    if (abs.n === 1 && abs.d === 1) {
+    if (abs.equals(1)) {
       return {
         sign,
         expr: sign < 0 ? `new Fraction(-1,1).mul(${prod.original})` : prod.original,
@@ -664,7 +669,7 @@ function emitProduct(prod, kind) {
 
   // For each kind, we may tweak ordering; but by default we use: (coeff if !=1) * anchors chained by .mul()
   let base = null;
-  if (!(abs.n === 1 && abs.d === 1)) {
+  if (!abs.equals(1)) {
     base = `new Fraction(${abs.n}, ${abs.d})`;
   }
 
@@ -894,14 +899,12 @@ function tryParseFractionLiteral(s) {
   const args = m[1].split(',').map(x => x.trim());
   try {
     if (args.length === 1) {
-      const a = parseNumeric(args[0]);
-      if (a == null) return null;
-      return new Fraction(a);
+      return parseNumeric(args[0]);
     } else if (args.length === 2) {
       const a = parseNumeric(args[0]);
       const b = parseNumeric(args[1]);
       if (a == null || b == null) return null;
-      return new Fraction(a, b);
+      return a.div(b);
     }
   } catch {
     return null;
@@ -909,11 +912,15 @@ function tryParseFractionLiteral(s) {
   return null;
 }
 
+/**
+ * Parse an integer or plain decimal literal into an exact Fraction at any
+ * magnitude. Scientific notation is rejected (null): it cannot round-trip
+ * its digits verbatim, so the term stays opaque instead.
+ */
 function parseNumeric(x) {
-  // Accept integer or float literal
-  const n = Number(x);
-  if (!isFinite(n)) return null;
-  return n;
+  const parts = decimalStringToBigFraction(x);
+  if (!parts) return null;
+  return new Fraction(parts.num, parts.den);
 }
 
 /**
@@ -921,18 +928,7 @@ function parseNumeric(x) {
  * Returns a Fraction if successful, null otherwise.
  */
 function tryParseBareNumeric(s) {
-  // Must be purely numeric (possibly with sign and decimal point)
-  const trimmed = trim(s);
-  if (!trimmed) return null;
-  // Match: optional sign, digits, optional decimal point + digits
-  if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return null;
-  const num = parseNumeric(trimmed);
-  if (num == null) return null;
-  try {
-    return new Fraction(num);
-  } catch {
-    return null;
-  }
+  return parseNumeric(trim(s));
 }
 
 // =============== Chain splitters (.add/.sub and .mul/.div) ===============

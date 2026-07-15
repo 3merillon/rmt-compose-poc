@@ -16,7 +16,12 @@ class HistoryManager {
   // Serialize a snapshot object to a minified JSON string (with fallback).
   _serialize(obj) {
     if (typeof obj === 'string') return obj;
-    try { return JSON.stringify(obj); } catch { return null; }
+    try { return JSON.stringify(obj); } catch (e) {
+      // A snapshot that cannot be stringified (e.g. a BigInt or Fraction leaked
+      // into the payload) means undo capture is being dropped — say so loudly.
+      console.error('[history] snapshot serialization failed; undo capture dropped:', e);
+      return null;
+    }
   }
   // Parse a stored snapshot string back to a fresh object (each restore gets its own
   // copy => same isolation the old deep-clone provided). Tolerates a raw object too.

@@ -94,21 +94,21 @@ does matter for how the expression is stored: a fraction literal compiles to a s
 ### Decimals are rationalized
 
 There are no floating-point values in an expression. A decimal is converted to a fraction when
-you save it, and it is the fraction that is stored. Simple decimals convert to the fraction you
-expect; others are approximated (largest denominator 10 000).
+you save it, and it is the fraction that is stored. The conversion is **exact as written**: the
+digits become the numerator over the matching power of ten, and the result is reduced.
 
 | You type | It is stored as |
 |---|---|
 | `0.5` | `(1/2)` |
 | `1.5` | `(3/2)` |
 | `0.1` | `(1/10)` |
-| `0.333333` | `(1/3)` |
-| `3.14159` | `(9563/3044)` |
+| `0.333333` | `(333333/1000000)` |
+| `3.14159` | `(314159/100000)` |
 
 ::: tip Write the fraction you mean
-`(1/3)` is exactly one third. `0.333333` happens to land on `(1/3)` because it is in the
-lookup table of common decimals — but `3.14159` becomes `(9563/3044)`, which is not what most
-people expect. Use fraction literals for anything that has to be exact.
+A decimal can only ever spell a fraction whose denominator is a power of ten. `0.333333` is
+exactly `(333333/1000000)` — close to a third, but not `(1/3)`, and no number of extra 3s will
+get there. Use a fraction literal for any value that is not a terminating decimal.
 :::
 
 ## Note references
@@ -119,8 +119,10 @@ people expect. Use fraction literals for anything that has to be exact.
 | `base.prop` | Property of the BaseNote |
 | `[0].prop` | The BaseNote. Note id 0 **is** the BaseNote |
 
-`N` must be a literal non-negative integer. There is no `[prev]`, no arithmetic inside the
-brackets, and no variables.
+`N` must be a literal integer between **0 and 65535** — the range a module's ids can occupy.
+Anything outside it is rejected when the expression compiles
+(`Note IDs must be integers between 0 and 65535`). There is no `[prev]`, no arithmetic inside
+the brackets, and no variables.
 
 The `[0]` rewrite happens everywhere a note id is accepted, including inside function
 arguments: `measure([0])` is `measure(base)`, and `beat([0])` is `beat(base)`.

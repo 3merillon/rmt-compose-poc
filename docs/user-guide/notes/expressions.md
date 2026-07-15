@@ -51,7 +51,7 @@ Every shipped module writes its durations this way, and so does the app: the not
 Fractions are exact rationals, all the way through. `(1/3)` is one third, not `0.3333`.
 
 ::: tip Prefer fractions to decimals
-A decimal is rationalised, and not always the way you would guess: `3.14159` compiles to `(9563/3044)`. If you want an exact value, write the fraction.
+A decimal is rationalised exactly as written: `3.14159` compiles to `(314159/100000)`, and `0.333333` to `(333333/1000000)` — close to a third, but not `(1/3)`. If you mean a fraction, write the fraction.
 :::
 
 ## Referencing other notes

@@ -137,8 +137,8 @@ Prefix `-` binds tighter than `*` and `/` but looser than `^`, so `-2^2` is `-4`
 
 ::: warning No legacy equivalent you can type
 `.neg()` appears in some old expressions but the legacy parser **cannot read it** — a saved
-`new Fraction(5).neg()` silently compiles to `0`. Write `-5` in DSL, or `new Fraction(-5)` in
-legacy.
+`new Fraction(5).neg()` fails to compile, so the widget rejects it on save and a file load
+leaves the property unset. Write `-5` in DSL, or `new Fraction(-5)` in legacy.
 :::
 
 ## Power: `^`
@@ -165,6 +165,7 @@ this operator.
 | Integer exponent (`2^3`, `2^-1`) | Exact rational | clean |
 | Fractional exponent with an exact root (`4^(1/2)` → 2, `8^(1/3)` → 2) | Exact rational | clean |
 | Fractional exponent with no exact root (`2^(1/12)`) | Irrational, approximated to a rational | **corrupted** |
+| Integer exponent past the safety caps (`2^100000`) | Approximated to a rational | **corrupted** |
 
 A property whose value came out irrational is flagged **corrupted**. That flag is what drives
 the visuals and the display:
@@ -179,7 +180,16 @@ no longer be reasoned about as one. See [SymbolicPower](/developer/core/symbolic
 
 ::: tip Perfect roots stay clean
 `4^(1/2)` is 2 exactly, so the note is not corrupted — and the simplifier will rewrite the
-expression to `2`. Only genuinely irrational powers corrupt.
+expression to `2`. Perfect roots are found exactly at any magnitude. Only genuinely irrational
+powers corrupt.
+:::
+
+::: warning Very large powers are capped
+Exact exponentiation has two safety caps: an integer exponent larger than **65536**, or a
+result that would exceed roughly **a megabit per component**, is not computed exactly. The
+power is treated like an irrational instead — the property is flagged corrupted and the value
+is an approximation. Below the caps, integer powers and perfect roots are exact regardless of
+how many digits the result has.
 :::
 
 <details>
@@ -261,6 +271,8 @@ See [Binary Evaluator](/developer/core/binary-evaluator) for how the bytecode ru
 | `1 +`, `base.`, `a & b` | Rejected on save; the reason appears in red under the Save button |
 | `5 / 0` | Accepted. Evaluates to **1** with a console warning, and the property is flagged corrupted (crosshatch) |
 | `2^(1/12)` | Accepted. Irrational — the property is flagged corrupted |
+| `2^100000` | Accepted. Past the exact-power caps — approximated, and the property is flagged corrupted |
+| `[70000].f` | Rejected on save: `Note IDs must be integers between 0 and 65535` |
 | Anything neither compiler can parse | Rejected: `console.error` plus a thrown compile error; the widget shows the message, and on a file load the property is left unset |
 
 The `Evaluated:` line in the note widget still repays a glance after saving anything unusual.

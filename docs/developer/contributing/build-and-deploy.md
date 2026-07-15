@@ -13,7 +13,7 @@ RMT Compose is a plain [Vite](https://vite.dev) ES-module app — no framework, 
 | | |
 |---|---|
 | Node | **20.19+ or 22.12+**. `package.json` declares no `engines` field, but Vite 7.1.12's own `engines` is `^20.19.0 \|\| >=22.12.0`. Node 18 will not run it. |
-| Runtime dependency | `fraction.js` `^4.3.7` — the only one |
+| Runtime dependency | `fraction.js` `^5.3.4` (BigInt-backed) — the only one |
 | devDependencies | `playwright`, `pngjs`, `vite`, `vitepress` |
 | Browser | **WebGL2** is a hard requirement — the workspace does not initialise without it. WASM support is not required. |
 | Rust + wasm-pack | Optional. Only for rebuilding the crate — see [Building WASM](/developer/wasm/building) |
@@ -35,7 +35,7 @@ All 13, and what each one really does.
 | `dev` | `vite` | Dev server on port 3000, auto-opens the browser |
 | `build` | `npm run wasm:build && vite build` | Full build. **Requires Rust + wasm-pack.** Vercel does *not* use this |
 | `preview` | `vite preview` | Serves the built `dist/` on Vite's default preview port (4173) |
-| `test` | `node scripts/validate-modules.mjs` | **Not a unit-test runner.** Validates every module in the library manifest |
+| `test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs` | **Not a unit-test runner.** Validates every library module, then proves arbitrary-precision exactness end to end |
 | `gen:intervals` | `node scripts/gen-interval-catalog.mjs` | Regenerates `public/modules/intervals/` and patches the `intervals` section of `library.json` |
 | `wasm:build` | `cd rust && wasm-pack build --target web --out-dir pkg && cd .. && node scripts/sync-wasm.mjs` | Builds the Rust crate, then copies the artifacts into `src/wasm/` |
 | `wasm:sync` | `node scripts/sync-wasm.mjs` | The copy step alone |
@@ -52,10 +52,13 @@ run **`npx vite build`** — byte for byte what Vercel runs.
 :::
 
 ::: warning `npm test` is not a test suite
-There is no Jest and no Vitest anywhere in this repo. `npm test` runs `scripts/validate-modules.mjs`,
-which validates every module referenced by `public/modules/library.json` and exits non-zero on
-failure. Run it before you touch anything under `public/modules/`. The five checks it performs are
-detailed in [Development Setup](/developer/contributing/setup#npm-test).
+There is no Jest and no Vitest anywhere in this repo. `npm test` runs two scripts and exits
+non-zero if either fails: `scripts/validate-modules.mjs`, which validates every module referenced
+by `public/modules/library.json`, and `scripts/test-exactness.mjs`, which proves exact rational
+arithmetic survives a 200-note `(3/2)` chain (checked against native BigInt) and that a ~98-digit
+`LOAD_CONST_BIG` literal round-trips digit-exact. Run it before you touch anything under
+`public/modules/`, the compilers, or the evaluator. The checks are detailed in
+[Development Setup](/developer/contributing/setup#npm-test).
 :::
 
 ### Scripts with no npm alias
@@ -83,16 +86,16 @@ See [Performance](/developer/performance) for how to use them.
 
 | Chunk | Raw | Gzip |
 |---|---|---|
-| `index-*.js` (entry) | 427.82 kB | 111.17 kB |
-| `renderer-*.js` | 262.69 kB | 53.59 kB |
-| `dsl-*.js` | 25.19 kB | 7.72 kB |
-| `settings-panel-*.js` (async) | 23.65 kB | 8.19 kB |
+| `index-*.js` (entry) | 422.70 kB | 110.97 kB |
+| `renderer-*.js` | 264.21 kB | 54.14 kB |
+| `dsl-*.js` | 25.70 kB | 7.86 kB |
+| `settings-panel-*.js` (async) | 24.80 kB | 8.46 kB |
 | `rmt_core-*.js` (WASM glue) | 16.72 kB | 4.69 kB |
-| `instruments-*.js` | 9.17 kB | 2.93 kB |
+| `instruments-*.js` | 9.46 kB | 3.03 kB |
 | `perf-harness-*.js` (async, `?perf` only) | 6.00 kB | 2.34 kB |
-| `vendor-*.js` (fraction.js) | 5.75 kB | 2.22 kB |
+| `vendor-*.js` (fraction.js) | 6.81 kB | 2.48 kB |
 | `rmt_core_bg-*.wasm` | 384.01 kB | 146.96 kB |
-| `index.html` | 8.81 kB | 2.98 kB |
+| `index.html` | 8.80 kB | 2.97 kB |
 
 Output goes to `dist/` (gitignored). `publicDir: 'public'` is copied verbatim, so `modules/`,
 `samples/`, `images/`, `styles.css`, `favicon.ico`, `robots.txt`, `sitemap.xml` and `license.html`

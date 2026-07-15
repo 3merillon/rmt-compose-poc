@@ -1462,7 +1462,9 @@ const menuAPI = (function() {
                 continue;
             }
             const noteId = parseInt(note.id, 10);
-            if (isNaN(noteId) || noteId < 0 || noteId > 100000) {
+            // 65535 matches the u16 note-id field in LOAD_REF — the same cap
+            // the JSON loader and both expression parsers enforce.
+            if (isNaN(noteId) || noteId < 0 || noteId > 65535) {
                 errors.push(`notes[${i}]: invalid id ${note.id}`);
                 continue;
             }

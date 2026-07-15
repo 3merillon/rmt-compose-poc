@@ -15,8 +15,38 @@ import { scaleStep } from './settings/settings-schema.js';
 import { themeManager } from './theme/theme-manager.js';
 import { showGroupWidget, hideGroupWidget } from './modals/group-widget.js';
 import { registerPanel, raisePanel } from './utils/panel-stack.js';
+import { toNumber } from './utils/fraction-num.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
+
+// Exact expression fragments from a Fraction — BigInt template interpolation
+// prints every digit, so these stay exact at any magnitude.
+function fracToDSL(f) {
+  const n = f.s * f.n;
+  return f.d === 1n ? `${n}` : `(${n}/${f.d})`;
+}
+function fracToLegacy(f) {
+  const n = f.s * f.n;
+  return f.d === 1n ? `new Fraction(${n})` : `new Fraction(${n}, ${f.d})`;
+}
+function fracIsOne(f) {
+  return f.s === 1n && f.n === 1n && f.d === 1n;
+}
+
+// Exact beat offset between two exact start times: (t - t0) * tempo / 60,
+// clamped at zero. Returns a Fraction; falls back to a float-derived one only
+// when an input is not a Fraction.
+function exactBeatOffset(tFrac, t0Frac, tempoFrac) {
+  try {
+    const diff = tFrac.sub(t0Frac);
+    if (diff.s < 0n) return new Fraction(0);
+    return diff.mul(tempoFrac).div(60);
+  } catch (e) {
+    const beat = 60 / toNumber(tempoFrac, 60);
+    const off = Math.max(0, toNumber(tFrac) - toNumber(t0Frac)) / beat;
+    try { return new Fraction(off); } catch { return new Fraction(Math.round(off * 4), 4); }
+  }
+}
 
 // Defer heavy UI sync without feature flags or polyfills
 // Use requestAnimationFrame to guarantee next-frame execution even when idle callbacks are throttled.
@@ -480,7 +510,10 @@ document.addEventListener('DOMContentLoaded', async function() {
               if (snap) {
                 localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
               }
-            } catch {}
+            } catch (e) {
+              // A silent failure here means the autosave quietly stops
+              console.error('[RMT] Autosave failed (visibilitychange):', e);
+            }
         }
     });
   
@@ -712,19 +745,14 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (selectedNote.variables[varName + "String"]) {
                 selectedRaw[varName] = selectedNote.variables[varName + "String"];
             } else {
+                // Emit the parseable two-arg form — a single argument
+                // containing a slash ('new Fraction(3/2)') never parsed.
                 const frac = selectedNote.getVariable(varName);
-                let fracStr;
-                if (frac == null) {
-                    fracStr = (varName === "frequency") ? "1/1" : "0/1";
-                } else if (frac && typeof frac.toFraction === "function") {
-                    fracStr = frac.toFraction();
+                if (frac != null && typeof frac.toFraction === "function") {
+                    selectedRaw[varName] = fracToLegacy(frac);
                 } else {
-                    fracStr = frac.toString();
+                    selectedRaw[varName] = (varName === "frequency") ? "new Fraction(1, 1)" : "new Fraction(0, 1)";
                 }
-                if (!fracStr.includes("/")) {
-                    fracStr = fracStr + "/1";
-                }
-                selectedRaw[varName] = "new Fraction(" + fracStr + ")";
             }
         });
         
@@ -802,8 +830,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         const baseStartVal = myModule.baseNote.getVariable('startTime');
         if (!noteStartVal || !baseStartVal) return;
 
-        const noteStartTime = noteStartVal.valueOf();
-        const baseNoteStartTime = baseStartVal.valueOf();
+        const noteStartTime = toNumber(noteStartVal);
+        const baseNoteStartTime = toNumber(baseStartVal);
         const dependentNotes = myModule.getDependentNotes(noteId);
         
         dependentNotes.forEach(depId => {
@@ -814,7 +842,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             const durationSubMatch = startTimeString.match(new RegExp(`module\\.getNoteById\\(${noteId}\\)\\.getVariable\\('startTime'\\)\\.add\\(module\\.getNoteById\\(${noteId}\\)\\.getVariable\\('duration'\\)\\)\\.sub\\(.*?\\)`));
             
             if (durationSubMatch) {
-                const depStartTime = depNote.getVariable('startTime').valueOf();
+                const depStartTime = toNumber(depNote.getVariable('startTime'));
                 
                 if (depStartTime < noteStartTime) {
                     
@@ -830,8 +858,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                             const parent = myModule.getNoteById(parentId);
                             
                             if (parent) {
-                                const parentStartTime = parent.getVariable('startTime').valueOf();
-                                
+                                const parentStartTime = toNumber(parent.getVariable('startTime'));
+
                                 if (parentStartTime <= depStartTime) {
                                     suitableParent = parent;
                                     break;
@@ -855,28 +883,28 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     let newRaw;
                     const depUseDSL = isDSLSyntax(depNote.variables?.startTimeString || '');
+                    const baseTempoFrac = myModule.baseNote.getVariable('tempo');
+                    const depStartFrac = depNote.getVariable('startTime');
 
                     if (suitableParent === myModule.baseNote) {
-                        const offset = Math.max(depStartTime, baseNoteStartTime) - baseNoteStartTime;
-                        const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-                        const beatLength = 60 / baseTempo;
-                        const beatOffset = offset / beatLength;
-                        const offsetFraction = new Fraction(beatOffset);
+                        // Exact beat offset from the exact start times — a float
+                        // delta here loses deep-chain exactness on every repair.
+                        const offsetFraction = exactBeatOffset(depStartFrac, baseStartVal, baseTempoFrac);
 
                         if (depUseDSL) {
-                            if (Math.abs(beatOffset) < 1e-10) {
+                            if (offsetFraction.n === 0n) {
                                 newRaw = 'base.t';
                             } else {
-                                const fracStr = (offsetFraction.d === 1) ? `${offsetFraction.n}` : `(${offsetFraction.n}/${offsetFraction.d})`;
-                                const beatMul = (offsetFraction.n === 1 && offsetFraction.d === 1) ? 'beat(base)' : `beat(base) * ${fracStr}`;
+                                const beatMul = fracIsOne(offsetFraction) ? 'beat(base)' : `beat(base) * ${fracToDSL(offsetFraction)}`;
                                 newRaw = `base.t + ${beatMul}`;
                             }
                         } else {
-                            newRaw = simplifyStartTime(`module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
+                            newRaw = simplifyStartTime(`module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetFraction.s * offsetFraction.n}, ${offsetFraction.d})))`, myModule);
                         }
                     } else {
-                        const parentStartTime = suitableParent.getVariable('startTime').valueOf();
-                        const parentDuration = suitableParent.getVariable('duration')?.valueOf() || 0;
+                        const parentStartFrac = suitableParent.getVariable('startTime');
+                        const parentStartTime = toNumber(parentStartFrac);
+                        const parentDuration = toNumber(suitableParent.getVariable('duration'), 0);
                         const parentEndTime = parentStartTime + parentDuration;
 
                         const pRef = depUseDSL ? `[${suitableParent.id}]` : null;
@@ -889,19 +917,14 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(module.getNoteById(${suitableParent.id}).getVariable('duration'))`, myModule);
                             }
                         } else {
-                            const offset = Math.max(depStartTime, parentStartTime) - parentStartTime;
-                            const baseTempo = myModule.baseNote.getVariable('tempo').valueOf();
-                            const beatLength = 60 / baseTempo;
-                            const beatOffset = offset / beatLength;
-                            const offsetFraction = new Fraction(beatOffset);
+                            const offsetFraction = exactBeatOffset(depStartFrac, parentStartFrac, baseTempoFrac);
 
                             if (depUseDSL) {
-                                const fracStr = (offsetFraction.d === 1) ? `${offsetFraction.n}` : `(${offsetFraction.n}/${offsetFraction.d})`;
                                 const beatRef = `beat([${suitableParent.id}])`;
-                                const beatMul = (offsetFraction.n === 1 && offsetFraction.d === 1) ? beatRef : `${beatRef} * ${fracStr}`;
+                                const beatMul = fracIsOne(offsetFraction) ? beatRef : `${beatRef} * ${fracToDSL(offsetFraction)}`;
                                 newRaw = `${pRef}.t + ${beatMul}`;
                             } else {
-                                newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${suitableParent.id}))).mul(new Fraction(${offsetFraction.n}, ${offsetFraction.d})))`, myModule);
+                                newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${suitableParent.id}))).mul(new Fraction(${offsetFraction.s * offsetFraction.n}, ${offsetFraction.d})))`, myModule);
                             }
                         }
                     }
@@ -987,18 +1010,23 @@ document.addEventListener('DOMContentLoaded', async function() {
             note.variables.startTime && !note.variables.duration && !note.variables.frequency
         );
         if (measureNotes.length > 0) {
+            // Exact ordering with id tie-break; a valueOf() subtraction here
+            // collapses rationals that differ past double precision, and a
+            // NaN comparator key would leave loop/transport end times wrong.
             measureNotes.sort((a, b) => {
                 const aStart = a.getVariable('startTime');
                 const bStart = b.getVariable('startTime');
-                if (!aStart || !bStart) return 0;
-                return aStart.valueOf() - bStart.valueOf();
+                if (!aStart || !bStart) return a.id - b.id;
+                try {
+                    const cmp = aStart.compare(bStart);
+                    if (cmp !== 0) return cmp;
+                } catch (e) { /* non-Fraction value — fall through */ }
+                return a.id - b.id;
             });
             const lastMeasure = measureNotes[measureNotes.length - 1];
             const lastMeasureStart = lastMeasure.getVariable('startTime');
             if (lastMeasureStart) {
-                measureEnd = lastMeasureStart
-                    .add(myModule.findMeasureLength(lastMeasure))
-                    .valueOf();
+                measureEnd = toNumber(lastMeasureStart.add(myModule.findMeasureLength(lastMeasure)));
             }
         }
 
@@ -1008,7 +1036,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                 const noteStart = note.getVariable('startTime');
                 const noteDuration = note.getVariable('duration');
                 if (!noteStart || !noteDuration) return;
-                const noteEnd = noteStart.valueOf() + noteDuration.valueOf();
+                let noteEnd;
+                try {
+                    noteEnd = toNumber(noteStart.add(noteDuration));
+                } catch (e) {
+                    noteEnd = toNumber(noteStart) + toNumber(noteDuration);
+                }
                 if (noteEnd > lastNoteEnd) {
                     lastNoteEnd = noteEnd;
                 }
@@ -1222,7 +1255,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                   const cy = rect.top  + rect.height * 0.5;
                   const offX = rect.left;
                   const offY = rect.top;
-                  const baseNoteFreqInit = myModule.baseNote?.getVariable?.('frequency')?.valueOf?.() ?? 440;
+                  const baseNoteFreqInit = toNumber(myModule.baseNote?.getVariable?.('frequency'), 440) || 440;
                   const baseYInit = frequencyToY(baseNoteFreqInit);
                   const s = 1.0;
                   // Camera uses container-local translation; Workspace camera publishes an affine basis via getBasis()
@@ -1972,7 +2005,7 @@ if (canvasEl) {
                     list.forEach(cid => {
                       try {
                         const n = myModule.getNoteById(Number(cid));
-                        const s = Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
+                        const s = toNumber(n.getVariable('startTime'), 0);
                         if (s < bestStart) { bestStart = s; best = cid; }
                       } catch {}
                     });
@@ -2289,18 +2322,21 @@ if (canvasEl) {
         const baseNoteFreq = myModule.baseNote.getVariable('frequency');
         let numerator, denominator;
         if (baseNoteFreq instanceof Fraction) {
-            numerator = baseNoteFreq.n;
-            denominator = baseNoteFreq.d;
+            // Sign belongs to the numerator; elide huge digit runs so the
+            // circle stays readable (exact value lives in the Raw field)
+            const elide = (s) => s.length > 12 ? `${s.slice(0, 6)}…${s.slice(-4)}` : s;
+            numerator = elide((baseNoteFreq.s * baseNoteFreq.n).toString());
+            denominator = elide(baseNoteFreq.d.toString());
         } else {
-            numerator = baseNoteFreq.toString();
+            numerator = String(baseNoteFreq);
             denominator = '1';
         }
-        
+
         const fractionElements = document.querySelector('.base-note-fraction');
         if (fractionElements) {
             const numeratorDisplay = fractionElements.querySelector('.fraction-numerator');
             const denominatorDisplay = fractionElements.querySelector('.fraction-denominator');
-            
+
             if (numeratorDisplay && denominatorDisplay) {
                 numeratorDisplay.textContent = numerator;
                 denominatorDisplay.textContent = denominator;
@@ -2313,7 +2349,7 @@ if (canvasEl) {
         return;
     }
     
-    let baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+    let baseNoteFreq = toNumber(myModule.baseNote.getVariable('frequency'), 440);
     let baseNoteY = frequencyToY(baseNoteFreq);
     
     let baseNoteDisplay = createBaseNoteDisplay();
@@ -2435,10 +2471,10 @@ if (canvasEl) {
             if (ev && baseEv && ev.frequency && baseEv.frequency) {
                 const f = ev.frequency instanceof Fraction
                     ? ev.frequency
-                    : new Fraction(typeof ev.frequency?.valueOf === 'function' ? ev.frequency.valueOf() : ev.frequency);
+                    : new Fraction(toNumber(ev.frequency, 1));
                 const b = baseEv.frequency instanceof Fraction
                     ? baseEv.frequency
-                    : new Fraction(typeof baseEv.frequency?.valueOf === 'function' ? baseEv.frequency.valueOf() : baseEv.frequency);
+                    : new Fraction(toNumber(baseEv.frequency, 1));
 
                 const ratio = (typeof f.div === 'function') ? f.div(b) : new Fraction(f).div(b);
                 let fracStr = (typeof ratio.toFraction === 'function') ? ratio.toFraction() : String(ratio);
@@ -2458,9 +2494,9 @@ if (canvasEl) {
             if (!baseVal) return "1/1";
 
             const f = (freqVal instanceof Fraction) ? freqVal
-                : new Fraction(typeof freqVal.valueOf === 'function' ? freqVal.valueOf() : Number(freqVal));
+                : new Fraction(toNumber(freqVal, 1));
             const b = (baseVal instanceof Fraction) ? baseVal
-                : new Fraction(typeof baseVal.valueOf === 'function' ? baseVal.valueOf() : Number(baseVal));
+                : new Fraction(toNumber(baseVal, 1));
 
             const ratio = (typeof f.div === 'function') ? f.div(b) : new Fraction(f).div(b);
             let fracStr = (typeof ratio.toFraction === 'function') ? ratio.toFraction() : String(ratio);
@@ -2492,19 +2528,21 @@ if (canvasEl) {
         affectedIds.forEach(id => {
             const depNote = myModule.getNoteById(id);
             if (depNote && typeof depNote.getVariable === 'function') {
-                originalValues[id] = new Fraction(depNote.getVariable('startTime').valueOf());
+                // Keep the exact Fraction — no float hop needed for comparison
+                originalValues[id] = depNote.getVariable('startTime');
             }
         });
         const savedStartFunc = draggedNote.variables.startTime;
         draggedNote.variables.startTime = () => newDraggedStart;
-        
+
         const moved = [];
         const tol = new Fraction(1, 10000);
         affectedIds.forEach(id => {
             const depNote = myModule.getNoteById(id);
             if (depNote && typeof depNote.getVariable === 'function') {
-                let newVal = new Fraction(depNote.getVariable('startTime').valueOf());
-                if (newVal.sub(originalValues[id]).abs().compare(tol) > 0) {
+                const newVal = depNote.getVariable('startTime');
+                if (newVal && originalValues[id] &&
+                    newVal.sub(originalValues[id]).abs().compare(tol) > 0) {
                     moved.push({ note: depNote, newStart: newVal });
                 }
             }
@@ -2655,15 +2693,17 @@ function __parseDSLFrequencyExpression(expr, debug) {
       continue;
     }
 
-    // Fraction coefficient: (a/b) or just a number
+    // Fraction coefficient: (a/b) or just a number — BigInt-exact parse
+    // (parseInt silently truncates digit runs past 2^53, e.g. after ~53
+    // octave-arrow presses)
     const fracMatch = tok.match(/^\(?\s*(-?\d+)\s*\/\s*(\d+)\s*\)?$/);
     if (fracMatch) {
-      coeff = coeff.mul(new Fraction(parseInt(fracMatch[1], 10), parseInt(fracMatch[2], 10)));
+      coeff = coeff.mul(new Fraction(BigInt(fracMatch[1]), BigInt(fracMatch[2])));
       continue;
     }
     const numMatch = tok.match(/^(-?\d+)$/);
     if (numMatch) {
-      coeff = coeff.mul(new Fraction(parseInt(numMatch[1], 10)));
+      coeff = coeff.mul(new Fraction(BigInt(numMatch[1]), 1n));
       continue;
     }
 
@@ -2779,8 +2819,9 @@ function parseFrequencyExpressionLocal(exprText, moduleInstance) {
   // Check if right is a fraction constant: new Fraction(a) or new Fraction(a, b)
   const fracMatch = right.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
   if (fracMatch) {
-    const num = parseInt(fracMatch[1], 10);
-    const den = fracMatch[2] ? parseInt(fracMatch[2], 10) : 1;
+    // BigInt-exact: parseInt truncates coefficient digit runs past 2^53
+    const num = BigInt(fracMatch[1]);
+    const den = fracMatch[2] ? BigInt(fracMatch[2]) : 1n;
     const leftParsed = parseFrequencyExpressionLocal(left, moduleInstance);
     if (leftParsed) {
       leftParsed.algebra.coeff = leftParsed.algebra.coeff.mul(new Fraction(num, den));
@@ -2791,8 +2832,8 @@ function parseFrequencyExpressionLocal(exprText, moduleInstance) {
   // Check if left is a fraction constant (e.g., new Fraction(3,2).mul(expr))
   const fracMatchLeft = left.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
   if (fracMatchLeft) {
-    const num = parseInt(fracMatchLeft[1], 10);
-    const den = fracMatchLeft[2] ? parseInt(fracMatchLeft[2], 10) : 1;
+    const num = BigInt(fracMatchLeft[1]);
+    const den = fracMatchLeft[2] ? BigInt(fracMatchLeft[2]) : 1n;
     const rightParsed = parseFrequencyExpressionLocal(right, moduleInstance);
     if (rightParsed) {
       rightParsed.algebra.coeff = rightParsed.algebra.coeff.mul(new Fraction(num, den));
@@ -2921,7 +2962,8 @@ function multiplyAlgebrasLocal(a, b) {
     }
   }
 
-  const newPowers = [...map.values()].filter(p => p.expNum !== 0).sort((x, y) => x.base - y.base);
+  const newPowers = [...map.values()].filter(p => p.expNum !== 0)
+    .sort((x, y) => (x.base < y.base ? -1 : x.base > y.base ? 1 : 0));
   return { coeff: newCoeff, powers: newPowers };
 }
 
@@ -2951,7 +2993,8 @@ function divideAlgebrasLocal(a, b) {
     }
   }
 
-  const newPowers = [...map.values()].filter(p => p.expNum !== 0).sort((x, y) => x.base - y.base);
+  const newPowers = [...map.values()].filter(p => p.expNum !== 0)
+    .sort((x, y) => (x.base < y.base ? -1 : x.base > y.base ? 1 : 0));
   return { coeff: newCoeff, powers: newPowers };
 }
 
@@ -2964,9 +3007,7 @@ function algebraToExpressionLocal(algebra, anchorRef, useDSL) {
     const parts = [];
 
     if (!algebra.coeff.equals(1)) {
-      const c = algebra.coeff;
-      const val = c.s * c.n;
-      parts.push(c.d === 1 ? `${val}` : `(${val}/${c.d})`);
+      parts.push(fracToDSL(algebra.coeff));
     }
 
     parts.push(anchorRef); // e.g. "base.f" or "[3].f"
@@ -2985,12 +3026,7 @@ function algebraToExpressionLocal(algebra, anchorRef, useDSL) {
 
   // Add coefficient if not 1
   if (!algebra.coeff.equals(1)) {
-    const c = algebra.coeff;
-    if (c.d === 1) {
-      parts.push(`new Fraction(${c.s * c.n})`);
-    } else {
-      parts.push(`new Fraction(${c.s * c.n}, ${c.d})`);
-    }
+    parts.push(fracToLegacy(algebra.coeff));
   }
 
   // Add each power term
@@ -3041,7 +3077,7 @@ function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
       if (debug) console.log('[AlgebraRebuild] Failed to parse:', exprText);
       return null;
     }
-    if (debug) console.log('[AlgebraRebuild] Parsed:', JSON.stringify(parsed, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+    if (debug) console.log('[AlgebraRebuild] Parsed:', JSON.stringify(parsed, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
 
     const exprIsDSL = isDSLSyntax(exprText);
     const anchorRef = exprIsDSL
@@ -3055,7 +3091,7 @@ function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
       if (debug) console.log('[AlgebraRebuild] Failed to trace oldRef:', oldRefId);
       return null;
     }
-    if (debug) console.log('[AlgebraRebuild] oldRefAlgebra:', JSON.stringify(oldRefAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+    if (debug) console.log('[AlgebraRebuild] oldRefAlgebra:', JSON.stringify(oldRefAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
 
     // Get the new anchor's algebra relative to baseNote
     const newAnchorAlgebra = traceFrequencyAlgebraToBaseNote(newAnchor.id, moduleInstance);
@@ -3063,18 +3099,18 @@ function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
       if (debug) console.log('[AlgebraRebuild] Failed to trace newAnchor:', newAnchor.id);
       return null;
     }
-    if (debug) console.log('[AlgebraRebuild] newAnchorAlgebra:', JSON.stringify(newAnchorAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+    if (debug) console.log('[AlgebraRebuild] newAnchorAlgebra:', JSON.stringify(newAnchorAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
 
     // The note's absolute algebra (relative to baseNote) is:
     // noteAbsoluteAlgebra = parsed.algebra * oldRefAlgebra
     const noteAbsoluteAlgebra = multiplyAlgebrasLocal(parsed.algebra, oldRefAlgebra);
-    if (debug) console.log('[AlgebraRebuild] noteAbsoluteAlgebra:', JSON.stringify(noteAbsoluteAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+    if (debug) console.log('[AlgebraRebuild] noteAbsoluteAlgebra:', JSON.stringify(noteAbsoluteAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
 
     // To express relative to newAnchor, we need:
     // noteAbsoluteAlgebra = newRelativeAlgebra * newAnchorAlgebra
     // So: newRelativeAlgebra = noteAbsoluteAlgebra / newAnchorAlgebra
     const newRelativeAlgebra = divideAlgebrasLocal(noteAbsoluteAlgebra, newAnchorAlgebra);
-    if (debug) console.log('[AlgebraRebuild] newRelativeAlgebra:', JSON.stringify(newRelativeAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : v));
+    if (debug) console.log('[AlgebraRebuild] newRelativeAlgebra:', JSON.stringify(newRelativeAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
 
     // Generate the new expression
     const result = algebraToExpressionLocal(newRelativeAlgebra, anchorRef, exprIsDSL);
@@ -3106,15 +3142,22 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
     const anchorFreq = newAnchor.getVariable('frequency');
     if (!noteFreq || !anchorFreq) return null;
 
-    const noteVal = typeof noteFreq.valueOf === 'function' ? noteFreq.valueOf() : Number(noteFreq);
-    const anchorVal = typeof anchorFreq.valueOf === 'function' ? anchorFreq.valueOf() : Number(anchorFreq);
+    // Exact ratio when both values are rational — this is what keeps
+    // retargeted frequencies exact at any chain depth.
+    let exactRatio = null;
+    if (noteFreq instanceof Fraction && anchorFreq instanceof Fraction && anchorFreq.n !== 0n) {
+      try { exactRatio = noteFreq.div(anchorFreq); } catch { exactRatio = null; }
+    }
+
+    const noteVal = toNumber(noteFreq, NaN);
+    const anchorVal = toNumber(anchorFreq, NaN);
 
     if (!isFinite(noteVal) || !isFinite(anchorVal) || Math.abs(anchorVal) < 1e-12) return null;
 
     const ratio = noteVal / anchorVal;
 
     // If ratio is 1, just reference anchor directly
-    if (Math.abs(ratio - 1) < 1e-9) {
+    if (exactRatio ? exactRatio.equals(1) : Math.abs(ratio - 1) < 1e-9) {
       return useDSL ? anchorRef : `${anchorRef}.getVariable('frequency')`;
     }
 
@@ -3152,14 +3195,20 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
             const simpDen = denom / g;
 
             if (simpDen === 1) {
-              // Integer power of base
+              // Integer power of base — computed in BigInt so the emitted
+              // multiplier keeps every digit (Math.pow overflows past 2^53)
               if (simpNum === 0) {
                 return useDSL ? anchorRef : `${anchorRef}.getVariable('frequency')`;
               }
-              const multiplier = Math.pow(config.base, simpNum);
+              const multiplier = BigInt(config.base) ** BigInt(Math.abs(simpNum));
+              if (simpNum > 0) {
+                return useDSL
+                  ? `${multiplier} * ${anchorRef}`
+                  : `new Fraction(${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
+              }
               return useDSL
-                ? `${multiplier} * ${anchorRef}`
-                : `new Fraction(${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
+                ? `(1/${multiplier}) * ${anchorRef}`
+                : `new Fraction(1, ${multiplier}).mul(${anchorRef}.getVariable('frequency'))`;
             }
             const expStr = `(${simpNum}/${simpDen})`;
             return useDSL
@@ -3189,15 +3238,16 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
             const simpTetDen = defaultDenom / g;
 
             let expr;
+            const tetMultStr = (b, e) => `${BigInt(b) ** BigInt(Math.abs(e))}`;
             if (useDSL) {
               const parts = [];
               if (remainingFrac.n !== remainingFrac.d) {
-                parts.push(remainingFrac.d === 1 ? `${remainingFrac.n}` : `(${remainingFrac.n}/${remainingFrac.d})`);
+                parts.push(fracToDSL(remainingFrac));
               }
               parts.push(anchorRef);
               if (simpTetDen === 1) {
                 if (simpTetNum !== 0) {
-                  parts.push(`${Math.pow(base, simpTetNum)}`);
+                  parts.push(simpTetNum > 0 ? tetMultStr(base, simpTetNum) : `(1/${tetMultStr(base, simpTetNum)})`);
                 }
               } else {
                 parts.push(`${base} ^ (${simpTetNum}/${simpTetDen})`);
@@ -3208,15 +3258,16 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
 
               if (simpTetDen === 1) {
                 if (simpTetNum !== 0) {
-                  const tetMult = Math.pow(base, simpTetNum);
-                  expr = `new Fraction(${tetMult}).mul(${expr})`;
+                  expr = simpTetNum > 0
+                    ? `new Fraction(${tetMultStr(base, simpTetNum)}).mul(${expr})`
+                    : `new Fraction(1, ${tetMultStr(base, simpTetNum)}).mul(${expr})`;
                 }
               } else {
                 expr = `${expr}.mul(new Fraction(${base}).pow(new Fraction(${simpTetNum}, ${simpTetDen})))`;
               }
 
               if (remainingFrac.n !== remainingFrac.d) {
-                expr = `new Fraction(${remainingFrac.n}, ${remainingFrac.d}).mul(${expr})`;
+                expr = `${fracToLegacy(remainingFrac)}.mul(${expr})`;
               }
             }
 
@@ -3236,24 +3287,27 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
       return `${anchorRef}.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(${tetPart / g}, ${12 / g})))`;
     }
 
-    // Clean case or anchor is also corrupt - use rational fraction
+    // Clean case or anchor is also corrupt - use rational fraction.
+    // The exact ratio of the two evaluated Fractions is preferred; a
+    // float-derived one is only a fallback for non-Fraction values.
     try {
-      const ratioFrac = new Fraction(ratio);
-      // Verify precision
-      if (Math.abs(ratioFrac.valueOf() - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-9) {
+      const ratioFrac = exactRatio || new Fraction(ratio);
+      if (exactRatio || Math.abs(ratioFrac.valueOf() - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-9) {
         if (useDSL) {
-          const fracStr = ratioFrac.d === 1 ? `${ratioFrac.n}` : `(${ratioFrac.n}/${ratioFrac.d})`;
-          return `${fracStr} * ${anchorRef}`;
+          return `${fracToDSL(ratioFrac)} * ${anchorRef}`;
         }
-        return `new Fraction(${ratioFrac.n}, ${ratioFrac.d}).mul(${anchorRef}.getVariable('frequency'))`;
+        return `${fracToLegacy(ratioFrac)}.mul(${anchorRef}.getVariable('frequency'))`;
       }
     } catch {}
 
-    // Fallback: use float (shouldn't happen often)
-    if (useDSL) {
-      return `${ratio} * ${anchorRef}`;
-    }
-    return `new Fraction(${ratio}).mul(${anchorRef}.getVariable('frequency'))`;
+    // Fallback: approximate the float as an exact fraction (a raw float
+    // literal can stringify to scientific notation, which never re-parses)
+    try {
+      const approx = new Fraction(ratio);
+      return useDSL
+        ? `${fracToDSL(approx)} * ${anchorRef}`
+        : `${fracToLegacy(approx)}.mul(${anchorRef}.getVariable('frequency'))`;
+    } catch { return null; }
   } catch { return null; }
 }
 
@@ -3272,8 +3326,14 @@ function __findNextMeasureInChainGL(measure) {
       if (startTimeString.includes(legacyLinkPattern) || startTimeString.includes(dslLinkPattern)) chainLinks.push(n);
     }
     if (chainLinks.length === 0) return null;
-    // Sort by startTime and return earliest (there should typically be only one chain link)
-    chainLinks.sort((a, b) => a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf());
+    // Sort by startTime and return earliest (there should typically be only
+    // one chain link). toNumber never yields NaN, and the id tie-break keeps
+    // the pick deterministic when starts collapse to the same double.
+    chainLinks.sort((a, b) => {
+      const sa = toNumber(a.getVariable('startTime'), 0);
+      const sb = toNumber(b.getVariable('startTime'), 0);
+      return sa < sb ? -1 : sa > sb ? 1 : a.id - b.id;
+    });
     return chainLinks[0];
   } catch { return null; }
 }
@@ -3282,11 +3342,11 @@ function selectSuitableParentForStartGL(note, newStartSec) {
   try {
     const tol = 1e-2;
     let parent = __parseParentFromStartTimeStringGL(note);
-    let parentStart = Number(parent.getVariable('startTime').valueOf() || 0);
-    const baseStart = Number(myModule.baseNote.getVariable('startTime').valueOf() || 0);
+    let parentStart = toNumber(parent.getVariable('startTime'), 0);
+    const baseStart = toNumber(myModule.baseNote.getVariable('startTime'), 0);
 
     // Keep original parent when effectively no movement
-    if (Math.abs(newStartSec - Number(note.getVariable('startTime').valueOf() || 0)) < tol) {
+    if (Math.abs(newStartSec - toNumber(note.getVariable('startTime'), 0)) < tol) {
       return parent;
     }
 
@@ -3299,14 +3359,13 @@ function selectSuitableParentForStartGL(note, newStartSec) {
         while (advanced) {
           advanced = false;
           // measure end = start + measureLength(cur)
-          const mlVal = myModule.findMeasureLength(cur);
-          const ml = Number(mlVal && typeof mlVal.valueOf === 'function' ? mlVal.valueOf() : mlVal);
+          const ml = toNumber(myModule.findMeasureLength(cur), 0);
           const end = curStart + ml;
           if (newStartSec >= end - tol) {
             const next = __findNextMeasureInChainGL(cur);
             if (next) {
               cur = next;
-              curStart = Number(next.getVariable('startTime').valueOf() || 0);
+              curStart = toNumber(next.getVariable('startTime'), 0);
               parent = cur;
               parentStart = curStart;
               advanced = true;
@@ -3336,7 +3395,7 @@ function selectSuitableParentForStartGL(note, newStartSec) {
 
       for (let i = 0; i < chain.length; i++) {
         const anc = chain[i];
-        const ancStart = Number(anc.getVariable('startTime').valueOf() || 0);
+        const ancStart = toNumber(anc.getVariable('startTime'), 0);
         if (newStartSec >= ancStart - tol) {
           parent = anc;
           parentStart = ancStart;
@@ -3361,26 +3420,34 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
     const noteRaw = note?.variables?.startTimeString || '';
     const useDSL = isDSLSyntax(noteRaw);
 
-    const parentStart = Number(parent.getVariable('startTime').valueOf() || 0);
+    const parentStartFrac = parent.getVariable('startTime');
+    const parentStart = toNumber(parentStartFrac, 0);
     let delta = newStartSec - parentStart;
 
     // Check alignment to parent end (duration)
     let hasDur = false, durSec = 0;
     try {
       const d = parent.getVariable('duration');
-      if (d) { hasDur = true; durSec = Number(d.valueOf ? d.valueOf() : d); }
+      if (d) { hasDur = true; durSec = toNumber(d, 0); }
     } catch {}
 
-    const tempoVal = myModule.findTempo(parent);
-    const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
-    const beatLen = 60 / tempo;
-    const offsetBeats = delta / beatLen;
+    const tempoFrac = myModule.findTempo(parent);
 
+    // The gesture position (newStartSec) is inherently a float — it crosses
+    // into exact arithmetic exactly once here. The parent's exact start and
+    // tempo never go through a float, so deep-chain positions stay exact.
     let frac;
     try {
-      frac = new Fraction(Math.abs(offsetBeats));
+      const offsetBeatsFrac = new Fraction(newStartSec).sub(parentStartFrac).mul(tempoFrac).div(60);
+      frac = offsetBeatsFrac.abs();
     } catch {
-      frac = new Fraction(Math.round(Math.abs(offsetBeats) * 4), 4);
+      const tempo = toNumber(tempoFrac, 120) || 120;
+      const offsetBeats = Math.abs(delta) / (60 / tempo);
+      try {
+        frac = new Fraction(offsetBeats);
+      } catch {
+        frac = new Fraction(Math.round(offsetBeats * 4), 4);
+      }
     }
 
     if (useDSL) {
@@ -3392,8 +3459,7 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
       } else if (Math.abs(delta) < 0.001) {
         raw = `${pRef}.t`;
       } else {
-        const fracStr = (frac.d === 1) ? `${frac.n}` : `(${frac.n}/${frac.d})`;
-        const beatMul = (frac.n === 1 && frac.d === 1) ? beatRef : `${beatRef} * ${fracStr}`;
+        const beatMul = fracIsOne(frac) ? beatRef : `${beatRef} * ${fracToDSL(frac)}`;
         if (delta >= 0) {
           raw = `${pRef}.t + ${beatMul}`;
         } else {
@@ -3409,9 +3475,9 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
     if (hasDur && durSec > 0 && Math.abs(delta - durSec) < 0.01) {
       raw = `${parentRef}.getVariable('startTime').add(${parentRef}.getVariable('duration'))`;
     } else if (delta >= 0) {
-      raw = `${parentRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.n}, ${frac.d})))`;
+      raw = `${parentRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.s * frac.n}, ${frac.d})))`;
     } else {
-      raw = `${parentRef}.getVariable('startTime').sub(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.n}, ${frac.d})))`;
+      raw = `${parentRef}.getVariable('startTime').sub(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.s * frac.n}, ${frac.d})))`;
     }
 
     const simplified = simplifyStartTime(raw, myModule);
@@ -3430,7 +3496,7 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
         let anc = __parseParentFromStartTimeStringGL(note);
         const tol = 1e-6;
         while (anc && anc.id !== 0) {
-          const st = Number(anc.getVariable('startTime').valueOf() || 0);
+          const st = toNumber(anc.getVariable('startTime'), 0);
           // Skip measure bars when we need frequency (measures have no frequency expression)
           const isMeasure = __isMeasureNoteGL(anc);
           if (st <= cutoffSec + tol && (!requireFrequency || !isMeasure)) return anc;
@@ -3447,13 +3513,13 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
           }
         }
         if (!anc) anc = myModule.baseNote;
-        const st2 = Number(anc.getVariable('startTime').valueOf() || 0);
+        const st2 = toNumber(anc.getVariable('startTime'), 0);
         return (st2 <= cutoffSec + tol) ? anc : myModule.baseNote;
       } catch { return myModule.baseNote; }
     }
 
     const movedId = movedNote.id;
-    const movedStart = Number(movedNote.getVariable('startTime').valueOf() || 0);
+    const movedStart = toNumber(movedNote.getVariable('startTime'), 0);
     const dependents = myModule.getDependentNotes(movedId) || [];
 
     // Get dependency graph for corruption checks
@@ -3474,7 +3540,7 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
       if (!__freqReferencesNoteId(fRaw, movedId)) return;
       const fIsDSL = isDSLSyntax(fRaw);
 
-      const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
+      const depStart = toNumber(dep.getVariable('startTime'), 0);
       // If dependent starts earlier than referenced (moved) note, swap to a valid ancestor at/before depStart
       if (depStart < movedStart - 1e-6) {
         const replacementTarget = __resolveAncestorAtOrBefore(movedNote, depStart, true); // requireFrequency=true to skip measure bars
@@ -3534,7 +3600,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         let anc = __parseParentFromStartTimeStringGL(note);
         const tol = 1e-6;
         while (anc && anc.id !== 0) {
-          const st = Number(anc.getVariable('startTime').valueOf() || 0);
+          const st = toNumber(anc.getVariable('startTime'), 0);
           // Skip measure bars when we need frequency (measures have no frequency expression)
           const isMeasure = __isMeasureNoteGL(anc);
           if (st <= cutoffSec + tol && (!requireFrequency || !isMeasure)) return anc;
@@ -3551,20 +3617,20 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           }
         }
         if (!anc) anc = myModule.baseNote;
-        const st2 = Number(anc.getVariable('startTime').valueOf() || 0);
+        const st2 = toNumber(anc.getVariable('startTime'), 0);
         return (st2 <= cutoffSec + tol) ? anc : myModule.baseNote;
       } catch { return myModule.baseNote; }
     }
 
     const movedId = movedNote.id;
-    const movedStart = Number(movedNote.getVariable('startTime').valueOf() || 0);
+    const movedStart = toNumber(movedNote.getVariable('startTime'), 0);
     const dependents = myModule.getDependentNotes(movedId) || [];
 
     dependents.forEach(depId => {
       const dep = myModule.getNoteById(Number(depId));
       if (!dep) return;
 
-      const depStart = Number(dep.getVariable('startTime').valueOf() || 0);
+      const depStart = toNumber(dep.getVariable('startTime'), 0);
       if (!(depStart < movedStart - 1e-6)) return;
 
       // For startTime/duration, measure bars are valid (they have startTime)
@@ -3707,9 +3773,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 else if (ch === ')' && --depth < 0) { balanced = false; break; }
             }
             if (balanced && depth === 0) {
-                const coeff = new Fraction(Number(m[1]), m[2] !== undefined ? Number(m[2]) : 1)
+                // BigInt-exact parse: Number() would round the folded
+                // coefficient after ~53 doublings and each press compounds it
+                const coeff = new Fraction(BigInt(m[1]), m[2] !== undefined ? BigInt(m[2]) : 1n)
                     .mul(new Fraction(num, den));
-                return coeff.equals(1) ? inner : `new Fraction(${coeff.n}, ${coeff.d}).mul(${inner})`;
+                return coeff.equals(1) ? inner : `${fracToLegacy(coeff)}.mul(${inner})`;
             }
         }
         return `new Fraction(${num}, ${den}).mul(${src})`;
@@ -3758,7 +3826,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (!rawExpression) {
                 // No raw expression to preserve; fallback to numeric exact fraction.
                 const newFrequency = currentFrequency.mul(new Fraction(factor.n, factor.d));
-                const newRaw = `new Fraction(${newFrequency.n}, ${newFrequency.d})`;
+                const newRaw = fracToLegacy(newFrequency);
                 note.setVariable('frequencyString', newRaw);
             } else if (isDSLSyntax(rawExpression)) {
                 // Fold the factor into the expression's coefficient instead of
@@ -4282,7 +4350,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             .filter((n) => n && !__isMeasureNoteGL(n));
         if (!notes.length) return null;
 
-        const startOf = (n) => Number(n.getVariable('startTime')?.valueOf?.() ?? 0);
+        const startOf = (n) => toNumber(n.getVariable('startTime'), 0);
         notes.sort((a, b) => (startOf(a) - startOf(b)) || (Number(a.id) - Number(b.id)));
         const t0 = startOf(notes[0]);
 
@@ -4291,15 +4359,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         notes.forEach((n, i) => idMap.set(Number(n.id), i + 1));
 
         const base = myModule.baseNote;
-        const baseTempo = Number(myModule.findTempo(base)?.valueOf?.() ?? 120) || 120;
+        const tempoFrac = myModule.findTempo(base);
+        const baseTempo = toNumber(tempoFrac, 120) || 120;
         const beatLen = 60 / baseTempo;
-        const baseFreq = Number(base.getVariable('frequency')?.valueOf?.() ?? 0);
+        const baseFreqFrac = base.getVariable('frequency');
+        const baseFreq = toNumber(baseFreqFrac, 0);
+        const t0Frac = notes[0].getVariable('startTime');
 
         const frac = (x) => {
             try { return new Fraction(x); }
             catch { return new Fraction(Math.round(Number(x) * 1000), 1000); }
         };
-        const fracStr = (f) => (f.d === 1 ? `${f.n}` : `(${f.n}/${f.d})`);
+        const fracStr = fracToDSL;
 
         const renumber = (raw) => String(raw)
             .replace(/\[(\d+)\]/g, (m, d) => {
@@ -4332,18 +4403,24 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (__startChainTouchesSetGL(n, S) && selfContained(sRaw)) {
                 e.startTime = renumber(sRaw);
             } else {
-                const k = frac((startOf(n) - t0) / beatLen);
-                e.startTime = (k.n === 0) ? 'base.t' : `base.t + beat(base) * ${fracStr(k)}`;
+                // Exact beat offset from exact Fractions; float diff only as fallback
+                let k;
+                try { k = exactBeatOffset(n.getVariable('startTime'), t0Frac, tempoFrac); }
+                catch { k = frac((startOf(n) - t0) / beatLen); }
+                e.startTime = (k.n === 0n) ? 'base.t' : `base.t + beat(base) * ${fracStr(k)}`;
             }
 
             // duration
             if (dRaw && selfContained(dRaw)) {
                 e.duration = renumber(dRaw);
             } else if (n.getVariable('duration') != null) {
-                const durSec = Number(n.getVariable('duration')?.valueOf?.() ?? 0);
+                const durFrac = n.getVariable('duration');
+                const durSec = toNumber(durFrac, 0);
                 if (isFinite(durSec) && durSec > 0) {
-                    const beats = frac(durSec / beatLen);
-                    e.duration = (beats.n === beats.d) ? 'beat(base)' : `beat(base) * ${fracStr(beats)}`;
+                    let beats;
+                    try { beats = durFrac.mul(tempoFrac).div(60); }
+                    catch { beats = frac(durSec / beatLen); }
+                    e.duration = beats.equals(1) ? 'beat(base)' : `beat(base) * ${fracStr(beats)}`;
                 }
             }
 
@@ -4351,10 +4428,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (fRaw && selfContained(fRaw)) {
                 e.frequency = renumber(fRaw);
             } else if (n.getVariable('frequency') != null) {
-                const f = Number(n.getVariable('frequency')?.valueOf?.() ?? 0);
+                const freqFrac = n.getVariable('frequency');
+                const f = toNumber(freqFrac, 0);
                 if (isFinite(f) && f > 0 && baseFreq > 0) {
-                    const r = frac(f / baseFreq);
-                    e.frequency = (r.n === r.d) ? 'base.f' : `${fracStr(r)} * base.f`;
+                    let r;
+                    try { r = freqFrac.div(baseFreqFrac); }
+                    catch { r = frac(f / baseFreq); }
+                    e.frequency = r.equals(1) ? 'base.f' : `${fracStr(r)} * base.f`;
                 }
             }
 
@@ -4372,8 +4452,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (typeof raw === 'string' && raw.trim()) {
                 baseOut[v] = raw;
             } else {
-                const val = Number(base.getVariable(v)?.valueOf?.());
-                if (isFinite(val)) baseOut[v] = String(val);
+                const bv = base.getVariable(v);
+                if (bv instanceof Fraction) {
+                    baseOut[v] = fracToDSL(bv);
+                } else {
+                    const val = toNumber(bv, NaN);
+                    if (isFinite(val)) baseOut[v] = String(val);
+                }
             }
         }
         baseOut.startTime = '0';
@@ -5722,7 +5807,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         try {
           const s = (typeof snapshotStr === 'string') ? snapshotStr : JSON.stringify(snapshot);
           localStorage.setItem('rmt:moduleSnapshot:v1', s);
-        } catch {}
+        } catch (e) {
+          console.error('[RMT] Autosave failed (history capture):', e);
+        }
       });
     } catch (e) {
       console.warn('eventBus subscription failed', e);
@@ -5743,7 +5830,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           // Capture original before remap for debug/validation
           const oldRaw = n.variables.startTimeString || '';
-          const oldStart = Number(n.getVariable('startTime').valueOf() || 0);
+          const oldStart = toNumber(n.getVariable('startTime'), 0);
 
           // Legacy-like remapping: select suitable parent and emit relative startTime expression
           const parent = selectSuitableParentForStartGL(n, newStartSec);
@@ -5811,7 +5898,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                   const tol = 1e-6;
                   let guard = 0;
                   while (anc && anc.id !== 0 && guard++ < 128) {
-                    const st = Number(anc.getVariable('startTime')?.valueOf?.() || 0);
+                    const st = toNumber(anc.getVariable('startTime'), 0);
                     // Skip measure bars when we need frequency (measures have no frequency expression)
                     const isMeasure = __isMeasureNoteGL(anc);
                     if (st <= Number(cutoffSec) + tol && (!requireFrequency || !isMeasure)) break;
@@ -5856,41 +5943,33 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // No corruption involved - safe to use ratio-based rebuilding with simplification
                 const curFv = n.getVariable('frequency');
                 const ancFv = anchor.getVariable('frequency');
-                const curVal = (curFv && typeof curFv.valueOf === 'function') ? curFv.valueOf() : Number(curFv);
-                const ancVal = (ancFv && typeof ancFv.valueOf === 'function') ? ancFv.valueOf() : Number(ancFv);
 
-                if (isFinite(curVal) && isFinite(ancVal) && Math.abs(ancVal) > 1e-12) {
-                  let ratio;
-                  try { ratio = new Fraction(curVal).div(new Fraction(ancVal)); }
-                  catch { ratio = new Fraction(curVal / ancVal); }
+                // Exact ratio of the two evaluated Fractions — the old float
+                // round-trip (new Fraction(valueOf())) fabricated nearby wrong
+                // ratios once values passed 2^53.
+                let ratio = null;
+                if (curFv instanceof Fraction && ancFv instanceof Fraction && ancFv.n !== 0n) {
+                  try { ratio = curFv.div(ancFv); } catch { ratio = null; }
+                }
+                if (!ratio) {
+                  const curVal = toNumber(curFv, NaN);
+                  const ancVal = toNumber(ancFv, NaN);
+                  if (isFinite(curVal) && isFinite(ancVal) && Math.abs(ancVal) > 1e-12) {
+                    try { ratio = new Fraction(curVal / ancVal); } catch { ratio = null; }
+                  }
+                }
 
+                if (ratio) {
                   const fIsDSL = fRaw0 && isDSLSyntax(fRaw0);
                   let rawFreq;
                   if (fIsDSL) {
                     const aRef = (anchor.id === 0) ? 'base.f' : `[${anchor.id}].f`;
-                    try {
-                      const r = (typeof ratio.valueOf === 'function') ? ratio.valueOf() : (ratio.n / ratio.d);
-                      if (Math.abs(r - 1) < 1e-6) {
-                        rawFreq = aRef;
-                      } else {
-                        const fracStr = ratio.d === 1 ? `${ratio.n}` : `(${ratio.n}/${ratio.d})`;
-                        rawFreq = `${fracStr} * ${aRef}`;
-                      }
-                    } catch {
-                      rawFreq = aRef;
-                    }
+                    rawFreq = ratio.equals(1) ? aRef : `${fracToDSL(ratio)} * ${aRef}`;
                   } else {
                     const anchorRef = (anchor.id === 0) ? "module.baseNote" : `module.getNoteById(${anchor.id})`;
-                    try {
-                      const r = (typeof ratio.valueOf === 'function') ? ratio.valueOf() : (ratio.n / ratio.d);
-                      if (Math.abs(r - 1) < 1e-6) {
-                        rawFreq = `${anchorRef}.getVariable('frequency')`;
-                      } else {
-                        rawFreq = `new Fraction(${ratio.n}, ${ratio.d}).mul(${anchorRef}.getVariable('frequency'))`;
-                      }
-                    } catch {
-                      rawFreq = `${anchorRef}.getVariable('frequency')`;
-                    }
+                    rawFreq = ratio.equals(1)
+                      ? `${anchorRef}.getVariable('frequency')`
+                      : `${fracToLegacy(ratio)}.mul(${anchorRef}.getVariable('frequency'))`;
                   }
 
                   let simplifiedF;
@@ -5959,7 +6038,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                   const tol = 1e-6;
                   let guard = 0;
                   while (anc && anc.id !== 0 && guard++ < 128) {
-                    const st = Number(anc.getVariable('startTime')?.valueOf?.() || 0);
+                    const st = toNumber(anc.getVariable('startTime'), 0);
                     if (st <= Number(cutoffSec) + tol) break;
                     const raw = (anc.variables && anc.variables.startTimeString) || '';
                     const ref = __extractNoteRefFromRaw(raw);
@@ -5977,28 +6056,33 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
               const anchorDur = __resolveAncestorAtOrBeforeLocalDur(refNote, newStartSec);
 
-              // Preserve numeric duration in seconds while re-anchoring to anchorDur's tempo
+              // Preserve the duration while re-anchoring to anchorDur's tempo.
+              // Both operands are exact Fractions, so beats = dur * tempo / 60
+              // stays exact at any depth (the old float beatLen division lost
+              // exactness on every move commit).
               const durVal = n.getVariable('duration');
-              const durSec = (durVal && typeof durVal.valueOf === 'function') ? durVal.valueOf() : Number(durVal);
+              const durSec = toNumber(durVal, NaN);
 
               if (isFinite(durSec) && durSec >= 0) {
                 const tempoVal = myModule.findTempo(anchorDur);
-                const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
-                const beatLen = 60 / tempo;
-                const beats = durSec / beatLen;
 
                 let bf;
-                try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
+                try {
+                  bf = durVal.mul(tempoVal).div(60);
+                } catch {
+                  const tempo = toNumber(tempoVal, 120) || 120;
+                  const beats = durSec / (60 / tempo);
+                  try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
+                }
 
                 const dIsDSL = dRaw0 && isDSLSyntax(dRaw0);
                 let rawDur;
                 if (dIsDSL) {
                   const beatRef = (anchorDur.id === 0) ? 'beat(base)' : `beat([${anchorDur.id}])`;
-                  const fracStr = bf.d === 1 ? `${bf.n}` : `(${bf.n}/${bf.d})`;
-                  rawDur = (bf.n === bf.d) ? beatRef : `${beatRef} * ${fracStr}`;
+                  rawDur = bf.equals(1) ? beatRef : `${beatRef} * ${fracToDSL(bf)}`;
                 } else {
                   const anchorRef = (anchorDur.id === 0) ? "module.baseNote" : `module.getNoteById(${anchorDur.id})`;
-                  rawDur = `new Fraction(60).div(module.findTempo(${anchorRef})).mul(new Fraction(${bf.n}, ${bf.d}))`;
+                  rawDur = `new Fraction(60).div(module.findTempo(${anchorRef})).mul(new Fraction(${bf.s * bf.n}, ${bf.d}))`;
                 }
 
                 let simplifiedD;
@@ -6122,10 +6206,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           // ancestors are static by construction (no selected note in its chain), so
           // these reads are order-independent — but taking them up front keeps the
           // batch deterministic regardless of commit order.
-          const baseStart = Number(myModule.baseNote.getVariable('startTime').valueOf() || 0);
+          const baseStart = toNumber(myModule.baseNote.getVariable('startTime'), 0);
           const plan = movers.map((n) => ({
             n,
-            newStart: Number(n.getVariable('startTime').valueOf() || 0) + deltaSec
+            newStart: toNumber(n.getVariable('startTime'), 0) + deltaSec
           }));
 
           // Never drag the group before the base note: clamp the whole batch by the
@@ -6164,36 +6248,33 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           try { eventBus.emit('player:requestPause'); } catch {}
 
-          const tempo = myModule.baseNote?.getVariable?.('tempo')?.valueOf?.() ?? 120;
+          const tempo = toNumber(myModule.baseNote?.getVariable?.('tempo'), 120) || 120;
           const beatLen = 60 / tempo;
 
-          const oldDuration = n.getVariable('duration')?.valueOf?.() ?? 0;
+          const oldDuration = toNumber(n.getVariable('duration'), 0);
 
+          // The sixteenth snap is deliberate gesture quantization — the
+          // snapped beat count is always an exact quarter multiple, so the
+          // Fraction below is exact regardless of tempo.
           const beats = newDurationSec / beatLen;
           const sixteenth = 0.25;
           const snappedBeats = Math.max(sixteenth, Math.round(beats / sixteenth) * sixteenth);
 
-          let beatsFrac;
-          try {
-            beatsFrac = new Fraction(snappedBeats);
-          } catch {
-            beatsFrac = new Fraction(Math.round(snappedBeats * 4), 4);
-          }
+          const beatsFrac = new Fraction(Math.round(snappedBeats * 4), 4);
 
           const dRaw = n.variables?.durationString;
           const dIsD = dRaw && isDSLSyntax(dRaw);
           let simplified;
           if (dIsD) {
-            const fracStr = beatsFrac.d === 1 ? `${beatsFrac.n}` : `(${beatsFrac.n}/${beatsFrac.d})`;
-            simplified = (beatsFrac.n === beatsFrac.d) ? 'beat(base)' : `beat(base) * ${fracStr}`;
+            simplified = beatsFrac.equals(1) ? 'beat(base)' : `beat(base) * ${fracToDSL(beatsFrac)}`;
           } else {
-            const raw = "new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(" + beatsFrac.n + ", " + beatsFrac.d + "))";
+            const raw = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFrac.s * beatsFrac.n}, ${beatsFrac.d}))`;
             simplified = simplifyDuration(raw, myModule);
           }
 
           n.setVariable('durationString', simplified);
 
-          const updatedDuration = n.getVariable('duration')?.valueOf?.() ?? newDurationSec;
+          const updatedDuration = toNumber(n.getVariable('duration'), newDurationSec);
 
           // Propagate to dependents when appropriate
           try { checkAndUpdateDependentNotes(n.id, oldDuration, updatedDuration); } catch {}
@@ -6284,8 +6365,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
              try {
                const n = myModule.getNoteById(Number(id));
                const st = n && n.getVariable && n.getVariable('startTime');
-               return Number(st && st.valueOf ? st.valueOf() : 0);
-             } catch { return 0; }
+               return toNumber(st, 0);
+             } catch (e) {
+               console.warn('measure chain: startTime evaluation failed for note', id, e);
+               return 0;
+             }
            };
            // Check if a dependent is a chain link (uses findMeasureLength/measure()) vs an anchor (starts new chain)
            const isChainLinkById = (depId, parentId) => {
@@ -6325,7 +6409,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
              break;
            }
            const pushWithStart = (n) => {
-             try { out.push({ id: Number(n.id), startSec: Number(n.getVariable('startTime')?.valueOf?.() ?? 0) }); }
+             try { out.push({ id: Number(n.id), startSec: toNumber(n.getVariable('startTime'), 0) }); }
              catch { out.push({ id: Number(n.id), startSec: 0 }); }
            };
            pushWithStart(cur);
@@ -6346,9 +6430,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                  if (sts.includes(linkPattern) || sts.includes(dslLinkPattern)) candidates.push(nn);
                }
              } catch {}
-             // Sort by startTime and return earliest (there should typically be only one chain link)
+             // Sort by startTime and return earliest (there should typically
+             // be only one chain link); id tie-break keeps the pick
+             // deterministic when starts collapse to the same double.
              candidates.sort((a, b) => {
-               try { return a.getVariable('startTime').valueOf() - b.getVariable('startTime').valueOf(); } catch { return 0; }
+               const sa = toNumber(a.getVariable && a.getVariable('startTime'), 0);
+               const sb = toNumber(b.getVariable && b.getVariable('startTime'), 0);
+               return sa < sb ? -1 : sa > sb ? 1 : a.id - b.id;
              });
              return candidates.length > 0 ? candidates[0] : null;
            };
@@ -6396,9 +6484,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (baseAnchored) {
               // Do NOT modify BaseNote beats. Anchor this measure directly to BaseNote with an explicit offset.
               const base = myModule.baseNote;
-              const baseStart = Number(base.getVariable('startTime')?.valueOf?.() || 0);
-              const tempoVal = myModule.findTempo(base);
-              const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+              const baseStart = toNumber(base.getVariable('startTime'), 0);
+              const tempo = toNumber(myModule.findTempo(base), 120) || 120;
               const beatLen = 60 / tempo;
 
               let gapSec = Math.max(0, Number(newStartSec) - baseStart);
@@ -6407,15 +6494,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               // Allow exact origin: round to nearest 1/16th without enforcing a minimum > 0
               beats = Math.max(0, Math.round(beats / sixteenth) * sixteenth);
 
-              let bf; try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(Math.max(0, beats) * 4), 4); }
+              // Snapped beats are exact quarter multiples
+              const bf = new Fraction(Math.round(beats * 4), 4);
               const noteUseDSL0 = isDSLSyntax(raw);
               let newRaw;
               if (noteUseDSL0) {
                 if (beats === 0) {
                   newRaw = 'base.t';
                 } else {
-                  const fracStr = (bf.d === 1) ? `${bf.n}` : `(${bf.n}/${bf.d})`;
-                  const beatMul = (bf.n === 1 && bf.d === 1) ? 'beat(base)' : `beat(base) * ${fracStr}`;
+                  const beatMul = fracIsOne(bf) ? 'beat(base)' : `beat(base) * ${fracToDSL(bf)}`;
                   newRaw = `base.t + ${beatMul}`;
                 }
               } else {
@@ -6423,7 +6510,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // If at origin, emit exactly base start to avoid add(... * 0) jitter
                 newRaw = (beats === 0)
                   ? `${baseRef}.getVariable('startTime')`
-                  : `${baseRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${baseRef})).mul(new Fraction(${bf.n}, ${bf.d})))`;
+                  : `${baseRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${baseRef})).mul(new Fraction(${bf.s * bf.n}, ${bf.d})))`;
               }
               const simplifiedStart = noteUseDSL0 ? newRaw : simplifyStartTime(newRaw, myModule);
               note.setVariable('startTimeString', simplifiedStart);
@@ -6438,7 +6525,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               try {
                 if (cand && cand.id === 0) {
                   const base = myModule.baseNote;
-                  const baseStart = Number(base.getVariable('startTime')?.valueOf?.() || 0);
+                  const baseStart = toNumber(base.getVariable('startTime'), 0);
                   if (Math.abs(Number(newStartSec) - baseStart) < 1e-6) {
                     const noteUseDSL = isDSLSyntax(note?.variables?.startTimeString || '');
                     raw2 = noteUseDSL ? "base.t" : "module.baseNote.getVariable('startTime')";
@@ -6469,22 +6556,24 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
            // Subsequent measure: adjust previous measure's beats so its END equals newStartSec, then anchor current to prev END
            const prevMeta = chain[idx - 1];
            const prev = myModule.getNoteById(Number(prevMeta.id));
-           const prevStart = Number(prevMeta.startSec || prev.getVariable('startTime')?.valueOf?.() || 0);
-           const tempoVal = myModule.findTempo(prev);
-           const tempo = Number(tempoVal && typeof tempoVal.valueOf === 'function' ? tempoVal.valueOf() : tempoVal) || 120;
+           const prevStart = Number.isFinite(prevMeta.startSec) && prevMeta.startSec !== 0
+             ? prevMeta.startSec
+             : toNumber(prev.getVariable('startTime'), 0);
+           const tempo = toNumber(myModule.findTempo(prev), 120) || 120;
            const beatLen = 60 / tempo;
- 
+
            let gapSec = Math.max(0, Number(newStartSec) - prevStart);
            // snap to sixteenth
            let beats = gapSec / beatLen;
            const sixteenth = 0.25;
            beats = Math.max(sixteenth, Math.round(beats / sixteenth) * sixteenth);
- 
-           let bf; try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
+
+           // Snapped beats are exact quarter multiples
+           const bf = new Fraction(Math.round(beats * 4), 4);
            const noteUseDSL = isDSLSyntax(note?.variables?.startTimeString || '');
            const rawBeats = noteUseDSL
-             ? ((bf.d === 1) ? `${bf.n}` : `(${bf.n}/${bf.d})`)
-             : `new Fraction(${bf.n}, ${bf.d})`;
+             ? fracToDSL(bf)
+             : `new Fraction(${bf.s * bf.n}, ${bf.d})`;
            try {
              prev.setVariable('beatsPerMeasureString', rawBeats);
              try { myModule.markNoteDirty(prev.id); } catch {}
@@ -6557,7 +6646,10 @@ function captureSnapshot(label = 'Change') {
       // localStorage autosave (Phase 8 dedupe: previously each captured module was
       // JSON.stringify'd 2-3x per user action).
       let snapStr = null;
-      try { snapStr = JSON.stringify(snap); } catch {}
+      try { snapStr = JSON.stringify(snap); } catch (e) {
+        // One failed stringify silently kills BOTH undo capture and autosave
+        console.error('[RMT] Snapshot serialization failed:', e);
+      }
       // Ensure a baseline exists so the very first user action (color edit, drag) can be undone independently
       try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap, snapshotStr: snapStr }); } catch {}
       eventBus.emit('history:capture', { label, snapshot: snap, snapshotStr: snapStr });
@@ -6575,7 +6667,9 @@ try {
       if (snap) {
         localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
       }
-    } catch {}
+    } catch (e) {
+      console.error('[RMT] Autosave failed (beforeunload):', e);
+    }
   });
 } catch {}
 
@@ -6662,7 +6756,9 @@ try {
         if (snap) {
           localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
         }
-      } catch {}
+      } catch (e) {
+        console.error('[RMT] Autosave failed (post-restore):', e);
+      }
 
       if (source === 'undo') notify(`Undid: ${label}`, 'success');
       else if (source === 'redo') notify(`Redid: ${label}`, 'success');

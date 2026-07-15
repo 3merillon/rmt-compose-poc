@@ -17,9 +17,9 @@ undo stack, the renderer's hatching — exists to make that idea fast and honest
 2. **Compiled, never evaluated.** Expressions compile to a compact bytecode and run on a stack VM.
    Nothing in the app calls `eval()` or `new Function()` — that is a security guarantee, enforced in
    `src/utils/safe-expression-validator.js`.
-3. **Exact where it can be.** Values are `fraction.js` rationals. Only an irrational power
-   (`2^(1/12)`) forces an approximation, and when it does the note is flagged **corrupted** and
-   visibly hatched.
+3. **Exact where it can be.** Values are `fraction.js` rationals — BigInt-backed, so exact at
+   any magnitude and any dependency depth. Only an irrational power (`2^(1/12)`) forces an
+   approximation, and when it does the note is flagged **corrupted** and visibly hatched.
 4. **Dependency-aware.** An inverse index answers "who depends on note 5?" in O(dependents), so an
    edit re-evaluates only what it must.
 5. **O(visible), not O(module).** The renderer culls per-note overlay work to the viewport, so a

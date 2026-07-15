@@ -6,6 +6,7 @@
  */
 
 import Fraction from 'fraction.js';
+import { toNumber } from '../utils/fraction-num.js';
 import { getWasm, isWasmAvailable } from './index.js';
 import { WASM_CONFIG, shouldUseWasm } from './config.js';
 import { BinaryEvaluator as JSBinaryEvaluator, IncrementalEvaluator as JSIncrementalEvaluator } from '../binary-evaluator.js';
@@ -253,10 +254,7 @@ class WasmEvaluatorWrapper {
           );
 
           // Create a new Fraction for caching
-          const value = this._createFraction(
-            (wasmResult.s || 1) * (wasmResult.n || 0),
-            wasmResult.d || 1
-          );
+          const value = this._fractionFromWasm(wasmResult);
           result[name] = value;
 
           // Update the converted cache for this note so subsequent expressions can see it
@@ -300,12 +298,16 @@ class WasmEvaluatorWrapper {
         const baseCache = evalCache.get(0);
         if (baseCache) tempo = baseCache.tempo;
       }
-      // Compute measureLength = beatsPerMeasure / tempo * 60 using fast native math
-      const beatsVal = beats ? (typeof beats.valueOf === 'function' ? beats.valueOf() : Number(beats)) : 4;
-      const tempoVal = tempo ? (typeof tempo.valueOf === 'function' ? tempo.valueOf() : Number(tempo)) : 60;
-      const measureLenVal = (beatsVal / tempoVal) * 60;
-      // Store as simple object with s/n/d for compatibility, avoiding Fraction constructor
-      result.measureLength = { s: 1, n: Math.round(measureLenVal * 1000000), d: 1000000, valueOf: () => measureLenVal };
+      // Compute measureLength = beatsPerMeasure * 60 / tempo as an exact
+      // Fraction (mirrors the JS evaluator; a duck-typed {s,n,d} POJO with
+      // Number fields would poison BigInt-backed consumers).
+      try {
+        const b = beats instanceof Fraction ? beats : new Fraction(4);
+        const t = tempo instanceof Fraction ? tempo : new Fraction(60);
+        result.measureLength = b.mul(60).div(t);
+      } catch (e) {
+        result.measureLength = new Fraction(4);
+      }
     }
 
     this.cache.set(note.id, result);
@@ -332,39 +334,46 @@ class WasmEvaluatorWrapper {
   }
 
   _fractionFromWasm(wasmResult) {
-    // wasmResult has { s, n, d } format
-    const frac = new Fraction(0);
-    frac.s = wasmResult.s || 1;
-    frac.n = wasmResult.n || 0;
-    frac.d = wasmResult.d || 1;
-    return frac;
+    // wasmResult has { s, n, d } format (u32 components from FractionData);
+    // construct instead of mutating internals so the result is a real Fraction
+    const s = wasmResult.s || 1;
+    const n = wasmResult.n || 0;
+    const d = wasmResult.d || 1;
+    return new Fraction(BigInt(s) * BigInt(n), BigInt(d));
   }
 
   _convertEvalValues(values) {
     const result = {};
     for (const [key, val] of Object.entries(values)) {
       if (val != null) {
-        // Handle both Fraction objects and plain numbers
-        const numVal = typeof val.valueOf === 'function' ? val.valueOf() : Number(val);
-        // For Fraction objects, use s/n/d directly; for numbers, compute them
-        const hasSnD = typeof val.s === 'number' && typeof val.n === 'number' && typeof val.d === 'number';
-        if (hasSnD) {
-          result[key] = {
-            s: val.s === 0 ? (numVal < 0 ? -1 : 1) : val.s,
-            n: val.n,
-            d: val.d
-          };
-        } else {
-          // Fallback for plain numbers or malformed fractions
-          result[key] = {
-            s: numVal < 0 ? -1 : 1,
-            n: Math.abs(Math.round(numVal * 1000000)),
-            d: 1000000
-          };
-        }
+        result[key] = this._toFractionData(val);
       }
     }
     return result;
+  }
+
+  // The WASM boundary struct (FractionData) holds n/d as u32: components
+  // that fit cross the boundary exactly, anything larger degrades to the
+  // quantized-float fallback (matching the Rust side's overflow handling).
+  _toFractionData(val) {
+    if (typeof val.n === 'bigint' && typeof val.d === 'bigint' && val.s != null) {
+      if (val.n < 4294967296n && val.d < 4294967296n) {
+        const s = Number(val.s);
+        return { s: s === 0 ? 1 : s, n: Number(val.n), d: Number(val.d) };
+      }
+    } else if (typeof val.s === 'number' && typeof val.n === 'number' && typeof val.d === 'number') {
+      if (val.n < 4294967296 && val.d < 4294967296) {
+        const numVal = toNumber(val, 0);
+        return { s: val.s === 0 ? (numVal < 0 ? -1 : 1) : val.s, n: val.n, d: val.d };
+      }
+    }
+    // Plain numbers, oversized components, or malformed fractions
+    const numVal = toNumber(val, 0);
+    return {
+      s: numVal < 0 ? -1 : 1,
+      n: Math.abs(Math.round(numVal * 1000000)),
+      d: 1000000
+    };
   }
 }
 
@@ -898,11 +907,9 @@ class WasmPersistentEvaluatorWrapper {
     for (const key of ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength']) {
       const val = wasmNote[key];
       if (val && val.s !== undefined) {
-        const frac = new Fraction(0);
-        // Be careful with sign: 0 is valid (means zero value), don't default to 1
-        frac.s = (val.s !== undefined && val.s !== null) ? val.s : 1;
-        frac.n = val.n || 0;
-        frac.d = val.d || 1;
+        // Rust sends s=0 for zero values; n is 0 there, so the sign is moot
+        const s = (val.s !== undefined && val.s !== null && val.s !== 0) ? val.s : 1;
+        const frac = new Fraction(BigInt(s) * BigInt(val.n || 0), BigInt(val.d || 1));
         // For irrational values (or large fractions that overflow u32), store the float value
         if (val.corrupted && val.f !== undefined) {
           frac._irrational = true;

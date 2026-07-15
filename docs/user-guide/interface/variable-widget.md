@@ -115,6 +115,8 @@ Fractions are exact; powers usually are not. `base.f * 2^(7/12)` — a 12-TET fi
 
 Any row whose **own expression** is irrational carries the `≈` — a startTime or duration built on a power shows it just like a frequency does. The *transitive* case — a note that merely inherits an irrational frequency from a note further up its chain — is tracked for **frequency only**, so the whole of a TET scale built on `[1].f * 2^(1/12)` reads `≈` on its `FREQUENCY` rows.
 
+A value can also earn an `≈` with nothing irrational in sight. Exact fractions can grow enormous in deep chains, and once one passes 24 digits (numerator and denominator together) the readout collapses to an eight-figure approximation — hover the `Evaluated:` line and the tooltip shows the exact, elided `n/d` form. The value underneath is still exact; only the readout is compressed, and it is not shown in brown.
+
 On the canvas the same notes are hatched, and the hatching tells you *which* kind you are looking at:
 
 | Hatching | Meaning |
