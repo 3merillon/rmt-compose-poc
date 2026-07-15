@@ -276,7 +276,7 @@ A per-category `index.json` loader still exists as a fallback for the pre-v2 lay
 
 ## The other saved JSON: `ui-state.json`
 
-**Save UI** (in the module bar's footer) downloads a different file — `ui-state.json`. It is the **library layout**, not a composition: sections and their labels, which icons sit where, which are collapsed, the `Drop at:` mode, and the full JSON of any module you *uploaded* (uploads have no re-fetchable path, so their data is embedded; built-ins are stored by file path).
+**Save UI** (in the module bar's footer) downloads a different file — `ui-state.json`. It is the **library layout**, not a composition: sections and their labels, which icons sit where, which are collapsed, the drop mode (**Start** or **End**, stored under the `dropMode` key), and the full JSON of any module you *uploaded* (uploads have no re-fetchable path, so their data is embedded; built-ins are stored by file path).
 
 Do not confuse the two. A `ui-state.json` will not load as a module, and a `module.json` will not load as a UI state.
 

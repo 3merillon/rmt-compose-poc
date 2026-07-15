@@ -224,8 +224,8 @@ Pick degrees by harmonic relationship rather than by keyboard habit:
 | 7 | 7/4 | 968.83 |
 | 8 | 2/1 | 1200 |
 
-Every one of those is an interval module. Set `Drop at: End` and drag them onto each other in
-sequence to chain the scale.
+Every one of those is an interval module. Set the drop mode to **End** (the ⇥ button next to
+Undo/Redo in the module bar's toolbar) and drag them onto each other in sequence to chain the scale.
 
 ### From an unusual division
 

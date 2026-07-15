@@ -176,14 +176,14 @@ Schisma (32805/32768).
 
 ## Building a microtonal composition
 
-::: tip Drop at: Start / End
-The `Drop at:` toggle at the bottom of the module bar decides where a dropped module
-lands relative to the target note.
+::: tip Drop mode: Start / End
+The drop-mode buttons in the module bar's toolbar — ⇤ and ⇥, just left of Undo/Redo —
+decide where a dropped module lands relative to the target note. Exactly one is lit at a time.
 
-- **End** — the module's notes are pushed past the target note's end. Chains scales and melodies.
-- **Start** — the module's notes share the target's start time. Stacks chords.
+- **End** (⇥) — the module's notes are pushed past the target note's end. Chains scales and melodies.
+- **Start** (⇤) — the module's notes share the target's start time. Stacks chords.
 
-Default is **Start**. Note that dropping onto the **BaseNote** ignores the toggle entirely.
+Default is **Start**. Note that dropping onto the **BaseNote** ignores the drop mode entirely.
 :::
 
 ### A 19-TET melody, by hand

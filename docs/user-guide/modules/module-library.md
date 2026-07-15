@@ -288,7 +288,7 @@ It is a harmonic series segment stretched over four octaves, not a scale in the 
 ## Where to go next
 
 - [Module Bar](/user-guide/interface/module-bar) — searching, dropping, and managing the library
-- [Loading Modules](/user-guide/modules/loading-modules) — drop targets and the `Drop at:` toggle
+- [Loading Modules](/user-guide/modules/loading-modules) — drop targets and the **Start** / **End** drop-mode buttons
 - [Dependencies](/user-guide/notes/dependencies) — what the trees in these modules are made of
 - [Expressions](/user-guide/notes/expressions) — the DSL every module is written in
 - [Ratios](/user-guide/tuning/ratios) — why 3/2 and not 700 cents

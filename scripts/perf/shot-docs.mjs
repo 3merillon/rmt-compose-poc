@@ -337,11 +337,14 @@ console.log('\n== workspace, top bar, module bar, note widget');
     toolbarInBar: !!document.querySelector('.second-top-bar .library-toolbar'),
     magnifier: !!document.querySelector('.library-search-toggle'),
     undoRedo: !!document.querySelector('.library-undo-btn') && !!document.querySelector('.library-redo-btn'),
+    // Exactly one of the drop-mode pair must be lit — it is a radio pair, and the docs
+    // describe the active-mode fill.
+    dropModeLit: document.querySelectorAll('.library-drop-btn.active').length === 1,
     barH: document.querySelector('.second-top-bar').offsetHeight,
   }));
   console.log('  module bar ' + JSON.stringify(barState));
-  if (!barState.toolbarInBar || !barState.magnifier || !barState.undoRedo) {
-    problems.push('module-bar: the magnifier / undo / redo toolbar is not in .second-top-bar');
+  if (!barState.toolbarInBar || !barState.magnifier || !barState.undoRedo || !barState.dropModeLit) {
+    problems.push('module-bar: the magnifier / drop-mode / undo / redo toolbar is not in .second-top-bar');
   }
   await save(page, 'module-bar.png', { selector: '.second-top-bar' });
 

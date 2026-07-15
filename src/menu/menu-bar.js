@@ -291,6 +291,10 @@ const menuAPI = (function() {
     const ICON_SEARCH = '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.6 15.6 21 21"/>';
     const ICON_UNDO = '<path d="M4 9h10a5.5 5.5 0 0 1 0 11h-3"/><path d="M8 5 4 9l4 4"/>';
     const ICON_REDO = '<path d="M20 9H10a5.5 5.5 0 0 0 0 11h3"/><path d="m16 5 4 4-4 4"/>';
+    // Arrow-to-bar (⇤ / ⇥): the bar is the target note's edge, the arrow is the module
+    // being pushed against it.
+    const ICON_DROP_START = '<path d="M5 4v16"/><path d="M19 12H9"/><path d="m13 8-4 4 4 4"/>';
+    const ICON_DROP_END = '<path d="M19 4v16"/><path d="M5 12h10"/><path d="m11 8 4 4-4 4"/>';
 
     function createToolButton(cls, label, iconPaths) {
         const btn = document.createElement('button');
@@ -346,9 +350,12 @@ const menuAPI = (function() {
     //
     // Left: a magnifier that unfolds the search field — collapsed by default, because a
     // permanently-open field sat there costing a module row's worth of width to show a
-    // control most sessions never touch. Right: undo/redo, which is the whole point of
-    // putting them here — history without opening the "+" menu, for anyone not using
-    // Ctrl+Z. Both emit the same eventBus events the menu's Undo/Redo buttons do.
+    // control most sessions never touch. Right: the drop-mode pair (start/end — where a
+    // dropped module lands relative to the target note; it used to hide at the bottom of
+    // the library, a long scroll from the notes being edited), then undo/redo, which is
+    // the whole point of putting them here — history without opening the "+" menu, for
+    // anyone not using Ctrl+Z. Undo/redo emit the same eventBus events the menu's
+    // Undo/Redo buttons do.
     //
     // Every control is 30px tall and border-boxed, and the field collapses by WIDTH (never
     // display/height), so the row's height is a constant 42px. That matters: its height is
@@ -395,6 +402,17 @@ const menuAPI = (function() {
             setSearchOpen(false);
         });
 
+        // Drop mode is a radio pair, not a command pair like undo/redo: one of the two is
+        // always lit (see syncDropModeButtons). Clicking the lit one is a no-op by design.
+        const dropGroup = document.createElement('div');
+        dropGroup.className = 'library-drop-group';
+        const dropStart = createToolButton('library-drop-btn library-drop-start-btn', 'Drop modules at note start', ICON_DROP_START);
+        const dropEnd = createToolButton('library-drop-btn library-drop-end-btn', 'Drop modules at note end', ICON_DROP_END);
+        dropStart.addEventListener('click', () => setModuleDropMode('start'));
+        dropEnd.addEventListener('click', () => setModuleDropMode('end'));
+        dropGroup.appendChild(dropStart);
+        dropGroup.appendChild(dropEnd);
+
         const group = document.createElement('div');
         group.className = 'library-tool-group';
         const undo = createToolButton('library-undo-btn', 'Undo (Ctrl+Z)', ICON_UNDO);
@@ -411,8 +429,34 @@ const menuAPI = (function() {
 
         row.appendChild(toggle);
         row.appendChild(input);
+        row.appendChild(dropGroup);
         row.appendChild(group);
         return row;
+    }
+
+    // The single writer of moduleDropMode from the UI side. Persists immediately, like
+    // the old bottom-of-library toggle did — the mode is part of the saved UI state.
+    function setModuleDropMode(value) {
+        if ((value !== 'start' && value !== 'end') || moduleDropMode === value) return;
+        moduleDropMode = value;
+        syncDropModeButtons();
+        saveUIStateToLocalStorage();
+    }
+
+    // Reflect moduleDropMode onto the pair. Called from ensureToolbar rather than only
+    // from clicks: applyUIState() restores the stored mode AFTER the toolbar was first
+    // built (init builds it before localStorage is read), and its ensureToolbar() call
+    // is what brings the buttons back in line with the restored value.
+    function syncDropModeButtons() {
+        const row = getToolbar();
+        if (!row) return;
+        [['.library-drop-start-btn', 'start'], ['.library-drop-end-btn', 'end']].forEach(([sel, value]) => {
+            const btn = row.querySelector(sel);
+            if (!btn) return;
+            const active = moduleDropMode === value;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+        });
     }
 
     // Enable/disable from the live stacks. The bus does not replay, and this row is built
@@ -467,6 +511,7 @@ const menuAPI = (function() {
         // not replay, and the module's initial snapshot may already have been seeded before
         // this module ever subscribed.
         syncHistoryButtons();
+        syncDropModeButtons();
         // Re-apply an in-flight query to freshly built icons.
         if (currentSearchQuery.trim()) applyModuleSearch(currentSearchQuery);
     }
@@ -2259,61 +2304,7 @@ const menuAPI = (function() {
         buttonsContainer.appendChild(createButton('Add Category', 'var(--rmt-accent, #ffa800)', onAddCategory));
         buttonsContainer.appendChild(createButton('Reload Defaults', 'var(--rmt-danger, #ff0000)', showReloadDefaultsConfirmation));
 
-        // Drop mode toggle row (placed above buttons)
-        const dropModeRow = document.createElement('div');
-        Object.assign(dropModeRow.style, {
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px',
-            marginTop: '18px', marginBottom: '4px', width: '100%', fontFamily: "'Roboto Mono', monospace", fontSize: '12px', color: 'var(--rmt-accent, #ffa800)'
-        });
-
-        const dropModeLabel = document.createElement('span');
-        dropModeLabel.textContent = 'Drop at:';
-
-        const createToggleOption = (text, value) => {
-            const option = document.createElement('span');
-            option.textContent = text;
-            option.dataset.value = value;
-            Object.assign(option.style, {
-                padding: '4px 8px', borderRadius: '3px', cursor: 'pointer',
-                border: '1px solid var(--rmt-accent, #ffa800)', transition: 'background-color 0.2s, color 0.2s'
-            });
-            const updateStyle = () => {
-                if (moduleDropMode === value) {
-                    option.style.backgroundColor = 'var(--rmt-accent, #ffa800)';
-                    option.style.color = '#151525';
-                } else {
-                    option.style.backgroundColor = 'transparent';
-                    option.style.color = 'var(--rmt-accent, #ffa800)';
-                }
-            };
-            updateStyle();
-            option.addEventListener('click', () => {
-                moduleDropMode = value;
-                saveUIStateToLocalStorage();
-                dropModeRow.querySelectorAll('span[data-value]').forEach(opt => {
-                    if (opt.dataset.value === moduleDropMode) {
-                        opt.style.backgroundColor = 'var(--rmt-accent, #ffa800)';
-                        opt.style.color = '#151525';
-                    } else {
-                        opt.style.backgroundColor = 'transparent';
-                        opt.style.color = 'var(--rmt-accent, #ffa800)';
-                    }
-                });
-            });
-            return option;
-        };
-
-        dropModeRow.appendChild(dropModeLabel);
-        dropModeRow.appendChild(createToggleOption('Start', 'start'));
-        dropModeRow.appendChild(createToggleOption('End', 'end'));
-
-        // Wrap with toggle above buttons
-        const wrapper = document.createElement('div');
-        Object.assign(wrapper.style, { display: 'flex', flexDirection: 'column', width: '100%' });
-        wrapper.appendChild(dropModeRow);
-        wrapper.appendChild(buttonsContainer);
-
-        return wrapper;
+        return buttonsContainer;
     }
 
     // A section row (label + module icons + trailing placeholder). Layout lives in
@@ -2520,9 +2511,13 @@ const menuAPI = (function() {
                z-index sits above the delete × buttons (10/12), or the controls would have
                them punching through unblurred while the icons behind are frosted. */
             .library-toolbar { position: absolute; top: 0; left: 0; right: 0; z-index: 30; display: flex; align-items: center; gap: 6px; padding: 6px 8px; margin: 0; box-sizing: border-box; background: transparent; pointer-events: none; }
-            /* Undo/redo, pinned to the right end of the row. Inert itself, like the row:
-               only the buttons inside it take the pointer. */
-            .library-tool-group { margin-left: auto; display: flex; align-items: center; gap: 6px; pointer-events: none; }
+            /* The right-end cluster: drop-mode pair, then undo/redo. The drop group
+               carries the auto margin that pins the cluster right; the tool group's own
+               margin (on top of the row's 6px gap) is what visually separates the two
+               pairs, so start/end cannot be misread as more history buttons. Both are
+               inert, like the row: only the buttons inside them take the pointer. */
+            .library-drop-group { margin-left: auto; display: flex; align-items: center; gap: 6px; pointer-events: none; }
+            .library-tool-group { margin-left: 8px; display: flex; align-items: center; gap: 6px; pointer-events: none; }
             /* The painted, clickable parts of the row: frosted, translucent so the icons
                scrolling under them stay faintly readable. 30px tall, like the field, which
                is what keeps the row's height constant (see getToolbarHeight). */
@@ -2535,6 +2530,11 @@ const menuAPI = (function() {
             /* The magnifier stays lit while the field is unfolded, so the open state reads
                even when the field itself is scrolled behind a wall of icons. */
             .library-toolbar.search-open .library-search-toggle { border-color: var(--rmt-accent, #ffa800); background: rgba(var(--rmt-accent-rgb), 0.18); }
+            /* The selected drop mode: solid accent fill with a dark glyph — a state, so it
+               must read stronger than the translucent hover wash the other buttons get.
+               The :hover selector isn't redundant: the shared hover rule above ties this
+               one's specificity, and hovering the lit button must not wash out its fill. */
+            .library-drop-btn.active, .library-drop-btn.active:hover { border-color: var(--rmt-accent, #ffa800); background: var(--rmt-accent, #ffa800); color: var(--rmt-bg, #151525); }
             /* The app sets user-select: none on html/body (styles.css), which takes the caret
                and text selection out of any input that does not opt back in. */
             .library-search-input { pointer-events: auto; flex: 0 1 320px; min-width: 0; height: 30px; box-sizing: border-box; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.62); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); color: var(--rmt-text-primary, #ffa800); font-family: 'Roboto Mono', monospace; font-size: 13px; outline: none; -webkit-appearance: none; appearance: none; user-select: text; -webkit-user-select: text;

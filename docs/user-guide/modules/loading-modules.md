@@ -56,9 +56,9 @@ That is the whole idea: drop the **Perfect 5th** interval on note 7 and you get 
 
 There is no fallback: dropping on empty space does not import the module at the BaseNote or at your selection. It does nothing but show the error.
 
-### Drop at: Start / End
+### Drop mode: Start / End
 
-At the bottom of the module bar, above the action buttons, is a **`Drop at:`** toggle with two options, **Start** and **End**. The default is **Start**, and the choice is remembered across sessions.
+The drop mode is set by two icon buttons pinned at the right end of the module bar's toolbar, just left of **Undo** / **Redo**: **⇤** (an arrow pushed against a left bar) for **Start**, **⇥** (against a right bar) for **End** — hover them for *Drop modules at note start* / *at note end*. They work as a radio pair: the active mode is filled solid, and clicking it again does nothing. The default is **Start**, and the choice is remembered across sessions as part of the saved UI state.
 
 | Mode | Where the module lands |
 |---|---|
@@ -66,7 +66,7 @@ At the bottom of the module bar, above the action buttons, is a **`Drop at:`** t
 | **End** | Aligned with the target note's **end** — the target's duration is added to the imported start times. |
 
 ::: warning End mode is ignored on the BaseNote
-The End adjustment only applies when the target is a real note. Drop a module on the BaseNote and it lands at the BaseNote's start time regardless of the toggle.
+The End adjustment only applies when the target is a real note. Drop a module on the BaseNote and it lands at the BaseNote's start time no matter which button is lit.
 :::
 
 ### Other things a drop does

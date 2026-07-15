@@ -9,7 +9,7 @@ The **module bar** is the panel pinned under the top bar. It holds the shipped c
 
 The bar is yours to rearrange. Sections collapse, tiles swap places, you can upload your own `.json` modules, add your own sections, and the whole layout is saved in your browser.
 
-![The module bar under the top bar, showing the search magnifier and undo/redo buttons in its toolbar row and rows of coloured module tiles grouped by section](/img/module-bar.png)
+![The module bar under the top bar, showing the search magnifier, the Start/End drop-mode buttons and the undo/redo buttons in its toolbar row and rows of coloured module tiles grouped by section](/img/module-bar.png)
 
 For what is actually *in* the catalog — and why every module is built as a relational tree — see [Module Library](/user-guide/modules/module-library).
 
@@ -17,9 +17,9 @@ For what is actually *in* the catalog — and why every module is built as a rel
 
 | Zone | What is in it |
 |---|---|
-| **Toolbar row** (top, always visible) | Left: the search magnifier. Right: **Undo** and **Redo**. |
+| **Toolbar row** (top, always visible) | Left: the search magnifier. Right: the **Start** / **End** drop-mode buttons, then **Undo** and **Redo**. |
 | **Icons area** (scrolls) | One row per section: the section label chip, its module tiles, then a dashed **`+`** tile. Dotted lines separate sections. |
-| **Bottom of the icons area** | The **`Drop at:`** Start / End toggle, then **Save UI**, **Load UI**, **Add Category**, **Reload Defaults**. |
+| **Bottom of the icons area** | **Save UI**, **Load UI**, **Add Category**, **Reload Defaults**. |
 | **Pull tab** | A small accent-coloured tab hanging below the bar. Drag it up or down to resize the bar. |
 
 The bar opens on first run tall enough for the toolbar plus one row of icons. After that, its height is yours — but note that it **shrinks itself when the content gets shorter** (widen the window and icons unwrap onto fewer rows) and it never grows itself back. Drag the pull tab to open it up again.
@@ -40,9 +40,13 @@ Close the field by clicking the magnifier again, pressing `Escape`, or clicking 
 **Closing the search always clears it.** You can never end up with a silently filtered library hiding behind a folded-away field.
 :::
 
+### The drop mode buttons
+
+Between the search field and the history pair, pinned to the right end of the row, sit two icon buttons — ⇤ and ⇥, an arrow pushed against a bar. They set the **drop mode**: whether a dropped module lands at the target note's **Start** or its **End**. Exactly one of the two is always lit, filled solid in the accent colour. What the modes actually do is covered [below](#drop-mode-start-or-end).
+
 ### Undo and Redo
 
-The two buttons at the right of the toolbar are the same Undo and Redo as in the **+** menu and the same as `Ctrl/Cmd + Z` and `Ctrl/Cmd + Y`. They exist so history is one click away without opening a menu. Both are greyed out when there is nothing to undo or redo.
+The two buttons at the far right of the toolbar are the same Undo and Redo as in the **+** menu and the same as `Ctrl/Cmd + Z` and `Ctrl/Cmd + Y`. They exist so history is one click away without opening a menu. Both are greyed out when there is nothing to undo or redo.
 
 ::: warning
 These undo your **composition**, not the library. Nothing you do to the bar itself — deleting a module, removing a section, reordering tiles — goes on the undo stack. Deleting a category is not undoable; use **Save UI** first if you care about the layout.
@@ -110,9 +114,9 @@ Two tiles look different on purpose:
 
 Drag a tile out of the bar and drop it on the workspace. The module's notes are added to your composition with every dependency re-anchored to what you dropped on — this is the whole point of the library, and it is worth reading [Module Library](/user-guide/modules/module-library) to understand what you are getting.
 
-### Drop at: Start or End
+### Drop mode: Start or End
 
-Above the action buttons at the bottom of the bar is a **`Drop at:`** toggle, set to **Start** by default. The choice is saved.
+The drop mode is set by the two icon buttons in the toolbar, just left of **Undo** and **Redo**: **⇤** (*Drop modules at note start*) and **⇥** (*Drop modules at note end*). They are a radio pair — exactly one is active, drawn filled in the accent colour, and clicking the active one again does nothing. The default is **Start**, and the choice is saved.
 
 | Mode | What a dropped module does |
 |---|---|
@@ -122,7 +126,7 @@ Above the action buttons at the bottom of the bar is a **`Drop at:`** toggle, se
 Use **End** to chain modules: drop one onto the last note of a phrase and it lands right after it, and it stays right after it if you later resize that note.
 
 ::: warning
-Drop mode is **ignored when you drop on the BaseNote**. A module dropped on the BaseNote always keeps its own `base.*` anchors and starts where the BaseNote starts, whichever way the toggle is set.
+Drop mode is **ignored when you drop on the BaseNote**. A module dropped on the BaseNote always keeps its own `base.*` anchors and starts where the BaseNote starts, whichever button is lit.
 :::
 
 ### Where you can drop

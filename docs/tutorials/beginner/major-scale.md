@@ -135,7 +135,7 @@ Change it back to `263` when you are done.
 Every interval in the table above already ships as a module. You do not have to type them.
 
 1. In the module bar, expand **Intervals** (46 modules).
-2. Set the **Drop at:** toggle to **End**. This makes each dropped module land at the end of the note you drop it on, which is what chains a scale together.
+2. Set the drop mode to **End** — click the ⇥ button next to Undo/Redo in the module bar's toolbar. This makes each dropped module land at the end of the note you drop it on, which is what chains a scale together.
 3. Drag **Major 2nd** (9/8) onto your Do note. Drag **Just major 3rd** (5/4) onto the note that appears. Keep going: Perfect 4th, Perfect 5th, Just major 6th, Just major 7th, Octave.
 
 Each interval module is a single note whose frequency is `(N/D) * base.f` — dropping it onto a note re-anchors it to *that* note, so you get the interval above whatever you dropped on.

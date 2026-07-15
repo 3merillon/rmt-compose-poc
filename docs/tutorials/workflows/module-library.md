@@ -120,19 +120,21 @@ There is no "load it wherever" fallback. A drop that misses a note, the BaseNote
 produces an error toast and does nothing. Modules are always imported *onto a target*.
 :::
 
-### Drop at: Start / End
+### Drop mode: Start / End
 
-The `Drop at:` toggle sits just above the action buttons. Default is **Start**.
+The **Start / End drop-mode buttons** are the two arrow-against-a-bar icons in the library toolbar,
+just left of Undo/Redo. They work as a radio pair — exactly one is lit — and the default is
+**Start**.
 
-| Mode | Effect on a note |
-|---|---|
-| **Start** | The module's notes anchor to the target's **start time** |
-| **End** | The same, plus `+ [target].d` on the start expressions — the module lands at the target's **end** |
+| Mode | Button | Effect on a note |
+|---|---|---|
+| **Start** | ⇤ | The module's notes anchor to the target's **start time** |
+| **End** | ⇥ | The same, plus `+ [target].d` on the start expressions — the module lands at the target's **end** |
 
-Start stacks (chords). End chains (scales, melodies).
+Start stacks (chords). End chains (scales, melodies). The choice is remembered across sessions.
 
-**Dropping on the BaseNote ignores the toggle entirely.** The End adjustment only applies to a real
-note.
+**Dropping on the BaseNote ignores the drop mode entirely.** The End adjustment only applies to a
+real note.
 
 An import is one undo entry (`Import Module at <id>`), and playback pauses first if it was running.
 

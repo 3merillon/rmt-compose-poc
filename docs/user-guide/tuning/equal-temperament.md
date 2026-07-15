@@ -125,7 +125,7 @@ The tiles show the module **name**, not the filename. `TET-12.json` is what's on
 ### Loading one
 
 1. Find **Scale Systems** in the library bar, or click the **magnifier** and search — the `microtonal` tag surfaces 19-TET and 31-TET immediately.
-2. Choose **Drop at: Start** or **End**.
+2. Set the drop mode — **Start** (⇤) or **End** (⇥) — with the icon buttons next to Undo/Redo in the module bar's toolbar.
 3. Drag the tile onto a **note** or onto the **BaseNote circle**.
 
 ![The module bar with its six sections, including Scale Systems](/img/module-bar.png)

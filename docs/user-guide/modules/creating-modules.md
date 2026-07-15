@@ -177,7 +177,7 @@ Two of them shape how you write a module:
 - **A measure bar has no pitch.** Drop on one and `startTime` anchors to it, but every `frequency` falls back to `base.f`. A module whose pitches are written against `base` still sounds right there; one that assumes a pitched target does not.
 - **The BaseNote is not a target to re-root onto.** Drop on it and `base.*` references stay exactly as they are — nothing is remapped.
 
-Silences and empty background are rejected outright. For the full table of what each drop target does, and for the **`Drop at:`** toggle, see [Loading Modules](/user-guide/modules/loading-modules#where-you-can-drop).
+Silences and empty background are rejected outright. For the full table of what each drop target does, and for the **Start** / **End** drop-mode buttons in the module bar's toolbar, see [Loading Modules](/user-guide/modules/loading-modules#where-you-can-drop).
 
 ### Mixing tunings
 

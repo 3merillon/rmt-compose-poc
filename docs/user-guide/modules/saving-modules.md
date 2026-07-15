@@ -142,7 +142,7 @@ The module bar's footer carries four buttons: **Save UI**, **Load UI**, **Add Ca
 - every section: its id, its label, and whether it is collapsed
 - every icon: its name, its file path, which section it started in and which it is in now, whether it was uploaded, and its manifest metadata (ratio, cents, family, tags)
 - the full module JSON of anything **uploaded** — an upload has no file on disk to re-fetch, so its data is embedded
-- the **`Drop at:`** mode
+- the drop mode (**Start** or **End**)
 
 Built-in modules are stored **by file path**, not by value, which is what keeps the file small with a 79-module catalog.
 

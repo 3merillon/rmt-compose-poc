@@ -81,7 +81,7 @@ The colored line drawn between a selected note and the notes it is related to. T
 A **thick** line points at something the selected note depends on. A **thin** line points at something that depends on the selected note.
 
 ### Drop mode
-The `Drop at:` toggle in the [module bar](#module-bar)'s footer — **Start** (the default) or **End**. It decides whether a module you drag onto a note anchors its imported start times to that note's **start** or to its **end**.
+**Start** (the default) or **End**, set by the two drop-mode buttons in the [module bar](#module-bar)'s toolbar — ⇤ for **Start**, ⇥ for **End**, just left of **Undo**/**Redo**; exactly one is lit at a time. It decides whether a module you drag onto a note anchors its imported start times to that note's **start** or to its **end**.
 
 ### DSL
 The expression language: `base.f * (3/2)`, `[1].t + [1].d`, `beat(base)`, `2^(7/12)`. Infix operators, note references in square brackets, three helper functions. It is the primary format — every shipped module uses it, and the note widget always *displays* it (a legacy expression is decompiled into DSL for the input box). Edits the app performs for you — a drag, a resize, an arrow press — rewrite an expression in whatever format it already uses; pressing **Save** in the note widget is what converts a legacy expression to DSL. See the [syntax reference](/reference/expressions/syntax).
@@ -151,7 +151,7 @@ A run of [measure bars](#measure-bar) where each one starts one measure after th
 One composition: a `baseNote` plus a flat array of notes, saved as `module.json`. See the [module schema](/reference/module-schema).
 
 ### Module bar
-The horizontal library strip under the top bar. It holds the categorized module icons you drag onto the workspace, a collapsible magnifier **search** field (`Search name, ratio, tag…`), and a footer with **Save UI**, **Load UI**, **Add Category**, **Reload Defaults** and the [`Drop at:`](#drop-mode) toggle. **Undo** and **Redo** sit at the right end of its toolbar row — the same history as `Ctrl/Cmd+Z` / `Ctrl/Cmd+Y` and the top bar's **+** menu. See [Module Bar](/user-guide/interface/module-bar).
+The horizontal library strip under the top bar. It holds the categorized module icons you drag onto the workspace, a collapsible magnifier **search** field (`Search name, ratio, tag…`), and a footer with **Save UI**, **Load UI**, **Add Category** and **Reload Defaults**. **Undo** and **Redo** sit at the right end of its toolbar row — the same history as `Ctrl/Cmd+Z` / `Ctrl/Cmd+Y` and the top bar's **+** menu — with the [drop-mode](#drop-mode) buttons (⇤ / ⇥) just to their left. See [Module Bar](/user-guide/interface/module-bar).
 
 ### Multisample
 An instrument built from recorded audio rather than an oscillator. `piano` and `violin` are multisampled: the player picks the recorded **zone** nearest the target pitch and shifts its playback rate to land on the exact frequency. Both are CC0, from VSCO2 Community Edition.

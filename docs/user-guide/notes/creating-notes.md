@@ -57,7 +57,7 @@ If any field fails to parse, creation aborts and a browser alert tells you which
 A library module is dropped **onto an existing note or onto the BaseNote** — never onto empty canvas. The drop target becomes the anchor that the module's expressions are rewritten against, which is what lets the same module land at a different pitch and time every time you use it.
 
 1. Open the **module bar** and find the module you want.
-2. Set **`Drop at:`** to **`Start`** or **`End`**. `Start` is the default. With `End`, the module's start times get the target note's duration added, so the module lands *after* the target instead of on top of it.
+2. Set the drop mode with the ⇤ / ⇥ buttons next to Undo/Redo in the module bar's toolbar: ⇤ for **Start** (the default), ⇥ for **End**. With **End**, the module's start times get the target note's duration added, so the module lands *after* the target instead of on top of it.
 3. Drag the module icon onto a note or the BaseNote.
 
 Two targets are refused, each with an error toast:

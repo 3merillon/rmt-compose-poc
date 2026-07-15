@@ -119,7 +119,7 @@ The arrow interval is **not fixed to the octave**. It defaults to ×2 up and ×1
 The chord you just built ships as a module.
 
 1. In the module library, expand **Chords** (11 modules).
-2. Set **Drop at:** to **Start**, so the chord lands *at* the note you drop on rather than after it.
+2. Check that the drop mode is **Start** — the ⇤ button next to Undo/Redo in the module bar's toolbar should be filled (it is by default). **Start** makes the chord land *at* the note you drop on rather than after it.
 3. Drag **Major** onto any note.
 
 The module is exactly the structure you built: a root on `base.f`, and tones written `(5/4) * [1].f` and `(3/2) * [1].f`. Dropping it on a note re-roots the whole chord onto that note.
