@@ -12,7 +12,7 @@ synthesised in the browser, at runtime, by `generateImpulseResponse()` in `src/p
 That is a licensing decision as much as a size one: a recorded IR would drag someone else's licence
 into an MIT-licensed repo. Rendering our own keeps the relicense clean.
 
-Reverb is **on by default** (`audio.reverb.enabled: true`, `settings-schema.js:72`) at 25% wet.
+Reverb is **on by default** (`audio.reverb.enabled: true`, `settings-schema.js:79`) at 25% wet.
 
 ## The function
 

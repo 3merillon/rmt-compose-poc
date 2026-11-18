@@ -119,9 +119,9 @@ purpose, so they can never be duplicated across chunks. `id` is normalised to fo
 matching works on Windows.
 
 Two chunks come from dynamic imports rather than the `manualChunks` rules. `settings-panel-*.js` is
-`import()`ed during `initApp()` (`src/main.js:112`), so it is out of the entry bundle but still
+`import()`ed during `initApp()` (`src/main.js:114`), so it is out of the entry bundle but still
 fetched on every boot. `perf-harness-*.js` is genuinely conditional — it is only ever downloaded with
-`?perf` in the URL (`src/main.js:133`).
+`?perf` in the URL (`src/main.js:135`).
 
 ::: info `optimizeDeps.exclude: ['rmt-core']` is vestigial
 `rmt-core` is not an npm dependency — the WASM glue is imported by relative path. The exclusion

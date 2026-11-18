@@ -36,7 +36,7 @@ features:
     details: Six sections — Intervals, Chords, Progressions, Melodies, Scale Systems, Custom — searchable by name, ratio, cents or tag. Drag a module onto a note and the whole structure re-roots itself there.
   - icon: 🎧
     title: Playback With a Room
-    details: Seven synth voices plus CC0 multisampled piano and violin, running through a reverb send, an optional pitch-based stereo spread and a master limiter.
+    details: Nine synth voices plus CC0 multisampled piano and violin, running through a reverb send, an optional pitch-based stereo spread and a master limiter.
   - icon: 🎛️
     title: Settings and Themes
     details: Five tabs behind the top-bar gear — Appearance (four theme presets with per-colour overrides), Arrows (the interval the transpose arrows use), Audio, Library and Scale. Changes apply live and persist across reloads.

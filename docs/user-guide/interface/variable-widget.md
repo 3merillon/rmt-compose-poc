@@ -194,9 +194,9 @@ The `INSTRUMENT` row shows one line of status and a dropdown.
 
 Notes inherit an instrument by following their **frequency** chain upward to the first ancestor that pins one; if nobody does, they fall back to **Settings → Audio → Default instrument** (`sine-wave` out of the box). Inheritance follows frequency only — a note whose *startTime* depends on note 5 inherits nothing from note 5.
 
-The dropdown lists all nine instruments, alphabetically:
+The dropdown lists all eleven instruments, alphabetically:
 
-`fm-epiano`, `organ`, `piano`, `sawtooth-wave`, `sine-wave`, `square-wave`, `triangle-wave`, `vibraphone`, `violin`
+`fm-epiano`, `harmonium`, `harmonium-soft`, `organ`, `piano`, `sawtooth-wave`, `sine-wave`, `square-wave`, `triangle-wave`, `vibraphone`, `violin`
 
 Change it and a `Save` button appears; Save pins that instrument on the note. Once a note has its own instrument, a grey **`Use Inherited`** button appears above the dropdown — press it to drop the pin and go back to inheriting.
 

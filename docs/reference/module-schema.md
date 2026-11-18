@@ -161,7 +161,7 @@ The library validator whitelists `#rgb`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba(
 
 ## Instruments
 
-`instrument` is a plain name string. The nine built-ins:
+`instrument` is a plain name string. The eleven built-ins:
 
 | Name | Kind |
 |---|---|
@@ -172,6 +172,8 @@ The library validator whitelists `#rgb`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba(
 | `organ` | Synth — additive harmonics |
 | `vibraphone` | Synth |
 | `fm-epiano` | Synth — FM electric piano (carrier + modulator) |
+| `harmonium` | Synth — every harmonic from the 1st to the 16th, steady |
+| `harmonium-soft` | Synth — the same, darker and quieter |
 | `piano` | Multisampled (VSCO2 Community Edition, CC0) |
 | `violin` | Multisampled (VSCO2 Community Edition, CC0) |
 

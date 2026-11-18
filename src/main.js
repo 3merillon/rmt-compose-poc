@@ -49,7 +49,9 @@ const SynthInstruments = {
     TriangleInstrument: SynthInstrumentsModule.TriangleInstrument,
     OrganInstrument: SynthInstrumentsModule.OrganInstrument,
     VibraphoneInstrument: SynthInstrumentsModule.VibraphoneInstrument,
-    FMEPianoInstrument: SynthInstrumentsModule.FMEPianoInstrument
+    FMEPianoInstrument: SynthInstrumentsModule.FMEPianoInstrument,
+    HarmoniumInstrument: SynthInstrumentsModule.HarmoniumInstrument,
+    SoftHarmoniumInstrument: SynthInstrumentsModule.SoftHarmoniumInstrument
 };
 
 // Create the SampleInstruments object

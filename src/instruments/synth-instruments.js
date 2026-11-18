@@ -1,4 +1,4 @@
-import { SynthInstrument, makeVoice } from './instrument-manager.js';
+import { SynthInstrument, makeVoice, applyVoiceEnvelope } from './instrument-manager.js';
 
 export class SineInstrument extends SynthInstrument {
     constructor(audioContext) {
@@ -226,6 +226,111 @@ export class FMEPianoInstrument extends SynthInstrument {
     }
 }
 
+/**
+ * Steady harmonic voices for pure intervals. The model is the reed organ: the
+ * tuning experiments of the nineteenth century were made on it (Helmholtz's
+ * harmonium, Bosanquet's with 53 keys to the octave), because its tone is
+ * sustained and full of partials, and that is what makes mistuning plain.
+ *
+ * Two notes a ratio p/q apart share a partial: the p-th of the lower note is the
+ * q-th of the upper. Pure, the two are one steady tone; mistuned, they beat.
+ * That beat is the loudest cue to tuning there is. It is not the only one: a
+ * sine has no partials to share, and a pure chord of sines still differs
+ * audibly from a tempered one, in its pitches and in the difference tones the
+ * ear adds. These voices make the difference more salient, and for that the
+ * partials have to be there, each of them has to stand still, and the note has
+ * to hold its level long enough to listen. So:
+ *
+ *   - every partial from 1 to 16 sounds. (The organ above has no 2nd and no 7th,
+ *     so a 7/4 played on it has nothing to meet.) 7/4 meets on the 7th partial,
+ *     11/8 on the 11th, 13/8 on the 13th, 16/15 on the 16th;
+ *   - one oscillator through one PeriodicWave: no unison, no detune, no vibrato;
+ *   - attack and release are fixed times in seconds, with the full level held
+ *     between them. The other synths use fractions of the note, so a long chord
+ *     on them swells slowly and fades through its last tenth or more.
+ *
+ * The spectrum is a sawtooth's with the top rolled off:
+ *
+ *     amplitude(n) = 1 / (n · √(1 + (n / knee)²))
+ *
+ * 6 dB per octave below the knee, 12 dB above it. The partials are in sine phase
+ * (the sawtooth's own shape). In cosine phase, as the organ's are, they would
+ * all peak together and the same sound would need twice the headroom: a crest
+ * factor of 10.6 dB against 4.5 dB.
+ *
+ * Not in the SynthInstruments map, so it is not registered itself.
+ */
+const HARMONIC_VOICE_PARTIALS = 16;
+
+class HarmonicVoice extends SynthInstrument {
+    /**
+     * @param {BaseAudioContext} audioContext
+     * @param {{name:string, knee:number, attackSec:number, releaseSec:number, level:number}} voice
+     *   knee: the partial above which the roll-off steepens; level: scales the per-note peak
+     */
+    constructor(audioContext, { name, knee, attackSec, releaseSec, level }) {
+        super(audioContext);
+        this.name = name;
+        this.attackSec = attackSec;
+        this.releaseSec = releaseSec;
+        this.level = level;
+        // Amplitude of partial n at index n - 1.
+        this.partials = Array.from({ length: HARMONIC_VOICE_PARTIALS }, (_, i) => {
+            const n = i + 1;
+            return 1 / (n * Math.sqrt(1 + (n / knee) ** 2));
+        });
+        this.periodicWave = this.createWave();
+    }
+
+    createWave() {
+        const real = new Float32Array(this.partials.length + 1); // index 0 is DC
+        const imag = new Float32Array(this.partials.length + 1);
+        for (let n = 1; n <= this.partials.length; n++) {
+            imag[n] = this.partials[n - 1];
+        }
+        return this.audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
+    }
+
+    // Seconds become the ratios the shared envelope takes, as the multisampled
+    // instruments do it: no decay stage, full level until the release.
+    getEnvelopeSettings(duration) {
+        const dur = duration > 0 ? duration : 1;
+        return {
+            attackTimeRatio: this.attackSec / dur,
+            decayTimeRatio: 0,
+            sustainLevel: 1,
+            releaseTimeRatio: this.releaseSec / dur
+        };
+    }
+
+    applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0) {
+        applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.level, this.getEnvelopeSettings(duration));
+    }
+}
+
+/**
+ * The full voice: a tune, or chords that should show their tuning. The browser
+ * scales a PeriodicWave to a peak of 1, and at that peak this dense wave is
+ * louder than the other synths; `level` brings one note to the loudness of one
+ * note of the organ (A-weighted, at 263 Hz).
+ */
+export class HarmoniumInstrument extends HarmonicVoice {
+    constructor(audioContext) {
+        super(audioContext, { name: 'harmonium', knee: 8, attackSec: 0.03, releaseSec: 0.08, level: 0.6 });
+    }
+}
+
+/**
+ * The same reed behind a darker filter, slower to speak and about 3 dB quieter
+ * (A-weighted, one note at 263 Hz): a bed under a tune. Its 7th and 11th
+ * partials are still there, 24.5 dB and 32 dB under the fundamental.
+ */
+export class SoftHarmoniumInstrument extends HarmonicVoice {
+    constructor(audioContext) {
+        super(audioContext, { name: 'harmonium-soft', knee: 3, attackSec: 0.06, releaseSec: 0.12, level: 0.42 });
+    }
+}
+
 export const SynthInstruments = {
     SineInstrument,
     SquareInstrument,
@@ -233,5 +338,7 @@ export const SynthInstruments = {
     TriangleInstrument,
     OrganInstrument,
     VibraphoneInstrument,
-    FMEPianoInstrument
+    FMEPianoInstrument,
+    HarmoniumInstrument,
+    SoftHarmoniumInstrument
 };

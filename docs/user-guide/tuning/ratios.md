@@ -168,7 +168,7 @@ The fifth is nearly right. The thirds and sixths are off by more than a seventh 
 
 ## Playing ratios back
 
-Any frequency plays on any instrument. The sampled **piano** and **violin** are multisampled and pitch-shift each zone by `frequency / rootHz`, so an 11/8 or a 531441/524288 comes out at exactly the pitch you asked for — they are not quantized to a keyboard. The synth voices (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`) are oscillators and have never cared.
+Any frequency plays on any instrument. The sampled **piano** and **violin** are multisampled and pitch-shift each zone by `frequency / rootHz`, so an 11/8 or a 531441/524288 comes out at exactly the pitch you asked for — they are not quantized to a keyboard. The synth voices (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`) are oscillators and have never cared.
 
 Pick the default in **Settings → Audio → Default instrument**, or set `instrument` on an individual note.
 

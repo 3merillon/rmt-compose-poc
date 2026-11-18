@@ -264,7 +264,7 @@ a couple of beats. `beat(base) * 4` is a reasonable starting length.
 A `sine-wave` shows the beat rate between two fundamentals most cleanly; `organ` and `violin` add
 harmonics that expose roughness higher up. Set the default in Settings → Audio →
 **Default instrument**, or set one note's instrument from its widget. The full listening rig —
-all nine instruments and the settings worth changing — is in
+all eleven instruments and the settings worth changing — is in
 [Microtonal Experiments](/tutorials/workflows/microtonal-experiments).
 
 ### Loop it

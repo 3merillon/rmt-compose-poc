@@ -1,17 +1,18 @@
 ---
 title: Audio & Reverb
-description: The reverb, stereo width, limiter and master volume in RMT Compose, and how the Settings Audio tab drives them live during playback.
+description: The reverb, stereo width, limiter and master volume in RMT Compose, the switch that plays a module tempered, and how the Settings Audio tab drives them live during playback.
 ---
 
 # Audio & Reverb
 
-What comes out of the speakers is more than the notes. Every voice runs through a shared reverb, an optional stereo placement stage, the master volume, and a limiter. All of it is controlled from one place.
+What comes out of the speakers is more than the notes. Every voice runs through a shared reverb, an optional stereo placement stage, the master volume, and a limiter. All of it is controlled from one place — and so is the switch that lets you hear a module pure and tempered.
 
 ## Out of the box
 
 | | Default |
 |---|---|
 | Master volume | **100%** |
+| Tempered playback | **Off** — every note sounds at the module's own frequency |
 | Reverb | **On** — a medium room, mixed in at 25% |
 | Stereo width | **Off** — no pitch-based placement; every note comes out of the centre |
 | Limiter | **On** |
@@ -22,12 +23,13 @@ So a fresh module already has a little room around it. If you want the raw, dry 
 
 Click the **gear** in the [top bar](/user-guide/interface/top-bar) and choose the **Audio** tab. The panel is not modal — leave it open and keep composing; every change applies immediately, during playback.
 
-![The Settings panel, Audio tab: master volume, default instrument, the reverb section, stereo width, and the limiter](/img/settings-audio.png)
+![The Settings panel, Audio tab: master volume, default instrument, the Play tempered switch, the reverb section, and the start of the stereo width section](/img/settings-audio.png)
 
 | Control | Range | Default | What it does |
 |---|---|---|---|
 | **Master volume** | 0–100% | 100% | The same value as the transport slider |
-| **Default instrument** | the nine names | `sine-wave` | What a note plays when nothing in its frequency chain pins an instrument — see [Instruments](/user-guide/playback/instruments) |
+| **Default instrument** | the eleven names | `sine-wave` | What a note plays when nothing in its frequency chain pins an instrument — see [Instruments](/user-guide/playback/instruments) |
+| **Play tempered (12-TET)** | on/off | **off** | Plays each note on the nearest key of a keyboard tuned from the BaseNote — see [Pure / Tempered](#pure-tempered) |
 | **Enable reverb** | on/off | **on** | Adds spatial ambience to the output |
 | **Room size** | 0–1 | 0.5 | How big the space sounds |
 | **Decay** | 0.1–12 s | 1.8 s | How long the tail rings |
@@ -37,6 +39,40 @@ Click the **gear** in the [top bar](/user-guide/interface/top-bar) and choose th
 | **Spread notes by pitch** | on/off | **off** | Stereo placement by pitch |
 | **Amount** | 0–100% | 60% | How far that placement spreads |
 | **Limiter** | on/off | **on** | Gentle output limiting to avoid clipping |
+
+## Pure / Tempered
+
+**Play tempered (12-TET)** plays the module the way a keyboard would. Every note is moved to the nearest of twelve equal steps to the octave, counted from the **BaseNote**, and sounds there instead of at its own frequency. Turn it off and the exact ratios are back.
+
+It exists for one comparison: the same module, pure and then tempered. It works on every instrument, `sine-wave` included.
+
+| Interval | Pure | Tempered | Moves by |
+|---|---|---|---|
+| Fifth | `3/2` | 7 steps | −2.0 cents |
+| Major third | `5/4` | 4 steps | +13.7 cents |
+| Harmonic seventh | `7/4` | 10 steps | +31.2 cents |
+| Eleventh harmonic | `11/8` | 6 steps | +48.7 cents |
+
+What it does and does not touch:
+
+- **Frequency only.** Start times, durations, instruments and stereo placement are the same either way.
+- **The BaseNote and its octaves never move.** The grid is `BaseNote × 2^(k/12)`; change the BaseNote's frequency and the whole keyboard moves with it.
+- **Two notes a comma apart usually become one.** `10/9` and `9/8` both land on the keyboard's whole tone, which is exactly what a keyboard does to them.
+- **The module is not changed.** The note widget, the fraction labels on the notes and a saved file all keep the exact ratios. Only the sound is tempered.
+
+::: tip The difference is there on every voice; overtones make it louder
+On `sine-wave` it is subtle but clear. The pitches themselves move — the tempered third is 13.7 cents higher — and so do the difference tones your ear adds: under a pure chord they coincide, under a tempered one they drift apart and beat (5.7 times a second for a major triad on a 263 Hz root).
+
+A voice with overtones adds the loudest cue of all. Two notes a ratio `p/q` apart share an overtone, and that overtone stands still when the interval is pure and beats when it is not. To hear it, set **Default instrument** to `harmonium`, or pin it on the note the others hang from, and put a chord on [loop](/user-guide/playback/transport#loop-playback). Rendered and measured: on `harmonium` the overtone a pure major third shares stands still, and with the switch on it beats — 10.4 times a second for a third on a 263 Hz root. See [the harmonium voices](/user-guide/playback/instruments#the-harmonium-voices).
+:::
+
+::: tip
+Like stereo, the switch takes a couple of seconds to bite mid-playback. Each note is given its pitch as it is scheduled, and the scheduler runs about 2 seconds ahead. Notes already sounding keep the tuning they started with, so a held chord does not change under your finger — the next one does.
+:::
+
+::: warning It stays on until you turn it off
+Play tempered is remembered across reloads like every other setting, and nothing outside the Settings panel shows that it is on. If a module's pure chords sound restless, look here first.
+:::
 
 ## Reverb
 
@@ -98,12 +134,12 @@ Every instrument gets its own bus, but the buses are plumbing, not a mixer: ther
 
 ## Where these settings live
 
-Audio settings are stored **in your browser**, not in the module. Share a module file and the person opening it hears it through *their* reverb settings, not yours.
+Audio settings are stored **in your browser**, not in the module. Share a module file and the person opening it hears it through *their* reverb settings, not yours — and pure or tempered according to *their* switch.
 
 They are also outside Undo — `Ctrl/Cmd + Z` covers the module, not the settings panel. To get back to the defaults, use **Reset this tab** (audio only) or **Reset all** (every tab) at the end of the panel. Both ask for confirmation before they run, and neither can be undone.
 
 ## See also
 
-- [Instruments](/user-guide/playback/instruments) — the nine voices these controls are downstream of
+- [Instruments](/user-guide/playback/instruments) — the eleven voices these controls are downstream of
 - [Transport Controls](/user-guide/playback/transport) — the other master-volume knob, and how playback is scheduled
 - [Settings Reference](/reference/settings-reference) — every setting, range and default in one table

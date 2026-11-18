@@ -85,12 +85,14 @@ Turning **Show note arrows** off does three things at once: the arrows stop bein
 
 ## Audio
 
-![The Settings panel open on the Audio tab, showing master volume, default instrument, and the Room / Reverb, Stereo width and Master sections](/img/settings-audio.png)
+![The Settings panel open on the Audio tab, showing master volume, default instrument, the Pure / Tempered switch, the Room / Reverb section and the start of the Stereo width section](/img/settings-audio.png)
 
 | Control | Range | Default |
 |---|---|---|
 | **Master volume** | 0–100%, step 1% | **100%** |
-| **Default instrument** | sine-wave, square-wave, sawtooth-wave, triangle-wave, organ, vibraphone, fm-epiano, piano, violin | **sine-wave** |
+| **Default instrument** | sine-wave, square-wave, sawtooth-wave, triangle-wave, organ, vibraphone, fm-epiano, harmonium, harmonium-soft, piano, violin | **sine-wave** |
+| *Pure / Tempered* | | |
+| **Play tempered (12-TET)** | on / off | **off** |
 | *Room / Reverb* | | |
 | **Enable reverb** | on / off | **on** |
 | **Room size** | 0–1, step 0.01 | 0.5 |
@@ -104,7 +106,9 @@ Turning **Show note arrows** off does three things at once: the arrows stop bein
 | *Master* | | |
 | **Limiter** | on / off | **on** |
 
-Reverb, stereo and the limiter all apply live during playback.
+Tempered playback, reverb, stereo and the limiter all apply live during playback.
+
+**Play tempered (12-TET)** plays each note on the nearest key of a keyboard tuned from the BaseNote — twelve equal steps to the octave — so you can hear the same module pure and then tempered. It changes the sound only: the module, its fraction labels and a saved file keep the exact ratios. Like stereo, it is applied when a note is *scheduled*. It is remembered across reloads, so it stays on until you turn it off. See [Pure / Tempered](/user-guide/playback/audio#pure-tempered).
 
 **Reverb is on by default** at 25% wet — a little room, not a hall. **Room size**, **Decay** and **Damping** rebuild the reverb's impulse response, so they land a fraction of a second after you stop dragging; **Reverb amount**, **Pre-delay** and the on/off toggle are immediate.
 

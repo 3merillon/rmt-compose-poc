@@ -11,7 +11,7 @@ ten-second one.
 
 ::: warning There is no `StreamingScheduler` class
 Do not go looking for one. The scheduler is a **closure** — `const pump = () => {…}` — over a mutable
-state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:258-353`). There is no
+state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:287-382`). There is no
 scheduler file, no scheduler object, and no `scheduler.debug` flag.
 :::
 
@@ -120,9 +120,9 @@ and quits (and for a module shorter than the lookahead, it quits immediately).
 
 | Constant | Value | Scope |
 |---|---|---|
-| `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:266`) |
-| `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:267`) — not `SCHEDULE_INTERVAL` |
-| `RELEASE_TAIL` | **0.15 s** | local inside `_scheduleNote()` (`:523`) |
+| `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:295`) |
+| `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:296`) — not `SCHEDULE_INTERVAL` |
+| `RELEASE_TAIL` | **0.15 s** | local inside `_scheduleNote()` (`:561`) |
 | `MIN_LOOP_PERIOD` | **0.05 s** | module-level (`:10`) |
 | `MAX_CYCLES_PER_BATCH` | **64** | module-level (`:14`) |
 | `SEAM_EPS` | **1e-6** | module-level (`:16`) |
@@ -147,6 +147,7 @@ The pump consumes plain objects from
   startTime: 0.5,      // seconds, relative to the pass start
   duration: 0.25,
   frequency: 440,      // null for measure markers
+  temperedFrequency: 442.3,  // the pitch played instead when audio.tempered is on; null for measure markers
   instrument: 'piano', // null for measure markers
   panPos: 0.33         // null for measure markers
 }

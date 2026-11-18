@@ -36,9 +36,11 @@ While you are there:
 orbiting a figure-8 while the loop runs. Park on a sustained dyad and let it beat at you while you
 retune the upper note. Shift-click again to exit.
 
-**Nine instruments ship:** `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`,
-`vibraphone`, `fm-epiano`, `piano`, `violin`. `piano` and `violin` are multisampled. A sine isolates
-the fundamentals; `organ` and `violin` add upper partials that expose roughness a sine will hide.
+**Eleven instruments ship:** `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`,
+`vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`, `piano`, `violin`. `piano` and `violin` are
+multisampled. A sine isolates the fundamentals; `organ` and `violin` add upper partials that expose
+roughness a sine will hide. `harmonium` has every partial up to the 16th and holds them still, so the
+overtones two notes share beat plainly when an interval is mistuned.
 The instrument is a **per-note** property — set it from the note widget — and a note without one
 inherits it up its frequency chain.
 

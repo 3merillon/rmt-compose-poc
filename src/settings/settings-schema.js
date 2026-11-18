@@ -67,6 +67,12 @@ export function defaultSettings() {
     audio: {
       masterVolume: 1,
       defaultInstrument: 'sine-wave',
+      // Playback only: each frequency is moved to the nearest of twelve equal
+      // steps to the octave, counted from the BaseNote — the module as a
+      // keyboard tuned from that note would play it, to compare with the pure
+      // intervals. The module itself is never touched. Off is the app's
+      // behavior before the setting existed.
+      tempered: { enabled: false },
       reverb: {
         // On by default (user decision 2026-07-12): a touch of room ambience is
         // the nicer out-of-box sound. Stereo stays off; limiter stays on.
@@ -176,11 +182,13 @@ export function validateSettings(raw, prev) {
   }
 
   const au = src.audio || {};
+  const tp = au.tempered || {};
   const rv = au.reverb || {};
   const st = au.stereo || {};
   const lm = au.limiter || {};
   d.audio.masterVolume = clampNum(au.masterVolume, 0, 1, d.audio.masterVolume);
   d.audio.defaultInstrument = typeof au.defaultInstrument === 'string' ? au.defaultInstrument : d.audio.defaultInstrument;
+  d.audio.tempered.enabled = asBool(tp.enabled, d.audio.tempered.enabled);
   d.audio.reverb.enabled = asBool(rv.enabled, d.audio.reverb.enabled);
   d.audio.reverb.roomSize = clampNum(rv.roomSize, 0, 1, d.audio.reverb.roomSize);
   d.audio.reverb.decaySec = clampNum(rv.decaySec, 0.1, 12, d.audio.reverb.decaySec);

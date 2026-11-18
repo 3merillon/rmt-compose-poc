@@ -95,7 +95,7 @@ const TABS = [
 // Instrument list for the Audio tab default-instrument selector. Kept in sync
 // with the built-in instruments; the audio phase can replace this with a live
 // query if desired.
-const INSTRUMENTS = ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone', 'fm-epiano', 'piano', 'violin'];
+const INSTRUMENTS = ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone', 'fm-epiano', 'harmonium', 'harmonium-soft', 'piano', 'violin'];
 
 // Quick-pick intervals for the Arrows tab (name, n, d).
 const ARROW_PRESETS = [
@@ -415,6 +415,9 @@ function buildAudioTab(container) {
 
   container.appendChild(row('Default instrument', select('audio.defaultInstrument', INSTRUMENTS)));
 
+  container.appendChild(el('div', 'rmt-set-subhead', 'Pure / Tempered'));
+  container.appendChild(row('Play tempered (12-TET)', toggle('audio.tempered.enabled'), 'Plays each note on the nearest key of a keyboard tuned from the BaseNote, to compare with the pure intervals. The module is not changed.'));
+
   const rvHeader = el('div', 'rmt-set-subhead', 'Room / Reverb');
   container.appendChild(rvHeader);
   container.appendChild(row('Enable reverb', toggle('audio.reverb.enabled'), 'Adds spatial ambience to the output.'));
@@ -433,7 +436,7 @@ function buildAudioTab(container) {
   container.appendChild(lmHeader);
   container.appendChild(row('Limiter', toggle('audio.limiter.enabled'), 'Gentle output limiting to avoid clipping.'));
 
-  const note = el('div', 'rmt-set-note', 'Reverb, stereo and the limiter apply live during playback.');
+  const note = el('div', 'rmt-set-note', 'Tempered playback, reverb, stereo and the limiter apply live during playback.');
   container.appendChild(note);
 }
 

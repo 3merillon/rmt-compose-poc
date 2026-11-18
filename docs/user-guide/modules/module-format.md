@@ -197,7 +197,7 @@ Anything else is rejected with `invalid color value` when the module goes throug
 
 ## Instruments
 
-`instrument` is a plain name string. The nine built-ins:
+`instrument` is a plain name string. The eleven built-ins:
 
 | Name | Kind |
 |---|---|
@@ -208,6 +208,8 @@ Anything else is rejected with `invalid color value` when the module goes throug
 | `organ` | Synth |
 | `vibraphone` | Synth |
 | `fm-epiano` | Synth — FM electric piano |
+| `harmonium` | Synth — steady, every harmonic to the 16th |
+| `harmonium-soft` | Synth — the same, darker and quieter |
 | `piano` | Multisampled (VSCO2 Community Edition, CC0) |
 | `violin` | Multisampled (VSCO2 Community Edition, CC0) |
 

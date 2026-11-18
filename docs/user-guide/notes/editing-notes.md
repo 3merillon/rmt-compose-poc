@@ -141,11 +141,11 @@ module.getNoteById(3).getVariable('duration')
 
 ### Instrument
 
-The `INSTRUMENT` row shows either **`Current:`** (the note has its own instrument) or **`Inherited:`** in grey (it is borrowing one), and a dropdown listing the nine registered instruments by their raw ids, alphabetically:
+The `INSTRUMENT` row shows either **`Current:`** (the note has its own instrument) or **`Inherited:`** in grey (it is borrowing one), and a dropdown listing the eleven registered instruments by their raw ids, alphabetically:
 
-`fm-epiano`, `organ`, `piano`, `sawtooth-wave`, `sine-wave`, `square-wave`, `triangle-wave`, `vibraphone`, `violin`
+`fm-epiano`, `harmonium`, `harmonium-soft`, `organ`, `piano`, `sawtooth-wave`, `sine-wave`, `square-wave`, `triangle-wave`, `vibraphone`, `violin`
 
-`piano` and `violin` are multisampled instruments; the other seven are synthesised.
+`piano` and `violin` are multisampled instruments; the other nine are synthesised.
 
 **Inheritance follows the frequency reference.** A note with no instrument of its own uses the instrument of the note its *frequency* points at, recursively. Set note 1 to `violin`, and every note whose frequency is `[1].f * …` plays as a violin unless it overrides it. A note that reaches the BaseNote and finds no instrument there falls back to the **global default in Settings → Audio**, which ships as `sine-wave`.
 

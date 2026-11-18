@@ -25,7 +25,8 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `arrows.up` | `{n, d, label}` | `{n: 2, d: 1, label: null}` | positive integers; `1/16 ≤ n/d ≤ 16`; `n/d ≠ 1` | Up interval + quick-pick chips |
 | `arrows.down` | `{n, d, label}` | `{n: 1, d: 2, label: null}` | same; derived from `up` in reciprocal mode | Down interval — shown in independent mode only |
 | `audio.masterVolume` | number | `1` | 0 – 1, step 0.01 | Master volume (and the transport slider) |
-| `audio.defaultInstrument` | string | `'sine-wave'` | the nine [instrument names](#instrument-names) | Default instrument |
+| `audio.defaultInstrument` | string | `'sine-wave'` | the eleven [instrument names](#instrument-names) | Default instrument |
+| `audio.tempered.enabled` | boolean | **`false`** | — | Play tempered (12-TET) |
 | `audio.reverb.enabled` | boolean | **`true`** | — | Enable reverb |
 | `audio.reverb.roomSize` | number | `0.5` | 0 – 1, step 0.01 | Room size |
 | `audio.reverb.decaySec` | number | `1.8` | 0.1 – 12, step 0.1 | Decay |
@@ -45,7 +46,7 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `scale.limits.yMin` | number | `0.3` | 0.001 – 1000 | Vertical range |
 | `scale.limits.yMax` | number | `5` | 0.001 – 1000 | Vertical range |
 
-Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate exception: **reverb now defaults on**. Stereo defaults off; the limiter defaults on.
+Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate exception: **reverb now defaults on**. Stereo and tempered playback default off; the limiter defaults on.
 
 ## Appearance
 
@@ -135,7 +136,9 @@ In **Independent up/down** mode a **Down interval (ratio)** row renders below th
 | Control | Type | Range | Default | Hint shown |
 |---|---|---|---|---|
 | **Master volume** | slider, `%` | 0 – 1, step 0.01 | 100% | — |
-| **Default instrument** | dropdown | nine names | `sine-wave` | — |
+| **Default instrument** | dropdown | eleven names | `sine-wave` | — |
+| *Pure / Tempered* | | | | |
+| **Play tempered (12-TET)** | checkbox | — | **off** | "Plays each note on the nearest key of a keyboard tuned from the BaseNote, to compare with the pure intervals. The module is not changed." |
 | *Room / Reverb* | | | | |
 | **Enable reverb** | checkbox | — | **on** | "Adds spatial ambience to the output." |
 | **Room size** | slider | 0 – 1, step 0.01 | 0.5 | — |
@@ -149,17 +152,19 @@ In **Independent up/down** mode a **Down interval (ratio)** row renders below th
 | *Master* | | | | |
 | **Limiter** | checkbox | — | **on** | "Gentle output limiting to avoid clipping." |
 
-The tab's footer reads: *"Reverb, stereo and the limiter apply live during playback."*
+The tab's footer reads: *"Tempered playback, reverb, stereo and the limiter apply live during playback."*
 
 ### Instrument names
 
-`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `piano`, `violin`.
+`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`, `piano`, `violin`.
 
 `audio.defaultInstrument` is the **fallback**, not an override: a note uses it only when neither it nor anything up its frequency chain pins an `instrument`. See [instrument inheritance](/reference/module-schema#instruments).
 
 ### Behaviour worth knowing
 
 - **Master volume is two-way bound** to the transport volume slider in the top bar. Dragging either moves the other. The transport slider only *persists* on release; while you drag it, it emits a live echo the panel follows.
+- **Play tempered changes what a note sounds at, and nothing else.** With it on, a note of frequency `f` sounds at `base × 2^(round(12 × log2(f / base)) / 12)`, where `base` is the BaseNote's frequency: the nearest of twelve equal steps to the octave, counted from the BaseNote. The BaseNote and its octaves never move; `5/4` moves up 13.7 cents, `3/2` down 2.0, `7/4` up 31.2. The module's expressions, its fraction labels and a saved file are untouched.
+- **Play tempered is applied when a note is scheduled**, like stereo, so it changes newly-started voices, not ones already sounding. It is stored like every other setting: it stays on across reloads until you turn it off.
 - **Room size, Decay and Damping re-render the reverb impulse response**, debounced by 250 ms. Reverb amount, pre-delay and the enable toggle are live parameters.
 - **Stereo width is applied when a note is scheduled**, so it changes newly-started voices, not ones already sounding.
 - The limiter is a peak catcher: −6 dB threshold, knee 6, ratio 12, attack 0.003 s, release 0.25 s.
@@ -237,6 +242,7 @@ Everything lives in one `localStorage` key.
   "audio": {
     "masterVolume": 1,
     "defaultInstrument": "sine-wave",
+    "tempered": { "enabled": false },
     "reverb": { "enabled": true, "roomSize": 0.5, "decaySec": 1.8, "damping": 0.5, "preDelayMs": 20, "wet": 0.25 },
     "stereo": { "enabled": false, "width": 0.6 },
     "limiter": { "enabled": true }

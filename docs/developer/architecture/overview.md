@@ -151,7 +151,7 @@ reverbInput → preDelay → Convolver(algorithmic IR) → reverbReturn(wet) ─
 ```
 
 Reverb is **on by default**; the limiter is on; stereo spread is off. `AudioGraph` consumes most of
-the `audio.*` settings section — `masterVolume`, `reverb.*`, `stereo.*`, `limiter.enabled`. The one
+the `audio.*` settings section — `masterVolume`, `tempered.enabled`, `reverb.*`, `stereo.*`, `limiter.enabled`. The one
 exception is `audio.defaultInstrument`, which `player.js` reads and pushes into
 `module.setDefaultInstrument()`.
 

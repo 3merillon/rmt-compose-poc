@@ -1,11 +1,11 @@
 ---
 title: Instruments
-description: The voice contract, the shared click-free envelope, the seven synth instruments, the two multisampled ones, and how to add your own.
+description: The voice contract, the shared click-free envelope, the nine synth instruments, the two multisampled ones, and how to add your own.
 ---
 
 # Instruments
 
-Nine instruments ship: **seven synthesized** and **two multisampled**. All of them implement one
+Eleven instruments ship: **nine synthesized** and **two multisampled**. All of them implement one
 small contract, and all of them share one envelope function. Get those two things right and the rest
 of this page is detail.
 
@@ -18,6 +18,8 @@ of this page is detail.
 | `organ` | synth | single oscillator with a **10-harmonic `PeriodicWave`** |
 | `vibraphone` | synth | single oscillator with a **16-harmonic `PeriodicWave`** |
 | `fm-epiano` | synth | **2-operator FM** — sine carrier, sine modulator, decaying index |
+| `harmonium` | synth | single oscillator, `PeriodicWave` with **every partial 1–16**, fixed-time envelope |
+| `harmonium-soft` | synth | the same class with a lower knee, a lower level and a slower envelope |
 | `piano` | sampled | `MultisampleInstrument`, 14 zones |
 | `violin` | sampled | `MultisampleInstrument`, 15 zones |
 
@@ -134,11 +136,16 @@ Attack / decay / release are ratios of duration; sustain is a fraction of peak.
 | `organ` | periodic (10 harm.) | 1 | — | — | 0.05 | 0.05 | 0.9 | 0.1 |
 | `vibraphone` | periodic (16 harm.) | 1 | — | — | 0.02 | 0.3 | 0.3 | 0.5 |
 | `fm-epiano` | 2-op FM | — | — | — | 0.005 | 0.4 | 0.5 | 0.3 |
+| `harmonium` | periodic (16 harm.) | 1 | — | — | **30 ms** | **0** | **1** | **80 ms** |
+| `harmonium-soft` | periodic (16 harm.) | 1 | — | — | **60 ms** | **0** | **1** | **120 ms** |
 | `piano` / `violin` | sampled | — | — | — | 0.02 | **0** | **1** | 0.12 |
+
+The two `harmonium` rows are **seconds, not ratios** — see [The harmonic voices](#the-harmonic-voices).
 
 The per-note `peak` is `initialVolume` — **0.2** (`player.js:36`, and the `AudioEngine` constructor
 default). That is not master volume; master volume lives on the
-[audio graph](/developer/audio/audio-graph#master-volume).
+[audio graph](/developer/audio/audio-graph#master-volume). Three instruments scale it: `piano` by its
+manifest's `gainDb`, `harmonium` by a `level` of 0.6 and `harmonium-soft` by 0.42.
 
 ## SynthInstrument
 
@@ -165,7 +172,7 @@ export class SquareInstrument extends SynthInstrument {
 | Field | Default | Effect |
 |---|---|---|
 | `waveType` | `'sine'` | Used when `periodicWave` is unset. |
-| `periodicWave` | `null` | Set it and `waveType` is ignored. `organ` and `vibraphone` do this. |
+| `periodicWave` | `null` | Set it and `waveType` is ignored. `organ`, `vibraphone` and the two harmonium voices do this. |
 | `unisonCount` | `1` | `n` oscillators summed through a gain of **`1/√n`**, so perceived level stays constant. |
 | `detuneCents` | `0` | Spread symmetrically: the **edge** voices land at ±`detuneCents`, the centre at 0. |
 | `filterTrackMul` | `0` | `> 0` adds a per-voice biquad lowpass at `clamp(max(200, freq × mul), ≤ 0.95 × Nyquist)`. |
@@ -176,6 +183,78 @@ export class SquareInstrument extends SynthInstrument {
 value is `index × modFreq` feeding `carrier.frequency`. The index decays exponentially from **4** to
 **0.6** over **0.28 s**, scheduled inside the voice's `start()` so it locks to the note's absolute
 start.
+
+### The harmonic voices
+
+`harmonium` and `harmonium-soft` are two three-line subclasses of `HarmonicVoice`
+(`synth-instruments.js:265`), a `SynthInstrument` that is deliberately **not** exported in the
+`SynthInstruments` map, so it is never registered itself. They exist to make the difference between
+a pure and a tempered interval as salient as it can be: two notes a ratio `p/q` apart share a
+partial (the `p`-th of the lower is the `q`-th of the upper), which stands still when the interval
+is pure and beats when it is not. That beat is the loudest cue to tuning, not the only one — pure
+against tempered is audible on a sine too, in the pitches and in the difference tones the ear adds —
+and it needs a voice that has the partials and holds them still.
+
+```javascript
+export class HarmoniumInstrument extends HarmonicVoice {
+  constructor(audioContext) {
+    super(audioContext, { name: 'harmonium', knee: 8, attackSec: 0.03, releaseSec: 0.08, level: 0.6 });
+  }
+}
+```
+
+| Option | `harmonium` | `harmonium-soft` | Effect |
+|---|---|---|---|
+| `knee` | 8 | 3 | The partial above which the roll-off steepens. |
+| `attackSec` | 0.03 | 0.06 | Attack, in **seconds**. |
+| `releaseSec` | 0.08 | 0.12 | Release, in **seconds**. |
+| `level` | 0.6 | 0.42 | Multiplies the per-note peak. |
+
+**The spectrum.** Sixteen partials (`HARMONIC_VOICE_PARTIALS`), none missing:
+
+```javascript
+amplitude(n) = 1 / (n * Math.sqrt(1 + (n / knee) ** 2))   // n = 1 … 16
+```
+
+A sawtooth's `1/n` with the top rolled off: 6 dB per octave below the knee, 12 dB above it. The
+amplitudes are kept on the instance as `partials` (index `n − 1`).
+
+**Sine phase.** `createWave()` writes the amplitudes into the `imag` array of `createPeriodicWave`,
+not into `real` as `organ` does. The spectrum is the same either way; the waveform is not. In cosine
+phase every partial peaks at the same instant, and the browser normalizes a `PeriodicWave` to a peak
+of 1 — so the cosine version has a crest factor of 10.6 dB against 4.5 dB for the sine version, and
+needs twice the headroom for the same loudness.
+
+**`level`.** At a peak of 1 this dense wave is louder than the other synths. `0.6` brings one
+`harmonium` note to the A-weighted level of one `organ` note at 263 Hz (−27.5 dB against −27.6 dB
+re full scale, measured by `scripts/perf/check-purity.mjs`); `0.42` puts `harmonium-soft` about 3 dB
+under that.
+
+**The envelope is in seconds.** `getEnvelopeSettings(duration)` converts the two times into the
+ratios `applyVoiceEnvelope` takes — the same move `MultisampleInstrument` makes for its manifest —
+with no decay stage and a sustain of 1:
+
+```javascript
+{ attackTimeRatio: attackSec / duration, decayTimeRatio: 0, sustainLevel: 1, releaseTimeRatio: releaseSec / duration }
+```
+
+`applyEnvelope()` is overridden to pass `duration` through and to apply `level`. The shared floors
+and the 90% clamp still hold: on a note shorter than `(attackSec + releaseSec) / 0.9` the two are
+squeezed proportionally.
+
+Everything else is inherited: `createOscillator()` is the base class's, with `unisonCount` 1 and no
+filter, so the voice is **one oscillator**. There is no detune and no vibrato to add.
+
+::: tip Measure it
+`node scripts/perf/check-purity.mjs` renders these voices through the real `AudioEngine` on an
+`OfflineAudioContext` and checks the claims above: all sixteen partials present at the declared
+levels and none beyond, each partial steady through a held note, the same attack and release at
+three note lengths, nothing folded back at a high pitch — and that a pure major third stands still
+in the band of its shared partial while its tempered twin beats. `--compare <git-ref>` adds a
+before/after render of every other instrument. It also prints, without judging, what the same switch
+does to a triad of sines: there is no shared partial for that measure to read, which is a limit of
+the measure and not of what can be heard.
+:::
 
 ## MultisampleInstrument
 
@@ -380,9 +459,14 @@ export class MyInstrument extends SynthInstrument {
 }
 ```
 
-Then add it to the `SynthInstruments` map in `src/instruments/synth-instruments.js` (it is picked up
-by `registerBuiltInInstruments`), and add the name to `INSTRUMENTS` in
-`src/settings/settings-panel.js:98` so it appears in the Settings dropdown.
+Then register it in **two** places, and list it in a third:
+
+1. the `SynthInstruments` object in `src/main.js` — this is the one the app passes to
+   `audioEngine.registerInstruments()`, and it names each class explicitly, so a class missing from
+   it is never registered;
+2. the `SynthInstruments` map exported from `src/instruments/synth-instruments.js`, which the app
+   itself does not read but `scripts/perf/check-purity.mjs` does;
+3. `INSTRUMENTS` in `src/settings/settings-panel.js:98`, so it appears in the Settings dropdown.
 
 If you need a voice the base class cannot build, override `createOscillator(frequency)` and return
 `makeVoice(sources, output, frequency, onStart)`. Do not return raw nodes unless a bare

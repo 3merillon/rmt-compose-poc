@@ -235,6 +235,9 @@ The algebraic form `coefficient × Π baseᵢ^expᵢ` used when the simplifier r
 
 ## T
 
+### Tempered playback
+**Settings → Audio → Play tempered (12-TET)**: every note sounds on the nearest of twelve equal steps to the octave, counted from the [BaseNote](#basenote), instead of at its own frequency. It is for hearing the same module pure and then tempered. Only the sound changes — the module's exact ratios are untouched. See [Pure / Tempered](/user-guide/playback/audio#pure-tempered).
+
 ### Tempo
 Speed in beats per minute. Inherited from the BaseNote; any note may override it, and the override applies to everything that inherits from it.
 

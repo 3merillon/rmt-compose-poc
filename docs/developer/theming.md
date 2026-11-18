@@ -107,7 +107,7 @@ roundedCornerPxAtZoom1: 4`. The sliders remain the fine-tuning control afterward
 :::
 
 Overrides are **not validated**: `validateSettings` copies `appearance.overrides` verbatim
-(`settings-schema.js:155`). No key whitelist, no hex check. Garbage keys are stored harmlessly; a
+(`settings-schema.js:168`). No key whitelist, no hex check. Garbage keys are stored harmlessly; a
 value that is not `#rrggbb` shows as `#000000` in the picker.
 
 ## Projection 1: CSS custom properties

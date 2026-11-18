@@ -1,15 +1,15 @@
 ---
 title: Instruments
-description: The nine built-in instruments in RMT Compose — seven synth voices, two CC0 multisampled ones — and how a note inherits one from its frequency chain.
+description: The eleven built-in instruments in RMT Compose — nine synth voices, two CC0 multisampled ones — and how a note inherits one from its frequency chain.
 ---
 
 # Instruments
 
-Every note plays through a named **instrument**. There are nine: seven synthesized live from Web Audio oscillators, and two built from recorded samples.
+Every note plays through a named **instrument**. There are eleven: nine synthesized live from Web Audio oscillators, and two built from recorded samples.
 
 Most notes do not carry an instrument of their own. They **inherit** one by following their frequency dependency chain, and fall back to a global default if nothing in the chain pins one.
 
-## The nine instruments
+## The eleven instruments
 
 The app shows these names exactly as written.
 
@@ -22,6 +22,8 @@ The app shows these names exactly as written.
 | `organ` | synth | A 10-harmonic wave with a high sustain and a short release |
 | `vibraphone` | synth | A 16-harmonic wave with a fast attack and a long decay. Bell-like. |
 | `fm-epiano` | synth | A 2-operator FM electric piano — bright, percussive attack settling into a mellow Rhodes-like tine |
+| `harmonium` | synth | A steady reed-organ voice with every harmonic from the 1st to the 16th. Made for hearing pure intervals. |
+| `harmonium-soft` | synth | The same voice, darker, quieter and slower to speak. A bed under a tune. |
 | `piano` | sampled | Upright piano, 14 recorded zones |
 | `violin` | sampled | Sustained bowed violin, 15 recorded zones |
 
@@ -106,6 +108,25 @@ See [Dependencies](/user-guide/notes/dependencies) for what else that operation 
 
 `fm-epiano` is 2-operator FM: a sine carrier frequency-modulated by another sine at the same pitch. The modulation index starts high and falls over the first quarter-second, which is the bright ping-then-mellow of an electric piano tine.
 
+### The harmonium voices
+
+`harmonium` and `harmonium-soft` are built for one thing: making the difference between a pure interval and a mistuned one as plain as it can be. The model is the reed organ, the instrument nineteenth-century acousticians such as Helmholtz and Bosanquet made their tuning experiments on, because its steady, overtone-rich tone makes mistuning plain.
+
+Two notes a ratio `p/q` apart share an overtone: the `p`-th harmonic of the lower note is the `q`-th of the upper. When the interval is pure the two are one steady tone. When it is not, they beat. That beat is the loudest cue to tuning there is. It is not the only one — on `sine-wave`, which has no overtones to share, pure and tempered still differ audibly, in the pitches themselves and in the difference tones the ear adds — but it needs the harmonics to be there and to hold still. So these two are made differently from the other synths:
+
+| | `harmonium` / `harmonium-soft` | The other synth voices |
+|---|---|---|
+| Harmonics | **Every one from the 1st to the 16th** | `sine-wave` has one; `organ` has no 2nd and no 7th; `triangle-wave` and `square-wave` have only the odd ones |
+| Steadiness | One oscillator. No unison, no detune, no vibrato | `square-wave` and `sawtooth-wave` detune three oscillators by ±4 cents, which makes even a single note waver |
+| Attack and release | **Fixed times**: 30 ms and 80 ms (`harmonium`), 60 ms and 120 ms (`harmonium-soft`) | Fractions of the note's length: a long chord swells slowly and fades through its last tenth or more |
+| Between them | Full level, held | A decay to a lower sustain level |
+
+So a `7/4` has the 7th harmonic to meet on, an `11/8` the 11th, a `13/8` the 13th.
+
+`harmonium` is the full voice, for a tune or for chords that should show their tuning: its harmonics fall away like a sawtooth's (6 dB per octave) up to the 8th and twice as fast above it. `harmonium-soft` is the same reed behind a darker filter — it falls away faster from the 3rd harmonic on — and is about 3 dB quieter and slower to speak: it is made to sit under a tune rather than beside it. One `harmonium` note is about as loud as one `organ` note.
+
+To hear what they are for, put a chord on [loop](/user-guide/playback/transport#loop-playback) and turn on **Settings → Audio → Play tempered**: the notes that start after the switch are tempered, and their shared overtones beat. See [Pure / Tempered](/user-guide/playback/audio#pure-tempered).
+
 ## The sampled instruments
 
 `piano` and `violin` are **multisampled**: several recordings across the range, each covering a band of frequencies, so a played note is pitch-shifted by at most a few semitones from a nearby recording rather than stretched across the whole keyboard from one.
@@ -142,9 +163,10 @@ Every instrument gets its own mix bus internally, but there are **no per-instrum
 ## Tips
 
 1. **Start with `sine-wave`.** It is the clearest voice for hearing whether an interval is in tune.
-2. **Pin the instrument high in the chain.** One pin on the note everything hangs off is worth twenty pins on leaves.
-3. **Use synths for long notes.** The sample cap makes drones a poor fit for `piano` and `violin`.
-4. **An unknown instrument name is silently ignored.** A module saved with `"instrument": "cello"` loads fine and plays as `sine-wave`.
+2. **Switch to `harmonium` to make the difference louder.** Its harmonics coincide when an interval is pure and beat when it is not: what you hear on a sine, with the most salient cue added.
+3. **Pin the instrument high in the chain.** One pin on the note everything hangs off is worth twenty pins on leaves.
+4. **Use synths for long notes.** The sample cap makes drones a poor fit for `piano` and `violin`; `harmonium` holds its level for as long as the note lasts.
+5. **An unknown instrument name is silently ignored.** A module saved with `"instrument": "cello"` loads fine and plays as `sine-wave`.
 
 ## See also
 

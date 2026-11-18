@@ -15,6 +15,25 @@ const MAX_CYCLES_PER_BATCH = 64;
 // Float slop when comparing a note's scheduled time against a pass boundary.
 const SEAM_EPS = 1e-6;
 
+/**
+ * The same pitch on the nearest key of a keyboard tuned from the BaseNote:
+ * twelve equal steps to the octave, counted from `baseFreq`. This is what the
+ * `audio.tempered` setting sounds instead of the module's own frequency. It
+ * lives on the float side of the boundary on purpose — the module's exact
+ * fractions are never rewritten, only what a voice is handed.
+ *
+ * The BaseNote and its octaves come back unchanged, bit for bit; two notes a
+ * comma apart come back as one key.
+ *
+ * @param {number} freq Hz
+ * @param {number} baseFreq Hz, the BaseNote's frequency
+ * @returns {number} Hz (freq itself if either argument is not a positive number)
+ */
+export function temperedFrequency(freq, baseFreq) {
+  if (!(freq > 0) || !(baseFreq > 0)) return freq;
+  return baseFreq * Math.pow(2, Math.round(12 * Math.log2(freq / baseFreq)) / 12);
+}
+
 export class AudioEngine {
   constructor({ initialVolume = 0.2, rampTime = 0.2 } = {}) {
     this.INITIAL_VOLUME = initialVolume;
@@ -170,6 +189,10 @@ export class AudioEngine {
               startTime: adjustedStart,
               duration: adjustedDuration,
               frequency: freq,
+              // Its tempered twin, always computed: which of the two sounds is
+              // decided per voice in _scheduleNote, so the setting can be
+              // switched while the module plays.
+              temperedFrequency: freq != null ? temperedFrequency(freq, baseF) : null,
               instrument: freq != null ? getInstrument(note) : null,
               // Normalized pan position (−1..1) before width scaling; width and
               // enable are applied live at schedule time so mid-play stereo
@@ -196,6 +219,11 @@ export class AudioEngine {
             let list = freqsByInstrument.get(note.instrument);
             if (!list) { list = []; freqsByInstrument.set(note.instrument, list); }
             list.push(note.frequency);
+            // Either pitch may be the one that sounds, and the two can fall in
+            // different sample zones: have both decoded.
+            if (note.temperedFrequency != null && note.temperedFrequency !== note.frequency) {
+              list.push(note.temperedFrequency);
+            }
           }
         });
 
@@ -473,6 +501,8 @@ export class AudioEngine {
   /**
    * Schedule a single note for playback.
    * Voice chain: source → voiceGain(env) → [StereoPanner] → instrument bus.
+   * The source's pitch is the note's own frequency, or its tempered twin when
+   * the `audio.tempered` setting is on at this moment.
    *
    * @param {number} passStartTime absolute ctx time at which this note's PASS begins
    *   (baseStartTime for a normal playback; baseStartTime + cycleStart when looping)
@@ -482,8 +512,15 @@ export class AudioEngine {
     const start = passStartTime + noteData.startTime;
     const duration = noteData.duration;
 
+    // Pure or tempered (Settings → Audio), read here like the stereo placement:
+    // per voice, as it is scheduled. A note prepared without a tempered pitch
+    // plays the one it has.
+    const frequency = (this.graph.temperedEnabled && noteData.temperedFrequency > 0)
+      ? noteData.temperedFrequency
+      : noteData.frequency;
+
     // Create the voice (may be a bare OscillatorNode or a wrapper) + envelope.
-    const voice = this.instrumentManager.createOscillator(noteData.instrument, noteData.frequency);
+    const voice = this.instrumentManager.createOscillator(noteData.instrument, frequency);
     const gainNode = ctx.createGain();
     // A GainNode defaults to 1, and voices are built up to LOOKAHEAD seconds
     // before they sound. That default is what a pending voice's gain reads back

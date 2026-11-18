@@ -51,7 +51,7 @@ Start with [Getting Started](/getting-started/) if you have not opened the app y
 
 - **[Transport Controls](/user-guide/playback/transport)** — play, pause, stop, loop
 - **[Playhead Tracking](/user-guide/playback/tracking)** — follow the playhead during playback
-- **[Instruments](/user-guide/playback/instruments)** — the nine built-in sounds
+- **[Instruments](/user-guide/playback/instruments)** — the eleven built-in sounds
 - **[Audio and Effects](/user-guide/playback/audio)** — reverb, stereo width, the limiter
 
 ## Quick reference

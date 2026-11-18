@@ -131,10 +131,10 @@ BP is a scale designed for odd-harmonic spectra. Play it on a timbre with strong
 
 Use an odd-harmonic voice. Of the built-in instruments, **`square-wave`** is the one to reach for: a square wave's spectrum is odd harmonics only, which is precisely what BP was designed around. `sine-wave` (the module's default) is also safe, because a sine has no harmonics at all to clash with.
 
-The full instrument list is `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `piano`, `violin`. Set the default in **Settings → Audio → Default instrument**, or set `instrument` on a single note.
+The full instrument list is `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`, `piano`, `violin`. Set the default in **Settings → Audio → Default instrument**, or set `instrument` on a single note.
 
-::: warning Sawtooth and the sampled voices will fight the scale
-`sawtooth-wave` has all harmonics, even ones included, and the sampled `piano` and `violin` are recordings of instruments with full harmonic spectra. They will play BP pitches accurately — the samplers pitch-shift by `frequency / rootHz`, so the frequencies are correct — but the harmonic clash is real, and BP chords will not lock on them.
+::: warning Sawtooth, the harmonium voices and the sampled voices will fight the scale
+`sawtooth-wave`, `harmonium` and `harmonium-soft` have all harmonics, even ones included, and the sampled `piano` and `violin` are recordings of instruments with full harmonic spectra. They will play BP pitches accurately — the samplers pitch-shift by `frequency / rootHz`, so the frequencies are correct — but the harmonic clash is real, and BP chords will not lock on them.
 :::
 
 ## Neighbours in the same section

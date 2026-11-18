@@ -225,7 +225,7 @@ So retuning a note against a different parent can also change what it sounds lik
 The evaluated frequency is converted to a floating-point number at schedule time.
 
 - Synth instruments (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`,
-  `vibraphone`, `fm-epiano`) set oscillator frequency directly.
+  `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`) set oscillator frequency directly.
 - `piano` and `violin` are multisampled: the nearest zone is picked and played back at
   `frequency / zone.rootHz`. There is no oscillator.
 - With **Settings → Audio → stereo** enabled (off by default), frequency also drives the pan

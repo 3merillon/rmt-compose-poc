@@ -249,4 +249,4 @@ They live in `public/modules/`. Open one in a text editor, and see the [Module L
 - [Selection](/user-guide/notes/selection) — marquee and group selection
 - [Loading Modules](/user-guide/modules/loading-modules) — dropping modules onto notes
 - [The Module Library](/user-guide/modules/module-library) — the 79 shipped modules, as worked examples
-- [Instruments](/user-guide/playback/instruments) — the nine voices and the inheritance rules
+- [Instruments](/user-guide/playback/instruments) — the eleven voices and the inheritance rules

@@ -87,7 +87,7 @@ The 100k figure is about **rendering**, not editing: `sync()` is the remaining b
   - Persistent Web Audio signal graph: per-instrument buses → reverb send/return → master gain → limiter
   - **Algorithmic reverb** — the impulse response is synthesised in the browser at runtime (no audio assets); room size, decay, damping, pre-delay and wet amount are live (IR re-renders debounced)
   - Optional **pitch panning** (low notes left, high notes right) and a peak limiter
-  - 9 instruments: 7 synthesized (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`) and 2 **multisampled** (`piano`, `violin`) cut from the CC0 VSCO-2 Community Edition library. Sample zones are decoded lazily, only for the notes about to play.
+  - 11 instruments: 9 synthesized (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`) and 2 **multisampled** (`piano`, `violin`) cut from the CC0 VSCO-2 Community Edition library. Sample zones are decoded lazily, only for the notes about to play.
   - Instruments inherit down the frequency dependency chain; a note without an explicit instrument takes its ancestor's, falling back to the global default
   - Click-free ADSR, 200 ms pause fade, 20 ms stop de-click
   - **Loop playback** — shift-click or long-press Play. Gapless at the seam: release tails and reverb ring across the loop boundary.
