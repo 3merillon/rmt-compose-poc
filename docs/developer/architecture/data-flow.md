@@ -24,12 +24,12 @@ The note widget's `Raw:` field commits **on Save**, not while typing.
 ```
 Save clicked
   → validateExpression()            src/modals/validation.js:11
-  → simplify (simplifyDSL)          src/utils/simplify.js:98
+  → simplify (simplifyDSL)          src/utils/simplify.js:106
   → Note.setVariable('frequencyString', text)
-      → Note._setExpression()       src/note.js:195
+      → Note._setExpression()       src/note.js:201
           → compiler.compile(text, 'frequency')   → BinaryExpression
           → note._depsEpoch++
-          → Note._notifyChange()    src/note.js:223
+          → Note._notifyChange()    src/note.js:245
               → module.markNoteDirty(note.id)
               → eventBus.emit('player:invalidateModuleEndTimeCache')
 ```
@@ -41,13 +41,13 @@ the cached `BinaryExpression`.
 There is a silent path too: **`Module.batchSetExpressions(updates)`** takes
 `[{ noteId, varName, expr }]`, applies every change through `_setExpressionSilent()` (no per-note
 notification), re-registers dependencies once, and marks everything dirty in one pass. Its one caller
-is **Evaluate Module** (`evaluateEntireModule()`, `src/modals/index.js:1435`). **Evaluate to
-BaseNote** does *not* use it: `evaluateNoteToBaseNote()` (`src/modals/index.js:1270`) writes each
+is **Evaluate Module** (`evaluateEntireModule()`, `src/modals/index.js:1390`). **Evaluate to
+BaseNote** does *not* use it: `evaluateNoteToBaseNote()` (`src/modals/index.js:1322`) writes each
 property with `note.setVariable(name + 'String', expr)` and then calls `markNoteDirty()`.
 
 ::: info Drag and resize do not use the batch path
 A move commit writes each moved note individually with `n.setVariable('startTimeString', raw)` inside
-`commitNoteStartGL()` (`src/player.js:5693`), then runs the dependent-retarget passes, then evaluates
+`commitNoteStartGL()` (`src/player.js:5952`), then runs the dependent-retarget passes, then evaluates
 once. A group move does the same per mover.
 :::
 
@@ -72,7 +72,7 @@ once. A group move does the same per mover.
 ## 3. Evaluation
 
 `Module.evaluateModule()` (`src/module.js:637`) delegates to
-`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1757`):
+`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1787`):
 
 ```
 evaluateDirty()
@@ -85,7 +85,7 @@ evaluateDirty()
 ```
 
 **The order is per variable, on the evaluator, not the graph.** The dirty set is a set of *notes*;
-inside it, `evaluateVariables()` (`binary-evaluator.js:1381`) walks depth-first from every variable
+inside it, `evaluateVariables()` (`binary-evaluator.js:1407`) walks depth-first from every variable
 and evaluates whatever it reads first. Each variable is one node: `[1].f` may read `[2].f` while
 `[2].t` reads `[1].t` and `[1].d`, and a note's own variables may read each other in any direction.
 What a variable reads comes straight from its bytecode, `base.x` included. Notes start in ascending
@@ -93,7 +93,7 @@ id, so the order is deterministic. On a true cycle — a variable that reads its
 throw: it `console.error`s `Dependency cycle detected!` with the loop named, and evaluates the
 members in a fixed order against defaults.
 
-`evaluateVariable()` (`binary-evaluator.js:1524`) evaluates one expression into the note's record
+`evaluateVariable()` (`binary-evaluator.js:1550`) evaluates one expression into the note's record
 and ORs a corruption bit for that property when an irrational `^` result appeared.
 
 A cache entry is:
@@ -104,7 +104,7 @@ A cache entry is:
 
 ::: warning Two gotchas in the cache
 `measureLength` on a *measure bar* or the BaseNote may be **computed** rather than evaluated from an
-expression (`binary-evaluator.js:1561-1581`) — it is still a real, exact `Fraction`. And pooled
+expression (`binary-evaluator.js:1588-1608`) — it is still a real, exact `Fraction`. And pooled
 fractions are never cached — `evaluateVariable()` copies each result into a fresh
 `new Fraction(...)` first, because the pool is rewound at the start of the next batch.
 :::
@@ -123,13 +123,13 @@ into `DependencyGraph.setCorruptionFlags()` — scoped to the dirty set, not all
 ::: warning Which evaluator actually runs
 The JS `BinaryEvaluator` / `IncrementalEvaluator`. The WASM pair is installed only when
 `isEvaluatorHotSwapEnabled() && isWasmAvailable()`, and in a browser the first half of that is `false`
-unless the URL carries `?evaluator=wasm` (`src/wasm/evaluator-adapter.js:36-40`). It is not a
+unless the URL carries `?evaluator=wasm` (`src/wasm/evaluator-adapter.js:37-41`). It is not a
 "WASM if available" branch.
 :::
 
 ## 4. Rendering
 
-`RendererAdapter.sync()` (`renderer.js:589`) is the CPU rebuild:
+`RendererAdapter.sync()` (`renderer.js:612`) is the CPU rebuild:
 
 ```javascript
 renderer.sync({
@@ -155,7 +155,7 @@ depend on?" for every note (a transitive BFS per note — O(N²) on deep chains)
 question: *i* transitively depends on a corrupt note **iff** *i* is a transitive dependent of one. So
 a single multi-source BFS over the `dependents` graph, seeded by the (usually empty) corrupt set,
 answers it for all notes at once in O(N+E) — and is a complete no-op when nothing is corrupt
-(`renderer.js:823-898`).
+(`renderer.js:862-937`).
 
 The result lands in `_corruptionType`, a `Float32Array` bound to vertex attribute 7:
 
@@ -171,7 +171,7 @@ draws. When nothing changed, `_render()` returns immediately and the frame costs
 `player.js` calls `sync()` on every commit. A drag does **not** call it: the workspace previews the
 gesture through the renderer's preview setters (`setDragOffsetPreview()` shifts moving notes on the
 GPU), and `sync()` runs once, on the drop. `player.js`'s rAF loop still carries a `tempOverrides`
-re-sync branch (`player.js:2119`), but nothing assigns `glTempOverrides` today, so it never fires.
+re-sync branch (`player.js:2192`), but nothing assigns `glTempOverrides` today, so it never fires.
 See [WebGL2 Renderer](/developer/rendering/webgl2-renderer).
 
 ## 5. Audio playback
@@ -235,7 +235,7 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 | Evaluation cache | `Map<noteId, result>` on the module and the incremental evaluator | Invalidated per note when marked dirty. |
 | Module end time | A **module-level** `let` in `src/module.js`, not a per-instance field | Cleared by `invalidateModuleEndTimeCache()`, emitted on every expression change. |
 | Renderer instance arrays | `RendererAdapter` | Rebuilt wholesale on every `sync()`. No per-note tracking. |
-| Children-tree (drag preview) | `renderer.js:10129`, keyed `anchorId\|_posEpoch\|_sceneEpoch` | Survives a drag (which changes neither key), invalidated by any real edit. |
+| Children-tree (drag preview) | `renderer.js:10188`, keyed `anchorId\|_posEpoch\|_sceneEpoch` | Survives a drag (which changes neither key), invalidated by any real edit. |
 
 ## Events
 
@@ -243,20 +243,20 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 
 | Event | Emitted by | Does |
 |---|---|---|
-| `workspace:noteMoveCommit` | `workspace.js:1954` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
-| `workspace:noteResizeCommit` | `workspace.js:1964` | `{noteId, newDurationSec}` |
-| `workspace:measureResizeCommit` | `workspace.js:1973` | `{measureId, newStartSec}` |
-| `workspace:groupMoveCommit` | `workspace.js:1945` | `{ids, deltaSec}` → clamps the batch so it can't cross the BaseNote, then commits each mover. |
-| `workspace:marqueeCommit` | `workspace.js:1935` | `{ids, additive}` → sets the multi-selection. |
-| `workspace:multiSelectToggle` | `workspace.js:2280` | `{id}` — shift-click / long-press adds or removes one note. |
+| `workspace:noteMoveCommit` | `workspace.js:1933` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
+| `workspace:noteResizeCommit` | `workspace.js:1943` | `{noteId, newDurationSec}` |
+| `workspace:measureResizeCommit` | `workspace.js:1952` | `{measureId, newStartSec}` |
+| `workspace:groupMoveCommit` | `workspace.js:1952` | `{ids, deltaSec}` → clamps the batch so it can't cross the BaseNote, then commits each mover. |
+| `workspace:marqueeCommit` | `workspace.js:1942` | `{ids, additive}` → sets the multi-selection. |
+| `workspace:multiSelectToggle` | `workspace.js:2259` | `{id}` — shift-click / long-press adds or removes one note. |
 | `player:octaveChange` | note widget arrows, GL arrow regions | `{noteId, direction}` → multiplies the frequency expression by the arrow interval. |
-| `player:invalidateModuleEndTimeCache` | `note.js:228` | Any expression change. |
+| `player:invalidateModuleEndTimeCache` | `note.js:250` | Any expression change. |
 | `player:importModuleAtTarget` | `menu-bar.js` | `{targetNoteId, moduleData, clientX, clientY}` |
 | `player:selectNote`, `player:requestPause` | various | Selection and transport. |
 | `history:capture` / `seedIfEmpty` / `undo` / `redo` / `requestRestore` / `stackChanged` | everywhere an edit commits | Undo. `player.js` also listens to `history:capture` to write the localStorage autosave. |
 | `settings:changed` / `settings:loaded` / `settings:panelToggled` | `settings-store.js`, `settings-panel.js` | `{path, value, settings}` |
 | `modals:show` / `requestRefresh` / `cleared` / `init` | modals | Widget lifecycle. |
-| `audio:masterVolumeInput` | `player.js:4977` | Live echo from the transport slider so the Settings panel tracks it mid-drag. |
+| `audio:masterVolumeInput` | `player.js:5184` | Live echo from the transport slider so the Settings panel tracks it mid-drag. |
 
 ## Settings → runtime
 
@@ -283,7 +283,7 @@ dotted path. A consumer that only matches `path.startsWith('library.')` will sil
 
 ```
 any committing edit
-  → captureSnapshot(label)              player.js:6503
+  → captureSnapshot(label)              player.js:6721
       → module.createModuleJSON()
       → JSON.stringify once → snapshotStr   (shared, not serialized twice)
       → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot, snapshotStr })

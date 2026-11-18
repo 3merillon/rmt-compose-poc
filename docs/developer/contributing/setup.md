@@ -219,7 +219,7 @@ evaluator. You do not need it to develop:
   The 384 KB download and instantiation happen only behind the opt-in.
 
 ::: danger Do not enable the WASM evaluator
-`?evaluator=wasm` opts into the hot-swap (`src/wasm/evaluator-adapter.js:36-40`). A full
+`?evaluator=wasm` opts into the hot-swap (`src/wasm/evaluator-adapter.js:37-41`). A full
 re-evaluation cycle then hangs the main thread forever inside the WASM binary. Every shipped code
 path runs on the JavaScript evaluator. Do not tell a user to pass this flag, and do not build a
 feature on it.
@@ -331,7 +331,7 @@ Expected. Use `npx vite build`, or install Rust and wasm-pack. See the warning a
 ### `WebGL2 not available` in the console
 
 The renderer logs this and bails out when `canvas.getContext('webgl2')` returns `null`
-(`src/renderer/webgl2/renderer.js:434`). Update the browser, enable hardware acceleration, check GPU
+(`src/renderer/webgl2/renderer.js:457`). Update the browser, enable hardware acceleration, check GPU
 drivers. There is no fallback renderer — the workspace does not initialise without WebGL2.
 
 ### The port is taken

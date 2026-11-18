@@ -72,7 +72,7 @@ It only *permits* the WASM evaluator; the actual gate is `isEvaluatorHotSwapEnab
 | *(headless Node — no `window`)* | `true` | WASM, so benches and `test-wasm-swap.mjs` can exercise the swap |
 
 ```javascript
-// src/wasm/evaluator-adapter.js:36-40
+// src/wasm/evaluator-adapter.js:37-41
 export function isEvaluatorHotSwapEnabled() {
   if (FORCE_JS_EVALUATOR) return false;
   if (typeof window === 'undefined') return true; // headless tests/benches
@@ -136,7 +136,7 @@ and hands the object to `PersistentEvaluator.registerNote(id, expressions)`, whe
 `serde-wasm-bindgen` deserializes it.
 
 ::: danger This is the hang site
-`WasmPersistentEvaluatorWrapper.registerNote` (`evaluator-adapter.js:758`), called from
+`WasmPersistentEvaluatorWrapper.registerNote` (`evaluator-adapter.js:745`), called from
 `WasmIncrementalEvaluator.evaluateDirty` (`evaluator-adapter.js:537`), is where the browser locks up
 after an `invalidateAll()`. The JS side of that call is straightforward; the loop is inside the Rust
 binary.
@@ -195,7 +195,7 @@ WASM init is async and normally loses the race against `Module` construction. Ra
 the module starts on JS and upgrades later:
 
 ```javascript
-// src/module.js:62-68 (in the Module constructor)
+// src/module.js:64-70 (in the Module constructor)
 if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)) {
   const ref = new WeakRef(this);
   onWasmReady(() => {
@@ -205,7 +205,7 @@ if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)
 }
 ```
 
-`_upgradeEvaluators()` (`src/module.js:133`) swaps `_binaryEvaluator` and `_incrementalEvaluator`
+`_upgradeEvaluators()` (`src/module.js:138`) swaps `_binaryEvaluator` and `_incrementalEvaluator`
 atomically, clears the evaluation cache, and marks every note dirty so the next `evaluateModule()`
 re-evaluates on the new engine. Values are identical across engines, so nothing goes stale in
 between. The `WeakRef` keeps a discarded module from leaking through the callback list.

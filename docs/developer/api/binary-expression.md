@@ -302,7 +302,7 @@ decompileToDSL(expr)         // always walks the bytecode, always emits DSL
 dslDecompiler.decompile(expr)  // same as decompileToDSL
 ```
 
-`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:851-855`),
+`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:786-790`),
 so for anything compiled from text it is a pass-through — a DSL expression comes back as DSL. Only
 a synthesised expression (empty `sourceText`) actually gets decompiled, and then it comes back as
 legacy JavaScript.

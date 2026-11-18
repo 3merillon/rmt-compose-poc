@@ -23,7 +23,7 @@ Every shipped module JSON is DSL. The legacy parser exists so old modules still 
 
 ## Entry point
 
-`ExpressionCompiler.compile(textExpr, varName)` (`src/expression-compiler.js:54`) is the only door in. `Note._setExpression()` calls the module-level singleton `compiler` exported at `expression-compiler.js:982`.
+`ExpressionCompiler.compile(textExpr, varName)` (`src/expression-compiler.js:54`) is the only door in. `Note._setExpression()` calls the module-level singleton `compiler` exported at `expression-compiler.js:984`.
 
 The routing is worth reading closely:
 
@@ -84,7 +84,7 @@ Rule 3 sends all three to the DSL compiler directly. Even without it these would
 
 ### Properties
 
-`src/dsl/constants.js:42-69`. These aliases and no others:
+`src/dsl/constants.js:42-74`. These aliases and no others:
 
 | Canonical | Accepted spellings | Canonical short form |
 |---|---|---|
@@ -95,11 +95,11 @@ Rule 3 sends all three to the DSL compiler directly. Even without it these would
 | `beatsPerMeasure` | `bpm`, `beatsPerMeasure` | `bpm` |
 | `measureLength` | `ml`, `measureLength` | `ml` |
 
-`[0].prop` is parsed as `base.prop` — note id 0 **is** the BaseNote (`parser.js:262-267`).
+`[0].prop` is parsed as `base.prop` — note id 0 **is** the BaseNote (`parser.js:265-270`).
 
 ### Helper functions
 
-Exactly three (`constants.js:86`), arity 1, and the argument must be a **bare note reference** — `[N]` or `base`, never an expression (`parser.js:308-358`).
+Exactly three (`constants.js:92`), arity 1, and the argument must be a **bare note reference** — `[N]` or `base`, never an expression (`parser.js:311-362`).
 
 | Call | Lowers to |
 |---|---|
@@ -155,7 +155,7 @@ Operands are pushed **before** the opcode — it is a stack machine, nothing nes
 
 ### Variable indices
 
-The export is `VAR`, with a `VAR_NAMES` reverse map (`binary-note.js:35-52`):
+The export is `VAR`, with a `VAR_NAMES` reverse map (`binary-note.js:35-54`):
 
 ```javascript
 export const VAR = {
@@ -175,12 +175,12 @@ export const VAR = {
 Number literals are exact at any size in both parsers: the digits are parsed straight into a BigInt fraction by `decimalStringToBigFraction()` (`src/utils/fraction-num.js:36`), never through `parseFloat`. A decimal literal is **exact as written** — `3.14159` is `314159/100000` and `0.333333` is `333333/1000000`, not `1/3`.
 
 ::: info `LOAD_CONST_BIG` carries BigInts, and they survive
-The evaluator decodes the variable-length BigInts straight into a pooled BigInt-backed fraction (`binary-evaluator.js:1038-1050`), so a big constant keeps every digit through parse → emit → decode → evaluate → decompile — `scripts/test-exactness.mjs` (part of `npm test`) proves it with a ~98-digit literal. The old path routed the decode through a double-backed `Fraction` constructor, which silently rounded anything past 2^53: the encoding preserved the *bytecode* but not the precision.
+The evaluator decodes the variable-length BigInts straight into a pooled BigInt-backed fraction (`binary-evaluator.js:1061-1073`), so a big constant keeps every digit through parse → emit → decode → evaluate → decompile — `scripts/test-exactness.mjs` (part of `npm test`) proves it with a ~98-digit literal. The old path routed the decode through a double-backed `Fraction` constructor, which silently rounded anything past 2^53: the encoding preserved the *bytecode* but not the precision.
 :::
 
 ## `BinaryExpression`
 
-`binary-note.js:77-392`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
+`binary-note.js:80-395`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -234,14 +234,14 @@ There are two, and they are not interchangeable.
 
 | Class | Singleton | Emits |
 |---|---|---|
-| `ExpressionDecompiler` (`expression-compiler.js:784`) | `decompiler` | **legacy** method-chain text |
-| `DSLExpressionDecompiler` (`:991`) | `dslDecompiler` | **DSL** text (delegates to `decompileToDSL`) |
+| `ExpressionDecompiler` (`expression-compiler.js:785`) | `decompiler` | **legacy** method-chain text |
+| `DSLExpressionDecompiler` (`:993`) | `dslDecompiler` | **DSL** text (delegates to `decompileToDSL`) |
 
-`ExpressionDecompiler.decompile()` **returns `binary.sourceText` verbatim if it is set** (`:793-795`), so for anything compiled from text it is a pass-through; its stack-based path only runs for synthesised expressions.
+`ExpressionDecompiler.decompile()` **returns `binary.sourceText` verbatim if it is set** (`:794-796`), so for anything compiled from text it is a pass-through; its stack-based path only runs for synthesised expressions.
 
 The DSL decompiler (`src/dsl/decompiler.js`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. Constants come out of the bytecode as BigInts and are stringified directly (`pushConst`, `:207-213`), so a big constant is printed **digit-exact** — it used to be coerced through `Number()`, which rounded and could emit unparseable scientific notation. It pattern-matches `60 / <ref>.tempo` back into `beat(<ref>)` (`:113-119`, `:236-240`).
 
-The note widget's `Raw:` box always shows DSL: `convertToDSLDisplay()` decompiles the note's compiled bytecode regardless of the stored format (`src/modals/variable-controls.js:87-101`).
+The note widget's `Raw:` box always shows DSL: `convertToDSLDisplay()` decompiles the note's compiled bytecode regardless of the stored format (`src/modals/variable-controls.js:109-123`).
 
 ### Round-trip is lossy in specific, harmless ways
 
@@ -267,11 +267,11 @@ The compiler refuses garbage by throwing, but validation is still a separate gat
 |---|---|---|
 | UI edits | `validateExpression()`, `src/modals/validation.js:11` | `validateDSL()`, `compileDSL()` to prove it yields bytecode, then the self-reference and cycle check on that bytecode — per (note, variable), see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable) |
 | DSL syntax | `validateDSL()`, `src/dsl/index.js:142` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
-| JSON import | `validateExpressionSyntax()`, `src/utils/safe-expression-validator.js:30` | rejects strings over 10 000 chars and a blocklist (`eval(`, `Function(`, `import(`, `document.`, `__proto__`, `<script`, …), then proves the string compiles — a compiler throw comes back as `{valid: false, error}` |
+| JSON import | `validateExpressionSyntax()`, `src/utils/safe-expression-validator.js:31` | rejects strings over 10 000 chars and a blocklist (`eval(`, `Function(`, `import(`, `document.`, `__proto__`, `<script`, …), then proves the string compiles — a compiler throw comes back as `{valid: false, error}` |
 
 Nothing anywhere calls `eval()` or `new Function()` on an expression.
 
-The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.js:138-153`, `:998`). The user-grade error strings in `src/dsl/errors.js` are what the user actually reads.
+The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.js:160-175`, `:1045`). The user-grade error strings in `src/dsl/errors.js` are what the user actually reads.
 
 ## Worked example
 

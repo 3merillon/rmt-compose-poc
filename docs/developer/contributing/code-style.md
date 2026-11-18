@@ -69,7 +69,7 @@ dev.
 
 Every one of the 79 shipped modules is written in the DSL. Legacy method-chain syntax is the
 compatibility path, not the norm — `ExpressionCompiler.compile()` tries the DSL *first*
-(`src/expression-compiler.js:66`).
+(`src/expression-compiler.js:67`).
 
 Write DSL in code, in comments, in tests and in docs:
 
@@ -129,7 +129,7 @@ The pattern, everywhere in the codebase: read the note's current source text, sn
 ```javascript
 import { isDSLSyntax } from './dsl/index.js';
 
-// src/module.js:798-810 — chaining a new measure onto the previous one
+// src/module.js:841-853 — chaining a new measure onto the previous one
 const prevRaw = prevNote.variables?.startTimeString || '';
 const useDSL = isDSLSyntax(prevRaw) || (i === 0 && isDSLSyntax(fromNote.variables?.startTimeString || ''));
 
@@ -168,9 +168,9 @@ Call sites that already do this and are worth reading: `src/module.js` (`generat
 ::: warning Expression compilation throws — but the throw is caught per note
 `ExpressionCompiler.compile()` raises a plain `Error` (not a `SyntaxError`) on an unparseable
 expression, after logging `Failed to compile expression: …` via `console.error`
-(`src/expression-compiler.js:98-107`). `Note._setExpression()` and the constructor wrap the
+(`src/expression-compiler.js:99-108`). `Note._setExpression()` and the constructor wrap the
 compile in `try/catch` and, on failure, `console.warn` and leave the previous expression in place
-(`src/note.js:195-203`) — so callers of `setVariable()` still see no exception.
+(`src/note.js:201-209`) — so callers of `setVariable()` still see no exception.
 :::
 
 This is a deliberate convention — a bad expression degrades a single property instead of tearing
@@ -218,9 +218,9 @@ codebase has already paid for these lessons; do not re-introduce them.
 
 | Pattern | Where | Why |
 |---|---|---|
-| The `note.variables` Proxy is **memoized per note** | `src/note.js:345-352` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame. |
-| Dependency re-registration is skipped by key | `src/module.js:172-195` — `_depsRegKey` = `generation:id:epoch` | `markNoteDirty` registers every marked note. The key skips rewriting ~15 graph maps for notes whose expressions did not change. |
-| The compile cache is LRU-capped at **4000** | `src/expression-compiler.js:22` | Every drag commit mints a fresh fraction string, so an uncapped cache grows without bound across a session. |
+| The `note.variables` Proxy is **memoized per note** | `src/note.js:367-374` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame. |
+| Dependency re-registration is skipped by key | `src/module.js:174-204` — `_depsRegKey` = `generation:id:epoch` | `markNoteDirty` registers every marked note. The key skips rewriting ~15 graph maps for notes whose expressions did not change. |
+| The compile cache is LRU-capped at **4000** | `src/expression-compiler.js:23` | Every drag commit mints a fresh fraction string, so an uncapped cache grows without bound across a session. |
 | Per-gesture state is built **once**, not per pointermove | `workspace.js`, `renderer.setDragOffsetPreview`, `setDragOverlay` | Rebuilding the moving-id set every move made allocation scale with dependent count and triggered mid-drag GC hitches. Identity-check the incoming Set and short-circuit. |
 | Keep overlay work **O(visible), not O(module)** | `renderer.js` viewport cull | This is what makes 100,000 notes tractable. |
 

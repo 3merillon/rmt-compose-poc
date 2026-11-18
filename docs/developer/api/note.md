@@ -31,7 +31,7 @@ is no evaluator to ask) and no dependency registration happens. Source text and 
 :::
 
 The constructor accepts a value per property in several shapes (`_initFromVariables`,
-`src/note.js:53-104`): a plain string (compiled), a `*String` key (preferred over the plain key
+`src/note.js:59-110`): a plain string (compiled), a `*String` key (preferred over the plain key
 when both are present), a legacy function (its `return` expression is extracted), or an existing
 `BinaryExpression` (adopted as-is).
 

@@ -244,7 +244,7 @@ None of these are scheduler methods. There is no `scheduler.pause()`, `resume(fr
 |---|---|
 | Pause | `audioEngine.pauseFade()` — 200 ms fade, then `stopAll(0)`. The streaming state is dropped. |
 | Stop | `audioEngine.stopAll()` — 20 ms declick fade, then teardown. |
-| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:4402`). |
+| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:4629`). |
 | Seek | Same: stop, then prepare and play from the new time. |
 
 There is no seek-within-a-running-pump. Every position change is a fresh `play()`.

@@ -170,12 +170,12 @@ Writing a var is not the same as anyone reading it. Today:
 
 ## Projection 2: the WebGL renderer
 
-`_applyRenderer(geometry, tokens)` (`theme-manager.js:143`) calls **two** different renderer methods.
+`_applyRenderer(geometry, tokens)` (`theme-manager.js:144`) calls **two** different renderer methods.
 They are not interchangeable.
 
 ### `renderer.setConfig(partial)` — geometry and the playhead
 
-`renderer.js:330`. Deep-merges a partial into `this._config` (via `normalizeRendererConfig`) and sets
+`renderer.js:332`. Deep-merges a partial into `this._config` (via `normalizeRendererConfig`) and sets
 `needsRedraw`. The theme manager sends note geometry and the playhead colour, because the playhead is
 already config-driven:
 
@@ -192,7 +192,7 @@ renderer.setConfig({
 
 ### `renderer.setThemeColors(colors)` — structural GL colours
 
-`renderer.js:345`. Takes **hex strings**, converts to RGBA float arrays, and stores them on
+`renderer.js:347`. Takes **hex strings**, converts to RGBA float arrays, and stores them on
 `this._themeColors`. It also clears `_octaveLabelCache` and bumps `_colorEpoch` **and** `_viewEpoch`,
 because canvas-textured labels are cached by string key with no colour in the key — without the
 invalidation they would keep rendering in the old accent.
@@ -208,7 +208,7 @@ renderer.setThemeColors({
 Reads go through accessors with baked fallbacks matching the pre-theme literals —
 `_accentRgba()`, `_noteBorderRgba()`, `_measureBarRgb()`, `_selectionRingRgba()`,
 `_hoverRingRgba()`, `_depFrequencyRgba()` / `_depStartTimeRgba()` / `_depDurationRgba()`,
-`_noteTextRgba()` / `_noteTextHex()` (`renderer.js:378-392`) — so the renderer draws correctly
+`_noteTextRgba()` / `_noteTextHex()` (`renderer.js:380-394`) — so the renderer draws correctly
 even if `setThemeColors` was never called.
 
 | Method | Input | Effect | Triggers a re-sync? |
@@ -220,7 +220,7 @@ even if `setThemeColors` was never called.
 
 Note rects are computed inside `sync()`, so a geometry change needs a full rebuild. A colour change
 does not. The theme manager therefore fires `requestResync()` **only when the geometry key actually
-changed** (`theme-manager.js:176-180`):
+changed** (`theme-manager.js:177-183`):
 
 ```javascript
 const geoKey = `${geometry.noteHeightWU}:${geometry.borderPxAtZoom1}:${geometry.roundedCornerPxAtZoom1}`;
@@ -238,33 +238,33 @@ actually costs.
 
 | GL element | Token | Source |
 |---|---|---|
-| Note body **border** (every note, not just the base) | `noteBorder` | `renderer.js:2710` |
-| Silence dashed ring | `noteBorder` | `renderer.js:7284`, `:7518` |
-| BaseNote circle fill | `accent` | `renderer.js:5342` |
-| BaseNote circle border | `noteBorder` | `renderer.js:5343` |
-| Octave / base guide lines | `accent` (alpha 0.9 primary, 0.35 secondary) | `renderer.js:8894`, `:9337` |
-| Note ID labels | `accent` | `renderer.js:6944-6949` |
-| BaseNote fraction label | `accent` | `renderer.js:6054` |
-| Octave-guide + measure-triangle ID labels | `accent` | `renderer.js:7664`, `:7717` |
-| Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:4981` |
-| Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5167` |
-| Playhead line | `playhead`, via `config.playhead.color` | `renderer.js:3034` |
-| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:10866-10871` |
-| Selected-note ring | `selectionRing` | `renderer.js:2931` |
-| Selected-note fill wash | `selectionRing` @ 0.12 | `renderer.js:2888` |
-| Multi-select group ring | `selectionRing`, 4 px (`selection.multiRingThicknessPxAtZoom1 ?? 4.0`) | `renderer.js:1532-1539` |
-| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5381`, `:6017` |
-| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3006`, `:5464`, `:5989` |
-| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:2786-2788`, `:5413-5415` |
-| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:5962-5978` |
-| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:5638-5712`, `:6148-6215`, `:7008`, `:7098` |
-| Note height / border px / corner px | `appearance.note.*` | `theme-manager.js:151-158` |
+| Note body **border** (every note, not just the base) | `noteBorder` | `renderer.js:2750` |
+| Silence dashed ring | `noteBorder` | `renderer.js:7343`, `:7577` |
+| BaseNote circle fill | `accent` | `renderer.js:5393` |
+| BaseNote circle border | `noteBorder` | `renderer.js:5394` |
+| Octave / base guide lines | `accent` (alpha 0.9 primary, 0.35 secondary) | `renderer.js:8953`, `:9396` |
+| Note ID labels | `accent` | `renderer.js:7003-7008` |
+| BaseNote fraction label | `accent` | `renderer.js:6113` |
+| Octave-guide + measure-triangle ID labels | `accent` | `renderer.js:7723`, `:7776` |
+| Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:5032` |
+| Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5218` |
+| Playhead line | `playhead`, via `config.playhead.color` | `renderer.js:3080` |
+| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:10899-10904` |
+| Selected-note ring | `selectionRing` | `renderer.js:2959` |
+| Selected-note fill wash | `selectionRing` @ 0.12 | `renderer.js:2916` |
+| Multi-select group ring | `selectionRing`, 4 px (`selection.multiRingThicknessPxAtZoom1 ?? 4.0`) | `renderer.js:1560-1567` |
+| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5414`, `:6050` |
+| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3034`, `:5497`, `:6022` |
+| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:2814-2816`, `:5446-5448` |
+| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:5995-6011` |
+| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:5671-5745`, `:6181-6248`, `:7041`, `:7131` |
+| Note height / border px / corner px | `appearance.note.*` | `theme-manager.js:152-159` |
 
 ### What is baked and cannot be themed
 
 | GL element | Colour | Source |
 |---|---|---|
-| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2391`, `note-creation.js:502-509` |
+| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2467`, `note-creation.js:507-514` |
 
 ![The Appearance tab of the Settings panel: theme dropdown, three geometry sliders, and fifteen colour pickers grouped into Interface, Workspace and Dependency highlights](/img/settings-appearance.png)
 
@@ -282,13 +282,13 @@ The hover ring is a worked example of the full path (it is wired this way today)
      looks right before JS boots. If you need `rgba(...)` forms, add a `setRgb(...)` line in
      `_applyCssVars`.
    - *GL* → pass it through `_applyRenderer`'s `setThemeColors({ ... })` call
-     (`theme-manager.js:163-172`), accept it in `setThemeColors` (`renderer.js:345`) with a baked
+     (`theme-manager.js:164-173`), accept it in `setThemeColors` (`renderer.js:347`) with a baked
      fallback matching today's literal, and add an accessor next to `_accentRgba()` /
-     `_noteBorderRgba()` (`renderer.js:378-381`).
+     `_noteBorderRgba()` (`renderer.js:381-384`).
 
 3. **Make the draw path read the accessor** instead of the literal. For the hover ring that is
    `const hr = this._hoverRingRgba(); gl.uniform4f(uCol, hr[0], hr[1], hr[2], a)`
-   (`renderer.js:3006`), keeping the existing alpha logic.
+   (`renderer.js:3034`), keeping the existing alpha logic.
 
 4. **Add a picker** — one entry in `COLOR_TOKEN_GROUPS` (`settings-panel.js:40-53`):
 
@@ -336,7 +336,7 @@ not written (`_applyCssVars` only sets string values), leaving the previous them
 `<html>`. Tune `geometry` too — selecting your preset writes it into `appearance.note`, so it is
 the note shape users land on.
 
-`getPreset(id)` falls back to `classic-orange` for an unknown id (`presets.js:142`), so a stale
+`getPreset(id)` falls back to `classic-orange` for an unknown id (`presets.js:145`), so a stale
 `themeId` in someone's localStorage degrades quietly rather than crashing.
 
 ## The four shipped presets
@@ -358,7 +358,7 @@ Full token tables are in the [Settings reference](/reference/settings-reference)
 - **There is no OS light/dark detection.** No `prefers-color-scheme` handling for app theming
   anywhere. `mono-light` is chosen by hand or not at all.
 - **There is a boot flash.** The `:root` literals in `styles.css` are classic-orange, and
-  `themeManager.init()` only runs once the GL workspace exists (`player.js:1195`). A user on
+  `themeManager.init()` only runs once the GL workspace exists (`player.js:1251`). A user on
   `mono-light` sees a brief dark/orange flash on every load. Do not promise flicker-free theming.
 - **Selecting a preset silently discards every colour override** and overwrites the geometry
   sliders with the preset's declared geometry, with no confirmation. Only the explicit "Reset

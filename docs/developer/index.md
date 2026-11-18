@@ -26,7 +26,7 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 
 ::: warning The WASM evaluator is not the default path
 The `rmt-core` WASM binary is **not even fetched** on a normal page load — `initWasm()` returns
-early without the URL flag `?evaluator=wasm` (`src/wasm/evaluator-adapter.js:36-40`), and that
+early without the URL flag `?evaluator=wasm` (`src/wasm/evaluator-adapter.js:37-41`), and that
 flag currently hangs the tab on a full re-evaluation. Everything you experience in the app runs
 on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 :::

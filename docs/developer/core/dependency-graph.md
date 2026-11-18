@@ -87,13 +87,13 @@ Each is `Map<dependencyId, Set<dependentId>>`.
 
 ## The BaseNote is not an edge
 
-`base.f` sets `BinaryExpression.referencesBase` and lands the note in `baseNoteDependents`. It **never** appears in `dependencies` or `dependents` as an edge to note 0 — that would make the BaseNote depend on itself, and the BaseNote *is* note 0 (comments at `src/expression-compiler.js:725-728`).
+`base.f` sets `BinaryExpression.referencesBase` and lands the note in `baseNoteDependents`. It **never** appears in `dependencies` or `dependents` as an edge to note 0 — that would make the BaseNote depend on itself, and the BaseNote *is* note 0 (comments at `src/expression-compiler.js:659-662`).
 
 Consumers simulate the edge instead. `Module.getDependentNotes(0)` unions `getAllDependents(0)` with `getBaseNoteDependents()` (`module.js:385-398`) — one level deep, which is what the UI wants.
 
 Re-evaluation needs more than that, and gets it from `getEvaluationDependents(id)` (`:790`): the transitive closure over `dependents` that, whenever it reaches note 0, continues into `baseNoteDependents` **and** `implicitBaseDependents` and on through everything that reads those. Before it existed, a BaseNote edit dirtied only the notes that wrote `base` themselves; a note defined purely against another note (`[1].f * (5/4)`) kept its old value.
 
-`implicitBaseDependents` covers the two ways a note depends on the BaseNote without naming it (`inheritsFromBase()`, `src/variable-deps.js:107`):
+`implicitBaseDependents` covers the two ways a note depends on the BaseNote without naming it (`inheritsFromBase()`, `src/variable-deps.js:113`):
 
 - a **measure bar** — its computed `measureLength` inherits `tempo` and `beatsPerMeasure`;
 - a reference to another note's `tempo`, `beatsPerMeasure`, `measureLength` or `amplitude` (`beat([5])`, `measure([5])`, `[5].tempo`, `[5].a`), which inherits when note 5 has none of its own.
@@ -123,12 +123,12 @@ _registerNoteDependencies(note) {
 ```
 
 ::: tip Re-registration is skipped when dependencies cannot have changed
-Dependencies derive purely from a note's compiled expressions. If the note's id, its expression epoch (`Note._depsEpoch`, declared at `src/note.js:42` and bumped on every expression mutation — `:185`, `:198`, `:213`) and the graph generation are all unchanged, the note is already registered identically.
+Dependencies derive purely from a note's compiled expressions. If the note's id, its expression epoch (`Note._depsEpoch`, declared at `src/note.js:43` and bumped on every expression mutation — `:191`, `:204`, `:219`) and the graph generation are all unchanged, the note is already registered identically.
 
 This matters because `markNoteDirty()` calls this for **every** marked note — on an interval-arrow change that is every dependent in the closure. The skip avoids rewriting up to 22 maps per untouched note.
 :::
 
-The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:225`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`:288`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
+The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:228`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`:291`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
 
 `_updateDependencies()` (`:449-503`) diffs old against new, patches the inverse index, and **bumps `_corruptionEpoch` if the dependency set actually changed** — because changing a note's dependencies can change whether *other* notes render as transitively corrupted, even if no corruption flag moved.
 
@@ -175,7 +175,7 @@ The drag path uses the narrower startTime traversals directly: `getAllStartTimeO
 | `getChildrenTreeByAllProperties(id)` | `{edgesByProperty: {frequency: [], startTime: [], duration: []}, maxDepth}` — all three in one traversal. **Not** the same shape as above: the edges are bucketed by originating property, not flat | `:1617` |
 | `getMeasureChain(measureId, isMeasure, getStartTime, isChainLink?)` | `[{id, startSec}]` — the linear measure chain, earliest to latest, O(chain length) | `:1927` |
 
-`getMeasureChain()` is live: `src/player.js:6258` and `src/renderer/webgl2/workspace.js:2808` both use it.
+`getMeasureChain()` is live: `src/player.js:6518` and `src/renderer/webgl2/workspace.js:2792` both use it.
 
 ### Structural
 
@@ -206,10 +206,10 @@ Between notes that is a loop. Between variables there is none: `[1].f` needs `[2
 
 | Function | Answers | Line |
 |---|---|---|
-| `getVariableRefs(note, varIndex)` | what one variable reads, as written (for a computed `measureLength`: `beatsPerMeasure` and `tempo`) | `:70` |
-| `resolveVariableRef(getNote, ref)` | the variable a reference really reads — the BaseNote's when a `tempo` / `beatsPerMeasure` / `measureLength` is inherited, nothing when no note defines it | `:92` |
-| `findVariableCycle(getNote, start)` | the loop through one variable, or `null` | `:128` |
-| `findDependencyCycle(module, noteId, variableName, expr)` | the loop that saving `expr` as that variable **would** create — nothing is changed | `:196` |
+| `getVariableRefs(note, varIndex)` | what one variable reads, as written (for a computed `measureLength`: `beatsPerMeasure` and `tempo`) | `:74` |
+| `resolveVariableRef(getNote, ref)` | the variable a reference really reads — the BaseNote's when a `tempo` / `beatsPerMeasure` / `measureLength` is inherited, nothing when no note defines it | `:97` |
+| `findVariableCycle(getNote, start)` | the loop through one variable, or `null` | `:134` |
+| `findDependencyCycle(module, noteId, variableName, expr)` | the loop that saving `expr` as that variable **would** create — nothing is changed | `:202` |
 
 A variable is addressed as one integer, `(noteId << 3) | varIndex`; `base.x` is note 0.
 
@@ -225,7 +225,7 @@ Reading a *different* variable of the same note, or a note that reads this one t
 The evaluator applies the identical rule when it orders a batch, so a cycle that arrives in a hand-written JSON file is reported by name rather than refused — see [True cycles](/developer/core/binary-evaluator#true-cycles).
 
 ::: warning The move and resize gestures still think in whole notes
-After a drag, `player.js` re-anchors the moved note (and dependents that would now start before it) on an ancestor found by walking **start-time parents**, so that nothing references a note that starts later. That walk assumes two notes never read each other; with cross-variable relationships it can arrive back at the note being rewritten. A re-anchor that would close a loop is now skipped (`__retargetWouldCycleGL()`, `src/player.js:2604`) and the note keeps its expression. The gestures do not otherwise understand cross-variable relationships: a move still rewrites the moved note's start, duration and frequency into their canonical forms.
+After a drag, `player.js` re-anchors the moved note (and dependents that would now start before it) on an ancestor found by walking **start-time parents**, so that nothing references a note that starts later. That walk assumes two notes never read each other; with cross-variable relationships it can arrive back at the note being rewritten. A re-anchor that would close a loop is now skipped (`__retargetWouldCycleGL()`, `src/player.js:2636`) and the note keeps its expression. The gestures do not otherwise understand cross-variable relationships: a move still rewrites the moved note's start, duration and frequency into their canonical forms.
 :::
 
 ## Corruption tracking
@@ -248,7 +248,7 @@ Flags arrive from `Module._updateCorruptionFlags()` after each evaluation (`modu
 
 ### How the renderer consumes it
 
-`RendererAdapter.sync()` needs, for every note, "is anything in my dependency closure corrupt?". Because `dependents` is the maintained inverse of `dependencies`, that is answered for all notes at once by **one multi-source BFS over the `dependents` graph, seeded by `getCorruptedNotes()`** — O(N+E) instead of a transitive BFS per note, and a complete no-op when the corrupt set is empty, which is the common case (`renderer.js:823-898`). The scan produces the per-note `a_corruptionType` attribute the shader hatches from (`0` clean, `1` transitive → single diagonal hatch, `2` direct → crosshatch); the before/after numbers are in [Performance](/developer/performance).
+`RendererAdapter.sync()` needs, for every note, "is anything in my dependency closure corrupt?". Because `dependents` is the maintained inverse of `dependencies`, that is answered for all notes at once by **one multi-source BFS over the `dependents` graph, seeded by `getCorruptedNotes()`** — O(N+E) instead of a transitive BFS per note, and a complete no-op when the corrupt set is empty, which is the common case (`renderer.js:862-937`). The scan produces the per-note `a_corruptionType` attribute the shader hatches from (`0` clean, `1` transitive → single diagonal hatch, `2` direct → crosshatch); the before/after numbers are in [Performance](/developer/performance).
 
 `_corruptionEpoch` is what lets the renderer know it can skip this work. It is bumped from **two** places — `setCorruptionFlags()` when a flag changes, and `_updateDependencies()` when a note's dependency set changes. Both can alter transitive corruption.
 
