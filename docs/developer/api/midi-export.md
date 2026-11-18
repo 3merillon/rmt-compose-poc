@@ -28,8 +28,15 @@ What a user sees of this is in [Exporting MIDI](/user-guide/modules/exporting-mi
 
 MIDI has 128 fixed keys and one pitch bend per channel. To carry an exact frequency, each note is
 written on its nearest 12-TET key with a 14-bit pitch bend for the remainder, and each sounding
-note gets a channel to itself. That layout is MPE: every instrument's track is an **MPE lower
-zone**, with channel 1 as the master and channels 2–16 as fifteen member channels.
+note gets a channel to itself.
+
+Which channels is the `layout` option. The default, `'general'`, is for ordinary General MIDI
+players: such a player merges all tracks onto one port, so the whole piece shares that port's
+fifteen usable channels (never channel 10, which is percussion), and every note is preceded by its
+instrument's program change and its bend. `'mpe'` writes one **MPE lower zone** per instrument
+track instead — channel 1 as the master, channels 2–16 as members, no program — for a DAW with one
+MPE instrument per track. In an ordinary player that layout plays wrong: the tracks collide on the
+same channels, some notes land on channel 10 and sound as drums, and everything else is piano.
 
 Two decisions keep the file exact where it can be:
 
@@ -109,6 +116,7 @@ the same bytes.
 | `unityVelocity` | `64` | 1–127 | The velocity amplitude 1 is written as |
 | `a4` | `440` | > 0 | Frequency of key 69, the reference of the key grid |
 | `title` | `'RMT Compose'` | — | Name of the conductor track |
+| `layout` | `'general'` | `'general'`, `'mpe'` | How notes are given channels — see [The approach](#the-approach) |
 
 `bendRange` trades resolution for compatibility. A bend has 16 384 steps across twice the range:
 
@@ -146,7 +154,15 @@ either. Note-off velocity is always 64.
 
 ### Channels
 
-Notes are grouped by instrument (`module.findInstrument(note)`, lower-cased), sorted by start, and
+**`'general'`.** All notes, sorted by start, draw on one pool: channels 1–9 and 11–16. A note takes
+a free channel that last played its own instrument (`module.findInstrument(note)`, lower-cased) —
+so a release tail is not re-voiced — and otherwise the one silent longest. A channel counts as free
+on the very tick its note ends only for the same instrument: that note-off and the new note-on are
+then in one track and keep their order. Past fifteen notes at once the surplus fills a second
+pool, written as tracks `<instrument> (port 2)` with a MIDI-port meta event (`FF 21`).
+`GM_PROGRAMS` maps instruments to programs; an unknown one is written as piano and reported.
+
+**`'mpe'`.** Notes are grouped by instrument, sorted by start, and
 each takes the member channel that fell silent longest ago; ties go to the lowest channel. That
 rotation leaves a release tail the most time before the channel's bend moves for the next note.
 
@@ -182,6 +198,11 @@ MTrk  conductor
       FF 51  tempo, µs per quarter note
       FF 2F  end of track, at endTick
 
+The note tracks below are the `'mpe'` layout. In `'general'` a note track holds its name, `FF 21 pp`
+when it is for a further port, RPN 0 on all fifteen channels, and per note `Cn pp` (program),
+`En lsb msb`, `9n key vel`, then `8n key 40`.
+
+```
 MTrk  one per instrument zone
       FF 03  track name
       B0 65 00  B0 64 06  B0 06 0F       MPE Configuration Message: RPN 6 = 15 member channels
@@ -234,8 +255,9 @@ note in the file with the module's evaluated values:
 - **Pitch** — key plus bend, using the bend range the *file* declares, within 0.1 cent.
 - **Time** — start and length within one tick.
 - **Loudness** — the velocity the amplitude calls for.
-- **Channels** — no two notes sound on one channel at once, no bend moves under a sounding note,
-  and every note sits on a member channel of a declared zone.
+- **Channels** — no two notes sound on one channel at once, no bend moves under a sounding note.
+  In the default layout this holds across all tracks, nothing is on channel 10, and every note
+  carries its instrument's program; in `'mpe'` every note sits on a member channel of a declared zone.
 - **Coverage** — every sounding note is in the file, and nothing else is.
 
 It covers the default module, every library module, and synthetic modules for what real ones do

@@ -12,8 +12,11 @@
  *   time      start and length within one tick of the exact position
  *   loudness  velocity = 64 × √amplitude
  *   channels  no two notes sound on one channel at once, a channel's bend never
- *             moves under a sounding note, every note sits on a member channel
- *             of a zone declared by an MPE Configuration Message
+ *             moves under a sounding note. In the default layout, across the
+ *             whole file: nothing on channel 10, and every note preceded by its
+ *             instrument's General MIDI program. In the 'mpe' layout, every note
+ *             on a member channel of a zone declared by an MPE Configuration
+ *             Message
  *   coverage  every sounding note of the module is in the file, and nothing else
  *
  * Checked: the default module, every shipped library module, any module files
@@ -97,13 +100,14 @@ function readNotes(smf) {
   const out = { ppq: smf.ppq, format: smf.format, usPerQuarter: null, timeSignature: null, tracks: [], notes: [], problems: [] };
 
   smf.tracks.forEach((events, trackIndex) => {
-    const track = { index: trackIndex, name: '', memberChannels: null, notes: 0, endTick: 0 };
-    const channels = Array.from({ length: 16 }, () => ({ rpn: [127, 127], bendRange: null, bendCents: 0, bend: 8192, sounding: [] }));
+    const track = { index: trackIndex, name: '', memberChannels: null, port: 0, notes: 0, endTick: 0 };
+    const channels = Array.from({ length: 16 }, () => ({ rpn: [127, 127], bendRange: null, bendCents: 0, bend: 8192, program: null, sounding: [] }));
 
     for (const e of events) {
       track.endTick = e.tick;
       if (e.meta !== undefined) {
         if (e.meta === 0x03) track.name = text(e.data);
+        if (e.meta === 0x21) track.port = e.data[0];
         if (e.meta === 0x51) out.usPerQuarter = (e.data[0] << 16) | (e.data[1] << 8) | e.data[2];
         if (e.meta === 0x58) out.timeSignature = { numerator: e.data[0], denominator: 2 ** e.data[1] };
         continue;
@@ -118,17 +122,25 @@ function readNotes(smf) {
           if (e.channel === 0) track.memberChannels = e.b;
           else out.problems.push(`track ${trackIndex}: MPE configuration on channel ${e.channel + 1}, not the master`);
         }
+      } else if (e.kind === 0xC0) {
+        if (ch.sounding.length) out.problems.push(`track ${trackIndex} ch ${e.channel + 1}: program changed under a sounding note at tick ${e.tick}`);
+        ch.program = e.a;
       } else if (e.kind === 0xE0) {
         if (ch.sounding.length) out.problems.push(`track ${trackIndex} ch ${e.channel + 1}: pitch bend moved under a sounding note at tick ${e.tick}`);
         ch.bend = e.a | (e.b << 7);
       } else if (e.kind === 0x90 && e.b > 0) {
         if (ch.sounding.length) out.problems.push(`track ${trackIndex} ch ${e.channel + 1}: two notes sound at once at tick ${e.tick}`);
-        if (track.memberChannels == null) out.problems.push(`track ${trackIndex}: note before any MPE configuration`);
-        else if (e.channel < 1 || e.channel > track.memberChannels) out.problems.push(`track ${trackIndex}: note on channel ${e.channel + 1}, outside the zone's member channels`);
+        if (track.memberChannels != null) {
+          if (e.channel < 1 || e.channel > track.memberChannels) out.problems.push(`track ${trackIndex}: note on channel ${e.channel + 1}, outside the zone's member channels`);
+        } else {
+          if (e.channel === 9) out.problems.push(`track ${trackIndex}: note on channel 10, the General MIDI percussion channel`);
+          if (ch.program == null) out.problems.push(`track ${trackIndex} ch ${e.channel + 1}: note before any program change`);
+        }
         if (ch.bendRange == null) out.problems.push(`track ${trackIndex} ch ${e.channel + 1}: note before the bend range was declared`);
         const range = (ch.bendRange ?? 2) + ch.bendCents / 100;
         const note = {
-          track: trackIndex, trackName: track.name, channel: e.channel, key: e.a, velocity: e.b,
+          track: trackIndex, trackName: track.name, port: track.port, mpe: track.memberChannels != null, program: ch.program,
+          channel: e.channel, key: e.a, velocity: e.b,
           startTick: e.tick, endTick: null, bend: ch.bend, bendRange: range,
           frequency: 440 * 2 ** ((e.a - 69) / 12 + ((ch.bend - 8192) / 8192) * (range / 12)),
         };
@@ -178,6 +190,10 @@ function expectedNotes(mod, ppq) {
 
 const centsBetween = (a, b) => 1200 * Math.abs(Math.log2(a / b));
 
+/** General MIDI programs (0-based), written out here independently of the exporter. */
+const PROGRAMS = { 'piano': 0, 'fm-epiano': 5, 'vibraphone': 11, 'organ': 19, 'harmonium': 20, 'violin': 40,
+  'triangle-wave': 73, 'sine-wave': 79, 'square-wave': 80, 'sawtooth-wave': 81 };
+
 /**
  * Export `mod`, parse the bytes back, and compare note by note.
  * @returns {object} the measurements, for the caller to print or assert on
@@ -194,7 +210,7 @@ function verify(mod, options = {}) {
   if (file.usPerQuarter !== wantUs) problems.push(`tempo ${file.usPerQuarter} µs/quarter, expected ${wantUs}`);
 
   const taken = new Set();
-  let maxCents = 0, maxStart = 0, maxLength = 0, maxDriftMs = 0, velocityMismatch = 0, missing = 0;
+  let maxCents = 0, maxStart = 0, maxLength = 0, maxDriftMs = 0, velocityMismatch = 0, programMismatch = 0, missing = 0;
   for (const want of expected) {
     let best = -1, bestDistance = Infinity;
     file.notes.forEach((got, i) => {
@@ -215,7 +231,29 @@ function verify(mod, options = {}) {
     const fileSeconds = got.startTick * file.usPerQuarter / (file.ppq * 1e6);
     maxDriftMs = Math.max(maxDriftMs, Math.abs(fileSeconds - want.seconds) * 1000);
     if (got.velocity !== want.velocity) velocityMismatch++;
+    if (!got.mpe && got.program !== (PROGRAMS[want.instrument] ?? 0)) programMismatch++;
   }
+  if (programMismatch) problems.push(`${programMismatch} notes sound with another program than their instrument's`);
+
+  // An ordinary player merges all tracks of a port: a channel must carry one
+  // note at a time across the WHOLE file, and two notes may meet on a tick
+  // only inside one track, where note-off comes before note-on.
+  const byChannel = new Map();
+  for (const n of file.notes) {
+    if (n.mpe) continue;
+    const key = `${n.port}:${n.channel}`;
+    if (!byChannel.has(key)) byChannel.set(key, []);
+    byChannel.get(key).push(n);
+  }
+  let collisions = 0;
+  for (const list of byChannel.values()) {
+    list.sort((a, b) => a.startTick - b.startTick);
+    for (let i = 1; i < list.length; i++) {
+      const prev = list[i - 1], next = list[i];
+      if (next.startTick < prev.endTick || (next.startTick === prev.endTick && next.track !== prev.track)) collisions++;
+    }
+  }
+  if (collisions) problems.push(`${collisions} notes share a channel with a note of another track that is still sounding`);
   if (missing > 3) problems.push(`… ${missing} notes missing in all`);
   if (file.notes.length !== expected.length) problems.push(`file has ${file.notes.length} notes, module has ${expected.length} sounding notes`);
   if (maxLength > TIME_TOLERANCE_TICKS) problems.push(`a length is ${maxLength.toFixed(3)} ticks off`);
@@ -280,13 +318,13 @@ console.log('MIDI export: real modules, read back from the bytes\n');
 }
 
 // --- 2. more simultaneous notes than a zone has channels -----------------------------
-console.log('\nMIDI export: more notes at once than an MPE zone has channels\n');
+console.log('\nMIDI export: the mpe layout, more notes at once than a zone has channels\n');
 {
   const notes = [];
   // A 40-note piano cluster and a 20-note organ cluster, all sounding together.
   for (let k = 1; k <= 40; k++) notes.push({ id: k, startTime: 'base.t', duration: 'beat(base) * 4', frequency: `base.f * (${k + 8}/8)`, instrument: 'piano' });
   for (let k = 41; k <= 60; k++) notes.push({ id: k, startTime: 'base.t + beat(base)', duration: 'beat(base) * 2', frequency: `base.f * (${k}/32)`, instrument: 'organ' });
-  const v = verify(await build(BASE, notes));
+  const v = verify(await build(BASE, notes), { layout: 'mpe' });
   const r = v.plan.report;
   check(v.problems.length === 0 && v.matched === 60, `all 60 notes are in the file: ${describe(v)}`);
   for (const problem of v.problems) console.error(`      ${problem}`);
@@ -298,17 +336,49 @@ console.log('\nMIDI export: more notes at once than an MPE zone has channels\n')
 }
 
 // --- 3. rotation ---------------------------------------------------------------------
-console.log('\nMIDI export: channel rotation\n');
+console.log('\nMIDI export: the mpe layout, channel rotation\n');
 {
   // A 40-note legato line: each note starts where the previous one ends.
   const notes = [];
   for (let k = 1; k <= 40; k++) notes.push({ id: k, startTime: k === 1 ? 'base.t' : `[${k - 1}].t + [${k - 1}].d`, duration: 'beat(base) * (1/2)', frequency: `base.f * (${k + 15}/16)` });
-  const v = verify(await build(BASE, notes));
+  const v = verify(await build(BASE, notes), { layout: 'mpe' });
   const order = [...v.file.notes].sort((a, b) => a.startTick - b.startTick).map((n) => n.channel + 1);
   check(v.problems.length === 0 && v.file.tracks.length === 2, `a monophonic line stays in one track: ${describe(v)}`);
   check(order.slice(0, 15).join(',') === '2,3,4,5,6,7,8,9,10,11,12,13,14,15,16' && order.every((ch, i) => i < 15 || ch === order[i - 15]),
     `notes cycle through channels 2–16, so a channel rests for 14 notes before it is bent again`);
   check(v.file.tracks[1].memberChannels === 15 && v.file.notes.every((n) => n.bendRange === 2), 'the file declares the zone (RPN 6 = 15) and the bend range (RPN 0 = 2 semitones)');
+}
+
+// --- 3b. the default layout: an ordinary General MIDI player ------------------------------
+console.log('\nMIDI export: the default layout plays in an ordinary player\n');
+{
+  // Four instruments sounding together, twelve notes at once, then a legato line.
+  const voices = ['organ', 'fm-epiano', 'vibraphone', 'triangle-wave'];
+  const notes = [];
+  for (let k = 0; k < 12; k++) notes.push({ id: k + 1, startTime: 'base.t', duration: 'beat(base) * 4', frequency: `base.f * (${k + 8}/8)`, instrument: voices[k % 4] });
+  for (let k = 0; k < 30; k++) notes.push({ id: 20 + k, startTime: `base.t + beat(base) * ${4 + k}`, duration: 'beat(base)', frequency: `base.f * (${k + 16}/16)`, instrument: voices[k % 4] });
+  const v = verify(await build(BASE, notes));
+  const used = [...new Set(v.file.notes.map((n) => n.channel + 1))].sort((a, b) => a - b);
+  check(v.problems.length === 0 && v.matched === 42, `all 42 notes, each alone on its channel across the whole file: ${describe(v)}`);
+  check(!used.includes(10) && v.file.notes.every((n) => !n.mpe), `nothing on channel 10, no MPE zone declared (channels used: ${used.join(' ')})`);
+  const programs = voices.map((name) => `${name} ${[...new Set(v.file.notes.filter((n) => n.trackName === name).map((n) => n.program + 1))].join('/')}`);
+  check(programs.join(', ') === 'organ 20, fm-epiano 6, vibraphone 12, triangle-wave 74', `every note is preceded by its instrument's program: ${programs.join(', ')}`);
+  check(v.file.tracks.slice(1).map((x) => x.name).join(' ') === voices.join(' '), 'one track per instrument, named after it');
+
+  const mpe = verify(await build(BASE, notes), { layout: 'mpe' });
+  check(mpe.problems.length === 0 && mpe.matched === 42 && mpe.file.notes.every((n) => n.mpe), `the same module with layout 'mpe': ${describe(mpe)}`);
+
+  // More than fifteen notes at once do not fit one port.
+  const cluster = [];
+  for (let k = 1; k <= 40; k++) cluster.push({ id: k, startTime: 'base.t', duration: 'beat(base) * 4', frequency: `base.f * (${k + 8}/8)`, instrument: 'piano' });
+  const big = verify(await build(BASE, cluster));
+  check(big.problems.length === 0 && big.matched === 40, `a 40-note cluster is all in the file: ${describe(big)}`);
+  check(big.file.tracks.slice(1).map((x) => `${x.name}:${x.notes}@${x.port}`).join(' ') === 'piano:15@0 piano (port 2):15@1 piano (port 3):10@2'
+    && big.plan.report.polyphony.overflowNotes === 25 && big.plan.report.warnings.some((w) => /one MIDI port carries 15/.test(w)),
+    `the surplus is written for further ports and reported: "${big.plan.report.warnings[0]}"`);
+  let threw = false;
+  try { planMidi(await build(BASE, cluster), { layout: 'gm' }); } catch { threw = true; }
+  check(threw, 'an unknown layout is refused');
 }
 
 // --- 4. loudness ---------------------------------------------------------------------

@@ -28,29 +28,42 @@ The filename is fixed, like `module.json`. Rename it as soon as it lands.
 | Format | Standard MIDI File, type 1, 960 ticks per quarter note |
 | First track | The tempo and the time signature, both from the BaseNote |
 | One track per instrument | Named after the instrument — `organ`, `fm-epiano`, `sine-wave` |
+| Sound | A General MIDI program for each instrument, set before every note |
 | Pitch | The nearest 12-TET key (A4 = 440 Hz) plus a 14-bit pitch bend |
-| Channels | Every sounding note has a channel to itself |
+| Channels | Every sounding note has a channel to itself — never channel 10 |
 | Loudness | Velocity, from the note's [amplitude](/reference/properties/amplitude) |
 
 ### Why every note has its own channel
 
 A pitch bend moves a whole channel, not one note. Two notes of a pure chord need two different bends, so they cannot share a channel.
 
-Each track is therefore laid out as an **MPE lower zone** (MIDI Polyphonic Expression): channel 1 is the zone's master and carries no notes; channels 2–16 are its fifteen member channels, one note at a time on each. A new note takes the channel that has been silent longest, which leaves the previous note's release the most time before that channel's bend moves.
+The whole piece shares the fifteen channels of one MIDI port: 1–9 and 11–16. **Channel 10 is never used** — General MIDI reserves it for percussion, and a note written there plays as a drum. A new note takes a free channel that last played its own instrument, or else the one that has been silent longest, and sets that channel's program and bend before it sounds.
 
-## Playing it in tune
+## Playing it
 
-Three things have to be true of the instrument each track plays into:
+The file is plain General MIDI plus pitch bends, so an ordinary player — a media player, a browser MIDI player, a sound card's synth — plays it as pitched instruments, in tune, with no setup. It relies on two things every General MIDI device has:
 
-1. **MPE is on.** Without it an instrument treats channels 2–16 as fifteen unrelated parts, or listens to one channel only.
-2. **Its per-note pitch-bend range is 2 semitones.** MPE instruments start at 48. An instrument left there plays every bend 24 times too wide — if an imported file sounds wildly out of tune, this is the setting to check first.
-3. **Each track has an instrument of its own.** Every track uses channels 1–16 for itself.
+- **a pitch-bend range of 2 semitones.** That is the General MIDI default, and the file also sets it on every channel (RPN 0). A device left on another range plays every bend too wide or too narrow — if a file sounds wildly out of tune, this is the setting to check first.
+- **program changes.** Each instrument maps to a General MIDI program:
 
-::: info The file declares all of this
-Each track opens with an MPE Configuration Message (RPN 6 on channel 1: fifteen member channels) and sets the pitch-bend sensitivity (RPN 0) to 2 semitones on every member channel. A receiver that follows the MPE specification needs no manual setup. Not every DAW passes these messages from a file on to its instruments, which is why the list above is worth knowing.
+| Instrument | Program |
+|---|---|
+| `piano` | 1 Acoustic Grand Piano |
+| `fm-epiano` | 6 Electric Piano 2 |
+| `vibraphone` | 12 Vibraphone |
+| `organ` | 20 Church Organ |
+| `harmonium` | 21 Reed Organ |
+| `violin` | 41 Violin |
+| `triangle-wave` | 74 Flute |
+| `sine-wave` | 80 Ocarina |
+| `square-wave` | 81 Lead 1 (square) |
+| `sawtooth-wave` | 82 Lead 2 (sawtooth) |
+
+These are the nearest General MIDI sounds, not the app's own; how they sound depends on the player's sound set.
+
+::: warning In a DAW
+A track holds one instrument's notes, but spread over many channels. Give the track an instrument that listens on all channels with a bend of its own per channel — a multitimbral General MIDI synth, or an MPE instrument with its bend range at 2 semitones. An instrument that listens on one channel plays only part of the track.
 :::
-
-The tracks carry instrument **names**, not sounds. Nothing in the file selects a patch; you choose the instrument for each track.
 
 ## What is rounded
 
@@ -94,7 +107,8 @@ A plain export answers with a cyan toast. When the file could not carry somethin
 
 | Situation | What the export does |
 |---|---|
-| More than 15 notes of one instrument sound at once | The surplus goes to further tracks for the same instrument — `piano (2)`, `piano (3)` — each to be given its own instrument. |
+| More than 15 notes sound at once | One port has fifteen channels. The surplus goes to tracks marked for a second port — `piano (port 2)` — which a player with a single port will mistune. |
+| An instrument with no program in the table | It is written as piano. |
 | A pitch no key can reach | Below about 7.3 Hz or above 14 080 Hz: the note is not exported. |
 | Amplitude 0 | The note is not exported. It is silent in playback too. |
 | A note shorter than one tick | It is given a length of one tick. |
@@ -108,7 +122,7 @@ If nothing could be written, no file is downloaded and a red toast says so.
 
 ## What is not in the file
 
-- **The sound.** Instrument names only; no patches, no samples.
+- **The sound.** A General MIDI program number, not the app's own synthesis or samples.
 - **Reverb, stereo spread and the limiter.** Those are playback settings, not part of the module.
 - **Colours.**
 - **Silences.** A silence is a rest; nothing is written for it.
@@ -118,8 +132,8 @@ If nothing could be written, no file is downloaded and a red toast says so.
 ## Tips
 
 1. **Save the module as well.** The MIDI file cannot be turned back into a composition.
-2. **Set the bend range before judging the result.** One wrong setting makes every pure interval sound wrong.
-3. **Keep each instrument to fifteen notes at once** if you want one track per instrument.
+2. **Check the bend range before judging the result.** One wrong setting makes every pure interval sound wrong.
+3. **Keep the piece to fifteen notes at once** if it has to play on a single port.
 4. **Rename the download.** Every export is `module.mid`.
 
 ## See also

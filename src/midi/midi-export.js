@@ -59,6 +59,27 @@ import { amplitudeToGain, MAX_AMPLITUDE } from '../player/amplitude.js';
 const MASTER_CHANNEL = 0;
 const MEMBER_CHANNELS = 15;
 
+/**
+ * The 'general' layout: every channel of one MIDI port except channel 10
+ * (index 9), which General MIDI reserves for percussion — a note written there
+ * plays as a drum in any ordinary player.
+ */
+const GENERAL_CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15];
+
+/** General MIDI program (0-based) for each instrument; anything else plays as piano. */
+const GM_PROGRAMS = Object.freeze({
+  'piano': 0,           // Acoustic Grand Piano
+  'fm-epiano': 5,       // Electric Piano 2 (the FM one)
+  'vibraphone': 11,     // Vibraphone
+  'organ': 19,          // Church Organ
+  'harmonium': 20,      // Reed Organ
+  'violin': 40,         // Violin
+  'triangle-wave': 73,  // Flute
+  'sine-wave': 79,      // Ocarina
+  'square-wave': 80,    // Lead 1 (square)
+  'sawtooth-wave': 81,  // Lead 2 (sawtooth)
+});
+
 /** Largest delta time a variable-length quantity can hold (four 7-bit groups). */
 const MAX_DELTA = 0x0FFFFFFF;
 
@@ -78,6 +99,16 @@ export const MIDI_EXPORT_DEFAULTS = Object.freeze({
   a4: 440,
   /** Name of the conductor track (the sequence name a DAW shows). */
   title: 'RMT Compose',
+  /**
+   * How notes are given channels.
+   * 'general'  plays in any General MIDI player: all instruments share the
+   *            fifteen channels of one port (never channel 10), and every note
+   *            sets its channel's program and bend before it sounds.
+   * 'mpe'      one MPE lower zone per instrument track, for a DAW with one MPE
+   *            instrument per track. Not for ordinary players: the tracks reuse
+   *            the same channels, channel 10 included, and set no program.
+   */
+  layout: 'general',
 });
 
 // ---------------------------------------------------------------------------
@@ -127,6 +158,9 @@ export function planMidi(module, options = {}) {
   if (!(unityVelocity >= 1 && unityVelocity <= 127)) throw new RangeError(`unityVelocity must be 1..127 (got ${opt.unityVelocity})`);
   const a4 = Number(opt.a4);
   if (!(a4 > 0 && Number.isFinite(a4))) throw new RangeError(`a4 must be a positive frequency (got ${opt.a4})`);
+
+  const layout = String(opt.layout);
+  if (layout !== 'general' && layout !== 'mpe') throw new RangeError(`layout must be 'general' or 'mpe' (got ${opt.layout})`);
 
   const cache = module.evaluateModule();
   const base = cache.get(0) || {};
@@ -227,7 +261,7 @@ export function planMidi(module, options = {}) {
 
     const instrument = String(module.findInstrument(note) || 'sine-wave').toLowerCase();
     if (!byInstrument.has(instrument)) byInstrument.set(instrument, []);
-    byInstrument.get(instrument).push({ id, startTick, endTick: noteEndTick, key, bend, cents, velocity, frequency, channel: -1 });
+    byInstrument.get(instrument).push({ id, instrument, startTick, endTick: noteEndTick, key, bend, cents, velocity, frequency, channel: -1 });
   }
 
   // --- channels ----------------------------------------------------------------
@@ -241,7 +275,43 @@ export function planMidi(module, options = {}) {
   let overflowNotes = 0;
   let exported = 0;
 
-  for (const [instrument, notes] of byInstrument) {
+  if (layout === 'general') {
+    // One pool of fifteen channels for the whole piece, as an ordinary player
+    // has: tracks do not separate channels there. A note takes a channel that
+    // last played its own instrument when one is free (so a release tail is not
+    // re-voiced), otherwise the one silent longest. Past fifteen notes at once
+    // the surplus goes to a second port, which a single-port player cannot follow.
+    const all = [...byInstrument.values()].flat().sort((a, b) => (a.startTick - b.startTick) || (a.id - b.id));
+    const ports = [];
+    for (const note of all) {
+      note.program = GM_PROGRAMS[note.instrument] ?? 0;
+      let placed = false;
+      for (let p = 0; p < ports.length && !placed; p++) placed = placeInPort(ports[p], note);
+      if (!placed) {
+        const port = { freeAt: new Array(GENERAL_CHANNELS.length).fill(-1), last: new Array(GENERAL_CHANNELS.length).fill(null), notes: [] };
+        ports.push(port);
+        placeInPort(port, note);
+      }
+    }
+    ports.forEach((port, p) => {
+      if (p > 0) overflowNotes += port.notes.length;
+      exported += port.notes.length;
+      for (const instrument of byInstrument.keys()) {
+        const own = port.notes.filter((n) => n.instrument === instrument);
+        if (own.length === 0) continue;
+        tracks.push({ name: p === 0 ? instrument : `${instrument} (port ${p + 1})`, instrument, zone: p + 1, layout, port: p, program: GM_PROGRAMS[instrument] ?? 0, notes: own });
+      }
+    });
+    for (const [instrument, notes] of byInstrument) {
+      instrumentReports.push({ instrument, program: GM_PROGRAMS[instrument] ?? 0, notes: notes.length, maxPolyphony: maxPolyphony(notes), tracks: tracks.filter((x) => x.instrument === instrument).length });
+      if (!(instrument in GM_PROGRAMS)) warnings.push(`"${instrument}" has no General MIDI program assigned; it is written as piano (program 1).`);
+    }
+    if (ports.length > 1) {
+      warnings.push(`Up to ${maxPolyphony(all)} notes sound at once; one MIDI port carries ${GENERAL_CHANNELS.length} with their own tuning. ` +
+        `${overflowNotes} note${overflowNotes === 1 ? ' was' : 's were'} written for ${ports.length - 1} further port${ports.length === 2 ? '' : 's'} ("… (port 2)" tracks); ` +
+        `a player with one port will mistune them.`);
+    }
+  } else for (const [instrument, notes] of byInstrument) {
     notes.sort((a, b) => (a.startTick - b.startTick) || (a.id - b.id));
     const zones = [];
     for (const note of notes) {
@@ -260,6 +330,7 @@ export function planMidi(module, options = {}) {
         name: z === 0 ? instrument : `${instrument} (${z + 1})`,
         instrument,
         zone: z + 1,
+        layout,
         memberChannels: MEMBER_CHANNELS,
         notes: zone.notes,
       });
@@ -289,6 +360,7 @@ export function planMidi(module, options = {}) {
   const report = {
     ppq,
     bendRange,
+    layout,
     bendStepCents: (bendRange * 100) / 8192,
     unityVelocity,
     a4,
@@ -330,7 +402,7 @@ export function planMidi(module, options = {}) {
     warnings,
   };
 
-  return { ppq, bendRange, usPerQuarter, timeSignature, title: String(opt.title || 'RMT Compose'), endTick, tracks, report };
+  return { ppq, bendRange, layout, usPerQuarter, timeSignature, title: String(opt.title || 'RMT Compose'), endTick, tracks, report };
 }
 
 /** Give `note` the member channel of `zone` that fell silent longest ago. */
@@ -344,6 +416,26 @@ function placeInZone(zone, note) {
   zone.freeAt[best] = note.endTick;
   note.channel = best + 1;            // member channels are MIDI channels 2–16 (indices 1–15)
   zone.notes.push(note);
+  return true;
+}
+
+/**
+ * Give `note` a channel of a General MIDI port. A channel is free once its
+ * note has ended; on the very tick it ends only for the same instrument, whose
+ * note-off and note-on share a track and so keep their order.
+ */
+function placeInPort(port, note) {
+  let best = -1, bestSame = false;
+  for (let c = 0; c < port.freeAt.length; c++) {
+    const same = port.last[c] === note.instrument;
+    if (port.freeAt[c] > note.startTick || (port.freeAt[c] === note.startTick && !same)) continue;
+    if (best < 0 || (same && !bestSame) || (same === bestSame && port.freeAt[c] < port.freeAt[best])) { best = c; bestSame = same; }
+  }
+  if (best < 0) return false;
+  port.freeAt[best] = note.endTick;
+  port.last[best] = note.instrument;
+  note.channel = GENERAL_CHANNELS[best];
+  port.notes.push(note);
   return true;
 }
 
@@ -421,7 +513,9 @@ function conductorTrack(plan) {
   const at = (tick, bytes) => events.push({ tick, priority: 0, seq: seq++, bytes });
 
   at(0, meta(0x03, utf8(plan.title)));                                     // sequence name
-  at(0, meta(0x01, utf8(`RMT Compose export: one MPE lower zone per track, member pitch-bend range +/-${plan.bendRange} semitones`)));
+  at(0, meta(0x01, utf8(plan.layout === 'mpe'
+    ? `RMT Compose export: one MPE lower zone per track, member pitch-bend range +/-${plan.bendRange} semitones`
+    : `RMT Compose export: one note per channel (never channel 10), pitch-bend range +/-${plan.bendRange} semitones`)));
   if (plan.timeSignature) {
     const { numerator, denominator } = plan.timeSignature;
     // nn, dd as a power of two, 24 MIDI clocks per click, 8 thirty-second notes per quarter
@@ -440,6 +534,27 @@ function noteTrack(track, plan) {
   const cc = (channel, controller, value) => at(0, 0, [0xB0 | channel, controller, value]);
 
   at(0, 0, meta(0x03, utf8(track.name)));
+
+  if (track.layout === 'general') {
+    if (track.port > 0) at(0, 0, meta(0x21, [track.port]));                // MIDI port, for players that have several
+    // Pitch-bend sensitivity (RPN 0) on every channel, in every track, so that
+    // no track depends on another having been read first.
+    for (const ch of GENERAL_CHANNELS) {
+      cc(ch, 101, 0); cc(ch, 100, 0); cc(ch, 6, plan.bendRange); cc(ch, 38, 0);
+      cc(ch, 101, 127); cc(ch, 100, 127);
+    }
+    let end = 0;
+    for (const note of track.notes) {
+      // Each note names its program and bend itself: channels are shared by all
+      // instruments, and a player may start anywhere.
+      at(note.startTick, 2, [0xC0 | note.channel, note.program]);
+      at(note.startTick, 3, [0xE0 | note.channel, note.bend & 0x7F, (note.bend >> 7) & 0x7F]);
+      at(note.startTick, 4, [0x90 | note.channel, note.key, note.velocity]);
+      at(note.endTick, 1, [0x80 | note.channel, note.key, 64]);
+      if (note.endTick > end) end = note.endTick;
+    }
+    return serializeTrack(events, end);
+  }
 
   // MPE Configuration Message: RPN 6 on the master channel, value = member channels.
   cc(MASTER_CHANNEL, 101, 0); cc(MASTER_CHANNEL, 100, 6); cc(MASTER_CHANNEL, 6, track.memberChannels);

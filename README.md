@@ -172,7 +172,7 @@ If you built the crate by hand, sync with `npm run wasm:sync` and commit the upd
 - **Import/Export**
   - Load a module from a file, or drag one from the module library onto a note, a measure bar, or the BaseNote
   - Save Module downloads `module.json` (reindexed on export). Save UI / Load UI export the *library layout*, not a composition.
-  - Export MIDI downloads `module.mid`: a type 1 Standard MIDI File that keeps the tuning — each note on its nearest key plus a 14-bit pitch bend, one note per channel (an MPE lower zone per instrument, bend range ±2 semitones), velocity from `amplitude`. One-way: there is no MIDI import.
+  - Export MIDI downloads `module.mid`: a type 1 Standard MIDI File that keeps the tuning — each note on its nearest key plus a 14-bit pitch bend, one note per channel (never channel 10, a General MIDI program per instrument, bend range ±2 semitones), velocity from `amplitude`. Plays in an ordinary MIDI player. One-way: there is no MIDI import.
 - **Keyboard** — the only global shortcuts are undo and redo:
   - **Undo: Ctrl/Cmd+Z**
   - **Redo: Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z**
