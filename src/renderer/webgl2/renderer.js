@@ -1,5 +1,6 @@
 import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.js';
 import { toNumber } from '../../utils/fraction-num.js';
+import { amplitudeToGain } from '../../player/amplitude.js';
 /**
  * WebGL2 RendererAdapter
  * - Non-interactive overlay renderer for notes and playhead
@@ -402,6 +403,16 @@ export class RendererAdapter {
   // drifting off its own frequency.
   _cfgCenterAnchor() { try { return this._config?.note?.centerAnchorWU ?? 10; } catch { return 10; } }
   _cfgNoteH() { try { return this._config?.note?.heightWU ?? 22; } catch { return 22; } }
+  // Note height as a picture of loudness: the configured height times the square
+  // root of the gain playback uses (amplitude clamped to 0..4), kept within
+  // 0.6x..2x so that the quietest note still holds its labels. Amplitude 1 gives
+  // exactly 1: a module that sets no amplitude draws as it always has.
+  _amplitudeHeightScale(amplitude) {
+    const gain = amplitudeToGain(amplitude);
+    if (gain === 1) return 1;
+    const s = Math.sqrt(gain);
+    return s < 0.6 ? 0.6 : (s > 2 ? 2 : s);
+  }
   _noteCenterY(freq) { return this._frequencyToY(freq) + this._cfgCenterAnchor(); }
 
   init(containerEl) {
@@ -706,6 +717,9 @@ export class RendererAdapter {
 
     // Build list of visible notes (those with startTime and duration)
     const items = [];
+    // What a note without an amplitude of its own inherits: the BaseNote's.
+    const baseEvForAmp = getEv(0);
+    const baseHeightScale = (baseEvForAmp && baseEvForAmp.amplitude) ? this._amplitudeHeightScale(baseEvForAmp.amplitude) : 1;
     // Latest end time across playable notes, accumulated here for free because this loop
     // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
     // re-derive it with a second full pass over module.notes (~31ms at 100k notes).
@@ -767,10 +781,12 @@ export class RendererAdapter {
         // top-left from the height. At the default height this is identical to the
         // old fixed -1 shift (anchor 10 - 22/2 = -1); at any other height the note
         // stays centred on its line instead of drifting off it.
-        const h = this._cfgNoteH(); // world units
+        // The height also shows the note's amplitude (silences have none).
+        const isSilence = (freqVal == null || !isFinite(Number(freqVal)));
+        const heightScale = isSilence ? 1 : ((ev && ev.amplitude) ? this._amplitudeHeightScale(ev.amplitude) : baseHeightScale);
+        const h = this._cfgNoteH() * heightScale; // world units
         y = y + this._cfgCenterAnchor() - h * 0.5;
 
-        const isSilence = (freqVal == null || !isFinite(Number(freqVal)));
         const baseColor = this._resolveColor(ev, note, module);
         const color = isSilence ? [0.0, 0.0, 0.0, 0.75] : baseColor;
 

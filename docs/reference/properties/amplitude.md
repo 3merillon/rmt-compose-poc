@@ -184,8 +184,13 @@ reads another note's amplitude — because that other note may be inheriting.
 
 ## In the workspace
 
-Amplitude has no visual of its own. Notes are drawn the same at any level; the widget row is where
-you read it.
+A note's **height** shows its amplitude. The height is the normal one times the square root of the
+gain playback uses, kept between 0.6× and 2×: amplitude `(1/2)` draws at 0.71×, `2` at 1.41×, `4`
+at twice the height, and anything at or below `(9/25)` at 0.6×, so that the quietest note still
+holds its labels. The note stays centred on its pitch line.
+
+Amplitude `1` — and so every note of a module that sets none — draws exactly as before. Silences
+are never scaled. The exact value is in the widget row.
 
 ::: info The optional WASM evaluator
 The Rust evaluator behind the opt-in `?evaluator=wasm` flag does not know this property yet. On
