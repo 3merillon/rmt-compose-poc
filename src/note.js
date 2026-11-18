@@ -22,6 +22,7 @@ export class Note {
       tempo: new BinaryExpression(),
       beatsPerMeasure: new BinaryExpression(),
       measureLength: new BinaryExpression(),
+      amplitude: new BinaryExpression(),
     };
 
     // Non-expression properties.
@@ -56,7 +57,7 @@ export class Note {
    * Handles both legacy format (*String properties, functions) and new format
    */
   _initFromVariables(variables) {
-    const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+    const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
 
     for (const [key, value] of Object.entries(variables)) {
       // Skip legacy *String properties - we'll use them as source
@@ -169,7 +170,7 @@ export class Note {
     }
 
     // Handle expression variables
-    const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+    const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
     if (expressionVars.includes(name)) {
       if (typeof value === 'string') {
         // Expression text
@@ -223,6 +224,22 @@ export class Note {
   }
 
   /**
+   * Remove a variable's expression so the note no longer defines it. An
+   * inheritable variable then falls back (amplitude: to the BaseNote, then 1),
+   * and the key is no longer written to the module JSON.
+   * @returns {boolean} whether there was an expression to remove
+   */
+  clearExpression(name) {
+    const expr = this.expressions[name];
+    if (!expr || expr.isEmpty()) return false;
+    this.expressions[name] = new BinaryExpression();
+    this._depsEpoch++;
+    this.lastModifiedTime = Date.now();
+    this._notifyChange();
+    return true;
+  }
+
+  /**
    * Internal: Notify module of change
    */
   _notifyChange() {
@@ -270,7 +287,7 @@ export class Note {
     const result = {};
 
     // Add evaluated expression values
-    const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+    const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
     for (const name of expressionVars) {
       const value = this.getVariable(name);
       if (value !== null) {
@@ -362,7 +379,7 @@ export class Note {
         }
         // Handle expression variables - return a function wrapper for legacy code
         // Only return a function if the expression actually exists
-        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
         if (expressionVars.includes(prop)) {
           // Check if this expression actually exists
           if (!note.hasExpression(prop)) {
@@ -406,7 +423,7 @@ export class Note {
           const baseName = prop.slice(0, -6);
           return note.hasExpression(baseName);
         }
-        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
         if (expressionVars.includes(prop)) {
           return note.hasExpression(prop);
         }
@@ -414,7 +431,7 @@ export class Note {
       },
       ownKeys(target) {
         const keys = [];
-        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
         for (const name of expressionVars) {
           if (note.hasExpression(name)) {
             keys.push(name);

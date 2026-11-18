@@ -1,6 +1,7 @@
 import { toNumber } from '../utils/fraction-num.js';
 import { InstrumentManager } from '../instruments/instrument-manager.js';
 import { AudioGraph } from './audio-graph.js';
+import { amplitudeToGain } from './amplitude.js';
 
 // Short enough to read as instant, long enough that the cut is not a step.
 const DECLICK_FADE = 0.02; // seconds
@@ -149,6 +150,14 @@ export class AudioEngine {
         } catch {}
         if (!(baseF > 0)) baseF = 440;
 
+        // BaseNote amplitude: what every note without its own inherits (the
+        // same fallback Module.findAmplitude and the evaluator's [id].a use).
+        let baseAmplitude = null;
+        try {
+          const baseCached = evalCache.get(0);
+          if (baseCached && baseCached.amplitude) baseAmplitude = baseCached.amplitude;
+        } catch {}
+
         // Build note data list (no oscillators yet)
         const noteDataList = [];
         for (const id in module.notes) {
@@ -171,6 +180,10 @@ export class AudioEngine {
               duration: adjustedDuration,
               frequency: freq,
               instrument: freq != null ? getInstrument(note) : null,
+              // Relative gain on the per-note peak, clamped to [0, 4] (see
+              // amplitude.js); exactly 1 when neither the note nor the
+              // BaseNote defines an amplitude.
+              amplitude: amplitudeToGain(cached.amplitude || baseAmplitude),
               // Normalized pan position (−1..1) before width scaling; width and
               // enable are applied live at schedule time so mid-play stereo
               // changes affect newly-scheduled notes.
@@ -316,8 +329,9 @@ export class AudioEngine {
           // Not due yet.
           if (at > targetTime) { horizonReached = true; break; }
 
-          // Skip notes without frequency (measure markers)
-          if (noteData.frequency && noteData.instrument) {
+          // Skip notes without frequency (measure markers) and silent notes
+          // (amplitude 0): there is nothing to hear, so no voice is built.
+          if (noteData.frequency && noteData.instrument && noteData.amplitude !== 0) {
             this._scheduleNote(noteData, s.baseStartTime + s.cycleStart, s.initialVolume);
           }
           s.nextIndex++;
@@ -493,8 +507,13 @@ export class AudioEngine {
     // the envelope's setValueAtTime(EPS, start) takes over from here.
     gainNode.gain.value = 0;
 
+    // The note's amplitude scales the envelope peak. `?? 1` keeps callers that
+    // build noteData without it (and every module that never sets amplitude)
+    // at exactly the old peak: x * 1 === x.
+    const peak = initialVolume * (noteData.amplitude ?? 1);
+
     try {
-      this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, initialVolume);
+      this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, peak);
     } catch (e) {
       console.warn('applyEnvelope failed', e);
     }

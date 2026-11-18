@@ -35,7 +35,7 @@ The file has exactly two top-level keys: `baseNote` and `notes`.
 | Per note | |
 |---|---|
 | `id` | The note's number |
-| The six expression keys | `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength` |
+| The seven expression keys | `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude` — each only if the note defines it |
 | `color` | If set |
 | `instrument` | If set |
 

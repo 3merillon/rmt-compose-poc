@@ -197,6 +197,7 @@ Each cache entry is:
   tempo: Fraction,
   beatsPerMeasure: Fraction,
   measureLength: Fraction,   // may be a plain {s, n, d, valueOf} object when derived
+  amplitude: Fraction,       // null unless the note defines one — see findAmplitude()
   corruptionFlags: number    // CORRUPT bitmask; 0 when clean
 }
 ```
@@ -346,6 +347,17 @@ const seconds = module.findMeasureLength(note)  // Fraction
 
 `beatsPerMeasure / tempo × 60`. `beatsPerMeasure` comes from the note, else from the nearest
 non-measure ancestor, else from the BaseNote.
+
+### findAmplitude()
+
+```javascript
+const gain = module.findAmplitude(note)  // Fraction — exact, unclamped
+```
+
+The amplitude a note sounds at: its own `amplitude` expression if it has one, otherwise the
+BaseNote's, otherwise `new Fraction(1)`. This is the same fallback the evaluator applies to
+`[id].a`. There is no `parentId` walk. Consumers clamp for their medium — the audio engine through
+`amplitudeToGain()` in `src/player/amplitude.js` (0–4).
 
 ### findInstrument()
 

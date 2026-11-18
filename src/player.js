@@ -635,10 +635,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         );
 
         // DSL shortname → variable name mapping
-        const dslShortToVar = { t: 'startTime', d: 'duration', f: 'frequency' };
+        const dslShortToVar = { t: 'startTime', d: 'duration', f: 'frequency', a: 'amplitude' };
 
-        // DSL patterns for [N].t, [N].d, [N].f
-        const dslVarRegex = new RegExp("\\[" + selectedNoteId + "\\]\\.(t|d|f)\\b", "g");
+        // DSL patterns for [N].t, [N].d, [N].f, [N].a
+        const dslVarRegex = new RegExp("\\[" + selectedNoteId + "\\]\\.(t|d|f|a)\\b", "g");
         // DSL helper patterns: beat([N]), tempo([N]), measure([N])
         const dslHelperRegex = new RegExp("\\b(beat|tempo|measure)\\s*\\(\\s*\\[" + selectedNoteId + "\\]\\s*\\)", "g");
 
@@ -672,6 +672,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 const varName = dslShortToVar[shortName];
                                 const noteExpr = selectedRaw[varName];
                                 if (noteExpr === undefined) {
+                                    // A note without its own amplitude was inheriting the
+                                    // BaseNote's, so that is what its dependents were reading.
+                                    if (varName === 'amplitude') return 'base.a';
                                     return (varName === 'frequency') ? '1' : '0';
                                 }
                                 // Wrap in parens to preserve operator precedence
@@ -694,6 +697,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                             newRawExp = newRawExp.replace(getVarRegex, (match, g1, g2) => {
                                 const varName = g1 || g2;
                                 let replacement = selectedRaw[varName];
+                                if (replacement === undefined && varName === "amplitude") {
+                                    // Inherited amplitude: the dependents were reading the BaseNote's.
+                                    return "module.baseNote.getVariable('amplitude')";
+                                }
                                 if (replacement === undefined) {
                                     replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
                                     console.warn("No raw value for", varName, "– using default", replacement);
@@ -760,6 +767,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
         
+        // amplitude only when the note defines its own; left undefined it is
+        // substituted by the BaseNote's (see updateDependentRawExpressions).
+        if (selectedNote.variables.amplitudeString) {
+            selectedRaw.amplitude = selectedNote.variables.amplitudeString;
+        }
+
         const selectedNoteInstrument = myModule.findInstrument(selectedNote);
         const directDependents = myModule.getDependentNotes(noteId);
         
@@ -1718,6 +1731,9 @@ if (canvasEl) {
             // Per-import cache to avoid repeating the same string remapping across many notes
             const exprRemapCache = new Map();
 
+            // The DSL spellings of the amplitude property (src/dsl/constants.js PropertyMap)
+            const __isAmplitudeProp = (prop) => prop === 'a' || prop === 'amp' || prop === 'amplitude';
+
             // Ensure imported expressions anchor to the actual drop target (requirement)
             // When dropping onto a measure bar: startTime anchors to measure, frequency anchors to BaseNote
             function updateExpression(expr, exprType = null) {
@@ -1733,7 +1749,7 @@ if (canvasEl) {
                 const hasBase = expr.indexOf('module.baseNote') !== -1;
                 const hasIds  = expr.indexOf('getNoteById(') !== -1;
                 // DSL format uses base.t, base.d, base.f, base.tempo, etc.
-                const hasDslBase = /\bbase\.([tdfbm]|tempo|bpm|ml)\b/.test(expr);
+                const hasDslBase = /\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/.test(expr);
                 // DSL format uses [id].prop for note references
                 const hasDslIds = /\[\d+\]\./.test(expr);
                 // DSL format uses tempo(base), beat(base), measure(base), tempo([id]), etc.
@@ -1746,13 +1762,17 @@ if (canvasEl) {
 
                 // Remap DSL [oldId].prop references using the mapping table
                 if (hasDslIds) {
-                    expr = expr.replace(/\[(\d+)\]\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, idStr, prop) {
+                    expr = expr.replace(/\[(\d+)\]\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/g, function(match, idStr, prop) {
                         const oldRef = parseInt(idStr, 10);
                         if (mapping.hasOwnProperty(oldRef)) {
                             const newId = mapping[oldRef];
                             // Measure bar drop: frequency refs to base note stay as base.f
                             if (targetIsMeasure && oldRef === 0 && exprType === 'frequency' && prop === 'f') {
                                 return 'base.f';
+                            }
+                            // ...and so do amplitude refs: a measure bar has no loudness either
+                            if (targetIsMeasure && oldRef === 0 && __isAmplitudeProp(prop)) {
+                                return 'base.a';
                             }
                             return `[${newId}].${prop}`;
                         }
@@ -1783,14 +1803,17 @@ if (canvasEl) {
                     const anchorId = targetNote.id;
 
                     if (targetIsMeasure) {
-                        expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
+                        expr = expr.replace(/\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/g, function(match, prop) {
                             if (prop === 'f') {
                                 return 'base.f';
+                            }
+                            if (__isAmplitudeProp(prop)) {
+                                return 'base.a';
                             }
                             return `[${anchorId}].${prop}`;
                         });
                     } else {
-                        expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
+                        expr = expr.replace(/\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/g, function(match, prop) {
                             return `[${anchorId}].${prop}`;
                         });
                     }
@@ -1839,6 +1862,9 @@ if (canvasEl) {
                         expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
                             if (varName === 'frequency') {
                                 return "module.baseNote.getVariable('frequency')";
+                            }
+                            if (varName === 'amplitude') {
+                                return "module.baseNote.getVariable('amplitude')";
                             }
                             return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
                         });
@@ -1922,7 +1948,7 @@ if (canvasEl) {
                         // Check for legacy format and DSL format references that need remapping
                         const needsRemap = (originalString.indexOf('module.baseNote') !== -1) ||
                                            (originalString.indexOf('getNoteById(') !== -1) ||
-                                           (/\bbase\.([tdfbm]|tempo|bpm|ml)\b/.test(originalString)) ||
+                                           (/\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/.test(originalString)) ||
                                            (/\[\d+\]\./.test(originalString)) ||
                                            (/\b(tempo|beat|measure)\s*\(/.test(originalString));
                         const baseKey = key.slice(0, -6);
@@ -4370,6 +4396,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         const beatLen = 60 / baseTempo;
         const baseFreqFrac = base.getVariable('frequency');
         const baseFreq = toNumber(baseFreqFrac, 0);
+        const baseAmpFrac = myModule.findAmplitude(base);
         const t0Frac = notes[0].getVariable('startTime');
 
         const frac = (x) => {
@@ -4444,6 +4471,26 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 }
             }
 
+            // amplitude — only a note that defines its own carries one; the rest go on
+            // inheriting the copied base's. Verbatim when self-contained, otherwise
+            // rebuilt as a ratio of base.a so it still follows the piece-wide gain.
+            const aRaw = n.variables?.amplitudeString || '';
+            if (aRaw && selfContained(aRaw)) {
+                e.amplitude = renumber(aRaw);
+            } else if (aRaw && n.getVariable('amplitude') != null) {
+                const ampFrac = n.getVariable('amplitude');
+                try {
+                    if (baseAmpFrac.equals(0)) {
+                        e.amplitude = fracStr(ampFrac);
+                    } else {
+                        const r = ampFrac.div(baseAmpFrac);
+                        e.amplitude = r.equals(1) ? 'base.a' : `${fracStr(r)} * base.a`;
+                    }
+                } catch {
+                    e.amplitude = fracStr(ampFrac);
+                }
+            }
+
             if (n.properties.color) e.color = n.properties.color;
             if (n.properties.instrument) e.instrument = n.properties.instrument;
             outNotes.push(e);
@@ -4453,7 +4500,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         // never reference a note, which makes them safe to reuse as-is. startTime is
         // forced to 0: the earliest copied note sits ON the base.
         const baseOut = {};
-        for (const v of ['frequency', 'tempo', 'beatsPerMeasure', 'measureLength']) {
+        for (const v of ['frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude']) {
             const raw = base.variables?.[v + 'String'];
             if (typeof raw === 'string' && raw.trim()) {
                 baseOut[v] = raw;

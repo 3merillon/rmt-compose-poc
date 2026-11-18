@@ -89,6 +89,7 @@ The 100k figure is about **rendering**, not editing: `sync()` is the remaining b
   - Optional **pitch panning** (low notes left, high notes right) and a peak limiter
   - 9 instruments: 7 synthesized (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`) and 2 **multisampled** (`piano`, `violin`) cut from the CC0 VSCO-2 Community Edition library. Sample zones are decoded lazily, only for the notes about to play.
   - Instruments inherit down the frequency dependency chain; a note without an explicit instrument takes its ancestor's, falling back to the global default
+  - **Per-note amplitude** — an exact relative gain (`a`) like every other variable: `[1].a * (121/100)`. A note without one sounds at the BaseNote's; the default is 1, and playback clamps the result to 0–4
   - Click-free ADSR, 200 ms pause fade, 20 ms stop de-click
   - **Loop playback** — shift-click or long-press Play. Gapless at the seam: release tails and reverb ring across the loop boundary.
 
@@ -246,8 +247,9 @@ The DSL is a concise, mathematical notation for defining note relationships. Bot
 | `tempo` | tempo | — |
 | `bpm` | beatsPerMeasure | `beatsPerMeasure` |
 | `ml` | measureLength | `measureLength` |
+| `a` | amplitude | `amp`, `amplitude` |
 
-`tempo`, `bpm` and `ml` fall back to the base note when the referenced note doesn't define them. `t`, `d` and `f` do not inherit.
+`tempo`, `bpm`, `ml` and `a` fall back to the base note when the referenced note doesn't define them (`a` is 1 when the base note doesn't define it either). `t`, `d` and `f` do not inherit.
 
 ### Operators and Literals
 
@@ -294,6 +296,10 @@ beat(base)               # One beat
 beat(base) * 2           # Two beats
 beat(base) * (1/2)       # An eighth note
 beat(base) * base.bpm    # A full measure
+
+# Loudness (amplitude: an exact relative gain, 1 when unset)
+[1].a * (121/100)        # A little louder than note 1
+base.a * (1/2)           # Half the level of the piece
 ```
 
 <details>

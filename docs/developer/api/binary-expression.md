@@ -232,6 +232,7 @@ The bitmask lives in the same file:
 | `CORRUPT.TEMPO` | `0x08` |
 | `CORRUPT.BEATS_PER_MEASURE` | `0x10` |
 | `CORRUPT.MEASURE_LENGTH` | `0x20` |
+| `CORRUPT.AMPLITUDE` | `0x40` |
 
 ```javascript
 getCorruptionFlag(VAR.FREQUENCY)  // → 4, i.e. 1 << varIndex
@@ -323,7 +324,7 @@ try {
 } catch (e) {
   if (e instanceof DSLError) console.error(e.formatWithContext('base.z'))
 }
-// Unknown property 'z'. Valid properties: f (frequency), t (startTime), d (duration), tempo, bpm, ml (at column 6)
+// Unknown property 'z'. Valid properties: f (frequency), t (startTime), d (duration), a (amplitude), tempo, bpm, ml (at column 6)
 //
 // base.z
 //      ^
@@ -342,7 +343,7 @@ npm run perf:bench     # scripts/perf/bench-node.mjs
 
 ## The other two classes in this file
 
-`src/binary-note.js` also exports `BinaryNote` (six `BinaryExpression`s plus cached values) and
+`src/binary-note.js` also exports `BinaryNote` (seven `BinaryExpression`s plus cached values) and
 `BinaryModule` (a `Map` of them). **Neither is on the live path** — nothing imports them (their
 last consumer, the dead `src/module-serializer.js`, has been deleted from the repo). The live
 containers are `Note` and `Module`. Do not build against them without checking that first.
@@ -351,5 +352,5 @@ containers are `Note` and `Module`. Do not build against them without checking t
 
 - [Expression Compiler](/developer/core/expression-compiler) — routing, the legacy parser, the cache
 - [Binary Evaluator](/developer/core/binary-evaluator) — the stack VM, `POW`, and the fallback defaults
-- [Note Class](/developer/api/note) — the owner of six of these
+- [Note Class](/developer/api/note) — the owner of seven of these
 - [Expression Syntax](/reference/expressions/syntax) — the DSL grammar

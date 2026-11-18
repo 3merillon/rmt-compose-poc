@@ -220,6 +220,29 @@ function rawValueSeed(v) {
     return (v && typeof v.toFraction === 'function') ? v.toFraction() : String(v);
 }
 
+// The amplitude row. Unlike the other expression rows it is shown even when the
+// note has no amplitude of its own — that is the only way to give it one. The
+// value is then the one the note sounds at (the BaseNote's, else 1), flagged as
+// inherited, and Raw is empty. A silence has nothing to be loud, so it only
+// gets the row if it carries an amplitude anyway (hand-written JSON).
+function collectAmplitude(note, module, depGraph) {
+    const isBase = note === module.baseNote;
+    const hasOwn = note.hasExpression('amplitude');
+    if (!isBase && !hasOwn && !note.getVariable('frequency')) return null;
+
+    // ≈ follows whichever note's expression produced the value (0x40 = amplitude).
+    const sourceId = hasOwn ? note.id : 0;
+    const isCorrupted = !!(depGraph && typeof depGraph.isPropertyCorrupted === 'function'
+        && depGraph.isPropertyCorrupted(sourceId, 0x40));
+
+    return {
+        evaluated: module.findAmplitude(note),
+        raw: hasOwn ? (note.variables.amplitudeString || '') : '',
+        isInherited: !hasOwn && !isBase,
+        isCorrupted
+    };
+}
+
 function collectVariables(note, measureId, moduleInstance) {
     let variables = {};
     const module = moduleInstance || (typeof getModule === 'function' ? getModule() : null);
@@ -241,7 +264,18 @@ function collectVariables(note, measureId, moduleInstance) {
         : 0;
 
     if (note === module.baseNote) {
+        let amplitudePlaced = false;
+        const placeAmplitude = () => {
+            if (amplitudePlaced) return;
+            amplitudePlaced = true;
+            const entry = collectAmplitude(note, module, depGraph);
+            if (entry) variables.amplitude = entry;
+        };
+
         Object.keys(note.variables).forEach(key => {
+            // amplitude gets its row whether or not the BaseNote defines one
+            if (key === 'amplitude' || key === 'amplitudeString') return;
+            if (key === 'color' || key === 'instrument') placeAmplitude();
             if (!key.endsWith('String') && key !== 'measureLength') {
                 variables[key] = {
                     evaluated: note.getVariable(key),
@@ -250,6 +284,7 @@ function collectVariables(note, measureId, moduleInstance) {
                 };
             }
         });
+        placeAmplitude();
 
         if (!variables.instrument) {
             const hasOwnInstrument = note.properties.instrument != null;
@@ -275,7 +310,7 @@ function collectVariables(note, measureId, moduleInstance) {
             console.error("Invalid measure note:", noteInstance);
         }
     } else {
-        const variableNames = ['startTime', 'duration', 'frequency', 'color'];
+        const variableNames = ['startTime', 'duration', 'frequency', 'amplitude', 'color'];
         // Map variable names to their corruption flag bits
         const flagMap = { startTime: 0x01, duration: 0x02, frequency: 0x04 };
 
@@ -285,6 +320,11 @@ function collectVariables(note, measureId, moduleInstance) {
             && depGraph.isFrequencyTransitivelyCorrupted(noteId);
 
         variableNames.forEach(key => {
+            if (key === 'amplitude') {
+                const entry = collectAmplitude(note, module, depGraph);
+                if (entry) variables.amplitude = entry;
+                return;
+            }
             if (note.variables && note.variables[key] !== undefined) {
                 const propertyCorrupted = (corruptionFlags & (flagMap[key] || 0)) !== 0;
 
@@ -1248,6 +1288,37 @@ function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null, use
     return `${ratioFrac}.mul(module.baseNote.getVariable('frequency'))`;
 }
 
+// Create BaseNote-relative expression for amplitude (exact Fraction in).
+// base.a is the piece-wide gain, so the note is written as a ratio of it and
+// goes on following it. A BaseNote gain of 0 cannot carry a ratio: the value
+// is then kept as a constant.
+function createBaseNoteAmplitudeExpr(amplitude, moduleInstance, useDSL = false) {
+    const baseRef = useDSL ? 'base.a' : `module.baseNote.getVariable('amplitude')`;
+    const baseAmp = moduleInstance.findAmplitude(moduleInstance.baseNote);
+
+    if (baseAmp.equals(0)) {
+        return useDSL ? toDSLFractionString(amplitude) : toFractionString(amplitude);
+    }
+
+    const ratio = amplitude.div(baseAmp);
+    if (ratio.equals(1)) return baseRef;
+    return useDSL
+        ? `base.a * ${toDSLFractionString(ratio)}`
+        : `${toFractionString(ratio)}.mul(${baseRef})`;
+}
+
+// An irrational amplitude (e.g. a decibel step written as a power) keeps its
+// own expression: rewriting it from the evaluated value would replace the
+// power with a rational approximation and silently drop the ≈.
+function amplitudeIsExact(moduleInstance, noteId) {
+    try {
+        const depGraph = moduleInstance.getDependencyGraph();
+        return !depGraph.isPropertyCorrupted(noteId, 0x40) && !depGraph.isPropertyCorrupted(0, 0x40);
+    } catch {
+        return true;
+    }
+}
+
 export function evaluateNoteToBaseNote(noteId) {
     const moduleInstance = getModule();
     const note = moduleInstance.getNoteById(parseInt(noteId, 10));
@@ -1258,7 +1329,7 @@ export function evaluateNoteToBaseNote(noteId) {
 
     // Check if this is a measure note (only has startTime)
     const isMeasureNote = note.variables.startTime && !note.variables.duration && !note.variables.frequency;
-    const variablesToProcess = isMeasureNote ? ['startTime'] : ['startTime', 'duration', 'frequency'];
+    const variablesToProcess = isMeasureNote ? ['startTime'] : ['startTime', 'duration', 'frequency', 'amplitude'];
     let success = true;
 
     // Detect if the note uses DSL format (check any expression)
@@ -1280,6 +1351,8 @@ export function evaluateNoteToBaseNote(noteId) {
             newExpr = createBaseNoteDurationExpr(currentValue, moduleInstance, useDSL);
         } else if (varName === 'frequency') {
             newExpr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note, useDSL);
+        } else if (varName === 'amplitude' && amplitudeIsExact(moduleInstance, note.id)) {
+            newExpr = createBaseNoteAmplitudeExpr(currentValue, moduleInstance, useDSL);
         }
 
         if (newExpr) {
@@ -1402,6 +1475,14 @@ export function evaluateEntireModule() {
                     updates.push({ noteId, varName: 'frequency', expr });
                 }
             }
+
+            if (note.hasExpression('amplitude') && amplitudeIsExact(moduleInstance, noteId)) {
+                const currentValue = note.getVariable('amplitude');
+                if (currentValue != null) {
+                    const expr = createBaseNoteAmplitudeExpr(currentValue, moduleInstance, useDSL);
+                    updates.push({ noteId, varName: 'amplitude', expr });
+                }
+            }
         }
     }
 
@@ -1464,6 +1545,11 @@ export function liberateDependencies(noteId) {
             }
         }
     });
+    // amplitude only when the note defines its own; left undefined, references
+    // to it are replaced by the BaseNote's (what the note was inheriting).
+    if (selectedNote.variables.amplitudeString) {
+        selectedRaw.amplitude = selectedNote.variables.amplitudeString;
+    }
 
     if (typeof externalFunctions.updateDependentRawExpressions === 'function') {
         externalFunctions.updateDependentRawExpressions(noteId, selectedRaw);

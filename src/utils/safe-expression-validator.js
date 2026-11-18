@@ -176,7 +176,8 @@ export function buildEvaluationCache(moduleInstance) {
                 frequency: safeGetVariable(baseNote, 'frequency'),
                 tempo: safeGetVariable(baseNote, 'tempo'),
                 beatsPerMeasure: safeGetVariable(baseNote, 'beatsPerMeasure'),
-                measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(baseNote) : null
+                measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(baseNote) : null,
+                amplitude: safeGetVariable(baseNote, 'amplitude')
             });
         } catch (e) {
             console.warn('buildEvaluationCache: Error caching baseNote:', e);
@@ -199,7 +200,8 @@ export function buildEvaluationCache(moduleInstance) {
                     frequency: safeGetVariable(note, 'frequency'),
                     tempo: moduleInstance.findTempo ? moduleInstance.findTempo(note) : null,
                     beatsPerMeasure: safeGetVariable(note, 'beatsPerMeasure'),
-                    measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(note) : null
+                    measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(note) : null,
+                    amplitude: safeGetVariable(note, 'amplitude')
                 });
             } catch (e) {
                 // Skip notes that can't be cached

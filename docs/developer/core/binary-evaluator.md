@@ -44,7 +44,7 @@ There is **no recursion**. Topological order guarantees a note's dependencies ar
 
 1. the caller's `evalCache` entry for that note id;
 2. the evaluator's own internal `cache` (`getCachedValue()`);
-3. **for `TEMPO`, `BEATS_PER_MEASURE` and `MEASURE_LENGTH` only** — the same two lookups again against note **0**, the BaseNote (`:1015-1032`);
+3. **for `TEMPO`, `BEATS_PER_MEASURE`, `MEASURE_LENGTH` and `AMPLITUDE` only** — the same two lookups again against note **0**, the BaseNote (`:1015-1032`);
 4. a **hard-coded default**.
 
 Step 3 is the inheritance rule users feel: `[5].tempo` on a note with no tempo expression yields the BaseNote's tempo. `startTime`, `duration` and `frequency` do **not** inherit.
@@ -58,6 +58,7 @@ Step 3 is the inheritance rule users feel: `[5].tempo` on a note with no tempo e
 | `tempo` | `60` |
 | `beatsPerMeasure` | `4` |
 | `measureLength` | `4` |
+| `amplitude` | `1` |
 
 (`binary-evaluator.js:1034-1046`.) Delete a note and its dependents keep evaluating against these — a dependent's frequency becomes 440 Hz. `Module.removeNote()` still does not rewrite dependents, but it now emits a `console.warn` listing every dependent left dangling (the UI's delete paths liberate dependents first; the warning guards programmatic callers and hand-authored JSON).
 :::
@@ -147,16 +148,17 @@ reset() { this.index = 0; }            // rewind — called once per batch
 
 ## `evaluateNote()`
 
-`:1287-1401`. Evaluates one note's six expressions in a fixed order and returns:
+`:1287-1401`. Evaluates one note's seven expressions in a fixed order and returns:
 
 ```javascript
 {
   startTime, duration, frequency, tempo, beatsPerMeasure, measureLength,
+  amplitude,        // null unless the note defines one
   corruptionFlags   // u8 bitmask
 }
 ```
 
-Order: **tempo → beatsPerMeasure → frequency → measureLength → startTime → duration** (`:1359-1368`). Expressions within a note may reference each other — `measureLength` reads the `tempo` evaluated a moment earlier — so the in-progress result object is written into the shared cache *before* evaluation begins:
+Order: **tempo → beatsPerMeasure → frequency → measureLength → startTime → duration → amplitude** (`:1359-1368`). Expressions within a note may reference each other — `measureLength` reads the `tempo` evaluated a moment earlier — so the in-progress result object is written into the shared cache *before* evaluation begins:
 
 ```javascript
 const workingCache = evalCache || new Map();
@@ -167,7 +169,7 @@ workingCache.set(note.id, result);   // :1305-1306
 This used to clone the whole evaluation cache for every note, which made a full evaluation **O(N²)**. Under topological order every dependency is already final before its dependent runs, and the caller overwrites the same key with the finished result — so writing straight into the shared map is safe. The rationale is in the source comment at `:1294-1300`.
 :::
 
-After each property, if `_lastEvalWasCorrupted` was set by a `POW`, the matching bit is OR-ed into `corruptionFlags`. The bits are the `CORRUPT` mask from `binary-note.js:55-62`: `startTime 0x01`, `duration 0x02`, `frequency 0x04`, `tempo 0x08`, `beatsPerMeasure 0x10`, `measureLength 0x20`.
+After each property, if `_lastEvalWasCorrupted` was set by a `POW`, the matching bit is OR-ed into `corruptionFlags`. The bits are the `CORRUPT` mask from `binary-note.js:55-62`: `startTime 0x01`, `duration 0x02`, `frequency 0x04`, `tempo 0x08`, `beatsPerMeasure 0x10`, `measureLength 0x20`, `amplitude 0x40`.
 
 ### The synthetic `measureLength`
 

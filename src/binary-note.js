@@ -39,6 +39,7 @@ export const VAR = {
   TEMPO: 3,
   BEATS_PER_MEASURE: 4,
   MEASURE_LENGTH: 5,
+  AMPLITUDE: 6,
 };
 
 // Reverse mapping for decompilation
@@ -49,6 +50,7 @@ export const VAR_NAMES = {
   3: 'tempo',
   4: 'beatsPerMeasure',
   5: 'measureLength',
+  6: 'amplitude',
 };
 
 // Corruption flags (bitmask indicating which properties contain irrational values)
@@ -59,11 +61,12 @@ export const CORRUPT = {
   TEMPO:            0x08,
   BEATS_PER_MEASURE: 0x10,
   MEASURE_LENGTH:   0x20,
+  AMPLITUDE:        0x40,
 };
 
 /**
  * Get corruption flag for a variable index
- * @param {number} varIndex - Variable index (0-5)
+ * @param {number} varIndex - Variable index (0-6)
  * @returns {number} Corruption flag bitmask
  */
 export function getCorruptionFlag(varIndex) {
@@ -335,6 +338,7 @@ export class BinaryNote {
     this.tempo = new BinaryExpression();
     this.beatsPerMeasure = new BinaryExpression();
     this.measureLength = new BinaryExpression();
+    this.amplitude = new BinaryExpression();
 
     // Non-expression properties (stored directly)
     this.color = 'rgba(255, 0, 0, 0.5)';
@@ -347,6 +351,7 @@ export class BinaryNote {
     this._cachedTempo = null;
     this._cachedBPM = null;
     this._cachedMeasureLen = null;
+    this._cachedAmp = null;
 
     // Generation counter for cache invalidation
     this._cacheGen = -1;
@@ -363,6 +368,7 @@ export class BinaryNote {
       case 'tempo': return this.tempo;
       case 'beatsPerMeasure': return this.beatsPerMeasure;
       case 'measureLength': return this.measureLength;
+      case 'amplitude': return this.amplitude;
       default: return null;
     }
   }
@@ -378,6 +384,7 @@ export class BinaryNote {
       case 'tempo': this.tempo = expr; break;
       case 'beatsPerMeasure': this.beatsPerMeasure = expr; break;
       case 'measureLength': this.measureLength = expr; break;
+      case 'amplitude': this.amplitude = expr; break;
     }
   }
 
@@ -392,6 +399,7 @@ export class BinaryNote {
       case 'tempo': return this._cachedTempo;
       case 'beatsPerMeasure': return this._cachedBPM;
       case 'measureLength': return this._cachedMeasureLen;
+      case 'amplitude': return this._cachedAmp;
       default: return null;
     }
   }
@@ -407,6 +415,7 @@ export class BinaryNote {
       case 'tempo': this._cachedTempo = value; break;
       case 'beatsPerMeasure': this._cachedBPM = value; break;
       case 'measureLength': this._cachedMeasureLen = value; break;
+      case 'amplitude': this._cachedAmp = value; break;
     }
   }
 
@@ -420,6 +429,7 @@ export class BinaryNote {
     this._cachedTempo = null;
     this._cachedBPM = null;
     this._cachedMeasureLen = null;
+    this._cachedAmp = null;
     this._cacheGen = -1;
   }
 
@@ -441,6 +451,7 @@ export class BinaryNote {
     addDeps(this.tempo);
     addDeps(this.beatsPerMeasure);
     addDeps(this.measureLength);
+    addDeps(this.amplitude);
 
     return deps;
   }
@@ -454,7 +465,8 @@ export class BinaryNote {
            this.frequency.referencesBase ||
            this.tempo.referencesBase ||
            this.beatsPerMeasure.referencesBase ||
-           this.measureLength.referencesBase;
+           this.measureLength.referencesBase ||
+           this.amplitude.referencesBase;
   }
 
   /**
@@ -468,6 +480,7 @@ export class BinaryNote {
     copy.tempo = this.tempo.clone();
     copy.beatsPerMeasure = this.beatsPerMeasure.clone();
     copy.measureLength = this.measureLength.clone();
+    copy.amplitude = this.amplitude.clone();
     copy.color = this.color;
     copy.instrument = this.instrument;
     return copy;

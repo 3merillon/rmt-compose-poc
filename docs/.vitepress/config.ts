@@ -175,7 +175,8 @@ export default defineConfig({
             { text: 'startTime', link: '/reference/properties/start-time' },
             { text: 'duration', link: '/reference/properties/duration' },
             { text: 'tempo', link: '/reference/properties/tempo' },
-            { text: 'beatsPerMeasure', link: '/reference/properties/beats-per-measure' }
+            { text: 'beatsPerMeasure', link: '/reference/properties/beats-per-measure' },
+            { text: 'amplitude', link: '/reference/properties/amplitude' }
           ]
         },
         {

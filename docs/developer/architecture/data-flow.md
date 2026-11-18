@@ -89,13 +89,13 @@ numerically, so the order is deterministic. On a cycle it does **not** throw —
 `console.warn`s `Dependency cycle detected!` and appends the stuck notes anyway.
 
 Each `evaluateNote()` (`binary-evaluator.js:1214`) evaluates in a fixed order —
-**tempo → beatsPerMeasure → frequency → measureLength → startTime → duration** — and ORs a
+**tempo → beatsPerMeasure → frequency → measureLength → startTime → duration → amplitude** — and ORs a
 corruption bit for whichever property was being evaluated when an irrational `^` result appeared.
 
 A cache entry is:
 
 ```javascript
-{ startTime, duration, frequency, tempo, beatsPerMeasure, measureLength, corruptionFlags }
+{ startTime, duration, frequency, tempo, beatsPerMeasure, measureLength, amplitude, corruptionFlags }
 ```
 
 ::: warning Two gotchas in the cache
@@ -105,10 +105,10 @@ rather than a real `Fraction` (`binary-evaluator.js:1321`). And pooled fractions
 rewound at the start of the next batch.
 :::
 
-An unresolvable reference does **not** throw. `LOAD_REF` falls back to the BaseNote for the three
-inheritable properties (`tempo`, `beatsPerMeasure`, `measureLength`), and otherwise pushes a
-hard-coded default: `startTime 0`, `duration 1`, `frequency 440`, `tempo 60`, `bpm 4`,
-`measureLength 4`. This is why deleting a note does not break its dependents — they silently pick up
+An unresolvable reference does **not** throw. `LOAD_REF` falls back to the BaseNote for the four
+inheritable properties (`tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`), and otherwise
+pushes a hard-coded default: `startTime 0`, `duration 1`, `frequency 440`, `tempo 60`, `bpm 4`,
+`measureLength 4`, `amplitude 1`. This is why deleting a note does not break its dependents — they silently pick up
 these defaults.
 
 Finally, `Module._updateCorruptionFlags(cache, dirtyIds)` pushes each result's `corruptionFlags`

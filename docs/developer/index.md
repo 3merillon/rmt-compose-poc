@@ -123,7 +123,7 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 | `src/main.js` | Entry point (`index.html` loads this). Registers instruments, boots WASM, modals, menu, settings. |
 | `src/player.js` | The orchestrator: transport, selection, drag/resize commits, undo wiring, scale controls. ~6.6k lines. |
 | `src/module.js` | `Module` — notes, dependency registration, evaluation, JSON load/save, reindexing. |
-| `src/note.js` | `Note` — six `BinaryExpression`s plus `color` / `instrument`. |
+| `src/note.js` | `Note` — seven `BinaryExpression`s plus `color` / `instrument`. |
 | `src/dsl/` | The primary expression language: `lexer` → `parser` → `compiler` → `decompiler`, plus `simplify`. |
 | `src/expression-compiler.js` | The **legacy** method-chain parser, the format router (`isDSLSyntax`), and the 4000-entry LRU compile cache. |
 | `src/binary-note.js` | `OP`, `VAR`, `CORRUPT`, `BinaryExpression`. |

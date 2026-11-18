@@ -80,7 +80,7 @@ const note = module.addNote({
 `addNote()` assigns `id = this.nextId++`, compiles each expression to bytecode, registers the note's
 dependencies, marks it dirty, invalidates the module end-time cache, and returns the `Note`.
 
-Any of the six expression keys is optional. Which ones a note *has* is what determines its kind:
+Any of the seven expression keys is optional. Which ones a note *has* is what determines its kind:
 
 | Kind | Rule |
 |---|---|
@@ -226,7 +226,7 @@ reentrant call it serves the in-progress cache rather than restarting the whole 
 A result:
 
 ```javascript
-{ startTime, duration, frequency, tempo, beatsPerMeasure, measureLength, corruptionFlags }
+{ startTime, duration, frequency, tempo, beatsPerMeasure, measureLength, amplitude, corruptionFlags }
 ```
 
 ```javascript

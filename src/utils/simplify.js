@@ -207,7 +207,8 @@ function evaluateExpr(expr, moduleInstance) {
           frequency: baseNote.getVariable('frequency'),
           tempo: baseNote.getVariable('tempo'),
           beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
-          measureLength: moduleInstance.findMeasureLength?.(baseNote)
+          measureLength: moduleInstance.findMeasureLength?.(baseNote),
+          amplitude: baseNote.getVariable('amplitude')
         });
       } catch {}
     }
@@ -221,7 +222,8 @@ function evaluateExpr(expr, moduleInstance) {
             frequency: noteObj.getVariable?.('frequency'),
             tempo: moduleInstance.findTempo?.(noteObj),
             beatsPerMeasure: noteObj.getVariable?.('beatsPerMeasure'),
-            measureLength: moduleInstance.findMeasureLength?.(noteObj)
+            measureLength: moduleInstance.findMeasureLength?.(noteObj),
+            amplitude: noteObj.getVariable?.('amplitude')
           });
         } catch {}
       }

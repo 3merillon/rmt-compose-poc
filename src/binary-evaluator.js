@@ -935,6 +935,7 @@ export class BinaryEvaluator {
       case VAR.TEMPO: return cached.tempo;
       case VAR.BEATS_PER_MEASURE: return cached.beatsPerMeasure;
       case VAR.MEASURE_LENGTH: return cached.measureLength;
+      case VAR.AMPLITUDE: return cached.amplitude;
       default: return null;
     }
   }
@@ -1003,6 +1004,7 @@ export class BinaryEvaluator {
                 case VAR.TEMPO: value = cached.tempo; break;
                 case VAR.BEATS_PER_MEASURE: value = cached.beatsPerMeasure; break;
                 case VAR.MEASURE_LENGTH: value = cached.measureLength; break;
+                case VAR.AMPLITUDE: value = cached.amplitude; break;
               }
             }
           }
@@ -1012,9 +1014,9 @@ export class BinaryEvaluator {
             value = this.getCachedValue(noteId, varIdx);
           }
 
-          // For inheritable properties (tempo, beatsPerMeasure, measureLength),
-          // fall back to base note if not found on the target note
-          if (!value && (varIdx === VAR.TEMPO || varIdx === VAR.BEATS_PER_MEASURE || varIdx === VAR.MEASURE_LENGTH)) {
+          // For inheritable properties (tempo, beatsPerMeasure, measureLength,
+          // amplitude), fall back to base note if not found on the target note
+          if (!value && (varIdx === VAR.TEMPO || varIdx === VAR.BEATS_PER_MEASURE || varIdx === VAR.MEASURE_LENGTH || varIdx === VAR.AMPLITUDE)) {
             // Try base note (ID 0)
             if (evalCache) {
               const baseCache = evalCache.get(0);
@@ -1023,6 +1025,7 @@ export class BinaryEvaluator {
                   case VAR.TEMPO: value = baseCache.tempo; break;
                   case VAR.BEATS_PER_MEASURE: value = baseCache.beatsPerMeasure; break;
                   case VAR.MEASURE_LENGTH: value = baseCache.measureLength; break;
+                  case VAR.AMPLITUDE: value = baseCache.amplitude; break;
                 }
               }
             }
@@ -1042,6 +1045,7 @@ export class BinaryEvaluator {
               case VAR.TEMPO: this.push(this.pool.alloc(60, 1)); break;
               case VAR.BEATS_PER_MEASURE: this.push(this.pool.alloc(4, 1)); break;
               case VAR.MEASURE_LENGTH: this.push(this.pool.alloc(4, 1)); break;
+              case VAR.AMPLITUDE: this.push(this.pool.alloc(1, 1)); break; // unity gain
               default: this.push(this.pool.alloc(0, 1));
             }
           } else {
@@ -1066,6 +1070,7 @@ export class BinaryEvaluator {
                 case VAR.TEMPO: value = cached.tempo; break;
                 case VAR.BEATS_PER_MEASURE: value = cached.beatsPerMeasure; break;
                 case VAR.MEASURE_LENGTH: value = cached.measureLength; break;
+                case VAR.AMPLITUDE: value = cached.amplitude; break;
               }
             }
           }
@@ -1083,6 +1088,7 @@ export class BinaryEvaluator {
               case VAR.TEMPO: this.push(this.pool.alloc(60, 1)); break;
               case VAR.BEATS_PER_MEASURE: this.push(this.pool.alloc(4, 1)); break;
               case VAR.MEASURE_LENGTH: this.push(this.pool.alloc(4, 1)); break;
+              case VAR.AMPLITUDE: this.push(this.pool.alloc(1, 1)); break; // unity gain
               default: this.push(this.pool.alloc(0, 1));
             }
           } else {
@@ -1292,6 +1298,9 @@ export class BinaryEvaluator {
       tempo: null,
       beatsPerMeasure: null,
       measureLength: null,
+      // Stays null when the note does not define it: readers fall back to the
+      // BaseNote's amplitude, then to 1 (see Module.findAmplitude).
+      amplitude: null,
       corruptionFlags: 0, // Track irrational values (TET scales)
     };
 
@@ -1326,6 +1335,7 @@ export class BinaryEvaluator {
       tempo: 0x08,
       beatsPerMeasure: 0x10,
       measureLength: 0x20,
+      amplitude: 0x40,
     };
 
     const safeEvaluate = (name) => {
@@ -1367,7 +1377,10 @@ export class BinaryEvaluator {
     result.startTime = safeEvaluate('startTime');
     result.duration = safeEvaluate('duration');
 
-    // 4. If measureLength wasn't explicitly defined but this is a measure note or base note,
+    // 4. amplitude last: a gain may be written in terms of anything above
+    result.amplitude = safeEvaluate('amplitude');
+
+    // 5. If measureLength wasn't explicitly defined but this is a measure note or base note,
     // compute it from beatsPerMeasure and tempo. This is needed because findMeasureLength()
     // references are compiled as LOAD_REF which looks up measureLength in the cache.
     // Only compute for measure notes (have startTime, no duration/frequency) or base note (id=0)

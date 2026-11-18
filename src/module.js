@@ -790,6 +790,20 @@ export class Module {
   }
 
   /**
+   * Find the amplitude (relative gain) a note sounds at: its own when it
+   * defines one, else the BaseNote's, else 1. Same fallback the evaluator
+   * applies to `[id].a`, so playback, export and expressions agree.
+   * @returns {Fraction} exact and unclamped — each consumer clamps for its medium
+   */
+  findAmplitude(note) {
+    if (note && note.id !== 0) {
+      const own = note.getVariable('amplitude');
+      if (own) return own;
+    }
+    return this.baseNote.getVariable('amplitude') || new Fraction(1);
+  }
+
+  /**
    * Find instrument for a note
    */
   findInstrument(note) {
@@ -953,7 +967,7 @@ export class Module {
 
     // Export base note
     const baseObj = {};
-    const baseExprs = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+    const baseExprs = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
     for (const name of baseExprs) {
       const source = this.baseNote.getExpressionSource(name);
       if (source) {
@@ -1091,7 +1105,7 @@ export class Module {
 
       // Create new variables with updated references
       const variables = {};
-      const exprNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+      const exprNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
 
       for (const name of exprNames) {
         const source = note.getExpressionSource(name);

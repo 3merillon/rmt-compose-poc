@@ -74,7 +74,7 @@ These answer *"whose **X** depends on this note's **Y**?"* — the discriminatio
 Each is `Map<dependencyId, Set<dependentId>>`.
 
 ::: info Only three properties get property-level indexes
-`startTime`, `frequency` and `duration`. `tempo` and `beatsPerMeasure` do not. `measureLength` (VAR 5) is deliberately bucketed **with duration** — a measure length is derived from a duration, so a reference to `[N].ml` registers in the `…OnDuration…` maps (`:129`, `:165`, with the reasoning at `:124-129`).
+`startTime`, `frequency` and `duration`. `tempo`, `beatsPerMeasure` and `amplitude` do not. `measureLength` (VAR 5) is deliberately bucketed **with duration** — a measure length is derived from a duration, so a reference to `[N].ml` registers in the `…OnDuration…` maps (`:129`, `:165`, with the reasoning at `:124-129`).
 :::
 
 ### 4. Corruption

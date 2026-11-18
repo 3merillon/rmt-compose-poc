@@ -7,7 +7,7 @@ description: The floating panel that opens when you click a note, silence, measu
 
 Click one thing in the workspace — a note, a silence, a measure bar's triangle, or the BaseNote circle — and the note widget opens on it. It is the only place in the app where you read and edit a note's **expressions**, and it is where you create new notes, transpose, change instruments, and delete.
 
-The widget fits itself to what you clicked. A measure shows two rows; the BaseNote shows five and a different delete button. Nothing is greyed out — sections that don't apply are simply not there.
+The widget fits itself to what you clicked. A measure shows two rows; the BaseNote shows six and a different delete button. Nothing is greyed out — sections that don't apply are simply not there.
 
 ![The note widget open on a note, showing the evaluated and raw value of each variable](/img/note-widget.png)
 
@@ -55,6 +55,7 @@ Rows appear in the order listed.
 | `FREQUENCY` (+ ▲/▼ arrows) | yes | yes | — | — |
 | `TEMPO` | yes | — | — | — |
 | `BEATSPERMEASURE` | yes | — | — | — |
+| `AMPLITUDE` | yes | yes | only if set | — |
 | `COLOR` | only if set | yes | yes | — |
 | `INSTRUMENT` | yes | yes | yes | — |
 | `MEASURE DURATION` | — | — | — | yes |
@@ -89,7 +90,7 @@ The full grammar is in [Expressions](/user-guide/notes/expressions) and [Syntax 
 
 Typing in a `Raw:` field changes nothing. The `Save` button is **hidden until you type** — it appears on your first keystroke — and only pressing it commits the edit. Saving pauses playback, validates the expression, simplifies it, rewrites the note and everything downstream of it, redraws, and pushes an undo entry.
 
-Validation rejects an empty expression, an expression that references its own note, and an expression that would create a circular dependency.
+Validation rejects an empty expression, an expression that references its own note, and an expression that would create a circular dependency. The one exception to the first rule is the `AMPLITUDE` row, where saving an empty field is how you remove the value — see [Amplitude](#amplitude).
 
 When a save is rejected, the reason appears **inline**: the validator's message shows in red under the `Save` button and the `Raw:` field gets a red border. Both clear on your next keystroke or your next save attempt. (`COLOR` is the odd one out: an unparseable colour raises a browser alert telling you the accepted formats — hex, `rgb()`, `rgba()`, `hsl()`, `hsla()`, or a named colour.)
 
@@ -185,6 +186,24 @@ Unlike `DURATION`, this row has no note-length icon buttons: type the value, pre
 
 Measures are what a `measure([N])` reference in a startTime expression resolves against — see [Expressions](/user-guide/notes/expressions) — and the triangles along the bottom of the [workspace](/user-guide/interface/workspace#measures) are the same objects you are editing here.
 
+## Amplitude
+
+The `AMPLITUDE` row is a note's loudness, as a relative gain: `1` is the default level, `2` twice the amplitude, `(1/2)` half. It is an ordinary variable row — `Evaluated:` over `Raw:` — and takes any expression:
+
+```
+base.a * (3/2)          # an accent against the piece's level
+(121/100) * [5].a       # a touch louder than note 5
+```
+
+Unlike the other expression rows it is there even when the note has no amplitude of its own, because that is how you give it one:
+
+- **`Inherited: <value>`** (in grey), with an empty `Raw:` field — the note defines none and sounds at the BaseNote's amplitude, or at `1` if the BaseNote defines none either.
+- **`Evaluated: <value>`** — the note has its own expression.
+
+Type an expression and press `Save` to set it. Clear the field and press `Save` to remove it again; the note goes back to inheriting. On the BaseNote the row sets the level of every note that does not define its own — with nothing set it reads `Evaluated: 1`.
+
+Playback clamps the value to 0–4. Silences only show the row if they already carry an amplitude; measures never do. The full rules are in the [amplitude reference](/reference/properties/amplitude).
+
 ## Instrument
 
 The `INSTRUMENT` row shows one line of status and a dropdown.
@@ -246,7 +265,7 @@ The **`EVALUATE`** section rewrites expressions to remove dependencies. Every bu
 | Button | Shown on | What it does |
 |---|---|---|
 | `Liberate Dependencies` | notes, silences | Replaces every reference *to this note* with this note's own raw expressions. The dependents stop depending on it; the note itself survives. |
-| `Evaluate to BaseNote` | everything except the BaseNote (measures included) | Rewrites this note's startTime, duration and frequency so they reference only the BaseNote. All its other dependencies are lost. |
+| `Evaluate to BaseNote` | everything except the BaseNote (measures included) | Rewrites this note's startTime, duration, frequency and amplitude so they reference only the BaseNote. All its other dependencies are lost. |
 | `Evaluate Module` | the BaseNote only | Does the same to every note in the module at once. |
 
 While the widget is open, the notes this one **depends on** and the notes that **depend on it** are highlighted in the workspace — so you can see the blast radius before you confirm. See [Dependencies](/user-guide/notes/dependencies).

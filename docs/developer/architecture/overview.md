@@ -11,8 +11,8 @@ undo stack, the renderer's hatching — exists to make that idea fast and honest
 
 ## Design principles
 
-1. **Expression-driven.** All six note properties (`startTime`, `duration`, `frequency`, `tempo`,
-   `beatsPerMeasure`, `measureLength`) are text expressions. Move a parent and its children follow,
+1. **Expression-driven.** All seven note properties (`startTime`, `duration`, `frequency`, `tempo`,
+   `beatsPerMeasure`, `measureLength`, `amplitude`) are text expressions. Move a parent and its children follow,
    because they never held a number in the first place.
 2. **Compiled, never evaluated.** Expressions compile to a compact bytecode and run on a stack VM.
    Nothing in the app calls `eval()` or `new Function()` — that is a security guarantee, enforced in
@@ -111,7 +111,7 @@ note widget shows it under Save); the load paths catch per-note and leave the pr
 graph, the evaluators, and the dirty set. It is also the JSON load/save path. See
 [Module System](/developer/architecture/module-system).
 
-**`Note`** (`src/note.js`) holds six `BinaryExpression`s plus non-expression `properties.color` and
+**`Note`** (`src/note.js`) holds seven `BinaryExpression`s plus non-expression `properties.color` and
 `properties.instrument`.
 
 **`BinaryExpression`** (`src/binary-note.js`) is a growable `Uint8Array` of bytecode plus a
@@ -210,7 +210,7 @@ src/
 ├── main.js                     # entry point (index.html loads this)
 ├── player.js                   # orchestrator: transport, selection, commits, undo wiring
 ├── module.js                   # Module: notes, deps, evaluation, JSON load/save, reindex
-├── note.js                     # Note: six BinaryExpressions + color/instrument
+├── note.js                     # Note: seven BinaryExpressions + color/instrument
 ├── stack-click.js              # click-through a stack of overlapping notes
 ├── expression-compiler.js      # LEGACY parser + format routing + LRU compile cache
 ├── binary-note.js              # OP / VAR / CORRUPT / BinaryExpression
@@ -230,6 +230,7 @@ src/
 ├── player/
 │   ├── audio-engine.js         # voices + lookahead scheduler
 │   ├── audio-graph.js          # buses, reverb send/return, pitch pan, limiter
+│   ├── amplitude.js            # amplitude → gain, clamped at the audio boundary
 │   └── reverb.js               # algorithmic impulse response
 ├── instruments/
 │   ├── instrument-manager.js  synth-instruments.js

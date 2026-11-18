@@ -156,7 +156,8 @@ function buildEvalCacheForValidation(moduleInstance) {
                 frequency: baseNote.getVariable('frequency'),
                 tempo: baseNote.getVariable('tempo'),
                 beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
-                measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(baseNote) : null
+                measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(baseNote) : null,
+                amplitude: baseNote.getVariable('amplitude')
             });
         } catch (e) { /* ignore */ }
     }
@@ -177,7 +178,8 @@ function buildEvalCacheForValidation(moduleInstance) {
                     frequency: note.getVariable ? note.getVariable('frequency') : null,
                     tempo: moduleInstance.findTempo ? moduleInstance.findTempo(note) : null,
                     beatsPerMeasure: note.getVariable ? note.getVariable('beatsPerMeasure') : null,
-                    measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(note) : null
+                    measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(note) : null,
+                    amplitude: note.getVariable ? note.getVariable('amplitude') : null
                 });
             } catch (e) { /* ignore individual note errors */ }
         }

@@ -89,7 +89,13 @@ function buildEvaluatedDiv(value) {
   }
 
   // SECURITY: Escape displayValue to prevent XSS
-  evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${escapeHtml(displayValue)}`;
+  if (value?.isInherited) {
+    // The note does not define this variable: same wording and grey as an
+    // inherited instrument (buildInstrumentControl).
+    evaluatedDiv.innerHTML = `<span class="value-label">Inherited:</span> <span style="color: #aaa;">${escapeHtml(displayValue)}</span>`;
+  } else {
+    evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${escapeHtml(displayValue)}`;
+  }
   if (exactTitle) evaluatedDiv.title = exactTitle;
   return evaluatedDiv;
 }
@@ -506,7 +512,8 @@ function createDurationSelector(rawInput, saveButton, note, value) {
                 frequency: baseNote.getVariable('frequency'),
                 tempo: baseNote.getVariable('tempo'),
                 beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
-                measureLength: moduleInstance.findMeasureLength?.(baseNote)
+                measureLength: moduleInstance.findMeasureLength?.(baseNote),
+                amplitude: baseNote.getVariable('amplitude')
               });
             }
             for (const id in moduleInstance?.notes || {}) {
@@ -519,7 +526,8 @@ function createDurationSelector(rawInput, saveButton, note, value) {
                     frequency: noteObj.getVariable?.('frequency'),
                     tempo: moduleInstance.findTempo?.(noteObj),
                     beatsPerMeasure: noteObj.getVariable?.('beatsPerMeasure'),
-                    measureLength: moduleInstance.findMeasureLength?.(noteObj)
+                    measureLength: moduleInstance.findMeasureLength?.(noteObj),
+                    amplitude: noteObj.getVariable?.('amplitude')
                   });
                 } catch {}
               }
@@ -940,6 +948,25 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           refreshModals(note, null);
           return;
         }
+        // amplitude is optional: an empty Raw means "not defined on this note",
+        // so it is removed and the note inherits again (BaseNote's, else 1).
+        if (key === 'amplitude' && !String(rawInput.value ?? '').trim()) {
+          note.clearExpression('amplitude');
+          recompileNoteAndDependents(currentNoteId);
+          const evaluated = moduleInstance.evaluateModule();
+          setEvaluatedNotes(evaluated);
+          if (typeof externalFunctions.updateVisualNotes === 'function') {
+            externalFunctions.updateVisualNotes(evaluated);
+          }
+          refreshModals(note, measureId);
+          try {
+            const snap = getModule().createModuleJSON();
+            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+            eventBus.emit('history:capture', { label: `Reset amplitude Note ${note?.id}`, snapshot: snap });
+          } catch {}
+          return;
+        }
+
         const validatedExpression = validateExpression(moduleInstance, currentNoteId, rawInput.value, key);
 
         // optional originalDuration to trigger dependent updates

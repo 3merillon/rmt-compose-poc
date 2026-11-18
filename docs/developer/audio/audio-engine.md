@@ -113,6 +113,7 @@ Evaluates the module and returns a plain array — **no oscillators are created 
   duration: 0.25,
   frequency: 440,      // null for measure markers
   instrument: 'piano', // null for measure markers; lowercased
+  amplitude: 1,        // gain on the envelope peak, clamped to 0..4; 1 when unset
   panPos: 0.33         // null for measure markers
 }
 ```
@@ -231,6 +232,11 @@ voice → gainNode (envelope) → [StereoPanner] → graph.getBus(instrument)
 
 `passStartTime` is `baseStartTime` for a normal playback and `baseStartTime + cycleStart` when
 looping; the note's absolute start is `passStartTime + noteData.startTime`.
+
+The envelope peak is `initialVolume * noteData.amplitude`. The amplitude comes from the note's
+`amplitude` expression (its own, else the BaseNote's, else 1), clamped once by `amplitudeToGain()`
+in `src/player/amplitude.js` to `[0, 4]`. A note whose amplitude is 0 is skipped by the pump — no
+voice is built for it.
 
 The panner is created only when `graph.stereoEnabled` is true, the note has a `panPos`, and
 `ctx.createStereoPanner` exists. Where it does not, the voice connects straight to the bus and the

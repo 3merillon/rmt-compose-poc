@@ -48,7 +48,7 @@ The everyday commands:
 | Script | Runs | Notes |
 |---|---|---|
 | `npm run dev` | `vite` | Dev server, port 3000, auto-opens. |
-| `npm test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs` | Validates every shipped library module, then proves exact arithmetic end to end. The repo's only automated check. |
+| `npm test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-amplitude.mjs` | Validates every shipped library module, proves exact arithmetic end to end, then checks the amplitude variable. The repo's only automated check. |
 | `npm run build` | `npm run wasm:build && vite build` | **Requires Rust + wasm-pack.** Use `npx vite build` to bundle without Rust — see the warning below. |
 | `npm run perf:gen` / `npm run perf:bench` | `scripts/perf/…` | Generate the stress modules; run the headless evaluation benchmark. |
 | `npm run docs:dev` / `npm run docs:build` | `vitepress` | This documentation site. |
@@ -67,13 +67,14 @@ WASM artifacts in `src/wasm/`.
 
 ### `npm test`
 
-There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs two scripts.
+There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs three scripts.
 The first, `scripts/validate-modules.mjs`, walks every item in the v2 manifest
 `public/modules/library.json` and checks five things per module:
 
 1. **Structure** — a `baseNote` object and a `notes` array.
-2. **Expressions** — every string under the six expression keys (`startTime`, `duration`,
-   `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`) passes `validateExpressionSyntax`.
+2. **Expressions** — every string under the seven expression keys (`startTime`, `duration`,
+   `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`) passes
+   `validateExpressionSyntax`.
 3. **Self-containment** — every `[id]` / `getNoteById(id)` reference resolves to a note defined in
    the same file (or to the base, id 0). This is what lets a module be dropped onto *any* target
    note: on import, id 0 is remapped to the target and the internal ids are renumbered.
@@ -101,6 +102,19 @@ The second, `scripts/test-exactness.mjs`, proves the arbitrary-precision guarant
 survive the full compile → evaluate → decompile → save → load → re-evaluate round trip, and a
 ~98-digit `(N/D)` literal must round-trip through `LOAD_CONST_BIG` digit-exact.
 
+The third, `scripts/test-amplitude.mjs`, covers the seventh variable, `amplitude`:
+
+1. **Old modules are untouched** — no shipped module gains an `amplitude` key when saved, and
+   every note in them sounds at exactly 1.
+2. **Inheritance** — a note without an amplitude sounds at the BaseNote's and stores nothing,
+   `[N].a` reads what such a note sounds at, and `a`, `amp` and `amplitude` compile to the same
+   bytecode.
+3. **Exactness** — a 50-note `(121/100)` chain keeps every digit, and an irrational amplitude sets
+   corruption flag `0x40` and no other.
+4. **Round trips** — a snapshot and a saved (reindexed) file evaluate to the same gains, and
+   removing a note's amplitude removes the key from the file.
+5. **The clamp** — the audio boundary limits the gain to 0–4 while the module keeps the exact value.
+
 `npm test` exits non-zero on any failure. Run it after **any** change to the DSL, the expression
 compiler, the evaluator, or anything under `public/modules/`.
 
@@ -122,7 +136,7 @@ rmt-compose-poc/
 │   ├── main.js             # entry point
 │   ├── player.js           # orchestrator: transport, selection, commits, undo wiring
 │   ├── module.js           # Module: notes, dep registration, evaluation, JSON load/save
-│   ├── note.js             # Note: six BinaryExpressions + color/instrument
+│   ├── note.js             # Note: seven BinaryExpressions + color/instrument
 │   ├── expression-compiler.js  # legacy parser + format router + LRU compile cache
 │   ├── binary-note.js      # bytecode format (OP / VAR / CORRUPT)
 │   ├── binary-evaluator.js # stack VM + incremental evaluator
@@ -130,7 +144,7 @@ rmt-compose-poc/
 │   ├── dsl/                # the PRIMARY expression language: lexer, parser,
 │   │                       #   compiler, decompiler, simplify
 │   ├── renderer/webgl2/    # renderer, workspace, camera-controller, renderer-config
-│   ├── player/             # audio-engine, audio-graph, reverb
+│   ├── player/             # audio-engine, audio-graph, reverb, amplitude
 │   ├── instruments/        # synths + multisampled piano/violin
 │   ├── modals/             # note widget, group widget
 │   ├── menu/               # module library / module bar
