@@ -137,10 +137,9 @@ The file could not be read or parsed — a trailing comma, a smart quote, a trun
 Open the browser console. The failures that do not surface in the UI all log there:
 
 - `Failed to compile expression: …` — the expression was refused; the property was left unset and the note fell back to its default.
-- `Dependency cycle detected! Some notes could not be evaluated.` — an A→B→A reference chain.
+- `Dependency cycle detected! …` — a property that depends on itself, with the loop spelled out (`[1].frequency → [2].frequency → [1].frequency`).
+- `Unresolved reference! …` — a reference to a note or property that does not exist. It resolves to a default (440 Hz, 0 s, 1 s), and the message names both ends: `[7].frequency reads [99].frequency, but note 99 does not exist (used 440)`.
 - `[RMT Security] Invalid note ID: … (must be 0-65535), skipping` — an id outside `0 … 65535`, or not an integer.
-
-A reference to a note that does not exist does not warn at all; it silently resolves to a default (440 Hz, 0 s, 1 s).
 
 ### No sound when playing
 

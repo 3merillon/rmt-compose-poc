@@ -89,6 +89,10 @@ export class BinaryExpression {
 
     // Whether this references baseNote (optimization for evaluation order)
     this.referencesBase = false;
+
+    // Decoded variable references, filled in by getVariableRefs()
+    this._varRefs = null;
+    this._varRefsLength = 0;
   }
 
   /**
@@ -271,6 +275,78 @@ export class BinaryExpression {
   }
 
   /**
+   * Every (note, variable) this expression reads, in order of first appearance.
+   * Each entry is packed as (noteId << 3) | varIndex; `base.x` appears as note 0.
+   *
+   * Unlike getPropertyDependencies() this includes BaseNote reads, because
+   * evaluation order and cycle checks work per variable, and `base.f` is a
+   * dependency on the BaseNote's frequency like any other. Decoded once per
+   * expression: bytecode is only appended to while compiling.
+   *
+   * @returns {number[]} Shared array, do not mutate
+   */
+  getVariableRefs() {
+    if (this._varRefs !== null && this._varRefsLength === this.length) {
+      return this._varRefs;
+    }
+
+    const refs = [];
+    const addRef = (ref) => { if (!refs.includes(ref)) refs.push(ref); };
+    const bytecode = this.bytecode;
+    const len = this.length;
+    let pc = 0;
+
+    while (pc < len) {
+      const op = bytecode[pc++];
+
+      switch (op) {
+        case OP.LOAD_CONST:
+          pc += 8;
+          break;
+
+        case OP.LOAD_CONST_BIG: {
+          pc += 1; // sign
+          const numLen = (bytecode[pc] << 8) | bytecode[pc + 1];
+          pc += 2 + numLen;
+          const denLen = (bytecode[pc] << 8) | bytecode[pc + 1];
+          pc += 2 + denLen;
+          break;
+        }
+
+        case OP.LOAD_REF: {
+          const noteId = (bytecode[pc] << 8) | bytecode[pc + 1];
+          addRef((noteId << 3) | bytecode[pc + 2]);
+          pc += 3;
+          break;
+        }
+
+        case OP.LOAD_BASE:
+          addRef(bytecode[pc++]); // note 0
+          break;
+
+        // No compiler emits these two, but the evaluator still runs them:
+        // both read the BaseNote's tempo, FIND_MEASURE also its beatsPerMeasure.
+        case OP.FIND_MEASURE:
+          addRef(VAR.BEATS_PER_MEASURE);
+          addRef(VAR.TEMPO);
+          break;
+
+        case OP.FIND_TEMPO:
+          addRef(VAR.TEMPO);
+          break;
+
+        // All other ops have no operands
+        default:
+          break;
+      }
+    }
+
+    this._varRefs = refs;
+    this._varRefsLength = len;
+    return refs;
+  }
+
+  /**
    * Check if this expression references a specific property of a note
    * @param {number} noteId - The note ID to check
    * @param {number} varIndex - The variable index (VAR.START_TIME, VAR.DURATION, etc.)
@@ -297,6 +373,7 @@ export class BinaryExpression {
     this.depCount = 0;
     this.sourceText = '';
     this.referencesBase = false;
+    this._varRefs = null;
   }
 
   /**

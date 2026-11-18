@@ -119,8 +119,9 @@ graph, the evaluators, and the dirty set. It is also the JSON load/save path. Se
 its own bytecode — that scan is where the dependency graph gets its edges.
 
 **`BinaryEvaluator`** (`src/binary-evaluator.js`) is a stack VM over that bytecode. Its stack holds
-pooled `fraction.js` rationals. `IncrementalEvaluator` wraps it with a dirty set and a **Kahn
-topological sort**, so dependencies are always evaluated before dependents.
+pooled `fraction.js` rationals. `IncrementalEvaluator` wraps it with a dirty set of notes and a
+**per-variable evaluation order**, so every variable is evaluated after the variables it reads —
+which is what lets two notes read each other through different variables.
 
 **`DependencyGraph`** (`src/dependency-graph.js`) maintains forward and inverse indexes for the
 whole note set, *plus* nine property-pair indexes (`startTimeOnDurationDependents`,
@@ -286,7 +287,9 @@ There is no serializer to update. The touch-points are:
    round-trips to JSON.
 4. `src/dsl/constants.js` — `PropertyMap` (input aliases) and `PropertyShortNames` (what the
    decompiler prints).
-5. `src/binary-evaluator.js` — `evaluateNote()`'s evaluation order and its default value.
+5. `src/binary-evaluator.js` — `VAR_ORDER`, its default in `UNRESOLVED_DEFAULTS`, the record in
+   `createEvaluationRecord()` and the `switch` in `evaluateVariable()`; and the matching `switch`
+   in `getVariableExpression()` (`src/variable-deps.js`).
 6. The renderer and the note widget, if it is visible.
 
 ## See also

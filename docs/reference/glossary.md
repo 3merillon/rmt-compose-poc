@@ -249,7 +249,7 @@ Several pickers currently have no visible effect — see [Themes & Appearance](/
 :::
 
 ### Topological sort
-The ordering that guarantees a note is evaluated after everything it depends on.
+The ordering that guarantees a value is evaluated after everything it depends on. It is worked out per property, not per note, so two notes may depend on each other through different properties.
 
 ### Tritave
 The interval `3/1`, the repeating interval of the Bohlen-Pierce scale.

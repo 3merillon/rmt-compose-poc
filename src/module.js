@@ -2,6 +2,7 @@ import Fraction from 'fraction.js';
 import { Note } from './note.js';
 import { toNumber } from './utils/fraction-num.js';
 import { DependencyGraph } from './dependency-graph.js';
+import { inheritsFromBase } from './variable-deps.js';
 import { createEvaluator, createIncrementalEvaluator, isWasmBackedEvaluator, isEvaluatorHotSwapEnabled } from './wasm/evaluator-adapter.js';
 import { onWasmReady } from './wasm/index.js';
 import { compiler, decompiler } from './expression-compiler.js';
@@ -186,6 +187,9 @@ export class Module {
     const allDeps = note.getAllDependencies();
     const refsBase = note.referencesBaseNote();
     this._dependencyGraph._updateDependencies(note.id, allDeps, refsBase);
+    // Measure bars and `beat([n])`-style reads can follow the base note
+    // without naming it; re-evaluation has to know about those too.
+    this._dependencyGraph.setImplicitBaseDependent(note.id, inheritsFromBase(note));
 
     // Also register startTime-specific dependencies for drag preview
     const startTimeExpr = note.getExpression('startTime');
@@ -216,30 +220,22 @@ export class Module {
       this._registerNoteDependencies(note);
     }
 
+    // Everything that reads this note, directly or through other notes. The walk
+    // crosses the base note: whatever reads it (module.baseNote, findTempo,
+    // findMeasureLength, an inherited tempo) follows, and so does whatever reads those.
+    const dependents = this._dependencyGraph.getEvaluationDependents(numId);
+
     // Invalidate incremental evaluator (this note's bytecode may have changed)
     if (this._incrementalEvaluator) {
-      this._incrementalEvaluator.invalidate(numId);
+      this._incrementalEvaluator.invalidate(numId, dependents);
     }
 
     // Also mark dependents as dirty (but don't invalidate - their bytecode hasn't changed)
-    const dependents = this._dependencyGraph.getAllDependents(numId);
     for (const depId of dependents) {
       this._dirtyNotes.add(depId);
       // Use markDirtyOnly for dependents - they need re-evaluation but not re-registration
       if (this._incrementalEvaluator && typeof this._incrementalEvaluator.markDirtyOnly === 'function') {
         this._incrementalEvaluator.markDirtyOnly(depId);
-      }
-    }
-
-    // If this is the base note (0), also mark all baseNoteDependents as dirty
-    // These are notes that reference baseNote via module.baseNote, findTempo, findMeasureLength
-    if (numId === 0) {
-      const baseNoteDeps = this._dependencyGraph.getBaseNoteDependents();
-      for (const depId of baseNoteDeps) {
-        this._dirtyNotes.add(depId);
-        if (this._incrementalEvaluator && typeof this._incrementalEvaluator.markDirtyOnly === 'function') {
-          this._incrementalEvaluator.markDirtyOnly(depId);
-        }
       }
     }
   }
@@ -270,17 +266,12 @@ export class Module {
     // Second pass: collect all notes that need to be dirty (including dependents AND dependencies)
     const allDirty = new Set(idsToProcess);
 
-    // Check if base note is being marked - if so, add all base note dependents
-    if (idsToProcess.has(0)) {
-      const baseNoteDeps = this._dependencyGraph.getBaseNoteDependents();
-      for (const depId of baseNoteDeps) {
-        allDirty.add(depId);
-      }
-    }
-
-    // For each note, add its dependents (notes that depend on it)
+    // For each note, add its dependents (notes that depend on it, also
+    // through the base note)
+    const dependentsOf = new Map();
     for (const numId of idsToProcess) {
-      const dependents = this._dependencyGraph.getAllDependents(numId);
+      const dependents = this._dependencyGraph.getEvaluationDependents(numId);
+      dependentsOf.set(numId, dependents);
       for (const depId of dependents) {
         allDirty.add(depId);
       }
@@ -315,7 +306,7 @@ export class Module {
     if (this._incrementalEvaluator) {
       // Notes in idsToProcess may have new/changed bytecode - use invalidate()
       for (const id of idsToProcess) {
-        this._incrementalEvaluator.invalidate(id);
+        this._incrementalEvaluator.invalidate(id, dependentsOf.get(id));
       }
       // Notes in allDirty (but not in idsToProcess) just need re-evaluation - use markDirtyOnly()
       for (const id of allDirty) {
@@ -581,14 +572,14 @@ export class Module {
     // with no error. The UI's delete paths liberate dependents first; this
     // guards programmatic callers.
     const dependents = this._dependencyGraph.getDependents(numId);
-    if (dependents && dependents.size > 0) {
-      const dangling = Array.from(dependents).filter(depId => depId !== numId && this.notes[depId]);
-      if (dangling.length > 0) {
-        console.warn(
-          `removeNote(${numId}): ${dangling.length} dependent note(s) left dangling: [${dangling.join(', ')}] — ` +
-          `their references to note ${numId} will now evaluate to hardcoded defaults`
-        );
-      }
+    const dangling = dependents
+      ? Array.from(dependents).filter(depId => depId !== numId && this.notes[depId])
+      : [];
+    if (dangling.length > 0) {
+      console.warn(
+        `removeNote(${numId}): ${dangling.length} dependent note(s) left dangling: [${dangling.join(', ')}] — ` +
+        `their references to note ${numId} will now evaluate to hardcoded defaults`
+      );
     }
     delete this.notes[id];
     this._evaluationCache.delete(id);
@@ -596,6 +587,12 @@ export class Module {
 
     if (this._incrementalEvaluator) {
       this._incrementalEvaluator.cache.delete(id);
+    }
+
+    // Re-evaluate the dangling notes, so they show now what a reload would
+    // show (and the evaluator names each broken reference in the console).
+    for (const depId of dangling) {
+      this.markNoteDirty(depId);
     }
 
     invalidateModuleEndTimeCache();

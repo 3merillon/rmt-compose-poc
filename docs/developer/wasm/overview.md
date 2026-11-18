@@ -229,8 +229,8 @@ __rmtPerf.measureEval(1)
 ```
 $func198
   ← $persistentevaluator_registerNote          (WASM)
-  ← WasmPersistentEvaluatorWrapper.registerNote (src/wasm/evaluator-adapter.js:724)
-  ← WasmIncrementalEvaluator.evaluateDirty      (src/wasm/evaluator-adapter.js:533)
+  ← WasmPersistentEvaluatorWrapper.registerNote (src/wasm/evaluator-adapter.js:758)
+  ← WasmIncrementalEvaluator.evaluateDirty      (src/wasm/evaluator-adapter.js:537)
 ```
 
 It hangs on the **first** registration (note 0) after `invalidateAll()`.
@@ -258,6 +258,18 @@ Two properties matter:
   passed once and hung on other attempts.
 - It needs **full app boot state** — roughly 170 notes registered and evaluated, plus the hot-swap
   warm-up. Isolated reproductions do not trigger it.
+
+### What is not ported
+
+The JS evaluator orders evaluation per (note, variable), detects only true cycles, and reports
+unresolved references by name (see
+[Binary Evaluator](/developer/core/binary-evaluator#evaluation-order-per-variable)). None of that is
+in the crate: `evaluate_note_internal` (`rust/src/evaluator.rs:957`) still evaluates a note's six
+expressions in a fixed order, and the WASM incremental evaluators still sort whole notes. The two
+engines agree on every module whose notes depend on each other one way only — which is every
+shipped module — and disagree on a module where two notes read each other through different
+variables, or where a note's variable reads one that comes later in the fixed order. Unblocking the
+swap means porting that as well.
 
 ### Suggested next steps
 

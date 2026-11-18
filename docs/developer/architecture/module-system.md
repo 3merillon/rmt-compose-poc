@@ -216,7 +216,7 @@ const cache = module.evaluateModule()   // → Map<noteId, result>
 ```
 
 Returns the existing cache immediately if nothing is dirty. Otherwise it snapshots the dirty set,
-runs `IncrementalEvaluator.evaluateDirty()` (Kahn topo-sort → stack VM), pushes each result's
+runs `IncrementalEvaluator.evaluateDirty()` (per-variable order → stack VM), pushes each result's
 `corruptionFlags` into the graph via `_updateCorruptionFlags(cache, dirtyIds)`, and clears the dirty
 set.
 

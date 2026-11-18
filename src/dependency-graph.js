@@ -19,6 +19,13 @@ export class DependencyGraph {
     // Track baseNote references separately
     this.baseNoteDependents = new Set();
 
+    // Notes that can follow the BaseNote without writing `base`: measure bars
+    // (their computed measureLength inherits tempo and beatsPerMeasure) and
+    // notes reading `[n].tempo` / `beat([n])` / `measure([n])`, which inherit
+    // when note n has none of its own. Only re-evaluation needs these, so
+    // they are kept apart from baseNoteDependents (which the UI also reads).
+    this.implicitBaseDependents = new Set();
+
     // StartTime-specific dependency tracking (for drag preview)
     // Forward map: noteId -> Set<noteId its startTime depends on>
     this.startTimeDependencies = new Map();
@@ -530,6 +537,7 @@ export class DependencyGraph {
 
     // Remove from baseNote tracking
     this.baseNoteDependents.delete(noteId);
+    this.implicitBaseDependents.delete(noteId);
 
     // Also remove from startTime-specific tracking
     const startTimeDeps = this.startTimeDependencies.get(noteId);
@@ -673,6 +681,7 @@ export class DependencyGraph {
     this.dependencies.clear();
     this.dependents.clear();
     this.baseNoteDependents.clear();
+    this.implicitBaseDependents.clear();
 
     this.startTimeDependencies.clear();
     this.startTimeDependents.clear();
@@ -749,6 +758,57 @@ export class DependencyGraph {
       }
     }
 
+    return result;
+  }
+
+  /**
+   * Record whether a note can follow the BaseNote without referencing it
+   * (see implicitBaseDependents).
+   *
+   * @param {number} noteId
+   * @param {boolean} inherits
+   */
+  setImplicitBaseDependent(noteId, inherits) {
+    if (inherits) {
+      this.implicitBaseDependents.add(noteId);
+    } else {
+      this.implicitBaseDependents.delete(noteId);
+    }
+  }
+
+  /**
+   * Get every note that must be re-evaluated when this note changes.
+   *
+   * getAllDependents() stops at the BaseNote, because `base.x` is not stored
+   * as an edge. Re-evaluation cannot stop there: when the walk reaches note 0
+   * (it is the note that changed, or it references one that did), everything
+   * that reads the BaseNote follows, and so does everything that reads those.
+   *
+   * @param {number} noteId
+   * @returns {Set<number>} Transitive, excluding noteId itself
+   */
+  getEvaluationDependents(noteId) {
+    const result = new Set();
+    const queue = [noteId];
+    const visit = (dep) => {
+      if (dep !== noteId && !result.has(dep)) {
+        result.add(dep);
+        queue.push(dep);
+      }
+    };
+    // Once every other registered note is in, nothing more can be added
+    const all = this.dependencies.size - (this.dependencies.has(noteId) ? 1 : 0);
+    for (let queueIdx = 0; queueIdx < queue.length && result.size < all; queueIdx++) {
+      const current = queue[queueIdx];
+      const directDeps = this.dependents.get(current);
+      if (directDeps) {
+        for (const dep of directDeps) visit(dep);
+      }
+      if (current === 0) {
+        for (const dep of this.baseNoteDependents) visit(dep);
+        for (const dep of this.implicitBaseDependents) visit(dep);
+      }
+    }
     return result;
   }
 
@@ -1661,6 +1721,7 @@ export class DependencyGraph {
     this.dependencies.clear();
     this.dependents.clear();
     this.baseNoteDependents.clear();
+    this.implicitBaseDependents.clear();
     this.startTimeDependencies.clear();
     this.startTimeDependents.clear();
     this.startTimeBaseNoteDependents.clear();

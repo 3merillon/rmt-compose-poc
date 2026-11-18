@@ -48,7 +48,7 @@ The everyday commands:
 | Script | Runs | Notes |
 |---|---|---|
 | `npm run dev` | `vite` | Dev server, port 3000, auto-opens. |
-| `npm test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs` | Validates every shipped library module, then proves exact arithmetic end to end. The repo's only automated check. |
+| `npm test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-variable-deps.mjs` | Validates every shipped library module, proves exact arithmetic end to end, then checks per-variable evaluation order. The repo's only automated check. |
 | `npm run build` | `npm run wasm:build && vite build` | **Requires Rust + wasm-pack.** Use `npx vite build` to bundle without Rust — see the warning below. |
 | `npm run perf:gen` / `npm run perf:bench` | `scripts/perf/…` | Generate the stress modules; run the headless evaluation benchmark. |
 | `npm run docs:dev` / `npm run docs:build` | `vitepress` | This documentation site. |
@@ -67,7 +67,7 @@ WASM artifacts in `src/wasm/`.
 
 ### `npm test`
 
-There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs two scripts.
+There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs three scripts.
 The first, `scripts/validate-modules.mjs`, walks every item in the v2 manifest
 `public/modules/library.json` and checks five things per module:
 
@@ -100,6 +100,19 @@ The second, `scripts/test-exactness.mjs`, proves the arbitrary-precision guarant
 `(3/2)` chain must evaluate to its exact 98-digit numerator (checked against native BigInt) and
 survive the full compile → evaluate → decompile → save → load → re-evaluate round trip, and a
 ~98-digit `(N/D)` literal must round-trip through `LOAD_CONST_BIG` digit-exact.
+
+The third, `scripts/test-variable-deps.mjs`, locks in that dependencies are ordered and
+cycle-checked per (note, variable) rather than per note:
+
+1. **Two notes reading each other** through different variables (`[1].f` from `[2].f`, `[2].t`
+   from `[1].t + [1].d`) evaluate exactly, on the first evaluation.
+2. **A note's own variables** may read each other in any direction (the BaseNote's tempo from its
+   frequency), including through an inherited tempo or a computed measure length.
+3. **A true cycle is still refused** — by `validateExpression()` with the widget's two messages,
+   and by the evaluator with a console error that names the loop and values that do not drift.
+4. **An unresolved reference is named** in a console error instead of vanishing into a default.
+5. **Incremental equals fresh** — after seeded random edits (cyclic ones included) every module
+   must equal a fresh load of its own JSON, variable for variable.
 
 `npm test` exits non-zero on any failure. Run it after **any** change to the DSL, the expression
 compiler, the evaluator, or anything under `public/modules/`.

@@ -317,8 +317,11 @@ unchanged:
 | Missing property after `.` | `base.` |
 | Incomplete expression | `1 +` |
 | Unclosed bracket | `beat([1].t` |
-| Self-reference | `[5].f * 2` typed on note 5 |
-| Circular dependency | note 1 references note 2, which references note 1 |
+| Self-reference | `[5].f * 2` as note 5's frequency |
+| Circular dependency | note 1's frequency reads `[2].f` while note 2's frequency reads `[1].f` |
+
+The last two are judged per property. `[5].d * 2` as note 5's start time is accepted, and so are
+two notes that read each other through different properties.
 
 A rejected expression shows its reason **inline in the widget** — in red under the `Save` button,
 with a red border on the field. The note keeps its old value. The message is specific, for
