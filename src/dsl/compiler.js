@@ -133,10 +133,6 @@ export class DSLCompiler {
       this.expr.writeUint16(node.noteId);
       this.expr.writeByte(varIndex);
       this.expr.addDependency(node.noteId);
-      // A note without its own amplitude reads the BaseNote's, so this value
-      // can change with the BaseNote although only the note is named. Record
-      // it, or a BaseNote amplitude edit would never mark this note dirty.
-      if (varIndex === VAR.AMPLITUDE) this.expr.referencesBase = true;
     }
   }
 

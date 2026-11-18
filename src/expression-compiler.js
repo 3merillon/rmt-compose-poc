@@ -677,10 +677,6 @@ export class ExpressionCompiler {
     binary.writeUint16(noteId);
     binary.writeByte(varIndex);
     binary.addDependency(noteId);
-    // A note without its own amplitude reads the BaseNote's, so this value can
-    // change with the BaseNote although only `noteId` is named. Record it, or
-    // a BaseNote amplitude edit would never mark this note dirty.
-    if (varIndex === VAR.AMPLITUDE) binary.referencesBase = true;
   }
 
   /**

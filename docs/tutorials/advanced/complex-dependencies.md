@@ -77,8 +77,8 @@ Two notes share an ancestor; a third depends on both.
 | 3 | `[2].f * (3/2)` | `[1].t + [1].d` | `beat(base) * 2` |
 
 Note 3 gets its pitch from note 2 and its start from note 1. Both routes lead back to the BaseNote,
-so a change to `base.f` reaches note 3 twice — and the evaluator still visits each note exactly
-once, in topological order.
+so a change to `base.f` reaches note 3 twice — and the evaluator still computes each value exactly
+once, in dependency order.
 
 ## Reading the dependency lines
 
@@ -248,18 +248,28 @@ Ctrl+Z brings it back.
 
 ## Cycles
 
-An expression cannot reference itself, and a chain cannot close on itself. The validator catches
-both before the edit lands:
+A property cannot read itself, and a chain cannot close on itself. The validator catches both
+before the edit lands:
 
 - `Expression cannot reference itself directly`
 - `Circular dependency detected in expression`
 
-These messages reach the **browser console**, not the screen. If a save appears to do nothing, open
-the console — that is where the reason is.
+The message appears in red under the widget's `Save` button, and the note keeps its old
+expression.
 
-If a cycle does somehow get into the graph (via a hand-edited JSON file), the evaluator logs
-`Dependency cycle detected! Some notes could not be evaluated.` and evaluates the stuck notes anyway
-rather than dropping them.
+What counts is the **property**, not the note. A note's start time may read the same note's
+duration, and two notes may depend on each other — note 1 taking its pitch from note 2 while note 2
+takes its timing from note 1 — because no single property ends up reading itself:
+
+```
+# note 1 frequency          # note 2 start time
+(3/2) * [2].f               [1].t + [1].d
+```
+
+If a real cycle does get into a module (via a hand-edited JSON file), the evaluator logs
+`Dependency cycle detected!` to the browser console with the loop spelled out —
+`[1].frequency → [2].frequency → [1].frequency` — and still evaluates those properties, against
+default values, rather than dropping the notes.
 
 ## Debugging
 
@@ -274,7 +284,7 @@ note inherited one. See [Understanding SymbolicPower](/tutorials/advanced/symbol
 | Symptom | Cause |
 |---|---|
 | Save does nothing | Invalid expression — check the console |
-| Note jumps to 0 / 440 Hz | The referenced note id does not exist; the evaluator substitutes a default rather than failing |
+| Note jumps to 0 / 440 Hz | The referenced note id does not exist; the evaluator substitutes a default rather than failing, and names the reference in the console (`Unresolved reference!`) |
 | Wrong note moved | You referenced `[2]` when you meant `[3]` — ids are not stable across a **Save Module** (it reindexes) |
 | Value shows `≈` unexpectedly | Something upstream is irrational |
 

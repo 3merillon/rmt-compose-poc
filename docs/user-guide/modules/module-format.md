@@ -260,8 +260,8 @@ Different entry points run different checks. This trips people up, so it is wort
 
 Two things that are **not** checked anywhere at load time:
 
-- **Dangling references.** `[99].f` when there is no note 99 loads fine and evaluates to a fallback (440 Hz for frequency, 0 s for start time, 1 s for duration).
-- **Circular dependencies.** `[1].f = [2].f` and `[2].f = [1].f` load. The evaluator logs `Dependency cycle detected!` to the console and leaves the affected notes unevaluated.
+- **Dangling references.** `[99].f` when there is no note 99 loads fine and evaluates to a fallback (440 Hz for frequency, 0 s for start time, 1 s for duration). The evaluator logs `Unresolved reference!` to the console, naming the note and property on both ends.
+- **Circular dependencies.** `[1].f = [2].f` and `[2].f = [1].f` load. The evaluator logs `Dependency cycle detected!` to the console with the loop spelled out, and evaluates those properties against the fallbacks. Only a property that depends on *itself* is a cycle: `[1].f = [2].f` together with `[2].t = [1].t + [1].d` is two notes reading each other, and evaluates normally.
 
 Neither produces an error message on screen. If a note is missing or in the wrong place after a load, open the browser console.
 

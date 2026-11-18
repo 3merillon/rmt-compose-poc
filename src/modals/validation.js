@@ -3,12 +3,10 @@ import { isDSLSyntax, validateDSL, compileDSL } from '../dsl/index.js';
 import { ExpressionCompiler } from '../expression-compiler.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
+import { findDependencyCycle } from '../variable-deps.js';
 
 // Singleton compiler for safe validation
 const safeCompiler = new ExpressionCompiler();
-
-let dependencyGraphCache = null;
-let lastGraphUpdateTime = 0;
 
 export function validateExpression(moduleInstance, noteId, expression, variableType) {
     const expr = String(expression ?? '').trim();
@@ -29,34 +27,45 @@ export function validateExpression(moduleInstance, noteId, expression, variableT
 }
 
 /**
+ * Refuse an expression that would make a variable depend on itself.
+ *
+ * The check is per (note, variable), like evaluation: a note may read another
+ * variable of its own, and two notes may read each other, as long as no
+ * variable ends up reading itself. `[5].d * 2` as note 5's startTime is fine;
+ * `[5].t + 1` as note 5's startTime is not.
+ */
+function assertNoDependencyCycle(moduleInstance, noteId, variableType, binary) {
+    const cycle = findDependencyCycle(moduleInstance, noteId, variableType, binary);
+    if (!cycle) return;
+    if (cycle.length === 1) {
+        throw new Error('Expression cannot reference itself directly');
+    }
+    throw new Error('Circular dependency detected in expression');
+}
+
+/**
  * Validate DSL expression
  */
 function validateDSLExpression(moduleInstance, noteId, expr, variableType) {
-    // SECURITY: Check for self-reference using string method instead of dynamic RegExp
-    // This prevents ReDoS if noteId contains regex special characters
-    if (expr.includes(`[${noteId}].`)) {
-        throw new Error('Expression cannot reference itself directly');
-    }
-
     // Validate DSL syntax
     const validation = validateDSL(expr);
     if (!validation.valid) {
         throw new Error(`Invalid DSL expression: ${validation.error}`);
     }
 
-    // Check for circular dependencies
-    if (detectCircularDependency(moduleInstance, noteId, expr, variableType)) {
-        throw new Error('Circular dependency detected in expression');
-    }
-
-    // Try to compile to verify it produces valid bytecode
+    // Compile to verify it produces valid bytecode
+    let binary;
     try {
-        const binary = compileDSL(expr);
-        // Successfully compiled - return the original DSL expression
-        return expr;
+        binary = compileDSL(expr);
     } catch (e) {
         throw new Error(`Invalid DSL expression: ${e.message}`);
     }
+
+    // Check for self-reference and circular dependencies, on what it compiled to
+    assertNoDependencyCycle(moduleInstance, noteId, variableType, binary);
+
+    // Successfully compiled - return the original DSL expression
+    return expr;
 }
 
 /**
@@ -66,14 +75,6 @@ function validateDSLExpression(moduleInstance, noteId, expr, variableType) {
  * It validates expressions using safe pattern-based parsing and binary compilation.
  */
 function validateLegacyExpression(moduleInstance, noteId, expr, variableType) {
-    if (expr.includes(`getNoteById(${noteId})`)) {
-        throw new Error('Expression cannot reference itself directly');
-    }
-
-    if (detectCircularDependency(moduleInstance, noteId, expr, variableType)) {
-        throw new Error('Circular dependency detected in expression');
-    }
-
     let openParens = 0;
     for (const char of expr) {
         if (char === '(') openParens++;
@@ -91,6 +92,10 @@ function validateLegacyExpression(moduleInstance, noteId, expr, variableType) {
     if (!syntaxValidation.valid) {
         throw new Error(syntaxValidation.error);
     }
+
+    // Check for self-reference and circular dependencies, on what it compiles to
+    // (the syntax check above already proved that it compiles)
+    assertNoDependencyCycle(moduleInstance, noteId, variableType, safeCompiler.compile(expr));
 
     // Detect whether expression contains references; if so, we preserve user-authored structure
     const hasRefs =
@@ -188,127 +193,24 @@ function buildEvalCacheForValidation(moduleInstance) {
     return cache;
 }
 
+/**
+ * Whether saving `expression` as this variable would make a variable depend
+ * on itself (a direct self-reference counts).
+ */
 export function detectCircularDependency(moduleInstance, noteId, expression, variableType) {
-    const newReferences = findReferences(expression);
-    
-    const currentModifiedTime = getModuleModifiedTime(moduleInstance);
-    
-    if (!dependencyGraphCache || currentModifiedTime > lastGraphUpdateTime) {
-        dependencyGraphCache = buildDependencyGraph(moduleInstance);
-        lastGraphUpdateTime = currentModifiedTime;
+    const expr = String(expression ?? '').trim();
+    let binary;
+    try {
+        binary = isDSLSyntax(expr) ? compileDSL(expr) : safeCompiler.compile(expr);
+    } catch (e) {
+        return false; // does not compile: there is nothing to depend on
     }
-    
-    const tempGraph = JSON.parse(JSON.stringify(dependencyGraphCache));
-    
-    if (!tempGraph[noteId]) {
-        tempGraph[noteId] = [];
-    }
-    
-    for (const refId of newReferences) {
-        if (!tempGraph[noteId].includes(refId)) {
-            tempGraph[noteId].push(refId);
-        }
-    }
-    
-    for (const refId of newReferences) {
-        if (hasPath(tempGraph, refId, noteId)) {
-            return true;
-        }
-    }
-    
-    return false;
+    return findDependencyCycle(moduleInstance, noteId, variableType, binary) !== null;
 }
 
-function findReferences(expr) {
-    const references = new Set();
-
-    // Legacy syntax: getNoteById(123)
-    const legacyRegex = /getNoteById\((\d+)\)/g;
-    let match;
-    while ((match = legacyRegex.exec(expr)) !== null) {
-        const noteId = parseInt(match[1], 10);
-        if (noteId !== 0) { // 0 is baseNote, not a dependency
-            references.add(noteId);
-        }
-    }
-
-    // DSL syntax: [123].property or tempo([123]) etc.
-    const dslRegex = /\[(\d+)\]/g;
-    while ((match = dslRegex.exec(expr)) !== null) {
-        const noteId = parseInt(match[1], 10);
-        if (noteId !== 0) { // 0 is baseNote, not a dependency
-            references.add(noteId);
-        }
-    }
-
-    return Array.from(references);
-}
-
-function buildDependencyGraph(moduleInstance) {
-    const graph = {};
-    
-    for (const id in moduleInstance.notes) {
-        graph[id] = [];
-    }
-    
-    for (const id in moduleInstance.notes) {
-        const note = moduleInstance.notes[id];
-        if (!note || !note.variables) continue;
-        
-        const deps = moduleInstance.getDirectDependencies(parseInt(id, 10));
-        
-        for (const depId of deps) {
-            if (!graph[id].includes(depId)) {
-                graph[id].push(depId);
-            }
-        }
-    }
-    
-    return graph;
-}
-
-function hasPath(graph, start, end) {
-    if (start === end) return true;
-    
-    const visited = new Set();
-    const queue = [start];
-    
-    while (queue.length > 0) {
-        const current = queue.shift();
-        
-        if (current === end) {
-            return true;
-        }
-        
-        if (visited.has(current)) {
-            continue;
-        }
-        
-        visited.add(current);
-        
-        if (graph[current]) {
-            for (const neighbor of graph[current]) {
-                if (!visited.has(neighbor)) {
-                    queue.push(neighbor);
-                }
-            }
-        }
-    }
-    
-    return false;
-}
-
-function getModuleModifiedTime(moduleInstance) {
-    if (!moduleInstance || !moduleInstance.notes) {
-        return 0;
-    }
-    
-    return Object.values(moduleInstance.notes).reduce((maxTime, note) => {
-        const noteTime = note.lastModifiedTime || 0;
-        return Math.max(maxTime, noteTime);
-    }, 0);
-}
-
+/**
+ * Kept for callers that still announce module changes. The cycle check reads
+ * the notes' compiled expressions directly, so there is no cache to drop.
+ */
 export function invalidateDependencyGraphCache() {
-    dependencyGraphCache = null;
 }

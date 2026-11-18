@@ -46,7 +46,7 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 │ Core                                                                 │
 │  module.js  ·  note.js                                               │
 │  binary-note.js      bytecode format (OP / VAR / CORRUPT)            │
-│  binary-evaluator.js stack VM + IncrementalEvaluator (Kahn topo-sort)│
+│  binary-evaluator.js stack VM + IncrementalEvaluator (per-variable)  │
 │  dependency-graph.js forward + inverse indexes, corruption flags     │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Output                                                               │

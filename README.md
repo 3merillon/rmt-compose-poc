@@ -35,7 +35,7 @@ The DSL replaces the verbose legacy JavaScript syntax. Both formats compile to t
 - **DSL compiler** — expressions are lexed, parsed, validated, and compiled to compact binary bytecode. Legacy method-chain syntax (`.mul()/.pow()/...`) is auto-detected and still supported.
 - **Evaluation** — a stack-based VM walks the bytecode with `fraction.js` (BigInt-backed) for exact rational arithmetic at any magnitude and depth, backed by a Fraction pool to keep allocation off the drag path. Powers that resolve to an irrational value flag the note as *corrupted* (shown as `≈` in the note widget and cross-hatched on the canvas).
 - **Dependency tracking** — an inverted index gives O(1) forward and inverse lookup, split per property (startTime / duration / frequency). Drag previews move only the notes whose position actually depends on the note under the cursor.
-- **Incremental re-evaluation** — a Kahn topological sort over the dirty set only, not the whole module.
+- **Incremental re-evaluation** — only the dirty set is re-evaluated, not the whole module, and it is ordered per (note, variable): any variable may depend on any other, and only a variable that depends on itself is refused.
 - **Rendering** — every visual class (note bodies, rings, measure bars, dependency lines, glyphs) is one instanced draw call. Per-note overlay work is culled to the viewport, and the renderer redraws only when something changed: an idle canvas issues **zero draw calls**.
 - **No `eval`, no `new Function`** anywhere. Expressions only ever become bytecode.
 
@@ -129,7 +129,7 @@ Other scripts:
 
 | Script | What it does |
 |---|---|
-| `npm test` | Validates all 79 library modules (structure, expressions, self-containedness, finite evaluation, ratio/cents), then checks the amplitude variable and reads exported MIDI files back note by note. **Not a unit-test suite** — the repo has no test framework. |
+| `npm test` | Validates all 79 library modules (structure, expressions, self-containedness, finite evaluation, ratio/cents), then checks exact arithmetic at depth, per-variable evaluation order and the amplitude variable, and reads exported MIDI files back note by note. **Not a unit-test suite** — the repo has no test framework. |
 | `npm run gen:intervals` | Regenerates the 46 interval modules and patches `library.json` |
 | `npm run perf:gen` / `npm run perf:bench` | Generate stress modules; benchmark evaluation in Node |
 | `npm run samples:build` | Rebuilds the piano/violin samples from VSCO-2 CE (needs `ffmpeg` + network) |
@@ -363,7 +363,8 @@ Example — chain notes up the 12-TET scale:
 ### Core expression system
 - `src/dsl/` — DSL lexer, parser, compiler, decompiler, and DSL-native simplifier
 - `src/binary-note.js` — binary expression format and bytecode opcodes
-- `src/binary-evaluator.js` — stack VM with Fraction pooling + incremental (Kahn) evaluator
+- `src/binary-evaluator.js` — stack VM with Fraction pooling + incremental evaluator, ordered per variable
+- `src/variable-deps.js` — what each (note, variable) reads: the basis of evaluation order and cycle checks
 - `src/dependency-graph.js` — forward/inverse dependency indexes, per property, plus corruption flags
 - `src/expression-compiler.js` — DSL/legacy routing, LRU compile cache, legacy compiler + decompiler
 - `src/utils/simplify.js` — simplification with a value + corruption-flag equivalence guard

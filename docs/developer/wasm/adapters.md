@@ -101,8 +101,9 @@ const incremental = createIncrementalEvaluator(module, dependencyGraph, evaluato
 3. otherwise → `WasmEvaluatorWrapper`
 4. construction throws and `fallbackOnError` → `JSBinaryEvaluator`
 
-`createIncrementalEvaluator(module, graph, evaluator)` returns a `WasmIncrementalEvaluator` **only**
-when the base evaluator is a `WasmPersistentEvaluatorWrapper`; otherwise `JSIncrementalEvaluator`.
+`createIncrementalEvaluator(module, graph, evaluator)` returns a `WasmIncrementalEvaluator` when
+the base evaluator is a `WasmPersistentEvaluatorWrapper`, a `WasmNoteOrderIncrementalEvaluator` when
+it is the non-persistent `WasmEvaluatorWrapper`, and otherwise `JSIncrementalEvaluator`.
 
 `isWasmBackedEvaluator(evaluator)` tells you which one you got.
 
@@ -135,8 +136,8 @@ and hands the object to `PersistentEvaluator.registerNote(id, expressions)`, whe
 `serde-wasm-bindgen` deserializes it.
 
 ::: danger This is the hang site
-`WasmPersistentEvaluatorWrapper.registerNote` (`evaluator-adapter.js:724`), called from
-`WasmIncrementalEvaluator.evaluateDirty` (`evaluator-adapter.js:533`), is where the browser locks up
+`WasmPersistentEvaluatorWrapper.registerNote` (`evaluator-adapter.js:758`), called from
+`WasmIncrementalEvaluator.evaluateDirty` (`evaluator-adapter.js:537`), is where the browser locks up
 after an `invalidateAll()`. The JS side of that call is straightforward; the loop is inside the Rust
 binary.
 :::
@@ -148,7 +149,9 @@ Dirty tracking, topological sort, and one batched WASM call.
 `evaluateDirty()` (no arguments — it reads its own dirty set):
 
 1. `registerNote()` any dirty note that is not yet registered
-2. topologically sort the dirty set (Kahn's algorithm, same as the JS incremental evaluator)
+2. topologically sort the dirty set — Kahn's algorithm over **whole notes**. The JS incremental
+   evaluator no longer works this way: it orders per (note, variable), see
+   [Binary Evaluator](/developer/core/binary-evaluator#evaluation-order-per-variable)
 3. clear the local cache
 4. call `evaluator.evaluateDirty(sorted)` — a single WASM call
 5. clear the dirty set and return the cache
@@ -171,6 +174,20 @@ what has already been fetched this cycle — it is not a full enumeration of the
 The non-persistent fallback around `wasm.Evaluator`, used when `usePersistentCache` is off. It keeps
 its cache in JS. Same interface where it matters: `evaluate(expr, evalCache)`,
 `evaluateNote(note, evalCache)`, `invalidate`, `invalidateAll`, `getCachedValue`, `getPoolStats`.
+
+It can only evaluate a whole note at a time, so it cannot be driven by the JS evaluator's
+per-variable order. `WasmNoteOrderIncrementalEvaluator` (`evaluator-adapter.js:670`) pairs it with
+the per-note Kahn sort instead: the JS incremental evaluator's dirty tracking, `WasmIncrementalEvaluator`'s
+`topoSort()`, then one `evaluateNote()` per note.
+
+::: warning The WASM path orders whole notes
+Per-variable ordering and cycle detection exist only in the JS evaluator. The Rust
+`evaluate_note_internal` (`rust/src/evaluator.rs:957`) evaluates a note's six expressions in the
+fixed order tempo → beatsPerMeasure → frequency → measureLength → startTime → duration, and both
+WASM incremental evaluators sort notes. Under `?evaluator=wasm`, a module in which two notes read
+each other through different variables still logs `Dependency cycle detected!` and evaluates the
+affected variables against defaults; the JS path evaluates it exactly.
+:::
 
 ## The hot-swap
 

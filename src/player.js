@@ -9,6 +9,8 @@ import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpress
 import { Workspace } from './renderer/webgl2/workspace.js';
 import { menuBar } from './menu/menu-bar.js';
 import { isDSLSyntax } from './dsl/index.js';
+import { compiler } from './expression-compiler.js';
+import { findDependencyCycle } from './variable-deps.js';
 import { escapeHtml } from './utils/html-escape.js';
 import { settingsStore } from './settings/settings-store.js';
 import { scaleStep } from './settings/settings-schema.js';
@@ -2625,6 +2627,20 @@ function __rawReferencesNoteId(raw, noteId) {
   return false;
 }
 
+// Shared helper: would writing `raw` as this variable make a variable depend on itself?
+// The retargeting below re-anchors a note on an ancestor found by walking start-time
+// parents, which assumes two notes never read each other. They can, through different
+// variables (1.f from 2.f while 2.t comes from 1.t), and then the walk can arrive back
+// at the note being rewritten. A retarget that would close such a loop is skipped: the
+// note keeps the expression it has.
+function __retargetWouldCycleGL(note, varName, raw) {
+  try {
+    return findDependencyCycle(myModule, note.id, varName, compiler.compile(raw)) !== null;
+  } catch {
+    return false;
+  }
+}
+
 // Shared helper: check if a raw expression references baseNote (legacy or DSL).
 function __rawReferencesBase(raw) {
   if (!raw || typeof raw !== 'string') return false;
@@ -3623,7 +3639,7 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
           }
         } catch {}
 
-        if (newFreqString) {
+        if (newFreqString && !__retargetWouldCycleGL(dep, 'frequency', newFreqString)) {
           dep.setVariable('frequencyString', newFreqString);
           try { myModule.markNoteDirty(dep.id); } catch {}
         }
@@ -3698,8 +3714,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             replacedS = sRaw.replace(noteRefRegex, parentRef);
             try { replacedS = simplifyStartTime(replacedS, myModule); } catch {}
           }
-          dep.setVariable('startTimeString', replacedS);
-          changed = true;
+          if (!__retargetWouldCycleGL(dep, 'startTime', replacedS)) {
+            dep.setVariable('startTimeString', replacedS);
+            changed = true;
+          }
         }
       } catch {}
 
@@ -3716,8 +3734,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             replacedD = dRaw.replace(noteRefRegex, parentRef);
             try { replacedD = simplifyDuration(replacedD, myModule); } catch {}
           }
-          dep.setVariable('durationString', replacedD);
-          changed = true;
+          if (!__retargetWouldCycleGL(dep, 'duration', replacedD)) {
+            dep.setVariable('durationString', replacedD);
+            changed = true;
+          }
         }
       } catch {}
 
@@ -3757,8 +3777,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           } else {
             try { simplifiedF = simplifyFrequency(replacedF, myModule); } catch { simplifiedF = replacedF; }
           }
-          dep.setVariable('frequencyString', simplifiedF);
-          changed = true;
+          if (!__retargetWouldCycleGL(dep, 'frequency', simplifiedF)) {
+            dep.setVariable('frequencyString', simplifiedF);
+            changed = true;
+          }
         }
       } catch {}
 
@@ -6038,7 +6060,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                   newExpr = rebuildFrequencyForAnchor(n, anchor, depGraph, _fIsDSL);
                 }
 
-                if (newExpr) {
+                if (newExpr && !__retargetWouldCycleGL(n, 'frequency', newExpr)) {
                   n.setVariable('frequencyString', newExpr);
                 }
                 // If newExpr is still null, preserve original expression (safer than corrupting)
@@ -6077,7 +6099,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
                   let simplifiedF;
                   try { simplifiedF = fIsDSL ? rawFreq : simplifyFrequency(rawFreq, myModule); } catch { simplifiedF = rawFreq; }
-                  n.setVariable('frequencyString', simplifiedF);
+                  if (!__retargetWouldCycleGL(n, 'frequency', simplifiedF)) {
+                    n.setVariable('frequencyString', simplifiedF);
+                  }
                 }
               }
 
@@ -6191,7 +6215,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 let simplifiedD;
                 try { simplifiedD = dIsDSL ? rawDur : simplifyDuration(rawDur, myModule); } catch { simplifiedD = rawDur; }
 
-                n.setVariable('durationString', simplifiedD);
+                if (!__retargetWouldCycleGL(n, 'duration', simplifiedD)) {
+                  n.setVariable('durationString', simplifiedD);
+                }
               }
             }
           } catch {}

@@ -168,21 +168,42 @@ An irrational start time or duration is marked just like an irrational frequency
 
 ### A typo'd note ID is not an error
 
-::: danger `[999].f` silently becomes 440 Hz
-Nothing validates that a referenced note exists. If the reference can't be resolved, the evaluator substitutes a default instead of complaining — **440 Hz** for a frequency, `0` for a start time, `1` for a duration. So a mistyped ID produces a plausible-sounding note rather than an error message. If a note is stubbornly sitting at 440 Hz, check its IDs.
+::: danger `[999].f` becomes 440 Hz, with no message on screen
+Nothing validates that a referenced note exists. If the reference can't be resolved, the evaluator substitutes a default — **440 Hz** for a frequency, `0` for a start time, `1` for a duration. So a mistyped ID produces a plausible-sounding note rather than an error in the widget. The only notice is in the browser console, which names both ends:
+
+```
+Unresolved reference! A hard-coded default was used instead:
+  [7].frequency reads [999].frequency, but note 999 does not exist (used 440)
+```
+
+If a note is stubbornly sitting at 440 Hz, check its IDs. The same happens when the note exists but lacks the property — `[3].d` when note 3 is a measure bar.
 :::
 
 ### Self-references and cycles are rejected
 
-A note cannot reference itself, and two notes cannot reference each other in a loop. Both are caught before the expression is stored.
+No property may depend on itself, directly or through a loop. Both are caught before the expression is stored.
 
 ```
-# On note 4 — rejected, a note cannot reference itself
+# As note 4's frequency — rejected, it reads itself
 [4].f * (3/2)
 
-# On note 5, when note 6 already reads [5].f — rejected, that's a cycle
+# As note 5's frequency, when note 6's frequency already reads [5].f — rejected, that's a cycle
 [6].f * (3/2)
 ```
+
+The check is per property, so these are fine:
+
+```
+# As note 4's start time — a start may read the same note's duration
+[4].d * 2
+
+# As note 5's start time, when note 6's frequency reads [5].f — nothing comes back to itself
+[6].t + [6].d
+```
+
+::: warning Dragging rewrites what it moves
+Moving a note re-emits its start time, duration and frequency in their standard forms (`[p].t + beat([p]) * k`, `beat([p]) * k`, `k * [p].f`), anchored on a note that starts no later than it does. A relationship outside those forms — a duration tied to another note's duration, a pitch tied to a note that starts later — becomes an equal value in the standard form when you drag that note. Set such relationships in the widget, and re-check them after a drag.
+:::
 
 ### Rejections tell you why
 

@@ -53,7 +53,7 @@ Dependencies are tracked **per property**, not per note. Note 4 can take its pit
 - **Drag previews** only move the notes whose *start time* traces back to the note in your hand.
 - **Cascade updates** only recompute the notes that are actually downstream of what changed.
 
-When a value changes, every note that depends on it — directly or transitively — is marked stale and recomputed in **topological order**, so a note is never evaluated before the notes it is built from.
+When a value changes, every note that depends on it — directly or transitively — is marked stale and recomputed in **dependency order**, property by property, so a value is never computed before the values it is built from.
 
 ```
 BaseNote  (frequency 263)
@@ -152,9 +152,11 @@ The confirmation dialog describes the delete as irreversible. It isn't: it lands
 
 ## Two edges the graph will not accept
 
-The graph must stay acyclic, so a note cannot reference itself and two notes cannot reference each other. Both are rejected on `Save`, with the reason shown in red under the Save button.
+No property may end up depending on itself. A frequency that reads its own note's frequency is a self-reference; note 5's frequency reading `[6].f` while note 6's frequency reads `[5].f` is a cycle. Both are rejected on `Save`, with the reason shown in red under the Save button.
 
-A reference to a note that **does not exist** is a different problem: it produces no edge, no line and no warning, and the evaluator quietly substitutes 440 Hz. Both cases are worked through in [Expressions → Things that go wrong](/user-guide/notes/expressions#things-that-go-wrong).
+The rule is per property, like everything else on this page. A note's start time may read the same note's duration, and two notes may read each other — one for its pitch, the other for its timing — as long as no property comes back to itself.
+
+A reference to a note that **does not exist** is a different problem: it produces no edge, no line and nothing on screen. The evaluator substitutes 440 Hz and names the reference in the browser console. Both cases are worked through in [Expressions → Things that go wrong](/user-guide/notes/expressions#things-that-go-wrong).
 
 ## Patterns
 

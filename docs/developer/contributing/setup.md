@@ -48,7 +48,7 @@ The everyday commands:
 | Script | Runs | Notes |
 |---|---|---|
 | `npm run dev` | `vite` | Dev server, port 3000, auto-opens. |
-| `npm test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-amplitude.mjs && node scripts/test-midi-export.mjs` | Validates every shipped library module, proves exact arithmetic end to end, then checks the amplitude variable and the MIDI export. The repo's only automated check. |
+| `npm test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-variable-deps.mjs && node scripts/test-amplitude.mjs && node scripts/test-midi-export.mjs` | Validates every shipped library module, proves exact arithmetic end to end, then checks per-variable evaluation order, the amplitude variable and the MIDI export. The repo's only automated check. |
 | `npm run build` | `npm run wasm:build && vite build` | **Requires Rust + wasm-pack.** Use `npx vite build` to bundle without Rust — see the warning below. |
 | `npm run perf:gen` / `npm run perf:bench` | `scripts/perf/…` | Generate the stress modules; run the headless evaluation benchmark. |
 | `npm run docs:dev` / `npm run docs:build` | `vitepress` | This documentation site. |
@@ -67,7 +67,7 @@ WASM artifacts in `src/wasm/`.
 
 ### `npm test`
 
-There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs four scripts.
+There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs five scripts.
 The first, `scripts/validate-modules.mjs`, walks every item in the v2 manifest
 `public/modules/library.json` and checks five things per module:
 
@@ -102,7 +102,23 @@ The second, `scripts/test-exactness.mjs`, proves the arbitrary-precision guarant
 survive the full compile → evaluate → decompile → save → load → re-evaluate round trip, and a
 ~98-digit `(N/D)` literal must round-trip through `LOAD_CONST_BIG` digit-exact.
 
-The third, `scripts/test-amplitude.mjs`, covers the seventh variable, `amplitude`:
+The third, `scripts/test-variable-deps.mjs`, locks in that dependencies are ordered and
+cycle-checked per (note, variable) rather than per note:
+
+1. **Two notes reading each other** through different variables (`[1].f` from `[2].f`, `[2].t`
+   from `[1].t + [1].d`) evaluate exactly, on the first evaluation.
+2. **A note's own variables** may read each other in any direction (the BaseNote's tempo from its
+   frequency), including through an inherited tempo or a computed measure length.
+3. **A true cycle is still refused** — by `validateExpression()` with the widget's two messages,
+   and by the evaluator with a console error that names the loop and values that do not drift.
+4. **An unresolved reference is named** in a console error instead of vanishing into a default.
+5. **Incremental equals fresh** — after seeded random edits (cyclic ones included) every module
+   must equal a fresh load of its own JSON, variable for variable.
+6. **Amplitude is part of all of it** — ordered per variable, inherited from the BaseNote and
+   cycle-checked like `tempo`. One thing differs: an amplitude nobody sets is 1 by definition,
+   so reading it is not an unresolved reference.
+
+The fourth, `scripts/test-amplitude.mjs`, covers the seventh variable, `amplitude`, on its own:
 
 1. **Old modules are untouched** — no shipped module gains an `amplitude` key when saved, and
    every note in them sounds at exactly 1.
@@ -115,7 +131,7 @@ The third, `scripts/test-amplitude.mjs`, covers the seventh variable, `amplitude
    removing a note's amplitude removes the key from the file.
 5. **The clamp** — the audio boundary limits the gain to 0–4 while the module keeps the exact value.
 
-The fourth, `scripts/test-midi-export.mjs`, exports modules with `src/midi/midi-export.js`, reads
+The fifth, `scripts/test-midi-export.mjs`, exports modules with `src/midi/midi-export.js`, reads
 the bytes back with a Standard MIDI File parser that shares no code with the exporter, and
 requires every note within 0.1 cent and one tick of the module's evaluated value, on a channel of
 its own. It covers the default module, all 79 library modules and synthetic cases — see

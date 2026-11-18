@@ -44,8 +44,9 @@ build one by hand — the compilers do it.
 
 ::: info The BaseNote is never a dependency
 `base.f` emits `LOAD_BASE` and sets `referencesBase`; it does **not** add `0` to `dependencies`.
-An explicit edge to note 0 would make the BaseNote a cycle in the graph. The evaluator's
-topological sort simulates the edge instead.
+An explicit edge to note 0 would make the BaseNote a cycle in the graph. The evaluator does not
+need the edge: it orders by [`getVariableRefs()`](#getvariablerefs), where `base.f` is simply a read
+of the BaseNote's frequency.
 :::
 
 ## Methods
@@ -109,6 +110,17 @@ expr.referencesProperty(1, VAR.FREQUENCY)  // → boolean
 
 Convenience wrapper over `getPropertyDependencies()`. Always `false` for `noteId === 0`, for the
 reason above.
+
+### getVariableRefs()
+
+```javascript
+expr.getVariableRefs()  // → number[]
+```
+
+Every (note, variable) the expression reads, in order of first appearance, each packed as
+`(noteId << 3) | varIndex`. Unlike `getPropertyDependencies()` it **includes BaseNote reads**, as
+note 0: `(3/2) * [2].f + base.t` gives `[(2 << 3) | 2, 0]`. Evaluation order and cycle checks are
+built on it. The array is decoded once and cached on the expression — treat it as read-only.
 
 ### Writer methods
 
@@ -238,7 +250,7 @@ The bitmask lives in the same file:
 getCorruptionFlag(VAR.FREQUENCY)  // → 4, i.e. 1 << varIndex
 ```
 
-`evaluateNote()` ORs the flag for whichever property was being evaluated when the irrational
+`evaluateVariable()` ORs the flag for whichever property was being evaluated when the irrational
 appeared, and returns it as `corruptionFlags` on the evaluated record. `Module.evaluateModule()`
 forwards those into the dependency graph, which is what lets the renderer hatch directly-corrupted
 notes and, through `isFrequencyTransitivelyCorrupted()`, their descendants.
