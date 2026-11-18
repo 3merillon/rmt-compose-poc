@@ -48,7 +48,7 @@ The everyday commands:
 | Script | Runs | Notes |
 |---|---|---|
 | `npm run dev` | `vite` | Dev server, port 3000, auto-opens. |
-| `npm test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-amplitude.mjs` | Validates every shipped library module, proves exact arithmetic end to end, then checks the amplitude variable. The repo's only automated check. |
+| `npm test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-amplitude.mjs && node scripts/test-midi-export.mjs` | Validates every shipped library module, proves exact arithmetic end to end, then checks the amplitude variable and the MIDI export. The repo's only automated check. |
 | `npm run build` | `npm run wasm:build && vite build` | **Requires Rust + wasm-pack.** Use `npx vite build` to bundle without Rust — see the warning below. |
 | `npm run perf:gen` / `npm run perf:bench` | `scripts/perf/…` | Generate the stress modules; run the headless evaluation benchmark. |
 | `npm run docs:dev` / `npm run docs:build` | `vitepress` | This documentation site. |
@@ -67,7 +67,7 @@ WASM artifacts in `src/wasm/`.
 
 ### `npm test`
 
-There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs three scripts.
+There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs four scripts.
 The first, `scripts/validate-modules.mjs`, walks every item in the v2 manifest
 `public/modules/library.json` and checks five things per module:
 
@@ -115,6 +115,12 @@ The third, `scripts/test-amplitude.mjs`, covers the seventh variable, `amplitude
    removing a note's amplitude removes the key from the file.
 5. **The clamp** — the audio boundary limits the gain to 0–4 while the module keeps the exact value.
 
+The fourth, `scripts/test-midi-export.mjs`, exports modules with `src/midi/midi-export.js`, reads
+the bytes back with a Standard MIDI File parser that shares no code with the exporter, and
+requires every note within 0.1 cent and one tick of the module's evaluated value, on a channel of
+its own. It covers the default module, all 79 library modules and synthetic cases — see
+[MIDI Export](/developer/api/midi-export#the-check).
+
 `npm test` exits non-zero on any failure. Run it after **any** change to the DSL, the expression
 compiler, the evaluator, or anything under `public/modules/`.
 
@@ -145,6 +151,7 @@ rmt-compose-poc/
 │   │                       #   compiler, decompiler, simplify
 │   ├── renderer/webgl2/    # renderer, workspace, camera-controller, renderer-config
 │   ├── player/             # audio-engine, audio-graph, reverb, amplitude
+│   ├── midi/               # midi-export: module → Standard MIDI File
 │   ├── instruments/        # synths + multisampled piano/violin
 │   ├── modals/             # note widget, group widget
 │   ├── menu/               # module library / module bar

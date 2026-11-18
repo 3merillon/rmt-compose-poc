@@ -35,7 +35,7 @@ All 13, and what each one really does.
 | `dev` | `vite` | Dev server on port 3000, auto-opens the browser |
 | `build` | `npm run wasm:build && vite build` | Full build. **Requires Rust + wasm-pack.** Vercel does *not* use this |
 | `preview` | `vite preview` | Serves the built `dist/` on Vite's default preview port (4173) |
-| `test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-amplitude.mjs` | **Not a unit-test runner.** Validates every library module, proves arbitrary-precision exactness end to end, then checks the amplitude variable |
+| `test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-amplitude.mjs && node scripts/test-midi-export.mjs` | **Not a unit-test runner.** Validates every library module, proves arbitrary-precision exactness end to end, then checks the amplitude variable and the MIDI export |
 | `gen:intervals` | `node scripts/gen-interval-catalog.mjs` | Regenerates `public/modules/intervals/` and patches the `intervals` section of `library.json` |
 | `wasm:build` | `cd rust && wasm-pack build --target web --out-dir pkg && cd .. && node scripts/sync-wasm.mjs` | Builds the Rust crate, then copies the artifacts into `src/wasm/` |
 | `wasm:sync` | `node scripts/sync-wasm.mjs` | The copy step alone |
@@ -52,13 +52,14 @@ run **`npx vite build`** — byte for byte what Vercel runs.
 :::
 
 ::: warning `npm test` is not a test suite
-There is no Jest and no Vitest anywhere in this repo. `npm test` runs three scripts and exits
+There is no Jest and no Vitest anywhere in this repo. `npm test` runs four scripts and exits
 non-zero if any fails: `scripts/validate-modules.mjs`, which validates every module referenced
 by `public/modules/library.json`; `scripts/test-exactness.mjs`, which proves exact rational
 arithmetic survives a 200-note `(3/2)` chain (checked against native BigInt) and that a ~98-digit
-`LOAD_CONST_BIG` literal round-trips digit-exact; and `scripts/test-amplitude.mjs`, which checks
+`LOAD_CONST_BIG` literal round-trips digit-exact; `scripts/test-amplitude.mjs`, which checks
 that `amplitude` inherits from the BaseNote, stays exact, and is never written to a module that
-did not set it. Run it before you touch anything under
+did not set it; and `scripts/test-midi-export.mjs`, which parses exported MIDI files back and
+requires every note within 0.1 cent and one tick. Run it before you touch anything under
 `public/modules/`, the compilers, or the evaluator. The checks are detailed in
 [Development Setup](/developer/contributing/setup#npm-test).
 :::

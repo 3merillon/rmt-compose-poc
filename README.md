@@ -129,7 +129,7 @@ Other scripts:
 
 | Script | What it does |
 |---|---|
-| `npm test` | Validates all 79 library modules (structure, expressions, self-containedness, finite evaluation, ratio/cents). **Not a unit-test suite** — the repo has no test framework. |
+| `npm test` | Validates all 79 library modules (structure, expressions, self-containedness, finite evaluation, ratio/cents), then checks the amplitude variable and reads exported MIDI files back note by note. **Not a unit-test suite** — the repo has no test framework. |
 | `npm run gen:intervals` | Regenerates the 46 interval modules and patches `library.json` |
 | `npm run perf:gen` / `npm run perf:bench` | Generate stress modules; benchmark evaluation in Node |
 | `npm run samples:build` | Rebuilds the piano/violin samples from VSCO-2 CE (needs `ffmpeg` + network) |
@@ -159,7 +159,7 @@ If you built the crate by hand, sync with `npm run wasm:sync` and commit the upd
   - Reset View centers on the BaseNote (disabled while tracking is on)
   - Playhead tracking keeps the playhead at the horizontal center — this **locks horizontal panning** for as long as it is on
   - **Gear** opens the Settings panel (five tabs). It is the only way in; there is no menu entry.
-  - **+** opens the main menu: Undo, Redo, Reorder Module, Save Module, Load Module (from file / reset to default), plus Documentation, Donate, License links
+  - **+** opens the main menu: Undo, Redo, Reorder Module, Save Module, Export MIDI, Load Module (from file / reset to default), plus Documentation, Donate, License links
 - **Editing**
   - Click to select a note, measure, or the BaseNote; click again on the same spot to cycle through an overlapping stack
   - Drag a note body to move it; drag the right tab to resize
@@ -172,6 +172,7 @@ If you built the crate by hand, sync with `npm run wasm:sync` and commit the upd
 - **Import/Export**
   - Load a module from a file, or drag one from the module library onto a note, a measure bar, or the BaseNote
   - Save Module downloads `module.json` (reindexed on export). Save UI / Load UI export the *library layout*, not a composition.
+  - Export MIDI downloads `module.mid`: a type 1 Standard MIDI File that keeps the tuning — each note on its nearest key plus a 14-bit pitch bend, one note per channel (an MPE lower zone per instrument, bend range ±2 semitones), velocity from `amplitude`. One-way: there is no MIDI import.
 - **Keyboard** — the only global shortcuts are undo and redo:
   - **Undo: Ctrl/Cmd+Z**
   - **Redo: Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z**
@@ -385,6 +386,8 @@ Example — chain notes up the 12-TET scale:
 - `src/player/audio-engine.js` — streaming scheduler, play/pause/stop/loop
 - `src/player/audio-graph.js` — buses, reverb send/return, limiter, master gain
 - `src/player/reverb.js` — algorithmic impulse-response generator
+- `src/player/amplitude.js` — amplitude → gain, clamped to 0–4 at the audio boundary
+- `src/midi/midi-export.js` — module → Standard MIDI File (pure function; also runs in Node)
 - `src/instruments/` — synth + multisample instruments
 
 ### WASM core (optional, inert by default)

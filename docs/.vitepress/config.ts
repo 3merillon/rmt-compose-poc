@@ -101,6 +101,7 @@ export default defineConfig({
             { text: 'The Module Library', link: '/user-guide/modules/module-library' },
             { text: 'Loading Modules', link: '/user-guide/modules/loading-modules' },
             { text: 'Saving Modules', link: '/user-guide/modules/saving-modules' },
+            { text: 'Exporting MIDI', link: '/user-guide/modules/exporting-midi' },
             { text: 'Creating Modules', link: '/user-guide/modules/creating-modules' },
             { text: 'Module Format', link: '/user-guide/modules/module-format' }
           ]
@@ -255,7 +256,8 @@ export default defineConfig({
             { text: 'Module Class', link: '/developer/api/module' },
             { text: 'Note Class', link: '/developer/api/note' },
             { text: 'BinaryExpression', link: '/developer/api/binary-expression' },
-            { text: 'EventBus', link: '/developer/api/event-bus' }
+            { text: 'EventBus', link: '/developer/api/event-bus' },
+            { text: 'MIDI Export', link: '/developer/api/midi-export' }
           ]
         },
         {

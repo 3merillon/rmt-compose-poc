@@ -235,6 +235,7 @@ src/
 ├── instruments/
 │   ├── instrument-manager.js  synth-instruments.js
 │   ├── sample-instruments.js  multisample-instrument.js
+├── midi/midi-export.js         # module → Standard MIDI File (pure: runs in Node too)
 ├── modals/                     # note widget, group widget, creation, actions, validation
 ├── menu/                       # module bar + icon factory
 ├── settings/                   # settings-schema.js, settings-store.js, settings-panel.js

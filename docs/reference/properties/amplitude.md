@@ -95,6 +95,9 @@ that reads `[N].a` sees it unclamped.
 Loud notes add up. The limiter (**Settings → Audio**) is on by default and catches the peaks of a
 dense, loud passage; with it off, several notes at `4` can clip.
 
+In a MIDI export the same clamped value becomes the note's velocity, `64 × √amplitude` — see
+[Exporting MIDI](/user-guide/modules/exporting-midi#amplitude-becomes-velocity).
+
 ## Expression examples
 
 ### A piece-wide level on the BaseNote
@@ -197,3 +200,4 @@ default JavaScript evaluator — what the app runs unless you add the flag — s
 - [Module API](/reference/expressions/module-api#inheritance) — inheritance rules
 - [Module JSON Schema](/reference/module-schema)
 - [Instruments](/user-guide/playback/instruments)
+- [Exporting MIDI](/user-guide/modules/exporting-midi) — amplitude as velocity

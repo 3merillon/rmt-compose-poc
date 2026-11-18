@@ -160,6 +160,8 @@ A module is a plain JSON file. Email it, drop it in cloud storage, put it in a g
 
 No account, no plugin, no runtime — just the file.
 
+For a DAW or a synthesizer, **Export MIDI** in the same menu writes the piece as `module.mid` with its tuning intact — see [Exporting MIDI](/user-guide/modules/exporting-midi). That file is an export, not a save: it cannot be loaded back.
+
 ## Tips
 
 1. **Rename the download.** Every export is `module.json`. Rename it the moment it lands.
@@ -171,6 +173,7 @@ No account, no plugin, no runtime — just the file.
 ## See also
 
 - [Loading Modules](/user-guide/modules/loading-modules) — the other half of the round trip
+- [Exporting MIDI](/user-guide/modules/exporting-midi) — the piece as a MIDI file, tuning included
 - [Module Format](/user-guide/modules/module-format) — what is in the file
 - [Module JSON Schema](/reference/module-schema) — the exhaustive reference
 - [Module Bar](/user-guide/interface/module-bar) — organizing the library

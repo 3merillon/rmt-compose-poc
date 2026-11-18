@@ -53,6 +53,7 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 │  renderer/webgl2/   renderer · workspace · camera · config           │
 │  player/            audio-engine → audio-graph → reverb              │
 │  instruments/       synths + multisampled piano/violin               │
+│  midi/              midi-export: module → Standard MIDI File (pure)  │
 ├──────────────────────────────────────────────────────────────────────┤
 │ State                                                                │
 │  store/app-state.js · store/history.js · utils/event-bus.js          │
@@ -108,6 +109,7 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 - **[Note Class](/developer/api/note)**
 - **[BinaryExpression](/developer/api/binary-expression)**
 - **[EventBus](/developer/api/event-bus)**
+- **[MIDI Export](/developer/api/midi-export)**
 
 ### Contributing
 

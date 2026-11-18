@@ -44,6 +44,7 @@ Start with [Getting Started](/getting-started/) if you have not opened the app y
 - **[Module Library](/user-guide/modules/module-library)** — what ships in the library and where it lives
 - **[Loading Modules](/user-guide/modules/loading-modules)** — import from the library or from a file
 - **[Saving Modules](/user-guide/modules/saving-modules)** — export your work
+- **[Exporting MIDI](/user-guide/modules/exporting-midi)** — a MIDI file that keeps the tuning
 - **[Creating Modules](/user-guide/modules/creating-modules)** — build one from scratch
 - **[Module Format](/user-guide/modules/module-format)** — the JSON schema
 
