@@ -6,7 +6,7 @@ description: The complete grammar of the RMT Compose expression DSL — tokens, 
 # Expression Syntax
 
 Every note property in RMT Compose — `startTime`, `duration`, `frequency`, `tempo`,
-`beatsPerMeasure`, `measureLength` — is stored as a **text expression**. The expression is
+`beatsPerMeasure`, `measureLength`, `amplitude` — is stored as a **text expression**. The expression is
 compiled to bytecode and evaluated with exact rational arithmetic.
 
 This page is the complete grammar. The modern format is the **DSL**:
@@ -142,6 +142,7 @@ Every property has a canonical name and one or more accepted spellings.
 | tempo | `tempo` | `tempo` |
 | beatsPerMeasure | `bpm`, `beatsPerMeasure` | `bpm` |
 | measureLength | `ml`, `measureLength` | `ml` |
+| amplitude | `a`, `amp`, `amplitude` | `a` |
 
 Aliases are normalized when the expression is saved: type `base.freq`, and it comes back as
 `base.f`.
@@ -150,20 +151,22 @@ Anything else is an error:
 
 ```
 [1].x           # Unknown property 'x'. Valid properties: f (frequency), t (startTime),
-                #   d (duration), tempo, bpm, ml
+                #   d (duration), a (amplitude), tempo, bpm, ml
 [1].pitch       # same
 base.l          # same — there is no `l` alias for duration
 ```
 
 ### What a reference resolves to
 
-`tempo`, `beatsPerMeasure` and `measureLength` **fall back to the BaseNote** when the
-referenced note does not define them. `[5].tempo` on a note with no tempo of its own gives you
-the BaseNote's tempo.
+`tempo`, `beatsPerMeasure`, `measureLength` and `amplitude` **fall back to the BaseNote** when
+the referenced note does not define them. `[5].tempo` on a note with no tempo of its own gives
+you the BaseNote's tempo, and `[5].a` on a note with no amplitude gives you the BaseNote's.
 
 `startTime`, `duration` and `frequency` do not inherit. If a reference cannot be resolved at
 all — for example it points at a note that no longer exists — evaluation does not fail. It
-substitutes a fixed default and carries on:
+substitutes a fixed default and carries on. For the four inheriting properties the BaseNote is
+still consulted first; the default is what is left when the BaseNote does not define the property
+either:
 
 | Property | Default when unresolvable |
 |---|---|
@@ -173,6 +176,7 @@ substitutes a fixed default and carries on:
 | tempo | 60 |
 | beatsPerMeasure | 4 |
 | measureLength | 4 |
+| amplitude | 1 |
 
 ## Built-in functions
 
@@ -317,13 +321,16 @@ unchanged:
 | Missing property after `.` | `base.` |
 | Incomplete expression | `1 +` |
 | Unclosed bracket | `beat([1].t` |
-| Self-reference | `[5].f * 2` typed on note 5 |
-| Circular dependency | note 1 references note 2, which references note 1 |
+| Self-reference | `[5].f * 2` as note 5's frequency |
+| Circular dependency | note 1's frequency reads `[2].f` while note 2's frequency reads `[1].f` |
+
+The last two are judged per property. `[5].d * 2` as note 5's start time is accepted, and so are
+two notes that read each other through different properties.
 
 A rejected expression shows its reason **inline in the widget** — in red under the `Save` button,
 with a red border on the field. The note keeps its old value. The message is specific, for
 example `Unknown property 'x'. Valid properties: f (frequency), t (startTime), d (duration),
-tempo, bpm, ml (at column 5)`.
+a (amplitude), tempo, bpm, ml (at column 5)`.
 
 ### What is *not* an error
 

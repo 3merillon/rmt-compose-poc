@@ -44,8 +44,9 @@ build one by hand — the compilers do it.
 
 ::: info The BaseNote is never a dependency
 `base.f` emits `LOAD_BASE` and sets `referencesBase`; it does **not** add `0` to `dependencies`.
-An explicit edge to note 0 would make the BaseNote a cycle in the graph. The evaluator's
-topological sort simulates the edge instead.
+An explicit edge to note 0 would make the BaseNote a cycle in the graph. The evaluator does not
+need the edge: it orders by [`getVariableRefs()`](#getvariablerefs), where `base.f` is simply a read
+of the BaseNote's frequency.
 :::
 
 ## Methods
@@ -109,6 +110,17 @@ expr.referencesProperty(1, VAR.FREQUENCY)  // → boolean
 
 Convenience wrapper over `getPropertyDependencies()`. Always `false` for `noteId === 0`, for the
 reason above.
+
+### getVariableRefs()
+
+```javascript
+expr.getVariableRefs()  // → number[]
+```
+
+Every (note, variable) the expression reads, in order of first appearance, each packed as
+`(noteId << 3) | varIndex`. Unlike `getPropertyDependencies()` it **includes BaseNote reads**, as
+note 0: `(3/2) * [2].f + base.t` gives `[(2 << 3) | 2, 0]`. Evaluation order and cycle checks are
+built on it. The array is decoded once and cached on the expression — treat it as read-only.
 
 ### Writer methods
 
@@ -232,12 +244,13 @@ The bitmask lives in the same file:
 | `CORRUPT.TEMPO` | `0x08` |
 | `CORRUPT.BEATS_PER_MEASURE` | `0x10` |
 | `CORRUPT.MEASURE_LENGTH` | `0x20` |
+| `CORRUPT.AMPLITUDE` | `0x40` |
 
 ```javascript
 getCorruptionFlag(VAR.FREQUENCY)  // → 4, i.e. 1 << varIndex
 ```
 
-`evaluateNote()` ORs the flag for whichever property was being evaluated when the irrational
+`evaluateVariable()` ORs the flag for whichever property was being evaluated when the irrational
 appeared, and returns it as `corruptionFlags` on the evaluated record. `Module.evaluateModule()`
 forwards those into the dependency graph, which is what lets the renderer hatch directly-corrupted
 notes and, through `isFrequencyTransitivelyCorrupted()`, their descendants.
@@ -323,7 +336,7 @@ try {
 } catch (e) {
   if (e instanceof DSLError) console.error(e.formatWithContext('base.z'))
 }
-// Unknown property 'z'. Valid properties: f (frequency), t (startTime), d (duration), tempo, bpm, ml (at column 6)
+// Unknown property 'z'. Valid properties: f (frequency), t (startTime), d (duration), a (amplitude), tempo, bpm, ml (at column 6)
 //
 // base.z
 //      ^
@@ -342,7 +355,7 @@ npm run perf:bench     # scripts/perf/bench-node.mjs
 
 ## The other two classes in this file
 
-`src/binary-note.js` also exports `BinaryNote` (six `BinaryExpression`s plus cached values) and
+`src/binary-note.js` also exports `BinaryNote` (seven `BinaryExpression`s plus cached values) and
 `BinaryModule` (a `Map` of them). **Neither is on the live path** — nothing imports them (their
 last consumer, the dead `src/module-serializer.js`, has been deleted from the repo). The live
 containers are `Note` and `Module`. Do not build against them without checking that first.
@@ -351,5 +364,5 @@ containers are `Note` and `Module`. Do not build against them without checking t
 
 - [Expression Compiler](/developer/core/expression-compiler) — routing, the legacy parser, the cache
 - [Binary Evaluator](/developer/core/binary-evaluator) — the stack VM, `POW`, and the fallback defaults
-- [Note Class](/developer/api/note) — the owner of six of these
+- [Note Class](/developer/api/note) — the owner of seven of these
 - [Expression Syntax](/reference/expressions/syntax) — the DSL grammar

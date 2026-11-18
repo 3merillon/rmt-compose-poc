@@ -11,8 +11,8 @@ undo stack, the renderer's hatching — exists to make that idea fast and honest
 
 ## Design principles
 
-1. **Expression-driven.** All six note properties (`startTime`, `duration`, `frequency`, `tempo`,
-   `beatsPerMeasure`, `measureLength`) are text expressions. Move a parent and its children follow,
+1. **Expression-driven.** All seven note properties (`startTime`, `duration`, `frequency`, `tempo`,
+   `beatsPerMeasure`, `measureLength`, `amplitude`) are text expressions. Move a parent and its children follow,
    because they never held a number in the first place.
 2. **Compiled, never evaluated.** Expressions compile to a compact bytecode and run on a stack VM.
    Nothing in the app calls `eval()` or `new Function()` — that is a security guarantee, enforced in
@@ -111,7 +111,7 @@ note widget shows it under Save); the load paths catch per-note and leave the pr
 graph, the evaluators, and the dirty set. It is also the JSON load/save path. See
 [Module System](/developer/architecture/module-system).
 
-**`Note`** (`src/note.js`) holds six `BinaryExpression`s plus non-expression `properties.color` and
+**`Note`** (`src/note.js`) holds seven `BinaryExpression`s plus non-expression `properties.color` and
 `properties.instrument`.
 
 **`BinaryExpression`** (`src/binary-note.js`) is a growable `Uint8Array` of bytecode plus a
@@ -119,8 +119,9 @@ graph, the evaluators, and the dirty set. It is also the JSON load/save path. Se
 its own bytecode — that scan is where the dependency graph gets its edges.
 
 **`BinaryEvaluator`** (`src/binary-evaluator.js`) is a stack VM over that bytecode. Its stack holds
-pooled `fraction.js` rationals. `IncrementalEvaluator` wraps it with a dirty set and a **Kahn
-topological sort**, so dependencies are always evaluated before dependents.
+pooled `fraction.js` rationals. `IncrementalEvaluator` wraps it with a dirty set of notes and a
+**per-variable evaluation order**, so every variable is evaluated after the variables it reads —
+which is what lets two notes read each other through different variables.
 
 **`DependencyGraph`** (`src/dependency-graph.js`) maintains forward and inverse indexes for the
 whole note set, *plus* nine property-pair indexes (`startTimeOnDurationDependents`,
@@ -210,7 +211,7 @@ src/
 ├── main.js                     # entry point (index.html loads this)
 ├── player.js                   # orchestrator: transport, selection, commits, undo wiring
 ├── module.js                   # Module: notes, deps, evaluation, JSON load/save, reindex
-├── note.js                     # Note: six BinaryExpressions + color/instrument
+├── note.js                     # Note: seven BinaryExpressions + color/instrument
 ├── stack-click.js              # click-through a stack of overlapping notes
 ├── expression-compiler.js      # LEGACY parser + format routing + LRU compile cache
 ├── binary-note.js              # OP / VAR / CORRUPT / BinaryExpression
@@ -230,10 +231,12 @@ src/
 ├── player/
 │   ├── audio-engine.js         # voices + lookahead scheduler
 │   ├── audio-graph.js          # buses, reverb send/return, pitch pan, limiter
+│   ├── amplitude.js            # amplitude → gain, clamped at the audio boundary
 │   └── reverb.js               # algorithmic impulse response
 ├── instruments/
 │   ├── instrument-manager.js  synth-instruments.js
 │   ├── sample-instruments.js  multisample-instrument.js
+├── midi/midi-export.js         # module → Standard MIDI File (pure: runs in Node too)
 ├── modals/                     # note widget, group widget, creation, actions, validation
 ├── menu/                       # module bar + icon factory
 ├── settings/                   # settings-schema.js, settings-store.js, settings-panel.js
@@ -280,14 +283,26 @@ build on them.
 
 There is no serializer to update. The touch-points are:
 
-1. `src/binary-note.js` — `VAR` and `VAR_NAMES` (the var index the bytecode carries).
-2. `src/note.js` — the `expressions` map in the constructor.
+1. `src/binary-note.js` — `VAR`, `VAR_NAMES` and `CORRUPT` (the var index the bytecode carries and
+   its corruption bit), and the expression, cache field and accessors on `BinaryNote`. A variable
+   is addressed in three bits, so there is room for eight; `amplitude` is the seventh.
+2. `src/note.js` — the `expressions` map in the constructor, and the lists of expression names
+   beside it.
 3. `src/module.js` — the `baseExprs` array inside `createModuleJSON()`, or the property never
-   round-trips to JSON.
+   round-trips to JSON, and the list of names `reindexModule()` rewrites references in.
 4. `src/dsl/constants.js` — `PropertyMap` (input aliases) and `PropertyShortNames` (what the
-   decompiler prints).
-5. `src/binary-evaluator.js` — `evaluateNote()`'s evaluation order and its default value.
-6. The renderer and the note widget, if it is visible.
+   decompiler prints); then `varNameToIndex()` in `src/dsl/compiler.js` and in
+   `src/expression-compiler.js`, with the legacy compiler's own name tables.
+5. `src/binary-evaluator.js` — `VAR_ORDER`, its default in `UNRESOLVED_DEFAULTS`, the record in
+   `createEvaluationRecord()`, the `switch` in `evaluateVariable()`, and the three places a value
+   is read back (`getCachedValue()`, `LOAD_REF`, `LOAD_BASE`); and the matching `switch` in
+   `getVariableExpression()` (`src/variable-deps.js`). A property that inherits from the BaseNote
+   takes an index of `VAR.TEMPO` or above and joins the inheritable list in `LOAD_REF`.
+6. The two validators that list a module file's expression keys — the import validator in
+   `src/menu/menu-bar.js` and `EXPR_KEYS` in `scripts/validate-modules.mjs`. A key missing from
+   them is not refused; its expression simply goes unchecked on upload and in `npm test`.
+7. The renderer and the note widget, if it is visible.
+8. `rust/src/` — the Rust evaluator keeps its own table of variables.
 
 ## See also
 

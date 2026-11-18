@@ -64,6 +64,7 @@ Every field is optional. An omitted field falls back to the **class default** be
 | `tempo` | `60` BPM | |
 | `beatsPerMeasure` | `4` | The numerator of the time signature. |
 | `measureLength` | `60 / tempo × beatsPerMeasure` | Only five shipped modules set it explicitly — 12/19/31-TET, Bohlen–Pierce and Mixed-Base — as `beat(base) * base.bpm`. |
+| `amplitude` | `1` | A relative gain. Every note without its own inherits it. Saved only when set; no shipped module uses it. |
 | `color` | none | Accepted, but no shipped module uses it. |
 | `instrument` | none → the `audio.defaultInstrument` setting | Pins the timbre for everything that inherits from the base. |
 
@@ -82,12 +83,13 @@ Every field is optional. An omitted field falls back to the **class default** be
 | `tempo` | no | Per-note override. |
 | `beatsPerMeasure` | no | Per-note override. This is how a measure bar carries a meter change. |
 | `measureLength` | no | Per-note override. |
+| `amplitude` | no | Relative gain, e.g. `"(121/100) * [3].a"`. Absent = the BaseNote's. |
 | `color` | no | e.g. `"rgba(242,167,27,0.7)"`. |
 | `instrument` | no | Inherited along the frequency chain when absent. |
 
-The six **expression keys** are exactly `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`. The three **non-expression keys** are `id`, `color`, `instrument`. Any other key in a note object is ignored — including the `_description` field that older versions of this page suggested. Nothing reads it, and it is dropped the first time you re-save.
+The seven **expression keys** are exactly `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`. The three **non-expression keys** are `id`, `color`, `instrument`. Any other key in a note object is ignored — including the `_description` field that older versions of this page suggested. Nothing reads it, and it is dropped the first time you re-save.
 
-`tempo`, `beatsPerMeasure` and `measureLength` **fall back to the BaseNote** when a referenced note does not define them. `startTime`, `duration` and `frequency` do not fall back.
+`tempo`, `beatsPerMeasure`, `measureLength` and `amplitude` **fall back to the BaseNote** when a referenced note does not define them. `startTime`, `duration` and `frequency` do not fall back.
 
 ### Note kinds are inferred, not declared
 
@@ -260,8 +262,8 @@ Different entry points run different checks. This trips people up, so it is wort
 
 Two things that are **not** checked anywhere at load time:
 
-- **Dangling references.** `[99].f` when there is no note 99 loads fine and evaluates to a fallback (440 Hz for frequency, 0 s for start time, 1 s for duration).
-- **Circular dependencies.** `[1].f = [2].f` and `[2].f = [1].f` load. The evaluator logs `Dependency cycle detected!` to the console and leaves the affected notes unevaluated.
+- **Dangling references.** `[99].f` when there is no note 99 loads fine and evaluates to a fallback (440 Hz for frequency, 0 s for start time, 1 s for duration). The evaluator logs `Unresolved reference!` to the console, naming the note and property on both ends.
+- **Circular dependencies.** `[1].f = [2].f` and `[2].f = [1].f` load. The evaluator logs `Dependency cycle detected!` to the console with the loop spelled out, and evaluates those properties against the fallbacks. Only a property that depends on *itself* is a cycle: `[1].f = [2].f` together with `[2].t = [1].t + [1].d` is two notes reading each other, and evaluates normally.
 
 Neither produces an error message on screen. If a note is missing or in the wrong place after a load, open the browser console.
 

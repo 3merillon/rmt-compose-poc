@@ -172,6 +172,7 @@ Note References:
   [id].tempo - tempo of note id
   [id].bpm   - beatsPerMeasure of note id
   [id].ml    - measureLength of note id
+  [id].a     - amplitude (relative gain) of note id
   base.f     - baseNote frequency (same as [0].f)
 
 Literals:

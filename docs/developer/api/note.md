@@ -5,7 +5,7 @@ description: API reference for the Note class in src/note.js — expression stor
 
 # Note Class
 
-A `Note` (`src/note.js`) is six compiled expressions plus two plain properties. It stores no
+A `Note` (`src/note.js`) is seven compiled expressions plus two plain properties. It stores no
 numbers: every musical value is an expression, and reading one goes through the module's evaluator.
 
 ```javascript
@@ -51,7 +51,7 @@ A plain writable field. `reindexModule()` does not mutate it — it builds fresh
 note.expressions  // { [name: string]: BinaryExpression }
 ```
 
-Always all six keys, always a `BinaryExpression` object — an *unset* property is an **empty**
+Always all seven keys, always a `BinaryExpression` object — an *unset* property is an **empty**
 expression, not a missing one. Use `hasExpression(name)` rather than a truthiness check.
 
 ```javascript
@@ -61,7 +61,8 @@ expression, not a missing one. Use `hasExpression(name)` rather than a truthines
   frequency: BinaryExpression,
   tempo: BinaryExpression,
   beatsPerMeasure: BinaryExpression,
-  measureLength: BinaryExpression
+  measureLength: BinaryExpression,
+  amplitude: BinaryExpression
 }
 ```
 
@@ -123,10 +124,10 @@ Reads through `module.getEvaluationCache()`, which evaluates first if anything i
 
 | `name` | Returns |
 |---|---|
-| `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength` | `Fraction` |
+| `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude` | `Fraction` |
 | `color`, `instrument` | `string \| null` (straight from `note.properties` — no module needed) |
 | any `<name>String` | `string \| null` — the expression **source text**, via `getExpressionSource()` (no module needed) |
-| any of the six expression names, when unresolvable or when `note.module` is `null` | `null` |
+| any of the seven expression names, when unresolvable or when `note.module` is `null` | `null` |
 | any other name | `null` |
 
 ```javascript
@@ -195,6 +196,17 @@ note.hasExpression('frequency')   // → boolean — true only when it has bytec
 `hasExpression()` is how note kinds are told apart: a **measure** has `startTime` but no `duration`
 and no `frequency`; a **silence** has `startTime` and `duration` but no `frequency`.
 
+### clearExpression()
+
+```javascript
+note.clearExpression('amplitude')   // → boolean — false when there was nothing to remove
+```
+
+Replaces the expression with an empty one, bumps `_depsEpoch` and notifies the module, so the note
+no longer defines the property and the key is no longer serialized. It exists for `amplitude`,
+the one property the note widget lets you remove: the note then inherits again
+(`Module.findAmplitude()`).
+
 ### getAllVariables()
 
 ```javascript
@@ -209,7 +221,7 @@ note.getAllVariables()
 
 Every defined expression appears **twice**: once evaluated, once as its source string. `color` and
 `instrument` are included only when set. Code iterating this object will hit string values —
-`Object.entries(note.getAllVariables())` is not six Fractions.
+`Object.entries(note.getAllVariables())` is not seven Fractions.
 
 ## Dependency tracking
 
@@ -219,7 +231,7 @@ Every defined expression appears **twice**: once evaluated, once as its source s
 note.getAllDependencies()  // → Set<number>
 ```
 
-Ids referenced across all six expressions. **The BaseNote is not in it** — base references set the
+Ids referenced across all seven expressions. **The BaseNote is not in it** — base references set the
 `referencesBase` flag on the expression instead of adding an edge to note 0.
 
 ### referencesBaseNote()
@@ -295,6 +307,7 @@ New code should use `getVariable()` / `setVariable()` / `getExpressionSource()` 
 | `tempo` | BPM (inheritable — falls back to the BaseNote) |
 | `beatsPerMeasure` | time-signature numerator (inheritable) |
 | `measureLength` | measure duration in seconds (inheritable) |
+| `amplitude` | relative gain, default 1 (inheritable; playback clamps it to 0–4) |
 
 | Non-expression property | Meaning |
 |---|---|

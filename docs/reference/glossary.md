@@ -9,6 +9,9 @@ Terms used across the app and these docs. Where a term names something you can c
 
 ## A
 
+### Amplitude
+A note's loudness, written as a relative gain: `1` is the default level, `2` twice the amplitude, `(1/2)` half. It is an expression like any other property (`a`), so it can be written against another note — `(121/100) * [3].a`. Inherited from the BaseNote unless a note defines its own. Playback clamps it to 0–4. See [amplitude](/reference/properties/amplitude).
+
 ### Approximation (≈)
 The prefix shown in the [note widget](/user-guide/interface/variable-widget) before a value the app cannot represent exactly — an irrational one. Both directly and transitively [corrupted](#corruption) values display with `≈`. A **directly** corrupted value is shown as a decimal, to 8 significant figures (`≈1.0594631`); a **transitively** corrupted one is shown as a fraction. Either way the text is rendered in a warm amber, in italics.
 
@@ -95,7 +98,7 @@ A tuning that divides an interval into *n* equal steps. `n`-TET usually means *n
 The number an expression computes to, shown on the `Evaluated:` line of the note widget. Contrast the **raw expression**, the text you typed.
 
 ### Expression
-The text stored for a note property. Six properties are expressions: `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`. Nothing is stored as a number.
+The text stored for a note property. Seven properties are expressions: `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`. Nothing is stored as a number.
 
 ## F
 
@@ -252,7 +255,7 @@ Several pickers currently have no visible effect — see [Themes & Appearance](/
 :::
 
 ### Topological sort
-The ordering that guarantees a note is evaluated after everything it depends on.
+The ordering that guarantees a value is evaluated after everything it depends on. It is worked out per property, not per note, so two notes may depend on each other through different properties.
 
 ### Tritave
 The interval `3/1`, the repeating interval of the Bohlen-Pierce scale.
@@ -265,7 +268,7 @@ The module **library layout** — sections, icon order, collapse state, drop mod
 ## V
 
 ### Variable
-Any of the six expression properties of a note: `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`.
+Any of the seven expression properties of a note: `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`.
 
 ## W
 

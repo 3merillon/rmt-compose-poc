@@ -6,7 +6,7 @@ description: Note references and built-in functions in RMT Compose expressions �
 # Module API
 
 An expression reaches other notes through **references** and **built-in functions**. That is the
-whole surface: three ways to name a note, six properties, three functions.
+whole surface: three ways to name a note, seven properties, three functions.
 
 ```
 base.f                 # the BaseNote's frequency
@@ -34,6 +34,7 @@ base.t                 # start time
 base.tempo             # tempo, in BPM
 base.bpm               # beats per measure
 base.ml                # measure length, in seconds
+base.a                 # amplitude, a relative gain
 ```
 
 `[0].p` means exactly the same thing as `base.p`, everywhere — including inside a function
@@ -55,6 +56,7 @@ What the BaseNote actually defines:
 | `tempo` | Yes |
 | `beatsPerMeasure` | Yes |
 | `measureLength` | Yes (derived from tempo and beatsPerMeasure unless you override it) |
+| `amplitude` | Only if you set it — otherwise `base.a` reads as 1 |
 | `duration` | **No** |
 
 The module that ships as the default puts the BaseNote at 263 Hz, 100 BPM, 4/4. Loading a
@@ -72,8 +74,10 @@ different module replaces all of that — a module file defines its own BaseNote
 and no variables.
 
 Referencing a note that does not exist is not an error. Evaluation substitutes a fixed default
-and carries on — `startTime` 0, `duration` 1, `frequency` 440, `tempo` 60, `beatsPerMeasure` 4,
-`measureLength` 4. Nothing on screen tells you this happened, so check the `Evaluated:` line.
+and carries on — `startTime` 0, `duration` 1, `frequency` 440. The four
+[inheriting](#inheritance) properties read the BaseNote's value instead, exactly as they would on
+a note that exists but does not define them. Nothing on screen tells you this happened, so check
+the `Evaluated:` line.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
@@ -89,7 +93,7 @@ module.getNoteById(10).getVariable('duration')    // [10].d
 
 ## Properties
 
-Six properties, each with one or more accepted spellings.
+Seven properties, each with one or more accepted spellings.
 
 | Property | Accepted spellings | Saved as | Unit |
 |---|---|---|---|
@@ -99,14 +103,19 @@ Six properties, each with one or more accepted spellings.
 | tempo | `tempo` | `tempo` | BPM |
 | beatsPerMeasure | `bpm`, `beatsPerMeasure` | `bpm` | beats |
 | measureLength | `ml`, `measureLength` | `ml` | seconds |
+| amplitude | `a`, `amp`, `amplitude` | `a` | none — a relative gain |
 
-Anything else is rejected: there is no `l`, `len`, `st` or `pitch`.
+Anything else is rejected: there is no `l`, `len`, `st`, `pitch`, `vol` or `velocity`.
 
 ### Inheritance
 
-`tempo`, `beatsPerMeasure` and `measureLength` **fall back to the BaseNote** when the note you
-reference does not define them. `[5].tempo` on a note with no tempo of its own returns the base
-note's tempo. This is what makes a single tempo change on the BaseNote move the whole piece.
+`tempo`, `beatsPerMeasure`, `measureLength` and `amplitude` **fall back to the BaseNote** when
+the note you reference does not define them. `[5].tempo` on a note with no tempo of its own
+returns the BaseNote's tempo. This is what makes a single tempo change on the BaseNote move the
+whole piece, and a single `amplitude` on the BaseNote scale it.
+
+If the BaseNote does not define the property either, the last resort is a fixed default: `tempo`
+60, `beatsPerMeasure` 4, `measureLength` 4, `amplitude` 1.
 
 `startTime`, `duration` and `frequency` do **not** inherit. Each note either has its own
 expression or it does not.

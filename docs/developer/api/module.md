@@ -123,11 +123,13 @@ module.removeNote(id)
 ```
 
 Deletes the note, drops its evaluation-cache entry, and unregisters it from the dependency graph.
-It does **not** rewrite expressions in other notes that referenced it — but it now emits a
-`console.warn` listing every dependent left dangling before it deletes, since a dangling
-`LOAD_REF` evaluates to hardcoded defaults (440 Hz / 0 s / 1 s). The app's delete flows deal with
-dependents first — deleting them too, or re-pointing them at the deleted note's parent — and only
-then call this; the warning guards programmatic callers.
+It does **not** rewrite expressions in other notes that referenced it — but it emits a
+`console.warn` listing every dependent left dangling before it deletes, and marks those dependents
+dirty, since a dangling `LOAD_REF` evaluates to hardcoded defaults (440 Hz / 0 s / 1 s). The next
+evaluation therefore shows what a reload would show, and names each broken reference in a
+`console.error`. The app's delete flows deal with dependents first — deleting them too, or
+re-pointing them at the deleted note's parent — and only then call this; the warning guards
+programmatic callers.
 
 ## Evaluation
 
@@ -140,8 +142,10 @@ dirty set (plus what it topologically depends on).
 module.markNoteDirty(noteId)
 ```
 
-Marks the note dirty, re-registers its dependencies, and cascades to every transitive dependent.
-When `noteId` is `0`, it also marks every note whose expressions reference `base`.
+Marks the note dirty, re-registers its dependencies, and cascades to everything downstream —
+transitively, and across the BaseNote: when the cascade reaches note `0` it continues into every
+note that reads the BaseNote (by writing `base`, or by inheriting a tempo or measure length) and on
+through whatever reads those.
 
 ### markNotesDirtyBatch()
 
@@ -183,7 +187,9 @@ the suffix is stripped.
 const cache = module.evaluateModule()  // Map<number, EvaluatedNote>
 ```
 
-Evaluates the dirty set in topological order and returns the whole evaluation cache. Returns the
+Evaluates the dirty set — each variable after the variables it reads — and returns the whole
+evaluation cache. A true cycle or an unresolvable reference does not throw; it is reported with a
+`console.error` naming the notes and variables involved. Returns the
 existing cache untouched when nothing is dirty. Re-entrant calls (an evaluation callback that
 reads `getEvaluationCache()`) get the in-progress cache rather than recursing.
 
@@ -197,6 +203,7 @@ Each cache entry is:
   tempo: Fraction,
   beatsPerMeasure: Fraction,
   measureLength: Fraction,   // may be a plain {s, n, d, valueOf} object when derived
+  amplitude: Fraction,       // null unless the note defines one — see findAmplitude()
   corruptionFlags: number    // CORRUPT bitmask; 0 when clean
 }
 ```
@@ -346,6 +353,17 @@ const seconds = module.findMeasureLength(note)  // Fraction
 
 `beatsPerMeasure / tempo × 60`. `beatsPerMeasure` comes from the note, else from the nearest
 non-measure ancestor, else from the BaseNote.
+
+### findAmplitude()
+
+```javascript
+const gain = module.findAmplitude(note)  // Fraction — exact, unclamped
+```
+
+The amplitude a note sounds at: its own `amplitude` expression if it has one, otherwise the
+BaseNote's, otherwise `new Fraction(1)`. This is the same fallback the evaluator applies to
+`[id].a`. There is no `parentId` walk. Consumers clamp for their medium — the audio engine through
+`amplitudeToGain()` in `src/player/amplitude.js` (0–4).
 
 ### findInstrument()
 

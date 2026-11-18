@@ -89,6 +89,10 @@ export function createIncrementalEvaluator(module, dependencyGraph, evaluator) {
   if (evaluator instanceof WasmPersistentEvaluatorWrapper) {
     return new WasmIncrementalEvaluator(module, dependencyGraph, evaluator);
   }
+  // The non-persistent WASM wrapper evaluates whole notes only
+  if (evaluator instanceof WasmEvaluatorWrapper) {
+    return new WasmNoteOrderIncrementalEvaluator(module, dependencyGraph, evaluator);
+  }
   // Otherwise use JS incremental evaluator
   return new JSIncrementalEvaluator(module, dependencyGraph, evaluator);
 }
@@ -653,6 +657,36 @@ class WasmIncrementalEvaluator {
 
   isCacheValid() {
     return this.dirty.size === 0;
+  }
+}
+
+/**
+ * Incremental evaluator for the non-persistent WASM wrapper.
+ *
+ * The JS evaluator orders evaluation per (note, variable). WasmEvaluatorWrapper
+ * can only evaluate a whole note at a time, so it keeps the per-note order the
+ * rest of the WASM path uses: the same Kahn sort, then one evaluateNote() each.
+ */
+class WasmNoteOrderIncrementalEvaluator extends JSIncrementalEvaluator {
+  evaluateDirty() {
+    if (this.dirty.size === 0) {
+      return this.cache;
+    }
+
+    this.evaluator.beginBatch();
+
+    const sorted = WasmIncrementalEvaluator.prototype.topoSort.call(this, this.dirty);
+    for (const noteId of sorted) {
+      const note = this.module.getNoteById(noteId);
+      if (!note) {
+        this.cache.delete(noteId);
+        continue;
+      }
+      this.cache.set(noteId, this.evaluator.evaluateNote(note, this.cache));
+    }
+
+    this.dirty.clear();
+    return this.cache;
   }
 }
 

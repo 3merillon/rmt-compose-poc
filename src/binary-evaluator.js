@@ -6,7 +6,47 @@
  */
 
 import Fraction from 'fraction.js';
-import { OP, VAR, getCorruptionFlag } from './binary-note.js';
+import { OP, VAR, VAR_NAMES, getCorruptionFlag } from './binary-note.js';
+import {
+  getVariableExpression,
+  getVariableRefs,
+  hasComputedMeasureLength,
+  definesVariable,
+  resolveVariableRef,
+  findVariableCycle,
+  describeVariable,
+} from './variable-deps.js';
+
+// Order in which a note's variables are visited when nothing forces another
+// one. Dependencies are pulled in ahead on demand, so this only breaks ties.
+const VAR_ORDER = [
+  VAR.TEMPO, VAR.BEATS_PER_MEASURE, VAR.FREQUENCY,
+  VAR.MEASURE_LENGTH, VAR.START_TIME, VAR.DURATION,
+  VAR.AMPLITUDE,
+];
+
+// What a reference evaluates to when nothing defines the variable it names,
+// indexed by VAR: startTime, duration, frequency, tempo, beatsPerMeasure,
+// measureLength, amplitude.
+const UNRESOLVED_DEFAULTS = [0, 1, 440, 60, 4, 4, 1];
+
+// Longest list of cycles / unresolved references written to the console
+const MAX_REPORTED_PROBLEMS = 10;
+
+function createEvaluationRecord() {
+  return {
+    startTime: null,
+    duration: null,
+    frequency: null,
+    tempo: null,
+    beatsPerMeasure: null,
+    measureLength: null,
+    // Stays null when the note does not define it: readers fall back to the
+    // BaseNote's amplitude, then to 1 (see Module.findAmplitude).
+    amplitude: null,
+    corruptionFlags: 0, // Track irrational values (TET scales)
+  };
+}
 
 /**
  * SymbolicPower represents an irrational value preserving its algebraic structure:
@@ -808,6 +848,13 @@ export class BinaryEvaluator {
     // Track if the last evaluation produced an irrational value (corruption)
     // This is set during evaluate() when a POW operation produces an irrational result
     this._lastEvalWasCorrupted = false;
+
+    // References the last evaluate() could not resolve and replaced with a
+    // hard-coded default: packed (noteId << 3) | varIndex, or null when none
+    this._lastEvalUnresolved = null;
+
+    // Unresolved references collected per variable until reportProblems()
+    this._unresolved = null;
   }
 
   /**
@@ -922,6 +969,43 @@ export class BinaryEvaluator {
   }
 
   /**
+   * The module's note with this id, or null
+   */
+  lookupNote(noteId) {
+    const module = this.module;
+    if (!module || typeof module.getNoteById !== 'function') return null;
+    return module.getNoteById(noteId) || null;
+  }
+
+  /**
+   * Nothing defines the referenced variable: push its hard-coded default and
+   * remember the reference, so whoever asked for the evaluation can name it.
+   */
+  pushDefault(noteId, varIdx) {
+    if (varIdx === VAR.AMPLITUDE && this.amplitudeIsUnset(noteId)) {
+      this.push(this.pool.alloc(1, 1));
+      return;
+    }
+    if (this._lastEvalUnresolved === null) this._lastEvalUnresolved = [];
+    this._lastEvalUnresolved.push((noteId << 3) | varIdx);
+    this.push(this.pool.alloc(UNRESOLVED_DEFAULTS[varIdx] || 0, 1));
+  }
+
+  /**
+   * Whether a missing amplitude is simply the default: the note exists and
+   * neither it nor the BaseNote sets one. Such a note sounds at 1, and that 1
+   * is the variable's value, not a stand-in. (A note that does not exist, or
+   * an amplitude that is set but lost to a cycle or a failed evaluation, is
+   * an unresolved reference like any other.)
+   */
+  amplitudeIsUnset(noteId) {
+    const note = this.lookupNote(noteId);
+    if (!note || definesVariable(note, VAR.AMPLITUDE)) return false;
+    const base = noteId === 0 ? note : this.lookupNote(0);
+    return !(base && definesVariable(base, VAR.AMPLITUDE));
+  }
+
+  /**
    * Get cached value for a note variable, or null if not cached
    */
   getCachedValue(noteId, varIndex) {
@@ -935,6 +1019,7 @@ export class BinaryEvaluator {
       case VAR.TEMPO: return cached.tempo;
       case VAR.BEATS_PER_MEASURE: return cached.beatsPerMeasure;
       case VAR.MEASURE_LENGTH: return cached.measureLength;
+      case VAR.AMPLITUDE: return cached.amplitude;
       default: return null;
     }
   }
@@ -949,6 +1034,7 @@ export class BinaryEvaluator {
   evaluate(expr, evalCache = null) {
     // Reset corruption flag for this evaluation
     this._lastEvalWasCorrupted = false;
+    this._lastEvalUnresolved = null;
 
     if (expr.isEmpty()) {
       return this.pool.alloc(0, 1);
@@ -1003,6 +1089,7 @@ export class BinaryEvaluator {
                 case VAR.TEMPO: value = cached.tempo; break;
                 case VAR.BEATS_PER_MEASURE: value = cached.beatsPerMeasure; break;
                 case VAR.MEASURE_LENGTH: value = cached.measureLength; break;
+                case VAR.AMPLITUDE: value = cached.amplitude; break;
               }
             }
           }
@@ -1012,9 +1099,9 @@ export class BinaryEvaluator {
             value = this.getCachedValue(noteId, varIdx);
           }
 
-          // For inheritable properties (tempo, beatsPerMeasure, measureLength),
-          // fall back to base note if not found on the target note
-          if (!value && (varIdx === VAR.TEMPO || varIdx === VAR.BEATS_PER_MEASURE || varIdx === VAR.MEASURE_LENGTH)) {
+          // For inheritable properties (tempo, beatsPerMeasure, measureLength,
+          // amplitude), fall back to base note if not found on the target note
+          if (!value && (varIdx === VAR.TEMPO || varIdx === VAR.BEATS_PER_MEASURE || varIdx === VAR.MEASURE_LENGTH || varIdx === VAR.AMPLITUDE)) {
             // Try base note (ID 0)
             if (evalCache) {
               const baseCache = evalCache.get(0);
@@ -1023,6 +1110,7 @@ export class BinaryEvaluator {
                   case VAR.TEMPO: value = baseCache.tempo; break;
                   case VAR.BEATS_PER_MEASURE: value = baseCache.beatsPerMeasure; break;
                   case VAR.MEASURE_LENGTH: value = baseCache.measureLength; break;
+                  case VAR.AMPLITUDE: value = baseCache.amplitude; break;
                 }
               }
             }
@@ -1034,16 +1122,7 @@ export class BinaryEvaluator {
           if (!value) {
             // Return a default value instead of throwing - this allows
             // graceful degradation when expressions can't be fully resolved
-            // Use sensible defaults
-            switch (varIdx) {
-              case VAR.START_TIME: this.push(this.pool.alloc(0, 1)); break;
-              case VAR.DURATION: this.push(this.pool.alloc(1, 1)); break;
-              case VAR.FREQUENCY: this.push(this.pool.alloc(440, 1)); break;
-              case VAR.TEMPO: this.push(this.pool.alloc(60, 1)); break;
-              case VAR.BEATS_PER_MEASURE: this.push(this.pool.alloc(4, 1)); break;
-              case VAR.MEASURE_LENGTH: this.push(this.pool.alloc(4, 1)); break;
-              default: this.push(this.pool.alloc(0, 1));
-            }
+            this.pushDefault(noteId, varIdx);
           } else {
             // Push a copy to avoid mutation issues
             this.push(this.pool.allocFrom(value));
@@ -1066,6 +1145,7 @@ export class BinaryEvaluator {
                 case VAR.TEMPO: value = cached.tempo; break;
                 case VAR.BEATS_PER_MEASURE: value = cached.beatsPerMeasure; break;
                 case VAR.MEASURE_LENGTH: value = cached.measureLength; break;
+                case VAR.AMPLITUDE: value = cached.amplitude; break;
               }
             }
           }
@@ -1076,15 +1156,7 @@ export class BinaryEvaluator {
 
           if (!value) {
             // Return sensible defaults for base note variables
-            switch (varIdx) {
-              case VAR.START_TIME: this.push(this.pool.alloc(0, 1)); break;
-              case VAR.DURATION: this.push(this.pool.alloc(1, 1)); break;
-              case VAR.FREQUENCY: this.push(this.pool.alloc(440, 1)); break;
-              case VAR.TEMPO: this.push(this.pool.alloc(60, 1)); break;
-              case VAR.BEATS_PER_MEASURE: this.push(this.pool.alloc(4, 1)); break;
-              case VAR.MEASURE_LENGTH: this.push(this.pool.alloc(4, 1)); break;
-              default: this.push(this.pool.alloc(0, 1));
-            }
+            this.pushDefault(0, varIdx);
           } else {
             this.push(this.pool.allocFrom(value));
           }
@@ -1280,128 +1352,337 @@ export class BinaryEvaluator {
   /**
    * Evaluate a note and cache the results
    *
+   * The note's variables are evaluated in dependency order, so a variable may
+   * read another variable of the same note (the BaseNote's tempo from its
+   * frequency, a measureLength from tempo). Everything it reads from OTHER
+   * notes must already be in `evalCache` (or in this evaluator's own cache).
+   *
    * @param {Note|BinaryNote} note - The note to evaluate (supports both Note and BinaryNote)
    * @param {Map} evalCache - Pre-evaluated dependencies
    * @returns {Object} - Evaluated values { startTime, duration, frequency, ... }
    */
   evaluateNote(note, evalCache = null) {
-    const result = {
-      startTime: null,
-      duration: null,
-      frequency: null,
-      tempo: null,
-      beatsPerMeasure: null,
-      measureLength: null,
-      corruptionFlags: 0, // Track irrational values (TET scales)
-    };
+    const result = createEvaluationRecord();
 
-    // Expressions within the same note may reference each other (e.g.,
-    // measureLength references the tempo evaluated just before), so the
-    // cache must contain this note's in-progress result during evaluation.
-    // Write it into the shared cache directly instead of copying the whole
-    // cache per note (the copy made every full evaluation O(N²)): under
-    // topological order all dependencies are final before their dependents
-    // run, and the caller overwrites this same key with the finished result.
+    // A variable must never read what this note evaluated to last time
+    this.cache.delete(note.id);
+
+    // Expressions within the same note may reference each other, so the cache
+    // must contain this note's in-progress result during evaluation. Write it
+    // into the shared cache directly instead of copying the whole cache per
+    // note (the copy made every full evaluation O(N²)).
     const workingCache = evalCache || new Map();
     workingCache.set(note.id, result);
 
-    // Helper to get expression - supports both Note.expressions and BinaryNote direct properties
-    const getExpr = (name) => {
-      // New Note class uses expressions object
-      if (note.expressions && note.expressions[name]) {
-        return note.expressions[name];
-      }
-      // BinaryNote has direct properties
-      if (note[name]) {
-        return note[name];
-      }
-      return null;
+    this.reportProblems(this.evaluateVariables([note], [result], workingCache));
+
+    // Cache the result
+    this.cache.set(note.id, result);
+
+    return result;
+  }
+
+  /**
+   * Evaluate a group of notes together, one variable at a time, each variable
+   * after the variables it reads.
+   *
+   * The walk is depth-first from every variable in turn (notes in the order
+   * given, variables in VAR_ORDER): before a variable is evaluated, whatever
+   * it reads inside the group is evaluated first. Variables of notes outside
+   * the group are taken from `evalCache` as they are.
+   *
+   * Variables that read each other in a loop are a true cycle and have no
+   * order. The walk finds each such set whole (Tarjan's strongly connected
+   * components), evaluates its members in ascending (note, variable) order,
+   * and returns one loop per set for reportProblems(). A member read before it
+   * is evaluated falls back to a hard-coded default in evaluate(). Because the
+   * order inside a set is fixed, the result depends only on the notes, never
+   * on which variable the walk happened to reach first.
+   *
+   * @param {Array<Note|BinaryNote>} notes - The notes to evaluate, in ascending id order
+   * @param {Array<Object>} records - records[i] receives notes[i]'s values; it must already be in evalCache
+   * @param {Map} evalCache - noteId -> evaluated values
+   * @returns {Array<number[]>|null} One loop per cycle, as packed (noteId << 3) | varIndex, or null
+   */
+  evaluateVariables(notes, records, evalCache) {
+    const count = notes.length;
+
+    // Where each note of the group sits in `notes`
+    const position = new Map();
+    for (let i = 0; i < count; i++) {
+      position.set(notes[i].id, i);
+    }
+    const getNote = (noteId) => {
+      const p = position.get(noteId);
+      return p !== undefined ? notes[p] : this.lookupNote(noteId);
     };
 
-    // Corruption flag mapping: name -> bit flag
-    const corruptionFlagMap = {
-      startTime: 0x01,
-      duration: 0x02,
-      frequency: 0x04,
-      tempo: 0x08,
-      beatsPerMeasure: 0x10,
-      measureLength: 0x20,
-    };
+    // A variable inside the group is (position << 3) | varIndex
+    const reached = new Int32Array(count << 3); // when the walk first reached it (1, 2, ...); 0 = not yet
+    const lowest = new Int32Array(count << 3);  // earliest still-open variable it leads back to
+    const isOpen = new Uint8Array(count << 3);  // reached, not evaluated yet
+    const open = [];      // the open variables, in the order they were reached
+    const path = [];      // variables waiting on a dependency, outermost first
+    const pathRefs = [];  // what each of them reads
+    const pathNext = [];  // which of those reads comes next
+    let reachedCount = 0;
+    let selfReading = null;
+    let cycles = null;
 
-    const safeEvaluate = (name) => {
-      try {
-        const expr = getExpr(name);
-        if (expr && !expr.isEmpty()) {
-          const pooledValue = this.evaluate(expr, workingCache);
-          // IMPORTANT: Create a NEW Fraction for caching, not the pooled one!
-          // Pooled fractions get reused when pool.reset() is called, which would
-          // corrupt our cached values.
-          const value = new Fraction(pooledValue.s * pooledValue.n, pooledValue.d);
-          // Update result immediately so later expressions in this note can use it
-          result[name] = value;
+    for (let p = 0; p < count; p++) {
+      const note = notes[p];
 
-          // Check if the evaluation actually produced an irrational value
-          // This is set by the POW opcode handler when the result is irrational
-          if (this._lastEvalWasCorrupted) {
-            result.corruptionFlags |= corruptionFlagMap[name] || 0;
+      for (let k = 0; k < VAR_ORDER.length; k++) {
+        const varIndex = VAR_ORDER[k];
+        const root = (p << 3) | varIndex;
+        if (reached[root] !== 0) continue;
+        if (!definesVariable(note, varIndex)) {
+          reached[root] = ++reachedCount;
+          continue;
+        }
+
+        let depth = 0;
+        path[0] = root;
+        pathRefs[0] = getVariableRefs(note, varIndex);
+        pathNext[0] = 0;
+        reached[root] = lowest[root] = ++reachedCount;
+        isOpen[root] = 1;
+        open.push(root);
+
+        while (depth >= 0) {
+          const current = path[depth];
+          const refs = pathRefs[depth];
+          let next = pathNext[depth];
+          let dependency = -1;
+
+          while (next < refs.length) {
+            const ref = refs[next++];
+            const refVar = ref & 7;
+            let targetPosition = position.get(ref >> 3);
+            let candidate;
+
+            if (targetPosition !== undefined && definesVariable(notes[targetPosition], refVar)) {
+              candidate = (targetPosition << 3) | refVar;
+            } else {
+              // A start, duration or frequency of a note outside the group is final
+              if (targetPosition === undefined && refVar < VAR.TEMPO) continue;
+              // Otherwise the read may be inherited from the BaseNote
+              const target = resolveVariableRef(getNote, ref);
+              if (target < 0) continue; // nothing defines it: evaluate() falls back to the default
+              targetPosition = position.get(target >> 3);
+              if (targetPosition === undefined) continue;
+              candidate = (targetPosition << 3) | (target & 7);
+            }
+
+            if (reached[candidate] === 0) {
+              dependency = candidate;
+              break;
+            }
+            if (isOpen[candidate] === 1) {
+              // Reads a variable that is itself still waiting: they are in a loop
+              if (reached[candidate] < lowest[current]) lowest[current] = reached[candidate];
+              if (candidate === current) {
+                if (selfReading === null) selfReading = new Set();
+                selfReading.add(current);
+              }
+            }
+          }
+          pathNext[depth] = next;
+
+          if (dependency >= 0) {
+            depth++;
+            path[depth] = dependency;
+            pathRefs[depth] = getVariableRefs(notes[dependency >> 3], dependency & 7);
+            pathNext[depth] = 0;
+            reached[dependency] = lowest[dependency] = ++reachedCount;
+            isOpen[dependency] = 1;
+            open.push(dependency);
+            continue;
           }
 
-          return value;
+          // Everything `current` reads has been walked. If it leads back to nothing
+          // earlier, it closes a set: itself alone, unless it sits in a loop.
+          if (lowest[current] === reached[current]) {
+            if (open[open.length - 1] === current && (selfReading === null || !selfReading.has(current))) {
+              open.pop();
+              isOpen[current] = 0;
+              this.evaluateVariable(notes[current >> 3], current & 7, records[current >> 3], evalCache);
+            } else {
+              const members = [];
+              let member;
+              do {
+                member = open.pop();
+                isOpen[member] = 0;
+                members.push(member);
+              } while (member !== current);
+              members.sort((a, b) => a - b);
+
+              for (const m of members) {
+                this.evaluateVariable(notes[m >> 3], m & 7, records[m >> 3], evalCache);
+              }
+
+              // Name one loop through the first member for the report
+              const first = (notes[members[0] >> 3].id << 3) | (members[0] & 7);
+              if (cycles === null) cycles = [];
+              cycles.push(findVariableCycle(getNote, first) || [first]);
+            }
+          }
+
+          depth--;
+          if (depth >= 0 && lowest[current] < lowest[path[depth]]) {
+            lowest[path[depth]] = lowest[current];
+          }
+        }
+      }
+    }
+
+    return cycles;
+  }
+
+  /**
+   * Evaluate one variable of a note into the note's record
+   *
+   * @param {Note|BinaryNote} note
+   * @param {number} varIndex - VAR.START_TIME ... VAR.AMPLITUDE
+   * @param {Object} record - The note's evaluated values; must already be in evalCache
+   * @param {Map} evalCache - noteId -> evaluated values of everything it reads
+   */
+  evaluateVariable(note, varIndex, record, evalCache) {
+    const expr = getVariableExpression(note, varIndex);
+
+    if (expr !== null) {
+      try {
+        const pooledValue = this.evaluate(expr, evalCache);
+        // IMPORTANT: Create a NEW Fraction for caching, not the pooled one!
+        // Pooled fractions get reused when pool.reset() is called, which would
+        // corrupt our cached values.
+        const value = new Fraction(pooledValue.s * pooledValue.n, pooledValue.d);
+        switch (varIndex) {
+          case VAR.START_TIME: record.startTime = value; break;
+          case VAR.DURATION: record.duration = value; break;
+          case VAR.FREQUENCY: record.frequency = value; break;
+          case VAR.TEMPO: record.tempo = value; break;
+          case VAR.BEATS_PER_MEASURE: record.beatsPerMeasure = value; break;
+          case VAR.MEASURE_LENGTH: record.measureLength = value; break;
+          case VAR.AMPLITUDE: record.amplitude = value; break;
+        }
+
+        // Check if the evaluation actually produced an irrational value
+        // This is set by the POW opcode handler when the result is irrational
+        if (this._lastEvalWasCorrupted) {
+          record.corruptionFlags |= getCorruptionFlag(varIndex);
+        }
+
+        // Keep what it could not resolve, with who was asking, for reportProblems()
+        if (this._lastEvalUnresolved !== null) {
+          if (this._unresolved === null) this._unresolved = [];
+          for (const ref of this._lastEvalUnresolved) {
+            this._unresolved.push((note.id << 3) | varIndex, ref);
+          }
         }
       } catch (e) {
-        console.warn(`Failed to evaluate ${name} for note ${note.id}:`, e);
+        console.warn(`Failed to evaluate ${VAR_NAMES[varIndex]} for note ${note.id}:`, e);
       }
-      return null;
-    };
+    }
 
-    // Evaluate in dependency order:
-    // 1. First evaluate variables that don't typically depend on others
-    result.tempo = safeEvaluate('tempo');
-    result.beatsPerMeasure = safeEvaluate('beatsPerMeasure');
-    result.frequency = safeEvaluate('frequency');
-
-    // 2. measureLength depends on tempo and beatsPerMeasure
-    result.measureLength = safeEvaluate('measureLength');
-
-    // 3. startTime and duration may depend on measureLength/tempo
-    result.startTime = safeEvaluate('startTime');
-    result.duration = safeEvaluate('duration');
-
-    // 4. If measureLength wasn't explicitly defined but this is a measure note or base note,
+    // If measureLength wasn't explicitly defined but this is a measure note or base note,
     // compute it from beatsPerMeasure and tempo. This is needed because findMeasureLength()
     // references are compiled as LOAD_REF which looks up measureLength in the cache.
-    // Only compute for measure notes (have startTime, no duration/frequency) or base note (id=0)
+    // Only for measure notes (have startTime, no duration/frequency) or base note (id=0)
     // to avoid expensive Fraction operations for regular notes.
-    const isMeasureNote = result.startTime && !result.duration && !result.frequency;
-    if (!result.measureLength && (isMeasureNote || note.id === 0)) {
-      // Get beatsPerMeasure - use this note's value or fall back to base note
-      let beats = result.beatsPerMeasure;
-      if (!beats && evalCache) {
-        const baseCache = evalCache.get(0);
-        if (baseCache) beats = baseCache.beatsPerMeasure;
-      }
-      // Get tempo - use this note's value or fall back to base note
-      let tempo = result.tempo;
-      if (!tempo && evalCache) {
-        const baseCache = evalCache.get(0);
-        if (baseCache) tempo = baseCache.tempo;
-      }
+    if (varIndex === VAR.MEASURE_LENGTH && record.measureLength === null && hasComputedMeasureLength(note)) {
+      // Use this note's beatsPerMeasure and tempo, or fall back to the base note's
+      const baseRecord = evalCache.get(0);
+      const beats = record.beatsPerMeasure || (baseRecord ? baseRecord.beatsPerMeasure : null);
+      const tempo = record.tempo || (baseRecord ? baseRecord.tempo : null);
       // Compute measureLength = beatsPerMeasure * 60 / tempo as an exact
       // Fraction. The old duck-typed {s,n,d,valueOf} POJO quantized to 1e-6
       // AND its Number fields would poison BigInt-backed consumers.
       try {
         const b = beats instanceof Fraction ? beats : new Fraction(4);
         const t = tempo instanceof Fraction ? tempo : new Fraction(60);
-        result.measureLength = b.mul(60).div(t);
+        record.measureLength = b.mul(60).div(t);
       } catch (e) {
-        result.measureLength = new Fraction(4);
+        record.measureLength = new Fraction(4);
       }
     }
+  }
 
-    // Cache the result
-    this.cache.set(note.id, result);
+  /**
+   * Report what the last evaluation could not get right: true dependency
+   * cycles, and references that fell back to a hard-coded default. Either way
+   * some evaluated values are not what the expressions say, so this is a
+   * console error naming every note and variable involved.
+   *
+   * @param {Array<number[]>|null} cycles - As returned by evaluateVariables()
+   */
+  reportProblems(cycles) {
+    const unresolved = this._unresolved;
+    if (cycles === null && unresolved === null) return;
+    this._unresolved = null;
 
-    return result;
+    const limit = (lines) => {
+      if (lines.length <= MAX_REPORTED_PROBLEMS) return lines;
+      const extra = lines.length - MAX_REPORTED_PROBLEMS;
+      return lines.slice(0, MAX_REPORTED_PROBLEMS).concat(`… and ${extra} more`);
+    };
+
+    if (cycles !== null) {
+      const lines = cycles.map((cycle) => cycle.concat(cycle[0]).map(describeVariable).join(' → '));
+      console.error(
+        'Dependency cycle detected! These variables depend on themselves, ' +
+        'so some of their reads fell back to defaults:\n  ' + limit(lines).join('\n  ')
+      );
+    }
+
+    if (unresolved !== null) {
+      const lines = [];
+      const seen = new Set();
+      for (let i = 0; i < unresolved.length; i += 2) {
+        const line = this.describeUnresolved(unresolved[i], unresolved[i + 1]);
+        if (!seen.has(line)) {
+          seen.add(line);
+          lines.push(line);
+        }
+      }
+      console.error(
+        'Unresolved reference! A hard-coded default was used instead:\n  ' + limit(lines).join('\n  ')
+      );
+    }
+  }
+
+  /**
+   * One line for a reference that fell back to a default: who read what, why
+   * it has no value, and the value used.
+   *
+   * @param {number} reader - Packed variable being evaluated
+   * @param {number} ref - Packed variable it referenced
+   * @returns {string}
+   */
+  describeUnresolved(reader, ref) {
+    const varIndex = ref & 7;
+    const noteId = ref >> 3;
+    const name = VAR_NAMES[varIndex];
+    const note = this.lookupNote(noteId);
+
+    let reason;
+    if (!note) {
+      reason = `but note ${noteId} does not exist`;
+    } else if (definesVariable(note, varIndex)) {
+      reason = 'which has no value because of a dependency cycle or a failed evaluation';
+    } else if (noteId === 0) {
+      reason = `but the BaseNote has no ${name}`;
+    } else if (varIndex >= VAR.TEMPO) {
+      const base = this.lookupNote(0);
+      reason = base && definesVariable(base, varIndex)
+        ? `which note ${noteId} inherits from the BaseNote, where it has no value because of a dependency cycle or a failed evaluation`
+        : `but neither note ${noteId} nor the BaseNote has a ${name}`;
+    } else {
+      reason = `but note ${noteId} has no ${name}`;
+    }
+
+    return `${describeVariable(reader)} reads ${describeVariable(ref)}, ${reason}` +
+           ` (used ${UNRESOLVED_DEFAULTS[varIndex]})`;
   }
 
   /**
@@ -1442,13 +1723,17 @@ export class IncrementalEvaluator {
 
   /**
    * Mark a note as dirty (needs re-evaluation)
+   *
+   * @param {number} noteId
+   * @param {Set<number>} [dependents] - graph.getEvaluationDependents(noteId),
+   *   when the caller has already computed it
    */
-  invalidate(noteId) {
+  invalidate(noteId, dependents = null) {
     this.dirty.add(noteId);
 
-    // Also invalidate all dependents
-    const dependents = this.graph.getAllDependents(noteId);
-    for (const dep of dependents) {
+    // Also invalidate all dependents, including the ones reached through the
+    // BaseNote
+    for (const dep of dependents || this.graph.getEvaluationDependents(noteId)) {
       this.dirty.add(dep);
     }
 
@@ -1491,7 +1776,11 @@ export class IncrementalEvaluator {
   }
 
   /**
-   * Evaluate all dirty notes in topological order
+   * Evaluate all dirty notes, one variable at a time, in dependency order
+   *
+   * Dirty tracking stays per note, but ordering is per (note, variable): see
+   * BinaryEvaluator.evaluateVariables(). Two notes may read each other as long
+   * as no variable ends up reading itself.
    *
    * @returns {Map} - Complete evaluation cache
    */
@@ -1503,129 +1792,37 @@ export class IncrementalEvaluator {
     // Reset fraction pool for this batch
     this.evaluator.beginBatch();
 
-    // Topological sort dirty notes
-    const sorted = this.topoSort(this.dirty);
+    // Ascending ids give the walk a fixed starting order, so the result never
+    // depends on the order in which notes happened to be marked dirty.
+    const ids = Array.from(this.dirty);
+    for (let i = 1; i < ids.length; i++) {
+      if (ids[i - 1] > ids[i]) {
+        ids.sort((a, b) => a - b);
+        break;
+      }
+    }
 
-    // Evaluate in dependency order
-    for (const noteId of sorted) {
+    // Every dirty note gets a blank record up front. From here on a variable
+    // can read only what this batch has computed or what a clean note holds,
+    // never the value a dirty note evaluated to last time.
+    const notes = [];
+    const records = [];
+    for (const noteId of ids) {
       const note = this.module.getNoteById(noteId);
       if (!note) {
         this.cache.delete(noteId);
         continue;
       }
-
-      const result = this.evaluator.evaluateNote(note, this.cache);
-      this.cache.set(noteId, result);
+      const record = createEvaluationRecord();
+      this.cache.set(noteId, record);
+      notes.push(note);
+      records.push(record);
     }
+
+    this.evaluator.reportProblems(this.evaluator.evaluateVariables(notes, records, this.cache));
 
     this.dirty.clear();
     return this.cache;
-  }
-
-  /**
-   * Topological sort using Kahn's algorithm
-   *
-   * @param {Set} noteIds - Set of note IDs to sort
-   * @returns {Array} - Sorted array of note IDs
-   */
-  topoSort(noteIds) {
-    const inDegree = new Map();
-    const result = [];
-    const resultSet = new Set(); // O(1) lookups for cycle detection
-
-    // Get notes that reference base note (they have implicit dependency on 0)
-    const baseNoteDependents = this.graph.getBaseNoteDependents();
-    const hasBaseNote = noteIds.has(0);
-
-    // Calculate in-degrees (count of dependencies within dirty set)
-    for (const id of noteIds) {
-      const deps = this.graph.getDependencies(id);
-      let count = 0;
-      for (const d of deps) {
-        if (noteIds.has(d)) count++;
-      }
-      // If this note references base note and base note is in the dirty set,
-      // add implicit dependency (unless this IS the base note)
-      if (hasBaseNote && id !== 0 && baseNoteDependents.has(id)) {
-        count++;
-      }
-      inDegree.set(id, count);
-    }
-
-    // Start with nodes that have no dependencies (in-degree 0)
-    // Sort by ID to ensure deterministic order - base note (0) first
-    const queue = [];
-    for (const [id, deg] of inDegree) {
-      if (deg === 0) queue.push(id);
-    }
-    queue.sort((a, b) => a - b); // Sort numerically, base note (0) first
-
-    // Process queue - use index instead of shift() for O(1) vs O(n)
-    let queueIdx = 0;
-    while (queueIdx < queue.length) {
-      const id = queue[queueIdx++];
-      result.push(id);
-      resultSet.add(id);
-
-      // Decrease in-degree of dependents
-      const dependents = this.graph.getDependents(id);
-      const newZeroDegree = [];
-      const newZeroSet = new Set(); // Track duplicates in O(1)
-      for (const dep of dependents) {
-        if (!inDegree.has(dep)) continue;
-        const newDeg = inDegree.get(dep) - 1;
-        inDegree.set(dep, newDeg);
-        if (newDeg === 0) {
-          newZeroDegree.push(dep);
-          newZeroSet.add(dep);
-        }
-      }
-
-      // If this is the base note (0), also release all baseNote-dependent notes
-      if (id === 0) {
-        for (const dep of baseNoteDependents) {
-          if (!inDegree.has(dep)) continue;
-          const newDeg = inDegree.get(dep) - 1;
-          inDegree.set(dep, newDeg);
-          if (newDeg === 0 && !newZeroSet.has(dep)) {
-            newZeroDegree.push(dep);
-            newZeroSet.add(dep);
-          }
-        }
-      }
-
-      // Sort newly discovered zero-degree nodes for deterministic order
-      newZeroDegree.sort((a, b) => a - b);
-      queue.push(...newZeroDegree);
-    }
-
-    // Check for cycles - use resultSet for O(1) lookups
-    if (result.length !== noteIds.size) {
-      console.warn('Dependency cycle detected! Some notes could not be evaluated.');
-      // Debug: show which notes have remaining dependencies (limit to first 10)
-      const stuck = [];
-      for (const id of noteIds) {
-        if (!resultSet.has(id)) {
-          if (stuck.length < 10) {
-            const deps = this.graph.getDependencies(id);
-            const unresolvedDeps = [...deps].filter(d => !resultSet.has(d) && noteIds.has(d));
-            stuck.push({ id, unresolvedDeps });
-          }
-        }
-      }
-      if (stuck.length > 0) {
-        console.warn('Stuck notes:', stuck);
-      }
-      // Add remaining notes anyway - sort by ID for deterministic order
-      const remaining = [];
-      for (const id of noteIds) {
-        if (!resultSet.has(id)) remaining.push(id);
-      }
-      remaining.sort((a, b) => a - b);
-      result.push(...remaining);
-    }
-
-    return result;
   }
 
   /**

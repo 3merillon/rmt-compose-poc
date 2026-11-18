@@ -1466,7 +1466,7 @@ const menuAPI = (function() {
      */
     function validateModuleData(data) {
         const errors = [];
-        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
 
         if (!data || typeof data !== 'object' || Array.isArray(data)) {
             return { valid: false, errors: ['Module must be a JSON object'] };

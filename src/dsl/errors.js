@@ -153,7 +153,7 @@ export const ErrorMessages = {
    * @returns {string}
    */
   unknownProperty(name) {
-    return `Unknown property '${name}'. Valid properties: f (frequency), t (startTime), d (duration), tempo, bpm, ml`;
+    return `Unknown property '${name}'. Valid properties: f (frequency), t (startTime), d (duration), a (amplitude), tempo, bpm, ml`;
   },
 
   /**

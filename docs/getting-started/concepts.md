@@ -32,6 +32,7 @@ Every module has one **BaseNote** — note id 0, drawn as the orange circle. It 
 | `tempo` | `tempo` | Beats per minute | 60 |
 | `beatsPerMeasure` | `bpm` | Beats in a measure | 4 |
 | `measureLength` | `ml` | Length of a measure in seconds | derived: `60 / tempo × beatsPerMeasure` |
+| `amplitude` | `a` | Loudness of every note that sets none of its own, as a relative gain | 1 |
 
 ::: info Defaults vs. the default module
 The table's right-hand column is what a module gets when it is constructed with no JSON. The **default module the app boots with** overrides them: **frequency 263, startTime 0, tempo 100, beatsPerMeasure 4**. That is what a new user actually sees, and it is what the examples on this page use.

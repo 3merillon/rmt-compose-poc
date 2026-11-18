@@ -62,6 +62,7 @@ Every field is optional. An omitted field falls back to the **class default** be
 | `tempo` | expression string | `60` BPM | In beats per minute. |
 | `beatsPerMeasure` | expression string | `4` | The numerator of the time signature. |
 | `measureLength` | expression string | `60 / tempo × beatsPerMeasure` | Five of the six scale-system modules are the only shipped modules that set it explicitly, as `beat(base) * base.bpm`. |
+| `amplitude` | expression string | `1` | A relative gain. Every note without its own inherits it, so it scales the whole piece. Written to the file only when set. No shipped module uses it. See [amplitude](/reference/properties/amplitude). |
 | `color` | CSS color string | none | Accepted by the loader and the exporter. No shipped module uses it. |
 | `instrument` | instrument name | none → the `audio.defaultInstrument` setting | See [Instruments](#instruments). |
 
@@ -80,10 +81,11 @@ Every field is optional. An omitted field falls back to the **class default** be
 | `tempo` | expression string | no | Per-note override. |
 | `beatsPerMeasure` | expression string | no | Per-note override — this is how measure bars carry a meter change. |
 | `measureLength` | expression string | no | Per-note override. |
+| `amplitude` | expression string | no | Relative gain, e.g. `"(121/100) * [3].a"`. Absent = the BaseNote's. |
 | `color` | CSS color string | no | e.g. `"rgba(242,167,27,0.7)"`. |
 | `instrument` | instrument name | no | Inherited along the frequency chain when absent. |
 
-The six **expression keys** are exactly `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`. The three **non-expression keys** are `id`, `color`, `instrument`. Anything else in a note object is ignored.
+The seven **expression keys** are exactly `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`. The three **non-expression keys** are `id`, `color`, `instrument`. Anything else in a note object is ignored.
 
 ### Note kinds are inferred, not declared
 
@@ -194,6 +196,8 @@ This is why most scale-system modules pin `"instrument": "sine-wave"` on their B
 ```
 
 A pure-DSL source file therefore round-trips as pure DSL.
+
+No other key is added. In particular `amplitude` is written only for the notes (and the BaseNote) that define one, so a file that never used it is saved without it.
 
 ## Limits and validation
 

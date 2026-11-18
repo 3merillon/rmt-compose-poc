@@ -1,6 +1,6 @@
 ---
 title: Data Flow
-description: Trace one edit through RMT Compose — compile, mark dirty, topologically sort, evaluate, sync the renderer, schedule audio.
+description: Trace one edit through RMT Compose — compile, mark dirty, order the variables, evaluate, sync the renderer, schedule audio.
 ---
 
 # Data Flow
@@ -12,7 +12,7 @@ the function that actually runs.
 
 ```
 edit → compile to bytecode → mark dirty (+ transitive dependents)
-     → Kahn topo-sort the dirty set → evaluate on the stack VM
+     → order the dirty notes' variables → evaluate on the stack VM
      → evaluation cache → renderer.sync() → one frame
                         → audio scheduler → AudioGraph → speakers
 ```
@@ -23,7 +23,7 @@ The note widget's `Raw:` field commits **on Save**, not while typing.
 
 ```
 Save clicked
-  → validateExpression()            src/modals/validation.js:13
+  → validateExpression()            src/modals/validation.js:11
   → simplify (simplifyDSL)          src/utils/simplify.js:98
   → Note.setVariable('frequencyString', text)
       → Note._setExpression()       src/note.js:195
@@ -53,63 +53,69 @@ once. A group move does the same per mover.
 
 ## 2. The module marks dirty
 
-`Module.markNoteDirty(noteId)` (`src/module.js:200`):
+`Module.markNoteDirty(noteId)` (`src/module.js:213`):
 
 1. Adds the id to `_dirtyNotes`.
 2. `_registerNoteDependencies(note)` — re-scans the note's bytecode and rewrites its rows in the
    dependency graph. **This is memoized**: the key is
    `` `${_depsRegGeneration}:${note.id}:${note._depsEpoch}` ``, so an unchanged note (the common case
    when cascading over hundreds of dependents) is skipped entirely.
-3. `_incrementalEvaluator.invalidate(noteId)` — this note's bytecode may have changed.
-4. Every transitive dependent (`graph.getAllDependents(id)`) is added to the dirty set with
-   `markDirtyOnly(depId)` — they need re-evaluating, but their bytecode did not change, so they must
-   not be re-registered.
-5. If the edited note **is** the BaseNote (id 0), every note in `getBaseNoteDependents()` is marked
-   too. The BaseNote is deliberately *not* an edge in the graph (that would be a self-cycle), so
-   this branch is how `base.f` edits propagate.
+3. `graph.getEvaluationDependents(id)` collects everything downstream: the transitive dependents,
+   **across the BaseNote**. The BaseNote is deliberately *not* an edge in the graph (that would be a
+   self-cycle), so when the walk reaches note 0 it steps over explicitly — into every note that
+   reads the BaseNote by name or by inheritance, and on through whatever reads those. This is how
+   `base.f` edits reach a note that only says `[1].f * (5/4)`.
+4. `_incrementalEvaluator.invalidate(noteId, dependents)` — this note's bytecode may have changed.
+5. Every one of those dependents is added to the dirty set with `markDirtyOnly(depId)` — they need
+   re-evaluating, but their bytecode did not change, so they must not be re-registered.
 
 ## 3. Evaluation
 
-`Module.evaluateModule()` (`src/module.js:590`) delegates to
-`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1421`):
+`Module.evaluateModule()` (`src/module.js:637`) delegates to
+`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1757`):
 
 ```
 evaluateDirty()
   → evaluator.beginBatch()      // rewinds the FractionPool bump allocator
-  → topoSort(dirtySet)          // Kahn's algorithm
-  → evaluateNote(id) for each id, in order
+  → a blank record for every dirty note
+  → evaluateVariables(dirty)    // each variable after the variables it reads
+  → reportProblems()            // true cycles, unresolved references
   → clear the dirty set
   → return Map<noteId, result>
 ```
 
-**The sort is Kahn's, on the evaluator, not the graph.** In-degree counts only dependencies *inside*
-the dirty set. Notes that reference the BaseNote get an implicit extra in-degree edge from note 0
-when 0 is itself dirty, and processing note 0 releases them. Zero-degree queues are sorted
-numerically, so the order is deterministic. On a cycle it does **not** throw — it
-`console.warn`s `Dependency cycle detected!` and appends the stuck notes anyway.
+**The order is per variable, on the evaluator, not the graph.** The dirty set is a set of *notes*;
+inside it, `evaluateVariables()` (`binary-evaluator.js:1381`) walks depth-first from every variable
+and evaluates whatever it reads first. Each variable is one node: `[1].f` may read `[2].f` while
+`[2].t` reads `[1].t` and `[1].d`, and a note's own variables may read each other in any direction.
+What a variable reads comes straight from its bytecode, `base.x` included. Notes start in ascending
+id, so the order is deterministic. On a true cycle — a variable that reads itself — it does **not**
+throw: it `console.error`s `Dependency cycle detected!` with the loop named, and evaluates the
+members in a fixed order against defaults.
 
-Each `evaluateNote()` (`binary-evaluator.js:1214`) evaluates in a fixed order —
-**tempo → beatsPerMeasure → frequency → measureLength → startTime → duration** — and ORs a
-corruption bit for whichever property was being evaluated when an irrational `^` result appeared.
+`evaluateVariable()` (`binary-evaluator.js:1524`) evaluates one expression into the note's record
+and ORs a corruption bit for that property when an irrational `^` result appeared.
 
 A cache entry is:
 
 ```javascript
-{ startTime, duration, frequency, tempo, beatsPerMeasure, measureLength, corruptionFlags }
+{ startTime, duration, frequency, tempo, beatsPerMeasure, measureLength, amplitude, corruptionFlags }
 ```
 
 ::: warning Two gotchas in the cache
-`measureLength` on a *measure bar* or the BaseNote may be a plain `{s, n, d, valueOf}` duck-type
-rather than a real `Fraction` (`binary-evaluator.js:1321`). And pooled fractions are never cached —
-`evaluateNote()` copies each result into a fresh `new Fraction(...)` first, because the pool is
-rewound at the start of the next batch.
+`measureLength` on a *measure bar* or the BaseNote may be **computed** rather than evaluated from an
+expression (`binary-evaluator.js:1561-1581`) — it is still a real, exact `Fraction`. And pooled
+fractions are never cached — `evaluateVariable()` copies each result into a fresh
+`new Fraction(...)` first, because the pool is rewound at the start of the next batch.
 :::
 
-An unresolvable reference does **not** throw. `LOAD_REF` falls back to the BaseNote for the three
-inheritable properties (`tempo`, `beatsPerMeasure`, `measureLength`), and otherwise pushes a
+An unresolvable reference does **not** throw. `LOAD_REF` falls back to the BaseNote for the four
+inheritable properties (`tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`), and otherwise pushes a
 hard-coded default: `startTime 0`, `duration 1`, `frequency 440`, `tempo 60`, `bpm 4`,
-`measureLength 4`. This is why deleting a note does not break its dependents — they silently pick up
-these defaults.
+`measureLength 4`. This is why deleting a note does not break its dependents — they pick up these
+defaults, and the evaluation says so with a `console.error` naming the note and variable on both
+ends of every such reference. An `amplitude` nobody sets is the one exception: its `1` is the
+variable's value, not a stand-in, and reading it is reported only when the note it names does not exist.
 
 Finally, `Module._updateCorruptionFlags(cache, dirtyIds)` pushes each result's `corruptionFlags`
 into `DependencyGraph.setCorruptionFlags()` — scoped to the dirty set, not all notes.
@@ -204,10 +210,9 @@ actually hears out of the box.
 ```
 Note 1's frequency changes
   → module.markNoteDirty(1)
-  → graph.getAllDependents(1) → transitive closure, say {2, 3, 5}
+  → graph.getEvaluationDependents(1) → transitive closure, say {2, 3, 5}
   → dirty = {1, 2, 3, 5}
-  → topoSort ensures 1 lands before 2, 3 and 5
-  → each is evaluated once, in order
+  → every variable of those four notes is evaluated once, after the variables it reads
 ```
 
 For *visualisation* — the coloured dependency lines and rings — the module asks a different question.

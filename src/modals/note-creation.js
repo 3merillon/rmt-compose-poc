@@ -376,7 +376,8 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
           frequency: baseNote.getVariable('frequency'),
           tempo: baseNote.getVariable('tempo'),
           beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
-          measureLength: module.findMeasureLength(baseNote)
+          measureLength: module.findMeasureLength(baseNote),
+          amplitude: baseNote.getVariable('amplitude')
         });
       }
       // Add other notes
@@ -390,7 +391,8 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
               frequency: noteObj.getVariable('frequency'),
               tempo: module.findTempo(noteObj),
               beatsPerMeasure: noteObj.getVariable('beatsPerMeasure'),
-              measureLength: module.findMeasureLength(noteObj)
+              measureLength: module.findMeasureLength(noteObj),
+              amplitude: noteObj.getVariable('amplitude')
             });
           } catch {}
         }

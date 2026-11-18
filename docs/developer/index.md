@@ -46,13 +46,14 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 │ Core                                                                 │
 │  module.js  ·  note.js                                               │
 │  binary-note.js      bytecode format (OP / VAR / CORRUPT)            │
-│  binary-evaluator.js stack VM + IncrementalEvaluator (Kahn topo-sort)│
+│  binary-evaluator.js stack VM + IncrementalEvaluator (per-variable)  │
 │  dependency-graph.js forward + inverse indexes, corruption flags     │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Output                                                               │
 │  renderer/webgl2/   renderer · workspace · camera · config           │
 │  player/            audio-engine → audio-graph → reverb              │
 │  instruments/       synths + multisampled piano/violin               │
+│  midi/              midi-export: module → Standard MIDI File (pure)  │
 ├──────────────────────────────────────────────────────────────────────┤
 │ State                                                                │
 │  store/app-state.js · store/history.js · utils/event-bus.js          │
@@ -108,6 +109,7 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 - **[Note Class](/developer/api/note)**
 - **[BinaryExpression](/developer/api/binary-expression)**
 - **[EventBus](/developer/api/event-bus)**
+- **[MIDI Export](/developer/api/midi-export)**
 
 ### Contributing
 
@@ -123,7 +125,7 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 | `src/main.js` | Entry point (`index.html` loads this). Registers instruments, boots WASM, modals, menu, settings. |
 | `src/player.js` | The orchestrator: transport, selection, drag/resize commits, undo wiring, scale controls. ~6.6k lines. |
 | `src/module.js` | `Module` — notes, dependency registration, evaluation, JSON load/save, reindexing. |
-| `src/note.js` | `Note` — six `BinaryExpression`s plus `color` / `instrument`. |
+| `src/note.js` | `Note` — seven `BinaryExpression`s plus `color` / `instrument`. |
 | `src/dsl/` | The primary expression language: `lexer` → `parser` → `compiler` → `decompiler`, plus `simplify`. |
 | `src/expression-compiler.js` | The **legacy** method-chain parser, the format router (`isDSLSyntax`), and the 4000-entry LRU compile cache. |
 | `src/binary-note.js` | `OP`, `VAR`, `CORRUPT`, `BinaryExpression`. |

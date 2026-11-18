@@ -25,8 +25,9 @@ tells you what is true.
 - [duration](/reference/properties/duration) — how long it lasts
 - [tempo](/reference/properties/tempo) — beats per minute
 - [beatsPerMeasure](/reference/properties/beats-per-measure) — meter
+- [amplitude](/reference/properties/amplitude) — loudness, as a relative gain
 
-The sixth property, `measureLength`, has no page of its own: it is derived from `tempo` and
+The seventh property, `measureLength`, has no page of its own: it is derived from `tempo` and
 `beatsPerMeasure` and has no UI. It is covered under
 [tempo](/reference/properties/tempo#tempo-and-measure-length).
 
@@ -81,6 +82,7 @@ buttons in the note widget write for you. The full table, including dotted value
 | tempo | `tempo` | `tempo` |
 | beatsPerMeasure | `bpm`, `beatsPerMeasure` | `bpm` |
 | measureLength | `ml`, `measureLength` | `ml` |
+| amplitude | `a`, `amp`, `amplitude` | `a` |
 
 ### Keyboard shortcuts
 
@@ -117,6 +119,7 @@ they are what the file format and the evaluator agree on.
 | 3 | tempo |
 | 4 | beatsPerMeasure |
 | 5 | measureLength |
+| 6 | amplitude |
 
 ### Corruption flags
 
@@ -130,6 +133,7 @@ A bitmask, one bit per property, recording which of a note's values came out irr
 | `0x08` | tempo |
 | `0x10` | beatsPerMeasure |
 | `0x20` | measureLength |
+| `0x40` | amplitude |
 
 ### Bytecode opcodes
 

@@ -35,7 +35,7 @@ The DSL replaces the verbose legacy JavaScript syntax. Both formats compile to t
 - **DSL compiler** — expressions are lexed, parsed, validated, and compiled to compact binary bytecode. Legacy method-chain syntax (`.mul()/.pow()/...`) is auto-detected and still supported.
 - **Evaluation** — a stack-based VM walks the bytecode with `fraction.js` (BigInt-backed) for exact rational arithmetic at any magnitude and depth, backed by a Fraction pool to keep allocation off the drag path. Powers that resolve to an irrational value flag the note as *corrupted* (shown as `≈` in the note widget and cross-hatched on the canvas).
 - **Dependency tracking** — an inverted index gives O(1) forward and inverse lookup, split per property (startTime / duration / frequency). Drag previews move only the notes whose position actually depends on the note under the cursor.
-- **Incremental re-evaluation** — a Kahn topological sort over the dirty set only, not the whole module.
+- **Incremental re-evaluation** — only the dirty set is re-evaluated, not the whole module, and it is ordered per (note, variable): any variable may depend on any other, and only a variable that depends on itself is refused.
 - **Rendering** — every visual class (note bodies, rings, measure bars, dependency lines, glyphs) is one instanced draw call. Per-note overlay work is culled to the viewport, and the renderer redraws only when something changed: an idle canvas issues **zero draw calls**.
 - **No `eval`, no `new Function`** anywhere. Expressions only ever become bytecode.
 
@@ -89,6 +89,7 @@ The 100k figure is about **rendering**, not editing: `sync()` is the remaining b
   - Optional **pitch panning** (low notes left, high notes right) and a peak limiter
   - 11 instruments: 9 synthesized (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`) and 2 **multisampled** (`piano`, `violin`) cut from the CC0 VSCO-2 Community Edition library. Sample zones are decoded lazily, only for the notes about to play.
   - Instruments inherit down the frequency dependency chain; a note without an explicit instrument takes its ancestor's, falling back to the global default
+  - **Per-note amplitude** — an exact relative gain (`a`) like every other variable: `[1].a * (121/100)`. A note without one sounds at the BaseNote's; the default is 1, and playback clamps the result to 0–4
   - Click-free ADSR, 200 ms pause fade, 20 ms stop de-click
   - **Loop playback** — shift-click or long-press Play. Gapless at the seam: release tails and reverb ring across the loop boundary.
 
@@ -128,7 +129,7 @@ Other scripts:
 
 | Script | What it does |
 |---|---|
-| `npm test` | Validates all 79 library modules (structure, expressions, self-containedness, finite evaluation, ratio/cents). **Not a unit-test suite** — the repo has no test framework. |
+| `npm test` | Validates all 79 library modules (structure, expressions, self-containedness, finite evaluation, ratio/cents), then checks exact arithmetic at depth, per-variable evaluation order and the amplitude variable, and reads exported MIDI files back note by note. **Not a unit-test suite** — the repo has no test framework. |
 | `npm run gen:intervals` | Regenerates the 46 interval modules and patches `library.json` |
 | `npm run perf:gen` / `npm run perf:bench` | Generate stress modules; benchmark evaluation in Node |
 | `npm run samples:build` | Rebuilds the piano/violin samples from VSCO-2 CE (needs `ffmpeg` + network) |
@@ -158,7 +159,7 @@ If you built the crate by hand, sync with `npm run wasm:sync` and commit the upd
   - Reset View centers on the BaseNote (disabled while tracking is on)
   - Playhead tracking keeps the playhead at the horizontal center — this **locks horizontal panning** for as long as it is on
   - **Gear** opens the Settings panel (five tabs). It is the only way in; there is no menu entry.
-  - **+** opens the main menu: Undo, Redo, Reorder Module, Save Module, Load Module (from file / reset to default), plus Documentation, Donate, License links
+  - **+** opens the main menu: Undo, Redo, Reorder Module, Save Module, Export MIDI, Load Module (from file / reset to default), plus Documentation, Donate, License links
 - **Editing**
   - Click to select a note, measure, or the BaseNote; click again on the same spot to cycle through an overlapping stack
   - Drag a note body to move it; drag the right tab to resize
@@ -171,6 +172,7 @@ If you built the crate by hand, sync with `npm run wasm:sync` and commit the upd
 - **Import/Export**
   - Load a module from a file, or drag one from the module library onto a note, a measure bar, or the BaseNote
   - Save Module downloads `module.json` (reindexed on export). Save UI / Load UI export the *library layout*, not a composition.
+  - Export MIDI downloads `module.mid`: a type 1 Standard MIDI File that keeps the tuning — each note on its nearest key plus a 14-bit pitch bend, one note per channel (an MPE lower zone per instrument, bend range ±2 semitones), velocity from `amplitude`. One-way: there is no MIDI import.
 - **Keyboard** — the only global shortcuts are undo and redo:
   - **Undo: Ctrl/Cmd+Z**
   - **Redo: Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z**
@@ -246,8 +248,9 @@ The DSL is a concise, mathematical notation for defining note relationships. Bot
 | `tempo` | tempo | — |
 | `bpm` | beatsPerMeasure | `beatsPerMeasure` |
 | `ml` | measureLength | `measureLength` |
+| `a` | amplitude | `amp`, `amplitude` |
 
-`tempo`, `bpm` and `ml` fall back to the base note when the referenced note doesn't define them. `t`, `d` and `f` do not inherit.
+`tempo`, `bpm`, `ml` and `a` fall back to the base note when the referenced note doesn't define them (`a` is 1 when the base note doesn't define it either). `t`, `d` and `f` do not inherit.
 
 ### Operators and Literals
 
@@ -294,6 +297,10 @@ beat(base)               # One beat
 beat(base) * 2           # Two beats
 beat(base) * (1/2)       # An eighth note
 beat(base) * base.bpm    # A full measure
+
+# Loudness (amplitude: an exact relative gain, 1 when unset)
+[1].a * (121/100)        # A little louder than note 1
+base.a * (1/2)           # Half the level of the piece
 ```
 
 <details>
@@ -356,7 +363,8 @@ Example — chain notes up the 12-TET scale:
 ### Core expression system
 - `src/dsl/` — DSL lexer, parser, compiler, decompiler, and DSL-native simplifier
 - `src/binary-note.js` — binary expression format and bytecode opcodes
-- `src/binary-evaluator.js` — stack VM with Fraction pooling + incremental (Kahn) evaluator
+- `src/binary-evaluator.js` — stack VM with Fraction pooling + incremental evaluator, ordered per variable
+- `src/variable-deps.js` — what each (note, variable) reads: the basis of evaluation order and cycle checks
 - `src/dependency-graph.js` — forward/inverse dependency indexes, per property, plus corruption flags
 - `src/expression-compiler.js` — DSL/legacy routing, LRU compile cache, legacy compiler + decompiler
 - `src/utils/simplify.js` — simplification with a value + corruption-flag equivalence guard
@@ -379,6 +387,8 @@ Example — chain notes up the 12-TET scale:
 - `src/player/audio-engine.js` — streaming scheduler, play/pause/stop/loop
 - `src/player/audio-graph.js` — buses, reverb send/return, limiter, master gain
 - `src/player/reverb.js` — algorithmic impulse-response generator
+- `src/player/amplitude.js` — amplitude → gain, clamped to 0–4 at the audio boundary
+- `src/midi/midi-export.js` — module → Standard MIDI File (pure function; also runs in Node)
 - `src/instruments/` — synth + multisample instruments
 
 ### WASM core (optional, inert by default)

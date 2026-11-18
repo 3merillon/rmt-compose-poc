@@ -37,9 +37,9 @@ compile to identical bytecode, and the helper form is rewritten to the property 
 | A note with no `tempo` expression | inherits the BaseNote's tempo |
 | Nothing resolvable at all | `60` (silent fallback) |
 
-Tempo is one of the three **inheriting** properties, along with `beatsPerMeasure` and
-`measureLength`. `[5].tempo` on a note that defines no tempo of its own yields the BaseNote's tempo.
-(`startTime`, `duration` and `frequency` do not inherit.)
+Tempo is one of the four **inheriting** properties, along with `beatsPerMeasure`,
+`measureLength` and `amplitude`. `[5].tempo` on a note that defines no tempo of its own yields the
+BaseNote's tempo. (`startTime`, `duration` and `frequency` do not inherit.)
 
 ## Where you edit it
 
@@ -48,8 +48,8 @@ row with an `Evaluated:` readout and a `Raw:` input. Type a value and press **Sa
 
 ::: warning
 There is no `tempo` row in a regular note's widget, and none in a measure's. The note widget only
-exposes `startTime`, `duration`, `frequency`, `color` and `instrument`. **A per-note tempo can only
-be set by editing the module JSON.**
+exposes `startTime`, `duration`, `frequency`, `amplitude`, `color` and `instrument`. **A per-note
+tempo can only be set by editing the module JSON.**
 :::
 
 There is no UI for `measureLength` either — it is derived (see below).

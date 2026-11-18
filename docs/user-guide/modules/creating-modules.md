@@ -32,6 +32,7 @@ With the BaseNote selected, the note widget shows:
 | `tempo` | Beats per minute. `beat(base)` is derived from this. |
 | `beatsPerMeasure` | The numerator of the time signature. |
 | `measureLength` | The length of a measure, in seconds. Leave it alone unless you need a measure that is not `beatsPerMeasure` beats long. |
+| `amplitude` | The level of every note that does not set its own, as a relative gain. `1` unless you change it. |
 | `color` | The BaseNote's own color. Unlike `instrument`, it is not inherited by anything. |
 | `instrument` | Pins the timbre for every note that inherits from the BaseNote. |
 

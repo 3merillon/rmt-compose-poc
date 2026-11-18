@@ -16,6 +16,7 @@ import Fraction from 'fraction.js';
 import { ExpressionCompiler } from '../expression-compiler.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
 import { isDSLSyntax, compileDSL } from '../dsl/index.js';
+import { findDependencyCycle } from '../variable-deps.js';
 
 // Singleton compiler instance
 const safeCompiler = new ExpressionCompiler();
@@ -176,7 +177,8 @@ export function buildEvaluationCache(moduleInstance) {
                 frequency: safeGetVariable(baseNote, 'frequency'),
                 tempo: safeGetVariable(baseNote, 'tempo'),
                 beatsPerMeasure: safeGetVariable(baseNote, 'beatsPerMeasure'),
-                measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(baseNote) : null
+                measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(baseNote) : null,
+                amplitude: safeGetVariable(baseNote, 'amplitude')
             });
         } catch (e) {
             console.warn('buildEvaluationCache: Error caching baseNote:', e);
@@ -199,7 +201,8 @@ export function buildEvaluationCache(moduleInstance) {
                     frequency: safeGetVariable(note, 'frequency'),
                     tempo: moduleInstance.findTempo ? moduleInstance.findTempo(note) : null,
                     beatsPerMeasure: safeGetVariable(note, 'beatsPerMeasure'),
-                    measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(note) : null
+                    measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(note) : null,
+                    amplitude: safeGetVariable(note, 'amplitude')
                 });
             } catch (e) {
                 // Skip notes that can't be cached
@@ -244,17 +247,16 @@ export function validateAndNormalizeExpression(expr, moduleInstance, noteId, var
         throw new Error(validation.error);
     }
 
-    // Check for self-reference
+    // Check for self-reference and circular dependencies. Per (note, variable),
+    // like evaluation: reading another variable of the same note is fine, a
+    // variable that ends up reading itself is not.
     if (noteId !== undefined && noteId !== null) {
-        // DSL syntax self-reference check
-        const dslSelfRef = new RegExp(`\\[${noteId}\\]\\.`);
-        if (dslSelfRef.test(exprStr)) {
-            throw new Error('Expression cannot reference itself directly');
-        }
-
-        // Legacy syntax self-reference check
-        if (exprStr.includes(`getNoteById(${noteId})`)) {
-            throw new Error('Expression cannot reference itself directly');
+        const binary = isDSLSyntax(exprStr) ? compileDSL(exprStr) : safeCompiler.compile(exprStr);
+        const cycle = findDependencyCycle(moduleInstance, noteId, variableType, binary);
+        if (cycle) {
+            throw new Error(cycle.length === 1
+                ? 'Expression cannot reference itself directly'
+                : 'Circular dependency detected in expression');
         }
     }
 

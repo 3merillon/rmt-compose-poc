@@ -270,6 +270,8 @@ export class DSLCompiler {
         return VAR.BEATS_PER_MEASURE;
       case 'measureLength':
         return VAR.MEASURE_LENGTH;
+      case 'amplitude':
+        return VAR.AMPLITUDE;
       default:
         throw new DSLCompileError(`Unknown variable name: ${varName}`);
     }

@@ -315,7 +315,7 @@ export class ExpressionCompiler {
 
     // 10. Handle bare variable names (legacy compatibility)
     // If someone passes just "tempo" or "beatsPerMeasure", treat as baseNote reference
-    const bareVarNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+    const bareVarNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
     if (bareVarNames.includes(trimmed)) {
       console.warn(`Bare variable name detected: ${trimmed} - treating as module.baseNote.getVariable('${trimmed}')`);
       return { type: 'baseRef', varName: trimmed };
@@ -770,6 +770,7 @@ export class ExpressionCompiler {
       case 'tempo': return VAR.TEMPO;
       case 'beatsPerMeasure': return VAR.BEATS_PER_MEASURE;
       case 'measureLength': return VAR.MEASURE_LENGTH;
+      case 'amplitude': return VAR.AMPLITUDE;
       default:
         console.warn(`Unknown variable name: ${varName}`);
         return VAR.START_TIME;
@@ -973,6 +974,7 @@ export class ExpressionDecompiler {
       case VAR.TEMPO: return 'tempo';
       case VAR.BEATS_PER_MEASURE: return 'beatsPerMeasure';
       case VAR.MEASURE_LENGTH: return 'measureLength';
+      case VAR.AMPLITUDE: return 'amplitude';
       default: return 'startTime';
     }
   }

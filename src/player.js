@@ -9,6 +9,8 @@ import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpress
 import { Workspace } from './renderer/webgl2/workspace.js';
 import { menuBar } from './menu/menu-bar.js';
 import { isDSLSyntax } from './dsl/index.js';
+import { compiler } from './expression-compiler.js';
+import { findDependencyCycle } from './variable-deps.js';
 import { escapeHtml } from './utils/html-escape.js';
 import { settingsStore } from './settings/settings-store.js';
 import { scaleStep } from './settings/settings-schema.js';
@@ -16,6 +18,7 @@ import { themeManager } from './theme/theme-manager.js';
 import { showGroupWidget, hideGroupWidget } from './modals/group-widget.js';
 import { registerPanel, raisePanel } from './utils/panel-stack.js';
 import { toNumber } from './utils/fraction-num.js';
+import { planMidi, encodeMidi } from './midi/midi-export.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -178,6 +181,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         noteWidget: document.getElementById('note-widget'),
         closeWidgetBtn: document.querySelector('.note-widget-close'),
         saveModuleBtn: document.getElementById('saveModuleBtn'),
+        exportMidiBtn: document.getElementById('exportMidiBtn'),
         widgetContent: document.querySelector('.note-widget-content'),
         widgetTitle: document.getElementById('note-widget-title'),
         volumeSlider: document.getElementById('volumeSlider'),
@@ -519,7 +523,7 @@ document.addEventListener('DOMContentLoaded', async function() {
   
     requestWakeLock();
 
-    function notify(message, type = 'info') {
+    function notify(message, type = 'info', duration = 3000) {
         try {
             const notification = document.createElement('div');
             notification.textContent = message;
@@ -545,7 +549,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             setTimeout(() => {
                 notification.style.opacity = '0';
                 setTimeout(() => { if (notification.parentNode) document.body.removeChild(notification); }, 300);
-            }, 3000);
+            }, duration);
         } catch (e) {
             console.warn('notify failed', e);
         }
@@ -635,10 +639,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         );
 
         // DSL shortname → variable name mapping
-        const dslShortToVar = { t: 'startTime', d: 'duration', f: 'frequency' };
+        const dslShortToVar = { t: 'startTime', d: 'duration', f: 'frequency', a: 'amplitude' };
 
-        // DSL patterns for [N].t, [N].d, [N].f
-        const dslVarRegex = new RegExp("\\[" + selectedNoteId + "\\]\\.(t|d|f)\\b", "g");
+        // DSL patterns for [N].t, [N].d, [N].f, [N].a
+        const dslVarRegex = new RegExp("\\[" + selectedNoteId + "\\]\\.(t|d|f|a)\\b", "g");
         // DSL helper patterns: beat([N]), tempo([N]), measure([N])
         const dslHelperRegex = new RegExp("\\b(beat|tempo|measure)\\s*\\(\\s*\\[" + selectedNoteId + "\\]\\s*\\)", "g");
 
@@ -672,6 +676,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 const varName = dslShortToVar[shortName];
                                 const noteExpr = selectedRaw[varName];
                                 if (noteExpr === undefined) {
+                                    // A note without its own amplitude was inheriting the
+                                    // BaseNote's, so that is what its dependents were reading.
+                                    if (varName === 'amplitude') return 'base.a';
                                     return (varName === 'frequency') ? '1' : '0';
                                 }
                                 // Wrap in parens to preserve operator precedence
@@ -694,6 +701,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                             newRawExp = newRawExp.replace(getVarRegex, (match, g1, g2) => {
                                 const varName = g1 || g2;
                                 let replacement = selectedRaw[varName];
+                                if (replacement === undefined && varName === "amplitude") {
+                                    // Inherited amplitude: the dependents were reading the BaseNote's.
+                                    return "module.baseNote.getVariable('amplitude')";
+                                }
                                 if (replacement === undefined) {
                                     replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
                                     console.warn("No raw value for", varName, "– using default", replacement);
@@ -760,6 +771,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
         
+        // amplitude only when the note defines its own; left undefined it is
+        // substituted by the BaseNote's (see updateDependentRawExpressions).
+        if (selectedNote.variables.amplitudeString) {
+            selectedRaw.amplitude = selectedNote.variables.amplitudeString;
+        }
+
         const selectedNoteInstrument = myModule.findInstrument(selectedNote);
         const directDependents = myModule.getDependentNotes(noteId);
         
@@ -1635,6 +1652,10 @@ if (canvasEl) {
     } else {
         console.error('Save Module button not found!');
     }
+
+    if (domCache.exportMidiBtn) {
+        domCache.exportMidiBtn.addEventListener('click', exportMidi);
+    }
   
     if (domCache.resetViewBtn) {
         domCache.resetViewBtn.addEventListener('click', (e) => {
@@ -1718,6 +1739,9 @@ if (canvasEl) {
             // Per-import cache to avoid repeating the same string remapping across many notes
             const exprRemapCache = new Map();
 
+            // The DSL spellings of the amplitude property (src/dsl/constants.js PropertyMap)
+            const __isAmplitudeProp = (prop) => prop === 'a' || prop === 'amp' || prop === 'amplitude';
+
             // Ensure imported expressions anchor to the actual drop target (requirement)
             // When dropping onto a measure bar: startTime anchors to measure, frequency anchors to BaseNote
             function updateExpression(expr, exprType = null) {
@@ -1733,7 +1757,7 @@ if (canvasEl) {
                 const hasBase = expr.indexOf('module.baseNote') !== -1;
                 const hasIds  = expr.indexOf('getNoteById(') !== -1;
                 // DSL format uses base.t, base.d, base.f, base.tempo, etc.
-                const hasDslBase = /\bbase\.([tdfbm]|tempo|bpm|ml)\b/.test(expr);
+                const hasDslBase = /\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/.test(expr);
                 // DSL format uses [id].prop for note references
                 const hasDslIds = /\[\d+\]\./.test(expr);
                 // DSL format uses tempo(base), beat(base), measure(base), tempo([id]), etc.
@@ -1746,13 +1770,17 @@ if (canvasEl) {
 
                 // Remap DSL [oldId].prop references using the mapping table
                 if (hasDslIds) {
-                    expr = expr.replace(/\[(\d+)\]\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, idStr, prop) {
+                    expr = expr.replace(/\[(\d+)\]\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/g, function(match, idStr, prop) {
                         const oldRef = parseInt(idStr, 10);
                         if (mapping.hasOwnProperty(oldRef)) {
                             const newId = mapping[oldRef];
                             // Measure bar drop: frequency refs to base note stay as base.f
                             if (targetIsMeasure && oldRef === 0 && exprType === 'frequency' && prop === 'f') {
                                 return 'base.f';
+                            }
+                            // ...and so do amplitude refs: a measure bar has no loudness either
+                            if (targetIsMeasure && oldRef === 0 && __isAmplitudeProp(prop)) {
+                                return 'base.a';
                             }
                             return `[${newId}].${prop}`;
                         }
@@ -1783,14 +1811,17 @@ if (canvasEl) {
                     const anchorId = targetNote.id;
 
                     if (targetIsMeasure) {
-                        expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
+                        expr = expr.replace(/\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/g, function(match, prop) {
                             if (prop === 'f') {
                                 return 'base.f';
+                            }
+                            if (__isAmplitudeProp(prop)) {
+                                return 'base.a';
                             }
                             return `[${anchorId}].${prop}`;
                         });
                     } else {
-                        expr = expr.replace(/\bbase\.([tdfbm]|tempo|bpm|ml)\b/g, function(match, prop) {
+                        expr = expr.replace(/\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/g, function(match, prop) {
                             return `[${anchorId}].${prop}`;
                         });
                     }
@@ -1839,6 +1870,9 @@ if (canvasEl) {
                         expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
                             if (varName === 'frequency') {
                                 return "module.baseNote.getVariable('frequency')";
+                            }
+                            if (varName === 'amplitude') {
+                                return "module.baseNote.getVariable('amplitude')";
                             }
                             return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
                         });
@@ -1922,7 +1956,7 @@ if (canvasEl) {
                         // Check for legacy format and DSL format references that need remapping
                         const needsRemap = (originalString.indexOf('module.baseNote') !== -1) ||
                                            (originalString.indexOf('getNoteById(') !== -1) ||
-                                           (/\bbase\.([tdfbm]|tempo|bpm|ml)\b/.test(originalString)) ||
+                                           (/\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/.test(originalString)) ||
                                            (/\[\d+\]\./.test(originalString)) ||
                                            (/\b(tempo|beat|measure)\s*\(/.test(originalString));
                         const baseKey = key.slice(0, -6);
@@ -2591,6 +2625,20 @@ function __rawReferencesNoteId(raw, noteId) {
   // DSL helpers: beat([noteId]), tempo([noteId]), measure([noteId])
   if (new RegExp(`\\b(?:beat|tempo|measure)\\s*\\(\\s*\\[${noteId}\\]\\s*\\)`).test(raw)) return true;
   return false;
+}
+
+// Shared helper: would writing `raw` as this variable make a variable depend on itself?
+// The retargeting below re-anchors a note on an ancestor found by walking start-time
+// parents, which assumes two notes never read each other. They can, through different
+// variables (1.f from 2.f while 2.t comes from 1.t), and then the walk can arrive back
+// at the note being rewritten. A retarget that would close such a loop is skipped: the
+// note keeps the expression it has.
+function __retargetWouldCycleGL(note, varName, raw) {
+  try {
+    return findDependencyCycle(myModule, note.id, varName, compiler.compile(raw)) !== null;
+  } catch {
+    return false;
+  }
 }
 
 // Shared helper: check if a raw expression references baseNote (legacy or DSL).
@@ -3591,7 +3639,7 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
           }
         } catch {}
 
-        if (newFreqString) {
+        if (newFreqString && !__retargetWouldCycleGL(dep, 'frequency', newFreqString)) {
           dep.setVariable('frequencyString', newFreqString);
           try { myModule.markNoteDirty(dep.id); } catch {}
         }
@@ -3666,8 +3714,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             replacedS = sRaw.replace(noteRefRegex, parentRef);
             try { replacedS = simplifyStartTime(replacedS, myModule); } catch {}
           }
-          dep.setVariable('startTimeString', replacedS);
-          changed = true;
+          if (!__retargetWouldCycleGL(dep, 'startTime', replacedS)) {
+            dep.setVariable('startTimeString', replacedS);
+            changed = true;
+          }
         }
       } catch {}
 
@@ -3684,8 +3734,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             replacedD = dRaw.replace(noteRefRegex, parentRef);
             try { replacedD = simplifyDuration(replacedD, myModule); } catch {}
           }
-          dep.setVariable('durationString', replacedD);
-          changed = true;
+          if (!__retargetWouldCycleGL(dep, 'duration', replacedD)) {
+            dep.setVariable('durationString', replacedD);
+            changed = true;
+          }
         }
       } catch {}
 
@@ -3725,8 +3777,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           } else {
             try { simplifiedF = simplifyFrequency(replacedF, myModule); } catch { simplifiedF = replacedF; }
           }
-          dep.setVariable('frequencyString', simplifiedF);
-          changed = true;
+          if (!__retargetWouldCycleGL(dep, 'frequency', simplifiedF)) {
+            dep.setVariable('frequencyString', simplifiedF);
+            changed = true;
+          }
         }
       } catch {}
 
@@ -4370,6 +4424,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         const beatLen = 60 / baseTempo;
         const baseFreqFrac = base.getVariable('frequency');
         const baseFreq = toNumber(baseFreqFrac, 0);
+        const baseAmpFrac = myModule.findAmplitude(base);
         const t0Frac = notes[0].getVariable('startTime');
 
         const frac = (x) => {
@@ -4444,6 +4499,26 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 }
             }
 
+            // amplitude — only a note that defines its own carries one; the rest go on
+            // inheriting the copied base's. Verbatim when self-contained, otherwise
+            // rebuilt as a ratio of base.a so it still follows the piece-wide gain.
+            const aRaw = n.variables?.amplitudeString || '';
+            if (aRaw && selfContained(aRaw)) {
+                e.amplitude = renumber(aRaw);
+            } else if (aRaw && n.getVariable('amplitude') != null) {
+                const ampFrac = n.getVariable('amplitude');
+                try {
+                    if (baseAmpFrac.equals(0)) {
+                        e.amplitude = fracStr(ampFrac);
+                    } else {
+                        const r = ampFrac.div(baseAmpFrac);
+                        e.amplitude = r.equals(1) ? 'base.a' : `${fracStr(r)} * base.a`;
+                    }
+                } catch {
+                    e.amplitude = fracStr(ampFrac);
+                }
+            }
+
             if (n.properties.color) e.color = n.properties.color;
             if (n.properties.instrument) e.instrument = n.properties.instrument;
             outNotes.push(e);
@@ -4453,7 +4528,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         // never reference a note, which makes them safe to reuse as-is. startTime is
         // forced to 0: the earliest copied note sits ON the base.
         const baseOut = {};
-        for (const v of ['frequency', 'tempo', 'beatsPerMeasure', 'measureLength']) {
+        for (const v of ['frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude']) {
             const raw = base.variables?.[v + 'String'];
             if (typeof raw === 'string' && raw.trim()) {
                 baseOut[v] = raw;
@@ -5497,6 +5572,50 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         });
     }
 
+    // Export MIDI ("+" menu): the module as a Standard MIDI File that keeps its
+    // tuning (see src/midi/midi-export.js for what is written and what is rounded).
+    // Whatever the file could not carry as written is counted in the toast and
+    // spelled out, note ids included, in the console.
+    function exportMidi() {
+        try {
+            const plan = planMidi(myModule);
+            const { notes, polyphony, warnings } = plan.report;
+            warnings.forEach(warning => console.warn('[RMT] MIDI export:', warning));
+
+            if (notes.exported === 0) {
+                const cause = notes.skippedTotal === 1
+                    ? 'the only note could not be written'
+                    : `none of the ${notes.skippedTotal} notes could be written`;
+                notify(notes.skippedTotal
+                    ? `Nothing exported: ${cause} — see the console`
+                    : 'Nothing to export: the module has no sounding notes', 'error', 6000);
+                return;
+            }
+
+            const blob = new Blob([encodeMidi(plan)], { type: 'audio/midi' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'module.mid';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+
+            const summary = `Exported ${notes.exported} note${notes.exported === 1 ? '' : 's'} to module.mid`;
+            if (warnings.length === 0) {
+                notify(summary, 'success');
+            } else {
+                const counts = [];
+                if (polyphony.overflowNotes) counts.push(`${polyphony.overflowNotes} on extra tracks`);
+                if (notes.skippedTotal) counts.push(`${notes.skippedTotal} not exported`);
+                notify(`${summary}${counts.length ? ` (${counts.join(', ')})` : ''} — see the console`, 'info', 6000);
+            }
+        } catch (error) {
+            console.error('Error exporting MIDI:', error);
+            notify(`Error exporting MIDI: ${error.message}`, 'error');
+        }
+    }
+
     function validateExpression(moduleInstance, noteId, expression, variableType) {
         return modals.validateExpression(moduleInstance, noteId, expression, variableType);
     }
@@ -5941,7 +6060,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                   newExpr = rebuildFrequencyForAnchor(n, anchor, depGraph, _fIsDSL);
                 }
 
-                if (newExpr) {
+                if (newExpr && !__retargetWouldCycleGL(n, 'frequency', newExpr)) {
                   n.setVariable('frequencyString', newExpr);
                 }
                 // If newExpr is still null, preserve original expression (safer than corrupting)
@@ -5980,7 +6099,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
                   let simplifiedF;
                   try { simplifiedF = fIsDSL ? rawFreq : simplifyFrequency(rawFreq, myModule); } catch { simplifiedF = rawFreq; }
-                  n.setVariable('frequencyString', simplifiedF);
+                  if (!__retargetWouldCycleGL(n, 'frequency', simplifiedF)) {
+                    n.setVariable('frequencyString', simplifiedF);
+                  }
                 }
               }
 
@@ -6094,7 +6215,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 let simplifiedD;
                 try { simplifiedD = dIsDSL ? rawDur : simplifyDuration(rawDur, myModule); } catch { simplifiedD = rawDur; }
 
-                n.setVariable('durationString', simplifiedD);
+                if (!__retargetWouldCycleGL(n, 'duration', simplifiedD)) {
+                  n.setVariable('durationString', simplifiedD);
+                }
               }
             }
           } catch {}

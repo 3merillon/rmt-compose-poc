@@ -30,7 +30,7 @@ export const TokenType = {
   BASE: 'BASE',               // base
 
   // Identifiers (properties and helpers)
-  IDENTIFIER: 'IDENTIFIER',   // f, t, d, tempo, measure, beat, etc.
+  IDENTIFIER: 'IDENTIFIER',   // f, t, d, a, tempo, measure, beat, etc.
 
   // End of input
   EOF: 'EOF',
@@ -66,6 +66,11 @@ export const PropertyMap = {
   // Measure length
   'ml': 'measureLength',
   'measureLength': 'measureLength',
+
+  // Amplitude (relative gain)
+  'a': 'amplitude',
+  'amp': 'amplitude',
+  'amplitude': 'amplitude',
 };
 
 /**
@@ -78,6 +83,7 @@ export const PropertyShortNames = {
   'tempo': 'tempo',
   'beatsPerMeasure': 'bpm',
   'measureLength': 'ml',
+  'amplitude': 'a',
 };
 
 /**

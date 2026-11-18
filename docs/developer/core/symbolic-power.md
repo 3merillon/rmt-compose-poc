@@ -11,7 +11,7 @@ description: The algebraic representation of irrationals like 2^(1/12) — its r
 value = coefficient × base₁^exp₁ × base₂^exp₂ × … × baseₙ^expₙ
 ```
 
-`src/binary-evaluator.js:20-284`.
+`src/binary-evaluator.js:56-320`.
 
 ## The problem
 
@@ -40,7 +40,7 @@ Read the next section before you build anything on that promise. In the shipping
 
 ## What actually happens at runtime
 
-`OP.POW` (`binary-evaluator.js:1143-1170`) builds a `MusicValue`, calls `pow()`, and then — if the result is irrational — **flattens it back to an approximated rational and pushes that**:
+`OP.POW` (`binary-evaluator.js:1189-1216`) builds a `MusicValue`, calls `pow()`, and then — if the result is irrational — **flattens it back to an approximated rational and pushes that**:
 
 ```javascript
 if (powResult.isCorrupted()) {
@@ -93,7 +93,7 @@ scaleDSL('base.f * 2^(7/12)', 3, 2)         → (3/2) * base.f * 2^(7/12)
 
 ## API
 
-`SymbolicPower` (`binary-evaluator.js:20-284`). Note the field is **`exp`**, not `exponent`.
+`SymbolicPower` (`binary-evaluator.js:56-320`). Note the field is **`exp`**, not `exponent`.
 
 ```javascript
 class SymbolicPower {
@@ -164,10 +164,10 @@ The path from an irrational power to a pixel:
 
 ```
 POW produces an irrational
-  → BinaryEvaluator._lastEvalWasCorrupted = true           binary-evaluator.js:1158
-  → evaluateNote() ORs the property's bit into corruptionFlags   :1345-1347
-  → Module._updateCorruptionFlags()                        module.js:642-659
-      → DependencyGraph.setCorruptionFlags(id, flags)      dependency-graph.js:1659
+  → BinaryEvaluator._lastEvalWasCorrupted = true           binary-evaluator.js:1204
+  → evaluateVariable() ORs the property's bit into corruptionFlags   :1545-1547
+  → Module._updateCorruptionFlags()                        module.js:683-706
+      → DependencyGraph.setCorruptionFlags(id, flags)      dependency-graph.js:1756
   → RendererAdapter.sync() → a_corruptionType per note     renderer.js:823-898
   → the shader hatches the note
 ```
@@ -183,7 +183,7 @@ On the canvas:
 In the note widget, a transitively-corrupted **frequency** displays as `≈<fraction>` with the `corrupted-value` class (`src/modals/variable-controls.js:70-79`; `public/styles.css:1308-1311`).
 
 ::: warning The direct-corruption float readout
-The widget's *directly*-corrupted branch (`≈1.0594631`, eight significant figures) keys on `value.isCorrupted || ev._irrational || ev._floatValue !== undefined` (`variable-controls.js:60`). `value.isCorrupted` is the dependency graph's per-property corruption bit (`src/modals/index.js:298`), so the branch fires on the JS path too; `_irrational` / `_floatValue` are only ever set by the WASM evaluator adapter (`src/wasm/evaluator-adapter.js:915-916`). The float it prints is `ev._floatValue` when present, otherwise the approximated fraction converted through `toNumber()` (`variable-controls.js:67`) — the documented lossy boundary in `src/utils/fraction-num.js`.
+The widget's *directly*-corrupted branch (`≈1.0594631`, eight significant figures) keys on `value.isCorrupted || ev._irrational || ev._floatValue !== undefined` (`variable-controls.js:60`). `value.isCorrupted` is the dependency graph's per-property corruption bit (`src/modals/index.js:298`), so the branch fires on the JS path too; `_irrational` / `_floatValue` are only ever set by the WASM evaluator adapter (`src/wasm/evaluator-adapter.js:949-950`). The float it prints is `ev._floatValue` when present, otherwise the approximated fraction converted through `toNumber()` (`variable-controls.js:67`) — the documented lossy boundary in `src/utils/fraction-num.js`.
 :::
 
 Exact values can wear an `≈` too, without any corruption: once a fraction's numerator plus denominator pass 24 digits, the widget collapses the readout to an eight-significant-figure approximation and keeps the exact (elided) `n/d` form in the row's `title` tooltip (`src/modals/fraction-display.js`). The stored value stays exact — only the rendering approximates.

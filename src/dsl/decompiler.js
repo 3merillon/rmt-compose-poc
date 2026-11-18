@@ -282,6 +282,8 @@ export class DSLDecompiler {
         return 'bpm';
       case VAR.MEASURE_LENGTH:
         return 'ml';
+      case VAR.AMPLITUDE:
+        return 'a';
       default:
         return 't';
     }
