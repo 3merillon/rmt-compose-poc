@@ -16,6 +16,7 @@ import { themeManager } from './theme/theme-manager.js';
 import { showGroupWidget, hideGroupWidget } from './modals/group-widget.js';
 import { registerPanel, raisePanel } from './utils/panel-stack.js';
 import { toNumber } from './utils/fraction-num.js';
+import { planMidi, encodeMidi } from './midi/midi-export.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -178,6 +179,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         noteWidget: document.getElementById('note-widget'),
         closeWidgetBtn: document.querySelector('.note-widget-close'),
         saveModuleBtn: document.getElementById('saveModuleBtn'),
+        exportMidiBtn: document.getElementById('exportMidiBtn'),
         widgetContent: document.querySelector('.note-widget-content'),
         widgetTitle: document.getElementById('note-widget-title'),
         volumeSlider: document.getElementById('volumeSlider'),
@@ -519,7 +521,7 @@ document.addEventListener('DOMContentLoaded', async function() {
   
     requestWakeLock();
 
-    function notify(message, type = 'info') {
+    function notify(message, type = 'info', duration = 3000) {
         try {
             const notification = document.createElement('div');
             notification.textContent = message;
@@ -545,7 +547,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             setTimeout(() => {
                 notification.style.opacity = '0';
                 setTimeout(() => { if (notification.parentNode) document.body.removeChild(notification); }, 300);
-            }, 3000);
+            }, duration);
         } catch (e) {
             console.warn('notify failed', e);
         }
@@ -1647,6 +1649,10 @@ if (canvasEl) {
         domCache.saveModuleBtn.addEventListener('click', saveModule);
     } else {
         console.error('Save Module button not found!');
+    }
+
+    if (domCache.exportMidiBtn) {
+        domCache.exportMidiBtn.addEventListener('click', exportMidi);
     }
   
     if (domCache.resetViewBtn) {
@@ -5542,6 +5548,50 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             document.body.appendChild(errorMsg);
             setTimeout(() => errorMsg.remove(), 3000);
         });
+    }
+
+    // Export MIDI ("+" menu): the module as a Standard MIDI File that keeps its
+    // tuning (see src/midi/midi-export.js for what is written and what is rounded).
+    // Whatever the file could not carry as written is counted in the toast and
+    // spelled out, note ids included, in the console.
+    function exportMidi() {
+        try {
+            const plan = planMidi(myModule);
+            const { notes, polyphony, warnings } = plan.report;
+            warnings.forEach(warning => console.warn('[RMT] MIDI export:', warning));
+
+            if (notes.exported === 0) {
+                const cause = notes.skippedTotal === 1
+                    ? 'the only note could not be written'
+                    : `none of the ${notes.skippedTotal} notes could be written`;
+                notify(notes.skippedTotal
+                    ? `Nothing exported: ${cause} — see the console`
+                    : 'Nothing to export: the module has no sounding notes', 'error', 6000);
+                return;
+            }
+
+            const blob = new Blob([encodeMidi(plan)], { type: 'audio/midi' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = 'module.mid';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(a.href);
+
+            const summary = `Exported ${notes.exported} note${notes.exported === 1 ? '' : 's'} to module.mid`;
+            if (warnings.length === 0) {
+                notify(summary, 'success');
+            } else {
+                const counts = [];
+                if (polyphony.overflowNotes) counts.push(`${polyphony.overflowNotes} on extra tracks`);
+                if (notes.skippedTotal) counts.push(`${notes.skippedTotal} not exported`);
+                notify(`${summary}${counts.length ? ` (${counts.join(', ')})` : ''} — see the console`, 'info', 6000);
+            }
+        } catch (error) {
+            console.error('Error exporting MIDI:', error);
+            notify(`Error exporting MIDI: ${error.message}`, 'error');
+        }
     }
 
     function validateExpression(moduleInstance, noteId, expression, variableType) {
