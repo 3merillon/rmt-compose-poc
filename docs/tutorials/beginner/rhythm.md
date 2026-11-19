@@ -50,7 +50,7 @@ The BaseNote stays at 263 Hz, with a duration of 3/5 s (**= 100 BPM** in the wid
 ## Step 2: The quarter note
 
 1. Click the **BaseNote** to reopen its widget.
-2. In **ADD NOTE / SILENCE**, the defaults are already what you want:
+2. In **ADD NOTE / SILENCE / REFERENCE**, the defaults are already what you want:
    - **Frequency:** `base.f`
    - **Duration:** `base.d`
    - **Start Time:** `base.t`
@@ -127,7 +127,7 @@ The widget pre-highlights the icon matching the note's current duration. If the 
 To put a rest in your phrase, do not fake it with an inaudible frequency. Use a silence.
 
 1. Select the note the rest should follow.
-2. In **ADD NOTE / SILENCE**, switch the kind radio from **Note** to **Silence**.
+2. In **ADD NOTE / SILENCE / REFERENCE**, switch the kind radio from **Note** to **Silence**.
 
    The Frequency field disappears — that is what a silence *is*: a note with a start time and a duration and no frequency.
 3. Set the **Duration** to how long the rest should last.

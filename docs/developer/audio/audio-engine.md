@@ -61,7 +61,7 @@ Two of those keys are **back-compat aliases**, not separate nodes:
 | `compressor` | `graph.limiter` |
 
 There is no "general volume" node and no compressor any more. The names survive because
-`player.js:4541` destructures them. New code should reach through `audioEngine.graph`.
+`player.js:4549` destructures them. New code should reach through `audioEngine.graph`.
 
 ## unlock()
 
@@ -86,7 +86,7 @@ Both halves matter, and `ensureResumed()` is not a substitute for either:
 - The context can report `running` and still stay muted on iOS until a source has actually been
   *started* inside a gesture. That is what the silent buffer is for.
 
-Its only call site is the `pointerdown` handler on `#playPauseBtn` (`player.js:5174`). If you add
+Its only call site is the `pointerdown` handler on `#playPauseBtn` (`player.js:5182`). If you add
 another entry point to playback, it needs this call too.
 
 ## ensureResumed()

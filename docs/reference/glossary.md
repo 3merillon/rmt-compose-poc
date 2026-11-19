@@ -171,7 +171,7 @@ The ▲ / ▼ pair drawn in a narrow column on the left inner edge of every soun
 The multiplier is **folded into the expression's existing coefficient**, not stacked in front of it, so up-then-down returns the expression to exactly what it was.
 
 ### Note widget
-The floating panel for the selected note: an `Evaluated:` line and a `Raw:` expression input per property, a `Save` button that appears once you type, note-length buttons on the duration row, the ▲/▼ arrows on the frequency row, and an **ADD NOTE / SILENCE** section at the bottom (choose **Note** or **Silence**, **At Start** or **At End**, then **Create Note**).
+The floating panel for the selected note: an `Evaluated:` line and a `Raw:` expression input per property, a `Save` button that appears once you type, note-length buttons on the duration row, the ▲/▼ arrows on the frequency row, and an **ADD NOTE / SILENCE / REFERENCE** section at the bottom (choose **Note** or **Silence**, **At Start** or **At End**, then **Create Note**).
 
 Edits take effect **on save**, not while you type.
 

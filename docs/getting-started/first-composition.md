@@ -44,9 +44,9 @@ In the default module those values are 263 Hz, 0 and 3/5 s, which the note widge
 
 ## Step 4: Create the root note
 
-With the BaseNote still selected, scroll the note widget to the section headed **ADD NOTE / SILENCE**.
+With the BaseNote still selected, scroll the note widget to the section headed **ADD NOTE / SILENCE / REFERENCE**.
 
-![The note widget's ADD NOTE / SILENCE section, showing the Note/Silence radios and the Frequency, Duration and Start Time expression fields](/img/note-widget.png)
+![The note widget's ADD NOTE / SILENCE / REFERENCE section, showing the Note/Silence radios and the Frequency, Duration and Start Time expression fields](/img/note-widget.png)
 
 You'll see:
 
@@ -72,7 +72,7 @@ Those options appear only when you create a note *from another note* — they sa
 ## Step 5: Create the fifth
 
 1. Click your new note in the workspace. The widget retitles to **Note [1] Variables**.
-2. Scroll to **ADD NOTE / SILENCE** again. This time there is an extra pair of radios: **At Start** / **At End**. **At End** is already selected — that's what you want, so the new note plays *after* this one.
+2. Scroll to **ADD NOTE / SILENCE / REFERENCE** again. This time there is an extra pair of radios: **At Start** / **At End**. **At End** is already selected — that's what you want, so the new note plays *after* this one.
 3. Look at the **Frequency** field. It is prefilled with `[1].f` — **the parent's frequency, not the base's**. New notes inherit the pitch of the note you created them from, which is why they start out at the same height. Replace it with:
 
 ```
@@ -94,7 +94,7 @@ module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 ## Step 6: Create the octave
 
 1. Select note 2.
-2. In **ADD NOTE / SILENCE**, leave **At End** selected.
+2. In **ADD NOTE / SILENCE / REFERENCE**, leave **At End** selected.
 3. Replace the **Frequency** field with:
 
 ```
@@ -181,7 +181,7 @@ The same submenu holds **Reset Default Module**, which restores the composition 
 
 - The **BaseNote** is the reference; it makes no sound.
 - Every note property is an **expression** — `base.f * (3/2)`, `base.d`, `[1].t + [1].d`.
-- New notes are created from the **ADD NOTE / SILENCE** section of the note widget, and inherit the pitch of the note you create them from.
+- New notes are created from the **ADD NOTE / SILENCE / REFERENCE** section of the note widget, and inherit the pitch of the note you create them from.
 - Referencing another note creates a **dependency**: change the parent, the child follows.
 - Ratios like 3/2 and 5/4 are stored exactly, so transposing is a single edit.
 

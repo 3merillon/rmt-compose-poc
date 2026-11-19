@@ -61,7 +61,7 @@ Click a bar's triangle and you get:
 - **EVALUATE** (Evaluate to BaseNote only; no Liberate),
 - **DELETE NOTE**.
 
-No frequency, no colour, no instrument, and no **ADD NOTE / SILENCE** section. You cannot create a note directly from a bar in the widget, but you can drag a library module onto one, and you can reference the bar from any note's expression.
+No frequency, no colour, no instrument, and no **ADD NOTE / SILENCE / REFERENCE** section. You cannot create a note directly from a bar in the widget, but you can drag a library module onto one, and you can reference the bar from any note's expression.
 
 ## Change the meter on one bar
 

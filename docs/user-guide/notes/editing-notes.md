@@ -8,7 +8,7 @@ description: Move, resize and transpose notes in the workspace, edit their expre
 Click a note and the [note widget](/user-guide/interface/variable-widget) opens on it. From there you can rewrite any of its expressions; in the workspace itself you can drag it, resize it, and step it by an interval.
 
 ::: tip Edits apply on Save
-Typing in a `Raw:` field changes nothing. The **`Save`** button appears the moment you type, and the edit only lands when you press it. The one exception is the ADD NOTE / SILENCE section, whose `Evaluated:` previews are live.
+Typing in a `Raw:` field changes nothing. The **`Save`** button appears the moment you type, and the edit only lands when you press it. The one exception is the ADD NOTE / SILENCE / REFERENCE section, whose `Evaluated:` previews are live.
 :::
 
 ## Selecting a note

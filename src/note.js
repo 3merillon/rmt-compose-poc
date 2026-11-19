@@ -21,6 +21,47 @@ export function isMeasureNote(note) {
 }
 
 /**
+ * What an object IS, from which variables it has (there is no type field):
+ *
+ *   'base'            note 0, the BaseNote
+ *   'measure'         a bar: start and duration, flagged "measure": true
+ *   'note'            frequency, start and duration: the only kind that sounds
+ *   'silence'         start and duration
+ *   'reference'       a frequency alone: a pitch outside time (a tonic, a key, a
+ *                     chord root), drawn as a line across the workspace
+ *   'reference-from'  a frequency and a start: a reference that begins (a key
+ *                     change), drawn as a line from its start on
+ *   'marker'          a start alone
+ *   'length'          a duration alone
+ *   'name'            none of the three
+ *
+ * Accepts a Note (asks hasExpression, which is cheap) or a plain JSON note.
+ * Only 'note' sounds; references and the rest only relate.
+ */
+export function noteKind(note) {
+  if (!note) return null;
+  if (Number(note.id) === 0) return 'base';
+  if (isMeasureNote(note)) return 'measure';
+  const has = (k) => (typeof note.hasExpression === 'function')
+    ? !!note.hasExpression(k)
+    : (note[k] != null && String(note[k]).trim() !== '');
+  const f = has('frequency'), t = has('startTime'), d = has('duration');
+  if (f && t && d) return 'note';
+  if (t && d) return 'silence';
+  if (f && t) return 'reference-from';
+  if (f) return 'reference';
+  if (t) return 'marker';
+  if (d) return 'length';
+  return 'name';
+}
+
+/** A note with a frequency and no duration: it relates, it never sounds. */
+export function isReferenceNote(note) {
+  const k = noteKind(note);
+  return k === 'reference' || k === 'reference-from';
+}
+
+/**
  * Note class - Binary-native implementation
  *
  * Stores expressions as compiled BinaryExpressions and evaluates
@@ -79,8 +120,22 @@ export class Note {
     const expressionVars = EXPRESSION_VARS;
 
     for (const [key, value] of Object.entries(variables)) {
-      // Skip legacy *String properties - we'll use them as source
-      if (key.endsWith('String')) continue;
+      // A *String property is the source for its variable. When the plain key is
+      // present too, that key's branch below reads it; when it comes ALONE (the
+      // add-note form passes only startTimeString, durationString, frequencyString)
+      // it is compiled here. Skipping it, as this loop used to, made every note
+      // created from the form an empty one.
+      if (key.endsWith('String')) {
+        const base = key.slice(0, -6);
+        if (expressionVars.includes(base) && !(base in variables) && typeof value === 'string' && value.trim() !== '') {
+          try {
+            this.expressions[base] = compiler.compile(value, base);
+          } catch (e) {
+            console.warn(`Failed to compile ${base} expression for note ${this.id}:`, e);
+          }
+        }
+        continue;
+      }
 
       // Handle expression variables
       if (expressionVars.includes(key)) {

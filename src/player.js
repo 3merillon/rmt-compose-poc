@@ -1327,7 +1327,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                             ? glWorkspace.pickStackAt(event.clientX, event.clientY, 3)
                             : [];
                           const entries = Array.isArray(stack)
-                            ? stack.filter(h => h && (h.type === 'note' || h.type === 'measure' || h.type === 'base'))
+                            ? stack.filter(h => h && (h.type === 'note' || h.type === 'measure' || h.type === 'base' || h.type === 'reference'))
                                     .map(h => ({ type: String(h.type), id: Number(h.id) }))
                             : [];
                           if (entries.length > 0 && !isLocked) {
@@ -1370,7 +1370,9 @@ document.addEventListener('DOMContentLoaded', async function() {
                           // one thing under the pointer — including when a group is live.
                           try { clearMultiSelection(); } catch {}
 
-                          if (t === 'note') {
+                          // A reference line selects like a note (it opens its widget); it
+                          // cannot be dragged, grouped or dropped onto.
+                          if (t === 'note' || t === 'reference') {
                             const note = myModule.getNoteById(tid);
                             if (note) {
                               currentSelectedNote = note;
@@ -4359,7 +4361,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
         const startOf = (n) => toNumber(n.getVariable('startTime'), 0);
         notes.sort((a, b) => (startOf(a) - startOf(b)) || (Number(a.id) - Number(b.id)));
-        const t0 = startOf(notes[0]);
+        // The copy's time origin is the earliest note that HAS a start: a reference
+        // (a frequency alone) lies outside time and must not pull it to 0.
+        const firstTimed = notes.find((n) => n.hasExpression('startTime')) || notes[0];
+        const t0 = startOf(firstTimed);
 
         // Renumber 1..N in time order; 0 stays reserved for the baseNote.
         const idMap = new Map();
@@ -4371,7 +4376,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         const baseFreqFrac = base.getVariable('frequency');
         const baseFreq = toNumber(baseFreqFrac, 0);
         const baseAmpFrac = myModule.findAmplitude(base);
-        const t0Frac = notes[0].getVariable('startTime');
+        const t0Frac = firstTimed.getVariable('startTime');
 
         const frac = (x) => {
             try { return new Fraction(x); }
@@ -4407,7 +4412,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             const fRaw = n.variables?.frequencyString || '';
 
             // startTime — verbatim only for a RIDER whose expression stays inside the set.
-            if (__startChainTouchesSetGL(n, S) && selfContained(sRaw)) {
+            // A note without a start (a reference) stays without one.
+            if (!n.hasExpression('startTime')) {
+                // nothing: outside time
+            } else if (__startChainTouchesSetGL(n, S) && selfContained(sRaw)) {
                 e.startTime = renumber(sRaw);
             } else {
                 // Exact offset in time units from exact Fractions; float diff only as fallback

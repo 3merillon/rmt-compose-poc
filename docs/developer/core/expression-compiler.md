@@ -114,7 +114,7 @@ Any other function name gets `Unknown function 'name'. Expressions have no funct
 
 ## Bytecode format
 
-`src/binary-note.js:9-31`:
+`src/binary-note.js:9-72`:
 
 ```javascript
 export const OP = {
@@ -161,7 +161,7 @@ Operands are pushed **before** the opcode — it is a stack machine, nothing nes
 
 ### Variable indices
 
-The export is `VAR`, with a `VAR_NAMES` reverse map (`binary-note.js:39-59`):
+The export is `VAR`, with a `VAR_NAMES` reverse map (`binary-note.js:80-100`):
 
 ```javascript
 export const VAR = {
@@ -190,7 +190,7 @@ The evaluator decodes the variable-length BigInts straight into a pooled BigInt-
 
 ## `BinaryExpression`
 
-`binary-note.js:84-388`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
+`binary-note.js:139-443`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -272,7 +272,7 @@ The compiler refuses garbage by throwing, but validation is still a separate gat
 | Gate | Where | What it does |
 |---|---|---|
 | UI edits | `validateExpression()`, `src/modals/validation.js:12` | `validateDSL()`, `compileDSL()` to prove it yields bytecode, then the self-reference and cycle check on that bytecode — per (note, variable), see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable) |
-| DSL syntax | `validateDSL()`, `src/dsl/index.js:143` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
+| DSL syntax | `validateDSL()`, `src/dsl/index.js:146` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
 | JSON import | `validateExpressionSyntax()`, `src/utils/safe-expression-validator.js:31` | rejects strings over 10 000 chars and a blocklist (`eval(`, `Function(`, `import(`, `document.`, `__proto__`, `<script`, …), then proves the string compiles — a compiler throw comes back as `{valid: false, error}` |
 
 Nothing anywhere calls `eval()` or `new Function()` on an expression.

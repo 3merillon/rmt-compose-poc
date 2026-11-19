@@ -12,7 +12,7 @@ import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { escapeHtml } from '../utils/html-escape.js';
 import { isDSLSyntax } from '../dsl/index.js';
 import { toNumber } from '../utils/fraction-num.js';
-import { isMeasureNote } from '../note.js';
+import { isMeasureNote, isReferenceNote } from '../note.js';
 import { CORRUPT } from '../binary-note.js';
 import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.js';
 import { raisePanel } from '../utils/panel-stack.js';
@@ -124,6 +124,7 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
     const isSilence = note && note.getVariable('startTime') &&
                      note.getVariable('duration') &&
                      !note.getVariable('frequency');
+    const isReference = note && isReferenceNote(note);
     
     if (note === moduleInstance.baseNote) {
         widgetTitle.textContent = 'BaseNote Variables';
@@ -131,6 +132,8 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
         widgetTitle.textContent = `Measure [${measureId}] Variables`;
     } else if (isSilence) {
         widgetTitle.textContent = `Silence [${effectiveNoteId || 'unknown'}] Variables`;
+    } else if (isReference) {
+        widgetTitle.textContent = `Reference [${effectiveNoteId || 'unknown'}] Variables`;
     } else {
         widgetTitle.textContent = `Note [${effectiveNoteId || 'unknown'}] Variables`;
     }
@@ -246,6 +249,8 @@ function collectInterpretation(note, module, depGraph, name) {
     const isBase = note === module.baseNote;
     const hasOwn = note.hasExpression(name);
     if (!isBase && !hasOwn && !note.getVariable('frequency')) return null;
+    // A reference (a frequency, no duration) never sounds: nothing to interpret.
+    if (!isBase && !hasOwn && isReferenceNote(note)) return null;
 
     // ≈ follows whichever note's expression produced the value.
     const sourceId = hasOwn ? note.id : 0;
@@ -373,6 +378,8 @@ function collectVariables(note, measureId, moduleInstance) {
         const hasOwnInstrument = note.properties.instrument != null;
         const inheritedInstrument = module.findInstrument(note);
 
+        // A reference never sounds: no instrument row unless it carries one anyway.
+        if (!hasOwnInstrument && isReferenceNote(note)) return variables;
         variables.instrument = {
             evaluated: hasOwnInstrument ? note.getVariable('instrument') : inheritedInstrument,
             raw: hasOwnInstrument ? note.getVariable('instrument') : inheritedInstrument,

@@ -197,7 +197,7 @@ Four notes, each starting where the previous one ends, each pitched off note 1:
 | 3 | `[1].f * 2^(6/19)` | `[2].t + [2].d` | `base.d` |
 | 4 | `[1].f * 2^(8/19)` | `[3].t + [3].d` | `base.d` |
 
-Create every note from the **ADD NOTE / SILENCE** section of a widget. Note 1 comes from the
+Create every note from the **ADD NOTE / SILENCE / REFERENCE** section of a widget. Note 1 comes from the
 BaseNote's widget, which has no **At Start** / **At End** toggle — it always writes `base.t` — and
 whose button reads **Create**. Notes 2–4 come from the previous note's widget: pick **Note**, pick
 **At End**, then press **Create Note**. Then open each variable's `Raw:` field and type the

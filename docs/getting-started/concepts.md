@@ -196,9 +196,21 @@ The app refuses the edit and tells you why: the reason appears in red under the 
 
 ## Silences
 
-A note with a **start time** and a **duration** but **no frequency** is a **silence**. It occupies time and nothing else, and it draws as a dark rectangle with a dashed border. You create one by choosing **Silence** instead of **Note** in the [Note Widget](/user-guide/interface/variable-widget)'s **ADD NOTE / SILENCE** section — the frequency field disappears.
+A note with a **start time** and a **duration** but **no frequency** is a **silence**. It occupies time and nothing else, and it draws as a dark rectangle with a dashed border. You create one by choosing **Silence** instead of **Note** in the [Note Widget](/user-guide/interface/variable-widget)'s **ADD NOTE / SILENCE / REFERENCE** section — the frequency field disappears.
 
 Silences are still full participants in the dependency graph: other notes can hang their start times off a silence's end. See [Creating Notes](/user-guide/notes/creating-notes).
+
+## References and key changes
+
+A note with a **frequency** and **no duration** never sounds: it is something the other notes relate to.
+With no start time it is a **reference**, a pitch outside time: the tonic, the key, the root of a chord.
+With a start time it is a **key change**: from that moment on, this is the reference. The editor draws a
+reference as a long-dashed line across the whole workspace at its pitch, and a key change as the same
+line from its start on, each labelled with its id. Notes hang from them like from any note, so
+`(3/2) * [1].f` is the fifth of the tonic in note 1, and moving the tonic moves everything written
+from it. Create one by choosing **Reference** or **Key change** in the Note Widget's add section.
+
+A key or a chord root therefore no longer has to be carried by a note that sounds.
 
 ## Measure bars
 

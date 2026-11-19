@@ -13,11 +13,11 @@ There are three ways to get notes into a composition: the [note widget](/user-gu
 
 ## From the note widget
 
-Click a note, a silence, or the BaseNote. The note widget opens with an **ADD NOTE / SILENCE** section below the property rows, above EVALUATE and DELETE NOTE. (Click a measure bar instead and you get an **Add Measure** section, on the last bar of a chain — no note creation.)
+Click a note, a silence, or the BaseNote. The note widget opens with an **ADD NOTE / SILENCE / REFERENCE** section below the property rows, above EVALUATE and DELETE NOTE. (Click a measure bar instead and you get an **Add Measure** section, on the last bar of a chain — no note creation.)
 
-![The note widget open on a note, showing the Evaluated and Raw rows for start time, duration and frequency, and the ADD NOTE / SILENCE section below them](/img/note-widget.png)
+![The note widget open on a note, showing the Evaluated and Raw rows for start time, duration and frequency, and the ADD NOTE / SILENCE / REFERENCE section below them](/img/note-widget.png)
 
-1. **Choose a kind.** `Note` (selected by default) or `Silence`. Choosing `Silence` hides the Frequency field — a silence is exactly a note with no frequency.
+1. **Choose a kind.** `Note` (selected by default), `Silence`, `Reference` or `Key change`. Choosing `Silence` hides the Frequency field — a silence is exactly a note with no frequency. `Reference` keeps only the Frequency field: a pitch outside time (a tonic, a key, a chord root) that notes relate to and that never sounds. `Key change` keeps Frequency and Start Time: the same, from that start on. Started from a reference, a new note's start defaults to the reference's start (a key change) or `base.t`, and its duration to `base.d`, since a reference has no length to borrow.
 2. **Choose a position.** `At Start` or `At End`, with **`At End` selected by default**. This toggle only appears when you clicked a note or a silence; the BaseNote has no position toggle.
 3. **Adjust the pre-filled expressions** if you want to. Each field carries a live **`Evaluated:`** readout that recomputes as you type, so you can see the pitch or time an expression produces before you commit to it. An expression the app cannot parse reads `Invalid`.
 4. **Click the create button.** It reads **`Create Note`** when you started from a note or a silence, and **`Create`** when you started from the BaseNote.
@@ -64,6 +64,7 @@ Two targets are refused, each with an error toast:
 
 - **Empty canvas** — `Drop onto a note or the BaseNote circle to import a module.`
 - **A silence** — `Cannot drop onto a silence. Drop on a note or the BaseNote instead.`
+- **A reference line** is not a drop target at all: a drop on it is a drop on empty canvas (it has no start or length for a module to hang from).
 
 See [Loading Modules](/user-guide/modules/loading-modules) for the full workflow and [The Module Bar](/user-guide/interface/module-bar) for the library itself.
 
@@ -126,12 +127,14 @@ See [Module Format](/user-guide/modules/module-format) for the full schema.
 | `color` | No | Any CSS colour. Inherited from the parent when created in the widget. |
 | `instrument` | No | Overrides the inherited instrument. Left unset, the note inherits along its frequency reference; see [Editing Notes](/user-guide/notes/editing-notes#instrument). |
 
-The three shapes a note can take are decided purely by which properties exist:
+The shapes a note can take are decided purely by which properties exist:
 
 | Has `startTime` | Has `duration` | Has `frequency` | Result |
 |---|---|---|---|
 | Yes | Yes | Yes | A **note** |
 | Yes | Yes | No | A **silence** |
+| No | No | Yes | A **reference** (a tonic, a key, a root): a line across the workspace, never sounds |
+| Yes | No | Yes | A **key change**: the same line from its start on, never sounds |
 
 A silent note flagged `"measure": true` is a **measure bar**, drawn as a bar line and not as a rest. A note with only a `startTime` is a plain marker, not a bar. See [Measure bars](/reference/module-schema#measure-bars).
 

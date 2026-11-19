@@ -165,7 +165,7 @@ Call sites that already do this and are worth reading: `src/module.js` (`findIns
 expression, after logging `Failed to compile expression: …` via `console.error`
 (`src/expression-compiler.js:99-108`). `Note._setExpression()` and the constructor wrap the
 compile in `try/catch` and, on failure, `console.warn` and leave the previous expression in place
-(`src/note.js:228-236`) — so callers of `setVariable()` still see no exception.
+(`src/note.js:283-291`) — so callers of `setVariable()` still see no exception.
 :::
 
 This is a deliberate convention — a bad expression degrades a single property instead of tearing
@@ -213,7 +213,7 @@ codebase has already paid for these lessons; do not re-introduce them.
 
 | Pattern | Where | Why |
 |---|---|---|
-| The `note.variables` Proxy is **memoized per note** | `src/note.js:396-403` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame. |
+| The `note.variables` Proxy is **memoized per note** | `src/note.js:451-458` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame. |
 | Dependency re-registration is skipped by key | `src/module.js:176-207` — `_depsRegKey` = `generation:id:epoch` | `markNoteDirty` registers every marked note. The key skips rewriting ~15 graph maps for notes whose expressions did not change. |
 | The compile cache is LRU-capped at **4000** | `src/expression-compiler.js:23` | Every drag commit mints a fresh fraction string, so an uncapped cache grows without bound across a session. |
 | Per-gesture state is built **once**, not per pointermove | `workspace.js`, `renderer.setDragOffsetPreview`, `setDragOverlay` | Rebuilding the moving-id set every move made allocation scale with dependent count and triggered mid-drag GC hitches. Identity-check the incoming Set and short-circuit. |

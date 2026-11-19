@@ -59,7 +59,7 @@ Rows appear in the order listed.
 | `COLOR` | only if set | yes | yes | — |
 | `INSTRUMENT` | yes | yes | yes | — |
 | Add measure | `ADD NEW MEASURE CHAIN` | — | — | `ADD MEASURE`, last in chain only |
-| `ADD NOTE / SILENCE` | yes | yes | yes | — |
+| `ADD NOTE / SILENCE / REFERENCE` | yes | yes | yes | — |
 | `EVALUATE` | `Evaluate Module` | `Liberate Dependencies`, `Evaluate to BaseNote` | same as note | `Evaluate to BaseNote` |
 | Delete | `DELETE ALL NOTES` → `Clean Slate` | `DELETE NOTE` → `Keep Dependencies`, `Delete Dependencies` | same as note | same as note |
 
@@ -255,7 +255,7 @@ The BaseNote's row follows the same rules: with nothing pinned it reads **`Inher
 
 This is how notes are created. There is no double-click-to-create in the workspace.
 
-The **`ADD NOTE / SILENCE`** section is at the bottom of the widget for the BaseNote, any note and any silence. It creates a new note *relative to the one you have open*.
+The **`ADD NOTE / SILENCE / REFERENCE`** section is at the bottom of the widget for the BaseNote, any note and any silence. It creates a new note *relative to the one you have open*.
 
 | Control | Options | Default |
 |---|---|---|

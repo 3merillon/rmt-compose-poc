@@ -196,7 +196,7 @@ workingCache.set(note.id, result);   // :1281-1282
 There used to be one. An expression that read a variable *later* in it got the hard-coded default, or whatever the note had evaluated to last time — a BaseNote variable computed from 440, then from the previous frequency after every edit. The list survives as `VAR_ORDER` (`:21`: frequency, startTime, duration, amplitude, attack, release), but only as the order in which the walk *starts*; anything a variable reads is evaluated ahead of it.
 :::
 
-After each variable, if `_lastEvalWasCorrupted` was set by a `POW`, the matching bit is OR-ed into `corruptionFlags` (`:1479-1481`). The bits are the `CORRUPT` mask from `src/binary-note.js:62-69`, `1 << varIndex`: `startTime 0x01`, `duration 0x02`, `frequency 0x04`, `amplitude 0x08`, `attack 0x10`, `release 0x20`.
+After each variable, if `_lastEvalWasCorrupted` was set by a `POW`, the matching bit is OR-ed into `corruptionFlags` (`:1479-1481`). The bits are the `CORRUPT` mask from `src/binary-note.js:103-110`, `1 << varIndex`: `startTime 0x01`, `duration 0x02`, `frequency 0x04`, `amplitude 0x08`, `attack 0x10`, `release 0x20`.
 
 ### No computed measure length
 
@@ -234,7 +234,7 @@ What a variable reads comes from `src/variable-deps.js`, the one place that stat
 
 | A variable reads… | Resolved by |
 |---|---|
-| every `LOAD_REF` / `LOAD_BASE` in its bytecode, `base.x` being note 0 | `BinaryExpression.getVariableRefs()` (`binary-note.js:295`), decoded once per expression |
+| every `LOAD_REF` / `LOAD_BASE` in its bytecode, `base.x` being note 0 | `BinaryExpression.getVariableRefs()` (`binary-note.js:350`), decoded once per expression |
 | the BaseNote's variable instead, when the reference is to an `amplitude`, `attack` or `release` the named note does not define (indices `>= FIRST_INTERPRETATION_VAR`) | `resolveVariableRef()` (`variable-deps.js:81`) |
 | nothing schedulable, when no note defines it — `evaluate()` falls back to the default and reports it | — |
 
@@ -278,7 +278,7 @@ POW produces an irrational
   → evaluateVariable ORs the property's bit into corruptionFlags   :1479-1481
   → Module._updateCorruptionFlags() pushes it into the graph   module.js:682-705
       → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1746
-  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:913-960
+  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:931-978
       0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
   → the note widget prefixes the frequency with ≈             variable-controls.js:127-143
 ```
@@ -316,7 +316,7 @@ Two costs matter now. **Depth** decides how much of the module a commit touches 
 | Fraction pool (evaluator) | 256, doubles when exhausted | `:838` (class default is 128, `:748`) |
 | Fraction backing | `fraction.js@5.3.4` — `n`/`d`/`s` are **BigInt**, arbitrary precision | `node_modules/fraction.js` |
 | POW exponent cap | integer exponent ≤ **65536**, result ≤ **~1 Mbit** per component | `:619-620` |
-| Note id in bytecode | `u16` → max **65535** | `binary-note.js:128` |
+| Note id in bytecode | `u16` → max **65535** | `binary-note.js:183` |
 | Note id accepted anywhere | integer `0 … 65535` — enforced by the loader **and both expression parsers** | `module.js:873`, `dsl/parser.js:253`, `expression-compiler.js:215` |
 
 ::: tip Arbitrary precision, end to end

@@ -90,14 +90,23 @@ The six **expression keys** are exactly `startTime`, `duration`, `frequency`, `a
 
 ### Note kinds
 
-What a note *is* follows from which keys it has. The one flag, `measure`, separates a measure bar from a silence.
+What a note *is* follows from which keys it has (`noteKind()` in `src/note.js`). The one flag, `measure`, separates a measure bar from a silence. Only a **note** sounds; the others are structure other notes relate to.
 
 | Kind | Rule | Drawn as |
 |---|---|---|
 | **Note** | `startTime` + `duration` + `frequency` | A filled bar at its pitch |
 | **Silence** (rest) | `startTime` + `duration`, **no** `frequency`, no `measure` flag | A dashed outline, no sound |
 | **Measure bar** | `startTime` + `duration`, **no** `frequency`, `"measure": true` | A vertical dashed line with a triangle |
+| **Reference** | `frequency` only | A dashed line across the whole workspace at its pitch, labelled `[id]`: a tonic, a key, a chord root. Never sounds |
+| **Key change** | `frequency` + `startTime`, **no** `duration` | The same line from its start on, labelled `[id]` just before the start: from here, this is the reference. Never sounds |
 | **Marker** | `startTime` only | A point to anchor other notes to; not a bar, and not scheduled |
+
+A reference or a key change is related to like any note: `(5/4) * [1].f` is a major third over the
+tonic in note 1, and `[4].t` starts a note where the key change in note 4 begins. It has no length, so
+nothing should read its `d` (a reference also has no `t`): such a read falls back to the documented
+default and is reported in the console. A reference is selected by clicking its line, which opens its
+widget; it cannot be dragged, grouped or dropped onto, and MIDI export counts it without writing it
+(`report.notes.references`).
 
 ## Measure bars
 

@@ -104,7 +104,7 @@ loads. See [Modules from earlier versions](/user-guide/modules/module-format#mod
 | A note with a `duration` and a `frequency` | it is a **note**, and sounds |
 | A note with a `duration` but no `frequency` | it is a **silence** (a rest): occupies time, never sounds |
 | The same, flagged `"measure": true` | it is a **measure bar**, see [Measure bars](/reference/module-schema#measure-bars) |
-| A note with no `duration` | it has no length: a plain marker, never scheduled to sound |
+| A note with no `duration` | it has no length and never sounds: with a `frequency` it is a **reference** (no start) or a **key change** (a start), drawn as a line at its pitch; with only a start it is a plain marker |
 | An expression referencing a note whose duration cannot be resolved | `1` second (silent fallback, console warning only) |
 
 `duration` does **not** inherit: `[5].d` on a note with no duration expression falls back to `1`, it

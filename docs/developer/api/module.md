@@ -159,7 +159,7 @@ The same thing for many notes in one pass: it registers dependencies once, colle
 **and** the transitive dependencies of the marked notes, then invalidates the incremental
 evaluator selectively rather than wholesale. Collecting the *dependencies* matters — without them
 an imported note's parent may not be in the cache when the child evaluates. The module-import path
-(`src/player.js:2105`) uses it after grafting a library module onto a target note.
+(`src/player.js:2107`) uses it after grafting a library module onto a target note.
 
 ### batchSetExpressions()
 
@@ -172,7 +172,7 @@ module.batchSetExpressions([
 
 Compiles all the expressions with per-note notifications suppressed, re-registers dependencies
 once, then calls `markNotesDirtyBatch()`. The widget's **Evaluate Module** action
-(`src/modals/index.js:1339`) rewrites every note in the composition through this in one pass.
+(`src/modals/index.js:1346`) rewrites every note in the composition through this in one pass.
 
 ::: danger The keys are `varName` and `expr`
 Not `property` and `expression`. The update objects are destructured as

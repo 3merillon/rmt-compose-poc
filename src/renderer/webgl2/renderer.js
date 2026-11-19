@@ -749,6 +749,10 @@ export class RendererAdapter {
     // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
     // re-derive it with a second full pass over module.notes (~31ms at 100k notes).
     let maxNoteEndSec = 0;
+    // Notes that only relate: a frequency and no duration (a tonic, a key, a root;
+    // with a start, a key change from there on). Drawn as reference lines by
+    // _renderReferenceLines, never as note bodies, never played.
+    const refLines = [];
     for (const idStr in module.notes) {
       const note = module.notes[idStr];
       if (!note) continue;
@@ -762,6 +766,19 @@ export class RendererAdapter {
         const ev = getEv(note.id);
         const hasStart = ev ? (ev.startTime != null) : !!note.getVariable('startTime');
         const hasDur = ev ? (ev.duration != null) : !!note.getVariable('duration');
+        if (!hasDur && note.hasExpression && note.hasExpression('frequency') && !note.hasExpression('duration')) {
+          const fr = (ev && ev.frequency != null) ? ev.frequency : note.getVariable('frequency');
+          const fv = fr ? (fr._floatValue !== undefined && fr._irrational ? fr._floatValue : toNumber(fr, NaN)) : NaN;
+          if (isFinite(fv) && fv > 0) {
+            let startSec = null;
+            if (hasStart) {
+              const st = toNumber((ev && ev.startTime != null) ? ev.startTime : note.getVariable('startTime'), NaN);
+              if (isFinite(st)) startSec = st;
+            }
+            refLines.push({ id: Number(note.id), freq: fv, startSec });
+          }
+          continue;
+        }
         if (!hasStart || !hasDur) continue;
 
         // Prefer evaluated cache values to avoid stale data after module reorder
@@ -839,6 +856,7 @@ export class RendererAdapter {
       }
     }
     this._maxNoteEndSec = maxNoteEndSec;
+    this._refLines = refLines;
 
     // PERFORMANCE: Instead of O(n log n) sort, use O(1) swap to move selected note to end
     // This avoids full buffer reallocation on every selection change
@@ -6208,6 +6226,8 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       if (this.drawOctaveGuides) {
         try { this._renderOctaveGuides(); } catch {}
       }
+      // 4b) Reference lines: notes with a frequency and no duration
+      try { this._renderReferenceLines(); } catch {}
 
       // Restore depth state for subsequent passes (note overlays/text flush)
       gl.enable(gl.DEPTH_TEST);
@@ -9267,6 +9287,11 @@ try {
             // Already includes { type:'note', id }
             list.push(...nHits);
           } catch {}
+          // Reference lines last: they cross everything, so anything else wins
+          try {
+            const rHits = this.pickReferenceLinesAt(clientX, clientY);
+            if (rHits && rHits.length) list.push(...rHits);
+          } catch {}
           return list;
         } catch { return []; }
       };
@@ -11032,6 +11057,111 @@ try {
       _prevRenderM.call(this);
       if (!wasDirty) return;
       try { this._renderMarquee(); } catch {}
+    };
+  } catch {}
+})();
+
+// Reference lines: notes that only relate (a frequency, no duration). A tonic, a key
+// or a chord root is a dashed line across the whole workspace at its pitch; with a
+// start it is a key change, the same line from that start on. They never sound. Drawn
+// with the octave guides' per-line dashed program (one draw per line; it re-uploads
+// its quad every draw, so sharing its buffer leaves nothing stale), longer dashes.
+(() => {
+  try {
+    if (typeof RendererAdapter === 'undefined') return;
+    const proto = RendererAdapter.prototype;
+
+    proto._renderReferenceLines = function () {
+      const gl = this.gl;
+      const lines = this._refLines;
+      this._refLineCss = [];
+      if (!gl || !this.canvas || !lines || !lines.length) return;
+      if (!this.octaveLineProgram || !this.octaveLineVAO || !this.octaveLinePosSizeBuffer) return;
+
+      const rect = this.canvas.getBoundingClientRect();
+      const vpW = Math.max(1, rect.width), vpH = Math.max(1, rect.height);
+      const m = this.matrix;
+      const ox = this.canvasOffset?.x ?? 0, oy = this.canvasOffset?.y ?? 0;
+      const sx = this._cfgSX() * (this.currentXScaleFactor || 1);
+      const ac = this._accentRgba();
+      const sel = this._lastSelectedNoteId != null ? Number(this._lastSelectedNoteId) : null;
+
+      const P = this.octaveLineProgram;
+      const uVP = gl.getUniformLocation(P, 'u_viewport');
+      const uDash = gl.getUniformLocation(P, 'u_dashLen');
+      const uGap = gl.getUniformLocation(P, 'u_gapLen');
+      const uCol = gl.getUniformLocation(P, 'u_color');
+      const uHole = gl.getUniformLocation(P, 'u_holeRect');
+      const T = this.textProgram;
+      const uVPt = T ? gl.getUniformLocation(T, 'u_viewport') : null;
+      const uTint = T ? gl.getUniformLocation(T, 'u_tint') : null;
+      const uTex = T ? gl.getUniformLocation(T, 'u_tex') : null;
+      gl.disable(gl.SCISSOR_TEST);
+
+      for (const L of lines) {
+        const yw = this._noteCenterY(L.freq);
+        const xw = L.startSec != null ? L.startSec * sx : 0;
+        const lyRaw = m[1] * xw + m[4] * yw + m[7] - oy;
+        const y = Math.floor(lyRaw) + 0.5;
+        if (y < -4 || y > vpH + 4) continue;
+        const x0 = L.startSec != null ? Math.max(-1, m[0] * xw + m[3] * yw + m[6] - ox) : -1;
+        if (x0 > vpW) continue;
+        const selected = sel === L.id;
+        const entry = this._createTextTexture(`[${L.id}]`);
+        // A key change's label sits just before its start, where it reads as the
+        // marker for what follows (after it, the first note in the new key covers it).
+        let lx = 8;
+        if (L.startSec != null) {
+          const w = entry ? entry.wCss : 0;
+          lx = (x0 - w - 6 >= 8) ? (x0 - w - 6) : Math.max(8, x0 + 6);
+        }
+
+        gl.useProgram(P);
+        if (uVP) gl.uniform2f(uVP, vpW, vpH);
+        if (uDash) gl.uniform1f(uDash, 8.0);   // longer than the octave guides' 3/3
+        if (uGap) gl.uniform1f(uGap, 4.0);
+        if (uCol) gl.uniform4f(uCol, ac[0], ac[1], ac[2], selected ? 1.0 : 0.7);
+        if (uHole) {
+          if (entry) gl.uniform4f(uHole, lx - 3, y - entry.hCss * 0.5 - 1, entry.wCss + 6, entry.hCss + 2);
+          else gl.uniform4f(uHole, 0, 0, 0, 0);
+        }
+        gl.bindVertexArray(this.octaveLineVAO);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([x0, selected ? y - 0.5 : y, vpW + 2 - x0, selected ? 2 : 1]), gl.DYNAMIC_DRAW);
+        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+
+        if (entry && entry.tex && T && this.textVAO && this.textPosSizeBuffer) {
+          gl.useProgram(T);
+          if (uVPt) gl.uniform2f(uVPt, vpW, vpH);
+          if (uTex) gl.uniform1i(uTex, 0);
+          if (uTint) gl.uniform4f(uTint, 1, 1, 1, selected ? 1.0 : 0.9);
+          gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+          gl.bindVertexArray(this.textVAO);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([lx, y - entry.hCss * 0.5, entry.wCss, entry.hCss]), gl.DYNAMIC_DRAW);
+          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+          gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          gl.bindTexture(gl.TEXTURE_2D, null);
+        }
+        this._refLineCss.push({ id: L.id, y, x0 });
+      }
+      gl.bindVertexArray(null);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    };
+
+    // Within 4 CSS px of a drawn line (and, for a key change, at or after its start).
+    proto.pickReferenceLinesAt = function (clientX, clientY) {
+      const css = this._refLineCss;
+      if (!css || !css.length) return [];
+      const px = clientX - (this.canvasOffset?.x ?? 0);
+      const py = clientY - (this.canvasOffset?.y ?? 0);
+      const hits = [];
+      for (const r of css) {
+        if (px >= r.x0 - 2 && Math.abs(py - r.y) <= 4) hits.push({ type: 'reference', id: r.id });
+      }
+      return hits;
     };
   } catch {}
 })();

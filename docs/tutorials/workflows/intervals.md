@@ -17,7 +17,7 @@ Two notes, sounding together, one of which you retune.
 | 1 (reference) | `base.f` | `base.t` | `base.d * 4` |
 | 2 (the interval) | `[1].f * (3/2)` | `[1].t` | `[1].d` |
 
-Create both from the **ADD NOTE / SILENCE** section of a widget. Note 1 comes from the BaseNote's
+Create both from the **ADD NOTE / SILENCE / REFERENCE** section of a widget. Note 1 comes from the BaseNote's
 widget — it has no **At Start** / **At End** toggle, and its button reads **Create**. Note 2 comes
 from note 1's widget: pick **Note**, pick **At Start** so it stacks, then **Create Note**. To try a
 different interval, edit note 2's `frequency` in its `Raw:` field and press **Save**.

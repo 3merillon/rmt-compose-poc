@@ -42,7 +42,7 @@ Clean Slate closes the note widget and clears the selection. The BaseNote keeps 
 ## Step 2: Create Do
 
 1. Click the **BaseNote** again to reopen its widget.
-2. Scroll to the **ADD NOTE / SILENCE** section.
+2. Scroll to the **ADD NOTE / SILENCE / REFERENCE** section.
 3. Leave the kind set to **Note**.
 4. The three fields are already filled in for you:
    - **Frequency:** `base.f`
@@ -60,7 +60,7 @@ The new note appears, gets selected, and the widget re-opens on it as **Note [1]
 
 Now you are working from a normal note, and the widget looks different.
 
-1. With Note 1 selected, scroll to **ADD NOTE / SILENCE**.
+1. With Note 1 selected, scroll to **ADD NOTE / SILENCE / REFERENCE**.
 2. Leave the kind on **Note** and the position on **At End** — this is the default, and it is what you want for a scale. Each note starts where the previous one stops.
 3. The fields prefill from Note 1:
    - **Frequency:** `[1].f` ← you will replace this

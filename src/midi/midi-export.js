@@ -55,7 +55,7 @@
 import Fraction from 'fraction.js';
 import { toNumber } from '../utils/fraction-num.js';
 import { amplitudeToGain, MAX_AMPLITUDE } from '../player/amplitude.js';
-import { isMeasureNote } from '../note.js';
+import { isMeasureNote, isReferenceNote } from '../note.js';
 
 /** MPE lower zone: master on channel 1 (index 0), members on channels 2–16. */
 const MASTER_CHANNEL = 0;
@@ -202,7 +202,7 @@ export function planMidi(module, options = {}) {
 
   // --- notes -------------------------------------------------------------------
   const skipped = { silent: [], noPitch: [], outOfRange: [], noLength: [], beforeStart: [] };
-  let silences = 0, lengthened = 0, clippedAtStart = 0, amplitudeClamped = 0, velocityFloored = 0;
+  let silences = 0, references = 0, lengthened = 0, clippedAtStart = 0, amplitudeClamped = 0, velocityFloored = 0;
   let maxStartError = 0, maxLengthError = 0, maxPitchError = 0;
   let endTick = 0;
   const byInstrument = new Map();   // instrument -> notes, in first-appearance order
@@ -211,6 +211,9 @@ export function planMidi(module, options = {}) {
   for (const id of ids) {
     const note = module.notes[id];
     const r = cache.get(id);
+    // A reference (a frequency, no duration): a tonic or key the notes relate to.
+    // It never sounds, so nothing is written; the report counts it.
+    if (isReferenceNote(note)) { references++; continue; }
     if (!r || !r.startTime) continue;
 
     const start = asFraction(r.startTime);
@@ -391,6 +394,7 @@ export function planMidi(module, options = {}) {
     notes: {
       exported,
       silences,
+      references,
       skipped,
       skippedTotal: Object.values(skipped).reduce((sum, list) => sum + list.length, 0),
       clippedAtStart,

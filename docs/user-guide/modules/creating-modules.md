@@ -46,7 +46,7 @@ Each property has a **Raw:** field. Type a new expression and a **Save** button 
 There is no double-click-to-create. Notes come from the note widget.
 
 1. Select the note you want to build from (the BaseNote, if the workspace is empty).
-2. Scroll to **ADD NOTE / SILENCE**.
+2. Scroll to **ADD NOTE / SILENCE / REFERENCE**.
 3. Choose **Note** or **Silence**.
 4. Choose where it goes relative to the selected note:
    - **At End** — the new note starts when the selected one ends. This is the default, and it is how you build a sequence.

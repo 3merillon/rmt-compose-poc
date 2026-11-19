@@ -15,6 +15,7 @@ The workspace is the WebGL2 canvas that fills the app below the two bars. It dra
 |---|---|
 | **Note rectangle** | One note. Width is its duration, vertical position is its frequency. |
 | **Silence** | A note with no frequency — a dark rectangle with a dashed border and the word `silence`. It occupies time and can be depended on, but makes no sound. |
+| **Reference line** | A note with a frequency and no duration: a long-dashed line at its pitch, labelled `[id]`. Across the whole workspace for a **reference** (a tonic, a key, a chord root); from its start on for a **key change**. Click the line to open its widget. It never sounds, and notes relate to it like to any note. |
 | **BaseNote circle** | The filled circle at the origin. This is note id `0`, the anchor every other note is ultimately measured against. |
 | **Measure bars** | Vertical dashed lines. Two extra **solid** lines sit just outside the module's start and end. |
 | **Measure triangles** | The handles along the bottom of the screen — one per measure. Click and drag these, not the line. |

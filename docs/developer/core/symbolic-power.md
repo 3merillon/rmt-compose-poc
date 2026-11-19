@@ -147,7 +147,7 @@ tetThird.mul(bpStep);
 
 ## Corruption, end to end
 
-The `CORRUPT` bitmask (`src/binary-note.js:62-69`):
+The `CORRUPT` bitmask (`src/binary-note.js:103-110`):
 
 ```javascript
 export const CORRUPT = {
@@ -168,7 +168,7 @@ POW produces an irrational
   → evaluateVariable() ORs the property's bit into corruptionFlags   :1545-1547
   → Module._updateCorruptionFlags()                        module.js:682-705
       → DependencyGraph.setCorruptionFlags(id, flags)      dependency-graph.js:1746
-  → RendererAdapter.sync() → a_corruptionType per note     renderer.js:913-960
+  → RendererAdapter.sync() → a_corruptionType per note     renderer.js:931-978
   → the shader hatches the note
 ```
 
@@ -183,7 +183,7 @@ On the canvas:
 In the note widget, a transitively-corrupted **frequency** displays as `≈<fraction>` with the `corrupted-value` class (`src/modals/variable-controls.js:133-142`; `public/styles.css:1308-1311`).
 
 ::: warning The direct-corruption float readout
-The widget's *directly*-corrupted branch (`≈1.0594631`, eight significant figures) keys on `value.isCorrupted || ev._irrational || ev._floatValue !== undefined` (`variable-controls.js:123`). `value.isCorrupted` is the dependency graph's per-property corruption bit (`src/modals/index.js:365`), so the branch fires on the JS path too; `_irrational` / `_floatValue` are only ever set by the WASM evaluator adapter (`src/wasm/evaluator-adapter.js:962-963`). The float it prints is `ev._floatValue` when present, otherwise the approximated fraction converted through `toNumber()` (`variable-controls.js:130`) — the documented lossy boundary in `src/utils/fraction-num.js`.
+The widget's *directly*-corrupted branch (`≈1.0594631`, eight significant figures) keys on `value.isCorrupted || ev._irrational || ev._floatValue !== undefined` (`variable-controls.js:123`). `value.isCorrupted` is the dependency graph's per-property corruption bit (`src/modals/index.js:370`), so the branch fires on the JS path too; `_irrational` / `_floatValue` are only ever set by the WASM evaluator adapter (`src/wasm/evaluator-adapter.js:962-963`). The float it prints is `ev._floatValue` when present, otherwise the approximated fraction converted through `toNumber()` (`variable-controls.js:130`) — the documented lossy boundary in `src/utils/fraction-num.js`.
 :::
 
 Exact values can wear an `≈` too, without any corruption: once a fraction's numerator plus denominator pass 24 digits, the widget collapses the readout to an eight-significant-figure approximation and keeps the exact (elided) `n/d` form in the row's `title` tooltip (`src/modals/fraction-display.js`). The stored value stays exact — only the rendering approximates.
