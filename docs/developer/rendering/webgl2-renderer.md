@@ -64,7 +64,7 @@ and `player.js`'s own loop keep running every frame. What is gated is the body o
 bottom of the file wrap it in turn. The outermost wrapper is the one that matters:
 
 ```javascript
-// renderer.js:10898 — the gate
+// renderer.js:10869 — the gate
 const _prevRender = proto._render;
 proto._render = function () {
   if (!this.needsRedraw) return;
@@ -82,7 +82,7 @@ canvas. Measured before the outer gate landed: **46 ms/frame at 5k notes, 1034 m
 with the picture on screen never changing.
 
 If you add a pass, add it **inside** the gate, and assume it is *not* safe to run twice on the same
-frame. The marquee wrapper (`renderer.js:11053`) has to snapshot `needsRedraw` *before* delegating
+frame. The marquee wrapper (`renderer.js:11024`) has to snapshot `needsRedraw` *before* delegating
 and bail if it was false, precisely because re-blending a translucent rectangle over itself darkens
 it.
 :::
@@ -230,7 +230,7 @@ Everything below is added by the prototype wrappers at the bottom of the file:
 
 ### Viewport culling
 
-The per-note overlay loop (step 6) is culled against the viewport (`renderer.js:7009-7040`). Every
+The per-note overlay loop (step 6) is culled against the viewport (`renderer.js:7003-7034`). Every
 overlay it emits is scissored to that note's own rect, so a note entirely off-canvas cannot produce
 a single pixel — the cull is **exact**, not an approximation, which is why the picture stays
 pixel-identical. Without it, overlay cost scaled with the size of the *module*; with it, it scales
@@ -279,7 +279,7 @@ frequency → duration so overlapping dependencies all stay visible.
 
 All on-note text — ID labels, fraction numerators/denominators, the word "silence", the ▲/▼ arrow
 glyphs, measure and octave-guide labels — is drawn through a single texture atlas and a single
-instanced call (`_drawAtlasGlyphInstances`, `renderer.js:8880`).
+instanced call (`_drawAtlasGlyphInstances`, `renderer.js:8874`).
 
 - One RGBA atlas texture, `min(1024, MAX_TEXTURE_SIZE)` square, glyphs rasterized on demand at
   `text.glyphBasePx` (64) in `Roboto Mono` and packed into rows. A seed set

@@ -74,7 +74,7 @@ The first, `scripts/validate-modules.mjs`, walks every item in the v2 manifest
 1. **Structure** — a `baseNote` object and a `notes` array.
 2. **Expressions** — every string under the six expression keys (`startTime`, `duration`,
    `frequency`, `amplitude`, `attack`, `release`) passes `validateExpressionSyntax`.
-3. **Self-containment** — every `[id]` / `getNoteById(id)` reference resolves to a note defined in
+3. **Self-containment** — every `[id]` reference resolves to a note defined in
    the same file (or to the base, id 0). This is what lets a module be dropped onto *any* target
    note: on import, id 0 is remapped to the target and the internal ids are renumbered.
 4. **Evaluation** — `Module.loadFromJSON` + `evaluateModule` yields a finite `startTime`,
@@ -183,7 +183,7 @@ rmt-compose-poc/
 │   ├── player.js           # orchestrator: transport, selection, commits, undo wiring
 │   ├── module.js           # Module: notes, dep registration, evaluation, JSON load/save
 │   ├── note.js             # Note: six BinaryExpressions + color/instrument/measure
-│   ├── expression-compiler.js  # legacy parser + format router + LRU compile cache
+│   ├── expression-compiler.js  # DSL compile entry point + LRU compile cache
 │   ├── binary-note.js      # bytecode format (OP / VAR / CORRUPT)
 │   ├── binary-evaluator.js # stack VM + incremental evaluator
 │   ├── dependency-graph.js # forward + inverse, per-property indexes
@@ -215,8 +215,8 @@ rmt-compose-poc/
 Two things new contributors get wrong:
 
 - The entry point is **`src/main.js`**, not `src/index.js` (which does not exist).
-- **`src/dsl/`** is the primary expression syntax. `src/expression-compiler.js` is the *legacy*
-  method-chain parser plus the router that decides between them.
+- **`src/dsl/`** is the expression language, the only one. `src/expression-compiler.js` is a cache
+  in front of it; `src/migrate/` converts older modules when they load.
 
 ## Dev-only flags
 
@@ -375,8 +375,8 @@ you to touch. Read [Code Style](/developer/contributing/code-style) and match th
 
 ## See also
 
-- [Code Style](/developer/contributing/code-style) — the conventions, including the two-format
-  expression invariant
+- [Code Style](/developer/contributing/code-style) — the conventions, including how code writes
+  expressions
 - [Pull Requests](/developer/contributing/pull-requests) — what to run before you submit
 - [System Architecture](/developer/architecture/overview) — how the pieces fit
 - [Performance](/developer/performance) — the harness and the measured numbers

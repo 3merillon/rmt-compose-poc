@@ -95,19 +95,7 @@ When a save is rejected, the reason appears **inline**: the validator's message 
 
 ### The `Raw:` field always shows DSL
 
-Even for a note stored in the old method-chain format, the widget decompiles the compiled expression and shows you DSL. A consequence worth knowing: **saving a legacy note's row converts that expression to DSL.**
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-A note authored as
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-```
-
-is displayed in the widget as `base.f * (3/2)`. Press Save and it is stored that way too.
-</details>
+The widget decompiles the compiled expression and shows you DSL.
 
 ### The `≈` symbol
 

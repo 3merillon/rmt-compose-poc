@@ -15,8 +15,7 @@ tells you what is true.
   operators, precedence, the removed `beat()` / `tempo()` / `measure()` forms, error behaviour
 - [Operators](/reference/expressions/operators) — per-operator semantics and result types
 - [Module API](/reference/expressions/module-api) — note references, the six properties and inheritance
-- [Fraction API](/reference/expressions/fraction-api) — exact numbers, and the legacy
-  `new Fraction()` compatibility surface
+- [Fraction API](/reference/expressions/fraction-api) — exact numbers
 
 ## Note properties
 
@@ -173,7 +172,7 @@ plain `LOAD_BASE` of variable index 1.
 |---|---|
 | Value used when a reference cannot be resolved | startTime 0, duration 1, frequency 440, amplitude 1, attack 0, release 0 |
 | Division by zero at evaluation time | Result 1, plus a console warning; the property is flagged corrupted (crosshatch) |
-| An expression neither compiler can parse | Compile error — `console.error` plus a thrown message naming both parser failures; validators return `valid: false`; on a file load the note's property is left unset |
+| An expression the compiler cannot parse | Compile error — `console.error` plus a thrown message; validators return `valid: false`; on a file load the note's property is left unset |
 | Decimal → fraction | Exact as written — the digits over the matching power of ten, reduced (`0.333333` is `333333/1000000`) |
 | Constant fits `LOAD_CONST` when both parts are within | −2 147 483 648 to 2 147 483 647 (bigger constants use `LOAD_CONST_BIG`, exact at any size) |
 | Note id in a reference | 0 – 65 535, enforced when the expression compiles |

@@ -54,16 +54,6 @@ base.t              # start when the BaseNote starts
 base.d * 2          # two time units long
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.baseNote.getVariable('startTime')
-module.baseNote.getVariable('duration').mul(new Fraction(2))
-```
-</details>
-
 ::: tip Think of it as a capo
 The BaseNote is a capo. It sets where everything sits; the shapes above it don't change.
 :::
@@ -141,19 +131,6 @@ Two further variables are not part of the notation: `amplitude` (`a`), and `atta
 | Negate | `-` (prefix) | `-base.f` |
 
 Precedence runs `+ -` loosest, then `* /`, then unary minus, then `^` tightest. `^` is right-associative, so `[1].f * 2^(1/12)` means `[1].f * (2^(1/12))` — exactly what you want when writing a TET step.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-| Operation | Syntax |
-|-----------|--------|
-| Add | `.add(x)` |
-| Subtract | `.sub(x)` |
-| Multiply | `.mul(x)` |
-| Divide | `.div(x)` |
-| Power | `.pow(x)` |
-| Negate | `.neg()` |
-</details>
 
 ### No functions
 
@@ -284,28 +261,6 @@ A **module** is a collection of notes: a whole composition, or a reusable fragme
 ```
 
 Note 2 is a major third above note 1 — defined against *note 1*, not against the base. Note 3 has no `frequency`: it is a silence. All three lengths are written in time units, so editing the BaseNote's `duration` changes the pace of the whole module.
-
-<details>
-<summary>Legacy JavaScript syntax (still loads)</summary>
-
-```json
-{
-  "baseNote": {
-    "frequency": "new Fraction(263)",
-    "startTime": "new Fraction(0)"
-  },
-  "notes": [
-    {
-      "id": 1,
-      "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))",
-      "startTime": "module.baseNote.getVariable('startTime')"
-    }
-  ]
-}
-```
-
-Modules are saved in the current syntax. A legacy file loads fine and is rewritten on the next save.
-</details>
 
 ### The module library
 

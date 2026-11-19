@@ -20,15 +20,6 @@ To divide interval `I` into `N` equal steps, one step is `I ^ (1/N)`:
 
 `k` steps is `I ^ (k/N)`.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(2).pow(new Fraction(1, 17))
-new Fraction(3).pow(new Fraction(1, 8))
-```
-</details>
-
 ## Use integer bases
 
 ::: danger Non-integer bases are not kept symbolic
@@ -167,7 +158,7 @@ Four things to copy from it:
 - **`duration` in time units** (`base.d * k`), not seconds.
 - **`color`** on every note. Notes without one fall back to default colouring.
 
-Expressions may reference `base` or any note **inside the same module** — a module must be self-contained, or it cannot be dropped onto an arbitrary note. Every module the app ships is written in DSL. The legacy method-chain format still loads, but nothing ships in it any more.
+Expressions may reference `base` or any note **inside the same module** — a module must be self-contained, or it cannot be dropped onto an arbitrary note. Every module the app ships is written in DSL.
 
 ## What to expect once it loads
 

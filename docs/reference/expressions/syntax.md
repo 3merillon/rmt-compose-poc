@@ -13,7 +13,7 @@ bytecode and evaluated with exact rational arithmetic. They fall in two groups:
 | **The language** | `f` frequency, `t` startTime, `d` duration | The notation. Each relates the note to other notes, and the BaseNote holds the only absolute values. |
 | **Interpretation** | `a` amplitude, `attack`, `release` | How the note sounds. Not part of the notation; the only variables that fall back to the BaseNote when unset. |
 
-This page is the complete grammar. The modern format is the **DSL**:
+This page is the complete grammar of the **DSL**:
 
 ```
 base.f * (3/2)          # perfect fifth above the BaseNote
@@ -25,11 +25,8 @@ base.d * (1/2)          # half a time unit long
 The DSL has **no functions**. Where a length is needed, `base.d` is the idiom: the BaseNote's
 duration is the time unit, one beat if you count in beats.
 
-An older **legacy** method-chain format still loads and still compiles. It is covered in
-[Fraction API](/reference/expressions/fraction-api) and
-[Module API](/reference/expressions/module-api). You never have to write it: the note widget
-displays every expression as DSL, whatever format it was stored in, and pressing **Save** in
-the widget stores that DSL.
+The method-chain syntax of earlier versions is retired; see
+[The retired method-chain syntax](#the-retired-method-chain-syntax).
 
 ## Where you type an expression
 
@@ -278,10 +275,7 @@ There is no call syntax.
 ## Expressions the app writes for you
 
 Dragging a note, resizing it, pressing the ▲/▼ frequency arrows, and creating a note all
-rewrite the affected expression. Each of these preserves the format it found: a DSL expression
-is rewritten as DSL, and a legacy expression is rewritten as legacy. The only thing that
-converts a legacy expression to DSL is pressing **Save** in the note widget, whose `Raw:` field
-is already showing you the DSL.
+rewrite the affected expression. The rewritten expression is DSL.
 
 The frequency arrows are worth a note: they **fold the interval into the expression's existing
 coefficient** rather than prepending a new multiplier. Stepping up and then back down returns
@@ -347,68 +341,46 @@ canvas the same way an irrational power does.
 **An unresolvable reference.** See the defaults table above. Evaluation degrades rather than
 failing.
 
-An expression **neither compiler can parse**, on the other hand, *is* an error: the compiler
+An expression the compiler **cannot parse**, on the other hand, *is* an error: the compiler
 logs a `console.error` and throws, the validators return `valid: false`, and a typo like `[1]f`
 (the dot is missing) is refused with a message instead of silently zeroing the note. On a file
 load the affected property is left unset.
 
-## Format detection
+## The retired method-chain syntax
 
-Each expression string is classified as DSL or legacy on its own, at compile time:
+Earlier versions also accepted a JavaScript-like method-chain syntax, for example
+`module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))`, which is `[3].f * (3/2)`
+in the DSL. That syntax is no longer compiled.
 
-1. It is **DSL** if it contains a note reference (`[N].`), a `base.` reference, starts with a
-   fraction literal, or starts with `tempo(` / `measure(` / `beat(`. The last three are routed to
-   the DSL parser only so that it can refuse them with the message above.
-2. It is **legacy** if it contains `new Fraction(`, `module.getNoteById`, `module.baseNote`,
-   `.getVariable(`, or a `.mul(`/`.div(`/`.add(`/`.sub(`/`.pow(`/`.neg(` call. A string with
-   `module.findTempo` or `module.findMeasureLength` is legacy too, and is refused as removed.
-3. Otherwise, if the whole string is reference-free arithmetic — `263`, `2 * 263`,
-   `(1/2) * 263` — it is **DSL**.
-4. Otherwise it is treated as legacy.
+- **Typed now, it is refused.** In the note widget or any other expression field, the message is
+  "The method-chain syntax was retired; write expressions in the DSL, e.g. [3].f * (3/2)." When the
+  text can be converted, a last sentence gives its DSL form, for example "In the DSL this reads:
+  base.f * (3/2)".
+- **Old modules still open.** Module files, saved modules and autosaved modules written in the old
+  syntax are converted to the DSL once, when the module is loaded, and the module is then saved in
+  the DSL. The conversion is exact: each converted expression has the same exact fraction as
+  before, which a test checks against values recorded with the old compiler.
+- **A few chains are refused instead of guessed.** The old compiler did not read some chains as
+  they were written: a `.mul()` or `.div()` after an `.add()` or `.sub()`, a `.pow()` after a
+  `.mul()` or after another `.pow()`, and any `.neg()`. A module containing one does not load, and
+  the message names the note and the variable so you can rewrite that expression in the DSL.
+- **Converting files on disk.** Run `node scripts/migrate-modules.mjs <file-or-folder>` from the
+  repository root. It converts the files in place, and also applies the earlier conversion of
+  tempo, beats per measure and measure length to relations of `base.d`.
 
-Rule 3 is why a bare number in a module file is DSL, not legacy. Misclassification is not fatal
-in either direction: a string routed to the wrong parser fails there and is retried with the
-other one before the compiler gives up.
+Examples of the conversion:
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-The legacy format is a method chain over `Fraction` objects. It is text, not JavaScript — it is
-never evaluated, only pattern-matched and compiled. Only `.mul()`, `.div()`, `.add()`, `.sub()`
-and `.pow()` are recognized.
-
-```javascript
-// Perfect fifth above the BaseNote
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-
-// Start when note 1 ends
-module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-
-// One time unit
-module.baseNote.getVariable('duration')
-
-// 12-TET semitone
-new Fraction(2).pow(new Fraction(1, 12))
-```
-
-| Task | DSL | Legacy |
-|---|---|---|
-| Perfect fifth | `base.f * (3/2)` | `module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))` |
-| Note 1's end time | `[1].t + [1].d` | `module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))` |
-| One time unit | `base.d` | `module.baseNote.getVariable('duration')` |
-| 12-TET semitone | `2^(1/12)` | `new Fraction(2).pow(new Fraction(1, 12))` |
-| Note 1's length | `[1].d` | `module.getNoteById(1).getVariable('duration')` |
-
-`module.findTempo` and `module.findMeasureLength` no longer exist: typed, they are refused. See
-[Fraction API](/reference/expressions/fraction-api) for the full list of what the legacy parser does
-and does not accept.
-</details>
+| Method chain | DSL |
+|---|---|
+| `module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))` | `[3].f * (3/2)` |
+| `module.baseNote.getVariable('duration')` | `base.d` |
+| `new Fraction(2).pow(new Fraction(1, 12)).mul(module.baseNote.getVariable('frequency'))` | `2^(1/12) * base.f` |
+| `new Fraction(0.25)` | `(1/4)` |
 
 ## See also
 
 - [Operators](/reference/expressions/operators) — per-operator semantics and result types
-- [Module API](/reference/expressions/module-api) — references, and the legacy `module.*` calls
-- [Fraction API](/reference/expressions/fraction-api) — exact numbers, and the legacy surface
+- [Module API](/reference/expressions/module-api) — references and the six properties
+- [Fraction API](/reference/expressions/fraction-api) — exact numbers
 - [Module JSON Schema](/reference/module-schema) — how expressions are stored in a file
 - [Dependencies](/user-guide/notes/dependencies) — what a reference does to the graph

@@ -61,14 +61,6 @@ The parentheses are part of the fraction literal. `(5/4)` is an exact rational; 
 is a division that still evaluates exactly, but the literal form is what the app itself writes and
 what round-trips through a save.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
-```
-</details>
-
 ## Equal temperaments
 
 An n-TET step is `2 ^ (1/n)`. Take `k` of them with `2 ^ (k/n)`.

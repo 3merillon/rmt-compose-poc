@@ -72,17 +72,6 @@ base.f * (5/4)             # a just major third
 [1].f * 3 ^ (1/13)         # one Bohlen-Pierce step above note 1
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(7, 12)))
-```
-
-</details>
-
 ### Start time
 
 ```

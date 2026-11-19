@@ -12,14 +12,6 @@ When a note's expression references another note, that is a dependency:
 [1].f * (3/2)      →  note 5 depends on note 1
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
-```
-</details>
-
 `src/dependency-graph.js` indexes those references so that both questions are **O(1)**:
 
 - *What does note 5 depend on?* → the forward index
@@ -87,7 +79,7 @@ Each is `Map<dependencyId, Set<dependentId>>`.
 
 ## The BaseNote is not an edge
 
-`base.f` sets `BinaryExpression.referencesBase` and lands the note in `baseNoteDependents`. It **never** appears in `dependencies` or `dependents` as an edge to note 0 — that would make the BaseNote depend on itself, and the BaseNote *is* note 0 (the comments at `src/expression-compiler.js:635-638`).
+`base.f` sets `BinaryExpression.referencesBase` and lands the note in `baseNoteDependents`. It **never** appears in `dependencies` or `dependents` as an edge to note 0 — that would make the BaseNote depend on itself, and the BaseNote *is* note 0 (`emitNoteReference()`, `src/dsl/compiler.js:120`).
 
 Consumers simulate the edge instead. `Module.getDependentNotes(0)` unions `getAllDependents(0)` with `getBaseNoteDependents()` (`src/module.js:384-397`) — one level deep, which is what the UI wants.
 
@@ -172,7 +164,7 @@ The drag path uses the narrower startTime traversals directly: `getAllStartTimeO
 | `getChildrenTreeByAllProperties(id)` | `{edgesByProperty: {frequency: [], startTime: [], duration: []}, maxDepth}` — all three in one traversal. **Not** the same shape as above: the edges are bucketed by originating property, not flat | `:1607` |
 | `getMeasureChain(measureId, isMeasure, getStartTime, isChainLink?)` | `[{id, startSec}]` — the linear measure chain, earliest to latest, O(chain length) | `:1917` |
 
-`getMeasureChain()` is live: `src/player.js:6557` and `src/renderer/webgl2/workspace.js:2487` both use it.
+`getMeasureChain()` is live: `src/player.js:5627` and `src/renderer/webgl2/workspace.js:2478` both use it.
 
 ### Structural
 
@@ -210,7 +202,7 @@ Between notes that is a loop. Between variables there is none: `[1].f` needs `[2
 
 A variable is addressed as one integer, `(noteId << 3) | varIndex`; `base.x` is note 0.
 
-The guard a user actually hits is `validateExpression()` (`src/modals/validation.js:12`), behind the note widget's `Save`. It compiles the candidate, calls `findDependencyCycle()`, and throws one of the two messages the widget shows in red:
+The guard a user actually hits is `validateExpression()` (`src/modals/validation.js:6`), behind the note widget's `Save`. It compiles the candidate, calls `findDependencyCycle()`, and throws one of the two messages the widget shows in red:
 
 | Result | Message |
 |---|---|
@@ -222,7 +214,7 @@ Reading a *different* variable of the same note, or a note that reads this one t
 The evaluator applies the identical rule when it orders a batch, so a cycle that arrives in a hand-written JSON file is reported by name rather than refused — see [True cycles](/developer/core/binary-evaluator#true-cycles).
 
 ::: warning The move and resize gestures still think in whole notes
-After a drag, `player.js` re-anchors the moved note (and dependents that would now start before it) on an ancestor found by walking **start-time parents**, so that nothing references a note that starts later. That walk assumes two notes never read each other; with cross-variable relationships it can arrive back at the note being rewritten. A re-anchor that would close a loop is now skipped (`__retargetWouldCycleGL()`, `src/player.js:2582`) and the note keeps its expression. The gestures do not otherwise understand cross-variable relationships: a move still rewrites the moved note's start, duration and frequency into their canonical forms.
+After a drag, `player.js` re-anchors the moved note (and dependents that would now start before it) on an ancestor found by walking **start-time parents**, so that nothing references a note that starts later. That walk assumes two notes never read each other; with cross-variable relationships it can arrive back at the note being rewritten. A re-anchor that would close a loop is now skipped (`__retargetWouldCycleGL()`, `src/player.js:2287`) and the note keeps its expression. The gestures do not otherwise understand cross-variable relationships: a move still rewrites the moved note's start, duration and frequency into their canonical forms.
 :::
 
 ## Corruption tracking

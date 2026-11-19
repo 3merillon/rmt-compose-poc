@@ -44,16 +44,6 @@ The parentheses are part of the fraction literal — `(3/2)` is one exact ration
 Every shipped interval module stores its ratio coefficient-first — the fifth is `(3/2) * base.f` — and when you drag a note or click an arrow, RMT folds the factor into that leading coefficient. `base.f * (3/2)` is equally valid and evaluates to the same pitch; it survives a save exactly as you typed it. The coefficient-first form is what the app writes when it writes for you, not something it imposes on what you write.
 :::
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.baseNote.getVariable('frequency').div(new Fraction(5, 4))
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(7, 4))
-```
-</details>
-
 ## The Intervals section of the library
 
 You rarely need to type a ratio at all. The module library — the bar under the top bar — ships **46 interval modules** in its **Intervals** section. Each one is a single note whose frequency is `(N/D) * base.f`. Drop it on a note and you get that interval above that note.

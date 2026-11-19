@@ -83,14 +83,6 @@ base.f * (3/2)
 
 The second note lands a perfect fifth above the first, starting exactly where the first one ends — because its Start Time was prefilled as `[1].t + [1].d`, "note 1's start plus note 1's duration". That reference is a **dependency**: move note 1 and note 2 follows it.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-```
-</details>
-
 ## Step 6: Create the octave
 
 1. Select note 2.

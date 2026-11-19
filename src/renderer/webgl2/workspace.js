@@ -11,49 +11,44 @@ import { eventBus } from '../../utils/event-bus.js';
 import { toNumber } from '../../utils/fraction-num.js';
 import { isMeasureNote } from '../../note.js';
 
-// ── Reading the time structure from expression text (legacy and DSL) ──────────
+// ── Reading the time structure from expression text ───────────────────────────
 // Shared with player.js, which imports these.
 
 const START_PROP = String.raw`(?:t|s|start|startTime)\b`;
 const DUR_PROP = String.raw`(?:d|dur|duration)\b`;
-const RE_DSL_START_REF = new RegExp(String.raw`\[\s*(\d+)\s*\]\s*\.\s*` + START_PROP);
-const RE_LEGACY_START_REF = /getNoteById\(\s*(\d+)\s*\)\s*\.getVariable\(\s*['"]startTime['"]\s*\)/;
-const RE_DSL_BASE_START = new RegExp(String.raw`\bbase\s*\.\s*` + START_PROP);
-const RE_LEGACY_BASE_START = /module\.baseNote\s*\.getVariable\(\s*['"]startTime['"]\s*\)/;
-const RE_DSL_CHAIN_LINK = new RegExp(
+const RE_START_REF = new RegExp(String.raw`\[\s*(\d+)\s*\]\s*\.\s*` + START_PROP);
+const RE_BASE_START = new RegExp(String.raw`\bbase\s*\.\s*` + START_PROP);
+const RE_CHAIN_LINK = new RegExp(
   String.raw`^\s*\[\s*(\d+)\s*\]\s*\.\s*` + START_PROP + String.raw`\s*\+\s*\[\s*(\d+)\s*\]\s*\.\s*` + DUR_PROP + String.raw`\s*$`
 );
-const RE_LEGACY_CHAIN_LINK = /^\s*module\.getNoteById\(\s*(\d+)\s*\)\s*\.getVariable\(\s*['"]startTime['"]\s*\)\s*\.add\(\s*module\.getNoteById\(\s*(\d+)\s*\)\s*\.getVariable\(\s*['"]duration['"]\s*\)\s*\)\s*$/;
 
 /**
  * The note a start expression is measured from: the note whose start it reads
- * (`[N].t`, `getNoteById(N).getVariable('startTime')`), else the BaseNote when
- * it reads `base.t`, else the first note it names at all. So `[5].t + base.d * 2`
- * hangs from 5 although it also reads the BaseNote's duration (the time unit),
- * and `base.t + [3].d` hangs from the BaseNote.
+ * (`[N].t`), else the BaseNote when it reads `base.t`, else the first note it
+ * names at all. So `[5].t + base.d * 2` hangs from 5 although it also reads the
+ * BaseNote's duration (the time unit), and `base.t + [3].d` hangs from the BaseNote.
  * @returns {number} note id, 0 for the BaseNote, -1 when the text names no note
  */
 export function startParentIdFromRaw(raw) {
   if (!raw || typeof raw !== 'string') return -1;
-  let m = raw.match(RE_DSL_START_REF) || raw.match(RE_LEGACY_START_REF);
+  let m = raw.match(RE_START_REF);
   if (m) return parseInt(m[1], 10);
-  if (RE_DSL_BASE_START.test(raw) || RE_LEGACY_BASE_START.test(raw)) return 0;
-  m = raw.match(/\[\s*(\d+)\s*\]/) || raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+  if (RE_BASE_START.test(raw)) return 0;
+  m = raw.match(/\[\s*(\d+)\s*\]/);
   if (m) return parseInt(m[1], 10);
-  if (/\bbase\s*\./.test(raw) || raw.includes('module.baseNote')) return 0;
+  if (/\bbase\s*\./.test(raw)) return 0;
   return -1;
 }
 
 /**
- * A measure chain link starts exactly where the bar before it ends: `[P].t + [P].d`,
- * or legacy `module.getNoteById(P).getVariable('startTime').add(module.getNoteById(P).getVariable('duration'))`.
+ * A measure chain link starts exactly where the bar before it ends: `[P].t + [P].d`.
  * Any other start (an offset, another note, the BaseNote) begins a chain of its own.
  * The caller checks that P is a bar.
  * @returns {number|null} P, or null when `raw` is not a chain link
  */
 export function measureChainLinkParentId(raw) {
   if (!raw || typeof raw !== 'string') return null;
-  const m = raw.match(RE_DSL_CHAIN_LINK) || raw.match(RE_LEGACY_CHAIN_LINK);
+  const m = raw.match(RE_CHAIN_LINK);
   if (!m || m[1] !== m[2]) return null;
   return parseInt(m[1], 10);
 }
@@ -360,7 +355,7 @@ export class Workspace {
                         const sts = nn.variables?.startTimeString || '';
                         // Include ANY measure that references a seed (both chain links and anchors)
                         for (const sid of out) {
-                          if (sts.includes(`getNoteById(${sid})`) || sts.includes(`[${sid}]`)) {
+                          if (sts.includes(`[${sid}]`)) {
                             out.add(nid);
                             changed = true;
                             break;
@@ -389,11 +384,7 @@ export class Workspace {
                     const refersStartOf = (nid, refId) => {
                       const s = getStartTimeStr(nid);
                       if (!s) return false;
-                      // Legacy
-                      if (s.includes(`getNoteById(${refId})`) &&
-                          (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
-                           s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`))) return true;
-                      // DSL: [refId].t, [refId].d
+                      // [refId].t, [refId].d
                       if (s.includes(`[${refId}].t`) || s.includes(`[${refId}].d`)) return true;
                       return false;
                     };

@@ -251,38 +251,6 @@ export class SymbolicPower {
   }
 
   /**
-   * Convert to expression string for serialization
-   */
-  toExpressionString() {
-    let parts = [];
-
-    // Add coefficient if not 1
-    if (!this.coefficient.equals(1)) {
-      if (this.coefficient.d === 1n) {
-        parts.push(`new Fraction(${this.coefficient.s * this.coefficient.n})`);
-      } else {
-        parts.push(`new Fraction(${this.coefficient.s * this.coefficient.n}, ${this.coefficient.d})`);
-      }
-    }
-
-    // Add each power term
-    for (const p of this.powers) {
-      if (p.exp.d === 1n) {
-        parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.exp.s * p.exp.n}))`);
-      } else {
-        parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.exp.s * p.exp.n}, ${p.exp.d}))`);
-      }
-    }
-
-    if (parts.length === 0) {
-      return 'new Fraction(1)';
-    }
-
-    // Chain with .mul()
-    return parts.reduce((acc, part) => acc ? `${acc}.mul(${part})` : part);
-  }
-
-  /**
    * Serialize to JSON-compatible object.
    * n/d serialize as decimal strings (JSON.stringify throws on BigInt), the
    * same convention as the Rust BigRational boundary.

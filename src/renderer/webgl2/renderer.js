@@ -3278,14 +3278,8 @@ export class RendererAdapter {
     const startTimeString = note.variables?.startTimeString;
     let parentId = null;
     if (startTimeString) {
-      // Legacy
-      const m = /getNoteById\(\s*(\d+)\s*\)/.exec(startTimeString);
-      if (m) parentId = parseInt(m[1], 10);
-      // DSL
-      if (parentId == null) {
-        const dm = /\[(\d+)\]\./.exec(startTimeString);
-        if (dm) parentId = parseInt(dm[1], 10);
-      }
+      const dm = /\[(\d+)\]\./.exec(startTimeString);
+      if (dm) parentId = parseInt(dm[1], 10);
     }
     if (parentId == null && note.parentId != null) parentId = note.parentId;
     if (parentId == null) return module.baseNote;
@@ -10180,33 +10174,10 @@ try {
 
                     out.parsed = true;
 
-                    // Legacy base ref
-                    const baseRefRe = /module\.baseNote\s*\.\s*getVariable\s*\(\s*['"](startTime|duration)['"]\s*\)/;
-                    out.hasBase = baseRefRe.test(s);
-                    // DSL base ref
-                    if (!out.hasBase) {
-                      out.hasBase = /\bbase\./.test(s);
-                    }
+                    out.hasBase = /\bbase\./.test(s);
 
                     const seen = new Set();
-                    // Legacy note refs
-                    const re = /module\.getNoteById\(\s*(\d+)\s*\)\s*\.\s*getVariable\s*\(\s*['"](startTime|duration)['"]\s*\)/g;
-                    let m;
-                    while ((m = re.exec(s))) {
-                      const id = Number(m[1]);
-                      if (!isFinite(id) || id === 0) continue;
-                      if (id === Number(anchorId) || seen.has(id)) continue;
-                      seen.add(id);
-                      try {
-                        const ref = mod.getNoteById(id);
-                        const isMeasure = isMeasureNote(ref);
-                        if (isMeasure) out.measureIds.push(id);
-                        else out.noteIds.push(id);
-                      } catch {
-                        out.noteIds.push(id);
-                      }
-                    }
-                    // DSL note refs: [N].t, [N].d
+                    // Note refs: [N].t, [N].d
                     const dslRe = /\[(\d+)\]\./g;
                     let dm;
                     while ((dm = dslRe.exec(s))) {

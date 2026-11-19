@@ -15,64 +15,6 @@ import { TokenType, PropertyMap, PropertyShortNames, getCanonicalPropertyName, g
 import { NodeType, createNumberLiteral, createFractionLiteral, createNoteReference, createBinaryOp, createUnaryOp, collectDependencies, referencesBase, printAST } from './ast.js';
 
 /**
- * Check if a string uses DSL syntax (vs legacy JavaScript syntax)
- *
- * @param {string} expr - Expression string to check
- * @returns {boolean} True if DSL syntax, false if legacy
- */
-export function isDSLSyntax(expr) {
-  if (!expr || typeof expr !== 'string') {
-    return false;
-  }
-
-  const trimmed = expr.trim();
-  if (!trimmed) {
-    return false;
-  }
-
-  // DSL indicators (check these first)
-  // Note references: [123].f, [0].t
-  if (/^\[[\d]+\]\./.test(trimmed)) return true;
-  // Base reference: base.f
-  if (/^base\./.test(trimmed)) return true;
-  // Fraction literal: (3/2) at start or after operator
-  if (/^\(\s*-?\d+\s*\/\s*-?\d+\s*\)/.test(trimmed)) return true;
-  // The old time helpers beat(...), tempo(...), measure(...) are DSL spellings:
-  // routed to the DSL parser, they get a message saying what replaced them.
-  if (/^(tempo|measure|beat)\s*\(/.test(trimmed)) return true;
-  // Contains DSL-style references anywhere
-  if (/\[[\d]+\]\./.test(trimmed)) return true;
-  if (/\bbase\.[a-z]/.test(trimmed)) return true;
-
-  // Legacy indicators
-  // new Fraction(...)
-  if (/new\s+Fraction\s*\(/.test(trimmed)) return false;
-  // module.getNoteById(...)
-  if (/module\.getNoteById/.test(trimmed)) return false;
-  // module.baseNote
-  if (/module\.baseNote/.test(trimmed)) return false;
-  // .getVariable(...)
-  if (/\.getVariable\s*\(/.test(trimmed)) return false;
-  // .mul(...), .div(...), .add(...), .sub(...), .pow(...)
-  if (/\.(mul|div|add|sub|pow|neg)\s*\(/.test(trimmed)) return false;
-  // module.findTempo(...), module.findMeasureLength(...)
-  if (/module\.find(Tempo|MeasureLength)/.test(trimmed)) return false;
-
-  // Reference-free arithmetic: a bare number ("263"), or numbers combined with
-  // infix operators ("2 * 263", "(1/2) * 263" — what the octave arrows write on
-  // the base note, whose frequency references nothing). Legacy cannot spell
-  // these without `new Fraction(` or a `.mul()`-style chain, and every legacy
-  // marker was ruled out above, so what remains is DSL. Routing these to the
-  // legacy parser makes it fail, and its failure path emits the constant 0
-  // (see ExpressionCompiler.compile), silently zeroing the note.
-  if (/^[-+*\/^().\d\s]+$/.test(trimmed)) return true;
-
-  // If no clear indicator, default to legacy for safety
-  // This ensures existing expressions work unchanged
-  return false;
-}
-
-/**
  * Compile a DSL expression string to BinaryExpression bytecode
  *
  * @param {string} source - DSL expression string
@@ -116,22 +58,6 @@ export function decompileToDSL(binary) {
   }
 
   return decompile(binary);
-}
-
-/**
- * Compile an expression string, auto-detecting DSL vs legacy syntax
- *
- * @param {string} source - Expression string (DSL or legacy)
- * @param {Function} legacyCompiler - Fallback legacy compiler function
- * @param {string} [varName] - Variable name for context
- * @returns {BinaryExpression} Compiled binary expression
- */
-export function compileAuto(source, legacyCompiler, varName = null) {
-  if (isDSLSyntax(source)) {
-    return compileDSL(source);
-  }
-  // Fall back to legacy compiler
-  return legacyCompiler(source, varName);
 }
 
 /**

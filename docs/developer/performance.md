@@ -85,7 +85,7 @@ properly idle)"*, and `bench-render.mjs` reports **0/100 idle frames redrawn** a
 notes.
 
 This does **not** mean rAF is descheduled. Both loops still tick every frame — the renderer's
-(`renderer.js:544-548`) and the player's (`player.js:2149-2169`, which updates the DOM playhead and
+(`renderer.js:544-548`) and the player's (`player.js:1871-1891`, which updates the DOM playhead and
 measure-bar transforms). What is gated is the *body* of `_render()`:
 
 ```javascript
@@ -96,7 +96,7 @@ this.needsRedraw = false;
 
 That inner gate existed before, and did nothing, for two reasons. First, the passes layered on top of
 `_render()` by the prototype wrappers ran unconditionally, so an idle frame still paid for all of
-them — an outer gate now wraps the whole chain (`renderer.js:10898`; see
+them — an outer gate now wraps the whole chain (`renderer.js:10869`; see
 [the redraw gate](/developer/rendering/webgl2-renderer#the-frame-loop-and-the-redraw-gate)). Second,
 two callers dirtied the scene on every frame. Both now short-circuit:
 
@@ -204,11 +204,11 @@ DOM per note and no draw call per note.
 | Pass | Where |
 |---|---|
 | Note bodies (`N = instanceCount`) | `renderer.js:2898` |
-| Silence dashed rings, fraction dividers, pull-tab and arrow backgrounds | `src/renderer/webgl2/renderer.js:6678`, `:6691`, `:7583`, `:7640`, `:7715` |
-| Octave guides | `renderer.js:5305` |
-| Measure bars and measure triangles | `renderer.js:6012`, `:6034` |
+| Silence dashed rings, fraction dividers, pull-tab and arrow backgrounds | `src/renderer/webgl2/renderer.js:6672`, `:6685`, `:7577`, `:7634`, `:7709` |
+| Octave guides | `renderer.js:5299` |
+| Measure bars and measure triangles | `renderer.js:6006`, `:6028` |
 | Dependency link-lines | instanced, per-property buckets |
-| All overlay text | glyph atlas run, `renderer.js:8908` |
+| All overlay text | glyph atlas run, `renderer.js:8902` |
 
 The shared rect VAO (`renderer.js:2550-2639`) binds one per-vertex attribute — the unit quad
 `a_unit` (location 0, divisor 0) — plus **six per-instance** attributes: `a_posSize` (1), `a_color`
@@ -243,7 +243,7 @@ frequency → duration so overlapping dependencies all stay visible.
 
 ### Viewport culling
 
-`renderer.js:7009-7040`. The per-note overlay loop — pull tab, interval arrows, fraction divider,
+`renderer.js:7003-7034`. The per-note overlay loop — pull tab, interval arrows, fraction divider,
 silence band, and **all** of that note's text runs — is culled against the viewport. Every overlay
 it emits is scissored to that note's own rect, so a note entirely off-canvas cannot produce a single
 pixel. The cull is therefore *exact*, not an approximation, which is why the picture stays
@@ -274,10 +274,10 @@ Rebuilt every pointermove → now built **once per gesture**:
   then `Array.from()`'d it. Both are now created once and handed back by reference.
 - The `workspace.js` note-drag path built `new Set([noteId, ...cachedDependents])` per move. Now
   cached on the interaction.
-- `renderer.setDragOffsetPreview` (`renderer.js:3773`) re-derived `_dragMovingIds` plus an index
+- `renderer.setDragOffsetPreview` (`renderer.js:3767`) re-derived `_dragMovingIds` plus an index
   array it then **sorted** — every move. Now short-circuits on an identity check against the
   caller's `Set`.
-- `renderer.setDragOverlay` (`renderer.js:9809`) rebuilt a `Set` via `movingIds.map(Number)` every
+- `renderer.setDragOverlay` (`renderer.js:9803`) rebuilt a `Set` via `movingIds.map(Number)` every
   move. Now identity-checked, with an allocation-free exact content comparison as the fallback.
   Deliberately *not* a size-only test — that would be unsound.
 
@@ -286,13 +286,13 @@ Per-frame allocations removed from the drag render path:
 - **Dependency-line endpoints** were accumulated into boxed JS arrays and copied into fresh
   `Float32Array`s every frame (~20,000 elements *per property* at 5,000 dependents). They now go
   into pooled, growable `Float32Array`s that hand out `subarray` views (`_linkWriter`,
-  `renderer.js:9640-9674`). A steady-state drag now allocates **nothing**.
+  `renderer.js:9634-9668`). A steady-state drag now allocates **nothing**.
 - The "legacy combined" deps/rdeps arrays were built with `push(...spread)`, converted, uploaded
   every frame — **and never drawn from**. Removed.
 - `getChildrenTreeByAllProperties()` re-ran a full BFS every pointermove, allocating an edge object
   per dependent per property. It is a pure function of the anchor plus module structure, neither of
   which a drag changes, so it is now cached on `anchorId|_posEpoch|_sceneEpoch`
-  (`renderer.js:10296-10303`) — any real edit still invalidates it.
+  (`renderer.js:10267-10274`) — any real edit still invalidates it.
 - Tab/arrow region arrays were re-minted (4 × `Float32Array(N*4)`) every drag frame. Reused.
 - Note-local overlay regions are now keyed on the note's **width**, not on "a drag happened". A
   *move* changes no note's width, so a move-drag no longer recomputes N regions and re-uploads N×4
@@ -306,14 +306,14 @@ actually passed in. The pixel diff caught this; eyeballing would not have.
 
 ## Picking is 100% CPU
 
-- `Workspace.pickAt(clientX, clientY, expandCssPx = 2)` (`workspace.js:1940`) tries
+- `Workspace.pickAt(clientX, clientY, expandCssPx = 2)` (`workspace.js:1931`) tries
   `renderer.pickAllAt()` first, which always exists.
-- `RendererAdapter.pickAllAt` (`renderer.js:9271`) resolves measure triangles (top) → base circle →
+- `RendererAdapter.pickAllAt` (`renderer.js:9265`) resolves measure triangles (top) → base circle →
   note stack.
-- `RendererAdapter.pickAt` (`renderer.js:3512`) is a **reverse linear scan** over `_instanceNoteIds`
+- `RendererAdapter.pickAt` (`renderer.js:3506`) is a **reverse linear scan** over `_instanceNoteIds`
   (last-drawn is top-most), with a fast world-space AABB reject followed by a precise rounded-rect
   test so corners do not select.
-- `hitTestSubRegion` (`renderer.js:3575`) resolves *which* sub-region of a note was hit (pull tab,
+- `hitTestSubRegion` (`renderer.js:3569`) resolves *which* sub-region of a note was hit (pull tab,
   arrow column), and only runs once a body hit is confirmed.
 
 There is **no spatial index**, and measurement says none is warranted: 0.31 ms per call at 100,000
@@ -326,7 +326,7 @@ notes. See [Picking](/developer/rendering/picking).
 - Snapshots are stored as **minified JSON strings**, not parsed object graphs (~3–5× less retained
   heap). Each restore `JSON.parse`s fresh, giving the same isolation the old deep-clone did.
 - The old 2–3× per-action serialize was deduped: `captureSnapshot` serializes **once** and shares one
-  `snapshotStr` between the history capture and the localStorage autosave (`player.js:6013-6014`).
+  `snapshotStr` between the history capture and the localStorage autosave (`player.js:5123-5124`).
 - Two caps, both in `_enforceCaps()` (`history.js:35-43`): a count cap of **50** entries and a byte
   cap of **12 MB**. The byte cap drops oldest but always keeps **≥ 2** entries, so undo survives even
   one enormous snapshot.

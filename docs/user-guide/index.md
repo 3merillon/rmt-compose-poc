@@ -107,17 +107,6 @@ Multiply a frequency by a ratio.
 
 These are the expressions the shipped **Scale Systems** modules actually use.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Older modules store expressions as method chains. They still load and still evaluate.
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.getNoteById(3).getVariable('startTime').add(module.getNoteById(3).getVariable('duration'))
-```
-</details>
-
 ### Keyboard and gestures
 
 | Input | Action |

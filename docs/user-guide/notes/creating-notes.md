@@ -93,27 +93,6 @@ Every note property is a string expression. The shipped modules are all written 
 }
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Older modules use method chains. They still load, and the app converts them to DSL as soon as you display or save an expression.
-
-```json
-{
-  "notes": [
-    {
-      "id": 1,
-      "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
-      "startTime": "module.baseNote.getVariable('startTime')",
-      "duration": "module.baseNote.getVariable('duration')",
-      "color": "rgba(255, 100, 100, 0.7)",
-      "instrument": "sine-wave"
-    }
-  ]
-}
-```
-</details>
-
 See [Module Format](/user-guide/modules/module-format) for the full schema.
 
 ## Note properties

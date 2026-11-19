@@ -6,8 +6,7 @@ import { eventBus } from '../utils/event-bus.js';
 import Fraction from 'fraction.js';
 import { getModule, setEvaluatedNotes, getInstrumentManager } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
-import { decompileToDSL, isDSLSyntax, compileDSL } from '../dsl/index.js';
-import { ExpressionCompiler } from '../expression-compiler.js';
+import { decompileToDSL, compileDSL } from '../dsl/index.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
 import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
 import { settingsStore } from '../settings/settings-store.js';
@@ -17,8 +16,6 @@ import { hugeFractionDisplay } from './fraction-display.js';
 import { EXPRESSION_VARS, isMeasureNote } from '../note.js';
 import { CORRUPT } from '../binary-note.js';
 
-// Singleton compiler for safe evaluation
-const safeCompiler = new ExpressionCompiler();
 
 // Variables a note may leave unset: an empty Raw removes the expression and the
 // note inherits again (the BaseNote's, else 1 for amplitude, else the
@@ -168,7 +165,7 @@ function buildEvaluatedDiv(value) {
 
 /**
  * Convert a raw expression to DSL format for display
- * @param {string} rawExpr - Raw expression (could be legacy or DSL)
+ * @param {string} rawExpr - Raw expression
  * @param {Object} note - The note object (to get binary expression)
  * @param {string} key - The variable key (frequency, startTime, etc.)
  * @returns {string} DSL-formatted expression
@@ -248,16 +245,11 @@ function buildRawEditor(initialRaw, note = null, key = null) {
 }
 
 // Helper to build canonical duration expression: the time unit times n/d, base.d * (n/d)
-function computeDurationExpr(multiplierNum, multiplierDen = 1, useDSL = false) {
-  const one = (multiplierNum === 1 && multiplierDen === 1);
-  if (useDSL) {
-    if (one) return 'base.d';
-    return (multiplierDen === 1)
-      ? `base.d * ${multiplierNum}`
-      : `base.d * (${multiplierNum}/${multiplierDen})`;
-  }
-  if (one) return `module.baseNote.getVariable('duration')`;
-  return `module.baseNote.getVariable('duration').mul(new Fraction(${multiplierNum}, ${multiplierDen}))`;
+function computeDurationExpr(multiplierNum, multiplierDen = 1) {
+  if (multiplierNum === 1 && multiplierDen === 1) return 'base.d';
+  return (multiplierDen === 1)
+    ? `base.d * ${multiplierNum}`
+    : `base.d * (${multiplierNum}/${multiplierDen})`;
 }
 
 // Multiply two rational values and reduce (n1/d1) * (n2/d2).
@@ -376,8 +368,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
       const mod = dotPicks[selectedDotIdx];
       [n, d] = mulFrac(n, d, mod.n, mod.d);
     }
-    const noteUseDSL = isDSLSyntax(note?.variables?.durationString || '');
-    const expr = computeDurationExpr(n, d, noteUseDSL);
+    const expr = computeDurationExpr(n, d);
     rawInput.value = expr;
     try {
       saveButton.style.display = 'inline-block';
@@ -514,7 +505,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
           const validation = validateExpressionSyntax(raw);
           if (unit && validation.valid) {
             // Compile using safe parser
-            const binary = isDSLSyntax(raw) ? compileDSL(raw) : safeCompiler.compile(raw);
+            const binary = compileDSL(raw);
             // Evaluate using safe binary evaluator
             const evaluator = new BinaryEvaluator(moduleInstance);
             const val = evaluator.evaluate(binary, buildEvalCache(moduleInstance));
@@ -952,15 +943,6 @@ export function createVariableControls(key, value, note, measureId, externalFunc
 
         // Recompile updated note + dependents to ensure functions are in sync
         recompileNoteAndDependents(currentNoteId);
-
-        // Trigger dependent duration updates if provided by external functions
-        if (key === 'duration' && typeof externalFunctions.checkAndUpdateDependentNotes === 'function' && originalDuration !== undefined) {
-          const udv = note.getVariable('duration');
-          const updatedDuration = udv != null ? toNumber(udv, NaN) : undefined;
-          if (Math.abs((updatedDuration ?? 0) - (originalDuration ?? 0)) > 0.001) {
-            externalFunctions.checkAndUpdateDependentNotes(currentNoteId, originalDuration, updatedDuration);
-          }
-        }
 
         // Re-evaluate and refresh
         const evaluated = moduleInstance.evaluateModule();

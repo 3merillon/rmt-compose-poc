@@ -1,6 +1,6 @@
 ---
 title: Module API
-description: Note references in RMT Compose expressions — base, [N], the six properties, inheritance — plus the legacy module.* compatibility spelling and the Module methods getTimeUnit() and getMeasureNotes().
+description: Note references in RMT Compose expressions — base, [N], the six properties, inheritance — plus the Module methods getTimeUnit() and getMeasureNotes().
 ---
 
 # Module API
@@ -15,9 +15,7 @@ base.d * 2             # two time units
 ```
 
 ::: info There is no `module` object
-In the DSL there is nothing called `module` and nothing to call methods on. The
-`module.getNoteById(…)` spellings on this page belong to the older legacy format; they are kept in
-collapsed blocks so you can read an old file. The compiled result is identical either way.
+In the DSL there is nothing called `module` and nothing to call methods on.
 :::
 
 ## Note references
@@ -73,18 +71,6 @@ and carries on — `startTime` 0, `duration` 1, `frequency` 440. The three
 [inheriting](#inheritance) variables read the BaseNote's value instead, exactly as they would on
 a note that exists but does not define them. Nothing on screen tells you this happened, so check
 the `Evaluated:` line.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency')          // base.f
-module.baseNote.getVariable('duration')           // base.d
-module.getNoteById(1).getVariable('frequency')    // [1].f
-module.getNoteById(5).getVariable('startTime')    // [5].t
-module.getNoteById(10).getVariable('duration')    // [10].d
-```
-</details>
 
 ## Properties
 
@@ -155,21 +141,6 @@ Outside an expression, the application's `Module` has two methods for the new ti
 `findTempo()` and `findMeasureLength()` are gone, and the bytecode opcodes `FIND_TEMPO` and
 `FIND_MEASURE` are retired. `EXPRESSION_VARS` (the six variable names) and `isMeasureNote(note)` are exported from
 `src/note.js`.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-A legacy expression is a method chain over the same references:
-
-```javascript
-module.baseNote.getVariable('duration')                       // base.d
-module.getNoteById(1).getVariable('duration')                 // [1].d
-module.baseNote.getVariable('duration').mul(new Fraction(2))  // base.d * 2
-```
-
-`module.findTempo(…)` and `module.findMeasureLength(…)` no longer exist. Typing either is refused
-with a message pointing at `module.baseNote.getVariable('duration')`.
-</details>
 
 ## Dependencies
 
@@ -250,30 +221,10 @@ base.f * 2^(4/12)      # a 12-TET major third
 [1].f * 3^(1/13)       # one Bohlen-Pierce step above note 1
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Perfect fifth above the BaseNote
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-
-// Start when note 7 ends
-module.getNoteById(7).getVariable('startTime')
-  .add(module.getNoteById(7).getVariable('duration'))
-
-// Half a time unit
-module.baseNote.getVariable('duration').mul(new Fraction(1, 2))
-
-// 12-TET semitone above the BaseNote
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(1, 12)))
-```
-</details>
-
 ## See also
 
 - [Expression Syntax](/reference/expressions/syntax) — the full grammar
 - [Operators](/reference/expressions/operators) — precedence and result types
-- [Fraction API](/reference/expressions/fraction-api) — exact numbers, and the legacy surface
+- [Fraction API](/reference/expressions/fraction-api) — exact numbers
 - [Dependencies](/user-guide/notes/dependencies) — dependency lines in the workspace
 - [Dependency Graph](/developer/core/dependency-graph) — how the graph is built

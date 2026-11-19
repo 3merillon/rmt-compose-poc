@@ -239,32 +239,32 @@ actually costs.
 | GL element | Token | Source |
 |---|---|---|
 | Note body **border** (every note, not just the base) | `noteBorder` | `renderer.js:2857` |
-| Silence dashed ring | `noteBorder` | `renderer.js:7446`, `:7680` |
-| BaseNote circle fill | `accent` | `renderer.js:5494` |
-| BaseNote circle border | `noteBorder` | `renderer.js:5495` |
-| Octave / base guide lines | `accent` (alpha 0.9 primary, 0.35 secondary) | `renderer.js:9056`, `:9504` |
-| Note ID labels | `accent` | `renderer.js:7106-7111` |
-| BaseNote fraction label | `accent` | `renderer.js:6214` |
-| Octave-guide + measure-triangle ID labels | `accent` | `renderer.js:7826`, `:7879` |
-| Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:5133` |
-| Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5319` |
+| Silence dashed ring | `noteBorder` | `renderer.js:7440`, `:7674` |
+| BaseNote circle fill | `accent` | `renderer.js:5488` |
+| BaseNote circle border | `noteBorder` | `renderer.js:5489` |
+| Octave / base guide lines | `accent` (alpha 0.9 primary, 0.35 secondary) | `renderer.js:9050`, `:9498` |
+| Note ID labels | `accent` | `renderer.js:7100-7105` |
+| BaseNote fraction label | `accent` | `renderer.js:6208` |
+| Octave-guide + measure-triangle ID labels | `accent` | `renderer.js:7820`, `:7873` |
+| Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:5127` |
+| Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5313` |
 | Playhead line | `playhead`, via `config.playhead.color` | `renderer.js:3187` |
-| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:11006-11011` |
+| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:10977-10982` |
 | Selected-note ring | `selectionRing` | `renderer.js:3066` |
 | Selected-note fill wash | `selectionRing` @ 0.12 | `renderer.js:3023` |
 | Multi-select group ring | `selectionRing`, 4 px (`selection.multiRingThicknessPxAtZoom1 ?? 4.0`) | `renderer.js:1631-1638` |
-| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5515`, `:6151` |
-| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3141`, `:5598`, `:6123` |
-| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:2921-2923`, `:5547-5549` |
-| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:6096-6112` |
-| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:5772-5846`, `:6284-6351`, `:7144`, `:7234` |
+| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5509`, `:6145` |
+| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3141`, `:5592`, `:6117` |
+| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:2921-2923`, `:5541-5543` |
+| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:6090-6106` |
+| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:5766-5840`, `:6278-6345`, `:7138`, `:7228` |
 | Note height / border px / corner px | `appearance.note.*` | `theme-manager.js:155-162` |
 
 ### What is baked and cannot be themed
 
 | GL element | Colour | Source |
 |---|---|---|
-| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2430`, `note-creation.js:523-535` |
+| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2152`, `note-creation.js:515-527` |
 
 ![The Appearance tab of the Settings panel: theme dropdown, three geometry sliders, and fifteen colour pickers grouped into Interface, Workspace and Dependency highlights](/img/settings-appearance.png)
 
@@ -358,7 +358,7 @@ Full token tables are in the [Settings reference](/reference/settings-reference)
 - **There is no OS light/dark detection.** No `prefers-color-scheme` handling for app theming
   anywhere. `mono-light` is chosen by hand or not at all.
 - **There is a boot flash.** The `:root` literals in `styles.css` are classic-orange, and
-  `themeManager.init()` only runs once the GL workspace exists (`player.js:1232`). A user on
+  `themeManager.init()` only runs once the GL workspace exists (`player.js:1063`). A user on
   `mono-light` sees a brief dark/orange flash on every load. Do not promise flicker-free theming.
 - **Selecting a preset silently discards every colour override** and overwrites the geometry
   sliders with the preset's declared geometry, with no confirmation. Only the explicit "Reset

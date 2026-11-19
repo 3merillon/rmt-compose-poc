@@ -88,7 +88,7 @@ A **thick** line points at something the selected note depends on. A **thin** li
 **Start** (the default) or **End**, set by the two drop-mode buttons in the [module bar](#module-bar)'s toolbar — ⇤ for **Start**, ⇥ for **End**, just left of **Undo**/**Redo**; exactly one is lit at a time. It decides whether a module you drag onto a note anchors its imported start times to that note's **start** or to its **end**.
 
 ### DSL
-The expression language: `base.f * (3/2)`, `[1].t + [1].d`, `base.d * (1/2)`, `2^(7/12)`. Infix operators and note references in square brackets; it has no functions. It is the primary format — every shipped module uses it, and the note widget always *displays* it (a legacy expression is decompiled into DSL for the input box). Edits the app performs for you — a drag, a resize, an arrow press — rewrite an expression in whatever format it already uses; pressing **Save** in the note widget is what converts a legacy expression to DSL. See the [syntax reference](/reference/expressions/syntax).
+The expression language: `base.f * (3/2)`, `[1].t + [1].d`, `base.d * (1/2)`, `2^(7/12)`. Infix operators and note references in square brackets; it has no functions. Every shipped module uses it. Edits the app performs for you — a drag, a resize, an arrow press — rewrite the expression in the DSL. See the [syntax reference](/reference/expressions/syntax).
 
 ## E
 
@@ -128,9 +128,6 @@ The half of the [dependency graph](#dependency-graph) that answers "what depends
 Tuning by exact whole-number ratios drawn from the harmonic series: `3/2`, `5/4`, `7/4`. Ratios are rational, so they never corrupt.
 
 ## L
-
-### Legacy syntax
-The original method-chain expression format: `module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))`. It still loads and still saves back verbatim, and it compiles to exactly the same bytecode as the DSL. You will only meet it in old files.
 
 ### Liberation (Liberate Dependencies)
 The **Liberate Dependencies** button in the note widget. It cuts every note that *depends on* the selected note free from it, by substituting the selected note's own expressions in place of the references to it. The dependents keep their current positions and pitches — they simply stop following the note. Undoable. Not available on measure bars.

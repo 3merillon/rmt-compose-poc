@@ -190,7 +190,7 @@ signal.
 ### Viewport culling
 
 The per-note overlay loop — pull tab, interval arrows, fraction divider, silence band, and all of a
-note's text runs — is culled against the viewport (`renderer.js:7009-7040`). Every overlay is
+note's text runs — is culled against the viewport (`renderer.js:7003-7034`). Every overlay is
 scissored to that note's own rect, so a note entirely off-canvas cannot produce a single pixel; the
 cull is *exact*, not an approximation, which is why the picture stays pixel-identical.
 
@@ -274,12 +274,12 @@ document or build on it.
 
 The live path:
 
-- `RendererAdapter.pickAllAt()` (`renderer.js:9271`) — measure triangles (top) → base circle → the
+- `RendererAdapter.pickAllAt()` (`renderer.js:9265`) — measure triangles (top) → base circle → the
   note stack. Returns hits top-most first.
-- `RendererAdapter.pickAt()` (`renderer.js:3512`) — a **reverse linear scan** over `_instanceNoteIds`
+- `RendererAdapter.pickAt()` (`renderer.js:3506`) — a **reverse linear scan** over `_instanceNoteIds`
   (last-drawn is top-most), a fast world-space AABB reject, then a precise **rounded-rect** test so
   the corners of a note are not selectable.
-- `hitTestSubRegion()` (`renderer.js:3575`) — which *sub-region* was hit (pull tab, arrow column).
+- `hitTestSubRegion()` (`renderer.js:3569`) — which *sub-region* was hit (pull tab, arrow column).
   Only runs once a note body is hit, and respects the rounded interior.
 
 There is **no spatial index**, and measurement says none is warranted: `pickAt` is **0.017 ms at 5,000

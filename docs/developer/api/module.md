@@ -60,7 +60,7 @@ module.notes  // { [id: number]: Note } — a plain object, not a Map
 
 Keyed by note id, and it **includes the BaseNote at key `0`**. `module.notes.get(1)` throws;
 use `module.getNoteById(1)`. Iterating with `Object.values(module.notes)` yields the BaseNote
-too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:939`).
+too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:933`).
 
 ### baseNote
 
@@ -97,18 +97,6 @@ const note = module.addNote({
 
 Pass `measure: true` to create a [measure bar](#generatemeasures) (a silent note with a start and
 a duration).
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-const note = module.addNote({
-  frequency: "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
-  startTime: "module.baseNote.getVariable('startTime')",
-  duration: "module.baseNote.getVariable('duration')"
-})
-```
-</details>
 
 ### getNoteById()
 
@@ -159,7 +147,7 @@ The same thing for many notes in one pass: it registers dependencies once, colle
 **and** the transitive dependencies of the marked notes, then invalidates the incremental
 evaluator selectively rather than wholesale. Collecting the *dependencies* matters — without them
 an imported note's parent may not be in the cache when the child evaluates. The module-import path
-(`src/player.js:2107`) uses it after grafting a library module onto a target note.
+(`src/player.js:1829`) uses it after grafting a library module onto a target note.
 
 ### batchSetExpressions()
 
@@ -386,12 +374,11 @@ const name = module.findInstrument(note)  // string
 ```
 
 Returns `note.properties.instrument` when it is pinned. Otherwise it follows the note's
-**frequency expression** to its parent (`[N].f` in DSL, `module.getNoteById(N).getVariable('frequency')`
-in legacy) and asks that note, recursively. A note that bottoms out at `base.f` — or at nothing —
+**frequency expression** to its parent (`[N].f`) and asks that note, recursively. A note that bottoms out at `base.f` — or at nothing —
 resolves to the module-level default instrument.
 
 That default is a module-scoped value, not a constant: `player.js` calls `setDefaultInstrument()`
-whenever the `audio.defaultInstrument` setting changes (`src/player.js:1210-1225`). This is the
+whenever the `audio.defaultInstrument` setting changes (`src/player.js:1041-1056`). This is the
 bridge between the Settings panel and note timbre.
 
 ```javascript
@@ -458,15 +445,21 @@ const module = await Module.loadFromJSON(source)
 `source` is either a URL string (which gets `fetch`ed) or a plain object. Ends with
 `invalidateAll()`, so the returned module is ready to evaluate.
 
-Before it builds any note, it runs the data through `migrateTimeModel()`
-(`src/migrate/relational-time.js`). A module written for the old time model (tempo, beats per
-measure, `beat()`, `measure()`, legacy `findTempo` chains) is converted exactly: every start,
-duration, frequency and amplitude keeps the same fraction. A module the converter cannot convert
-throws a `TimeMigrationError` instead of loading wrong. A converted load logs one
-`[RMT] Converted a module to relational time` line. See
-[Module System](/developer/architecture/module-system#loading-old-modules).
+Before it builds any note, it runs the data through two conversions, in this order:
 
-Per-note id guards (`src/module.js:872-884`): ids that are not integers, are `< 0`, or are
+1. `migrateTimeModel()` (`src/migrate/relational-time.js`): a module written for the old time
+   model (tempo, beats per measure, `beat()`, `measure()`, `module.findTempo` chains) is rewritten
+   in relational time. A module it cannot convert throws a `TimeMigrationError`. A converted load
+   logs one `[RMT] Converted a module to relational time` line.
+2. `migrateSyntax()` (`src/migrate/legacy-syntax.js`): every expression in the retired method-chain
+   syntax becomes DSL. One it cannot read as written throws a `SyntaxMigrationError` naming the
+   note and variable. A converted load logs `[RMT] N expression(s) converted from the method-chain
+   syntax to the DSL`.
+
+Both are exact: every start, duration, frequency and interpretation value keeps the same fraction.
+See [Module System](/developer/architecture/module-system#loading-old-modules).
+
+Per-note id guards (`src/module.js:866-878`): ids that are not integers, are `< 0`, or are
 `> 65535` (the `u16` ceiling of `LOAD_REF`) are skipped with a `[RMT Security]` warning; the
 literal ids `__proto__`, `constructor` and `prototype` are blocked outright. There is no `eval()`
 anywhere in this path — expressions are compiled to bytecode.
@@ -482,7 +475,7 @@ module.reindexModule()
 ```
 
 Renumbers in place, from 1: measure bars (`isMeasureNote()`) first, sorted by evaluated `startTime`, then regular
-notes. Rewrites every `[N]` and `module.getNoteById(N)` reference to match, rebuilds the dependency
+notes. Rewrites every `[N]` reference to match, rebuilds the dependency
 graph, and re-evaluates (which repopulates corruption flags).
 
 ## Timing and diagnostics

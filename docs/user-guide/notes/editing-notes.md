@@ -60,7 +60,7 @@ They apply a **user-chosen ratio**, set in **Settings → Arrows**. The default 
 
 ## In the note widget
 
-Each property gets a row with an **`Evaluated:`** readout (what it currently works out to) and a **`Raw:`** field (the expression). The Raw field **always shows DSL**, even for a note that was authored in the legacy method-chain format.
+Each property gets a row with an **`Evaluated:`** readout (what it currently works out to) and a **`Raw:`** field (the expression). The Raw field **always shows DSL**.
 
 If an expression is invalid, self-referencing, or would create a cycle, pressing `Save` refuses the edit and shows the reason **inline** — a red message under the Save button and a red border on the field, both cleared on your next keystroke. The field keeps your text so you can fix it. (`color` is the exception: it pops an alert instead.)
 
@@ -73,16 +73,6 @@ base.f * (5/4)      # just major third above the BaseNote
 base.f * 2^(7/12)   # a 12-TET fifth above the BaseNote
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
-module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))
-new Fraction(440)
-```
-</details>
-
 ### Start time
 
 ```
@@ -90,15 +80,6 @@ base.t                    # start with the BaseNote
 [2].t + [2].d             # start when note 2 ends
 base.t + base.d * 2       # two time units after the BaseNote
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('startTime')
-module.getNoteById(2).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))
-```
-</details>
 
 ### Duration
 
@@ -124,16 +105,6 @@ base.d * 2              # a half note
 base.d * (3/4)          # a dotted eighth
 [3].d                   # the same length as note 3, and tied to it
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('duration')
-module.baseNote.getVariable('duration').mul(new Fraction(2))
-module.getNoteById(3).getVariable('duration')
-```
-</details>
 
 ::: tip `1` is not one time unit
 `1` is one **second**. In the default module the time unit is `3/5` s, so `1` is about 1.67 units. Use `base.d` for one unit.

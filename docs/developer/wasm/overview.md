@@ -32,7 +32,7 @@ feature. The JS path carries the app on its own: a full re-evaluation of the 100
 |---|---|---|
 | `initWasm()` is called eagerly at import time | `src/store/app-state.js:6` | **Returns `false` early**: `isEvaluatorHotSwapEnabled()` is false while the layout flag is false — no fetch |
 | `initWasm()` is `await`ed during `initApp()` | `src/main.js:82` | Same early-out |
-| `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:139-148` | Same call, same gate, deduped by a `wasmInitialized` guard |
+| `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:65-74` | Same call, same gate, deduped by a `wasmInitialized` guard |
 | `Module` constructor registers a hot-swap callback | `src/module.js:65-71` | **Never**: `isEvaluatorHotSwapEnabled()` is false everywhere |
 | Evaluation | `src/binary-evaluator.js` | JS |
 
@@ -174,16 +174,16 @@ diagonal hatch for transitive). The Rust bitmask says *which property* is irrati
 value says *how* the note became corrupt. They are different questions and different code paths.
 :::
 
-## The compiler only understands legacy syntax
+## The compiler only understands the retired syntax
 
-`ExpressionCompiler` in `rust/src/compiler.rs` parses the **legacy method-chain grammar** only —
+`ExpressionCompiler` in `rust/src/compiler.rs` parses the **method-chain grammar** only —
 `module.baseNote.getVariable('frequency')`, `module.getNoteById(3).getVariable('startTime')`, and
 `.add()/.sub()/.mul()/.div()/.pow()` chains. It has no lexer for the DSL.
 
-Every default module and every expression the app writes today is DSL (`base.f * (3/2)`,
-`[3].t + [3].d`, `base.d * 2`). DSL is compiled by the **JavaScript** DSL compiler
-(`src/dsl/compiler.js`), routed from `src/expression-compiler.js` by `isDSLSyntax()`. So even if the
-WASM compiler were wired in, it would fall back to JS for essentially every expression in the app.
+That grammar is retired in the JavaScript app: the DSL is the only language, compiled by the
+**JavaScript** DSL compiler (`src/dsl/compiler.js`) through `src/expression-compiler.js`, and modules
+in the old syntax are converted to DSL on load (`src/migrate/legacy-syntax.js`). So the WASM compiler
+could compile nothing the app holds; it is left in the crate until the Rust core is ported.
 
 It is not wired in: `src/wasm/compiler-adapter.js` is imported by nothing. See
 [JS/WASM Adapters](/developer/wasm/adapters#dead-code-three-of-the-four-adapters).

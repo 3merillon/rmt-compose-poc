@@ -32,7 +32,7 @@ const note = new Note(id, variables = {})
 | Parameter | Type | Description |
 |---|---|---|
 | `id` | number | Note id. `0` is the BaseNote. |
-| `variables` | object | Expression strings (DSL or legacy), plus optional `color` / `instrument`. |
+| `variables` | object | Expression strings (DSL), plus optional `color` / `instrument`. |
 
 ::: warning Create notes through the module
 `module.addNote(variables)` or `Module.loadFromJSON()`. A `Note` built directly has
@@ -168,20 +168,9 @@ note.setVariable('frequencyString', 'base.f * (3/2)')   // identical
 note.setVariable('color', '#ff0000')
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-note.setVariable('frequency', "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))")
-```
-
-The compiler sniffs the format per string (`isDSLSyntax()`), so a legacy string and its DSL
-equivalent produce identical bytecode.
-</details>
-
 ::: warning Compilation failures do not throw out of `setVariable()`
-`ExpressionCompiler.compile()` **throws** on an expression neither parser can read, after emitting
-a `console.error` naming the expression. `_setExpression()` and the constructor catch that throw
+`ExpressionCompiler.compile()` **throws** on an expression it cannot read (a DSL syntax error, or
+text in the retired method-chain syntax). `_setExpression()` and the constructor catch that throw
 per-property, so a typo leaves the property **unset** (or keeps the previous expression) rather
 than silently zeroing it — but the caller of `setVariable()` sees no exception either. Validate
 first with `validateDSL()` from `src/dsl/index.js` if you need a structured answer.
@@ -197,7 +186,7 @@ Returns `expr.sourceText` when the expression was compiled from text — so a DS
 exactly the DSL you wrote. Returns `null` for an unset property.
 
 If `sourceText` is empty (a synthesised expression), it falls back to `decompiler.decompile(expr)`,
-which emits **legacy** syntax. For DSL output from bytecode use `decompileToDSL()` instead.
+which decompiles the bytecode to DSL.
 
 ### getExpression() / hasExpression()
 
@@ -271,9 +260,8 @@ One entry per non-empty expression, plus `color` / `instrument` when set and `me
 measure bar.
 
 ::: info This is not the app's save path
-`toJSON()` runs each expression through the **legacy** decompiler. That decompiler returns
-`sourceText` verbatim when it has it, so for a note loaded from text you get your DSL back — but a
-synthesised expression comes out as a legacy method chain.
+`toJSON()` runs each expression through `decompiler.decompile()`, which returns `sourceText`
+verbatim when it has it and otherwise decompiles the bytecode to DSL.
 
 The app saves through `Module.createModuleJSON()`, which uses `getExpressionSource()`. Reach for
 that one.

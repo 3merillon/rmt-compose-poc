@@ -104,32 +104,12 @@ base.f * 2             # octave above
 base.f / (4/3)         # perfect fourth below
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency')
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.baseNote.getVariable('frequency').mul(new Fraction(2))
-module.baseNote.getVariable('frequency').div(new Fraction(4, 3))
-```
-</details>
-
 ### Relative to another note
 
 ```
 [1].f * (5/4)          # major third above note 1
 [3].f / 2              # octave below note 3
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
-module.getNoteById(3).getVariable('frequency').div(new Fraction(2))
-```
-</details>
 
 ### Equal temperament
 
@@ -142,15 +122,6 @@ base.f * 2^(1/19)      # one 19-TET step
 ```
 
 Exponents are reduced on save: `base.f * 2^(4/12)` is stored as `base.f * 2^(1/3)`.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(7, 12)))
-```
-</details>
 
 ## Just-intonation ratios
 

@@ -24,17 +24,6 @@ different interval, edit note 2's `frequency` in its `Raw:` field and press **Sa
 
 Note 2 is defined against note 1, so it follows note 1 anywhere. Note 1 is your movable reference.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Note 2: a perfect fifth above note 1
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration:  module.getNoteById(1).getVariable('duration')
-```
-</details>
-
 ### Before you listen: turn reverb off
 
 Reverb is **on by default**. It blurs the beating that tells you an interval is out of tune. Open the

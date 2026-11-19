@@ -11,7 +11,8 @@
  *      at exactly 1 (so playback is unchanged). Checked on every shipped module.
  *   B. Inheritance and references — `base.a` scales the notes that do not
  *      define their own; `[N].a` reads what note N sounds at; `a`, `amp` and
- *      `amplitude` are the same property; the legacy syntax works too.
+ *      `amplitude` are the same property; a module in the retired
+ *      method-chain syntax converts on load.
  *   C. Exactness — a 50-note chain of `(121/100) * [prev].a` evaluates to
  *      exactly (121/100)^50 (compared against native BigInt).
  *   D. Irrational gains raise the amplitude corruption bit (0x08) and no other.
@@ -92,7 +93,7 @@ console.log('\nAmplitude: inheritance and references\n');
   check(amp(mod, 2) === '121/200', 'B3 [N].a reads what an inheriting note sounds at');
   check(amp(mod, 3) === '2', 'B4 a note\'s own amplitude wins over the BaseNote\'s');
   check(amp(mod, 4) === '121/400', 'B5 amp / amplitude are the same property as a');
-  check(amp(mod, 5) === '121/100', 'B6 legacy getVariable(\'amplitude\') syntax');
+  check(amp(mod, 5) === '121/100', 'B6 a module written with getVariable(\'amplitude\') converts on load');
 
   const bytes = (src) => { const b = compiler.compile(src); return Array.from(b.bytecode.subarray(0, b.length)).join(','); };
   check(bytes('[7].a') === bytes('[7].amp') && bytes('[7].a') === bytes('[7].amplitude')

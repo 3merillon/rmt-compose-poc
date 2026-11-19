@@ -20,16 +20,6 @@ startTime: [2].t
 duration:  [2].d
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
-startTime: module.getNoteById(2).getVariable('startTime')
-duration:  module.getNoteById(2).getVariable('duration')
-```
-</details>
-
 ### Harmony that follows a melody
 
 | Note | Role | frequency | startTime | duration |

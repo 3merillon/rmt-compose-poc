@@ -4,15 +4,12 @@
 //   - createAddMeasureSection(note, measureId, externalFunctions) => HTMLElement
 import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
-import { isDSLSyntax, compileDSL, decompileToDSL } from '../dsl/index.js';
+import { compileDSL, decompileToDSL } from '../dsl/index.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
-import { ExpressionCompiler } from '../expression-compiler.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
 import { hugeFractionDisplay } from './fraction-display.js';
 import { EXPRESSION_VARS, isReferenceNote } from '../note.js';
 
-// Singleton compiler for safe evaluation
-const safeCompiler = new ExpressionCompiler();
 
 function pauseIfPlaying() {
   try {
@@ -379,12 +376,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       }
 
       // Compile the expression using safe parser
-      let binary;
-      if (isDSLSyntax(expr)) {
-        binary = compileDSL(expr);
-      } else {
-        binary = safeCompiler.compile(expr);
-      }
+      const binary = compileDSL(expr);
 
       // Build an eval cache from current module state (the BaseNote is id 0)
       const evalCache = new Map();

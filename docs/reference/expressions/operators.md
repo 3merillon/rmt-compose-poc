@@ -50,16 +50,6 @@ base.t + base.d        # one time unit after the BaseNote starts
 
 Exact. `(1/2) + (1/3)` is `5/6`, not `0.8333…`.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(1, 2).add(new Fraction(1, 3))
-module.getNoteById(5).getVariable('startTime')
-  .add(module.getNoteById(5).getVariable('duration'))
-```
-</details>
-
 ## Subtraction: `-`
 
 ```
@@ -67,15 +57,6 @@ module.getNoteById(5).getVariable('startTime')
 (3/4) - (1/4)          # 1/2
 [3].t - (1/2)          # half a second before note 3 starts
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(5).sub(new Fraction(2))
-module.getNoteById(3).getVariable('startTime').sub(new Fraction(1, 2))
-```
-</details>
 
 ## Multiplication: `*`
 
@@ -87,15 +68,6 @@ base.d * 2             # two time units
 ```
 
 Multiplication is how you build intervals. See [Pure Ratios](/user-guide/tuning/ratios).
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(3, 2).mul(new Fraction(5, 4))
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-```
-</details>
 
 ## Division: `/`
 
@@ -116,15 +88,6 @@ it falls back to a grouped division.
 For a length, write it against the time unit: `base.d / 2` or `base.d * (1/2)`. A tempo is never
 divided into a duration: `60 / base.d` is only the BPM view shown in the note widget.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(3, 2).div(new Fraction(3))
-module.baseNote.getVariable('duration').div(new Fraction(2))   // half a time unit
-```
-</details>
-
 ## Negation: `-` (prefix)
 
 ```
@@ -134,12 +97,6 @@ module.baseNote.getVariable('duration').div(new Fraction(2))   // half a time un
 ```
 
 Prefix `-` binds tighter than `*` and `/` but looser than `^`, so `-2^2` is `-4`.
-
-::: warning No legacy equivalent you can type
-`.neg()` appears in some old expressions but the legacy parser **cannot read it** — a saved
-`new Fraction(5).neg()` fails to compile, so the widget rejects it on save and a file load
-leaves the property unset. Write `-5` in DSL, or `new Fraction(-5)` in legacy.
-:::
 
 ## Power: `^`
 
@@ -191,16 +148,6 @@ power is treated like an irrational instead — the property is flagged corrupte
 is an approximation. Below the caps, integer powers and perfect roots are exact regardless of
 how many digits the result has.
 :::
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(2).pow(new Fraction(3))      // 8
-new Fraction(2).pow(new Fraction(-1))     // 1/2
-new Fraction(2).pow(new Fraction(1, 12))  // 12-TET semitone
-```
-</details>
 
 ## Worked patterns
 
@@ -271,13 +218,13 @@ See [Binary Evaluator](/developer/core/binary-evaluator) for how the bytecode ru
 | `2^(1/12)` | Accepted. Irrational — the property is flagged corrupted |
 | `2^100000` | Accepted. Past the exact-power caps — approximated, and the property is flagged corrupted |
 | `[70000].f` | Rejected on save: `Note IDs must be integers between 0 and 65535` |
-| Anything neither compiler can parse | Rejected: `console.error` plus a thrown compile error; the widget shows the message, and on a file load the property is left unset |
+| Anything the compiler cannot parse | Rejected: `console.error` plus a thrown compile error; the widget shows the message, and on a file load the property is left unset |
 
 The `Evaluated:` line in the note widget still repays a glance after saving anything unusual.
 
 ## See also
 
 - [Expression Syntax](/reference/expressions/syntax) — the full grammar
-- [Fraction API](/reference/expressions/fraction-api) — exactness, and the legacy surface
+- [Fraction API](/reference/expressions/fraction-api) — exactness
 - [Module API](/reference/expressions/module-api) — note references and the six properties
 - [Binary Evaluator](/developer/core/binary-evaluator) — bytecode execution

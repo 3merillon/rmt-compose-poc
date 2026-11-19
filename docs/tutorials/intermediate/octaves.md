@@ -46,10 +46,6 @@ Power terms are left alone, so a TET note keeps its shape:
 
 The `2^(7/12)` is untouched, so the note stays a 12-TET fifth — it just moved up an octave.
 
-::: warning
-This folding applies to DSL expressions. A note stored in the old method-chain format *and* containing a `.pow(` call is instead wrapped on every press, so repeated arrow clicks genuinely nest multipliers in it. That is deliberate — folding would destroy the power term — but it means "up then down restores the expression" holds for DSL notes, not for legacy TET ones. Everything the app writes today is DSL.
-:::
-
 ## Arrows move whole structures
 
 Because dependents follow their parents, an arrow on a *root* moves everything anchored to it.

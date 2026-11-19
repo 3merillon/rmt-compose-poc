@@ -5,21 +5,16 @@
  * using eval() or new Function(). Instead, it leverages the existing safe
  * compilation pipeline:
  *
- * 1. DSL expressions (e.g., "[1].f * (3/2)") → compileDSL() → BinaryExpression
- * 2. Legacy expressions (e.g., "new Fraction(...)") → ExpressionCompiler → BinaryExpression
- * 3. BinaryExpression → BinaryEvaluator → Safe evaluation
+ * 1. DSL expressions (e.g., "[1].f * (3/2)") → compiler.compile() → BinaryExpression
+ * 2. BinaryExpression → BinaryEvaluator → Safe evaluation
  *
  * This prevents arbitrary code execution from malicious module.json files.
  */
 
 import Fraction from 'fraction.js';
-import { ExpressionCompiler } from '../expression-compiler.js';
+import { compiler } from '../expression-compiler.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
-import { isDSLSyntax, compileDSL } from '../dsl/index.js';
 import { findDependencyCycle } from '../variable-deps.js';
-
-// Singleton compiler instance
-const safeCompiler = new ExpressionCompiler();
 
 /**
  * Validate that an expression string is safe to use.
@@ -71,16 +66,9 @@ export function validateExpressionSyntax(expr) {
         }
     }
 
-    // Try to compile the expression using the safe compiler
-    // If it fails to parse with our strict parser, it's invalid
+    // The DSL is inherently safe: it compiles to bytecode or fails to parse.
     try {
-        if (isDSLSyntax(exprStr)) {
-            // DSL syntax is inherently safe - it compiles to bytecode
-            compileDSL(exprStr);
-        } else {
-            // Legacy syntax - use our strict regex-based parser
-            safeCompiler.compile(exprStr);
-        }
+        compiler.compile(exprStr);
         return { valid: true };
     } catch (e) {
         return { valid: false, error: `Invalid expression: ${e.message}` };
@@ -116,12 +104,7 @@ export function evaluateExpressionSafe(expr, moduleInstance, evalCache = null) {
 
     try {
         // Compile to binary
-        let binary;
-        if (isDSLSyntax(exprStr)) {
-            binary = compileDSL(exprStr);
-        } else {
-            binary = safeCompiler.compile(exprStr);
-        }
+        const binary = compiler.compile(exprStr);
 
         // Build evaluation cache if not provided
         const cache = evalCache || buildEvaluationCache(moduleInstance);
@@ -249,7 +232,7 @@ export function validateAndNormalizeExpression(expr, moduleInstance, noteId, var
     // like evaluation: reading another variable of the same note is fine, a
     // variable that ends up reading itself is not.
     if (noteId !== undefined && noteId !== null) {
-        const binary = isDSLSyntax(exprStr) ? compileDSL(exprStr) : safeCompiler.compile(exprStr);
+        const binary = compiler.compile(exprStr);
         const cycle = findDependencyCycle(moduleInstance, noteId, variableType, binary);
         if (cycle) {
             throw new Error(cycle.length === 1

@@ -84,16 +84,6 @@ base.f * 2 ^ (6/19)     # major third
 base.f * 2 ^ (11/19)    # fifth
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency')
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(6, 19)))
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(11, 19)))
-```
-</details>
-
 ## The shipped module
 
 The library's **Scale Systems** section ships a **19-TET** module (file `scale-systems/TET-19.json`; the tile reads **19-TET**).

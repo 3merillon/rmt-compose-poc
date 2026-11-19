@@ -54,19 +54,6 @@ The **raw expression** is written out, never the number it evaluated to:
 
 That is what makes a module portable. Load it somewhere else, or drop it onto a different note, and the fifth is still a fifth — relative to whatever it now sits on.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-A module authored in the older method-chain format saves back in that format, verbatim:
-
-```json
-{ "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))" }
-```
-
-Saving does **not** convert legacy expressions to DSL, or DSL to legacy. The source text round-trips exactly as written.
-
-</details>
-
 ### What changes on the way out
 
 **The file is reindexed.** Measure bars are renumbered first (sorted by start time), then the remaining notes (also by start time), starting at id 1, and every `[N]` reference is rewritten to match. The ids in the downloaded file will generally differ from the ids you saw on screen. **Reorder Module** in the **+** menu applies the same renumbering to the live workspace, behind a confirmation — it is not something you need to do before saving.

@@ -76,17 +76,6 @@ base.f * 3 ^ (4/13)      # 7   (585.2¢ — just 7/5 is 582.5¢)
 base.f * 3 ^ (7/13)      # 9   (1024.1¢ — just 9/5 is 1017.6¢)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// BP major chord (3:5:7)
-module.baseNote.getVariable('frequency')
-module.baseNote.getVariable('frequency').mul(new Fraction(3).pow(new Fraction(6, 13)))
-module.baseNote.getVariable('frequency').mul(new Fraction(3).pow(new Fraction(10, 13)))
-```
-</details>
-
 ::: tip Hear the just version too
 The library ships both chords as pure ratios. **Base-3 chord** (3:5:7:9) and **Base-5 chord** (5:7:9:11) are in the **Chords** section. Drop one next to a tempered BP chord and compare — the tempered one is a few cents off and beats very slowly.
 :::

@@ -36,10 +36,9 @@ flowchart TB
         UI[Pointer / widgets / settings]
     end
 
-    subgraph Front["Expression front ends"]
-        ROUTE["ExpressionCompiler.compile()<br/>isDSLSyntax → route"]
+    subgraph Front["Expression front end"]
+        COMP["ExpressionCompiler.compile()<br/>LRU cache"]
         DSL["src/dsl/<br/>lexer → parser → compiler"]
-        LEG["legacy method-chain parser"]
     end
 
     subgraph Core["Core"]
@@ -63,14 +62,12 @@ flowchart TB
         SET[settingsStore]
     end
 
-    JSON -->|"Module.loadFromJSON (migrateTimeModel first)"| MOD
+    JSON -->|"Module.loadFromJSON (migrateTimeModel, migrateSyntax first)"| MOD
     UI --> MOD
     MOD --> NOTE
-    NOTE --> ROUTE
-    ROUTE --> DSL
-    ROUTE --> LEG
+    NOTE --> COMP
+    COMP --> DSL
     DSL --> BIN
-    LEG --> BIN
     BIN --> DEP
     BIN --> EVAL
     DEP --> EVAL
@@ -86,30 +83,25 @@ flowchart TB
 
 ## Layer responsibilities
 
-### Expression front ends
+### Expression front end
 
-Two syntaxes compile to the **same bytecode**. `ExpressionCompiler.compile()`
-(`src/expression-compiler.js:54`) is the single routing point: it probes an LRU cache, calls
-`isDSLSyntax()`, and sends the text to the DSL pipeline or the legacy parser accordingly.
+One language, the **DSL** (`src/dsl/`): `base.f * (3/2)`, `[1].t + [1].d`, `base.d * 4`, infix
+`+ - * / ^`. It has no functions. Every shipped module file uses it, the note widget displays it, and
+every expression the app writes on your behalf is DSL. `ExpressionCompiler.compile()`
+(`src/expression-compiler.js:45`) puts an LRU cache in front of the DSL compiler and refuses text in
+the retired method-chain syntax with its DSL form.
 
-- **DSL** (`src/dsl/`, 9 files) is primary. `base.f * (3/2)`, `[1].t + [1].d`, `base.d * 4`, infix
-  `+ - * / ^`. It has no functions. Every shipped module file uses it, the note widget always *displays*
-  it, and every expression the app writes on your behalf is DSL.
-- **Legacy** is the old method-chain form
-  (`module.baseNote.getVariable('frequency').mul(new Fraction(3,2))`). It still loads. Its compiler
-  throws on a variable name outside the six and on `module.findTempo` / `module.findMeasureLength`,
-  which no longer exist.
-
-A module of the old time model (tempo, beats per measure, `beat()`, `measure()`) is not compiled as
-written. `Module.loadFromJSON()` first runs it through `migrateTimeModel()`
-(`src/migrate/relational-time.js`), an exact conversion on the JSON text that refuses rather than
-guesses. See [Module System](/developer/architecture/module-system#loading-old-modules).
+Older modules are converted when they load, before anything is compiled: `Module.loadFromJSON()` runs
+`migrateTimeModel()` (`src/migrate/relational-time.js`; tempo, beats per measure, `beat()`,
+`measure()`) and then `migrateSyntax()` (`src/migrate/legacy-syntax.js`; the method chain
+`module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))` becomes `base.f * (3/2)`). Both
+are exact conversions on the JSON text that refuse rather than guess. See
+[Module System](/developer/architecture/module-system#loading-old-modules).
 
 ::: warning A failed compile throws
-If both parsers fail, `compile()` logs a `console.error` and **throws** an error carrying both
-parsers' messages — there is no constant-0 fallback. Interactive callers surface the message (the
-note widget shows it under Save); the load paths catch per-note and leave the property unset. See
-[Expression Compiler](/developer/core/expression-compiler).
+A DSL syntax error throws a `DSLError` — there is no constant-0 fallback. Interactive callers
+surface the message (the note widget shows it under Save); the load paths catch per-note and leave
+the property unset. See [Expression Compiler](/developer/core/expression-compiler).
 :::
 
 ### Core
@@ -201,7 +193,7 @@ early on an unchanged camera basis (`renderer.js:594-598`). Without them, `playe
 kept the scene permanently dirty.
 
 **Viewport culling on the overlay pass.** The per-note loop that emits pull tabs, arrows, fraction
-dividers and text is culled against the viewport (`renderer.js:7009-7040`). This is what makes 100k
+dividers and text is culled against the viewport (`renderer.js:7003-7034`). This is what makes 100k
 notes tractable — without it, overlay cost scaled with the size of the *module* rather than with
 what is on screen.
 
@@ -220,7 +212,7 @@ src/
 ├── module.js                   # Module: notes, deps, evaluation, JSON load/save, reindex
 ├── note.js                     # Note: six BinaryExpressions + color/instrument/measure
 ├── stack-click.js              # click-through a stack of overlapping notes
-├── expression-compiler.js      # LEGACY parser + format routing + LRU compile cache
+├── expression-compiler.js      # DSL compile entry point + LRU compile cache
 ├── binary-note.js              # OP / VAR / CORRUPT / BinaryExpression
 ├── binary-evaluator.js         # stack VM, IncrementalEvaluator, FractionPool, SymbolicPower
 ├── binary-utils.js
@@ -228,7 +220,7 @@ src/
 ├── dsl/                        # THE primary expression language
 │   ├── lexer.js  parser.js  compiler.js  decompiler.js
 │   ├── ast.js  constants.js  errors.js  simplify.js
-│   └── index.js                # isDSLSyntax, compileDSL, decompileToDSL, validateDSL
+│   └── index.js                # compileDSL, decompileToDSL, validateDSL
 ├── renderer/webgl2/
 │   ├── renderer.js             # RendererAdapter — 22 programs, sync(), CPU picking
 │   ├── workspace.js            # pointer interaction, gesture arbitration
@@ -245,6 +237,7 @@ src/
 │   ├── sample-instruments.js  multisample-instrument.js
 ├── midi/midi-export.js         # module → Standard MIDI File (pure: runs in Node too)
 ├── migrate/relational-time.js  # migrateTimeModel: old time model → relational form, on load
+├── migrate/legacy-syntax.js    # migrateSyntax: method-chain syntax → DSL, on load
 ├── modals/                     # note widget, group widget, creation, actions, validation
 ├── menu/                       # module bar + icon factory
 ├── settings/                   # settings-schema.js, settings-store.js, settings-panel.js
@@ -267,8 +260,6 @@ An opcode is only real once **all four** of these know about it:
    `compiler.js` to emit it, `decompiler.js` to read it back.
 4. `rust/src/bytecode.rs` and `rust/src/evaluator.rs` — the WASM evaluator has its own opcode
    switch. Skip this and the opcode breaks under `?evaluator=wasm`.
-
-`src/expression-compiler.js` only needs touching if the *legacy* syntax must also spell it.
 
 ::: info Three opcodes exist but are dead
 `FIND_INSTRUMENT` (0x22), `DUP` (0x30) and `SWAP` (0x31) are defined in `OP`. `DUP` and `SWAP` are
@@ -298,8 +289,9 @@ There is no serializer to update. The touch-points are:
 3. `src/module.js` — `createModuleJSON()` and `reindexModule()` both read `EXPRESSION_VARS`, so
    the property round-trips to JSON and has its references rewritten without a second list.
 4. `src/dsl/constants.js` — `PropertyMap` (input aliases) and `PropertyShortNames` (what the
-   decompiler prints); then `varNameToIndex()` in `src/dsl/compiler.js` and in
-   `src/expression-compiler.js`, with the legacy compiler's own name tables.
+   decompiler prints); then `varNameToIndex()` in `src/dsl/compiler.js`. (The converters in
+   `src/migrate/` list the variables that existed when the syntax they convert was retired; a new
+   property needs no entry there.)
 5. `src/binary-evaluator.js` — `VAR_ORDER`, its default in `UNRESOLVED_DEFAULTS`, the record in
    `createEvaluationRecord()`, the `switch` in `evaluateVariable()`, and the three places a value
    is read back (`getCachedValue()`, `LOAD_REF`, `LOAD_BASE`); and the matching `switch` in

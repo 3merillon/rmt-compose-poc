@@ -10,7 +10,7 @@ import {
 import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { escapeHtml } from '../utils/html-escape.js';
-import { isDSLSyntax } from '../dsl/index.js';
+import { parseFrequencyAlgebra } from '../utils/frequency-algebra.js';
 import { toNumber } from '../utils/fraction-num.js';
 import { isMeasureNote, isReferenceNote } from '../note.js';
 import { CORRUPT } from '../binary-note.js';
@@ -43,7 +43,6 @@ let externalFunctions = {
     createMeasureBars: null,
     deleteNoteAndDependencies: null,
     deleteNoteKeepDependencies: null,
-    checkAndUpdateDependentNotes: null,
     cleanSlate: null,
     bringSelectedNoteToFront: null,
     restoreNotePosition: null,
@@ -675,23 +674,6 @@ function showNotification(message, type = 'info') {
 
 
 // ===== Feature: Evaluate to BaseNote =====
-// Helper to convert an exact value (Fraction preferred, number tolerated) to a
-// clean Fraction string (legacy format). BigInt fields interpolate digit-exact.
-function toFractionString(value) {
-    try {
-        const frac = value instanceof Fraction ? value : new Fraction(value);
-        // Use the Fraction's built-in simplification
-        if (frac.d === 1n) {
-            return `new Fraction(${frac.s * frac.n})`;
-        }
-        return `new Fraction(${frac.s * frac.n}, ${frac.d})`;
-    } catch (e) {
-        // Fallback for values that Fraction can't handle cleanly
-        console.warn('toFractionString: inexact fallback for', value, e?.message ?? e);
-        return `new Fraction(${value})`;
-    }
-}
-
 // Helper to convert an exact value to a DSL fraction/number string
 function toDSLFractionString(value) {
     try {
@@ -707,14 +689,14 @@ function toDSLFractionString(value) {
     }
 }
 
-// Check if an expression contains a .pow() operation
+// Check if an expression contains a power
 function containsPowOperation(exprText) {
-    return exprText && /\.pow\s*\(/.test(exprText);
+    return exprText && /\^/.test(exprText);
 }
 
 // Check if expression already references baseNote frequency
 function referencesBaseNoteFrequency(exprText) {
-    return exprText && /module\.baseNote\.getVariable\s*\(\s*['"]frequency['"]\s*\)/.test(exprText);
+    return exprText && /\bbase\.f\b/.test(exprText);
 }
 
 // ===== Symbolic Expression Chain Tracing =====
@@ -779,164 +761,6 @@ function gcd(a, b) {
 }
 
 /**
- * Parse a frequency expression and extract its algebraic components.
- * Returns { algebra, noteRef } where noteRef is null if it references baseNote,
- * or the noteId if it references another note.
- *
- * Supported patterns:
- * - module.baseNote.getVariable('frequency')
- * - module.getNoteById(N).getVariable('frequency')
- * - <expr>.mul(new Fraction(a, b))
- * - <expr>.mul(new Fraction(a))
- * - new Fraction(a, b).mul(<expr>)
- * - <expr>.mul(new Fraction(BASE).pow(new Fraction(n, d)))  -- any positive integer base
- * - new Fraction(BASE).pow(new Fraction(n, d)).mul(<expr>)
- */
-function parseFrequencyExpression(exprText) {
-    if (!exprText) return null;
-
-    const expr = exprText.trim();
-
-    // Base case: direct baseNote reference
-    const baseNoteMatch = expr.match(/^module\.baseNote\.getVariable\s*\(\s*['"]frequency['"]\s*\)$/);
-    if (baseNoteMatch) {
-        return { algebra: createFrequencyAlgebra(), noteRef: null };
-    }
-
-    // Base case: direct note reference
-    const noteRefMatch = expr.match(/^module\.getNoteById\s*\(\s*(\d+)\s*\)\.getVariable\s*\(\s*['"]frequency['"]\s*\)$/);
-    if (noteRefMatch) {
-        return { algebra: createFrequencyAlgebra(), noteRef: parseInt(noteRefMatch[1], 10) };
-    }
-
-    // Pattern: <something>.mul(<something>)
-    const mulMatch = findTopLevelMul(expr);
-    if (mulMatch) {
-        const { left, right } = mulMatch;
-
-        // Check if right is a fraction constant: new Fraction(a) or new Fraction(a, b)
-        // Coefficient digits parse as BigInt so they survive at any magnitude
-        const fracMatch = right.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
-        if (fracMatch) {
-            const num = BigInt(fracMatch[1]);
-            const den = fracMatch[2] ? BigInt(fracMatch[2]) : 1n;
-            const leftParsed = parseFrequencyExpression(left);
-            if (leftParsed) {
-                leftParsed.algebra.coeff = leftParsed.algebra.coeff.mul(new Fraction(num, den));
-                return leftParsed;
-            }
-        }
-
-        // Check if left is a fraction constant
-        const fracMatchLeft = left.match(/^new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)$/);
-        if (fracMatchLeft) {
-            const num = BigInt(fracMatchLeft[1]);
-            const den = fracMatchLeft[2] ? BigInt(fracMatchLeft[2]) : 1n;
-            const rightParsed = parseFrequencyExpression(right);
-            if (rightParsed) {
-                rightParsed.algebra.coeff = rightParsed.algebra.coeff.mul(new Fraction(num, den));
-                return rightParsed;
-            }
-        }
-
-        // Check if right is a POW expression: new Fraction(BASE).pow(new Fraction(n, d))
-        // Now matches any positive integer base, not just 2
-        const powMatch = right.match(/^new\s+Fraction\s*\(\s*(\d+)\s*\)\.pow\s*\(\s*new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
-        if (powMatch) {
-            const base = parseInt(powMatch[1], 10);
-            const expNum = parseInt(powMatch[2], 10);
-            const expDen = powMatch[3] ? parseInt(powMatch[3], 10) : 1;
-            const leftParsed = parseFrequencyExpression(left);
-            if (leftParsed) {
-                // Add to existing powers using mergePowerTerms
-                const newPower = [{ base, expNum, expDen }];
-                leftParsed.algebra.powers = mergePowerTerms(leftParsed.algebra.powers, newPower);
-                return leftParsed;
-            }
-        }
-
-        // Check if left is a POW expression
-        const powMatchLeft = left.match(/^new\s+Fraction\s*\(\s*(\d+)\s*\)\.pow\s*\(\s*new\s+Fraction\s*\(\s*(-?\d+)\s*(?:,\s*(-?\d+))?\s*\)\s*\)$/);
-        if (powMatchLeft) {
-            const base = parseInt(powMatchLeft[1], 10);
-            const expNum = parseInt(powMatchLeft[2], 10);
-            const expDen = powMatchLeft[3] ? parseInt(powMatchLeft[3], 10) : 1;
-            const rightParsed = parseFrequencyExpression(right);
-            if (rightParsed) {
-                const newPower = [{ base, expNum, expDen }];
-                rightParsed.algebra.powers = mergePowerTerms(rightParsed.algebra.powers, newPower);
-                return rightParsed;
-            }
-        }
-
-        // Both sides might be expressions that need parsing
-        const leftParsed = parseFrequencyExpression(left);
-        const rightParsed = parseFrequencyExpression(right);
-        if (leftParsed && rightParsed) {
-            // One should have noteRef, the other should be coefficient/pow only
-            if (leftParsed.noteRef === null && rightParsed.noteRef !== null) {
-                // Left is baseNote-based, right references a note - combine
-                return {
-                    algebra: multiplyFrequencyAlgebras(leftParsed.algebra, rightParsed.algebra),
-                    noteRef: rightParsed.noteRef
-                };
-            } else if (rightParsed.noteRef === null && leftParsed.noteRef !== null) {
-                return {
-                    algebra: multiplyFrequencyAlgebras(leftParsed.algebra, rightParsed.algebra),
-                    noteRef: leftParsed.noteRef
-                };
-            } else if (leftParsed.noteRef === null && rightParsed.noteRef === null) {
-                // Both reference baseNote - combine algebras
-                return {
-                    algebra: multiplyFrequencyAlgebras(leftParsed.algebra, rightParsed.algebra),
-                    noteRef: null
-                };
-            }
-        }
-    }
-
-    // Couldn't parse
-    return null;
-}
-
-/**
- * Find top-level .mul() call, handling nested parentheses
- */
-function findTopLevelMul(expr) {
-    // Find .mul( at top level (not inside parentheses)
-    let depth = 0;
-    let mulStart = -1;
-
-    for (let i = 0; i < expr.length - 4; i++) {
-        if (expr[i] === '(') depth++;
-        else if (expr[i] === ')') depth--;
-        else if (depth === 0 && expr.substring(i, i + 5) === '.mul(') {
-            mulStart = i;
-            break;
-        }
-    }
-
-    if (mulStart === -1) return null;
-
-    const left = expr.substring(0, mulStart);
-    // Find matching closing paren
-    let parenDepth = 0;
-    let argStart = mulStart + 5;
-    for (let i = argStart; i < expr.length; i++) {
-        if (expr[i] === '(') parenDepth++;
-        else if (expr[i] === ')') {
-            if (parenDepth === 0) {
-                const right = expr.substring(argStart, i);
-                return { left: left.trim(), right: right.trim() };
-            }
-            parenDepth--;
-        }
-    }
-
-    return null;
-}
-
-/**
  * Trace a frequency expression recursively back to baseNote.
  * Returns the combined algebra, or null if tracing fails.
  */
@@ -956,7 +780,7 @@ function traceFrequencyToBaseNote(noteId, moduleInstance, visited = new Set()) {
     const exprText = note.getExpressionSource('frequency');
     if (!exprText) return null;
 
-    const parsed = parseFrequencyExpression(exprText);
+    const parsed = parseFrequencyAlgebra(exprText);
     if (!parsed) return null;
 
     if (parsed.noteRef === null) {
@@ -976,66 +800,22 @@ function traceFrequencyToBaseNote(noteId, moduleInstance, visited = new Set()) {
  * Convert a frequency algebra back to an expression string
  * Supports multi-base power terms
  */
-function algebraToExpression(algebra, useDSL = false) {
-    if (useDSL) {
-        return algebraToExpressionDSL(algebra);
-    }
-
-    const parts = [];
-
-    // Start with baseNote.frequency
-    let base = `module.baseNote.getVariable('frequency')`;
-
-    // Add coefficient if not 1
-    if (!algebra.coeff.equals(1)) {
-        const c = algebra.coeff;
-        if (c.d === 1n) {
-            parts.push(`new Fraction(${c.s * c.n})`);
-        } else {
-            parts.push(`new Fraction(${c.s * c.n}, ${c.d})`);
-        }
-    }
-
-    // Add each power term
+function algebraToExpression(algebra) {
+    // An integer power is rational: fold it into the coefficient (2^1 is 2)
+    let coeff = algebra.coeff;
+    const powers = [];
     for (const p of algebra.powers) {
         if (p.expDen === 1) {
-            parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.expNum}))`);
+            const k = BigInt(p.base) ** BigInt(Math.abs(p.expNum));
+            coeff = p.expNum > 0 ? coeff.mul(new Fraction(k)) : coeff.div(new Fraction(k));
         } else {
-            parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.expNum}, ${p.expDen}))`);
+            powers.push(p);
         }
     }
 
-    // Build the expression
-    if (parts.length === 0) {
-        return base;
-    }
-
-    // Chain with .mul()
-    let result = base;
-    for (const part of parts) {
-        result = `${result}.mul(${part})`;
-    }
-
-    return result;
-}
-
-function algebraToExpressionDSL(algebra) {
     let result = 'base.f';
-
-    // Multiply by coefficient if not 1
-    if (!algebra.coeff.equals(1)) {
-        const c = algebra.coeff;
-        const val = c.s * c.n;
-        const fracStr = (c.d === 1n) ? `${val}` : `(${val}/${c.d})`;
-        result = `${result} * ${fracStr}`;
-    }
-
-    // Multiply by each power term
-    for (const p of algebra.powers) {
-        const expStr = (p.expDen === 1) ? `${p.expNum}` : `(${p.expNum}/${p.expDen})`;
-        result = `${result} * ${p.base}^${expStr}`;
-    }
-
+    if (!coeff.equals(1)) result = `${result} * ${toDSLFractionString(coeff)}`;
+    for (const p of powers) result = `${result} * ${p.base}^(${p.expNum}/${p.expDen})`;
     return result;
 }
 
@@ -1091,76 +871,57 @@ function detectTETInterval(ratio) {
 }
 
 // Create a POW-based frequency expression from TET interval
-function createTETFrequencyExpr(interval, useDSL = false) {
+function createTETFrequencyExpr(interval) {
     const { base, numerator, denominator } = interval;
-    if (useDSL) {
-        const expStr = (denominator === 1) ? `${numerator}` : `(${numerator}/${denominator})`;
-        return `base.f * ${base}^${expStr}`;
-    }
-    if (denominator === 1) {
-        // Simple integer power (e.g., octave)
-        return `module.baseNote.getVariable('frequency').mul(new Fraction(${base}).pow(new Fraction(${numerator})))`;
-    }
-    return `module.baseNote.getVariable('frequency').mul(new Fraction(${base}).pow(new Fraction(${numerator}, ${denominator})))`;
+    return algebraToExpression({ coeff: new Fraction(1), powers: [{ base, expNum: numerator, expDen: denominator }] });
 }
 
-// A span of time (exact Fraction, seconds) written in time units: base.d * k,
-// or its legacy chain. With no usable time unit (base.d not positive) the
-// seconds are written as a constant, so the value never changes.
-function createTimeUnitsExpr(seconds, moduleInstance, useDSL = false) {
+// A span of time (exact Fraction, seconds) written in time units: base.d * k.
+// With no usable time unit (base.d not positive) the seconds are written as a
+// constant, so the value never changes.
+function createTimeUnitsExpr(seconds, moduleInstance) {
     const unit = moduleInstance.baseNote.getVariable('duration');
     if (!unit || typeof unit.compare !== 'function' || unit.compare(0) <= 0) {
-        return useDSL ? toDSLFractionString(seconds) : toFractionString(seconds);
+        return toDSLFractionString(seconds);
     }
     const k = seconds.div(unit);
-    if (useDSL) {
-        return k.equals(1) ? 'base.d' : `base.d * ${toDSLFractionString(k)}`;
-    }
-    const unitRef = `module.baseNote.getVariable('duration')`;
-    return k.equals(1) ? unitRef : `${unitRef}.mul(${toFractionString(k)})`;
+    return k.equals(1) ? 'base.d' : `base.d * ${toDSLFractionString(k)}`;
 }
 
 // Create BaseNote-relative expression for startTime: base.t + base.d * k.
 // Takes the exact evaluated Fraction; all offset algebra stays in Fraction
 // arithmetic so the emitted literal is digit-exact at any magnitude.
-function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance, useDSL = false) {
+function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance) {
     const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
     const offset = noteStartTime.sub(baseStartTime);
 
-    if (offset.equals(0)) {
-        return useDSL ? 'base.t' : `module.baseNote.getVariable('startTime')`;
-    }
+    if (offset.equals(0)) return 'base.t';
 
-    if (useDSL) {
-        const span = createTimeUnitsExpr(offset.abs(), moduleInstance, true);
-        return offset.compare(0) >= 0 ? `base.t + ${span}` : `base.t - ${span}`;
-    }
-
-    return `module.baseNote.getVariable('startTime').add(${createTimeUnitsExpr(offset, moduleInstance, false)})`;
+    const span = createTimeUnitsExpr(offset.abs(), moduleInstance);
+    return offset.compare(0) >= 0 ? `base.t + ${span}` : `base.t - ${span}`;
 }
 
 // Create BaseNote-relative expression for duration: base.d * k (exact Fraction in)
-function createBaseNoteDurationExpr(duration, moduleInstance, useDSL = false) {
-    return createTimeUnitsExpr(duration, moduleInstance, useDSL);
+function createBaseNoteDurationExpr(duration, moduleInstance) {
+    return createTimeUnitsExpr(duration, moduleInstance);
 }
 
 // Create BaseNote-relative expression for frequency (exact Fraction in)
 // Preserves POW expressions by tracing the dependency chain algebraically
-function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null, useDSL = false) {
+function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null) {
     const baseFreq = moduleInstance.baseNote.getVariable('frequency');
     const ratio = frequency.div(baseFreq);
 
     // If ratio is exactly 1, just reference baseNote directly
     if (ratio.equals(1)) {
-        return useDSL ? 'base.f' : `module.baseNote.getVariable('frequency')`;
+        return 'base.f';
     }
 
     // Option 1: Try symbolic chain tracing - this preserves POW expressions exactly
     if (note) {
         const algebra = traceFrequencyToBaseNote(note.id, moduleInstance);
         if (algebra) {
-            const tracedExpr = algebraToExpression(algebra, useDSL);
-            return tracedExpr;
+            return algebraToExpression(algebra);
         }
     }
 
@@ -1176,35 +937,24 @@ function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null, use
     // TET detection is a float heuristic by design — approximate via toNumber.
     const tetInterval = detectTETInterval(toNumber(ratio));
     if (tetInterval) {
-        return createTETFrequencyExpr(tetInterval, useDSL);
+        return createTETFrequencyExpr(tetInterval);
     }
 
-    // Option 4: Fallback to fraction approximation
-    if (useDSL) {
-        const fracStr = toDSLFractionString(ratio);
-        return `base.f * ${fracStr}`;
-    }
-    const ratioFrac = toFractionString(ratio);
-    return `${ratioFrac}.mul(module.baseNote.getVariable('frequency'))`;
+    // Option 4: the exact ratio
+    return `base.f * ${toDSLFractionString(ratio)}`;
 }
 
 // Create BaseNote-relative expression for amplitude (exact Fraction in).
 // base.a is the piece-wide gain, so the note is written as a ratio of it and
 // goes on following it. A BaseNote gain of 0 cannot carry a ratio: the value
 // is then kept as a constant.
-function createBaseNoteAmplitudeExpr(amplitude, moduleInstance, useDSL = false) {
-    const baseRef = useDSL ? 'base.a' : `module.baseNote.getVariable('amplitude')`;
+function createBaseNoteAmplitudeExpr(amplitude, moduleInstance) {
     const baseAmp = moduleInstance.findAmplitude(moduleInstance.baseNote);
-
-    if (baseAmp.equals(0)) {
-        return useDSL ? toDSLFractionString(amplitude) : toFractionString(amplitude);
-    }
+    if (baseAmp.equals(0)) return toDSLFractionString(amplitude);
 
     const ratio = amplitude.div(baseAmp);
-    if (ratio.equals(1)) return baseRef;
-    return useDSL
-        ? `base.a * ${toDSLFractionString(ratio)}`
-        : `${toFractionString(ratio)}.mul(${baseRef})`;
+    if (ratio.equals(1)) return 'base.a';
+    return `base.a * ${toDSLFractionString(ratio)}`;
 }
 
 // An irrational amplitude (e.g. a decibel step written as a power) keeps its
@@ -1233,10 +983,6 @@ export function evaluateNoteToBaseNote(noteId) {
         : ['startTime', 'duration', 'frequency', 'amplitude'];
     let success = true;
 
-    // Detect if the note uses DSL format (check any expression)
-    const anyRaw = note.variables.startTimeString || note.variables.durationString || note.variables.frequencyString || '';
-    const useDSL = isDSLSyntax(anyRaw);
-
     for (const varName of variablesToProcess) {
         if (!note.variables[varName + 'String']) continue;
 
@@ -1247,13 +993,13 @@ export function evaluateNoteToBaseNote(noteId) {
         // Create the BaseNote-relative expression directly from the exact value
         let newExpr;
         if (varName === 'startTime') {
-            newExpr = createBaseNoteStartTimeExpr(currentValue, moduleInstance, useDSL);
+            newExpr = createBaseNoteStartTimeExpr(currentValue, moduleInstance);
         } else if (varName === 'duration') {
-            newExpr = createBaseNoteDurationExpr(currentValue, moduleInstance, useDSL);
+            newExpr = createBaseNoteDurationExpr(currentValue, moduleInstance);
         } else if (varName === 'frequency') {
-            newExpr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note, useDSL);
+            newExpr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note);
         } else if (varName === 'amplitude' && amplitudeIsExact(moduleInstance, note.id)) {
-            newExpr = createBaseNoteAmplitudeExpr(currentValue, moduleInstance, useDSL);
+            newExpr = createBaseNoteAmplitudeExpr(currentValue, moduleInstance);
         }
 
         if (newExpr) {
@@ -1300,15 +1046,11 @@ export function evaluateEntireModule() {
         const note = moduleInstance.getNoteById(noteId);
         if (!note) continue;
 
-        // Detect if this note uses DSL format
-        const anyRaw = note.variables.startTimeString || note.variables.durationString || note.variables.frequencyString || '';
-        const useDSL = isDSLSyntax(anyRaw);
-
         // Process startTime for all notes: base.t + base.d * k
         if (note.hasExpression('startTime')) {
             const currentValue = note.getVariable('startTime');
             if (currentValue != null) {
-                const expr = createBaseNoteStartTimeExpr(currentValue, moduleInstance, useDSL);
+                const expr = createBaseNoteStartTimeExpr(currentValue, moduleInstance);
                 updates.push({ noteId, varName: 'startTime', expr });
             }
         }
@@ -1317,7 +1059,7 @@ export function evaluateEntireModule() {
         if (note.hasExpression('duration')) {
             const currentValue = note.getVariable('duration');
             if (currentValue != null) {
-                const expr = createBaseNoteDurationExpr(currentValue, moduleInstance, useDSL);
+                const expr = createBaseNoteDurationExpr(currentValue, moduleInstance);
                 updates.push({ noteId, varName: 'duration', expr });
             }
         }
@@ -1327,7 +1069,7 @@ export function evaluateEntireModule() {
             if (note.hasExpression('frequency')) {
                 const currentValue = note.getVariable('frequency');
                 if (currentValue != null) {
-                    const expr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note, useDSL);
+                    const expr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note);
                     updates.push({ noteId, varName: 'frequency', expr });
                 }
             }
@@ -1335,7 +1077,7 @@ export function evaluateEntireModule() {
             if (note.hasExpression('amplitude') && amplitudeIsExact(moduleInstance, noteId)) {
                 const currentValue = note.getVariable('amplitude');
                 if (currentValue != null) {
-                    const expr = createBaseNoteAmplitudeExpr(currentValue, moduleInstance, useDSL);
+                    const expr = createBaseNoteAmplitudeExpr(currentValue, moduleInstance);
                     updates.push({ noteId, varName: 'amplitude', expr });
                 }
             }
@@ -1386,17 +1128,17 @@ export function liberateDependencies(noteId) {
         if (selectedNote.variables[varName + "String"]) {
             selectedRaw[varName] = selectedNote.variables[varName + "String"];
         } else {
-            // Emit the canonical two-arg form from the exact fields: digit-exact
-            // at any magnitude, and never toString()'s repeating decimals
+            // A DSL fraction from the exact fields: digit-exact at any
+            // magnitude, and never toString()'s repeating decimals
             const frac = selectedNote.getVariable(varName);
             if (frac == null) {
-                selectedRaw[varName] = (varName === "frequency") ? "new Fraction(1, 1)" : "new Fraction(0, 1)";
+                selectedRaw[varName] = (varName === "frequency") ? "1" : "0";
             } else {
                 let f = frac;
                 if (!(f instanceof Fraction)) {
                     f = new Fraction(typeof f.toFraction === "function" ? f.toFraction() : f);
                 }
-                selectedRaw[varName] = `new Fraction(${f.s * f.n}, ${f.d})`;
+                selectedRaw[varName] = toDSLFractionString(f);
             }
         }
     });

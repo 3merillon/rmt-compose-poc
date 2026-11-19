@@ -48,16 +48,6 @@ base.f * 2 ^ (4/12)     # a major third above the BaseNote
 
 You can reduce the exponent by hand — `4/12` is `1/3`, so `2^(1/3)` is the same major third — but you do not have to. Save the expression and the simplifier reduces the fraction for you.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(2).pow(new Fraction(7, 12))
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(4, 12)))
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))
-```
-</details>
-
 ## Every interval
 
 | Interval | Semitones | Expression | Nearest just ratio | 12-TET is off by |

@@ -1,6 +1,6 @@
 ---
 title: Fraction API
-description: How numbers work in RMT Compose expressions — exact rationals, literal forms, normalization, irrational results, and the legacy new Fraction() compatibility surface.
+description: How numbers work in RMT Compose expressions — exact rationals, literal forms, normalization, and irrational results.
 ---
 
 # Fraction API
@@ -34,16 +34,6 @@ There are three literal forms in the DSL.
 (5/4)                  # a major third
 (-1/4)                 # negative quarter
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(440)      // 440/1
-new Fraction(3, 2)     // 3/2
-new Fraction(-1, 4)    // -1/4
-```
-</details>
 
 ### Fractions are normalized
 
@@ -153,106 +143,7 @@ base.d * (3/2)         # a dotted unit
 
 Note ids must be literal integers — there is no `[prev]`.
 
-## The legacy `new Fraction()` surface
-
-Modules saved before the DSL existed use a JavaScript-shaped method chain. They still load, and
-they still compile to the same bytecode. You do not need to write this format, and the note
-widget will convert it to DSL the moment you look at it — but if you are reading an old file,
-this is what it means.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Perfect fifth above the BaseNote
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-
-// Octave above
-module.baseNote.getVariable('frequency').mul(new Fraction(2))
-
-// Perfect fourth below
-module.baseNote.getVariable('frequency').div(new Fraction(4, 3))
-
-// One time unit
-module.baseNote.getVariable('duration')
-
-// Two time units
-module.baseNote.getVariable('duration').mul(new Fraction(2))
-
-// Start when note 7 ends
-module.getNoteById(7).getVariable('startTime')
-  .add(module.getNoteById(7).getVariable('duration'))
-
-// 12-TET semitone
-new Fraction(2).pow(new Fraction(1, 12))
-```
-</details>
-
-### Exactly what the legacy parser accepts
-
-| Construct | Accepted |
-|---|---|
-| `new Fraction(n)` | Yes |
-| `new Fraction(n, d)` | Yes |
-| `.mul(…)` `.div(…)` | Yes |
-| `.add(…)` `.sub(…)` | Yes |
-| `.pow(…)` | Yes |
-| `module.baseNote.getVariable('name')` | Yes |
-| `module.getNoteById(N).getVariable('name')` | Yes |
-
-That is the whole list. `module.findTempo(…)` and `module.findMeasureLength(…)` were removed; typed,
-they are refused with a message pointing at `module.baseNote.getVariable('duration')`. Any variable
-name other than `startTime`, `duration`, `frequency`, `amplitude`, `attack` and `release` is an error.
-
-### What it does not accept
-
-::: warning These are rejected with an error
-The following are real Fraction.js methods, so they look like they should work. **They do not.**
-The legacy parser does not recognize them, and after the DSL retry fails too the compiler throws
-— the note widget shows the message under the Save button, and on a file load the property is
-left unset with a `console.error`.
-
-| Not accepted |
-|---|
-| `.neg()` |
-| `.abs()` |
-| `.inverse()` |
-| `.mod()` |
-| `.equals()`, `.compare()` |
-| `.valueOf()`, `.toString()`, `.toFraction()` |
-| `.n`, `.d`, `.s` (property access) |
-| String arguments, e.g. `new Fraction("355", "113")` |
-
-Write `-5` (DSL) or `new Fraction(-5)` (legacy) instead of a negation call. Everything else on
-that list has no expression-language equivalent — comparisons, string conversion and modulo are
-not part of the language in either format.
-:::
-
-### Migration table
-
-| Legacy | DSL |
-|---|---|
-| `new Fraction(440)` | `440` |
-| `new Fraction(3, 2)` | `(3/2)` |
-| `a.add(b)` | `a + b` |
-| `a.sub(b)` | `a - b` |
-| `a.mul(b)` | `a * b` |
-| `a.div(b)` | `a / b` |
-| `a.pow(b)` | `a ^ b` |
-| `new Fraction(5).neg()` | `-5` |
-| `module.baseNote.getVariable('frequency')` | `base.f` |
-| `module.getNoteById(1).getVariable('startTime')` | `[1].t` |
-| `module.baseNote.getVariable('duration')` | `base.d` |
-| `module.getNoteById(1).getVariable('duration')` | `[1].d` |
-
-One thing, and one thing only, rewrites a legacy expression as DSL: pressing **Save** in the
-note widget. The `Raw:` field is already showing you the DSL, so saving it stores the DSL.
-
-Everything else preserves the format it found. A drag, a resize, or a frequency arrow rewrites
-the expression *in its existing format* — touch a legacy note in the workspace and what gets
-written back is legacy. Exporting a module writes each expression exactly as it is currently
-stored, so a legacy expression you never save through the widget stays legacy in the file. It
-still loads, and it still works.
+The method-chain syntax of earlier versions (`new Fraction(3, 2)`, `.mul()` and the other method names) is retired. See [The retired method-chain syntax](/reference/expressions/syntax#the-retired-method-chain-syntax).
 
 ## See also
 

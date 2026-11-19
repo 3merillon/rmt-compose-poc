@@ -79,16 +79,6 @@ base.d * 2          # two time units long
 [1].t + [1].d       # starts when note 1 ends
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Older modules used a method-chain format. It still loads, and the app converts it to the expression language above as soon as you open it in the [Note Widget](/user-guide/interface/variable-widget).
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-```
-</details>
-
 See the [expression syntax reference](/reference/expressions/syntax) for the full language.
 
 ## Who is this for?

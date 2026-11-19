@@ -163,16 +163,6 @@ base.d * (3/2)     # a dotted quarter
 base.d * (3/4)     # a dotted eighth
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('duration')
-module.baseNote.getVariable('duration').mul(new Fraction(4))
-module.baseNote.getVariable('duration').mul(new Fraction(1, 2))
-```
-</details>
-
 ### Standard note values
 
 | Note | Time units | Expression |
@@ -215,15 +205,6 @@ BaseNote's duration.
 [1].d          # same length as note 1
 [1].d * 2      # twice as long as note 1
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(1).getVariable('duration')
-module.getNoteById(1).getVariable('duration').mul(new Fraction(2))
-```
-</details>
 
 ## Dependencies
 

@@ -202,9 +202,9 @@ is used only when the numerator or denominator falls outside the i32 range
 
 `LOAD_REF` encodes the id as a `u16`, and `dependencies` is a `Uint16Array`.
 `Module.loadFromJSON()` guards the boundary: it rejects (skips, with a console warning) any note
-whose id is above 65535. Both expression parsers enforce the same range at compile time —
-`[70000].f` is a parse error (`src/dsl/parser.js:253`, `src/expression-compiler.js:215`) — so an
-id can never wrap.
+whose id is above 65535. The DSL parser enforces the same range at compile time —
+`[70000].f` is a parse error (`src/dsl/parser.js:253`), and so is `module.getNoteById(70000)` in
+the converter of the retired method-chain syntax — so an id can never wrap.
 
 ## Worked example
 
@@ -278,62 +278,53 @@ stays clean.
 ```javascript
 import { compiler } from './expression-compiler.js'
 
-const expr = compiler.compile('base.f * (3/2)', 'frequency')
+const expr = compiler.compile('base.f * (3/2)')
 ```
 
 `compiler` is the shared `ExpressionCompiler` singleton — there is no bare `compile()` export.
-`compile(text, varName)`:
+`compile(text)`:
 
 1. Checks its LRU cache (`COMPILE_CACHE_MAX = 4000`, keyed on the raw text) and returns a **clone**
    on a hit.
-2. Routes on `isDSLSyntax(text)` — a regex sniff, not a parse — to `compileDSL()`.
-3. Falls back to the legacy method-chain parser, and if *that* throws, retries `compileDSL()` (the
-   sniff can misclassify). The legacy parser throws on a variable name outside the six, and on
-   `module.findTempo(...)` / `module.findMeasureLength(...)`, with a message naming the replacement.
-4. If everything fails, logs a `console.error` and **throws** an `Error` whose message carries both
-   parsers' failures — there is no constant-0 fallback.
+2. Refuses text in the retired method-chain syntax, with its DSL form in the message (modules in
+   that syntax are converted when they load; see
+   [Expression Compiler](/developer/core/expression-compiler#the-retired-method-chain-syntax)).
+3. Compiles with `compileDSL()`, which **throws** a `DSLError` on a syntax error — there is no
+   constant-0 fallback.
 
-To compile DSL directly, skipping the routing:
+To compile DSL directly, without the cache:
 
 ```javascript
-import { compileDSL, validateDSL, isDSLSyntax } from './dsl/index.js'
+import { compileDSL, validateDSL } from './dsl/index.js'
 
 const expr = compileDSL('[1].f * 2^(7/12)')
 ```
 
-The DSL path is lexer → parser → compiler (`src/dsl/`), producing the AST node types in
-`src/dsl/ast.js`. The legacy path has its own parser and AST in `src/expression-compiler.js`; both
-emit the same bytecode.
+The pipeline is lexer → parser → compiler (`src/dsl/`), producing the AST node types in
+`src/dsl/ast.js`.
 
 ## Decompilation
 
-Two decompilers, and they do not agree — pick deliberately.
-
 ```javascript
-import { decompiler, dslDecompiler } from './expression-compiler.js'
+import { decompiler } from './expression-compiler.js'
 import { decompileToDSL } from './dsl/index.js'
 
-decompiler.decompile(expr)   // sourceText verbatim if present, else LEGACY method chains
+decompiler.decompile(expr)   // sourceText verbatim if present, else decompileToDSL(expr)
 decompileToDSL(expr)         // always walks the bytecode, always emits DSL
-dslDecompiler.decompile(expr)  // same as decompileToDSL
 ```
 
-`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:729-732`),
-so for anything compiled from text it is a pass-through — a DSL expression comes back as DSL. Only
-a synthesised expression (empty `sourceText`) actually gets decompiled, and then it comes back as
-legacy JavaScript.
+`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:74`),
+so for anything compiled from text it is a pass-through. A synthesised expression (empty
+`sourceText`) is decompiled to DSL.
 
 `decompileToDSL()` prints each `LOAD_REF` / `LOAD_BASE` as a property access (`base.d`, `[2].f`).
 The DSL has no functions, so there is nothing to reconstruct beyond the six variables.
 
 ## Error handling
 
-`compiler.compile()` **throws** on an unparseable expression. After the legacy parser fails it
-retries the other syntax; if the DSL parser fails too, it logs
-`Failed to compile expression: …` via `console.error` and throws an `Error` whose message includes
-both parser messages (`Unparseable expression: "…" — legacy parser: …; DSL parser: …`). Callers
-that can show the message do (the note widget's inline error, the validators); load paths catch
-per-note and leave the property unset rather than zeroing it.
+`compiler.compile()` **throws** on an unparseable expression: the `DSLError` of the DSL parser, or
+the retired-syntax refusal. Callers that can show the message do (the note widget's inline error,
+the validators); load paths catch per-note and leave the property unset rather than zeroing it.
 
 The DSL layer *does* throw, with its own error classes (`src/dsl/errors.js`) — `DSLError` and its
 subclasses `DSLLexerError`, `DSLParseError`, `DSLCompileError`. Each carries a `position` and a
@@ -386,7 +377,7 @@ containers are `Note` and `Module`. Do not build against them without checking t
 
 ## See also
 
-- [Expression Compiler](/developer/core/expression-compiler) — routing, the legacy parser, the cache
+- [Expression Compiler](/developer/core/expression-compiler) — the DSL pipeline, the cache, the retired syntax
 - [Binary Evaluator](/developer/core/binary-evaluator) — the stack VM, `POW`, and the fallback defaults
 - [Note Class](/developer/api/note) — the owner of six of these
 - [Expression Syntax](/reference/expressions/syntax) — the DSL grammar

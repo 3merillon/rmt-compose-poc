@@ -19,14 +19,6 @@ Write this in Note 2's frequency field:
 
 Note 2 now **depends on** Note 1's frequency. Change Note 1 and Note 2 follows, without you touching it. `[1]` means "note with id 1"; `.f` means frequency. The other shortnames are `.t` (startTime) and `.d` (duration).
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(1).getVariable('frequency')
-```
-</details>
-
 ## Why bother
 
 Suppose you want three notes: a root, a fifth above it, and an octave above it.

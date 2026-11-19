@@ -42,15 +42,6 @@ duration:   [1].d
 **Add Measure** only appears on the **last** bar of a chain. If you select a bar in the middle, the button is not there. You cannot insert a bar into the middle of a chain from the widget.
 :::
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))
-module.getNoteById(1).getVariable('duration')
-```
-</details>
-
 ## A bar widget is nearly empty
 
 Click a bar's triangle and you get:

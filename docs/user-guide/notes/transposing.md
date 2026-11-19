@@ -145,11 +145,6 @@ base.f * 2^(7/12)        ▲ octave →   2 * base.f * 2^(7/12)
 2 * base.f * 2^(7/12)    ▼ octave →   base.f * 2^(7/12)
 ```
 
-The same folding applies to a note whose frequency is still stored in **legacy** syntax, including
-a `.pow()` (crosshatched, TET) chain: repeated presses rescale one leading
-`new Fraction(a, b).mul(…)` coefficient rather than nesting a new wrapper per press, and ▲ followed
-by ▼ returns the exact original expression.
-
 The rewrite is checked before it is kept: the new expression must evaluate to the old value times
 the factor, **and** must not change the note's corruption flag. If either check fails, the app
 falls back to an explicit multiplier wrapped around the whole expression, so the pitch is always

@@ -58,17 +58,6 @@ const note = module.addNote({
 })
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-const note = module.addNote({
-  frequency: "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
-  startTime: "module.baseNote.getVariable('startTime')",
-  duration:  "module.baseNote.getVariable('duration')"
-})
-```
-</details>
 
 `addNote()` assigns `id = this.nextId++`, compiles each expression to bytecode, registers the note's
 dependencies, marks it dirty, invalidates the module end-time cache, and returns the `Note`.
@@ -252,7 +241,7 @@ from JSON, every note's `parentId` is `undefined`. Evaluation does not read it.
 
 `findInstrument(note)` is different — it does not use `parentId`. It reads the note's own
 `properties.instrument`, and if absent, parses the note's **frequency expression** for a parent
-reference (`[N].f` in DSL, `module.getNoteById(N).getVariable('frequency')` in legacy) and recurses
+reference (`[N].f`) and recurses
 into that note. The terminal fallback is the module-level default instrument, driven by the
 `audio.defaultInstrument` setting through `setDefaultInstrument()` (default `sine-wave`).
 
@@ -293,17 +282,18 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 
 `source` is either a **URL string** (fetched) or a **plain object**. The steps:
 
-1. **`migrateTimeModel(data)`** (`src/migrate/relational-time.js`), before anything is built. A module
-   of the current model comes back unchanged. A module of the old model is converted (see
-   [Loading old modules](#loading-old-modules)); one the converter cannot convert throws a
-   `TimeMigrationError`, so it never loads wrong.
+1. **`migrateTimeModel(data)`** (`src/migrate/relational-time.js`), then **`migrateSyntax(data)`**
+   (`src/migrate/legacy-syntax.js`), before anything is built. A module in the current form comes
+   back unchanged. A module of the old time model, or in the retired method-chain syntax, is
+   converted (see [Loading old modules](#loading-old-modules)); one a converter cannot convert throws
+   a `TimeMigrationError` or `SyntaxMigrationError`, so it never loads wrong.
 2. Copy `data.baseNote`'s keys into the BaseNote variables and `new Module(baseVars)`.
 3. For each entry in `data.notes`, validate the id, build a `Note`, install it at `notes[id]`,
    register its dependencies, and advance `nextId`.
 4. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
    `evaluateModule()` does that.
 
-Ids are guarded (`src/module.js:872-884`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
+Ids are guarded (`src/module.js:866-878`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
 `LOAD_REF`) are skipped with a `[RMT Security] Invalid note ID` warning, and `__proto__` /
 `constructor` / `prototype` are blocked outright as prototype-pollution vectors.
 
@@ -333,6 +323,16 @@ version does not load in the published editor.
 The user-facing translation table is under
 [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions).
 
+Then the **method-chain syntax** (`module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))`)
+is converted to DSL by `migrateSyntax()` (`src/migrate/legacy-syntax.js`), exactly, and the module is
+saved in the DSL from then on. The time conversion runs first because it rewrites old time constructs
+inside method-chain text and keeps that text in the same syntax. The syntax converter refuses the call
+orders the old compiler did not read as written (a `.mul()` after an `.add()`, a `.pow()` after a
+`.mul()`, any `.neg()`) with a `SyntaxMigrationError` naming the note and the variable;
+`scripts/test-legacy-syntax.mjs` checks every converted value against the old compiler
+(`scripts/fixtures/legacy-syntax-oracle.json`). See
+[Expression Compiler](/developer/core/expression-compiler#the-retired-method-chain-syntax).
+
 ### Boot fallback
 
 At startup `src/player.js` loads the saved session (`rmt:moduleSnapshot:v1`) with
@@ -349,8 +349,8 @@ const text = await module.exportOrderedModule()  // → pretty JSON string (2-sp
 ```
 
 `createModuleJSON()` emits each note's **verbatim expression source text**
-(`note.getExpressionSource(name)`) plus `color` and `instrument` when set, sorted by id. Saving does
-**not** convert legacy expressions to DSL.
+(`note.getExpressionSource(name)`) plus `color` and `instrument` when set, sorted by id. Every
+expression is DSL by then: loading converted any other form.
 
 `exportOrderedModule()` is what the **Save Module** button downloads. It is *not* a byte copy of what
 you loaded: it round-trips through `createModuleJSON()` → `loadFromJSON()` → `reindexModule()` →
@@ -363,7 +363,7 @@ module.reindexModule()
 ```
 
 Renumbers from 1 — **measure bars first** (`isMeasureNote()`, sorted by evaluated `startTime`), then regular notes (also by
-`startTime`) — and rewrites every `[N]` and `module.getNoteById(N)` reference to match. Then it
+`startTime`) — and rewrites every `[N]` reference to match. Then it
 rebuilds the dependency graph and re-evaluates.
 
 ::: warning Ids change on save

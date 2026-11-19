@@ -121,7 +121,7 @@ And this is a silence from `custom/canon base.json` — a quarter time unit of n
 
 Expressions are text. They are compiled to **bytecode** and run on a stack machine — nothing in the load path uses `eval()` or `new Function()`.
 
-The **DSL** is the primary format. Every shipped module uses it.
+Expressions are written in the **DSL**. Every shipped module uses it.
 
 ```
 base.f * (3/2)          # a fifth above the BaseNote
@@ -158,23 +158,7 @@ Use `base.d` for durations. It is what every shipped module and every expression
 Saving writes back the **source text** of each expression, not a regeneration of it. Spacing and comments are preserved, and only the `[N]` references are renumbered by the reindex. An expression is rewritten in the app's own style only when the *app* generates a new one for you — a drag, a resize, an arrow click, a note-length button.
 :::
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Method-chain expressions still load, and round-trip verbatim — saving does not convert them.
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.getNoteById(1).getVariable('startTime')
-module.baseNote.getVariable('duration').mul(new Fraction(2))
-module.getNoteById(3).getVariable('duration')
-```
-
-The two formats can be mixed in one file. The format is detected per expression string.
-
-</details>
-
-::: warning An expression neither compiler can read is rejected
+::: warning An expression the compiler cannot read is rejected
 The compiler logs a `console.error` and refuses the expression — it never silently compiles to `0`. On the **Load Module** file path the module still loads, but the affected property is left unset (the note falls back to its defaults); the library-upload and Load-UI validators reject the file outright with the reason. If a load "succeeded" but a note looks wrong, check the browser console.
 :::
 
@@ -315,7 +299,7 @@ Earlier versions stored a tempo and a number of beats per measure on the BaseNot
 | a tempo T | `base.d = 60/T` |
 | beats per measure B | a measure bar of `base.d * B` |
 
-Legacy method-chain forms convert the same way: `new Fraction(60).div(module.findTempo(...))` becomes the BaseNote's `duration`, and `module.findMeasureLength(...)` becomes the bar's `duration`.
+Files written in the old method-chain syntax (`module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))`) are converted to the DSL in the same load, right after; see [The retired method-chain syntax](/reference/expressions/syntax#the-retired-method-chain-syntax).
 
 A BaseNote tempo written as a relation stays one: `tempo: base.f * (15/64)` becomes `duration: 60 / (base.f * (15/64))`. What the converter cannot express exactly, such as a note's own tempo next to a BaseNote tempo that is not a constant, is refused with an error rather than loaded wrongly.
 

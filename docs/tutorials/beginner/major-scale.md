@@ -93,16 +93,6 @@ Repeat Step 3 six more times. Each time: select the note you just made, keep **A
 
 Every note anchors its *pitch* to the BaseNote and its *timing* to the note before it. That split is deliberate, and Step 11 shows why it matters.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Older modules store expressions as method chains. The widget decompiles them to DSL for display, so you will not need to type this — but you may see it in a hand-edited file.
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(9, 8))
-```
-</details>
-
 ## Step 10: Listen
 
 Press **Play** in the top bar. You should hear eight notes climbing, and the last should sound like the first an octave higher.

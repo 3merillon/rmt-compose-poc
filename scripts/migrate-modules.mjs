@@ -1,18 +1,21 @@
 #!/usr/bin/env node
 /**
- * Convert module JSON files to relational time, in place.
+ * Convert module JSON files to relational time and the DSL, in place.
  *
  *   node scripts/migrate-modules.mjs <file-or-folder>... [--dry-run]
  *
- * Uses the same conversion the app applies on load (src/migrate/relational-time.js),
- * so a converted file evaluates to exactly the values it had under tempo, beats
- * per measure and measure length (scripts/test-relational-time.mjs checks the
- * library against the old engine). Files already in the relational form are
+ * Uses the same conversions the app applies on load, in the same order:
+ * src/migrate/relational-time.js (tempo, beats per measure and measure length
+ * become relations of base.d), then src/migrate/legacy-syntax.js (the retired
+ * method-chain syntax becomes DSL). A converted file evaluates to exactly the
+ * values it had (scripts/test-relational-time.mjs and test-legacy-syntax.mjs
+ * check this against the old engines). Files already in the current form are
  * left untouched. Line endings and two-space indentation are kept.
  */
 import { readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { migrateTimeModel } from '../src/migrate/relational-time.js';
+import { migrateSyntax } from '../src/migrate/legacy-syntax.js';
 
 const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
@@ -46,8 +49,10 @@ for (const file of targets.flatMap(t => walk(t, []))) {
   try { data = JSON.parse(text); } catch { continue; }
   if (!data || !data.baseNote || !Array.isArray(data.notes)) continue;
   try {
-    const r = migrateTimeModel(data);
-    if (!r.migrated) { unchanged++; continue; }
+    const time = migrateTimeModel(data);
+    const syntax = migrateSyntax(time.data);
+    if (!time.migrated && !syntax.migrated) { unchanged++; continue; }
+    const r = { data: syntax.data, report: [...time.report, ...syntax.report] };
     r.data.baseNote = orderBase(r.data.baseNote);
     const eol = text.includes('\r\n') ? '\r\n' : '\n';
     const compact = !text.trimEnd().includes('\n'); // generated stress modules are one line
@@ -61,5 +66,5 @@ for (const file of targets.flatMap(t => walk(t, []))) {
     console.error(`FAILED ${file}: ${e.message}`);
   }
 }
-console.log(`\n${converted} converted, ${unchanged} already relational, ${failed} failed`);
+console.log(`\n${converted} converted, ${unchanged} already current, ${failed} failed`);
 process.exit(failed ? 1 : 0);

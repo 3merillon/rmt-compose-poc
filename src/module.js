@@ -1,13 +1,13 @@
 import Fraction from 'fraction.js';
 import { Note, EXPRESSION_VARS, isMeasureNote } from './note.js';
 import { migrateTimeModel } from './migrate/relational-time.js';
+import { migrateSyntax } from './migrate/legacy-syntax.js';
 import { toNumber } from './utils/fraction-num.js';
 import { DependencyGraph } from './dependency-graph.js';
 import { inheritsFromBase } from './variable-deps.js';
 import { createEvaluator, createIncrementalEvaluator, isWasmBackedEvaluator, isEvaluatorHotSwapEnabled } from './wasm/evaluator-adapter.js';
 import { onWasmReady } from './wasm/index.js';
-import { compiler, decompiler } from './expression-compiler.js';
-import { isDSLSyntax } from './dsl/index.js';
+import { compiler } from './expression-compiler.js';
 
 let memoizedModuleEndTime = null;
 let moduleLastModifiedTime = 0;
@@ -775,30 +775,16 @@ export class Module {
     // Check frequency expression for parent reference
     const freqSource = note.getExpressionSource('frequency');
     if (freqSource) {
-      if (isDSLSyntax(freqSource)) {
-        // DSL format: [N].f for note references, base.f for base note
-        const dslNoteRef = freqSource.match(/\[(\d+)\]\.f/);
-        if (dslNoteRef) {
-          const parentId = parseInt(dslNoteRef[1], 10);
-          const parentNote = this.getNoteById(parentId);
-          if (parentNote) return this.findInstrument(parentNote);
-        }
+      // [N].f names a parent note, base.f the BaseNote
+      const dslNoteRef = freqSource.match(/\[(\d+)\]\.f/);
+      if (dslNoteRef) {
+        const parentId = parseInt(dslNoteRef[1], 10);
+        const parentNote = this.getNoteById(parentId);
+        if (parentNote) return this.findInstrument(parentNote);
+      }
 
-        if (freqSource.includes('base.f')) {
-          return this.findInstrument(this.baseNote);
-        }
-      } else {
-        // Legacy format
-        const noteRefMatch = freqSource.match(/module\.getNoteById\((\d+)\)\.getVariable\('frequency'\)/);
-        if (noteRefMatch) {
-          const parentId = parseInt(noteRefMatch[1], 10);
-          const parentNote = this.getNoteById(parentId);
-          if (parentNote) return this.findInstrument(parentNote);
-        }
-
-        if (freqSource.includes("module.baseNote.getVariable('frequency')")) {
-          return this.findInstrument(this.baseNote);
-        }
+      if (freqSource.includes('base.f')) {
+        return this.findInstrument(this.baseNote);
       }
     }
 
@@ -849,6 +835,14 @@ export class Module {
     if (migration.migrated) {
       data = migration.data;
       console.info('[RMT] Converted a module to relational time: ' + migration.report.join('; '));
+    }
+    // Then expressions in the retired method-chain syntax become DSL, exactly;
+    // see migrate/legacy-syntax.js. One it cannot read as written throws a
+    // SyntaxMigrationError naming the note.
+    const syntax = migrateSyntax(data);
+    if (syntax.migrated) {
+      data = syntax.data;
+      console.info('[RMT] ' + syntax.report.join('; '));
     }
 
     // Create base note variables from JSON
@@ -1016,10 +1010,9 @@ export class Module {
       }
     }
 
-    // Update expression references (supports both DSL and legacy formats)
+    // Update expression references: [N] -> [new id]
     const updateReferences = (exprText) => {
-      // DSL format: [N].prop
-      let updated = exprText.replace(/\[(\d+)\]/g, (match, p1) => {
+      const updated = exprText.replace(/\[(\d+)\]/g, (match, p1) => {
         const oldRefId = parseInt(p1, 10);
         const newRefId = newMapping[oldRefId];
         if (typeof newRefId !== 'number') {
@@ -1028,21 +1021,6 @@ export class Module {
         }
         return '[' + newRefId + ']';
       });
-
-      // Legacy format: module.getNoteById(N) or getNoteById(N)
-      updated = updated.replace(/(?:module\.)?getNoteById\(\s*(\d+)\s*\)/g, (match, p1) => {
-        const oldRefId = parseInt(p1, 10);
-        if (oldRefId === 0) {
-          return 'module.baseNote';
-        }
-        const newRefId = newMapping[oldRefId];
-        if (typeof newRefId !== 'number') {
-          console.warn('No new mapping found for old id ' + oldRefId);
-          return match;
-        }
-        return 'module.getNoteById(' + newRefId + ')';
-      });
-
       return updated;
     };
 

@@ -110,7 +110,7 @@ rust/
 │   ├── bytecode.rs   # opcodes
 │   ├── evaluator.rs  # Evaluator, PersistentEvaluator, EvaluatedNote
 │   ├── graph.rs      # DependencyGraph
-│   └── compiler.rs   # ExpressionCompiler (legacy method-chain grammar only)
+│   └── compiler.rs   # ExpressionCompiler (retired method-chain grammar only)
 └── pkg/              # wasm-pack output — GITIGNORED
 ```
 

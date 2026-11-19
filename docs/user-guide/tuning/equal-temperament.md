@@ -52,15 +52,6 @@ base.f * 2 ^ (4/12)     # a 12-TET major third above the BaseNote
 [1].f * 2 ^ (1/12)      # one semitone above note 1
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(4, 12)))
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))
-```
-</details>
-
 ## Chaining a scale
 
 Every shipped TET module is built the same way: note 1 is `base.f`, and every later note is *the previous note* times one step.

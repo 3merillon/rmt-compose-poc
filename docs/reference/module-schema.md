@@ -155,9 +155,7 @@ Bar 1 is four time units, bars 2 and 3 are three. There is no time-signature obj
 
 Expressions are text. They are **compiled to bytecode**, never `eval`'d — nothing in the load path uses `eval()` or `new Function()`.
 
-Two formats compile to the same bytecode and may be mixed freely in one file. The format is detected per expression string.
-
-**DSL** — the primary format. Every shipped module uses it for its notes:
+Expressions are written in the DSL. Every shipped module uses it for its notes:
 
 ```
 base.f * (3/2)          # a fifth above the base
@@ -169,27 +167,8 @@ base.d * (3/4)          # a dotted eighth
 
 See the [expression syntax reference](/reference/expressions/syntax) for the full grammar. The language has no functions.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Method-chain expressions still load, and still round-trip verbatim:
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.getNoteById(1).getVariable('startTime')
-module.baseNote.getVariable('duration')
-```
-
-</details>
-
-### Format detection
-
-A string is compiled as **DSL** when it contains `[N].` or `base.` anywhere, or **starts with** a fraction literal like `(3/2)`. It is compiled as **legacy** when it contains `new Fraction(`, `module.`, `.getVariable(`, or a `.mul(`/`.div(`/`.add(`/`.sub(`/`.pow(` chain.
-
-A string that is **pure arithmetic with no references** — `440`, `263`, `2 * 263`, `(1/2) * 263` — is routed to the **DSL** compiler directly.
-
 ::: warning An unparseable expression is rejected with an error
-If neither compiler can read a string, `compile()` logs a `console.error` naming the expression and **throws** — there is no silent constant-0 fallback. In the note widget the message appears under the Save button; the syntax validators return `valid: false`; `npm test` rejects a shipped module containing one. On a file load the affected property is left **unset** rather than zeroed, so the note falls back to its defaults.
+If the compiler cannot read a string, `compile()` logs a `console.error` naming the expression and **throws** — there is no silent constant-0 fallback. In the note widget the message appears under the Save button; the syntax validators return `valid: false`; `npm test` rejects a shipped module containing one. On a file load the affected property is left **unset** rather than zeroed, so the note falls back to its defaults.
 :::
 
 ## Colors
@@ -232,7 +211,7 @@ This is why most scale-system modules pin `"instrument": "sine-wave"` on their B
 **Save Module** (in the top-bar **+** menu) downloads a file named `module.json`, pretty-printed with 2-space indentation. Three things about that file surprise people:
 
 1. **It is reindexed.** Measure bars are renumbered first (sorted by evaluated `startTime`), then the remaining notes (also by `startTime`), starting at id 1. Every `[N]` reference is rewritten to match. Ids in the saved file will generally differ from the ids you saw on screen. There is no byte-stable round trip.
-2. **Expression source text is preserved verbatim.** Saving does **not** convert legacy expressions to DSL, and it does not convert DSL to legacy.
+2. **Expression source text is preserved verbatim.** A module that was loaded from the retired method-chain syntax has already been converted to DSL on load, so it is saved in the DSL (see [The retired method-chain syntax](/reference/expressions/syntax#the-retired-method-chain-syntax)).
 3. **Nothing is added.** `amplitude`, `attack` and `release` are written only for the notes (and the BaseNote) that define one, and `measure` only on a bar, so a file that never used them is saved without them. A pure-DSL source file round-trips as pure DSL.
 
 Files saved by this version do not load in the published editor.
@@ -264,7 +243,7 @@ Toasts you can hit on load: `Module file too large (max 3MB)`, `Invalid module f
 
 The id ceiling exists because a reference is encoded as a 16-bit integer in the evaluator's bytecode. The loader rejects (and skips) any note whose id is above 65 535, and both expression parsers enforce the same range at compile time — `[70000].f` is a parse error (`Note IDs must be integers between 0 and 65535`), not a silently truncated reference to a different note.
 
-Expression strings are additionally screened for dangerous-looking patterns (`eval(`, `Function(`, `fetch(`, `document.`, `window.`, `__proto__`, `<script`, `javascript:`, …) at the library-upload and Load-UI entry points. Malformed expressions of either syntax — DSL or a broken legacy method chain — are caught by the compiler itself, which throws instead of guessing (see above).
+Expression strings are additionally screened for dangerous-looking patterns (`eval(`, `Function(`, `fetch(`, `document.`, `window.`, `__proto__`, `<script`, `javascript:`, …) at the library-upload and Load-UI entry points. Malformed expressions are caught by the compiler itself, which throws instead of guessing (see above).
 
 ## The library manifest
 

@@ -5,7 +5,7 @@
  * For each module referenced by public/modules/library.json (v2 manifest):
  *   1. structure    — object with baseNote{} + notes[]
  *   2. expressions  — every expression string passes validateExpressionSyntax
- *   3. self-contained — every [id] / getNoteById(id) reference resolves to a
+ *   3. self-contained — every [id] reference resolves to a
  *      note defined in the module (or the base, id 0). This is what guarantees
  *      the module imports cleanly onto BOTH a note and the base note: on drop,
  *      id 0 is remapped to the target and internal ids are renumbered, so no
@@ -41,8 +41,6 @@ function extractRefIds(expr) {
   let m;
   const re1 = /\[(\d+)\]/g;
   while ((m = re1.exec(s))) ids.add(Number(m[1]));
-  const re2 = /getNoteById\(\s*(\d+)\s*\)/g;
-  while ((m = re2.exec(s))) ids.add(Number(m[1]));
   return ids;
 }
 

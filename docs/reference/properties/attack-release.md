@@ -89,15 +89,6 @@ Silences and measure bars have no `attack` or `release` row, because neither mak
 base.release * (1/2)    # half the piece's release
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('attack')
-module.getNoteById(3).getVariable('attack').mul(new Fraction(2))
-```
-</details>
-
 ## In the editor
 
 The editor draws the envelope inside each note. When a note, or the BaseNote, sets an `attack` or a

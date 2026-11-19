@@ -41,8 +41,8 @@ evaluator. See [WASM Overview](/developer/wasm/overview).
 │  menu/ (module library) · settings/ (panel + store) · theme/          │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Expression front ends                                                │
-│  dsl/          lexer → parser → compiler → decompiler   (primary)    │
-│  expression-compiler.js   legacy method-chain parser + routing + LRU  │
+│  dsl/          lexer → parser → compiler → decompiler   (the DSL)    │
+│  expression-compiler.js   compile entry point + LRU cache             │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Core                                                                 │
 │  module.js  ·  note.js                                               │
@@ -74,7 +74,7 @@ evaluator. See [WASM Overview](/developer/wasm/overview).
 
 ### Core systems
 
-- **[Expression Compiler](/developer/core/expression-compiler)** — text → bytecode, DSL and legacy
+- **[Expression Compiler](/developer/core/expression-compiler)** — text → bytecode, and the conversion of retired syntax on load
 - **[Binary Evaluator](/developer/core/binary-evaluator)** — the stack VM and incremental evaluation
 - **[Dependency Graph](/developer/core/dependency-graph)** — property-specific forward and inverse indexes
 - **[SymbolicPower](/developer/core/symbolic-power)** — irrational algebra and what actually survives evaluation
@@ -128,8 +128,9 @@ evaluator. See [WASM Overview](/developer/wasm/overview).
 | `src/module.js` | `Module` — notes, dependency registration, evaluation, JSON load/save, reindexing. |
 | `src/note.js` | `Note` — six `BinaryExpression`s plus `color` / `instrument` / `measure`; `EXPRESSION_VARS`, `isMeasureNote()`. |
 | `src/migrate/relational-time.js` | `migrateTimeModel()` — converts a module of the old time model (tempo, beats per measure, `beat()`, `measure()`) on load. |
-| `src/dsl/` | The primary expression language: `lexer` → `parser` → `compiler` → `decompiler`, plus `simplify`. |
-| `src/expression-compiler.js` | The **legacy** method-chain parser, the format router (`isDSLSyntax`), and the 4000-entry LRU compile cache. |
+| `src/migrate/legacy-syntax.js` | `migrateSyntax()` — converts expressions in the retired method-chain syntax to the DSL on load. |
+| `src/dsl/` | The expression language: `lexer` → `parser` → `compiler` → `decompiler`, plus `simplify`. |
+| `src/expression-compiler.js` | The compile entry point: the 4000-entry LRU cache in front of the DSL compiler, and the decompiler that gives an expression's text back. |
 | `src/binary-note.js` | `OP`, `VAR`, `CORRUPT`, `BinaryExpression`. |
 | `src/binary-evaluator.js` | `BinaryEvaluator` (stack VM), `IncrementalEvaluator`, `FractionPool`, `SymbolicPower`. |
 | `src/dependency-graph.js` | Forward and inverse dependency indexes, per-property indexes, corruption flags. |
@@ -143,7 +144,7 @@ evaluator. See [WASM Overview](/developer/wasm/overview).
 | `src/theme/theme-manager.js` | `appearance.*` → CSS custom properties + `renderer.setConfig` / `setThemeColors`. |
 | `src/store/history.js` | Undo/redo. String snapshots, 50 entries, 12 MB cap. |
 | `src/utils/event-bus.js` | The pub/sub bus every subsystem talks over. |
-| `src/utils/simplify.js` | Expression simplification and the arrow-interval coefficient fold. |
+| `src/utils/simplify.js` | Value-checked simplification and the arrow-interval coefficient fold (the algebra is `src/dsl/simplify.js`). |
 
 The save/load path is `Module.loadFromJSON()` and `Module.createModuleJSON()` in `src/module.js`.
 (The dead `src/module-serializer.js` that used to sit beside it has been deleted.)

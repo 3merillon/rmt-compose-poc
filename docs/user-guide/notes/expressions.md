@@ -140,7 +140,7 @@ base.d * (7/4)          # a double-dotted quarter
 
 ## What the app does with what you typed
 
-**It always shows you DSL.** Whatever format a note was authored in, the `Raw:` field decompiles it into the DSL. You will essentially never see the legacy method-chain syntax unless you open an old JSON file by hand — and saving a legacy row rewrites it as DSL.
+**It always shows you DSL.** The `Raw:` field decompiles the note's compiled expression into the DSL.
 
 **It simplifies on save.** Expressions are canonicalised into a rational coefficient times a product of powers:
 

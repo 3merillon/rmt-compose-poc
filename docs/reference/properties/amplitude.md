@@ -119,15 +119,6 @@ base.a * (1/2)      # a ghost note
 base.a              # the piece's level, stated explicitly
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('amplitude').mul(new Fraction(3, 2))
-module.baseNote.getVariable('amplitude').mul(new Fraction(1, 2))
-```
-</details>
-
 ### Relative to another note
 
 ```
@@ -143,15 +134,6 @@ Chained, this writes a crescendo as a ratio per step — each note `(11/10)` of 
 [2].a * (11/10)         # on note 3
 [3].a * (11/10)         # on note 4
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(3).getVariable('amplitude')
-module.getNoteById(3).getVariable('amplitude').mul(new Fraction(121, 100))
-```
-</details>
 
 ### Decibels
 

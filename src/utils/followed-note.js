@@ -11,7 +11,6 @@
  * then the lowest id. Only for notes written in the DSL.
  */
 import { isMeasureNote } from '../note.js';
-import { isDSLSyntax } from '../dsl/index.js';
 import { compiler } from '../expression-compiler.js';
 import { findDependencyCycle } from '../variable-deps.js';
 import { toNumber } from './fraction-num.js';
@@ -29,7 +28,7 @@ export const followExpr = (id) => `[${id}].t + [${id}].d`;
 export function findFollowedNote(module, note, newStartSec, currentParent = null) {
   try {
     if (!module || !note || !Number.isFinite(newStartSec)) return null;
-    if (!isDSLSyntax(note?.variables?.startTimeString || '')) return null;
+    if (!note?.variables?.startTimeString) return null;
     const tol = 1e-6 * Math.max(1, Math.abs(newStartSec));
     let best = null, bestStart = -Infinity;
     for (const idStr in module.notes) {

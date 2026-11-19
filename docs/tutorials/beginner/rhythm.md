@@ -163,15 +163,6 @@ Every note after the first uses this start time:
 
 "Start when Note 1 ends." The **At End** radio writes it for you. It is the single most useful expression in the app — change any duration anywhere in the chain and everything downstream re-flows.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-```
-</details>
-
 ## What you learned
 
 - `base.d` is the time unit, so durations written in it survive a change of pace.

@@ -88,16 +88,6 @@ app re-anchors that dependent to an earlier note.
 (5/2)    # 2.5 seconds in
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(0)
-new Fraction(1)
-new Fraction(5, 2)
-```
-</details>
-
 ### Relative to the BaseNote
 
 ```
@@ -106,15 +96,6 @@ base.t + 1                   # one second after it
 base.t + base.d * (1/4)      # a quarter of a time unit after it (a sixteenth note)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('startTime')
-module.baseNote.getVariable('startTime').add(new Fraction(1))
-```
-</details>
-
 ### Sequential notes
 
 The single most common pattern — start when note 1 ends:
@@ -122,15 +103,6 @@ The single most common pattern — start when note 1 ends:
 ```
 [1].t + [1].d
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-```
-</details>
 
 ### In time units and bars
 
@@ -144,18 +116,6 @@ base.t + base.d        # one time unit after the BaseNote
 `base.d` is the time unit, the BaseNote's duration: see
 [the time unit](/reference/properties/duration#the-time-unit). There is no function to fetch a beat or
 a measure; a measure bar's length is its own `.d`.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(3).getVariable('startTime')
-  .add(module.baseNote.getVariable('duration'))
-
-module.getNoteById(1).getVariable('startTime')
-  .add(module.getNoteById(1).getVariable('duration'))
-```
-</details>
 
 ### Simultaneous notes (chords)
 
