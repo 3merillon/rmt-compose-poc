@@ -154,6 +154,7 @@ function fmt(rows) {
 }
 
 const browser = await chromium.launch({
+  channel: process.env.PW_CHANNEL || undefined, // PW_CHANNEL=msedge where bundled Chromium is absent
   headless: !HEADED,
   args: [
     '--use-angle=default',

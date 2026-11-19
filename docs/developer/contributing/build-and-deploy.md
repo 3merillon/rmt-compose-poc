@@ -202,6 +202,9 @@ you push.
 5. If you touched the renderer: measure and pixel-diff. See [Performance](/developer/performance) —
    `visual-regress.mjs` defaults to a 300-pixel tolerance (MSAA resolution is not bit-deterministic
    across runs, so a 0-pixel gate would be permanently red).
+   Set `PW_CHANNEL=msedge` for `visual-regress.mjs`, `bench-render.mjs` and `converge.mjs` where
+   Playwright's own Chromium is not installed. `HUB_ID=<id>` pins the note the `selected-*` scenes
+   select: the automatic pick (most related notes) can change between builds when counts tie.
 6. If you touched the docs: `npm run docs:build`.
 
 ## Licensing
