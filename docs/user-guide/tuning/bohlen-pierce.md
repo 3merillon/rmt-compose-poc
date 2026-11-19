@@ -111,7 +111,7 @@ Note 1 is `base.f`; every later note is the previous one times `3 ^ (1/13)`. Not
 
 To load it, drag the tile from **Scale Systems** (or search `bohlen`, `tritave` or `base-3` with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-All thirteen steps after the first show a **≈** prefix and cross-hatching, because `3^(k/13)` is irrational.
+All thirteen steps after the first are cross-hatched and labelled with their power, `3^(1/13)` … `3^(12/13)`, because `3^(k/13)` is irrational.
 
 ## Timbre matters more here than anywhere else
 

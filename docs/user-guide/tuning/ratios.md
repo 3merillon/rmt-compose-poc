@@ -136,7 +136,7 @@ The interval must be a ratio of positive integers between 1/16 and 16 — you ca
 
 ## Pure ratios never show ≈
 
-A note built from ratios evaluates to an exact fraction. It renders with a plain fraction label and no hatching. The moment a note's frequency involves an irrational power — a TET step — it gets flagged: the canvas label picks up an **≈** prefix and the note is cross-hatched. The value itself stays exact; the hatching says it is tempered, not a pure ratio.
+A note built from ratios evaluates to an exact fraction. It renders with a plain fraction label and no hatching. The moment a note's frequency involves an irrational power — a TET step — it gets flagged: the canvas label shows the power (`2^(7/12)`) instead of a fraction, and the note is cross-hatched. The value itself stays exact; the hatching says it is tempered, not a pure ratio.
 
 That contrast is the fastest way to see, at a glance, which parts of a piece are just and which are tempered. See [Equal Temperament](/user-guide/tuning/equal-temperament) for what happens on the other side of the line.
 

@@ -111,7 +111,7 @@ The short note duration matters: with a time unit of `1/2` s (120 BPM) and sixte
 
 To load it, drag the tile from **Scale Systems** (or search `31` or the `microtonal` tag with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-Thirty-one of the thirty-two notes carry the **≈** prefix and cross-hatching. This is the module where that display earns its keep — the approximated ratios next to each note are the quickest way to see which just interval each degree is standing in for.
+Thirty-one of the thirty-two notes are cross-hatched and labelled with their power, `2^(k/31)`. To see which just interval a degree stands in for, compare it with a pure ratio from the Intervals section.
 
 ## Meantone repertoire
 

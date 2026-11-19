@@ -84,7 +84,7 @@ Note 1 is `base.f`. Every later note is the previous note times one semitone, so
 
 To load it, drag the tile from **Scale Systems** (or search `12` with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The module's `base` references are rewritten to your drop target, so the scale re-roots onto that note. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-Once loaded, twelve of the thirteen notes show cross-hatching and a **≈** label on the canvas. That is correct: `2^(1/12)` is irrational, and the fraction the app draws is the note's approximate ratio to the BaseNote, not its exact value, which the note widget shows exactly. The octave note shows exactly `263/2` when the BaseNote is 263/4. Only note 1 — plain `base.f` — is unhatched.
+Once loaded, the notes are cross-hatched and each label shows its exact step above the BaseNote: `2^(1/12)`, `2^(1/6)`, `2^(1/4)` … `2^(11/12)` (the exponents are reduced, so the third step reads `2^(1/4)`). That is correct: `2^(1/12)` is irrational, and the app keeps it as the power it is. The octave note's label reads `2/1`, exactly. Only note 1 — plain `base.f` — is unhatched.
 
 ## Why 12-TET won
 

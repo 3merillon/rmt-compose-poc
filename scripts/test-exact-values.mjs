@@ -175,6 +175,20 @@ console.log('\nApproximations: ~');
   check(valueFactor(new X.Approx(new Fraction(-3))) === '~-3', 'a negative approximation as a factor: ~-3');
 }
 
+console.log('\nCanvas labels: the exact relation to the BaseNote');
+{
+  const { noteLabel, LINE_LABEL } = await import('../src/renderer/webgl2/note-label.js');
+  const base = F(263, 4);
+  const lab = (v) => { const l = noteLabel(v, base); return l?.approx ? '≈' : l?.den === LINE_LABEL ? l.num : `${l.num}/${l.den}`; };
+  check(lab(X.mul(base, F(3, 2))) === '3/2', 'a pure ratio: 3/2');
+  check(lab(X.mul(base, X.pow(F(2), F(7, 12)))) === '2^(7/12)', 'a tempered note: 2^(7/12), on one line');
+  check(lab(X.mul(base, X.mul(F(3, 2), X.pow(F(2), F(1, 2))))) === '3/2·2^(1/2)', 'a coefficient and a power: 3/2·2^(1/2)');
+  check(lab(X.mul(base, F(2))) === '2/1', 'twelve tempered steps land on the pure octave: 2/1');
+  check(lab(X.mul(base, F(19683, 16384))) === '≈', '19683/16384 is too long for the label: drawn rounded, with ≈ (no longer silently)');
+  check(lab(X.mul(base, F(6561, 4096))) === '6561/4096', '6561/4096 fits: exact');
+  check(lab(new X.Approx(F(394, 1))) === '≈', 'an approximate note: ≈');
+}
+
 console.info = quiet;
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
 console.log('\nAll exact-value checks passed');

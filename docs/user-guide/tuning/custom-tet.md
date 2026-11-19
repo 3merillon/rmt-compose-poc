@@ -156,7 +156,7 @@ Expressions may reference `base` or any note **inside the same module** — a mo
 
 ## What to expect once it loads
 
-**Every note will be cross-hatched, with a ≈ label on the canvas.** `2^(k/17)` is irrational, so the frequency is flagged as tempered. The fraction drawn beside the ≈ is the note's approximate ratio to the BaseNote (maximum denominator 8192), not its stored value.
+**Every note will be cross-hatched, and its label will show its power.** `2^(k/17)` is irrational, so the frequency is flagged as tempered, and the label reads `2^(k/17)`. Only an approximate note, or an exact fraction too long for the label, shows `≈` and a rounded fraction.
 
 **The arrows will not step by your scale.** ▲/▼ apply a rational interval configured in **Settings → Arrows** — positive integers, ratio within `[1/16, 16]`. A TET step is not expressible that way. Use the arrows to move octaves (or fifths, or commas); edit the exponent to move by degrees.
 

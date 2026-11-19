@@ -101,7 +101,7 @@ Note 1 is `base.f`; every later note is the previous one times `2 ^ (1/19)`. It 
 
 To load it, drag the tile from **Scale Systems** (or search `19` or the `microtonal` tag with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-All nineteen steps after the first show a **≈** prefix and cross-hatching, because `2^(k/19)` is irrational. The fraction beside the ≈ is the note's approximate ratio to the BaseNote.
+All nineteen steps after the first are cross-hatched and labelled with their power, `2^(1/19)` … `2^(18/19)`, because `2^(k/19)` is irrational.
 
 ## Working in 19-TET
 

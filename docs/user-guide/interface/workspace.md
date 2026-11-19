@@ -31,7 +31,7 @@ Every note carries two labels:
 - `[N]` at the top-left — the note's **id**. This is the number you write in an expression: `[5].t`, `[5].f`.
 - A **fraction** in the middle — the note's frequency as a ratio of the base frequency.
 
-A note whose frequency is irrational (any TET step, for instance) cannot be written as an exact fraction. The app keeps its value exact, but the label on the canvas can only show a fractional **approximation**, prefixed with `≈`, and the note is **hatched** (tempered or approximate, not a pure ratio):
+The label on a note is its exact relation to the BaseNote: a pure ratio as its fraction (`3/2`), a tempered note as its power on one line (`2^(7/12)`, or `3/2·2^(1/2)` with a coefficient), and `≈` with a rounded fraction only for an approximate note, or for an exact fraction too long for the label (more than four digits in its numerator or denominator, such as 19683/16384). A note that is tempered or approximate (not a pure ratio) is also **hatched**:
 
 | Hatching | Meaning |
 |---|---|

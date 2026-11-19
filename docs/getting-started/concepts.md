@@ -304,7 +304,7 @@ There is no fraction that equals it, so RMT Compose keeps it as the power it is.
 ### How it is shown
 
 - In the note widget, an irrational value shows its exact form and its value, for example `(263/4) * 2^(1/4) = 78.190368…`. An approximate value shows `≈493.12500`. A rational value shows its fraction, also when a tempered chain lands on one.
-- On the canvas, the note is **hatched** when it is tempered or approximate (not a pure ratio), and the hatch pattern tells you which:
+- On the canvas, the note's label shows the same kind: a fraction (`3/2`), a power (`2^(7/12)`), or `≈` with a rounded fraction for an approximate note (or an exact fraction too long for the label). The note is **hatched** when it is tempered or approximate (not a pure ratio), and the hatch pattern tells you which:
 
 | Hatching | Meaning |
 |----------|---------|

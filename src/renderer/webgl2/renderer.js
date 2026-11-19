@@ -1,5 +1,6 @@
 import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.js';
 import { toNumber } from '../../utils/fraction-num.js';
+import { noteLabel, LINE_LABEL } from './note-label.js';
 import { amplitudeToGain } from '../../player/amplitude.js';
 import { isMeasureNote } from '../../note.js';
 import { envelopeShares } from '../../instruments/instrument-manager.js';
@@ -661,6 +662,12 @@ export class RendererAdapter {
       return evaluatedNotes[id];
     };
 
+    // The BaseNote's exact frequency (src/value/exact.js), for exact note labels
+    try {
+      const b0 = getEv(0);
+      this._baseFreqExact = (b0 && (b0.exact?.frequency ?? b0.frequency)) ?? module.baseNote.getExactVariable?.('frequency') ?? null;
+    } catch { this._baseFreqExact = null; }
+
     // Resolve base frequency (fast path via evaluated cache)
     try {
       const baseEv = getEv(0)?.frequency;
@@ -850,7 +857,9 @@ export class RendererAdapter {
 
         // Carry freqVal so the fraction-label pass below does not have to look the note up in
         // evaluatedNotes a second time and re-unwrap the Fraction.
-        items.push({ id: note.id, x, y, w, h, color, isSilence, freqVal, env });
+        // The exact frequency (Fraction, or an exact Irrational / Approx) for the label
+        const freqExact = ev ? (ev.exact?.frequency ?? ev.frequency ?? null) : null;
+        items.push({ id: note.id, x, y, w, h, color, isSilence, freqVal, freqExact, env });
       } catch {
         // Ignore malformed notes
       }
@@ -1186,8 +1195,26 @@ export class RendererAdapter {
     // against itself and text would never be marked dirty.
     this._noteFracNumStrs = new Array(N);
     this._noteFracDenStrs = new Array(N);
+    // 1 where the label is drawn with ≈: an approximate value, or an exact one too long to show
+    this._noteLabelApprox = new Uint8Array(N);
     const baseValNum = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
+    const baseExact = this._baseFreqExact;
     const fracCache = this._fracStrCache || (this._fracStrCache = new Map());
+    // Exact labels, memoised per value object: a record keeps its Fraction / exact value
+    // until the note is re-evaluated, so a steady sync costs one WeakMap lookup per note.
+    const exactCache = (this._labelCacheBase === baseExact && this._exactLabelCache) || new WeakMap();
+    this._exactLabelCache = exactCache;
+    this._labelCacheBase = baseExact;
+    const approxFrac = (ratio) => {
+      let pair = fracCache.get(ratio);
+      if (pair === undefined) {
+        const fr = (typeof this._approximateFraction === 'function') ? this._approximateFraction(ratio, 8192, 4) : { n: Math.round(ratio * 1000), d: 1000 };
+        pair = [String(fr.n), String(fr.d)];
+        if (fracCache.size > 65536) fracCache.clear();
+        fracCache.set(ratio, pair);
+      }
+      return pair;
+    };
     for (let i = 0; i < N; i++) {
       try {
         // items[i] is instance i (the selected-note swap above keeps them aligned), and its
@@ -1195,21 +1222,33 @@ export class RendererAdapter {
         // that avoids a transient "silence" label at initial load. Re-reading evaluatedNotes
         // here was a second Map lookup plus a Fraction unwrap for every note.
         const fnum = items[i] ? items[i].freqVal : null;
+        const fex = items[i] ? items[i].freqExact : null;
         if (fnum != null && isFinite(fnum) && baseValNum && isFinite(baseValNum) && baseValNum !== 0) {
-          // The label is a pure function of the frequency ratio, and a piece of music reuses a
-          // small set of ratios across many notes. Memoising skips both the continued-fraction
-          // approximation and two string allocations per note per sync (200k strings at 100k
-          // notes). The ratio already folds in the base frequency, so a base change re-keys.
-          const ratio = fnum / baseValNum;
-          let pair = fracCache.get(ratio);
-          if (pair === undefined) {
-            const fr = (typeof this._approximateFraction === 'function') ? this._approximateFraction(ratio, 8192, 4) : { n: Math.round(ratio * 1000), d: 1000 };
-            pair = [String(fr.n), String(fr.d)];
-            if (fracCache.size > 65536) fracCache.clear();
-            fracCache.set(ratio, pair);
+          // The label states the note's exact relation to the BaseNote (note-label.js): a
+          // pure ratio as its fraction, a tempered note as its power, ≈ only for an
+          // approximation or an exact value too long for the label.
+          let label = (fex && typeof fex === 'object' && baseExact) ? exactCache.get(fex) : undefined;
+          if (label === undefined && fex && typeof fex === 'object' && baseExact) {
+            label = noteLabel(fex, baseExact) || null;
+            exactCache.set(fex, label);
           }
-          this._noteFracNumStrs[i] = pair[0];
-          this._noteFracDenStrs[i] = pair[1];
+          if (label) {
+            if (label.approx) {
+              const pair = approxFrac(fnum / baseValNum);
+              this._noteFracNumStrs[i] = pair[0];
+              this._noteFracDenStrs[i] = pair[1];
+              this._noteLabelApprox[i] = 1;
+            } else {
+              this._noteFracNumStrs[i] = label.num;
+              this._noteFracDenStrs[i] = label.den;
+            }
+          } else {
+            // No exact value at hand (e.g. the WASM path): the float ratio, as before
+            const pair = approxFrac(fnum / baseValNum);
+            this._noteFracNumStrs[i] = pair[0];
+            this._noteFracDenStrs[i] = pair[1];
+            if (this._corruptionType && this._corruptionType[i] > 0) this._noteLabelApprox[i] = 1;
+          }
         } else {
           // Only mark as 'silence' when we truly lack/invalid frequency even after fallback
           this._noteFracNumStrs[i] = 'silence';
@@ -1331,12 +1370,13 @@ export class RendererAdapter {
     // Determine if text content or selection changed (avoid forcing text rebuild on every sync)
     const prevNum = this._lastNoteFracNumStrs;
     const prevDen = this._lastNoteFracDenStrs;
+    const prevApx = this._lastNoteLabelApprox;
     let contentChanged = false;
-    if (!prevNum || !prevDen || prevNum.length !== this._noteFracNumStrs.length || prevDen.length !== this._noteFracDenStrs.length) {
+    if (!prevNum || !prevDen || !prevApx || prevNum.length !== this._noteFracNumStrs.length || prevDen.length !== this._noteFracDenStrs.length) {
       contentChanged = true;
     } else {
       for (let i = 0; i < this._noteFracNumStrs.length; i++) {
-        if (this._noteFracNumStrs[i] !== prevNum[i] || this._noteFracDenStrs[i] !== prevDen[i]) { contentChanged = true; break; }
+        if (this._noteFracNumStrs[i] !== prevNum[i] || this._noteFracDenStrs[i] !== prevDen[i] || this._noteLabelApprox[i] !== prevApx[i]) { contentChanged = true; break; }
       }
     }
     const selChanged = (this._lastSelectedNoteId !== (selectedNoteId == null ? null : selectedNoteId));
@@ -1345,6 +1385,7 @@ export class RendererAdapter {
     // Persist current snapshot for next-diff
     this._lastNoteFracNumStrs = this._noteFracNumStrs;
     this._lastNoteFracDenStrs = this._noteFracDenStrs;
+    this._lastNoteLabelApprox = this._noteLabelApprox;
 
     // Rebuild glyph runs only when necessary; viewport changes are handled by _lastTextViewEpoch gating in _render()
     // PERFORMANCE: Selection change doesn't affect text content (fractions, "silence"), only ring/highlights
@@ -7119,8 +7160,32 @@ try {
           const numStr = this._noteFracNumStrs ? this._noteFracNumStrs[i] : null;
           const denStr = this._noteFracDenStrs ? this._noteFracDenStrs[i] : null;
           const isSilence = (numStr === 'silence');
- 
-          if (isSilence) {
+          const isLine = (denStr === LINE_LABEL);
+
+          if (isLine) {
+            // A tempered note: its exact power on one line (2^(7/12)), after the arrows,
+            // squeezed horizontally like the silence text when the note is short
+            const fontPx = this.useGlyphCache ? Math.max(5, Math.round(hCss * 0.26)) : this._clampFontPx(Math.max(5, Math.round(hCss * 0.26)));
+            const text = String(numStr);
+            const sLeft = contentLeft;
+            const sWidth = Math.max(1, contentRight - sLeft);
+            const runW = this._measureGlyphRunWidth(text, fontPx);
+            const runH = this._getRunHeight(text, fontPx);
+            const sx = runW > 0 ? Math.min(1.0, sWidth / runW) : 1.0;
+            const ny = Math.round((top + hCss * 0.5 - runH * 0.5) * 2.0) / 2.0;
+            this._deferredGlyphRuns.push({
+              text, noteId: id, x: sLeft, y: ny, fontPx, color: this._noteTextRgba(), layerZ, scaleX: sx,
+              scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
+              rrCx, rrCy, rrHx, rrHy, rrR
+            });
+            // No fraction bar for a one-line label
+            if (!_dividerRegions) _dividerRegions = new Float32Array(this.instanceCount * 4);
+            const oDiv = i * 4;
+            _dividerRegions[oDiv + 0] = 1.0;
+            _dividerRegions[oDiv + 1] = 0.0;
+            _dividerRegions[oDiv + 2] = 0.0;
+            _dividerRegions[oDiv + 3] = 0.0;
+          } else if (isSilence) {
             // Silence: draw only "silence" text, left-aligned; HORIZONTAL scaling only (no vertical scaling).
             // Use full left content area (no octave arrows for silences) while keeping ID placement unchanged.
             const fontPx = this.useGlyphCache ? Math.max(5, Math.round(hCss * 0.26)) : this._clampFontPx(Math.max(5, Math.round(hCss * 0.26)));
@@ -7174,8 +7239,9 @@ try {
               : this._clampFontPx(Math.max(5, Math.round(hCss * (this._config?.overlays?.fractionFontFactor ?? 0.26)))); // slightly larger fraction numerals
             const gapPx  = Math.max(1, Math.round(fontPx * 0.08));
 
-            // Check if note is corrupted (direct or transitive) to show ≈ prefix
-            const isCorrupted = this._corruptionType && this._corruptionType[i] > 0;
+            // ≈ before the fraction: the value is approximate, or the exact fraction is too long
+            // to show and this one is rounded (a tempered note has a one-line label instead)
+            const isCorrupted = !!(this._noteLabelApprox && this._noteLabelApprox[i] === 1);
             const approxSymbol = '≈';
             const approxW = isCorrupted ? this._measureGlyphRunWidth(approxSymbol, fontPx) : 0;
             const approxGap = isCorrupted ? Math.max(1, Math.round(fontPx * 0.1)) : 0;

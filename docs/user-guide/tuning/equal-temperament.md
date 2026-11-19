@@ -88,8 +88,8 @@ When the app computes a note's frequency, an irrational power is kept exact: the
 
 A note whose frequency involves an irrational power is **corrupted** — the app's word for "this value is tempered or approximate, not a pure ratio".
 
-- On the canvas, the note is **cross-hatched** and its fraction label is prefixed with **≈**. Notes that merely *depend* on a corrupted note get a single diagonal hatch and the same label.
-- The fraction shown next to ≈ on the canvas is the note's **ratio to the BaseNote**, approximated with a maximum denominator of 8192. It is a readable landmark, not the stored value, which stays exact.
+- On the canvas, the note is **cross-hatched** and its label shows its exact power relative to the BaseNote, such as `2^(7/12)`. Notes that merely *depend* on a tempered note get a single diagonal hatch; their label shows their own relation (a fraction when it is a pure ratio).
+- `≈` on a label means the label is rounded: the note is approximate (a `~` number), or its exact fraction is too long for the label.
 - In the note widget, the **Evaluated:** line shows the exact form and its value, in italic amber, for example `(263/4) * 2^(1/4) = 78.190368…`. A tempered chain that lands on a rational, such as the 12-TET octave, shows its fraction (`263/2`). `≈` there means only "approximate".
 
 Load any TET module and every note but the first will be hatched. That is correct and expected. A scale made of pure ratios — such as the **Tesla** module — shows plain fractions and no hatching, because it never raises anything to a fractional power.
