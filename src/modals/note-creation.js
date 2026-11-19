@@ -9,6 +9,7 @@ import { BinaryEvaluator } from '../binary-evaluator.js';
 import { ExpressionCompiler } from '../expression-compiler.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
 import { hugeFractionDisplay } from './fraction-display.js';
+import { EXPRESSION_VARS } from '../note.js';
 
 // Singleton compiler for safe evaluation
 const safeCompiler = new ExpressionCompiler();
@@ -33,9 +34,8 @@ function refreshModals(note, measureId = null) {
   }
 }
 
-function beatUnitFor(noteRef) {
-  return `beat(${noteRef})`;
-}
+// The time unit: the reference note's duration
+const TIME_UNIT = 'base.d';
 
 function defaultFrequencyFormulaFor(note) {
   if (!note || !note.id) {
@@ -64,8 +64,8 @@ function getDefaultDuration(note) {
     // Fallback: reference the parent note's duration
     return `[${note.id}].d`;
   }
-  // Default to beat(base)
-  return `beat(base)`;
+  // Default to one time unit
+  return TIME_UNIT;
 }
 
 function sectionHeader(text) {
@@ -120,21 +120,13 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
       const maxID = currentIDs.length > 0 ? Math.max(...currentIDs) : 0;
       module.nextId = maxID + 1;
 
-      let newMeasures = [];
-      let fromNote;
-
-      if (note === module.baseNote) {
-        fromNote = module.baseNote;
-        const newMeasure = module.addNote({
-          startTime: () => module.baseNote.getVariable('startTime'),
-          startTimeString: "base.t"
-        });
-        newMeasure.parentId = module.baseNote.id;
-        newMeasures.push(newMeasure);
-      } else {
-        fromNote = (measureId != null) ? module.getNoteById(measureId) : module.baseNote;
-        newMeasures = module.generateMeasures(fromNote, 1);
-      }
+      // From the BaseNote this starts a new chain: { startTime: 'base.t',
+      // duration: 'base.d * 4', measure: true }. From a bar it appends the next
+      // one: starts where it ends ([p].t + [p].d) and lasts as long ([p].d).
+      const fromNote = (note === module.baseNote || measureId == null)
+        ? module.baseNote
+        : (module.getNoteById(Number(measureId)) || module.baseNote);
+      const newMeasures = module.generateMeasures(fromNote, 1);
 
       newMeasures.forEach((m) => { try { m.getVariable('startTime'); } catch {} });
 
@@ -269,8 +261,6 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
     addSection.appendChild(posToggle);
   }
 
-  const noteRefForTempo = "base";
-
   // Frequency row (hidden for silence)
   const freqRow = labeledRow('Frequency');
   const freqEval = document.createElement('div');
@@ -303,7 +293,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   durInput.type = 'text';
   durInput.className = 'raw-value-input';
   durInput.value = isBase
-    ? `${beatUnitFor(noteRefForTempo)}`
+    ? TIME_UNIT
     : getDefaultDuration(note);
 
   durRaw.appendChild(durInput);
@@ -365,35 +355,15 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
         binary = safeCompiler.compile(expr);
       }
 
-      // Build an eval cache from current module state
+      // Build an eval cache from current module state (the BaseNote is id 0)
       const evalCache = new Map();
-      // Add baseNote as ID 0
-      const baseNote = module.baseNote;
-      if (baseNote) {
-        evalCache.set(0, {
-          startTime: baseNote.getVariable('startTime'),
-          duration: baseNote.getVariable('duration'),
-          frequency: baseNote.getVariable('frequency'),
-          tempo: baseNote.getVariable('tempo'),
-          beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
-          measureLength: module.findMeasureLength(baseNote),
-          amplitude: baseNote.getVariable('amplitude')
-        });
-      }
-      // Add other notes
       for (const id in module.notes) {
         const noteObj = module.notes[id];
         if (noteObj) {
           try {
-            evalCache.set(parseInt(id, 10), {
-              startTime: noteObj.getVariable('startTime'),
-              duration: noteObj.getVariable('duration'),
-              frequency: noteObj.getVariable('frequency'),
-              tempo: module.findTempo(noteObj),
-              beatsPerMeasure: noteObj.getVariable('beatsPerMeasure'),
-              measureLength: module.findMeasureLength(noteObj),
-              amplitude: noteObj.getVariable('amplitude')
-            });
+            const rec = {};
+            for (const v of EXPRESSION_VARS) rec[v] = noteObj.getVariable(v);
+            evalCache.set(parseInt(id, 10), rec);
           } catch {}
         }
       }

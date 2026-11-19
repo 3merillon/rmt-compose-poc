@@ -1,6 +1,7 @@
 import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.js';
 import { toNumber } from '../../utils/fraction-num.js';
 import { amplitudeToGain } from '../../player/amplitude.js';
+import { isMeasureNote } from '../../note.js';
 /**
  * WebGL2 RendererAdapter
  * - Non-interactive overlay renderer for notes and playhead
@@ -727,6 +728,9 @@ export class RendererAdapter {
     for (const idStr in module.notes) {
       const note = module.notes[idStr];
       if (!note) continue;
+      // A measure bar has a start and a duration but is drawn as a bar line and a
+      // triangle (_syncMeasureBars), never as a rest.
+      if (isMeasureNote(note)) continue;
       try {
         // Use evaluatedNotes cache if available (required for correct display after reorder)
         const ev = getEv(note.id);
@@ -980,22 +984,19 @@ export class RendererAdapter {
           let depsHasBase = false;
           let rdepsHasBase = false;
 
-          const isMeasureNote = (id) => {
-            try {
-              const n = module.getNoteById(Number(id));
-              return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
-            } catch { return false; }
+          const isBarId = (id) => {
+            try { return isMeasureNote(module.getNoteById(Number(id))); } catch { return false; }
           };
 
           for (let k = 0; k < deps.length; k++) {
             const id = Number(deps[k]);
             if (id === 0) { depsHasBase = true; continue; }
-            if (isMeasureNote(id)) depMeasureIds.push(id);
+            if (isBarId(id)) depMeasureIds.push(id);
           }
           for (let k = 0; k < rdeps.length; k++) {
             const id = Number(rdeps[k]);
             if (id === 0) { rdepsHasBase = true; continue; }
-            if (isMeasureNote(id)) rdepMeasureIds.push(id);
+            if (isBarId(id)) rdepMeasureIds.push(id);
           }
 
           // Cache the computed data (including posEpoch for invalidation)
@@ -3178,10 +3179,6 @@ export class RendererAdapter {
       if (parentId == null) {
         const dm = /\[(\d+)\]\./.exec(startTimeString);
         if (dm) parentId = parseInt(dm[1], 10);
-        else {
-          const dh = /\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/.exec(startTimeString);
-          if (dh) parentId = parseInt(dh[1], 10);
-        }
       }
     }
     if (parentId == null && note.parentId != null) parentId = note.parentId;
@@ -4687,17 +4684,22 @@ export class RendererAdapter {
       catch { return false; }
     };
 
-    // Measure notes: a startTime and nothing else.
+    // Measure bars: notes flagged `measure` (a start and a duration, drawn as bar lines).
     proto._collectMeasureNotes = function (module) {
       const out = [];
       try {
         for (const id in module.notes) {
           const n = module.notes[id];
-          if (!n) continue;
-          if (hasVar(n, 'startTime') && !hasVar(n, 'duration') && !hasVar(n, 'frequency')) out.push(n);
+          if (n && isMeasureNote(n)) out.push(n);
         }
       } catch {}
       return out;
+    };
+
+    // A bar's length is its own duration, in seconds (0 when it has none).
+    const barLengthSec = (bar) => {
+      try { return toNumber(bar ? bar.getVariable('duration') : null, 0) || 0; }
+      catch { return 0; }
     };
 
     proto._computeModuleEndTime = function (module, measureNotes) {
@@ -4717,8 +4719,9 @@ export class RendererAdapter {
           if (lastMeasure) {
             const st = lastMeasure.getVariable('startTime');
             if (st) {
-              const ml = module.findMeasureLength(lastMeasure);
-              measureEnd = toNumber(st.add(ml), 0);
+              // The last bar ends at its start plus its own duration (exact add, one conversion)
+              const ml = lastMeasure.getVariable('duration');
+              measureEnd = toNumber(ml ? st.add(ml) : st, 0);
             }
           }
         }
@@ -4846,19 +4849,16 @@ export class RendererAdapter {
       try {
         const triTimes = [];
         const triIds = [];
-        for (const id in module.notes) {
-          const n = module.notes[id];
-          if (!n) continue;
-          // Measure notes: have startTime but no duration/frequency
-          if (n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency) {
-            try {
-              const st = n.getVariable('startTime');
-              if (st != null) {
-                triTimes.push(toNumber(st, 0));
-                triIds.push(Number(id));
-              }
-            } catch {}
-          }
+        // One triangle per measure bar (the list collected above)
+        for (let i = 0; i < measureNotes.length; i++) {
+          const n = measureNotes[i];
+          try {
+            const st = n.getVariable('startTime');
+            if (st != null) {
+              triTimes.push(toNumber(st, 0));
+              triIds.push(Number(n.id));
+            }
+          } catch {}
         }
         // Sort by time and build next arrays
         const zipped = triTimes.map((t, i) => ({ t, id: triIds[i] })).sort((a, b) => a.t - b.t);
@@ -4882,12 +4882,7 @@ export class RendererAdapter {
           if (nextTimes && nextIds && nextTimes.length > 0) {
             const lastIdx = nextTimes.length - 1;
             const lastId = Number(nextIds[lastIdx]);
-            let mlSec = 0;
-            try {
-              const lastNote = module.getNoteById(lastId);
-              const mlVal = module.findMeasureLength(lastNote);
-              mlSec = toNumber(mlVal, 0) || 0;
-            } catch {}
+            const mlSec = barLengthSec(module.getNoteById(lastId));
             this._lastMeasureMeta = {
               id: lastId,
               baseStartSec: Number(nextTimes[lastIdx]) || 0,
@@ -5071,7 +5066,7 @@ export class RendererAdapter {
                     ml = this._lastMeasureMeta.lengthSec;
                   } else {
                     const lastNote = this._moduleRef.getNoteById(Number(lastId));
-                    const mlVal = this._moduleRef.findMeasureLength(lastNote);
+                    const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
                     ml = toNumber(mlVal, 0) || 0;
                   }
                   endFromMeasures = Math.max(0, lastStart + ml);
@@ -5098,7 +5093,7 @@ export class RendererAdapter {
                   ml = this._lastMeasureMeta.lengthSec;
                 } else {
                   const lastNote = this._moduleRef.getNoteById(Number(lastId));
-                  const mlVal = this._moduleRef.findMeasureLength(lastNote);
+                  const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
                   ml = toNumber(mlVal, 0) || 0;
                 }
                 endFromMeasures = Math.max(0, lastStart + ml);
@@ -5255,7 +5250,7 @@ const e = startSec + addDx + durSec;
             ml = this._lastMeasureMeta.lengthSec;
           } else {
             const lastNote = this._moduleRef.getNoteById(Number(lastId));
-            const mlVal = this._moduleRef.findMeasureLength(lastNote);
+            const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
             ml = toNumber(mlVal, 0) || 0;
           }
           endFromMeasures = Math.max(0, lastStart + ml);
@@ -5280,7 +5275,7 @@ const e = startSec + addDx + durSec;
           ml = this._lastMeasureMeta.lengthSec;
         } else {
           const lastNote = this._moduleRef.getNoteById(Number(lastId));
-          const mlVal = this._moduleRef.findMeasureLength(lastNote);
+          const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
           ml = toNumber(mlVal, 0) || 0;
         }
         endFromMeasures = Math.max(0, lastStart + ml);
@@ -9951,7 +9946,7 @@ try {
               const isMeasureNoteId = (id) => {
                 try {
                   const n = mref?.getNoteById?.(Number(id));
-                  return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                  return isMeasureNote(n);
                 } catch { return false; }
               };
 
@@ -10003,7 +9998,7 @@ try {
                 if (st.type === 'move' && Number(st.dxSec) > 0) {
                   try {
                     const n = mref?.getNoteById?.(Number(anchorId));
-                    const isMeasureAnchor = !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                    const isMeasureAnchor = isMeasureNote(n);
                     if (isMeasureAnchor) usePros = false;
                   } catch {}
                 }
@@ -10077,7 +10072,7 @@ try {
                     out.hasBase = baseRefRe.test(s);
                     // DSL base ref
                     if (!out.hasBase) {
-                      out.hasBase = /\bbase\./.test(s) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(s);
+                      out.hasBase = /\bbase\./.test(s);
                     }
 
                     const seen = new Set();
@@ -10091,24 +10086,24 @@ try {
                       seen.add(id);
                       try {
                         const ref = mod.getNoteById(id);
-                        const isMeasure = !!(ref && ref.variables && ref.variables.startTime && !ref.variables.duration && !ref.variables.frequency);
+                        const isMeasure = isMeasureNote(ref);
                         if (isMeasure) out.measureIds.push(id);
                         else out.noteIds.push(id);
                       } catch {
                         out.noteIds.push(id);
                       }
                     }
-                    // DSL note refs: [N].t, [N].d, beat([N]), measure([N])
-                    const dslRe = /\[(\d+)\]\.|\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/g;
+                    // DSL note refs: [N].t, [N].d
+                    const dslRe = /\[(\d+)\]\./g;
                     let dm;
                     while ((dm = dslRe.exec(s))) {
-                      const id = Number(dm[1] ?? dm[2]);
+                      const id = Number(dm[1]);
                       if (!isFinite(id) || id === 0) continue;
                       if (id === Number(anchorId) || seen.has(id)) continue;
                       seen.add(id);
                       try {
                         const ref = mod.getNoteById(id);
-                        const isMeasure = !!(ref && ref.variables && ref.variables.startTime && !ref.variables.duration && !ref.variables.frequency);
+                        const isMeasure = isMeasureNote(ref);
                         if (isMeasure) out.measureIds.push(id);
                         else out.noteIds.push(id);
                       } catch {
@@ -10134,7 +10129,7 @@ try {
                   const isMeasureNoteId = (id) => {
                     try {
                       const n = mref.getNoteById(Number(id));
-                      return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                      return isMeasureNote(n);
                     } catch { return false; }
                   };
                   const d = mref.getDirectDependencies(Number(anchorId)) || [];
@@ -10244,7 +10239,7 @@ try {
                 const isMeasureNoteIdRdeps = (id) => {
                   try {
                     const n = mref.getNoteById(Number(id));
-                    return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                    return isMeasureNote(n);
                   } catch { return false; }
                 };
 
@@ -10279,7 +10274,7 @@ try {
                 const isMeasureNoteIdFallback = (id) => {
                   try {
                     const n = mref.getNoteById(Number(id));
-                    return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                    return isMeasureNote(n);
                   } catch { return false; }
                 };
                 const rRaw = mref.getDependentNotes(Number(anchorId)) || [];

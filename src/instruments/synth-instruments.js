@@ -303,8 +303,8 @@ class HarmonicVoice extends SynthInstrument {
         };
     }
 
-    applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0) {
-        applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.level, this.getEnvelopeSettings(duration));
+    applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null) {
+        applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.level, this.getEnvelopeSettings(duration), shape);
     }
 }
 

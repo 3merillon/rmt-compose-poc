@@ -27,7 +27,20 @@ const EVALUATOR_PARAM = (() => {
   }
 })();
 
-const FORCE_JS_EVALUATOR = EVALUATOR_PARAM === 'js';
+// The Rust core still has the old variable layout (tempo, beatsPerMeasure,
+// measureLength at indices 3-5, no attack or release) and the FIND_TEMPO /
+// FIND_MEASURE opcodes. The JavaScript evaluator moved to relational time
+// (startTime, duration, frequency, amplitude, attack, release), so the two
+// read the same bytecode differently. Until the Rust core is ported (planned
+// together with its per-variable evaluation port), the JavaScript evaluator
+// is the only one used, even when ?evaluator=wasm asks for the other.
+const WASM_MATCHES_VARIABLE_LAYOUT = false;
+
+const FORCE_JS_EVALUATOR = EVALUATOR_PARAM === 'js' || !WASM_MATCHES_VARIABLE_LAYOUT;
+
+if (EVALUATOR_PARAM === 'wasm' && !WASM_MATCHES_VARIABLE_LAYOUT) {
+  console.warn('[RMT] ?evaluator=wasm ignored: the WASM evaluator has not been ported to relational time yet; using the JavaScript evaluator.');
+}
 
 /**
  * Whether module.js should hot-swap to the WASM evaluator when WASM

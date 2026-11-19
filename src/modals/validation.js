@@ -4,6 +4,7 @@ import { ExpressionCompiler } from '../expression-compiler.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
 import { findDependencyCycle } from '../variable-deps.js';
+import { EXPRESSION_VARS } from '../note.js';
 
 // Singleton compiler for safe validation
 const safeCompiler = new ExpressionCompiler();
@@ -100,7 +101,7 @@ function validateLegacyExpression(moduleInstance, noteId, expr, variableType) {
     // Detect whether expression contains references; if so, we preserve user-authored structure
     const hasRefs =
         /\.getVariable\s*\(/.test(expr) ||
-        /module\.(?:baseNote|getNoteById|findTempo|findMeasureLength)\s*\(/.test(expr) ||
+        /module\.(?:baseNote|getNoteById)\s*\(/.test(expr) ||
         /module\.baseNote/.test(expr);
 
     try {
@@ -151,19 +152,19 @@ function buildEvalCacheForValidation(moduleInstance) {
     const cache = new Map();
     if (!moduleInstance) return cache;
 
+    const record = (note) => {
+        const rec = {};
+        for (const v of EXPRESSION_VARS) {
+            rec[v] = note.getVariable ? note.getVariable(v) : null;
+        }
+        return rec;
+    };
+
     // Cache baseNote as ID 0
     const baseNote = moduleInstance.baseNote;
     if (baseNote) {
         try {
-            cache.set(0, {
-                startTime: baseNote.getVariable('startTime'),
-                duration: baseNote.getVariable('duration'),
-                frequency: baseNote.getVariable('frequency'),
-                tempo: baseNote.getVariable('tempo'),
-                beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
-                measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(baseNote) : null,
-                amplitude: baseNote.getVariable('amplitude')
-            });
+            cache.set(0, record(baseNote));
         } catch (e) { /* ignore */ }
     }
 
@@ -177,15 +178,7 @@ function buildEvalCacheForValidation(moduleInstance) {
             if (!note) continue;
 
             try {
-                cache.set(noteId, {
-                    startTime: note.getVariable ? note.getVariable('startTime') : null,
-                    duration: note.getVariable ? note.getVariable('duration') : null,
-                    frequency: note.getVariable ? note.getVariable('frequency') : null,
-                    tempo: moduleInstance.findTempo ? moduleInstance.findTempo(note) : null,
-                    beatsPerMeasure: note.getVariable ? note.getVariable('beatsPerMeasure') : null,
-                    measureLength: moduleInstance.findMeasureLength ? moduleInstance.findMeasureLength(note) : null,
-                    amplitude: note.getVariable ? note.getVariable('amplitude') : null
-                });
+                cache.set(noteId, record(note));
             } catch (e) { /* ignore individual note errors */ }
         }
     }

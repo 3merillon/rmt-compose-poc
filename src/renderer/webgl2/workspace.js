@@ -9,6 +9,108 @@ import { RendererAdapter } from './renderer.js';
 import { CameraController } from './camera-controller.js';
 import { eventBus } from '../../utils/event-bus.js';
 import { toNumber } from '../../utils/fraction-num.js';
+import { isMeasureNote } from '../../note.js';
+
+// ── Reading the time structure from expression text (legacy and DSL) ──────────
+// Shared with player.js, which imports these.
+
+const START_PROP = String.raw`(?:t|s|start|startTime)\b`;
+const DUR_PROP = String.raw`(?:d|dur|duration)\b`;
+const RE_DSL_START_REF = new RegExp(String.raw`\[\s*(\d+)\s*\]\s*\.\s*` + START_PROP);
+const RE_LEGACY_START_REF = /getNoteById\(\s*(\d+)\s*\)\s*\.getVariable\(\s*['"]startTime['"]\s*\)/;
+const RE_DSL_BASE_START = new RegExp(String.raw`\bbase\s*\.\s*` + START_PROP);
+const RE_LEGACY_BASE_START = /module\.baseNote\s*\.getVariable\(\s*['"]startTime['"]\s*\)/;
+const RE_DSL_CHAIN_LINK = new RegExp(
+  String.raw`^\s*\[\s*(\d+)\s*\]\s*\.\s*` + START_PROP + String.raw`\s*\+\s*\[\s*(\d+)\s*\]\s*\.\s*` + DUR_PROP + String.raw`\s*$`
+);
+const RE_LEGACY_CHAIN_LINK = /^\s*module\.getNoteById\(\s*(\d+)\s*\)\s*\.getVariable\(\s*['"]startTime['"]\s*\)\s*\.add\(\s*module\.getNoteById\(\s*(\d+)\s*\)\s*\.getVariable\(\s*['"]duration['"]\s*\)\s*\)\s*$/;
+
+/**
+ * The note a start expression is measured from: the note whose start it reads
+ * (`[N].t`, `getNoteById(N).getVariable('startTime')`), else the BaseNote when
+ * it reads `base.t`, else the first note it names at all. So `[5].t + base.d * 2`
+ * hangs from 5 although it also reads the BaseNote's duration (the time unit),
+ * and `base.t + [3].d` hangs from the BaseNote.
+ * @returns {number} note id, 0 for the BaseNote, -1 when the text names no note
+ */
+export function startParentIdFromRaw(raw) {
+  if (!raw || typeof raw !== 'string') return -1;
+  let m = raw.match(RE_DSL_START_REF) || raw.match(RE_LEGACY_START_REF);
+  if (m) return parseInt(m[1], 10);
+  if (RE_DSL_BASE_START.test(raw) || RE_LEGACY_BASE_START.test(raw)) return 0;
+  m = raw.match(/\[\s*(\d+)\s*\]/) || raw.match(/getNoteById\(\s*(\d+)\s*\)/);
+  if (m) return parseInt(m[1], 10);
+  if (/\bbase\s*\./.test(raw) || raw.includes('module.baseNote')) return 0;
+  return -1;
+}
+
+/**
+ * A measure chain link starts exactly where the bar before it ends: `[P].t + [P].d`,
+ * or legacy `module.getNoteById(P).getVariable('startTime').add(module.getNoteById(P).getVariable('duration'))`.
+ * Any other start (an offset, another note, the BaseNote) begins a chain of its own.
+ * The caller checks that P is a bar.
+ * @returns {number|null} P, or null when `raw` is not a chain link
+ */
+export function measureChainLinkParentId(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  const m = raw.match(RE_DSL_CHAIN_LINK) || raw.match(RE_LEGACY_CHAIN_LINK);
+  if (!m || m[1] !== m[2]) return null;
+  return parseInt(m[1], 10);
+}
+
+/** Whether `note` is a bar chained onto bar `parentId` (see measureChainLinkParentId). */
+function isChainLinkOf(note, parentId) {
+  try {
+    if (!isMeasureNote(note)) return false;
+    const pid = measureChainLinkParentId(note.variables?.startTimeString || '');
+    return pid != null && pid === Number(parentId);
+  } catch { return false; }
+}
+
+/** The bar that is chained onto `bar` (earliest start, then lowest id), or null. */
+function nextBarInChain(mod, bar) {
+  try {
+    if (!mod || !isMeasureNote(bar)) return null;
+    let best = null, bestStart = Infinity;
+    for (const id in mod.notes) {
+      const nn = mod.getNoteById(Number(id));
+      if (!isChainLinkOf(nn, bar.id)) continue;
+      const st = toNumber(nn.getVariable('startTime'), Infinity);
+      if (st < bestStart || (st === bestStart && best && Number(nn.id) < Number(best.id))) {
+        best = nn;
+        bestStart = st;
+      }
+    }
+    return best;
+  } catch { return null; }
+}
+
+/**
+ * Start-time ancestors of `from`, itself first, ending with the BaseNote when the
+ * walk reaches it: [{ id, startSec }].
+ */
+function startAncestorChain(mod, from) {
+  const out = [];
+  try {
+    const baseStartSec = () => toNumber(mod?.baseNote?.getVariable?.('startTime'), 0);
+    let cur = from;
+    let guard = 0;
+    while (cur && guard++ < 1024) {
+      out.push({ id: Number(cur.id || 0), startSec: toNumber(cur.getVariable?.('startTime'), 0) });
+      if (Number(cur.id || 0) === 0) break;
+      const ref = startParentIdFromRaw(cur?.variables?.startTimeString || '');
+      if (ref === 0) { out.push({ id: 0, startSec: baseStartSec() }); break; }
+      if (ref < 0) break;
+      cur = mod?.getNoteById?.(ref);
+    }
+  } catch {}
+  return out;
+}
+
+/** A bar's length in seconds: its own duration. */
+function barLengthSec(bar) {
+  try { return toNumber(bar?.getVariable?.('duration'), 0) || 0; } catch { return 0; }
+}
 
 /**
  * CameraController is provided by camera-controller.js
@@ -60,7 +162,7 @@ export class Workspace {
       cachedDependents: null  // Set<number> of dependent note IDs
     };
 
-    // Module snapshot for snapping/tempo info (filled in sync)
+    // Module snapshot for snapping (time unit) and chain info (filled in sync)
     this._module = null;
 
     // Bound DOM handlers (set in init)
@@ -241,10 +343,7 @@ export class Workspace {
                 } else {
                   // Fallback to original O(N×M) implementation if DependencyGraph not available
                   // Include ALL dependent measures (both chain links AND anchors) for preview
-                  const isMeasure = (n) => {
-                    try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
-                    catch { return false; }
-                  };
+                  const isMeasure = isMeasureNote;
 
                   // Expand to ALL transitive dependent measures (including anchors)
                   const measureClosure = (seedSet) => {
@@ -261,7 +360,7 @@ export class Workspace {
                         const sts = nn.variables?.startTimeString || '';
                         // Include ANY measure that references a seed (both chain links and anchors)
                         for (const sid of out) {
-                          if (sts.includes(`getNoteById(${sid})`) || sts.includes(`[${sid}]`) || sts.includes(`measure([${sid}])`)) {
+                          if (sts.includes(`getNoteById(${sid})`) || sts.includes(`[${sid}]`)) {
                             out.add(nid);
                             changed = true;
                             break;
@@ -294,9 +393,8 @@ export class Workspace {
                       if (s.includes(`getNoteById(${refId})`) &&
                           (s.includes(`getVariable('startTime'`) || s.includes(`getVariable("startTime"`) ||
                            s.includes(`getVariable('duration'`)  || s.includes(`getVariable("duration"`))) return true;
-                      // DSL: [refId].t, [refId].d, beat([refId]), measure([refId])
-                      if (s.includes(`[${refId}].t`) || s.includes(`[${refId}].d`) ||
-                          s.includes(`beat([${refId}])`) || s.includes(`measure([${refId}])`)) return true;
+                      // DSL: [refId].t, [refId].d
+                      if (s.includes(`[${refId}].t`) || s.includes(`[${refId}].d`)) return true;
                       return false;
                     };
                     const closureStartRefs = (seedSet) => {
@@ -601,101 +699,7 @@ export class Workspace {
         // drag: identical gesture, identical snapping — only the commit differs.
         this._decorateAsGroupDrag(this._interaction);
         // Seed per-interaction parent/ancestor caches for note drags (move/resize)
-        try {
-          const mod = this._module;
-          const n0 = mod?.getNoteById?.(Number(id));
-          const raw0 = n0?.variables?.startTimeString || '';
-          // Parse current parent (legacy + DSL)
-          let parent0 = null;
-          try {
-            if (raw0.includes('module.baseNote')) {
-              parent0 = mod?.baseNote || null;
-            } else {
-              const m = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (m) parent0 = mod?.getNoteById?.(parseInt(m[1], 10)) || null;
-            }
-            // DSL fallback
-            if (!parent0) {
-              const dm = raw0.match(/\[(\d+)\]\./);
-              if (dm) parent0 = mod?.getNoteById?.(parseInt(dm[1], 10)) || null;
-              if (!parent0) {
-                const dh = raw0.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                if (dh) parent0 = mod?.getNoteById?.(parseInt(dh[1], 10)) || null;
-              }
-              if (!parent0 && (/\bbase\./.test(raw0) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw0))) {
-                parent0 = mod?.baseNote || null;
-              }
-            }
-          } catch {}
-          if (!parent0) parent0 = mod?.baseNote || null;
-
-          const isMeasure = (nn) => {
-            try { return !!(nn && nn.hasExpression && nn.hasExpression('startTime') && !nn.hasExpression('duration') && !nn.hasExpression('frequency')); }
-            catch { return false; }
-          };
-
-          // Build ancestor chain from current parent up to BaseNote (legacy + DSL)
-          const anc = [];
-          try {
-            let curA = parent0;
-            let guardA = 0;
-            while (curA && guardA++ < 1024) {
-              const st = toNumber(curA.getVariable?.('startTime'), 0);
-              anc.push({ id: Number(curA.id || 0), startSec: st });
-              if (Number(curA.id || 0) === 0) break;
-              const rawA = curA?.variables?.startTimeString || '';
-              if (rawA.includes('module.baseNote')) {
-                anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                break;
-              }
-              const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (mm) {
-                curA = mod?.getNoteById?.(parseInt(mm[1], 10));
-                if (!curA) break;
-              } else {
-                const dslM = rawA.match(/\[(\d+)\]\./);
-                const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
-                if (dslId >= 0) {
-                  if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
-                  curA = mod?.getNoteById?.(dslId);
-                  if (!curA) break;
-                } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                  anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                  break;
-                } else {
-                  break;
-                }
-              }
-            }
-          } catch {}
-          this._interaction.cachedAncestorChain = anc;
-
-          // Build linear measure chain if current parent is a measure
-          if (isMeasure(parent0)) {
-            const chain = (this._collectMeasureChainFor && typeof this._collectMeasureChainFor === 'function')
-              ? (this._collectMeasureChainFor(Number(parent0.id)) || [])
-              : [];
-            const list = [];
-            let idx = -1;
-            for (let i = 0; i < chain.length; i++) {
-              const mid = Number(chain[i].id);
-              const st = Number(chain[i].startSec || 0);
-              let ml = 0;
-              try {
-                const mnote = mod?.getNoteById?.(mid);
-                const mlVal = mod?.findMeasureLength?.(mnote);
-                ml = toNumber(mlVal, 0) || 0;
-              } catch {}
-              list.push({ id: mid, startSec: st, endSec: st + ml });
-              if (mid === Number(parent0.id)) idx = i;
-            }
-            if (idx < 0 && list.length) idx = 0;
-            this._interaction.cachedParentChain = { list, idx, anchorParentId: Number(parent0.id) };
-          } else {
-            this._interaction.cachedParentChain = null;
-          }
-        } catch {}
+        this._seedParentCaches(Number(id));
 
         // Defer drag overlay until user actually drags (avoid bar pop on simple selection)
         // Precompute and set initial prospective parent at zero-delta so link line is correct immediately
@@ -1043,100 +1047,7 @@ export class Workspace {
           if (this._interaction.groupMode) this._decorateAsGroupDrag(this._interaction);
 
           // Seed per-interaction parent/ancestor caches for note drags (move/resize) on promotion
-          try {
-            const mod = this._module;
-            const n0 = mod?.getNoteById?.(Number(noteId));
-            const raw0 = n0?.variables?.startTimeString || '';
-            // Parse current parent (legacy + DSL)
-            let parent0 = null;
-            try {
-              if (raw0.includes('module.baseNote')) {
-                parent0 = mod?.baseNote || null;
-              } else {
-                const m = raw0.match(/getNoteById\(\s*(\d+)\s*\)/);
-                if (m) parent0 = mod?.getNoteById?.(parseInt(m[1], 10)) || null;
-              }
-              if (!parent0) {
-                const dm = raw0.match(/\[(\d+)\]\./);
-                if (dm) parent0 = mod?.getNoteById?.(parseInt(dm[1], 10)) || null;
-                if (!parent0) {
-                  const dh = raw0.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                  if (dh) parent0 = mod?.getNoteById?.(parseInt(dh[1], 10)) || null;
-                }
-                if (!parent0 && (/\bbase\./.test(raw0) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw0))) {
-                  parent0 = mod?.baseNote || null;
-                }
-              }
-            } catch {}
-            if (!parent0) parent0 = mod?.baseNote || null;
-
-            const isMeasure = (nn) => {
-              try { return !!(nn && nn.hasExpression && nn.hasExpression('startTime') && !nn.hasExpression('duration') && !nn.hasExpression('frequency')); }
-              catch { return false; }
-            };
-
-            // Build ancestor chain (legacy + DSL)
-            const anc = [];
-            try {
-              let curA = parent0;
-              let guardA = 0;
-              while (curA && guardA++ < 1024) {
-                const st = toNumber(curA.getVariable?.('startTime'), 0);
-                anc.push({ id: Number(curA.id || 0), startSec: st });
-                if (Number(curA.id || 0) === 0) break;
-                const rawA = curA?.variables?.startTimeString || '';
-                if (rawA.includes('module.baseNote')) {
-                  anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                  break;
-                }
-                const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-                if (mm) {
-                  curA = mod?.getNoteById?.(parseInt(mm[1], 10));
-                  if (!curA) break;
-                } else {
-                  const dslM = rawA.match(/\[(\d+)\]\./);
-                  const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                  const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
-                  if (dslId >= 0) {
-                    if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
-                    curA = mod?.getNoteById?.(dslId);
-                    if (!curA) break;
-                  } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                    anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                    break;
-                  } else {
-                    break;
-                  }
-                }
-              }
-            } catch {}
-            this._interaction.cachedAncestorChain = anc;
-
-            // Build linear measure chain if current parent is a measure
-            if (isMeasure(parent0)) {
-              const chain = (this._collectMeasureChainFor && typeof this._collectMeasureChainFor === 'function')
-                ? (this._collectMeasureChainFor(Number(parent0.id)) || [])
-                : [];
-              const list = [];
-              let idx = -1;
-              for (let i = 0; i < chain.length; i++) {
-                const mid = Number(chain[i].id);
-                const st = Number(chain[i].startSec || 0);
-                let ml = 0;
-                try {
-                  const mnote = mod?.getNoteById?.(mid);
-                  const mlVal = mod?.findMeasureLength?.(mnote);
-                  ml = toNumber(mlVal, 0) || 0;
-                } catch {}
-                list.push({ id: mid, startSec: st, endSec: st + ml });
-                if (mid === Number(parent0.id)) idx = i;
-              }
-              if (idx < 0 && list.length) idx = 0;
-              this._interaction.cachedParentChain = { list, idx, anchorParentId: Number(parent0.id) };
-            } else {
-              this._interaction.cachedParentChain = null;
-            }
-          } catch {}
+          this._seedParentCaches(Number(noteId));
 
           try { if (this.camera) this.camera.setInputEnabled(false); } catch {}
           // Fall through to normal move-preview path below
@@ -1155,24 +1066,18 @@ export class Workspace {
         const dxWorld = curWorldX - baseEdgeX - offsetWorld;
         const dxSec = dxWorld / (((this.renderer && typeof this.renderer._cfgSX === 'function') ? this.renderer._cfgSX() : 200) * xScale);
 
-        // Snapping helpers (use tempo at the context note when available)
-        const getBeatLengthSec = (ctxNoteId) => {
+        // Snapping helpers. A sixteenth is a quarter of the time unit, base.d (one
+        // beat). The unit is the same for every note, so the context note passed by
+        // the callers below no longer matters.
+        const getBeatLengthSec = () => {
           try {
-            const mod = this._module;
-            let tempoVal = null;
-            if (ctxNoteId != null && mod && typeof mod.getNoteById === 'function' && typeof mod.findTempo === 'function') {
-              const ctx = mod.getNoteById(Number(ctxNoteId));
-              tempoVal = mod.findTempo(ctx);
-            } else {
-              tempoVal = mod?.findTempo?.(mod?.baseNote);
-            }
-            const tempo = toNumber(tempoVal, 0);
-            if (tempo && isFinite(tempo) && tempo > 0) return 60 / tempo;
+            const unit = toNumber(this._module?.getTimeUnit?.(), 0);
+            if (unit && isFinite(unit) && unit > 0) return unit;
           } catch {}
-          return 60 / 120; // fallback 120 BPM
+          return 1; // the same fallback Module.getTimeUnit() uses
         };
-        const snapSixteenth = (sec, ctxNoteId) => {
-          const bl = getBeatLengthSec(ctxNoteId);
+        const snapSixteenth = (sec) => {
+          const bl = getBeatLengthSec();
           const beats = sec / bl;
           const snappedBeats = Math.round(beats * 4) / 4;
           return Math.max(0, snappedBeats * bl);
@@ -1188,13 +1093,13 @@ export class Workspace {
         if (type === 'move') {
           let next = this._interaction.origStartSec + dxSec;
           // Snap and clamp to base start
-          next = snapSixteenth(next, noteId);
+          next = snapSixteenth(next);
           if (next < baseStart) next = baseStart;
           startSec = next;
         } else if (type === 'resize') {
-          const minDur = snapSixteenth(1e-6, noteId) || (getBeatLengthSec(noteId) / 4);
+          const minDur = snapSixteenth(1e-6) || (getBeatLengthSec() / 4);
           let next = this._interaction.origDurationSec + dxSec;
-          next = Math.max(minDur, snapSixteenth(next, noteId));
+          next = Math.max(minDur, snapSixteenth(next));
           durationSec = next;
         } else if (type === 'measure') {
           // PERF: optional per-frame marker for measure drag preview (enable via window.__RMT_PERF.measureDrag = true)
@@ -1230,13 +1135,8 @@ export class Workspace {
           try {
             const mod = this._module;
             const n = mod?.getNoteById?.(Number(noteId));
-            const s = n?.variables?.startTimeString || '';
-            if (s && (s.includes('module.baseNote') || /\bbase\./.test(s) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(s))) {
-              // Also ensure no note-specific ref precedes the base ref
-              if (!(/\[\d+\]\./.test(s)) && !(/getNoteById\(\s*\d+\s*\)/.test(s))) {
-                parentIsBaseNote = true;
-              }
-            }
+            // Hangs from base.t (a start may also read base.d, the time unit, from any note)
+            parentIsBaseNote = startParentIdFromRaw(n?.variables?.startTimeString || '') === 0;
           } catch {}
           // Compute left bound:
           // - For subsequent measures in chain (cidx > 0): previous measure's start
@@ -1255,7 +1155,7 @@ export class Workspace {
             if (parentIsBaseNote) {
               // Anchored to BaseNote: clamp against baseStart (time 0)
               // If inside the first 1/16 bucket from origin, force exact origin.
-              const bl = getBeatLengthSec(noteId);
+              const bl = getBeatLengthSec();
               const sixteenthLen = bl / 4;
 
               // Clamp to base start first so we never go negative
@@ -1266,18 +1166,17 @@ export class Workspace {
                 next = left;
               } else {
                 // Otherwise quantize normally to 1/16
-                next = snapSixteenth(next, noteId);
+                next = snapSixteenth(next);
               }
             } else {
               // Parent is a measure or normal note: move freely, will relink on drop
-              next = snapSixteenth(next, noteId);
+              next = snapSixteenth(next);
             }
           } else {
             // For subsequent measures, respect a minimum gap to avoid overlapping previous measure
-            const prevId = Number(chain[cidx - 1]?.id ?? noteId);
-            const gap = snapSixteenth(1e-6, prevId) || (getBeatLengthSec(prevId) / 4);
+            const gap = snapSixteenth(1e-6) || (getBeatLengthSec() / 4);
             // Snap next, then enforce minimum gap from previous
-            next = Math.max(left + gap, snapSixteenth(next, noteId));
+            next = Math.max(left + gap, snapSixteenth(next));
           }
           startSec = next;
 
@@ -1294,54 +1193,9 @@ export class Workspace {
                 const note = mod?.getNoteById?.(Number(noteId));
 
                 if (note && mod) {
-                  // Parse current parent from startTimeString (legacy + DSL)
-                  const parseParent = (n) => {
-                    try {
-                      const raw = n?.variables?.startTimeString || '';
-                      // Legacy
-                      const m = raw.match(/getNoteById\(\s*(\d+)\s*\)/);
-                      if (m) return mod.getNoteById(parseInt(m[1], 10)) || mod.baseNote;
-                      if (raw.includes('module.baseNote')) return mod.baseNote;
-                      // DSL
-                      const dslM = raw.match(/\[(\d+)\]\./);
-                      if (dslM) return mod.getNoteById(parseInt(dslM[1], 10)) || mod.baseNote;
-                      const dslH = raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                      if (dslH) return mod.getNoteById(parseInt(dslH[1], 10)) || mod.baseNote;
-                      if (/\bbase\./.test(raw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return mod.baseNote;
-                    } catch {}
-                    return mod.baseNote;
-                  };
-
-                  // Check if note is a measure
-                  const isMeasure = (n) => {
-                    try {
-                      return !!(n && n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency);
-                    } catch { return false; }
-                  };
-
-                  // Find next measure in chain (CHAIN LINK only, legacy + DSL)
-                  const findNextInChain = (measure) => {
-                    if (!isMeasure(measure)) return null;
-                    const legacyLink = `findMeasureLength(module.getNoteById(${measure.id}))`;
-                    const dslLink = `measure([${measure.id}])`;
-                    let best = null;
-                    let bestStart = Infinity;
-                    for (const id in mod.notes) {
-                      const nn = mod.getNoteById(Number(id));
-                      if (!isMeasure(nn)) continue;
-                      const sts = nn.variables?.startTimeString || '';
-                      if (sts.includes(legacyLink) || sts.includes(dslLink)) {
-                        const st = toNumber(nn.getVariable('startTime'), Infinity);
-                        if (st < bestStart) {
-                          bestStart = st;
-                          best = nn;
-                        }
-                      }
-                    }
-                    return best;
-                  };
-
-                  let parent = parseParent(note);
+                  // Current parent from startTimeString (legacy + DSL)
+                  const ref0 = startParentIdFromRaw(note.variables?.startTimeString || '');
+                  let parent = (ref0 > 0 && mod.getNoteById(ref0)) || mod.baseNote;
                   let parentStart = toNumber(parent?.getVariable?.('startTime'), 0);
                   const origStart = toNumber(note.getVariable?.('startTime'), 0);
 
@@ -1349,18 +1203,17 @@ export class Workspace {
                   if (Math.abs(startSec - origStart) < tol) {
                     prospectiveParent = Number(parent?.id ?? 0);
                   } else if (startSec > parentStart + tol) {
-                    // Forward drag: walk forward through parent's chain
-                    if (isMeasure(parent)) {
+                    // Forward drag: walk forward through parent's chain (a bar ends at start + its own duration)
+                    if (isMeasureNote(parent)) {
                       let cur = parent;
                       let curStart = parentStart;
                       let advanced = true;
-                      while (advanced) {
+                      let guard = 0;
+                      while (advanced && guard++ < 4096) {
                         advanced = false;
-                        const mlVal = mod.findMeasureLength(cur);
-                        const ml = toNumber(mlVal, 0);
-                        const end = curStart + ml;
+                        const end = curStart + barLengthSec(cur);
                         if (startSec >= end - tol) {
-                          const next = findNextInChain(cur);
+                          const next = nextBarInChain(mod, cur);
                           if (next) {
                             cur = next;
                             curStart = toNumber(next.getVariable('startTime'), 0);
@@ -1373,46 +1226,16 @@ export class Workspace {
                     }
                     prospectiveParent = Number(parent?.id ?? 0);
                   } else if (startSec < parentStart - tol) {
-                    // Backward drag: climb ancestor chain (legacy + DSL)
-                    let ancestorChain = [];
-                    let cur = parent;
-                    while (cur && cur.id !== 0) {
-                      const raw = cur.variables?.startTimeString || '';
-                      // Legacy
-                      const m = raw.match(/getNoteById\((\d+)\)/);
-                      if (m) {
-                        cur = mod.getNoteById(parseInt(m[1], 10));
-                        if (cur) ancestorChain.push(cur);
-                        else break;
-                      } else if (raw.includes('module.baseNote')) {
-                        ancestorChain.push(mod.baseNote);
-                        break;
-                      // DSL
-                      } else {
-                        const dslM = raw.match(/\[(\d+)\]\./);
-                        const dslH = !dslM && raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                        const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
-                        if (dslId > 0) {
-                          cur = mod.getNoteById(dslId);
-                          if (cur) ancestorChain.push(cur);
-                          else break;
-                        } else if (dslId === 0 || /\bbase\./.test(raw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) {
-                          ancestorChain.push(mod.baseNote);
-                          break;
-                        } else {
-                          break;
-                        }
-                      }
-                    }
+                    // Backward drag: climb the start ancestors (the parent itself excluded)
+                    const ancestorChain = startAncestorChain(mod, parent).slice(1);
                     if (ancestorChain.length === 0 || ancestorChain[ancestorChain.length - 1]?.id !== 0) {
-                      ancestorChain.push(mod.baseNote);
+                      ancestorChain.push({ id: 0, startSec: toNumber(mod.baseNote?.getVariable?.('startTime'), 0) });
                     }
 
                     for (let i = 0; i < ancestorChain.length; i++) {
                       const anc = ancestorChain[i];
-                      const ancStart = toNumber(anc?.getVariable?.('startTime'), 0);
-                      if (startSec >= ancStart - tol) {
-                        parent = anc;
+                      if (startSec >= Number(anc.startSec || 0) - tol) {
+                        parent = mod.getNoteById(Number(anc.id)) || mod.baseNote;
                         break;
                       }
                     }
@@ -1583,8 +1406,7 @@ export class Workspace {
                   const did = Number(didRaw);
                   try {
                     const n = this._module?.getNoteById?.(did);
-                    const isMeasure = !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
-                    if (!isMeasure) continue;
+                    if (!isMeasureNote(n)) continue;
                     let baseS = 0;
                     if (baseline && baseline.has(did)) baseS = baseline.get(did) || 0;
                     else baseS = toNumber(n.getVariable('startTime'), 0);
@@ -2068,7 +1890,7 @@ export class Workspace {
     if (!this.renderer) return;
     try {
       const payload = args || {};
-      // Keep a reference to module for snapping (tempo) and clamps
+      // Keep a reference to module for snapping (time unit) and clamps
       try { this._module = payload && payload.module ? payload.module : this._module; } catch {}
       // Cache an authoritative snapshot (without tempOverrides) to restore after a cancel/no-op
       try {
@@ -2403,72 +2225,17 @@ export class Workspace {
       const note = mod.getNoteById(Number(noteId));
       if (!note) return null;
 
-      // Helper: is a "measure" note (has startTime but no duration/frequency)
-      const isMeasure = (n) => {
-        try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
-        catch { return false; }
-      };
-
       // Helper: parse current parent from startTimeString or parentId; fall back to BaseNote
       const parseParent = (n) => {
         try {
-          const raw = n?.variables?.startTimeString || '';
-          // Legacy: module.getNoteById(N)
-          const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
-          if (m) {
-            const pid = parseInt(m[1], 10);
-            const p = mod.getNoteById(pid);
-            return p || mod.baseNote;
-          }
-          if (raw.includes('module.baseNote')) return mod.baseNote;
-          // DSL: [N].t or [N].d or beat([N]) etc.
-          const dslM = raw.match(/\[(\d+)\]\./);
-          if (dslM) {
-            const pid = parseInt(dslM[1], 10);
-            const p = mod.getNoteById(pid);
-            return p || mod.baseNote;
-          }
-          // DSL: beat([N]) / tempo([N]) / measure([N])
-          const dslHelper = raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-          if (dslHelper) {
-            const pid = parseInt(dslHelper[1], 10);
-            const p = mod.getNoteById(pid);
-            return p || mod.baseNote;
-          }
-          if (/\bbase\./.test(raw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return mod.baseNote;
+          const ref = startParentIdFromRaw(n?.variables?.startTimeString || '');
+          if (ref >= 0) return mod.getNoteById(ref) || mod.baseNote;
           if (typeof n.parentId === 'number') {
             const p2 = mod.getNoteById(n.parentId);
             return p2 || mod.baseNote;
           }
         } catch {}
         return mod.baseNote;
-      };
-
-      // Helper: next measure in chain (CHAIN LINK that uses findMeasureLength/measure(), not anchors)
-      const findNextMeasureInChain = (measure) => {
-        try {
-          if (!isMeasure(measure)) return null;
-          const legacyLink = `findMeasureLength(module.getNoteById(${measure.id}))`;
-          const dslLink = `measure([${measure.id}])`;
-          const chainLinks = [];
-          for (const id in mod.notes) {
-            const nn = mod.getNoteById(Number(id));
-            if (!isMeasure(nn)) continue;
-            const sts = nn.variables?.startTimeString || '';
-            if (sts.includes(legacyLink) || sts.includes(dslLink)) {
-              chainLinks.push(nn);
-            }
-          }
-          if (!chainLinks.length) return null;
-          chainLinks.sort((a, b) => {
-            const sa = toNumber(a.getVariable('startTime'), NaN);
-            const sb = toNumber(b.getVariable('startTime'), NaN);
-            if (sa < sb) return -1;
-            if (sa > sb) return 1;
-            return Number(a.id) - Number(b.id);
-          });
-          return chainLinks[0];
-        } catch { return null; }
       };
 
       // Current parent and starts
@@ -2483,7 +2250,7 @@ export class Workspace {
 
       if (startSec > parentStart + tol) {
         // Dragging forward
-        if (isMeasure(parent)) {
+        if (isMeasureNote(parent)) {
           // Advance across measure chain using cached linear chain (no per-frame scans)
           const ensureParentChain = () => {
             try {
@@ -2493,23 +2260,7 @@ export class Workspace {
               }
             } catch {}
             // Rebuild if missing or anchor changed
-            const chain = this._collectMeasureChainFor(Number(parent.id)) || [];
-            const list = [];
-            let idxLocal = -1;
-            for (let i = 0; i < chain.length; i++) {
-              const mid = Number(chain[i].id);
-              const st = Number(chain[i].startSec || 0);
-              let ml = 0;
-              try {
-                const mnote = mod.getNoteById(mid);
-                const mlVal = mod.findMeasureLength(mnote);
-                ml = toNumber(mlVal, 0) || 0;
-              } catch {}
-              list.push({ id: mid, startSec: st, endSec: st + ml });
-              if (mid === Number(parent.id)) idxLocal = i;
-            }
-            if (idxLocal < 0 && list.length) idxLocal = 0;
-            const out = { list, idx: idxLocal, anchorParentId: Number(parent.id) };
+            const out = this._parentChainListFor(Number(parent.id));
             try { if (this._interaction) this._interaction.cachedParentChain = out; } catch {}
             return out;
           };
@@ -2549,41 +2300,7 @@ export class Workspace {
             // Refresh ancestor chain only if the parent index actually changed
             if (idx !== prevIdx) {
               try {
-                const anc = [];
-                let curA = parent;
-                let guardA = 0;
-                while (curA && guardA++ < 1024) {
-                  const st = toNumber(curA.getVariable?.('startTime'), 0);
-                  anc.push({ id: Number(curA.id || 0), startSec: st });
-                  if (Number(curA.id || 0) === 0) break;
-                  const rawA = curA?.variables?.startTimeString || '';
-                  // Legacy
-                  if (rawA.includes('module.baseNote')) {
-                    anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                    break;
-                  }
-                  const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-                  if (mm) {
-                    curA = mod.getNoteById(parseInt(mm[1], 10));
-                    if (!curA) break;
-                  // DSL
-                  } else {
-                    const dslM = rawA.match(/\[(\d+)\]\./);
-                    const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                    const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
-                    if (dslId >= 0) {
-                      if (dslId === 0) { anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
-                      curA = mod.getNoteById(dslId);
-                      if (!curA) break;
-                    } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                      anc.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                      break;
-                    } else {
-                      break;
-                    }
-                  }
-                }
-                if (this._interaction) this._interaction.cachedAncestorChain = anc;
+                if (this._interaction) this._interaction.cachedAncestorChain = startAncestorChain(mod, parent);
               } catch {}
             }
           }
@@ -2594,42 +2311,8 @@ export class Workspace {
           const ac = this._interaction && this._interaction.cachedAncestorChain;
           if (ac && Array.isArray(ac) && ac.length && Number(ac[0]?.id ?? -1) === Number(parent.id ?? -2)) return ac;
           // Rebuild when missing or parent changed
-          const arr = [];
           try {
-            let curA = parent;
-            let guardA = 0;
-            while (curA && guardA++ < 1024) {
-              const st = toNumber(curA.getVariable?.('startTime'), 0);
-              arr.push({ id: Number(curA.id || 0), startSec: st });
-              if (Number(curA.id || 0) === 0) break;
-              const rawA = curA?.variables?.startTimeString || '';
-              // Legacy
-              if (rawA.includes('module.baseNote')) {
-                arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                break;
-              }
-              const mm = rawA.match(/getNoteById\(\s*(\d+)\s*\)/);
-              if (mm) {
-                curA = mod.getNoteById(parseInt(mm[1], 10));
-                if (!curA) break;
-              // DSL
-              } else {
-                const dslM = rawA.match(/\[(\d+)\]\./);
-                const dslH = !dslM && rawA.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-                const dslId = dslM ? parseInt(dslM[1], 10) : (dslH ? parseInt(dslH[1], 10) : -1);
-                if (dslId >= 0) {
-                  if (dslId === 0) { arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) }); break; }
-                  curA = mod.getNoteById(dslId);
-                  if (!curA) break;
-                } else if (/\bbase\./.test(rawA) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(rawA)) {
-                  arr.push({ id: 0, startSec: toNumber(mod?.baseNote?.getVariable?.('startTime'), 0) });
-                  break;
-                } else {
-                  break;
-                }
-              }
-            }
-            if (this._interaction) this._interaction.cachedAncestorChain = arr;
+            if (this._interaction) this._interaction.cachedAncestorChain = startAncestorChain(mod, parent);
           } catch {}
           return (this._interaction && this._interaction.cachedAncestorChain) || [];
         };
@@ -2656,33 +2339,58 @@ export class Workspace {
     }
   }
 
-  // Return measure note { id, startSec } whose [startSec, nextStartSec) contains tSec.
-  // If none contains it, return the nearest measure with startSec <= tSec; otherwise null.
+  // Seed the per-interaction parent caches for a note drag (move/resize): the note's
+  // start ancestors up to the BaseNote and, when its start parent is a bar, that
+  // bar's chain with each bar's [start, end).
+  _seedParentCaches(noteId) {
+    try {
+      const mod = this._module;
+      const n0 = mod?.getNoteById?.(Number(noteId));
+      const ref = startParentIdFromRaw(n0?.variables?.startTimeString || '');
+      let parent0 = (ref > 0) ? (mod?.getNoteById?.(ref) || null) : null;
+      if (!parent0) parent0 = mod?.baseNote || null;
+
+      this._interaction.cachedAncestorChain = startAncestorChain(mod, parent0);
+      this._interaction.cachedParentChain = isMeasureNote(parent0)
+        ? this._parentChainListFor(Number(parent0.id))
+        : null;
+    } catch {}
+  }
+
+  // A bar's chain as { list: [{ id, startSec, endSec }], idx, anchorParentId }, idx
+  // being barId's place in it. A bar ends at its start plus its own duration.
+  _parentChainListFor(barId) {
+    const mod = this._module;
+    const chain = this._collectMeasureChainFor(Number(barId)) || [];
+    const list = [];
+    let idx = -1;
+    for (let i = 0; i < chain.length; i++) {
+      const mid = Number(chain[i].id);
+      const st = Number(chain[i].startSec || 0);
+      list.push({ id: mid, startSec: st, endSec: st + barLengthSec(mod?.getNoteById?.(mid)) });
+      if (mid === Number(barId)) idx = i;
+    }
+    if (idx < 0 && list.length) idx = 0;
+    return { list, idx, anchorParentId: Number(barId) };
+  }
+
+  // Return the bar { id, startSec, endSec } whose [startSec, endSec) contains tSec, a
+  // bar lasting its own duration (the latest-starting one if bars overlap). If none
+  // contains it, return the nearest bar with startSec <= tSec; otherwise null.
   _findMeasureAtTime(tSec) {
     try {
       const ms = this._collectMeasureNotes();
-      if (!ms.length) return null;
-
-      // Sorted ascending by startSec
-      let last = null;
-      for (let i = 0; i < ms.length; i++) {
-        const cur = ms[i];
-        const next = ms[i + 1];
-        if (tSec < cur.startSec) {
-          // Before first measure's start -> no containing interval; return previous (if any)
-          return last || null;
-        }
-        if (next && tSec >= cur.startSec && tSec < next.startSec) {
-          return cur;
-        }
+      let last = null, containing = null;
+      for (const cur of ms) {
+        if (tSec < cur.startSec) break;
+        if (tSec < cur.endSec) containing = cur;
         last = cur;
       }
-      // After last measure start
-      return last;
+      return containing || last;
     } catch { return null; }
   }
 
-  // Collect measure note ids and starts from current module snapshot.
+  // Collect measure bars (ids, starts and ends) from the current module snapshot.
   _collectMeasureNotes() {
     try {
       const mod = this._module;
@@ -2690,14 +2398,12 @@ export class Workspace {
       const out = [];
       for (const idStr in mod.notes) {
         const n = mod.notes[idStr];
-        if (!n) continue;
-        const hasStart = !!n.variables?.startTime;
-        const isMeasure = hasStart && !n.variables?.duration && !n.variables?.frequency;
-        if (!isMeasure) continue;
+        if (!isMeasureNote(n)) continue;
         try {
           const st = n.getVariable('startTime');
           if (st == null) continue;
-          out.push({ id: Number(idStr), startSec: toNumber(st, 0) || 0 });
+          const startSec = toNumber(st, 0) || 0;
+          out.push({ id: Number(idStr), startSec, endSec: startSec + barLengthSec(n) });
         } catch {}
       }
       out.sort((a, b) => a.startSec - b.startSec);
@@ -2741,23 +2447,20 @@ export class Workspace {
  * instead of O(N × M) regex scanning.
  * Usage:
  * - Cached at pointerdown as this._interaction.cachedMeasureChain and index as cachedMeasureIndex.
- * - Reused in [JavaScript.Workspace.prototype._updateInteraction()](src/renderer/webgl2/workspace.js:734) for snapping/clamping
+ * - Reused in Workspace._updateInteraction() for snapping/clamping
  *   and in the GPU preview path to build moving sets efficiently.
  * Notes:
- * - A "measure" is any note with startTime but without duration/frequency.
- * - The chain is defined by repeatedly selecting the earliest dependent measure.
+ * - A "measure" is a bar: a note flagged `measure` (isMeasureNote).
+ * - A chain runs through chain links, bars starting exactly where the previous bar
+ *   ends (`[P].t + [P].d`); a bar anchored any other way starts a chain of its own.
  */
 Workspace.prototype._collectMeasureChainFor = function(measureId) {
   try {
     const mod = this._module;
     if (!mod || !mod.notes) return [];
 
-    // Check if note is a measure (has startTime but no duration/frequency)
     const isMeasureById = (id) => {
-      try {
-        const n = mod.getNoteById(Number(id));
-        return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
-      } catch { return false; }
+      try { return isMeasureNote(mod.getNoteById(Number(id))); } catch { return false; }
     };
 
     const note = mod.getNoteById(Number(measureId));
@@ -2775,16 +2478,8 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       }
     };
 
-    // Check if a dependent is a chain link (uses findMeasureLength/measure()) vs an anchor (starts new chain)
-    const isChainLinkById = (depId, parentId) => {
-      try {
-        const n = mod.getNoteById(Number(depId));
-        const expr = (n && n.variables && n.variables.startTimeString) || '';
-        const legacyLink = `findMeasureLength(module.getNoteById(${parentId}))`;
-        const dslLink = `measure([${parentId}])`;
-        return expr.includes(legacyLink) || expr.includes(dslLink);
-      } catch { return false; }
-    };
+    // Is a dependent a chain link of this parent, or an anchor starting a new chain?
+    const isChainLinkById = (depId, parentId) => isChainLinkOf(mod.getNoteById(Number(depId)), parentId);
 
     // Use DependencyGraph if available (O(d) vs O(N×M))
     const depGraph = mod._dependencyGraph;
@@ -2792,45 +2487,15 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
       return depGraph.getMeasureChain(Number(measureId), isMeasureById, getStartTime, isChainLinkById);
     }
 
-    // Fallback to original O(N×M) implementation if DependencyGraph not available
-    const isMeasure = (n) => {
-      try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
-      catch { return false; }
-    };
-
-    // Get the parent measure id ONLY if this note is a CHAIN LINK (uses findMeasureLength/measure())
-    // If it's an anchor (no findMeasureLength/measure()), return null to stop backward walk
-    const getChainLinkParentId = (n) => {
-      try {
-        const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
-        // Legacy chain link: findMeasureLength(module.getNoteById(N))
-        const linkMatch = raw.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
-        if (linkMatch) {
-          const pid = parseInt(linkMatch[1], 10);
-          const pn = mod.getNoteById(pid);
-          return isMeasure(pn) ? pid : null;
-        }
-        // DSL chain link: measure([N])
-        const dslMatch = raw.match(/\bmeasure\s*\(\s*\[(\d+)\]\s*\)/);
-        if (dslMatch) {
-          const pid = parseInt(dslMatch[1], 10);
-          const pn = mod.getNoteById(pid);
-          return isMeasure(pn) ? pid : null;
-        }
-        // If no findMeasureLength, this is an anchor (or root) - stop backward walk
-        return null;
-      } catch {}
-      return null;
-    };
-
+    // Fallback (no DependencyGraph): scan the notes.
     // Backward to the earliest measure in this chain (only through chain links, not anchors)
     let cur = note;
     let guard = 0;
     while (guard++ < 1024) {
-      const pid = getChainLinkParentId(cur);
+      const pid = measureChainLinkParentId(cur?.variables?.startTimeString || '');
       if (pid == null) break; // Stop at anchors or roots
       const p = mod.getNoteById(pid);
-      if (!p || !isMeasure(p)) break;
+      if (!isMeasureNote(p)) break;
       cur = p;
     }
 
@@ -2847,38 +2512,11 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
     };
     pushWithStart(cur);
 
-    // Forward linearly: at each step choose the next CHAIN LINK measure (not anchors from other chains)
-    // A chain link uses findMeasureLength(getNoteById(X)) to compute start time
-    // An anchor uses getNoteById(X).getVariable('startTime') directly (starts a new chain)
-    const findNextChainLink = (m) => {
-      const candidates = [];
-      try {
-        const legacyLink = `findMeasureLength(module.getNoteById(${m.id}))`;
-        const dslLink = `measure([${m.id}])`;
-        for (const id in mod.notes) {
-          const nn = mod.getNoteById(Number(id));
-          if (!isMeasure(nn)) continue;
-          const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
-          if (sts.includes(legacyLink) || sts.includes(dslLink)) {
-            candidates.push(nn);
-          }
-        }
-      } catch {}
-      // Sort by startTime and return earliest (there should typically be only one chain link)
-      candidates.sort((a, b) => {
-        const sa = toNumber(a.getVariable('startTime'), NaN);
-        const sb = toNumber(b.getVariable('startTime'), NaN);
-        if (sa < sb) return -1;
-        if (sa > sb) return 1;
-        return Number(a.id) - Number(b.id);
-      });
-      return candidates.length > 0 ? candidates[0] : null;
-    };
-
+    // Forward linearly: at each step take the next chain link
     guard = 0;
     let curN = cur;
     while (guard++ < 2048) {
-      const next = findNextChainLink(curN);
+      const next = nextBarInChain(mod, curN);
       if (!next) break;
       pushWithStart(next);
       curN = next;
@@ -2891,41 +2529,20 @@ Workspace.prototype._collectMeasureChainFor = function(measureId) {
 /**
  * Determine the role of a measure in chain structure based on its startTimeString expression.
  * @param {Object} note - The note object with variables.startTimeString
- * @returns {Object} { role: 'root'|'anchor'|'link', parentId: number|null }
+ * @returns {Object} { role: 'root'|'anchor'|'link'|'orphan', parentId: number|null }
  *   - 'root': anchored directly to BaseNote (first measure at time 0)
- *   - 'link': chain link using findMeasureLength (subsequent measure in same chain)
- *   - 'anchor': first measure of a dependent chain (references another measure's startTime directly)
+ *   - 'link': chain link `[P].t + [P].d` (subsequent measure in same chain)
+ *   - 'anchor': first measure of a dependent chain (starts from another note any other way)
  */
 function getMeasureChainRole(note) {
   const expr = (note && note.variables && note.variables.startTimeString) || '';
 
-  // Root: anchored directly to BaseNote (legacy or DSL)
-  if (expr.includes('module.baseNote') ||
-      (/\bbase\./.test(expr) && !/\[\d+\]\./.test(expr)) ||
-      (/\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(expr) && !/\[\d+\]/.test(expr))) {
-    return { role: 'root', parentId: 0 };
-  }
+  const linkParent = measureChainLinkParentId(expr);
+  if (linkParent != null) return { role: 'link', parentId: linkParent };
 
-  // Check for chain link pattern (uses findMeasureLength or DSL measure())
-  const linkMatch = expr.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/);
-  if (linkMatch) {
-    return { role: 'link', parentId: parseInt(linkMatch[1], 10) };
-  }
-  const dslLinkMatch = expr.match(/\bmeasure\s*\(\s*\[(\d+)\]\s*\)/);
-  if (dslLinkMatch) {
-    return { role: 'link', parentId: parseInt(dslLinkMatch[1], 10) };
-  }
-
-  // Check for anchor pattern (direct getNoteById or DSL [N] reference without findMeasureLength/measure())
-  const anchorMatch = expr.match(/getNoteById\s*\(\s*(\d+)\s*\)/);
-  if (anchorMatch) {
-    return { role: 'anchor', parentId: parseInt(anchorMatch[1], 10) };
-  }
-  const dslAnchorMatch = expr.match(/\[(\d+)\]\./);
-  if (dslAnchorMatch) {
-    return { role: 'anchor', parentId: parseInt(dslAnchorMatch[1], 10) };
-  }
-
+  const ref = startParentIdFromRaw(expr);
+  if (ref === 0) return { role: 'root', parentId: 0 };
+  if (ref > 0) return { role: 'anchor', parentId: ref };
   return { role: 'orphan', parentId: null };
 }
 

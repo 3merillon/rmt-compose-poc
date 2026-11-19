@@ -9,10 +9,11 @@ import {
 } from './validation.js';
 import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
-import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
 import { escapeHtml } from '../utils/html-escape.js';
 import { isDSLSyntax } from '../dsl/index.js';
 import { toNumber } from '../utils/fraction-num.js';
+import { isMeasureNote } from '../note.js';
+import { CORRUPT } from '../binary-note.js';
 import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.js';
 import { raisePanel } from '../utils/panel-stack.js';
 import { viewportHeight } from '../utils/viewport.js';
@@ -90,6 +91,12 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
         return;
     }
 
+    // A measure bar opened without its measure id (e.g. after Evaluate to BaseNote)
+    // still gets the bar widget, not the one for a rest.
+    if (measureId === null && isMeasureNote(note)) {
+        measureId = note.id;
+    }
+
     const effectiveNoteId = (note && note.id !== undefined) ? note.id : measureId;
     if (effectiveNoteId === undefined) {
         console.error("No valid note id found for dependency highlighting.");
@@ -152,7 +159,7 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
         widgetContent.appendChild(variableRow);
     });
 
-    // Separate section for Measure Duration (beatsPerMeasure), not inside StartTime
+    // The bar's length: its own duration, as an expression row
     if (measureId !== null) {
         const measureDurationRow = createMeasureDurationRow(note, measureId, externalFunctions);
         if (measureDurationRow) widgetContent.appendChild(measureDurationRow);
@@ -220,26 +227,43 @@ function rawValueSeed(v) {
     return (v && typeof v.toFraction === 'function') ? v.toFraction() : String(v);
 }
 
-// The amplitude row. Unlike the other expression rows it is shown even when the
-// note has no amplitude of its own — that is the only way to give it one. The
-// value is then the one the note sounds at (the BaseNote's, else 1), flagged as
-// inherited, and Raw is empty. A silence has nothing to be loud, so it only
-// gets the row if it carries an amplitude anyway (hand-written JSON).
-function collectAmplitude(note, module, depGraph) {
+// The interpretation variables: how a note sounds, not what it relates to.
+const INTERPRETATION_VARS = ['amplitude', 'attack', 'release'];
+const INTERPRETATION_CORRUPT = {
+    amplitude: CORRUPT.AMPLITUDE,
+    attack: CORRUPT.ATTACK,
+    release: CORRUPT.RELEASE
+};
+
+// The amplitude, attack and release rows. Unlike the other expression rows they
+// are shown even when the note has none of its own — that is the only way to
+// give it one. The value is then the one the note sounds with (the BaseNote's;
+// else 1 for amplitude, else the instrument's own envelope for attack and
+// release), flagged as inherited or default, and Raw is empty. A silence has
+// nothing to sound, so it only gets a row for a variable it carries anyway
+// (hand-written JSON).
+function collectInterpretation(note, module, depGraph, name) {
     const isBase = note === module.baseNote;
-    const hasOwn = note.hasExpression('amplitude');
+    const hasOwn = note.hasExpression(name);
     if (!isBase && !hasOwn && !note.getVariable('frequency')) return null;
 
-    // ≈ follows whichever note's expression produced the value (0x40 = amplitude).
+    // ≈ follows whichever note's expression produced the value.
     const sourceId = hasOwn ? note.id : 0;
     const isCorrupted = !!(depGraph && typeof depGraph.isPropertyCorrupted === 'function'
-        && depGraph.isPropertyCorrupted(sourceId, 0x40));
+        && depGraph.isPropertyCorrupted(sourceId, INTERPRETATION_CORRUPT[name]));
+
+    const evaluated = (name === 'amplitude')
+        ? module.findAmplitude(note)
+        : (hasOwn ? note.getVariable(name) : module.baseNote.getVariable(name));
+    // Attack or release defined nowhere: the instrument's own envelope applies.
+    const isDefault = name !== 'amplitude' && evaluated == null;
 
     return {
-        evaluated: module.findAmplitude(note),
-        raw: hasOwn ? (note.variables.amplitudeString || '') : '',
-        isInherited: !hasOwn && !isBase,
-        isCorrupted
+        evaluated,
+        raw: hasOwn ? (note.variables[name + 'String'] || '') : '',
+        isInherited: !hasOwn && !isBase && !isDefault,
+        isDefault,
+        isCorrupted: !isDefault && isCorrupted
     };
 }
 
@@ -264,19 +288,22 @@ function collectVariables(note, measureId, moduleInstance) {
         : 0;
 
     if (note === module.baseNote) {
-        let amplitudePlaced = false;
-        const placeAmplitude = () => {
-            if (amplitudePlaced) return;
-            amplitudePlaced = true;
-            const entry = collectAmplitude(note, module, depGraph);
-            if (entry) variables.amplitude = entry;
+        let interpretationPlaced = false;
+        const placeInterpretation = () => {
+            if (interpretationPlaced) return;
+            interpretationPlaced = true;
+            for (const name of INTERPRETATION_VARS) {
+                const entry = collectInterpretation(note, module, depGraph, name);
+                if (entry) variables[name] = entry;
+            }
         };
 
         Object.keys(note.variables).forEach(key => {
-            // amplitude gets its row whether or not the BaseNote defines one
-            if (key === 'amplitude' || key === 'amplitudeString') return;
-            if (key === 'color' || key === 'instrument') placeAmplitude();
-            if (!key.endsWith('String') && key !== 'measureLength') {
+            // amplitude, attack and release get their rows whether or not the BaseNote defines them
+            const baseKey = key.endsWith('String') ? key.slice(0, -6) : key;
+            if (INTERPRETATION_VARS.includes(baseKey)) return;
+            if (key === 'color' || key === 'instrument') placeInterpretation();
+            if (!key.endsWith('String')) {
                 variables[key] = {
                     evaluated: note.getVariable(key),
                     raw: note.variables[key + 'String'] || rawValueSeed(note.variables[key]),
@@ -284,7 +311,7 @@ function collectVariables(note, measureId, moduleInstance) {
                 };
             }
         });
-        placeAmplitude();
+        placeInterpretation();
 
         if (!variables.instrument) {
             const hasOwnInstrument = note.properties.instrument != null;
@@ -310,9 +337,9 @@ function collectVariables(note, measureId, moduleInstance) {
             console.error("Invalid measure note:", noteInstance);
         }
     } else {
-        const variableNames = ['startTime', 'duration', 'frequency', 'amplitude', 'color'];
+        const variableNames = ['startTime', 'duration', 'frequency', ...INTERPRETATION_VARS, 'color'];
         // Map variable names to their corruption flag bits
-        const flagMap = { startTime: 0x01, duration: 0x02, frequency: 0x04 };
+        const flagMap = { startTime: CORRUPT.START_TIME, duration: CORRUPT.DURATION, frequency: CORRUPT.FREQUENCY };
 
         // Check if frequency is transitively corrupted (for display purposes only)
         const freqTransitivelyCorrupted = depGraph && noteId !== null
@@ -320,9 +347,9 @@ function collectVariables(note, measureId, moduleInstance) {
             && depGraph.isFrequencyTransitivelyCorrupted(noteId);
 
         variableNames.forEach(key => {
-            if (key === 'amplitude') {
-                const entry = collectAmplitude(note, module, depGraph);
-                if (entry) variables.amplitude = entry;
+            if (INTERPRETATION_VARS.includes(key)) {
+                const entry = collectInterpretation(note, module, depGraph, key);
+                if (entry) variables[key] = entry;
                 return;
             }
             if (note.variables && note.variables[key] !== undefined) {
@@ -639,142 +666,6 @@ function showNotification(message, type = 'info') {
     }, 3000);
 }
 
-
-function balanceParentheses(expr) {
-    let openCount = 0;
-    for (const char of expr) {
-        if (char === '(') openCount++;
-        else if (char === ')') openCount--;
-    }
-    if (openCount > 0) expr += ')'.repeat(openCount);
-    if (openCount < 0) {
-        while (openCount < 0 && expr.endsWith(')')) {
-            expr = expr.slice(0, -1);
-            openCount++;
-        }
-    }
-    return expr;
-}
-
-function removeExcessParentheses(expr) {
-    let result = expr;
-    let prev = '';
-    while (prev !== result) {
-        prev = result;
-        result = result.replace(/\(\(([^()]*)\)\)/g, '($1)');
-    }
-    return result;
-}
-
-
-
-
-
-
-function simplifyExpressions(expr) {
-    try {
-        // DSL expressions bypass legacy simplification
-        if (isDSLSyntax(expr)) return expr;
-
-        // Use centralized simplifier with heuristics to determine kind.
-        const moduleInstance = getModule();
-        const cleaned = removeExcessParentheses(expr);
-        const m = cleaned;
-
-        const hasStart = /getVariable\(\s*'startTime'\s*\)/.test(m);
-        const hasTempo = /findTempo\(/.test(m);
-        const hasDurRef = /getVariable\(\s*'duration'\s*\)/.test(m);
-        const hasFreqRef = /getVariable\(\s*'frequency'\s*\)/.test(m);
-
-        let out = cleaned;
-        if (hasStart) {
-            out = simplifyStartTime(cleaned, moduleInstance);
-        } else if (hasTempo || hasDurRef) {
-            out = simplifyDuration(cleaned, moduleInstance);
-        } else if (hasFreqRef) {
-            out = simplifyFrequency(cleaned, moduleInstance);
-        } else {
-            // Fallback: keep as-is (or run generic if desired)
-            try { out = simplifyGeneric(cleaned, 'generic', moduleInstance); } catch {}
-        }
-        return removeExcessParentheses(out);
-    } catch (error) {
-        console.error("Error in simplifyExpressions:", error);
-        return expr;
-    }
-}
-
-function replaceNoteReferencesWithBaseNoteOnly(expr, moduleInstance) {
-    const measureLengthRegex = /module\.findMeasureLength\(module\.getNoteById\((\d+)\)\)/g;
-    const tempoRegex = /module\.findTempo\(module\.getNoteById\((\d+)\)\)/g;
-    const draggedNotePattern = /module\.getNoteById\((\d+)\)\.getVariable\('startTime'\)\.add\(new Fraction\(60\)\.div\(module\.findTempo\(module\.getNoteById\(\d+\)\)\)\.mul\(new Fraction\(([^,]+),\s*([^)]+)\)\)\)/g;
-
-    let prevExpr = '';
-    let currentExpr = expr;
-    let iterations = 0;
-    const MAX_ITERATIONS = 10;
-
-    while (prevExpr !== currentExpr && iterations < MAX_ITERATIONS) {
-        prevExpr = currentExpr;
-        iterations++;
-
-        currentExpr = currentExpr.replace(measureLengthRegex, () => 'module.findMeasureLength(module.baseNote)');
-        currentExpr = currentExpr.replace(tempoRegex, () => 'module.findTempo(module.baseNote)');
-
-        currentExpr = currentExpr.replace(draggedNotePattern, (match, noteId, numerator, denominator) => {
-            const refNote = moduleInstance.getNoteById(parseInt(noteId, 10));
-            if (!refNote) return match;
-
-            const refStartTime = refNote.getVariable('startTime');
-            const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
-            const baseTempo = moduleInstance.baseNote.getVariable('tempo');
-            const beatOffset = new Fraction(numerator.trim(), denominator.trim());
-
-            // offsetBeats = (refStart - baseStart) * tempo / 60 + beatOffset, exact
-            const offsetBeats = refStartTime.sub(baseStartTime).mul(baseTempo).div(60).add(beatOffset);
-
-            return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${toFractionString(offsetBeats)}))`;
-        });
-
-        const noteRefRegex = /module\.getNoteById\((\d+)\)\.getVariable\('([^']+)'\)/g;
-
-        let newExpr = '';
-        let lastIndex = 0;
-        let match;
-
-        const regex = new RegExp(noteRefRegex);
-        while ((match = regex.exec(currentExpr)) !== null) {
-            newExpr += currentExpr.substring(lastIndex, match.index);
-            const noteId = match[1];
-            const varName = match[2];
-
-            if (noteId === '0') {
-                newExpr += `module.baseNote.getVariable('${varName}')`;
-            } else {
-                const refNote = moduleInstance.getNoteById(parseInt(noteId, 10));
-                if (!refNote) {
-                    newExpr += match[0];
-                } else {
-                    const rawExpr = refNote.variables[varName + 'String'] || '';
-                    if (!rawExpr) {
-                        newExpr += match[0];
-                    } else {
-                        if (rawExpr === "module.baseNote.getVariable('startTime')") {
-                            newExpr += `module.baseNote.getVariable('${varName}')`;
-                        } else {
-                            newExpr += `(${rawExpr})`;
-                        }
-                    }
-                }
-            }
-            lastIndex = match.index + match[0].length;
-        }
-        newExpr += currentExpr.substring(lastIndex);
-        if (newExpr !== currentExpr) currentExpr = newExpr;
-    }
-    currentExpr = currentExpr.replace(/module\.getNoteById\(0\)/g, 'module.baseNote');
-    return simplifyExpressions(currentExpr);
-}
 
 // ===== Feature: Evaluate to BaseNote =====
 // Helper to convert an exact value (Fraction preferred, number tolerated) to a
@@ -1206,42 +1097,44 @@ function createTETFrequencyExpr(interval, useDSL = false) {
     return `module.baseNote.getVariable('frequency').mul(new Fraction(${base}).pow(new Fraction(${numerator}, ${denominator})))`;
 }
 
-// Create BaseNote-relative expression for startTime.
+// A span of time (exact Fraction, seconds) written in time units: base.d * k,
+// or its legacy chain. With no usable time unit (base.d not positive) the
+// seconds are written as a constant, so the value never changes.
+function createTimeUnitsExpr(seconds, moduleInstance, useDSL = false) {
+    const unit = moduleInstance.baseNote.getVariable('duration');
+    if (!unit || typeof unit.compare !== 'function' || unit.compare(0) <= 0) {
+        return useDSL ? toDSLFractionString(seconds) : toFractionString(seconds);
+    }
+    const k = seconds.div(unit);
+    if (useDSL) {
+        return k.equals(1) ? 'base.d' : `base.d * ${toDSLFractionString(k)}`;
+    }
+    const unitRef = `module.baseNote.getVariable('duration')`;
+    return k.equals(1) ? unitRef : `${unitRef}.mul(${toFractionString(k)})`;
+}
+
+// Create BaseNote-relative expression for startTime: base.t + base.d * k.
 // Takes the exact evaluated Fraction; all offset algebra stays in Fraction
 // arithmetic so the emitted literal is digit-exact at any magnitude.
 function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance, useDSL = false) {
     const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
-    const baseTempo = moduleInstance.baseNote.getVariable('tempo');
+    const offset = noteStartTime.sub(baseStartTime);
 
-    // offsetBeats = (t - baseT) * tempo / 60
-    const offsetBeats = noteStartTime.sub(baseStartTime).mul(baseTempo).div(60);
-
-    if (offsetBeats.equals(0)) {
+    if (offset.equals(0)) {
         return useDSL ? 'base.t' : `module.baseNote.getVariable('startTime')`;
     }
 
     if (useDSL) {
-        const fracStr = toDSLFractionString(offsetBeats.abs());
-        const beatMul = (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
-        return offsetBeats.compare(0) >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
+        const span = createTimeUnitsExpr(offset.abs(), moduleInstance, true);
+        return offset.compare(0) >= 0 ? `base.t + ${span}` : `base.t - ${span}`;
     }
 
-    const beatsFrac = toFractionString(offsetBeats);
-    return `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac}))`;
+    return `module.baseNote.getVariable('startTime').add(${createTimeUnitsExpr(offset, moduleInstance, false)})`;
 }
 
-// Create BaseNote-relative expression for duration (exact Fraction in)
+// Create BaseNote-relative expression for duration: base.d * k (exact Fraction in)
 function createBaseNoteDurationExpr(duration, moduleInstance, useDSL = false) {
-    const baseTempo = moduleInstance.baseNote.getVariable('tempo');
-    const durationBeats = duration.mul(baseTempo).div(60);
-
-    if (useDSL) {
-        const fracStr = toDSLFractionString(durationBeats);
-        return (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
-    }
-
-    const beatsFrac = toFractionString(durationBeats);
-    return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac})`;
+    return createTimeUnitsExpr(duration, moduleInstance, useDSL);
 }
 
 // Create BaseNote-relative expression for frequency (exact Fraction in)
@@ -1313,7 +1206,7 @@ function createBaseNoteAmplitudeExpr(amplitude, moduleInstance, useDSL = false) 
 function amplitudeIsExact(moduleInstance, noteId) {
     try {
         const depGraph = moduleInstance.getDependencyGraph();
-        return !depGraph.isPropertyCorrupted(noteId, 0x40) && !depGraph.isPropertyCorrupted(0, 0x40);
+        return !depGraph.isPropertyCorrupted(noteId, CORRUPT.AMPLITUDE) && !depGraph.isPropertyCorrupted(0, CORRUPT.AMPLITUDE);
     } catch {
         return true;
     }
@@ -1327,9 +1220,10 @@ export function evaluateNoteToBaseNote(noteId) {
         return;
     }
 
-    // Check if this is a measure note (only has startTime)
-    const isMeasureNote = note.variables.startTime && !note.variables.duration && !note.variables.frequency;
-    const variablesToProcess = isMeasureNote ? ['startTime'] : ['startTime', 'duration', 'frequency', 'amplitude'];
+    // A measure bar has a start and a length (its duration), nothing that sounds
+    const variablesToProcess = isMeasureNote(note)
+        ? ['startTime', 'duration']
+        : ['startTime', 'duration', 'frequency', 'amplitude'];
     let success = true;
 
     // Detect if the note uses DSL format (check any expression)
@@ -1391,12 +1285,8 @@ export function evaluateEntireModule() {
     const moduleInstance = getModule();
     const noteIds = Object.keys(moduleInstance.notes).map(id => parseInt(id, 10)).filter(id => id !== 0);
 
-    // Pre-compute BaseNote reference values ONCE (avoid repeated lookups);
-    // keep them as exact Fractions so all offset/ratio algebra stays exact
-    const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
-    const baseTempo = moduleInstance.baseNote.getVariable('tempo');
-
-    // Collect all expression updates in a single pass
+    // Collect all expression updates in a single pass. Every value is read
+    // before any update is applied, and all offset/ratio algebra stays exact.
     const updates = [];
 
     for (const noteId of noteIds) {
@@ -1407,67 +1297,26 @@ export function evaluateEntireModule() {
         const anyRaw = note.variables.startTimeString || note.variables.durationString || note.variables.frequencyString || '';
         const useDSL = isDSLSyntax(anyRaw);
 
-        // Check if this is a measure note (only has startTime)
-        const isMeasureNote = note.hasExpression('startTime') &&
-                              !note.hasExpression('duration') &&
-                              !note.hasExpression('frequency');
-
-        // Process startTime for all notes
+        // Process startTime for all notes: base.t + base.d * k
         if (note.hasExpression('startTime')) {
             const currentValue = note.getVariable('startTime');
             if (currentValue != null) {
-                // offsetBeats = (t - baseT) * tempo / 60, exact
-                const offsetBeats = currentValue.sub(baseStartTime).mul(baseTempo).div(60);
-
-                let expr;
-                if (offsetBeats.equals(0)) {
-                    expr = useDSL ? 'base.t' : `module.baseNote.getVariable('startTime')`;
-                } else if (useDSL) {
-                    const fracStr = toDSLFractionString(offsetBeats.abs());
-                    const beatMul = (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
-                    expr = offsetBeats.compare(0) >= 0 ? `base.t + ${beatMul}` : `base.t - ${beatMul}`;
-                } else {
-                    const beatsFrac = toFractionString(offsetBeats);
-                    expr = `module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac}))`;
-                }
+                const expr = createBaseNoteStartTimeExpr(currentValue, moduleInstance, useDSL);
                 updates.push({ noteId, varName: 'startTime', expr });
             }
         }
 
-        // Process beatsPerMeasure for measure notes (convert to BaseNote reference)
-        if (isMeasureNote && note.hasExpression('beatsPerMeasure')) {
-            const currentValue = note.getVariable('beatsPerMeasure');
+        // Process duration for all notes, a measure bar's length included: base.d * k
+        if (note.hasExpression('duration')) {
+            const currentValue = note.getVariable('duration');
             if (currentValue != null) {
-                const baseBeats = moduleInstance.baseNote.getVariable('beatsPerMeasure');
-
-                let expr;
-                if (baseBeats != null && currentValue.equals(baseBeats)) {
-                    expr = useDSL ? 'base.bpm' : `module.baseNote.getVariable('beatsPerMeasure')`;
-                } else {
-                    expr = useDSL ? toDSLFractionString(currentValue) : toFractionString(currentValue);
-                }
-                updates.push({ noteId, varName: 'beatsPerMeasure', expr });
+                const expr = createBaseNoteDurationExpr(currentValue, moduleInstance, useDSL);
+                updates.push({ noteId, varName: 'duration', expr });
             }
         }
 
-        // Process duration and frequency only for non-measure notes
-        if (!isMeasureNote) {
-            if (note.hasExpression('duration')) {
-                const currentValue = note.getVariable('duration');
-                if (currentValue != null) {
-                    const durationBeats = currentValue.mul(baseTempo).div(60);
-                    let expr;
-                    if (useDSL) {
-                        const fracStr = toDSLFractionString(durationBeats);
-                        expr = (fracStr === '1') ? 'beat(base)' : `beat(base) * ${fracStr}`;
-                    } else {
-                        const beatsFrac = toFractionString(durationBeats);
-                        expr = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(${beatsFrac})`;
-                    }
-                    updates.push({ noteId, varName: 'duration', expr });
-                }
-            }
-
+        // Process frequency and amplitude only for non-measure notes
+        if (!isMeasureNote(note)) {
             if (note.hasExpression('frequency')) {
                 const currentValue = note.getVariable('frequency');
                 if (currentValue != null) {
@@ -1519,9 +1368,8 @@ export function liberateDependencies(noteId) {
     if (!selectedNote) return;
 
     const currentSelected = selectedNote;
-    const isMeasureBar = selectedNote.variables.startTime && !selectedNote.variables.duration;
 
-    if (isMeasureBar) {
+    if (isMeasureNote(selectedNote)) {
         showNotification('Cannot liberate dependencies on measure bars', 'error');
         return;
     }
@@ -1545,10 +1393,12 @@ export function liberateDependencies(noteId) {
             }
         }
     });
-    // amplitude only when the note defines its own; left undefined, references
-    // to it are replaced by the BaseNote's (what the note was inheriting).
-    if (selectedNote.variables.amplitudeString) {
-        selectedRaw.amplitude = selectedNote.variables.amplitudeString;
+    // amplitude, attack and release only when the note defines its own; left
+    // undefined, references to them are replaced by the BaseNote's (what the
+    // note was inheriting).
+    for (const varName of INTERPRETATION_VARS) {
+        const own = selectedNote.variables[varName + "String"];
+        if (own) selectedRaw[varName] = own;
     }
 
     if (typeof externalFunctions.updateDependentRawExpressions === 'function') {

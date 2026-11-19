@@ -205,8 +205,8 @@ export class MultisampleInstrument {
     return env;
   }
 
-  applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0) {
+  applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null) {
     // Reuse the shared click-free envelope; samples hold at full then release.
-    applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.gain, this.getEnvelopeSettings(duration));
+    applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.gain, this.getEnvelopeSettings(duration), shape);
   }
 }

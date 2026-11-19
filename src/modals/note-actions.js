@@ -3,6 +3,7 @@
 //   - createEvaluateSection(note, measureId, effectiveNoteId, modalsApi) => HTMLElement
 //   - createDeleteSection(note, effectiveNoteId, externalFunctions, modalsApi) => HTMLElement
 import { getModule } from '../store/app-state.js';
+import { isMeasureNote } from '../note.js';
 
 function rowContainer(cls = 'variable-row') {
   const row = document.createElement('div');
@@ -36,7 +37,7 @@ export function createEvaluateSection(note, measureId, effectiveNoteId, modalsAp
   wrap.appendChild(hdr);
 
   // For non-measure notes only, liberate button if supported
-  const isMeasureBar = !!(note?.variables?.startTime && !note?.variables?.duration);
+  const isMeasureBar = (measureId !== null && measureId !== undefined) || isMeasureNote(note);
 
   if (!isMeasureBar && effectiveNoteId !== undefined && effectiveNoteId !== null) {
     // Prefer confirmation dialog if available

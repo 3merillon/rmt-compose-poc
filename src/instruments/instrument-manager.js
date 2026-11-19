@@ -24,15 +24,23 @@ const EPS = 0.0001;           // exponential ramps can't touch 0
  * @param {number} duration note length in seconds
  * @param {number} peak peak gain (per-note initial volume)
  * @param {{attackTimeRatio?:number,decayTimeRatio?:number,sustainLevel?:number,releaseTimeRatio?:number}} env
+ * @param {{attack?:number|null, release?:number|null}} [shape] the note's own
+ *   attack and release, as shares of its duration (the interpretation variables
+ *   `attack` and `release`); each replaces the instrument's ratio when given.
  */
-export function applyVoiceEnvelope(gainNode, startTime, duration, peak, env = {}) {
+export function applyVoiceEnvelope(gainNode, startTime, duration, peak, env = {}, shape = null) {
   const g = gainNode.gain;
   const dur = Math.max(0.001, duration);
+  const own = noteShape(shape);
 
-  let attack = Math.max(ATTACK_FLOOR, dur * (env.attackTimeRatio != null ? env.attackTimeRatio : 0.01));
-  let release = Math.max(RELEASE_FLOOR, dur * (env.releaseTimeRatio != null ? env.releaseTimeRatio : 0.05));
-  // Keep attack+release inside the note, leaving >=10% for the body.
-  const maxAR = dur * 0.9;
+  const attackRatio = own.attack != null ? own.attack : (env.attackTimeRatio != null ? env.attackTimeRatio : 0.01);
+  const releaseRatio = own.release != null ? own.release : (env.releaseTimeRatio != null ? env.releaseTimeRatio : 0.05);
+  // The floors stay: they are what keeps a note from clicking.
+  let attack = Math.max(ATTACK_FLOOR, dur * attackRatio);
+  let release = Math.max(RELEASE_FLOOR, dur * releaseRatio);
+  // Keep attack+release inside the note: the instrument leaves >=10% for the
+  // body; a note's own shape may use all of it (attack 1 is a swell to the end).
+  const maxAR = dur * (own.attack != null || own.release != null ? 1 : 0.9);
   if (attack + release > maxAR) {
     const s = maxAR / (attack + release);
     attack *= s;
@@ -61,6 +69,17 @@ export function applyVoiceEnvelope(gainNode, startTime, duration, peak, env = {}
   }
   g.exponentialRampToValueAtTime(EPS, end);                // exponential release
   g.linearRampToValueAtTime(0, end + 0.004);               // hard-zero → clean stop
+}
+
+/**
+ * A note's own attack and release shares, clamped to [0, 1]; null when unset
+ * or not a finite number.
+ * @param {{attack?:number|null, release?:number|null}|null} shape
+ * @returns {{attack:number|null, release:number|null}}
+ */
+export function noteShape(shape) {
+  const clamp = (v) => (v == null || !Number.isFinite(v) ? null : Math.min(1, Math.max(0, v)));
+  return { attack: clamp(shape && shape.attack), release: clamp(shape && shape.release) };
 }
 
 /**
@@ -151,8 +170,8 @@ export class SynthInstrument {
         return makeVoice(oscs, output, frequency);
     }
 
-    applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0) {
-        applyVoiceEnvelope(gainNode, startTime, duration, initialVolume, this.getEnvelopeSettings());
+    applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null) {
+        applyVoiceEnvelope(gainNode, startTime, duration, initialVolume, this.getEnvelopeSettings(), shape);
     }
 }
 
@@ -259,11 +278,17 @@ export class SampleInstrument {
         };
     }
 
-    applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0) {
+    applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null) {
         const env = this.getEnvelopeSettings();
+        const own = noteShape(shape);
 
-        const attackTime = Math.min(0.01, duration * env.attackTimeRatio);
-        const releaseTime = Math.min(0.1, duration * env.releaseTimeRatio);
+        let attackTime = own.attack != null ? duration * own.attack : Math.min(0.01, duration * env.attackTimeRatio);
+        let releaseTime = own.release != null ? duration * own.release : Math.min(0.1, duration * env.releaseTimeRatio);
+        if (attackTime + releaseTime > duration) {
+            const s = duration / (attackTime + releaseTime);
+            attackTime *= s;
+            releaseTime *= s;
+        }
         const sustainTime = duration - attackTime - releaseTime;
 
         gainNode.gain.cancelScheduledValues(startTime);
@@ -330,8 +355,12 @@ export class InstrumentManager {
         return instrument.createOscillator(frequency);
     }
 
-    applyEnvelope(instrumentName, gainNode, startTime, duration, initialVolume = 1.0) {
+    /**
+     * @param {{attack?:number|null, release?:number|null}} [shape] the note's own
+     *   attack and release (shares of its duration); null keeps the instrument's.
+     */
+    applyEnvelope(instrumentName, gainNode, startTime, duration, initialVolume = 1.0, shape = null) {
         const instrument = this.getInstrument(instrumentName);
-        instrument.applyEnvelope(gainNode, startTime, duration, initialVolume);
+        instrument.applyEnvelope(gainNode, startTime, duration, initialVolume, shape);
     }
 }

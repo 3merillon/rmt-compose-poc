@@ -6,9 +6,11 @@ import { eventBus } from './utils/event-bus.js';
 import { audioEngine } from './player/audio-engine.js';
 import { setModule, setEvaluatedNotes } from './store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, multiplyExpressionByFraction } from './utils/simplify.js';
-import { Workspace } from './renderer/webgl2/workspace.js';
+import { Workspace, startParentIdFromRaw, measureChainLinkParentId } from './renderer/webgl2/workspace.js';
+import { isMeasureNote, EXPRESSION_VARS } from './note.js';
 import { menuBar } from './menu/menu-bar.js';
 import { isDSLSyntax } from './dsl/index.js';
+import { PropertyMap } from './dsl/constants.js';
 import { compiler } from './expression-compiler.js';
 import { findDependencyCycle } from './variable-deps.js';
 import { escapeHtml } from './utils/html-escape.js';
@@ -36,19 +38,29 @@ function fracIsOne(f) {
   return f.s === 1n && f.n === 1n && f.d === 1n;
 }
 
-// Exact beat offset between two exact start times: (t - t0) * tempo / 60,
-// clamped at zero. Returns a Fraction; falls back to a float-derived one only
-// when an input is not a Fraction.
-function exactBeatOffset(tFrac, t0Frac, tempoFrac) {
+// Exact offset between two exact start times in time units (base.d, one beat):
+// (t - t0) / unit, clamped at zero. Returns a Fraction; falls back to a
+// float-derived one only when an input is not a Fraction.
+function exactBeatOffset(tFrac, t0Frac, unitFrac) {
   try {
     const diff = tFrac.sub(t0Frac);
     if (diff.s < 0n) return new Fraction(0);
-    return diff.mul(tempoFrac).div(60);
+    return diff.div(unitFrac);
   } catch (e) {
-    const beat = 60 / toNumber(tempoFrac, 60);
-    const off = Math.max(0, toNumber(tFrac) - toNumber(t0Frac)) / beat;
+    const unit = toNumber(unitFrac, 1) || 1;
+    const off = Math.max(0, toNumber(tFrac) - toNumber(t0Frac)) / unit;
     try { return new Fraction(off); } catch { return new Fraction(Math.round(off * 4), 4); }
   }
+}
+
+// k time units as an expression: `base.d` / `base.d * k`, or the legacy
+// equivalent. The time unit is the BaseNote's duration, the same for every note.
+function unitsToDSL(k) {
+  return fracIsOne(k) ? 'base.d' : `base.d * ${fracToDSL(k)}`;
+}
+function unitsToLegacy(k) {
+  const unit = "module.baseNote.getVariable('duration')";
+  return fracIsOne(k) ? unit : `${unit}.mul(${fracToLegacy(k)})`;
 }
 
 // Defer heavy UI sync without feature flags or polyfills
@@ -633,18 +645,14 @@ document.addEventListener('DOMContentLoaded', async function() {
             "(?:module\\.)?getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\.getVariable\\('([^']+)'\\)|targetNote\\.getVariable\\('([^']+)'\\)",
             "g"
         );
-        const otherRefRegex = new RegExp(
-            "module\\.(?:findTempo|findMeasureLength)\\(\\s*module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)\\s*\\)",
-            "g"
-        );
 
-        // DSL shortname → variable name mapping
-        const dslShortToVar = { t: 'startTime', d: 'duration', f: 'frequency', a: 'amplitude' };
+        // Interpretation variables a note may leave unset: it then reads the BaseNote's.
+        const inheritedVars = ['amplitude', 'attack', 'release'];
 
-        // DSL patterns for [N].t, [N].d, [N].f, [N].a
-        const dslVarRegex = new RegExp("\\[" + selectedNoteId + "\\]\\.(t|d|f|a)\\b", "g");
-        // DSL helper patterns: beat([N]), tempo([N]), measure([N])
-        const dslHelperRegex = new RegExp("\\b(beat|tempo|measure)\\s*\\(\\s*\\[" + selectedNoteId + "\\]\\s*\\)", "g");
+        // DSL [N].<property>, any spelling of PropertyMap (t, d, f, a, attack/atk, release/rel, ...),
+        // longest first so `[N].attack` is not read as `[N].a`
+        const dslProps = Object.keys(PropertyMap).sort((a, b) => b.length - a.length).join('|');
+        const dslVarRegex = new RegExp("\\[" + selectedNoteId + "\\]\\.(" + dslProps + ")\\b", "g");
 
         const dependents = myModule.getDependentNotes(selectedNoteId);
         dependents.forEach(depId => {
@@ -672,52 +680,33 @@ document.addEventListener('DOMContentLoaded', async function() {
                         if (expIsDSL) {
                             // DSL substitution: replace [N].t/d/f with the selected note's own expression
                             // This rewires the dependency chain around the liberated note
-                            newRawExp = newRawExp.replace(dslVarRegex, (match, shortName) => {
-                                const varName = dslShortToVar[shortName];
+                            newRawExp = newRawExp.replace(dslVarRegex, (match, prop) => {
+                                const varName = PropertyMap[prop];
                                 const noteExpr = selectedRaw[varName];
                                 if (noteExpr === undefined) {
-                                    // A note without its own amplitude was inheriting the
-                                    // BaseNote's, so that is what its dependents were reading.
-                                    if (varName === 'amplitude') return 'base.a';
+                                    // A note without its own amplitude (attack, release) was
+                                    // inheriting the BaseNote's, so that is what its dependents
+                                    // were reading.
+                                    if (inheritedVars.includes(varName)) return `base.${prop}`;
                                     return (varName === 'frequency') ? '1' : '0';
                                 }
                                 // Wrap in parens to preserve operator precedence
                                 return `(${noteExpr})`;
-                            });
-                            // Replace beat([N]) → beat(parent) where parent is from the selected note's own expression
-                            newRawExp = newRawExp.replace(dslHelperRegex, (match, fn) => {
-                                // Find which note the selected note references for tempo/beat/measure
-                                const selStartRaw = selectedRaw['startTime'] || '';
-                                // Extract the parent ref from the selected note's startTime expression
-                                const dslRefM = selStartRaw.match(/\[(\d+)\]\./);
-                                const dslBaseM = !dslRefM && (/\bbase\./.test(selStartRaw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(selStartRaw));
-                                if (dslRefM) {
-                                    return `${fn}([${dslRefM[1]}])`;
-                                }
-                                return `${fn}(base)`;
                             });
                         } else {
                             // Legacy substitution
                             newRawExp = newRawExp.replace(getVarRegex, (match, g1, g2) => {
                                 const varName = g1 || g2;
                                 let replacement = selectedRaw[varName];
-                                if (replacement === undefined && varName === "amplitude") {
-                                    // Inherited amplitude: the dependents were reading the BaseNote's.
-                                    return "module.baseNote.getVariable('amplitude')";
+                                if (replacement === undefined && inheritedVars.includes(varName)) {
+                                    // Inherited amplitude (attack, release): the dependents were reading the BaseNote's.
+                                    return `module.baseNote.getVariable('${varName}')`;
                                 }
                                 if (replacement === undefined) {
                                     replacement = (varName === "frequency") ? "new Fraction(1,1)" : "new Fraction(0,1)";
                                     console.warn("No raw value for", varName, "– using default", replacement);
                                 }
                                 return replacement;
-                            });
-                            newRawExp = newRawExp.replace(otherRefRegex, (match) => {
-                                if (match.includes("findTempo")) {
-                                    return "module.findTempo(module.baseNote)";
-                                } else if (match.includes("findMeasureLength")) {
-                                    return "module.findMeasureLength(module.baseNote)";
-                                }
-                                return match;
                             });
                             const directRefRegex = new RegExp("module\\.getNoteById\\(\\s*" + selectedNoteId + "\\s*\\)", "g");
                             newRawExp = newRawExp.replace(directRefRegex, "module.baseNote");
@@ -771,10 +760,12 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         });
         
-        // amplitude only when the note defines its own; left undefined it is
-        // substituted by the BaseNote's (see updateDependentRawExpressions).
-        if (selectedNote.variables.amplitudeString) {
-            selectedRaw.amplitude = selectedNote.variables.amplitudeString;
+        // amplitude, attack and release only when the note defines its own; left
+        // undefined each is substituted by the BaseNote's (see updateDependentRawExpressions).
+        for (const v of ['amplitude', 'attack', 'release']) {
+            if (selectedNote.variables[v + 'String']) {
+                selectedRaw[v] = selectedNote.variables[v + 'String'];
+            }
         }
 
         const selectedNoteInstrument = myModule.findInstrument(selectedNote);
@@ -906,23 +897,18 @@ document.addEventListener('DOMContentLoaded', async function() {
                     
                     let newRaw;
                     const depUseDSL = isDSLSyntax(depNote.variables?.startTimeString || '');
-                    const baseTempoFrac = myModule.baseNote.getVariable('tempo');
+                    const unitFrac = myModule.getTimeUnit();
                     const depStartFrac = depNote.getVariable('startTime');
 
                     if (suitableParent === myModule.baseNote) {
-                        // Exact beat offset from the exact start times — a float
-                        // delta here loses deep-chain exactness on every repair.
-                        const offsetFraction = exactBeatOffset(depStartFrac, baseStartVal, baseTempoFrac);
+                        // Exact offset in time units from the exact start times — a
+                        // float delta here loses deep-chain exactness on every repair.
+                        const offsetFraction = exactBeatOffset(depStartFrac, baseStartVal, unitFrac);
 
                         if (depUseDSL) {
-                            if (offsetFraction.n === 0n) {
-                                newRaw = 'base.t';
-                            } else {
-                                const beatMul = fracIsOne(offsetFraction) ? 'beat(base)' : `beat(base) * ${fracToDSL(offsetFraction)}`;
-                                newRaw = `base.t + ${beatMul}`;
-                            }
+                            newRaw = (offsetFraction.n === 0n) ? 'base.t' : `base.t + ${unitsToDSL(offsetFraction)}`;
                         } else {
-                            newRaw = simplifyStartTime(`module.baseNote.getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${offsetFraction.s * offsetFraction.n}, ${offsetFraction.d})))`, myModule);
+                            newRaw = simplifyStartTime(`module.baseNote.getVariable('startTime').add(${unitsToLegacy(offsetFraction)})`, myModule);
                         }
                     } else {
                         const parentStartFrac = suitableParent.getVariable('startTime');
@@ -940,14 +926,12 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(module.getNoteById(${suitableParent.id}).getVariable('duration'))`, myModule);
                             }
                         } else {
-                            const offsetFraction = exactBeatOffset(depStartFrac, parentStartFrac, baseTempoFrac);
+                            const offsetFraction = exactBeatOffset(depStartFrac, parentStartFrac, unitFrac);
 
                             if (depUseDSL) {
-                                const beatRef = `beat([${suitableParent.id}])`;
-                                const beatMul = fracIsOne(offsetFraction) ? beatRef : `${beatRef} * ${fracToDSL(offsetFraction)}`;
-                                newRaw = `${pRef}.t + ${beatMul}`;
+                                newRaw = `${pRef}.t + ${unitsToDSL(offsetFraction)}`;
                             } else {
-                                newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(new Fraction(60).div(module.findTempo(module.getNoteById(${suitableParent.id}))).mul(new Fraction(${offsetFraction.s * offsetFraction.n}, ${offsetFraction.d})))`, myModule);
+                                newRaw = simplifyStartTime(`module.getNoteById(${suitableParent.id}).getVariable('startTime').add(${unitsToLegacy(offsetFraction)})`, myModule);
                             }
                         }
                     }
@@ -967,54 +951,34 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
   
     function hasMeasurePoints() {
-        return Object.values(myModule.notes).some(note =>
-            note.variables.startTime && 
-            !note.variables.duration && 
-            !note.variables.frequency
-        );
+        return Object.values(myModule.notes).some(isMeasureNote);
     }
-    
+
     function getLastMeasureId() {
-        const measureNotes = [];
-        for (const id in myModule.notes) {
-            const note = myModule.notes[id];
-            if (note.variables.startTime && !note.variables.duration && !note.variables.frequency) {
-                measureNotes.push(note);
-            }
-        }
+        const measureNotes = Object.values(myModule.notes).filter(isMeasureNote);
         if (measureNotes.length === 0) return null;
-        
+
+        // Exact comparison of the evaluated starts
         let lastMeasure = measureNotes[0];
         for (let i = 1; i < measureNotes.length; i++) {
-            if (measureNotes[i].getVariable('startTime').valueOf() > lastMeasure.getVariable('startTime').valueOf()) {
-                lastMeasure = measureNotes[i];
-            }
+            try {
+                if (measureNotes[i].getVariable('startTime').compare(lastMeasure.getVariable('startTime')) > 0) {
+                    lastMeasure = measureNotes[i];
+                }
+            } catch { /* non-Fraction value — keep current candidate */ }
         }
         return lastMeasure.id;
     }
-    
+
     function isLastMeasureInChain(measureId) {
         const measure = myModule.getNoteById(parseInt(measureId, 10));
         if (!measure) return false;
 
-        // Check if any other measure is a CHAIN LINK to this one (uses findMeasureLength/measure())
-        // Anchors (measures that start a new chain) don't count - they form their own chains
-        const linkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
-        const dslLinkPattern = `measure([${measure.id}])`;
-
+        // Is any other bar a CHAIN LINK to this one (starts at `[id].t + [id].d`)?
+        // Anchors (bars that start a new chain) don't count - they form their own chains
         return !Object.values(myModule.notes).some(otherNote => {
-            if (otherNote.id === measure.id) return false;
-            if (!otherNote.variables.startTimeString) return false;
-
-            const startTimeString = otherNote.variables.startTimeString;
-
-            // Only count chain links (use findMeasureLength/measure()), not anchors
-            const isChainLink = startTimeString.includes(linkPattern) || startTimeString.includes(dslLinkPattern);
-            const isMeasure = otherNote.variables.startTime &&
-                              !otherNote.variables.duration &&
-                              !otherNote.variables.frequency;
-
-            return isChainLink && isMeasure;
+            if (otherNote.id === measure.id || !isMeasureNote(otherNote)) return false;
+            return measureChainLinkParentId(otherNote.variables.startTimeString || '') === Number(measure.id);
         });
     }
       
@@ -1029,9 +993,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
 
         let measureEnd = 0;
-        const measureNotes = Object.values(myModule.notes).filter(note =>
-            note.variables.startTime && !note.variables.duration && !note.variables.frequency
-        );
+        const measureNotes = Object.values(myModule.notes).filter(isMeasureNote);
         if (measureNotes.length > 0) {
             // Exact ordering with id tie-break; a valueOf() subtraction here
             // collapses rationals that differ past double precision, and a
@@ -1048,8 +1010,10 @@ document.addEventListener('DOMContentLoaded', async function() {
             });
             const lastMeasure = measureNotes[measureNotes.length - 1];
             const lastMeasureStart = lastMeasure.getVariable('startTime');
-            if (lastMeasureStart) {
-                measureEnd = toNumber(lastMeasureStart.add(myModule.findMeasureLength(lastMeasure)));
+            // A bar lasts its own duration
+            const lastMeasureLength = lastMeasure.getVariable('duration');
+            if (lastMeasureStart && lastMeasureLength) {
+                measureEnd = toNumber(lastMeasureStart.add(lastMeasureLength));
             }
         }
 
@@ -1089,7 +1053,7 @@ document.addEventListener('DOMContentLoaded', async function() {
       savedSnapshot = JSON.parse(localStorage.getItem('rmt:moduleSnapshot:v1') || 'null');
       // Validate the snapshot has proper expression strings (not legacy function format)
       if (savedSnapshot && savedSnapshot.baseNote) {
-        const testExpr = savedSnapshot.baseNote.tempo || savedSnapshot.baseNote.frequency;
+        const testExpr = savedSnapshot.baseNote.frequency || savedSnapshot.baseNote.duration;
         // Check if any expression contains legacy function wrapper patterns
         if (testExpr && (typeof testExpr !== 'string' || testExpr.includes('newFunc') || testExpr.includes('__evalExpr'))) {
           console.warn('[RMT] Detected legacy localStorage snapshot format, clearing...');
@@ -1101,7 +1065,18 @@ document.addEventListener('DOMContentLoaded', async function() {
       savedSnapshot = null;
     }
     // Use Module for binary expression evaluation (performance optimization)
-    let myModule = await Module.loadFromJSON(savedSnapshot || 'modules/defaultModule.json');
+    let myModule;
+    try {
+      myModule = await Module.loadFromJSON(savedSnapshot || 'modules/defaultModule.json');
+    } catch (e) {
+      if (!savedSnapshot) throw e;
+      // The last session could not be loaded (for instance a module of the old
+      // time model the conversion refuses). Keep it under its own key before
+      // the autosave replaces the snapshot, and start from the default module.
+      try { localStorage.setItem('rmt:moduleSnapshot:v1:unloadable', JSON.stringify(savedSnapshot)); } catch {}
+      console.error('[RMT] The last session could not be loaded and was kept as rmt:moduleSnapshot:v1:unloadable: ' + (e && e.message));
+      myModule = await Module.loadFromJSON('modules/defaultModule.json');
+    }
     console.log('[RMT] Loaded Module with binary expression system');
     setModule(myModule);
     updateNotesPointerEvents();
@@ -1360,7 +1335,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                                 return prev.entries[prev.index];
                               }
                               if (currentSelectedNote) {
-                                return { type: (currentSelectedNote.id === 0 ? 'base' : (currentSelectedNote.variables && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency ? 'measure' : 'note')), id: Number(currentSelectedNote.id) };
+                                return { type: (currentSelectedNote.id === 0 ? 'base' : (isMeasureNote(currentSelectedNote) ? 'measure' : 'note')), id: Number(currentSelectedNote.id) };
                               }
                               return null;
                             })();
@@ -1690,25 +1665,21 @@ if (canvasEl) {
         }
 
         try {
-            // Reject drop on silences (notes with startTime+duration and no frequency)
+            // Detect if target is a measure bar (flagged `measure`; a start and a duration, no frequency).
+            // Measure bars have no frequency, so frequency expressions must anchor to BaseNote
+            const targetIsMeasure = isMeasureNote(targetNote);
+
+            // Reject drop on silences (notes with startTime+duration and no frequency).
+            // A measure bar is built the same way but is a valid target.
             try {
               const __isSilence = (n) => {
-                try { return !!(n && n.getVariable('startTime') && n.getVariable('duration') && !n.getVariable('frequency')); } catch { return false; }
+                try { return !!(n && !isMeasureNote(n) && n.getVariable('startTime') && n.getVariable('duration') && !n.getVariable('frequency')); } catch { return false; }
               };
               if (__isSilence(targetNote)) {
                 try { notify('Cannot drop onto a silence. Drop on a note or the BaseNote instead.', 'error'); } catch {}
                 return;
               }
             } catch {}
-
-            // Detect if target is a measure bar (has startTime but no frequency/duration)
-            // Measure bars have no frequency, so frequency expressions must anchor to BaseNote
-            const __isMeasureTarget = (n) => {
-              try {
-                return !!(n && n.id !== 0 && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
-              } catch { return false; }
-            };
-            const targetIsMeasure = __isMeasureTarget(targetNote);
 
             let importedModule;
             let filename = null;
@@ -1739,8 +1710,17 @@ if (canvasEl) {
             // Per-import cache to avoid repeating the same string remapping across many notes
             const exprRemapCache = new Map();
 
-            // The DSL spellings of the amplitude property (src/dsl/constants.js PropertyMap)
-            const __isAmplitudeProp = (prop) => prop === 'a' || prop === 'amp' || prop === 'amplitude';
+            // Every DSL property spelling (src/dsl/constants.js PropertyMap), longest first,
+            // and what each one means. The BaseNote frames a dropped module: base.t, base.d
+            // and base.f map to the target note's t, d and f.
+            const __dslProps = Object.keys(PropertyMap).sort((a, b) => b.length - a.length).join('|');
+            const __dslBaseRefRe = () => new RegExp(`\\bbase\\.(${__dslProps})\\b`, 'g');
+            const __dslIdRefRe = () => new RegExp(`\\[(\\d+)\\]\\.(${__dslProps})\\b`, 'g');
+            const __isFrequencyProp = (prop) => PropertyMap[prop] === 'frequency';
+            // Interpretation variables: a measure bar has no loudness or envelope either,
+            // so on a bar these stay with the BaseNote.
+            const __interpretationVars = ['amplitude', 'attack', 'release'];
+            const __isInterpretationProp = (prop) => __interpretationVars.includes(PropertyMap[prop]);
 
             // Ensure imported expressions anchor to the actual drop target (requirement)
             // When dropping onto a measure bar: startTime anchors to measure, frequency anchors to BaseNote
@@ -1756,12 +1736,10 @@ if (canvasEl) {
 
                 const hasBase = expr.indexOf('module.baseNote') !== -1;
                 const hasIds  = expr.indexOf('getNoteById(') !== -1;
-                // DSL format uses base.t, base.d, base.f, base.tempo, etc.
-                const hasDslBase = /\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/.test(expr);
+                // DSL format uses base.t, base.d, base.f, base.a, etc.
+                const hasDslBase = __dslBaseRefRe().test(expr);
                 // DSL format uses [id].prop for note references
                 const hasDslIds = /\[\d+\]\./.test(expr);
-                // DSL format uses tempo(base), beat(base), measure(base), tempo([id]), etc.
-                const hasDslHelpers = /\b(tempo|beat|measure)\s*\(/.test(expr);
 
                 // === DSL format remapping ===
                 // IMPORTANT: ID remaps MUST run before base→target remaps.
@@ -1770,17 +1748,17 @@ if (canvasEl) {
 
                 // Remap DSL [oldId].prop references using the mapping table
                 if (hasDslIds) {
-                    expr = expr.replace(/\[(\d+)\]\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/g, function(match, idStr, prop) {
+                    expr = expr.replace(__dslIdRefRe(), function(match, idStr, prop) {
                         const oldRef = parseInt(idStr, 10);
                         if (mapping.hasOwnProperty(oldRef)) {
                             const newId = mapping[oldRef];
                             // Measure bar drop: frequency refs to base note stay as base.f
-                            if (targetIsMeasure && oldRef === 0 && exprType === 'frequency' && prop === 'f') {
-                                return 'base.f';
+                            if (targetIsMeasure && oldRef === 0 && exprType === 'frequency' && __isFrequencyProp(prop)) {
+                                return `base.${prop}`;
                             }
-                            // ...and so do amplitude refs: a measure bar has no loudness either
-                            if (targetIsMeasure && oldRef === 0 && __isAmplitudeProp(prop)) {
-                                return 'base.a';
+                            // ...and so do amplitude, attack and release refs
+                            if (targetIsMeasure && oldRef === 0 && __isInterpretationProp(prop)) {
+                                return `base.${prop}`;
                             }
                             return `[${newId}].${prop}`;
                         }
@@ -1790,50 +1768,29 @@ if (canvasEl) {
                     // Second pass: fix frequency references pointing to measure bar
                     if (targetIsMeasure && exprType === 'frequency') {
                         const measureId = targetNote.id;
-                        expr = expr.replace(new RegExp(`\\[${measureId}\\]\\.f\\b`, 'g'), 'base.f');
+                        expr = expr.replace(new RegExp(`\\[${measureId}\\]\\.(f|freq|frequency)\\b`, 'g'), 'base.$1');
                     }
                 }
 
-                // Remap DSL helper functions that reference note IDs: tempo([oldId]), beat([oldId]), measure([oldId])
-                if (hasDslHelpers) {
-                    expr = expr.replace(/\b(tempo|beat|measure)\s*\(\s*\[(\d+)\]\s*\)/g, function(match, fn, idStr) {
-                        const oldRef = parseInt(idStr, 10);
-                        if (mapping.hasOwnProperty(oldRef)) {
-                            return `${fn}([${mapping[oldRef]}])`;
-                        }
-                        return match;
-                    });
-                }
-
-                // Remap DSL base references (base.t, base.d, etc.) to target note
-                // (runs after ID remaps so [targetId] refs won't be re-remapped)
+                // Remap DSL base references (base.t, base.d, etc.) to target note.
+                // base.d is the dropped module's time unit, so its rhythm scales to the
+                // target's duration. (Runs after ID remaps so [targetId] refs won't be re-remapped.)
                 if (targetNote.id !== 0 && hasDslBase) {
                     const anchorId = targetNote.id;
 
                     if (targetIsMeasure) {
-                        expr = expr.replace(/\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/g, function(match, prop) {
-                            if (prop === 'f') {
-                                return 'base.f';
-                            }
-                            if (__isAmplitudeProp(prop)) {
-                                return 'base.a';
+                        // A bar has t and d but no frequency, loudness or envelope
+                        expr = expr.replace(__dslBaseRefRe(), function(match, prop) {
+                            if (__isFrequencyProp(prop) || __isInterpretationProp(prop)) {
+                                return `base.${prop}`;
                             }
                             return `[${anchorId}].${prop}`;
                         });
                     } else {
-                        expr = expr.replace(/\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/g, function(match, prop) {
+                        expr = expr.replace(__dslBaseRefRe(), function(match, prop) {
                             return `[${anchorId}].${prop}`;
                         });
                     }
-                }
-
-                // Remap DSL helper functions that reference base: tempo(base), beat(base), measure(base)
-                // (runs after helper ID remaps so [targetId] refs won't be re-remapped)
-                if (targetNote.id !== 0 && hasDslHelpers) {
-                    const anchorId = targetNote.id;
-                    expr = expr.replace(/\b(tempo|beat|measure)\s*\(\s*base\s*\)/g, function(match, fn) {
-                        return `${fn}([${anchorId}])`;
-                    });
                 }
 
                 // === Legacy format remapping ===
@@ -1868,11 +1825,9 @@ if (canvasEl) {
 
                     if (targetIsMeasure) {
                         expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
-                            if (varName === 'frequency') {
-                                return "module.baseNote.getVariable('frequency')";
-                            }
-                            if (varName === 'amplitude') {
-                                return "module.baseNote.getVariable('amplitude')";
+                            // A bar has t and d but no frequency, loudness or envelope
+                            if (varName === 'frequency' || __interpretationVars.includes(varName)) {
+                                return "module.baseNote.getVariable('" + varName + "')";
                             }
                             return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
                         });
@@ -1881,21 +1836,18 @@ if (canvasEl) {
                             return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
                         });
                     }
-
-                    // Remap common helpers that take baseNote as argument
-                    expr = expr.replace(/module\.findTempo\(\s*module\.baseNote\s*\)/g, "module.findTempo(module.getNoteById(" + anchorId + "))");
-                    expr = expr.replace(/module\.findMeasureLength\(\s*module\.baseNote\s*\)/g, "module.findMeasureLength(module.getNoteById(" + anchorId + "))");
                 }
 
-                // Check drop mode - if 'end', add target's duration to startTime expressions
+                // Check drop mode - if 'end', add target's duration to startTime expressions.
+                // Every start that hangs from the target's start moves by the target's
+                // duration. (It used to skip a start that already read a duration; with
+                // base.d → [target].d as the time unit nearly every start does.)
                 const dropMode = menuBar?.getModuleDropMode?.() || 'start';
                 if (dropMode === 'end' && exprType === 'startTime' && targetNote.id !== 0) {
                     const anchorId = targetNote.id;
                     const refsTargetStart = expr.includes(`getNoteById(${anchorId}).getVariable('startTime')`) ||
                                             expr.includes(`[${anchorId}].t`);
-                    const alreadyHasDur = expr.includes(`getVariable('duration')`) ||
-                                          expr.includes(`[${anchorId}].d`);
-                    if (refsTargetStart && !alreadyHasDur) {
+                    if (refsTargetStart) {
                         if (exprIsDSL) {
                             expr = expr + ` + [${anchorId}].d`;
                         } else {
@@ -1911,12 +1863,11 @@ if (canvasEl) {
                 if (!exprIsDSL) {
                     try {
                         const hasStart = /getVariable\(\s*'startTime'\s*\)/.test(expr);
-                        const hasTempo = /findTempo\(/.test(expr);
                         const hasDurRef = /getVariable\(\s*'duration'\s*\)/.test(expr);
                         const hasFreqRef = /getVariable\(\s*'frequency'\s*\)/.test(expr);
                         if (hasStart) {
                             simplified = simplifyStartTime(expr, myModule);
-                        } else if (hasTempo || hasDurRef) {
+                        } else if (hasDurRef) {
                             simplified = simplifyDuration(expr, myModule);
                         } else if (hasFreqRef) {
                             simplified = simplifyFrequency(expr, myModule);
@@ -1956,9 +1907,8 @@ if (canvasEl) {
                         // Check for legacy format and DSL format references that need remapping
                         const needsRemap = (originalString.indexOf('module.baseNote') !== -1) ||
                                            (originalString.indexOf('getNoteById(') !== -1) ||
-                                           (/\bbase\.([tdfbma]|tempo|bpm|ml|amp|amplitude)\b/.test(originalString)) ||
-                                           (/\[\d+\]\./.test(originalString)) ||
-                                           (/\b(tempo|beat|measure)\s*\(/.test(originalString));
+                                           __dslBaseRefRe().test(originalString) ||
+                                           (/\[\d+\]\./.test(originalString));
                         const baseKey = key.slice(0, -6);
 
                         // Pass expression type for measure bar drops (frequency needs special handling)
@@ -1997,9 +1947,7 @@ if (canvasEl) {
             (function __normalizeImportedMeasureChains(){
               try {
                 const importedSet = new Set(importedIds.map(Number));
-                const isMeasure = (n) => {
-                  try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); } catch { return false; }
-                };
+                const isMeasure = isMeasureNote;
                 // Collect imported measures
                 const measures = importedIds
                   .map(id => myModule.getNoteById(Number(id)))
@@ -2066,7 +2014,7 @@ if (canvasEl) {
                 // Canonicalize each imported chain:
                 // - First element keeps its existing parent anchor (non-measure note or BaseNote).
                 //   We only fix parentId to match that anchor if possible.
-                // - Subsequent measures are anchored to previous measure END via findMeasureLength(prev).
+                // - Subsequent measures are anchored to previous measure END: `[prev].t + [prev].d`.
                 // - Special case: if dropping onto a measure bar, integrate the first imported measure
                 //   into the target measure bar's chain (start after the target measure ends).
                 chains.forEach(chain => {
@@ -2075,8 +2023,9 @@ if (canvasEl) {
                   // First measure in the imported chain: fix parentId to match anchor in startTimeString
                   const first = myModule.getNoteById(Number(chain[0]));
                   const raw0 = (first && first.variables && first.variables.startTimeString) ? first.variables.startTimeString : '';
-                  // Match both legacy getNoteById(id) and DSL [id]. references
-                  const m0 = raw0.match(/getNoteById\(\s*(\d+)\s*\)/) || raw0.match(/\[(\d+)\]\./);
+                  // The note its start hangs from (legacy getNoteById(id) or DSL [id])
+                  const ref0 = startParentIdFromRaw(raw0);
+                  const m0 = (ref0 > 0) ? [null, String(ref0)] : null;
                   let parentIdForPID = 0;
 
                   // Special handling when dropping onto a measure bar:
@@ -2107,8 +2056,9 @@ if (canvasEl) {
                   }
                   try { first.parentId = parentIdForPID; } catch {}
 
-                  // Subsequent measures: start = prev.startTime + findMeasureLength(prev), and parentId = prev.id
-                  // These remain as a separate chain (not integrated into the target measure bar's chain)
+                  // Subsequent measures: start = prev end (`[prev].t + [prev].d`), and parentId = prev.id.
+                  // Each keeps its own duration. These remain a separate chain (not integrated into
+                  // the target measure bar's chain).
                   // Note: We don't call markNoteDirty here - the batch marking below handles all imported notes
                   for (let i = 1; i < chain.length; i++) {
                     const prevId = Number(chain[i - 1]);
@@ -2117,14 +2067,8 @@ if (canvasEl) {
                     if (!curNote) continue;
                     // Detect if this note's expression was DSL format
                     const curRaw = (curNote.variables && curNote.variables.startTimeString) ? curNote.variables.startTimeString : '';
-                    const curIsDSL = isDSLSyntax(curRaw);
-                    let rawStart;
-                    if (curIsDSL) {
-                      rawStart = `[${prevId}].t + measure([${prevId}])`;
-                    } else {
-                      rawStart = `module.getNoteById(${prevId}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevId})))`;
-                      rawStart = simplifyStartTime(rawStart, myModule);
-                    }
+                    // Written in the exact chain-link form (not simplified): chain detection reads it
+                    const rawStart = __measureChainLinkExpr(prevId, isDSLSyntax(curRaw));
                     curNote.setVariable('startTimeString', rawStart);
                     try { curNote.parentId = prevId; } catch {}
                   }
@@ -2593,37 +2537,20 @@ if (canvasEl) {
     }
 // === GL move helpers: parent selection, expression emission, and frequency retargeting ===
 
-// Shared helper: extract the first referenced note ID from a raw expression string (legacy or DSL).
+// Shared helper: the note a start expression hangs from (legacy or DSL): the note whose
+// start it reads, else the BaseNote when it reads base.t, else the first note it names.
 // Returns the numeric note ID, or 0 for baseNote, or -1 if no reference found.
 function __extractNoteRefFromRaw(raw) {
-  if (!raw) return -1;
-  // Legacy: module.getNoteById(N)
-  const legacyMatch = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/);
-  if (legacyMatch) return parseInt(legacyMatch[1], 10);
-  // Legacy: module.baseNote
-  if (raw.includes('module.baseNote')) return 0;
-  // DSL: [N].prop
-  const dslMatch = raw.match(/\[(\d+)\]\./);
-  if (dslMatch) return parseInt(dslMatch[1], 10);
-  // DSL: base.prop
-  if (/\bbase\./.test(raw)) return 0;
-  // DSL helpers: beat([N]), tempo([N]), measure([N])
-  const dslHelperMatch = raw.match(/\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/);
-  if (dslHelperMatch) return parseInt(dslHelperMatch[1], 10);
-  // DSL helpers: beat(base), tempo(base), measure(base)
-  if (/\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return 0;
-  return -1;
+  return startParentIdFromRaw(raw);
 }
 
 // Shared helper: check if a raw expression references a specific note ID (legacy or DSL).
 function __rawReferencesNoteId(raw, noteId) {
   if (!raw || typeof raw !== 'string') return false;
   // Legacy
-  if (new RegExp(`module\\.getNoteById\\(\\s*${noteId}\\s*\\)`).test(raw)) return true;
+  if (new RegExp(`module\.getNoteById\(\s*${noteId}\s*\)`).test(raw)) return true;
   // DSL: [noteId].prop
-  if (new RegExp(`\\[${noteId}\\]\\.`).test(raw)) return true;
-  // DSL helpers: beat([noteId]), tempo([noteId]), measure([noteId])
-  if (new RegExp(`\\b(?:beat|tempo|measure)\\s*\\(\\s*\\[${noteId}\\]\\s*\\)`).test(raw)) return true;
+  if (new RegExp(`\[${noteId}\]\.`).test(raw)) return true;
   return false;
 }
 
@@ -2646,7 +2573,6 @@ function __rawReferencesBase(raw) {
   if (!raw || typeof raw !== 'string') return false;
   if (raw.includes('module.baseNote')) return true;
   if (/\bbase\./.test(raw)) return true;
-  if (/\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return true;
   return false;
 }
 
@@ -2654,17 +2580,23 @@ function __rawReferencesBase(raw) {
 function __freqReferencesNoteId(fRaw, noteId) {
   if (!fRaw || typeof fRaw !== 'string') return false;
   // Legacy: module.getNoteById(N).getVariable('frequency')
-  if (new RegExp(`module\\.getNoteById\\(\\s*${noteId}\\s*\\)\\.getVariable\\(\\s*['"]frequency['"]\\s*\\)`).test(fRaw)) return true;
+  if (new RegExp(`module\.getNoteById\(\s*${noteId}\s*\)\.getVariable\(\s*['"]frequency['"]\s*\)`).test(fRaw)) return true;
   // DSL: [N].f
-  if (new RegExp(`\\[${noteId}\\]\\.f\\b`).test(fRaw)) return true;
+  if (new RegExp(`\[${noteId}\]\.f\b`).test(fRaw)) return true;
   return false;
 }
 
+// A measure bar: a note flagged `measure` (see isMeasureNote in note.js).
 function __isMeasureNoteGL(note) {
-  try {
-    // Use hasExpression instead of getVariable to avoid dependency on evaluation cache
-    return !!(note && note.hasExpression && note.hasExpression('startTime') && !note.hasExpression('duration') && !note.hasExpression('frequency'));
-  } catch { return false; }
+  return isMeasureNote(note);
+}
+
+// The start of a bar chained onto bar `prevId`: it begins where that bar ends.
+// Written in exactly the form measureChainLinkParentId() recognises, never simplified.
+function __measureChainLinkExpr(prevId, useDSL) {
+  return useDSL
+    ? `[${prevId}].t + [${prevId}].d`
+    : `module.getNoteById(${prevId}).getVariable('startTime').add(module.getNoteById(${prevId}).getVariable('duration'))`;
 }
 
 function __parseParentFromStartTimeStringGL(note) {
@@ -3368,16 +3300,12 @@ function rebuildFrequencyForAnchor(note, newAnchor, depGraph, useDSL) {
 function __findNextMeasureInChainGL(measure) {
   try {
     if (!__isMeasureNoteGL(measure)) return null;
-    // Only find CHAIN LINKS (measures that use findMeasureLength/measure()), not anchors starting new chains
-    const legacyLinkPattern = `findMeasureLength(module.getNoteById(${measure.id}))`;
-    const dslLinkPattern = `measure([${measure.id}])`;
+    // Only find CHAIN LINKS (bars starting at `[id].t + [id].d`), not anchors starting new chains
     const chainLinks = [];
     for (const id in myModule.notes) {
       const n = myModule.getNoteById(parseInt(id, 10));
       if (!n || !__isMeasureNoteGL(n)) continue;
-      const startTimeString = n.variables.startTimeString || '';
-      // Only include chain links (use findMeasureLength or measure()), not anchors
-      if (startTimeString.includes(legacyLinkPattern) || startTimeString.includes(dslLinkPattern)) chainLinks.push(n);
+      if (measureChainLinkParentId(n.variables.startTimeString || '') === Number(measure.id)) chainLinks.push(n);
     }
     if (chainLinks.length === 0) return null;
     // Sort by startTime and return earliest (there should typically be only
@@ -3412,8 +3340,8 @@ function selectSuitableParentForStartGL(note, newStartSec) {
         let advanced = true;
         while (advanced) {
           advanced = false;
-          // measure end = start + measureLength(cur)
-          const ml = toNumber(myModule.findMeasureLength(cur), 0);
+          // measure end = start + the bar's own duration
+          const ml = toNumber(cur.getVariable('duration'), 0);
           const end = curStart + ml;
           if (newStartSec >= end - tol) {
             const next = __findNextMeasureInChainGL(cur);
@@ -3478,25 +3406,25 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
     const parentStart = toNumber(parentStartFrac, 0);
     let delta = newStartSec - parentStart;
 
-    // Check alignment to parent end (duration)
+    // Check alignment to parent end (duration). A bar placed at another bar's end is
+    // still written as an offset: `[P].t + [P].d` would make it a chain link of P.
     let hasDur = false, durSec = 0;
     try {
       const d = parent.getVariable('duration');
-      if (d) { hasDur = true; durSec = toNumber(d, 0); }
+      if (d && !(__isMeasureNoteGL(note) && __isMeasureNoteGL(parent))) { hasDur = true; durSec = toNumber(d, 0); }
     } catch {}
 
-    const tempoFrac = myModule.findTempo(parent);
-
-    // The gesture position (newStartSec) is inherently a float — it crosses
-    // into exact arithmetic exactly once here. The parent's exact start and
-    // tempo never go through a float, so deep-chain positions stay exact.
+    // Offsets are written in time units (base.d, one beat). The gesture position
+    // (newStartSec) is inherently a float — it crosses into exact arithmetic exactly
+    // once here. The parent's exact start and the unit never go through a float, so
+    // deep-chain positions stay exact.
+    const unitFrac = myModule.getTimeUnit();
     let frac;
     try {
-      const offsetBeatsFrac = new Fraction(newStartSec).sub(parentStartFrac).mul(tempoFrac).div(60);
-      frac = offsetBeatsFrac.abs();
+      frac = new Fraction(newStartSec).sub(parentStartFrac).div(unitFrac).abs();
     } catch {
-      const tempo = toNumber(tempoFrac, 120) || 120;
-      const offsetBeats = Math.abs(delta) / (60 / tempo);
+      const unit = toNumber(unitFrac, 1) || 1;
+      const offsetBeats = Math.abs(delta) / unit;
       try {
         frac = new Fraction(offsetBeats);
       } catch {
@@ -3506,14 +3434,13 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
 
     if (useDSL) {
       const pRef = (parent.id === 0) ? 'base' : `[${parent.id}]`;
-      const beatRef = (parent.id === 0) ? 'beat(base)' : `beat([${parent.id}])`;
       let raw;
       if (hasDur && durSec > 0 && Math.abs(delta - durSec) < 0.01) {
         raw = `${pRef}.t + ${pRef}.d`;
       } else if (Math.abs(delta) < 0.001) {
         raw = `${pRef}.t`;
       } else {
-        const beatMul = fracIsOne(frac) ? beatRef : `${beatRef} * ${fracToDSL(frac)}`;
+        const beatMul = unitsToDSL(frac);
         if (delta >= 0) {
           raw = `${pRef}.t + ${beatMul}`;
         } else {
@@ -3529,9 +3456,9 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
     if (hasDur && durSec > 0 && Math.abs(delta - durSec) < 0.01) {
       raw = `${parentRef}.getVariable('startTime').add(${parentRef}.getVariable('duration'))`;
     } else if (delta >= 0) {
-      raw = `${parentRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.s * frac.n}, ${frac.d})))`;
+      raw = `${parentRef}.getVariable('startTime').add(${unitsToLegacy(frac)})`;
     } else {
-      raw = `${parentRef}.getVariable('startTime').sub(new Fraction(60).div(module.findTempo(${parentRef})).mul(new Fraction(${frac.s * frac.n}, ${frac.d})))`;
+      raw = `${parentRef}.getVariable('startTime').sub(${unitsToLegacy(frac)})`;
     }
 
     const simplified = simplifyStartTime(raw, myModule);
@@ -3707,9 +3634,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           let replacedS;
           if (isDSLSyntax(sRaw)) {
             replacedS = sRaw.replace(dslNoteRefRegex, dslParentRef);
-            // Also replace DSL helpers: beat([movedId]) -> beat([newId]) etc.
-            replacedS = replacedS.replace(new RegExp(`(beat|tempo|measure)\\s*\\(\\s*\\[${movedId}\\]\\s*\\)`, 'g'),
-              (_, fn) => `${fn}(${dslParentRef})`);
           } else {
             replacedS = sRaw.replace(noteRefRegex, parentRef);
             try { replacedS = simplifyStartTime(replacedS, myModule); } catch {}
@@ -3728,8 +3652,6 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           let replacedD;
           if (isDSLSyntax(dRaw)) {
             replacedD = dRaw.replace(dslNoteRefRegex, dslParentRef);
-            replacedD = replacedD.replace(new RegExp(`(beat|tempo|measure)\\s*\\(\\s*\\[${movedId}\\]\\s*\\)`, 'g'),
-              (_, fn) => `${fn}(${dslParentRef})`);
           } else {
             replacedD = dRaw.replace(noteRefRegex, parentRef);
             try { replacedD = simplifyDuration(replacedD, myModule); } catch {}
@@ -3942,7 +3864,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 }
                 if (!anchor) anchor = document.body;
                 try {
-                  const __isSelectedMeasure = currentSelectedNote && currentSelectedNote.variables && currentSelectedNote.variables.startTime && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency;
+                  const __isSelectedMeasure = isMeasureNote(currentSelectedNote);
                   const __mid = __isSelectedMeasure ? currentSelectedNote.id : null;
                   eventBus.emit('modals:requestRefresh', { note: currentSelectedNote, measureId: __mid, clickedElement: anchor });
                 } catch {
@@ -4395,14 +4317,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     //   the note keeps its position/pitch/length even though it lost its anchor.
     //
     //   startTime is stricter. A note whose start-anchor chain LEAVES the selection is a
-    //   root and is always rebuilt as `base.t + beat(base) * k`, even when its expression
-    //   names no note at all (e.g. `base.t + beat(base) * 4`). Copied verbatim that would
+    //   root and is always rebuilt as `base.t + base.d * k`, even when its expression
+    //   names no note at all (e.g. `base.t + base.d * 4`). Copied verbatim that would
     //   pin it to its original absolute time instead of to wherever the module is dropped.
     //   This is the same MOVER/RIDER split group move uses — a root is a mover.
     //
-    // The new baseNote is a COPY of the current one (same frequency, tempo, meter), so
-    // `base.f`, `beat(base)` and `tempo(base)` keep meaning exactly what they meant and
-    // pitches survive as ratios rather than as frozen numbers.
+    // The new baseNote is a COPY of the current one (same frequency, same duration — the
+    // time unit — and the same interpretation), so `base.f` and `base.d` keep meaning
+    // exactly what they meant: pitches survive as ratios and rhythms as multiples of the
+    // unit rather than as frozen numbers.
     function buildModuleFromSelection(ids) {
         const S = new Set([...(ids || [])].map(Number).filter((id) => Number.isFinite(id) && id !== 0));
         const notes = [...S]
@@ -4419,9 +4342,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         notes.forEach((n, i) => idMap.set(Number(n.id), i + 1));
 
         const base = myModule.baseNote;
-        const tempoFrac = myModule.findTempo(base);
-        const baseTempo = toNumber(tempoFrac, 120) || 120;
-        const beatLen = 60 / baseTempo;
+        const unitFrac = myModule.getTimeUnit();
+        const beatLen = toNumber(unitFrac, 1) || 1;
         const baseFreqFrac = base.getVariable('frequency');
         const baseFreq = toNumber(baseFreqFrac, 0);
         const baseAmpFrac = myModule.findAmplitude(base);
@@ -4464,11 +4386,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (__startChainTouchesSetGL(n, S) && selfContained(sRaw)) {
                 e.startTime = renumber(sRaw);
             } else {
-                // Exact beat offset from exact Fractions; float diff only as fallback
+                // Exact offset in time units from exact Fractions; float diff only as fallback
                 let k;
-                try { k = exactBeatOffset(n.getVariable('startTime'), t0Frac, tempoFrac); }
+                try { k = exactBeatOffset(n.getVariable('startTime'), t0Frac, unitFrac); }
                 catch { k = frac((startOf(n) - t0) / beatLen); }
-                e.startTime = (k.n === 0n) ? 'base.t' : `base.t + beat(base) * ${fracStr(k)}`;
+                e.startTime = (k.n === 0n) ? 'base.t' : `base.t + ${unitsToDSL(k)}`;
             }
 
             // duration
@@ -4479,9 +4401,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 const durSec = toNumber(durFrac, 0);
                 if (isFinite(durSec) && durSec > 0) {
                     let beats;
-                    try { beats = durFrac.mul(tempoFrac).div(60); }
+                    try { beats = durFrac.div(unitFrac); }
                     catch { beats = frac(durSec / beatLen); }
-                    e.duration = beats.equals(1) ? 'beat(base)' : `beat(base) * ${fracStr(beats)}`;
+                    e.duration = unitsToDSL(beats);
                 }
             }
 
@@ -4519,16 +4441,30 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 }
             }
 
+            // attack and release — shares of the note's own duration, so a plain number
+            // stands for them when the expression reaches outside the selection.
+            for (const v of ['attack', 'release']) {
+                const vRaw = n.variables?.[v + 'String'] || '';
+                if (!vRaw) continue;
+                if (selfContained(vRaw)) {
+                    e[v] = renumber(vRaw);
+                } else {
+                    const vFrac = n.getVariable(v);
+                    if (vFrac instanceof Fraction) e[v] = fracStr(vFrac);
+                }
+            }
+
             if (n.properties.color) e.color = n.properties.color;
             if (n.properties.instrument) e.instrument = n.properties.instrument;
             outNotes.push(e);
         }
 
         // Copy the current baseNote's own expressions — it is the tree's root, so it can
-        // never reference a note, which makes them safe to reuse as-is. startTime is
-        // forced to 0: the earliest copied note sits ON the base.
+        // never reference a note, which makes them safe to reuse as-is. Its duration is
+        // the time unit every `base.d` above reads. startTime is forced to 0: the
+        // earliest copied note sits ON the base.
         const baseOut = {};
-        for (const v of ['frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude']) {
+        for (const v of EXPRESSION_VARS.filter((name) => name !== 'startTime')) {
             const raw = base.variables?.[v + 'String'];
             if (typeof raw === 'string' && raw.trim()) {
                 baseOut[v] = raw;
@@ -6136,81 +6072,44 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
           } catch {}
 
-          // Duration remapping: re-anchor tempo reference to an ancestor at/before newStartSec, preserving seconds
+          // Duration remapping. A duration is written in time units (base.d) or relative to
+          // other notes. One that reads a note now starting after this one would point into
+          // the future, so it is rewritten as the same length in time units (`base.d * k`,
+          // exact). Any other duration — `base.d * k`, `[p].d` of an earlier note, a number —
+          // is a relation the move does not break, and is kept as written.
           try {
             if (n && n.variables && n.variables.duration) {
               const dRaw0 = (n.variables && n.variables.durationString) ? n.variables.durationString : null;
 
-              // Prefer an explicit referenced note id inside durationString (e.g., findTempo(getNoteById(id)))
-              let refNote = null;
+              let refsLaterNote = false;
               try {
-                const dRef = __extractNoteRefFromRaw(dRaw0);
-                if (dRef > 0) {
-                  refNote = myModule.getNoteById(dRef) || null;
-                } else if (dRef === 0) {
-                  refNote = myModule.baseNote;
+                const tol = 1e-6;
+                for (const ref of __extractAllNoteRefsFromRaw(dRaw0)) {
+                  if (ref === 0) continue;
+                  const rn = myModule.getNoteById(ref);
+                  if (rn && toNumber(rn.getVariable('startTime'), 0) > Number(newStartSec) + tol) {
+                    refsLaterNote = true;
+                    break;
+                  }
                 }
               } catch {}
 
-              if (!refNote) {
-                // Fallback: use chosen temporal parent's parent as basis when no explicit ref present
-                const chosenParent = parent;
-                refNote = __parseParentFromStartTimeStringGL(chosenParent) || myModule.baseNote;
-              }
-
-              // Local resolver: climb ancestors of refNote until startTime <= newStartSec
-              function __resolveAncestorAtOrBeforeLocalDur(node, cutoffSec) {
-                try {
-                  let anc = node || myModule.baseNote;
-                  const tol = 1e-6;
-                  let guard = 0;
-                  while (anc && anc.id !== 0 && guard++ < 128) {
-                    const st = toNumber(anc.getVariable('startTime'), 0);
-                    if (st <= Number(cutoffSec) + tol) break;
-                    const raw = (anc.variables && anc.variables.startTimeString) || '';
-                    const ref = __extractNoteRefFromRaw(raw);
-                    if (ref > 0) {
-                      anc = myModule.getNoteById(ref) || myModule.baseNote;
-                    } else if (ref === 0) {
-                      anc = myModule.baseNote; break;
-                    } else {
-                      anc = myModule.baseNote; break;
-                    }
-                  }
-                  return anc || myModule.baseNote;
-                } catch { return myModule.baseNote; }
-              }
-
-              const anchorDur = __resolveAncestorAtOrBeforeLocalDur(refNote, newStartSec);
-
-              // Preserve the duration while re-anchoring to anchorDur's tempo.
-              // Both operands are exact Fractions, so beats = dur * tempo / 60
-              // stays exact at any depth (the old float beatLen division lost
-              // exactness on every move commit).
+              // Both operands are exact Fractions, so units = dur / base.d stays exact at any depth.
               const durVal = n.getVariable('duration');
               const durSec = toNumber(durVal, NaN);
 
-              if (isFinite(durSec) && durSec >= 0) {
-                const tempoVal = myModule.findTempo(anchorDur);
-
+              if (refsLaterNote && isFinite(durSec) && durSec >= 0) {
+                const unitFrac = myModule.getTimeUnit();
                 let bf;
                 try {
-                  bf = durVal.mul(tempoVal).div(60);
+                  bf = durVal.div(unitFrac);
                 } catch {
-                  const tempo = toNumber(tempoVal, 120) || 120;
-                  const beats = durSec / (60 / tempo);
+                  const beats = durSec / (toNumber(unitFrac, 1) || 1);
                   try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
                 }
 
                 const dIsDSL = dRaw0 && isDSLSyntax(dRaw0);
-                let rawDur;
-                if (dIsDSL) {
-                  const beatRef = (anchorDur.id === 0) ? 'beat(base)' : `beat([${anchorDur.id}])`;
-                  rawDur = bf.equals(1) ? beatRef : `${beatRef} * ${fracToDSL(bf)}`;
-                } else {
-                  const anchorRef = (anchorDur.id === 0) ? "module.baseNote" : `module.getNoteById(${anchorDur.id})`;
-                  rawDur = `new Fraction(60).div(module.findTempo(${anchorRef})).mul(new Fraction(${bf.s * bf.n}, ${bf.d}))`;
-                }
+                const rawDur = dIsDSL ? unitsToDSL(bf) : unitsToLegacy(bf);
 
                 let simplifiedD;
                 try { simplifiedD = dIsDSL ? rawDur : simplifyDuration(rawDur, myModule); } catch { simplifiedD = rawDur; }
@@ -6239,7 +6138,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               );
               if (!anchor) anchor = document.body;
               try {
-                const __isSelectedMeasure = currentSelectedNote && currentSelectedNote.variables && currentSelectedNote.variables.startTime && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency;
+                const __isSelectedMeasure = isMeasureNote(currentSelectedNote);
                 const __mid = __isSelectedMeasure ? currentSelectedNote.id : null;
                 eventBus.emit('modals:requestRefresh', { note: currentSelectedNote, measureId: __mid, clickedElement: anchor });
               } catch {
@@ -6377,14 +6276,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           try { eventBus.emit('player:requestPause'); } catch {}
 
-          const tempo = toNumber(myModule.baseNote?.getVariable?.('tempo'), 120) || 120;
-          const beatLen = 60 / tempo;
+          // The time unit, base.d: one beat
+          const unitFrac = myModule.getTimeUnit();
+          const beatLen = toNumber(unitFrac, 1) || 1;
 
           const oldDuration = toNumber(n.getVariable('duration'), 0);
 
           // The sixteenth snap is deliberate gesture quantization — the
           // snapped beat count is always an exact quarter multiple, so the
-          // Fraction below is exact regardless of tempo.
+          // Fraction below is exact whatever the time unit.
           const beats = newDurationSec / beatLen;
           const sixteenth = 0.25;
           const snappedBeats = Math.max(sixteenth, Math.round(beats / sixteenth) * sixteenth);
@@ -6394,11 +6294,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           const dRaw = n.variables?.durationString;
           const dIsD = dRaw && isDSLSyntax(dRaw);
           let simplified;
-          if (dIsD) {
-            simplified = beatsFrac.equals(1) ? 'beat(base)' : `beat(base) * ${fracToDSL(beatsFrac)}`;
+          if (Number(n.id) === 0) {
+            // The BaseNote's duration IS the time unit: `base.d * k` would read itself.
+            // Write the new length in seconds, exactly.
+            const secs = beatsFrac.mul(unitFrac);
+            simplified = dIsD ? fracToDSL(secs) : fracToLegacy(secs);
+          } else if (dIsD) {
+            simplified = unitsToDSL(beatsFrac);
           } else {
-            const raw = `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${beatsFrac.s * beatsFrac.n}, ${beatsFrac.d}))`;
-            simplified = simplifyDuration(raw, myModule);
+            simplified = simplifyDuration(unitsToLegacy(beatsFrac), myModule);
           }
 
           n.setVariable('durationString', simplified);
@@ -6430,7 +6334,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               );
               if (!anchor) anchor = document.body;
               try {
-                const __isSelectedMeasure = currentSelectedNote && currentSelectedNote.variables && currentSelectedNote.variables.startTime && !currentSelectedNote.variables.duration && !currentSelectedNote.variables.frequency;
+                const __isSelectedMeasure = isMeasureNote(currentSelectedNote);
                 const __mid = __isSelectedMeasure ? currentSelectedNote.id : null;
                 eventBus.emit('modals:requestRefresh', { note: currentSelectedNote, measureId: __mid, clickedElement: anchor });
               } catch {
@@ -6456,31 +6360,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
          // Pause playback during edit if needed
          try { eventBus.emit('player:requestPause'); } catch {}
  
-         // Helper: identify "measure" notes (startTime set, no duration/frequency)
-         // Use hasExpression instead of getVariable to avoid dependency on evaluation cache
-         const __isMeasure = (n) => {
-           try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
-           catch { return false; }
-         };
+         // A measure bar: a note flagged `measure` (start and duration, no frequency)
+         const __isMeasure = isMeasureNote;
  
          const note = myModule.getNoteById(mId);
          if (!note || !__isMeasure(note)) return;
  
-         // Helper: parse parent from startTimeString and tell if it is a measure
-         const getParentMeasureId = (n) => {
-           try {
-             const raw = (n && n.variables && n.variables.startTimeString) ? n.variables.startTimeString : '';
-             const ref = __extractNoteRefFromRaw(raw);
-             if (ref > 0) {
-               const pn = myModule.getNoteById(ref);
-               return __isMeasure(pn) ? ref : (ref || null);
-             }
-             if (ref === 0) return 0;
-           } catch {}
-           return null;
-         };
- 
-         // Collect the linear chain for this measure only (do not mix with other chains)
+         // Collect the linear chain for this measure only (do not mix with other chains).
+         // A chain runs through chain links: bars starting at `[P].t + [P].d`, P a bar.
          // OPTIMIZED: Use DependencyGraph.getMeasureChain() when available for O(d) vs O(n²) performance
          const chain = (() => {
            const depGraph = myModule._dependencyGraph;
@@ -6500,16 +6387,16 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                return 0;
              }
            };
-           // Check if a dependent is a chain link (uses findMeasureLength/measure()) vs an anchor (starts new chain)
+           // The bar a chain link continues, or null for an anchor (starts a new chain) or root
+           const chainLinkParentOf = (n) => {
+             const pid = measureChainLinkParentId((n && n.variables && n.variables.startTimeString) || '');
+             return (pid != null && __isMeasure(myModule.getNoteById(pid))) ? pid : null;
+           };
+           // Check if a dependent is a chain link of parentId vs an anchor (starts new chain)
            const isChainLinkById = (depId, parentId) => {
              try {
                const n = myModule.getNoteById(Number(depId));
-               const expr = (n && n.variables && n.variables.startTimeString) || '';
-               // Legacy: findMeasureLength(module.getNoteById(parentId))
-               const linkPattern = `findMeasureLength(module.getNoteById(${parentId}))`;
-               // DSL: measure([parentId])
-               const dslLinkPattern = `measure([${parentId}])`;
-               return expr.includes(linkPattern) || expr.includes(dslLinkPattern);
+               return __isMeasure(n) && chainLinkParentOf(n) === Number(parentId);
              } catch { return false; }
            };
 
@@ -6521,21 +6408,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
            // Fallback to original implementation
            const out = [];
            // Walk backward to earliest measure in this chain (only through chain links, not anchors)
-           // A chain link uses findMeasureLength(module.getNoteById(X)) - anchors don't
            let cur = note;
            let guard = 0;
            while (guard++ < 1024) {
-             const raw = (cur && cur.variables && cur.variables.startTimeString) ? cur.variables.startTimeString : '';
-             // Check if current note is a CHAIN LINK (uses findMeasureLength or DSL measure())
-             const linkMatch = raw.match(/findMeasureLength\s*\(\s*module\.getNoteById\s*\(\s*(\d+)\s*\)\s*\)/)
-                            || raw.match(/\bmeasure\s*\(\s*\[\s*(\d+)\s*\]\s*\)/);
-             if (linkMatch) {
-               const pid = parseInt(linkMatch[1], 10);
-               const pn = myModule.getNoteById(pid);
-               if (pn && __isMeasure(pn)) { cur = pn; continue; }
-             }
-             // If no findMeasureLength/measure(), this is an anchor or root - stop backward walk
-             break;
+             const pid = chainLinkParentOf(cur);
+             if (pid == null) break; // an anchor or root - stop backward walk
+             cur = myModule.getNoteById(pid);
            }
            const pushWithStart = (n) => {
              try { out.push({ id: Number(n.id), startSec: toNumber(n.getVariable('startTime'), 0) }); }
@@ -6543,20 +6421,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
            };
            pushWithStart(cur);
            // Forward: at each step pick the next CHAIN LINK measure (not anchors from other chains)
-           // A chain link uses findMeasureLength(getNoteById(X)) to compute start time
            const findNextChainLink = (m) => {
              const candidates = [];
              try {
-               // Legacy: findMeasureLength(module.getNoteById(ID))
-               const linkPattern = `findMeasureLength(module.getNoteById(${m.id}))`;
-               // DSL: measure([ID])
-               const dslLinkPattern = `measure([${m.id}])`;
                for (const id in myModule.notes) {
                  const nn = myModule.getNoteById(Number(id));
-                 if (!__isMeasure(nn)) continue;
-                 const sts = (nn && nn.variables && nn.variables.startTimeString) ? nn.variables.startTimeString : '';
-                 // Only include measures that are CHAIN LINKS (use findMeasureLength/measure()), not anchors
-                 if (sts.includes(linkPattern) || sts.includes(dslLinkPattern)) candidates.push(nn);
+                 if (isChainLinkById(nn && nn.id, m.id)) candidates.push(nn);
                }
              } catch {}
              // Sort by startTime and return earliest (there should typically
@@ -6592,30 +6462,27 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           // Decide behavior from the anchor encoded in startTimeString.
           try {
             const raw = (note && note.variables && note.variables.startTimeString) ? note.variables.startTimeString : '';
-            const baseAnchored = !!(raw && (raw.indexOf('module.baseNote') !== -1 || /\bbase\./.test(raw)));
+            // The note its start hangs from (a start may also read base.d, the time unit)
+            const startRef = startParentIdFromRaw(raw);
+            const baseAnchored = startRef === 0;
 
-            const isMeasure = (n) => {
-              try { return !!(n && n.hasExpression && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency')); }
-              catch { return false; }
-            };
+            const isMeasure = isMeasureNote;
 
             let parentNote = null;
             if (!baseAnchored) {
-              const m = raw.match(/module\.getNoteById\(\s*(\d+)\s*\)/) || raw.match(/\[\s*(\d+)\s*\]\./);
-              if (m) {
-                const pid = parseInt(m[1], 10);
-                parentNote = myModule.getNoteById(pid) || null;
+              if (startRef > 0) {
+                parentNote = myModule.getNoteById(startRef) || null;
               } else if (typeof note.parentId === 'number') {
                 parentNote = myModule.getNoteById(note.parentId) || null;
               }
             }
 
             if (baseAnchored) {
-              // Do NOT modify BaseNote beats. Anchor this measure directly to BaseNote with an explicit offset.
+              // Do NOT modify the BaseNote. Anchor this measure directly to BaseNote with an
+              // explicit offset in time units.
               const base = myModule.baseNote;
               const baseStart = toNumber(base.getVariable('startTime'), 0);
-              const tempo = toNumber(myModule.findTempo(base), 120) || 120;
-              const beatLen = 60 / tempo;
+              const beatLen = toNumber(myModule.getTimeUnit(), 1) || 1;
 
               let gapSec = Math.max(0, Number(newStartSec) - baseStart);
               let beats = gapSec / beatLen;
@@ -6628,18 +6495,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               const noteUseDSL0 = isDSLSyntax(raw);
               let newRaw;
               if (noteUseDSL0) {
-                if (beats === 0) {
-                  newRaw = 'base.t';
-                } else {
-                  const beatMul = fracIsOne(bf) ? 'beat(base)' : `beat(base) * ${fracToDSL(bf)}`;
-                  newRaw = `base.t + ${beatMul}`;
-                }
+                newRaw = (beats === 0) ? 'base.t' : `base.t + ${unitsToDSL(bf)}`;
               } else {
                 const baseRef = "module.baseNote";
                 // If at origin, emit exactly base start to avoid add(... * 0) jitter
                 newRaw = (beats === 0)
                   ? `${baseRef}.getVariable('startTime')`
-                  : `${baseRef}.getVariable('startTime').add(new Fraction(60).div(module.findTempo(${baseRef})).mul(new Fraction(${bf.s * bf.n}, ${bf.d})))`;
+                  : `${baseRef}.getVariable('startTime').add(${unitsToLegacy(bf)})`;
               }
               const simplifiedStart = noteUseDSL0 ? newRaw : simplifyStartTime(newRaw, myModule);
               note.setVariable('startTimeString', simplifiedStart);
@@ -6682,14 +6544,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             try { myModule.markNoteDirty(note.id); } catch {}
           }
         } else {
-           // Subsequent measure: adjust previous measure's beats so its END equals newStartSec, then anchor current to prev END
+           // Subsequent measure: set the previous bar's duration so its END equals newStartSec,
+           // then anchor the current bar to that end.
            const prevMeta = chain[idx - 1];
            const prev = myModule.getNoteById(Number(prevMeta.id));
            const prevStart = Number.isFinite(prevMeta.startSec) && prevMeta.startSec !== 0
              ? prevMeta.startSec
              : toNumber(prev.getVariable('startTime'), 0);
-           const tempo = toNumber(myModule.findTempo(prev), 120) || 120;
-           const beatLen = 60 / tempo;
+           const unitFrac = myModule.getTimeUnit();
+           const beatLen = toNumber(unitFrac, 1) || 1;
 
            let gapSec = Math.max(0, Number(newStartSec) - prevStart);
            // snap to sixteenth
@@ -6700,23 +6563,44 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
            // Snapped beats are exact quarter multiples
            const bf = new Fraction(Math.round(beats * 4), 4);
            const noteUseDSL = isDSLSyntax(note?.variables?.startTimeString || '');
-           const rawBeats = noteUseDSL
-             ? fracToDSL(bf)
-             : `new Fraction(${bf.s * bf.n}, ${bf.d})`;
            try {
-             prev.setVariable('beatsPerMeasureString', rawBeats);
-             try { myModule.markNoteDirty(prev.id); } catch {}
+             const prevDurRaw = (prev.variables && prev.variables.durationString) || '';
+             const oldPrevDur = prev.getVariable('duration');
+             let unchanged = false;
+             try { unchanged = !!oldPrevDur && oldPrevDur.equals(bf.mul(unitFrac)); } catch {}
+             if (!unchanged) {
+               // Only the previous bar changes length. A bar after it that read its length
+               // (`[prev].d`, how a chain carries its meter) keeps the length it had: it
+               // takes over the previous bar's old expression, or failing that the same
+               // length in time units.
+               const noteDurRaw = ((note.variables && note.variables.durationString) || '').trim();
+               if (__rawReferencesNoteId(noteDurRaw, prev.id)) {
+                 const noteDurIsDSL = isDSLSyntax(noteDurRaw);
+                 const isExactCarry = noteDurRaw === `[${prev.id}].d` ||
+                   noteDurRaw === `module.getNoteById(${prev.id}).getVariable('duration')`;
+                 let keepRaw = null;
+                 if (isExactCarry && prevDurRaw && isDSLSyntax(prevDurRaw) === noteDurIsDSL) {
+                   keepRaw = prevDurRaw;
+                 } else {
+                   try {
+                     const k = note.getVariable('duration').div(unitFrac);
+                     keepRaw = noteDurIsDSL ? unitsToDSL(k) : unitsToLegacy(k);
+                   } catch {}
+                 }
+                 if (keepRaw && !__retargetWouldCycleGL(note, 'duration', keepRaw)) {
+                   note.setVariable('durationString', keepRaw);
+                 }
+               }
+
+               const prevUseDSL = prevDurRaw ? isDSLSyntax(prevDurRaw) : noteUseDSL;
+               prev.setVariable('durationString', prevUseDSL ? unitsToDSL(bf) : unitsToLegacy(bf));
+               try { myModule.markNoteDirty(prev.id); } catch {}
+             }
            } catch (e) { /* ignore */ }
 
            try {
-             let rawStart;
-             if (noteUseDSL) {
-               rawStart = `[${prev.id}].t + measure([${prev.id}])`;
-             } else {
-               rawStart = `module.getNoteById(${prev.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prev.id})))`;
-               rawStart = simplifyStartTime(rawStart, myModule);
-             }
-             note.setVariable('startTimeString', rawStart);
+             // Exact chain-link form (not simplified): chain detection reads it
+             note.setVariable('startTimeString', __measureChainLinkExpr(prev.id, noteUseDSL));
              try { myModule.markNoteDirty(note.id); } catch {}
            } catch {}
          }

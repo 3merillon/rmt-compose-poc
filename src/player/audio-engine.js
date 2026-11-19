@@ -172,10 +172,16 @@ export class AudioEngine {
         // BaseNote amplitude: what every note without its own inherits (the
         // same fallback Module.findAmplitude and the evaluator's [id].a use).
         let baseAmplitude = null;
+        // Likewise its attack and release (shares of each note's duration);
+        // null when the BaseNote sets none, and then the instrument's apply.
+        let baseAttack = null, baseRelease = null;
         try {
           const baseCached = evalCache.get(0);
           if (baseCached && baseCached.amplitude) baseAmplitude = baseCached.amplitude;
+          if (baseCached && baseCached.attack) baseAttack = baseCached.attack;
+          if (baseCached && baseCached.release) baseRelease = baseCached.release;
         } catch {}
+        const share = (v) => (v ? toNumber(v) : null);
 
         // Build note data list (no oscillators yet)
         const noteDataList = [];
@@ -207,6 +213,10 @@ export class AudioEngine {
               // amplitude.js); exactly 1 when neither the note nor the
               // BaseNote defines an amplitude.
               amplitude: amplitudeToGain(cached.amplitude || baseAmplitude),
+              // The note's own envelope shape, or the BaseNote's, or null (the
+              // instrument's): shares of the duration, clamped in the envelope.
+              attack: share(cached.attack || baseAttack),
+              release: share(cached.release || baseRelease),
               // Normalized pan position (−1..1) before width scaling; width and
               // enable are applied live at schedule time so mid-play stereo
               // changes affect newly-scheduled notes.
@@ -550,7 +560,8 @@ export class AudioEngine {
     const peak = initialVolume * (noteData.amplitude ?? 1);
 
     try {
-      this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, peak);
+      this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, peak,
+        { attack: noteData.attack ?? null, release: noteData.release ?? null });
     } catch (e) {
       console.warn('applyEnvelope failed', e);
     }

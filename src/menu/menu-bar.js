@@ -6,6 +6,10 @@ import { settingsStore } from '../settings/settings-store.js';
 import { pointerOf } from '../utils/draggable-widget.js';
 import { viewportHeight } from '../utils/viewport.js';
 import { history } from '../store/history.js';
+import { EXPRESSION_VARS } from '../note.js';
+
+// JSON keys of the old time model (tempo, beats per measure, measure length)
+const RETIRED_TIME_KEYS = ['tempo', 'beatsPerMeasure', 'measureLength'];
 
 const menuAPI = (function() {
     const domCache = {
@@ -1466,7 +1470,10 @@ const menuAPI = (function() {
      */
     function validateModuleData(data) {
         const errors = [];
-        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+        // The note's expression variables, plus the keys of the old time model:
+        // a module saved before relational time is still accepted (it is converted
+        // exactly when it loads), so its old expressions are checked here too.
+        const expressionVars = [...EXPRESSION_VARS, ...RETIRED_TIME_KEYS];
 
         if (!data || typeof data !== 'object' || Array.isArray(data)) {
             return { valid: false, errors: ['Module must be a JSON object'] };
