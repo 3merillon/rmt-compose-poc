@@ -743,6 +743,8 @@ export class RendererAdapter {
     // And its attack and release, which a note without its own inherits.
     const baseAttack = baseEvForAmp ? baseEvForAmp.attack : null;
     const baseRelease = baseEvForAmp ? baseEvForAmp.release : null;
+    // Settings > Appearance > "Show every envelope": the band in every sounding note.
+    const showAllEnvelopes = this._config?.note?.showAllEnvelopes === true;
     // Latest end time across playable notes, accumulated here for free because this loop
     // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
     // re-derive it with a second full pass over module.notes (~31ms at 100k notes).
@@ -819,13 +821,14 @@ export class RendererAdapter {
         const color = isSilence ? [0.0, 0.0, 0.0, 0.75] : baseColor;
 
         // The envelope a note sounds with, drawn inside it (see rectBorderFS) when
-        // the note or the BaseNote sets an attack or a release. Otherwise null, and
-        // the note draws exactly as before.
+        // the note or the BaseNote sets an attack or a release, or for every note
+        // when Settings > Appearance > "Show every envelope" is on. Otherwise null,
+        // and the note draws exactly as before.
         let env = null;
         if (!isSilence) {
           const atk = (ev && ev.attack) || baseAttack;
           const rel = (ev && ev.release) || baseRelease;
-          if (atk || rel) env = this._envelopeSharesFor(module, note, durSec, atk, rel);
+          if (atk || rel || showAllEnvelopes) env = this._envelopeSharesFor(module, note, durSec, atk, rel);
         }
 
         // Carry freqVal so the fraction-label pass below does not have to look the note up in

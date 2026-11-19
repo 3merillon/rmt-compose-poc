@@ -20,6 +20,7 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `appearance.note.heightWU` | number | `22` | 8 – 60, step 1 | Note height |
 | `appearance.note.borderPxAtZoom1` | number | `1` | 0 – 6, step 0.5 | Border thickness |
 | `appearance.note.roundedCornerPxAtZoom1` | number | `6` | 0 – 20, step 1 | Corner radius |
+| `appearance.showEnvelopes` | boolean | `false` | — | Show every envelope |
 | `arrows.enabled` | boolean | `true` | — | Show note arrows |
 | `arrows.mode` | string | `'reciprocal'` | `reciprocal`, `independent` | Arrow mode |
 | `arrows.up` | `{n, d, label}` | `{n: 2, d: 1, label: null}` | positive integers; `1/16 ≤ n/d ≤ 16`; `n/d ≠ 1` | Up interval + quick-pick chips |
@@ -58,6 +59,7 @@ Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate
 | **Note height** | slider, `N wu` | 8 – 60, step 1 | 22 wu | "Bar thickness in world units." |
 | **Border thickness** | slider, `N px` | 0 – 6, step 0.5 | 1 px | — |
 | **Corner radius** | slider, `N px` | 0 – 20, step 1 | 6 px | — |
+| **Show every envelope** | toggle | on / off | off | "Draws the envelope each note sounds with inside it: its own attack and release, else the instrument's. Off: only notes that set an attack or a release show it." |
 | **Reset colors to theme** | button | — | — | Disabled while you have no overrides |
 
 Then fifteen color pickers (a native swatch plus an uppercase hex readout), in three groups.

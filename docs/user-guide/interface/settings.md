@@ -55,6 +55,7 @@ Every control writes to the settings store on change. The store re-validates, pe
 | **Note height** | 8–60 world units, step 1 | 22 wu |
 | **Border thickness** | 0–6 px, step 0.5 | 1 px |
 | **Corner radius** | 0–20 px, step 1 | 6 px |
+| **Show every envelope** | on / off | off |
 | **Colour pickers** | 15 pickers in three groups | per theme |
 | **Reset colors to theme** | button, disabled when you have no custom colours | — |
 

@@ -168,7 +168,7 @@ POW produces an irrational
   → evaluateVariable() ORs the property's bit into corruptionFlags   :1545-1547
   → Module._updateCorruptionFlags()                        module.js:682-705
       → DependencyGraph.setCorruptionFlags(id, flags)      dependency-graph.js:1746
-  → RendererAdapter.sync() → a_corruptionType per note     renderer.js:910-957
+  → RendererAdapter.sync() → a_corruptionType per note     renderer.js:913-960
   → the shader hatches the note
 ```
 

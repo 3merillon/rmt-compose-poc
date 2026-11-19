@@ -107,12 +107,12 @@ roundedCornerPxAtZoom1: 4`. The sliders remain the fine-tuning control afterward
 :::
 
 Overrides are **not validated**: `validateSettings` copies `appearance.overrides` verbatim
-(`settings-schema.js:168`). No key whitelist, no hex check. Garbage keys are stored harmlessly; a
+(`settings-schema.js:172`). No key whitelist, no hex check. Garbage keys are stored harmlessly; a
 value that is not `#rrggbb` shows as `#000000` in the picker.
 
 ## Projection 1: CSS custom properties
 
-`_applyCssVars(tokens)` (`theme-manager.js:122`) walks `CSS_VAR_MAP` (`theme-manager.js:50-67`) and
+`_applyCssVars(tokens)` (`theme-manager.js:125`) walks `CSS_VAR_MAP` (`theme-manager.js:50-67`) and
 writes each token onto `document.documentElement.style` as `--rmt-<kebab>`:
 
 | Token | CSS var |
@@ -170,7 +170,7 @@ Writing a var is not the same as anyone reading it. Today:
 
 ## Projection 2: the WebGL renderer
 
-`_applyRenderer(geometry, tokens)` (`theme-manager.js:144`) calls **two** different renderer methods.
+`_applyRenderer(geometry, tokens)` (`theme-manager.js:147`) calls **two** different renderer methods.
 They are not interchangeable.
 
 ### `renderer.setConfig(partial)` — geometry and the playhead
@@ -220,7 +220,7 @@ even if `setThemeColors` was never called.
 
 Note rects are computed inside `sync()`, so a geometry change needs a full rebuild. A colour change
 does not. The theme manager therefore fires `requestResync()` **only when the geometry key actually
-changed** (`theme-manager.js:177-183`):
+changed** (`theme-manager.js:181-187`):
 
 ```javascript
 const geoKey = `${geometry.noteHeightWU}:${geometry.borderPxAtZoom1}:${geometry.roundedCornerPxAtZoom1}`;
@@ -238,27 +238,27 @@ actually costs.
 
 | GL element | Token | Source |
 |---|---|---|
-| Note body **border** (every note, not just the base) | `noteBorder` | `renderer.js:2836` |
-| Silence dashed ring | `noteBorder` | `renderer.js:7423`, `:7657` |
-| BaseNote circle fill | `accent` | `renderer.js:5473` |
-| BaseNote circle border | `noteBorder` | `renderer.js:5474` |
-| Octave / base guide lines | `accent` (alpha 0.9 primary, 0.35 secondary) | `renderer.js:9033`, `:9476` |
-| Note ID labels | `accent` | `renderer.js:7083-7088` |
-| BaseNote fraction label | `accent` | `renderer.js:6193` |
-| Octave-guide + measure-triangle ID labels | `accent` | `renderer.js:7803`, `:7856` |
-| Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:5112` |
-| Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5298` |
-| Playhead line | `playhead`, via `config.playhead.color` | `renderer.js:3166` |
-| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:10978-10983` |
-| Selected-note ring | `selectionRing` | `renderer.js:3045` |
-| Selected-note fill wash | `selectionRing` @ 0.12 | `renderer.js:3002` |
-| Multi-select group ring | `selectionRing`, 4 px (`selection.multiRingThicknessPxAtZoom1 ?? 4.0`) | `renderer.js:1610-1617` |
-| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5494`, `:6130` |
-| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3120`, `:5577`, `:6102` |
-| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:2900-2902`, `:5526-5528` |
-| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:6075-6091` |
-| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:5751-5825`, `:6261-6328`, `:7121`, `:7211` |
-| Note height / border px / corner px | `appearance.note.*` | `theme-manager.js:152-159` |
+| Note body **border** (every note, not just the base) | `noteBorder` | `renderer.js:2839` |
+| Silence dashed ring | `noteBorder` | `renderer.js:7426`, `:7660` |
+| BaseNote circle fill | `accent` | `renderer.js:5476` |
+| BaseNote circle border | `noteBorder` | `renderer.js:5477` |
+| Octave / base guide lines | `accent` (alpha 0.9 primary, 0.35 secondary) | `renderer.js:9036`, `:9479` |
+| Note ID labels | `accent` | `renderer.js:7086-7091` |
+| BaseNote fraction label | `accent` | `renderer.js:6196` |
+| Octave-guide + measure-triangle ID labels | `accent` | `renderer.js:7806`, `:7859` |
+| Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:5115` |
+| Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5301` |
+| Playhead line | `playhead`, via `config.playhead.color` | `renderer.js:3169` |
+| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:10981-10986` |
+| Selected-note ring | `selectionRing` | `renderer.js:3048` |
+| Selected-note fill wash | `selectionRing` @ 0.12 | `renderer.js:3005` |
+| Multi-select group ring | `selectionRing`, 4 px (`selection.multiRingThicknessPxAtZoom1 ?? 4.0`) | `renderer.js:1613-1620` |
+| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5497`, `:6133` |
+| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3123`, `:5580`, `:6105` |
+| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:2903-2905`, `:5529-5531` |
+| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:6078-6094` |
+| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:5754-5828`, `:6264-6331`, `:7124`, `:7214` |
+| Note height / border px / corner px | `appearance.note.*` | `theme-manager.js:155-162` |
 
 ### What is baked and cannot be themed
 
@@ -282,13 +282,13 @@ The hover ring is a worked example of the full path (it is wired this way today)
      looks right before JS boots. If you need `rgba(...)` forms, add a `setRgb(...)` line in
      `_applyCssVars`.
    - *GL* → pass it through `_applyRenderer`'s `setThemeColors({ ... })` call
-     (`theme-manager.js:164-173`), accept it in `setThemeColors` (`renderer.js:350`) with a baked
+     (`theme-manager.js:168-177`), accept it in `setThemeColors` (`renderer.js:350`) with a baked
      fallback matching today's literal, and add an accessor next to `_accentRgba()` /
      `_noteBorderRgba()` (`renderer.js:384-387`).
 
 3. **Make the draw path read the accessor** instead of the literal. For the hover ring that is
    `const hr = this._hoverRingRgba(); gl.uniform4f(uCol, hr[0], hr[1], hr[2], a)`
-   (`renderer.js:3120`), keeping the existing alpha logic.
+   (`renderer.js:3123`), keeping the existing alpha logic.
 
 4. **Add a picker** — one entry in `COLOR_TOKEN_GROUPS` (`settings-panel.js:40-53`):
 
@@ -368,7 +368,7 @@ Full token tables are in the [Settings reference](/reference/settings-reference)
 - **`geometry` values are clamped** to `[8, 60]`, `[0, 6]` and `[0, 20]` by `validateSettings`,
   whether they come from a preset selection or the sliders.
 - **Note height is the master dimension for on-note overlays.** The ID label, fraction text, arrow
-  column and pull tab are all sized as factors of it (`renderer-config.js:61-74`), so a geometry
+  column and pull tab are all sized as factors of it (`renderer-config.js:64-77`), so a geometry
   change is never just a note-body change.
 
 ## See also

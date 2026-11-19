@@ -278,7 +278,7 @@ POW produces an irrational
   → evaluateVariable ORs the property's bit into corruptionFlags   :1479-1481
   → Module._updateCorruptionFlags() pushes it into the graph   module.js:682-705
       → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1746
-  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:910-957
+  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:913-960
       0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
   → the note widget prefixes the frequency with ≈             variable-controls.js:127-143
 ```

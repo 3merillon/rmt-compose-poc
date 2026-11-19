@@ -182,5 +182,18 @@ console.log('\nAmplitude: clamp at the audio boundary\n');
     'H2 above 4 -> 4, negative -> 0, in range -> unchanged');
 }
 
+// --- I: the envelope display setting -----------------------------------------------
+console.log('\nEnvelope display: Settings > Appearance > Show every envelope\n');
+{
+  const { defaultSettings, validateSettings } = await import('../src/settings/settings-schema.js');
+  const { defaultRendererConfig } = await import('../src/renderer/webgl2/renderer-config.js');
+  check(defaultSettings().appearance.showEnvelopes === false, 'I1 off by default (the app as it was)');
+  check(defaultRendererConfig.note.showAllEnvelopes === false, 'I2 the renderer config defaults to off too');
+  check(validateSettings({ appearance: { showEnvelopes: true } }).appearance.showEnvelopes === true, 'I3 on survives validation');
+  check(validateSettings({ appearance: { showEnvelopes: 'yes' } }).appearance.showEnvelopes === false, 'I4 a non-boolean falls back to off');
+  check(validateSettings({ appearance: { showEnvelopes: true, note: { heightWU: 30 } } }).appearance.showEnvelopes === true,
+    'I5 it sits beside appearance.note (which a theme preset replaces), not inside it');
+}
+
 console.log(`\n${failures ? `${failures} failure(s).` : 'All amplitude checks passed.'}`);
 process.exit(failures ? 1 : 0);

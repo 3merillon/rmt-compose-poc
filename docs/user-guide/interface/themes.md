@@ -55,6 +55,8 @@ Three sliders under the theme dropdown reshape every note on the canvas. They ap
 | **Border thickness** | 0–6, step 0.5 | **1 px** | The outline around every note. Set it to 0 for no border. |
 | **Corner radius** | 0–20, step 1 | **6 px** | How rounded a note's corners are. Set it to 0 for square notes. |
 
+Under the sliders, **Show every envelope** (off by default) draws inside every sounding note the envelope it is played with: a band about the note's centre line that rises over the attack and falls over the release. A note that sets no [attack or release](/reference/properties/attack-release) shows its instrument's own envelope. When the toggle is off, only notes that set an attack or a release (or inherit one from the BaseNote) show the band, and the canvas looks exactly as it did before the toggle existed. Presets do not change it.
+
 **Note height is the master dimension.** The ID label, the fraction text, the arrow column and the pull tab on a note are all sized as fractions of it — so raising the note height makes a note's whole interior bigger, not just taller. If a dense passage is unreadable, raise it; if you want to see more of the piece at once, lower it.
 
 ## Custom colours

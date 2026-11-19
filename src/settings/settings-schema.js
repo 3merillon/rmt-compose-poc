@@ -55,6 +55,10 @@ export function defaultSettings() {
         borderPxAtZoom1: 1,
         roundedCornerPxAtZoom1: 6,
       },
+      // Draw every sounding note's envelope inside it, not only the notes that
+      // set an attack or a release (or inherit one from the BaseNote). Off is
+      // the app's behavior before the setting existed.
+      showEnvelopes: false,
     },
     arrows: {
       enabled: true,
@@ -169,6 +173,7 @@ export function validateSettings(raw, prev) {
   d.appearance.note.heightWU = clampNum(an.heightWU, 8, 60, d.appearance.note.heightWU);
   d.appearance.note.borderPxAtZoom1 = clampNum(an.borderPxAtZoom1, 0, 6, d.appearance.note.borderPxAtZoom1);
   d.appearance.note.roundedCornerPxAtZoom1 = clampNum(an.roundedCornerPxAtZoom1, 0, 20, d.appearance.note.roundedCornerPxAtZoom1);
+  d.appearance.showEnvelopes = asBool(a.showEnvelopes, d.appearance.showEnvelopes);
 
   const ar = src.arrows || {};
   const prevAr = (prev && prev.arrows) || {};

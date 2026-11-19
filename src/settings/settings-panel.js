@@ -280,6 +280,7 @@ function buildAppearanceTab(container) {
   container.appendChild(row('Note height', slider('appearance.note.heightWU', 8, 60, 1, (v) => `${v} wu`), 'Bar thickness in world units.'));
   container.appendChild(row('Border thickness', slider('appearance.note.borderPxAtZoom1', 0, 6, 0.5, (v) => `${v} px`)));
   container.appendChild(row('Corner radius', slider('appearance.note.roundedCornerPxAtZoom1', 0, 20, 1, (v) => `${v} px`)));
+  container.appendChild(row('Show every envelope', toggle('appearance.showEnvelopes'), 'Draws the envelope each note sounds with inside it: its own attack and release, else the instrument\'s. Off: only notes that set an attack or a release show it.'));
 
   // Per-token color pickers (write sparse overrides over the active preset).
   for (const group of COLOR_TOKEN_GROUPS) {

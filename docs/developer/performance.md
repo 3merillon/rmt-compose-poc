@@ -89,18 +89,18 @@ This does **not** mean rAF is descheduled. Both loops still tick every frame —
 measure-bar transforms). What is gated is the *body* of `_render()`:
 
 ```javascript
-// renderer.js:2789
+// renderer.js:2792
 if (!this.needsRedraw) return;
 this.needsRedraw = false;
 ```
 
 That inner gate existed before, and did nothing, for two reasons. First, the passes layered on top of
 `_render()` by the prototype wrappers ran unconditionally, so an idle frame still paid for all of
-them — an outer gate now wraps the whole chain (`renderer.js:10870`; see
+them — an outer gate now wraps the whole chain (`renderer.js:10873`; see
 [the redraw gate](/developer/rendering/webgl2-renderer#the-frame-loop-and-the-redraw-gate)). Second,
 two callers dirtied the scene on every frame. Both now short-circuit:
 
-- **`setPlayhead()`** (`renderer.js:1351`) — `if (t === this.playheadTimeSec) return;`. `player.js`
+- **`setPlayhead()`** (`renderer.js:1354`) — `if (t === this.playheadTimeSec) return;`. `player.js`
   calls this every frame whether or not audio is playing; dirtying unconditionally kept
   `needsRedraw` permanently true.
 - **`updateViewportBasis()`** (`renderer.js:594-598`) — an unchanged-basis early return. The
@@ -149,7 +149,7 @@ drop. That is why the hub-drag trace above shows exactly one frame over 33 ms.
 
 ### The headline fix: O(N²) → O(N+E) corruption scan
 
-`renderer.js:910-957`. The old code asked, for every note, *"does anything in my dependency closure
+`renderer.js:913-960`. The old code asked, for every note, *"does anything in my dependency closure
 have a corrupt value?"* — by calling `depGraph.getAllDependencies(noteId)`, a full transitive BFS,
 **once per note per sync**. Cost therefore scaled with dependency *depth*, not just note count. At
 identical note counts: **28.5 ms for `chain-1000`** (depth 1000) versus **1.4 ms for `fan-1000`**
@@ -177,7 +177,7 @@ every stress shape**, chain or fan.
 
 The new algorithm was proven identical to the old one by a randomised differential test — 5,600
 trials, zero mismatches. A fallback branch preserving the exact old per-note logic is kept at
-`renderer.js:958` for graph objects that lack `getCorruptedNotes` / `getDependents`.
+`renderer.js:961` for graph objects that lack `getCorruptedNotes` / `getDependents`.
 
 Corruption is encoded in `_corruptionType` (a `Float32Array`, vertex attribute 7), which the note
 shader turns into hatching:
@@ -192,7 +192,7 @@ See [Dependencies](/user-guide/notes/dependencies) for what corruption means mus
 
 ### Cached zero-buffer
 
-`renderer.js:1246-1250`. The per-sync region-buffer resets reuse a cached `_zeros4Cache`
+`renderer.js:1249-1253`. The per-sync region-buffer resets reuse a cached `_zeros4Cache`
 `Float32Array` instead of allocating a fresh one each sync. It is only ever read, so it stays
 all-zeros. Same GPU behaviour, no GC churn during a drag.
 
@@ -203,14 +203,14 @@ DOM per note and no draw call per note.
 
 | Pass | Where |
 |---|---|
-| Note bodies (`N = instanceCount`) | `renderer.js:2877` |
-| Silence dashed rings, fraction dividers, pull-tab and arrow backgrounds | `src/renderer/webgl2/renderer.js:6655`, `:6668`, `:7560`, `:7617`, `:7692` |
-| Octave guides | `renderer.js:5284` |
-| Measure bars and measure triangles | `renderer.js:5991`, `:6013` |
+| Note bodies (`N = instanceCount`) | `renderer.js:2880` |
+| Silence dashed rings, fraction dividers, pull-tab and arrow backgrounds | `src/renderer/webgl2/renderer.js:6658`, `:6671`, `:7563`, `:7620`, `:7695` |
+| Octave guides | `renderer.js:5287` |
+| Measure bars and measure triangles | `renderer.js:5994`, `:6016` |
 | Dependency link-lines | instanced, per-property buckets |
-| All overlay text | glyph atlas run, `renderer.js:8885` |
+| All overlay text | glyph atlas run, `renderer.js:8888` |
 
-The shared rect VAO (`renderer.js:2529-2618`) binds one per-vertex attribute — the unit quad
+The shared rect VAO (`renderer.js:2532-2621`) binds one per-vertex attribute — the unit quad
 `a_unit` (location 0, divisor 0) — plus **six per-instance** attributes: `a_posSize` (1), `a_color`
 (2), `a_tabRegion` (4), `a_flags` silence mask (5), `a_dragFlag` (6) and `a_corruptionType` (7).
 Location 3 (`a_noteSize`) is still declared in the note-body shader but is no longer bound — note
@@ -221,29 +221,29 @@ never draw-call count. The governing rule is **keep it O(visible), not O(module)
 
 ### The batched dependency-highlight ring pass
 
-`_drawRingIdxList()` — `renderer.js:2674`. This is the one remaining per-instance loop that could
+`_drawRingIdxList()` — `renderer.js:2677`. This is the one remaining per-instance loop that could
 approach O(N): it fires when a highly-connected note is selected (a hub with ~1000 dependents) and
 the scene keeps redrawing for other reasons (hover, playhead).
 
-- **No drag active** (`renderer.js:2714`): `u_dragOffset` is `(0,0)` for every ring, so the whole
+- **No drag active** (`renderer.js:2717`): `u_dragOffset` is `(0,0)` for every ring, so the whole
   bucket shares identical uniforms. The indices are gathered into one reused `_depRingBatch` buffer
   and drawn in **one** instanced call — 999 draws and 999 `bufferData` uploads collapse to 6 and 6
   per selection. It is pixel-identical: the ring shader reads only `a_posSize` per instance, and
   WebGL rasterises instances in order, so same-colour overlap blends the same.
-- **Drag active** (`renderer.js:2748`): per-instance drag offsets differ (moving vs anchor vs
+- **Drag active** (`renderer.js:2751`): per-instance drag offsets differ (moving vs anchor vs
   static), so the exact per-instance loop is kept for correctness.
 
 Three callers share it: the dependents rings, the full parent-chain rings, and the multi-selection
 ring.
 
-Ring colours (`renderer.js:2906-2924`) are property-specific — orange = frequency, teal = startTime,
+Ring colours (`renderer.js:2909-2927`) are property-specific — orange = frequency, teal = startTime,
 purple = duration — and dim the properties a drag is *not* changing. Parent-chain rings are drawn at
 `ringThicknessPxAtZoom1 × 1.5` (3 px), dependents at `× 1.0` (2 px), in the order startTime →
 frequency → duration so overlapping dependencies all stay visible.
 
 ### Viewport culling
 
-`renderer.js:6986-7017`. The per-note overlay loop — pull tab, interval arrows, fraction divider,
+`renderer.js:6989-7020`. The per-note overlay loop — pull tab, interval arrows, fraction divider,
 silence band, and **all** of that note's text runs — is culled against the viewport. Every overlay
 it emits is scissored to that note's own rect, so a note entirely off-canvas cannot produce a single
 pixel. The cull is therefore *exact*, not an approximation, which is why the picture stays
@@ -274,10 +274,10 @@ Rebuilt every pointermove → now built **once per gesture**:
   then `Array.from()`'d it. Both are now created once and handed back by reference.
 - The `workspace.js` note-drag path built `new Set([noteId, ...cachedDependents])` per move. Now
   cached on the interaction.
-- `renderer.setDragOffsetPreview` (`renderer.js:3752`) re-derived `_dragMovingIds` plus an index
+- `renderer.setDragOffsetPreview` (`renderer.js:3755`) re-derived `_dragMovingIds` plus an index
   array it then **sorted** — every move. Now short-circuits on an identity check against the
   caller's `Set`.
-- `renderer.setDragOverlay` (`renderer.js:9781`) rebuilt a `Set` via `movingIds.map(Number)` every
+- `renderer.setDragOverlay` (`renderer.js:9784`) rebuilt a `Set` via `movingIds.map(Number)` every
   move. Now identity-checked, with an allocation-free exact content comparison as the fallback.
   Deliberately *not* a size-only test — that would be unsound.
 
@@ -286,13 +286,13 @@ Per-frame allocations removed from the drag render path:
 - **Dependency-line endpoints** were accumulated into boxed JS arrays and copied into fresh
   `Float32Array`s every frame (~20,000 elements *per property* at 5,000 dependents). They now go
   into pooled, growable `Float32Array`s that hand out `subarray` views (`_linkWriter`,
-  `renderer.js:9612-9646`). A steady-state drag now allocates **nothing**.
+  `renderer.js:9615-9649`). A steady-state drag now allocates **nothing**.
 - The "legacy combined" deps/rdeps arrays were built with `push(...spread)`, converted, uploaded
   every frame — **and never drawn from**. Removed.
 - `getChildrenTreeByAllProperties()` re-ran a full BFS every pointermove, allocating an edge object
   per dependent per property. It is a pure function of the anchor plus module structure, neither of
   which a drag changes, so it is now cached on `anchorId|_posEpoch|_sceneEpoch`
-  (`renderer.js:10268-10275`) — any real edit still invalidates it.
+  (`renderer.js:10271-10278`) — any real edit still invalidates it.
 - Tab/arrow region arrays were re-minted (4 × `Float32Array(N*4)`) every drag frame. Reused.
 - Note-local overlay regions are now keyed on the note's **width**, not on "a drag happened". A
   *move* changes no note's width, so a move-drag no longer recomputes N regions and re-uploads N×4
@@ -308,12 +308,12 @@ actually passed in. The pixel diff caught this; eyeballing would not have.
 
 - `Workspace.pickAt(clientX, clientY, expandCssPx = 2)` (`workspace.js:1940`) tries
   `renderer.pickAllAt()` first, which always exists.
-- `RendererAdapter.pickAllAt` (`renderer.js:9248`) resolves measure triangles (top) → base circle →
+- `RendererAdapter.pickAllAt` (`renderer.js:9251`) resolves measure triangles (top) → base circle →
   note stack.
-- `RendererAdapter.pickAt` (`renderer.js:3491`) is a **reverse linear scan** over `_instanceNoteIds`
+- `RendererAdapter.pickAt` (`renderer.js:3494`) is a **reverse linear scan** over `_instanceNoteIds`
   (last-drawn is top-most), with a fast world-space AABB reject followed by a precise rounded-rect
   test so corners do not select.
-- `hitTestSubRegion` (`renderer.js:3554`) resolves *which* sub-region of a note was hit (pull tab,
+- `hitTestSubRegion` (`renderer.js:3557`) resolves *which* sub-region of a note was hit (pull tab,
   arrow column), and only runs once a body hit is confirmed.
 
 There is **no spatial index**, and measurement says none is warranted: 0.31 ms per call at 100,000

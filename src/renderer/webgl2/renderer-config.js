@@ -28,7 +28,10 @@ export const defaultRendererConfig = {
     // drifting off it. Changing this shifts notes AND their guides together.
     centerAnchorWU: 10,
     roundedCornerPxAtZoom1: 6,
-    borderPxAtZoom1: 1
+    borderPxAtZoom1: 1,
+    // Draw the envelope inside every sounding note (Settings > Appearance), not
+    // only in notes that set an attack or a release.
+    showAllEnvelopes: false
   },
 
   // Base note glyph circle (world-space size)
