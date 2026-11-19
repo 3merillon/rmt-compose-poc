@@ -63,8 +63,13 @@ function temperedMatch(mod, rec, id, k, want, got) {
 
 async function compareOracle(oracleFile, baseDir) {
   const oracle = JSON.parse(readFileSync(oracleFile, 'utf8')).modules;
-  let modules = 0, values = 0;
+  let modules = 0, values = 0, rewritten = 0;
   for (const [key, expected] of Object.entries(oracle)) {
+    // Rewritten in Phase L with new note ids (each root a key change plus a root
+    // tone), so a note-by-note comparison by id no longer applies; what they play
+    // is checked note for note by scripts/test-library.mjs, recorded from the
+    // library this test had verified.
+    if (key.startsWith('public/modules/progressions/')) { rewritten++; continue; }
     const file = join(baseDir, key);
     let mod;
     try {
@@ -96,6 +101,7 @@ async function compareOracle(oracleFile, baseDir) {
     if (wrong > 3) bad(`${key}: ${wrong - 3} more differences`);
     modules++;
   }
+  if (rewritten) console.log(`  · ${rewritten} progressions rewritten in Phase L: checked by test-library.mjs instead`);
   return { modules, values };
 }
 

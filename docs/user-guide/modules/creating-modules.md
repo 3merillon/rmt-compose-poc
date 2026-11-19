@@ -125,23 +125,25 @@ When you drag a module out of the library and drop it on a note, **its BaseNote 
 
 Drop this on note 5 and all three notes hang directly off note 5. Move note 5 and the whole chord follows. Simple, and fine for a triad.
 
-### Root-subtree — what the shipped library does
+### Root-subtree
+
+Hang the third and the fifth off a sounding root note instead (`(5/4) * [1].f`), and transposing that note moves the chord. That is a fine way to build a chord by hand.
+
+### The root as reference — what the shipped library does
 
 ```json
 {
   "notes": [
-    { "id": 1, "frequency": "base.f",         "startTime": "base.t", "duration": "base.d * 2" },
-    { "id": 2, "frequency": "(5/4) * [1].f",  "startTime": "[1].t",  "duration": "base.d * 2" },
-    { "id": 3, "frequency": "(3/2) * [1].f",  "startTime": "[1].t",  "duration": "base.d * 2" }
+    { "id": 1, "frequency": "base.f",          "startTime": "base.t", "duration": "base.d * 2" },
+    { "id": 2, "frequency": "(5/4) * base.f",  "startTime": "[1].t",  "duration": "[1].d" },
+    { "id": 3, "frequency": "(3/2) * base.f",  "startTime": "[1].t",  "duration": "[1].d" }
   ]
 }
 ```
 
-This is `chords/major.json`, shipped. Only **note 1** touches `base`; the third and the fifth hang off note 1. The chord is not three independent pitches — it is a root plus two relationships.
+This is `chords/major.json`, shipped. The root of a single chord is the module's **BaseNote**: every tone, the root tone included, hangs from `base.f`, and the third and the fifth start with the root tone and last as long as it does. Dropped on a note, the chord is built on that note and moves with it; no sounding tone carries the others.
 
-The payoff: transpose the root and the chord moves with it, in tune. Octave-shift the root and the whole chord shifts. The structure is the music.
-
-Progressions take this further — each chord's root is expressed off the *previous* chord's root, so only the very first root ever references `base`. Move it and the entire progression moves.
+Progressions name each chord's root as a **key change** (a frequency and a start, no sound), a ratio of the previous root, beginning when the previous chord ends; the chord's tones hang from it. Only the first root reads `base`. Transpose a root and its chord follows, and so does every chord after it, because each root is written against the one before. See [Module Library](/user-guide/modules/module-library#a-progression-is-a-chain-of-roots).
 
 ### Chained scale
 

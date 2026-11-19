@@ -47,44 +47,47 @@ Drop it on a note and `base.f` becomes that note's frequency. You get a fifth ab
 
 ### A chord is a root, with tones hanging off it
 
-The Major chord, frequencies only (note 1 starts at `base.t`, notes 2 and 3 at `[1].t`, and all three last `base.d * 2`):
+The Major chord, frequencies only (note 1 starts at `base.t` and lasts `base.d * 2`; notes 2 and 3 start at `[1].t` and last `[1].d`):
 
 ```json
 { "id": 1, "frequency": "base.f" }
-{ "id": 2, "frequency": "(5/4) * [1].f" }
-{ "id": 3, "frequency": "(3/2) * [1].f" }
+{ "id": 2, "frequency": "(5/4) * base.f" }
+{ "id": 3, "frequency": "(3/2) * base.f" }
 ```
 
-Note 1 is the **root**. Notes 2 and 3 are not independent pitches — they are *defined as* a major third and a fifth above note 1. Move note 1 and the third and the fifth follow it, still a third and a fifth.
+The root of a single chord is the module's **BaseNote**. Notes 2 and 3 are not independent pitches — they are *defined as* a major third and a fifth above the root, and no sounding tone carries the others. Drop the chord on a note and it is built on that note: move that note and the root, the third and the fifth follow it, still a third and a fifth.
 
 This is the difference between a chord and three notes that happen to sound like a chord.
 
 ### A progression is a chain of roots
 
-This is where it gets interesting. Here is **ii – V – I**, stripped to its frequencies:
+This is where it gets interesting. Each chord's root is a **key change**: a note with a frequency and a start and no duration, which never sounds and is drawn as a dashed line from its start on. Here is **ii – V – I**, stripped to its frequencies:
 
 ```
-[1]  (9/8) * base.f      ← the ii root — the only note that touches base
-[2]  (6/5) * [1].f       ← minor third of ii
-[3]  (3/2) * [1].f       ← fifth of ii
+[1]  (9/8) * base.f      ← the ii root (a key change) — the only note that touches base
+[2]  [1].f               ← the root tone of ii
+[3]  (6/5) * [1].f       ← minor third of ii
+[4]  (3/2) * [1].f       ← fifth of ii
 
-[4]  (4/3) * [1].f       ← the V root, a fourth above the ii root
-[5]  (5/4) * [4].f       ← third of V
-[6]  (3/2) * [4].f       ← fifth of V
-[7]  (7/4) * [4].f       ← harmonic seventh of V
+[5]  (4/3) * [1].f       ← the V root, a fourth above the ii root
+[6]  [5].f               ← the root tone of V
+[7]  (5/4) * [5].f       ← third of V
+[8]  (3/2) * [5].f       ← fifth of V
+[9]  (7/4) * [5].f       ← harmonic seventh of V
 
-[8]  (2/3) * [4].f       ← the I root, a fifth below the V root
-[9]  (5/4) * [8].f       ← third of I
-[10] (3/2) * [8].f       ← fifth of I
-[11] (2/1) * [8].f       ← octave of I
+[10] (2/3) * [5].f       ← the I root, a fifth below the V root
+[11] [10].f              ← the root tone of I
+[12] (5/4) * [10].f      ← third of I
+[13] (3/2) * [10].f      ← fifth of I
+[14] 2 * [10].f          ← octave of I
 ```
 
-Read down the roots: note 1 comes from `base`. Note 4 comes from **note 1**. Note 8 comes from **note 4**. The roots move *by interval* — up a fourth, then down a fifth — exactly as a musician would describe the progression. Nothing in the module is in any key. The absolute pitches only exist once you drop it somewhere.
+Read down the roots: note 1 comes from `base`. Note 5 comes from **note 1**. Note 10 comes from **note 5**. The roots move *by interval* — up a fourth, then down a fifth — exactly as a musician would describe the progression. In time, each root begins where the chord before it ends (`[2].t + [2].d`), and each chord's tones start with its root tone and last as long. Nothing in the module is in any key. The absolute pitches only exist once you drop it somewhere.
 
 ::: tip Try this
-Drop **ii – V – I** onto a note. Now open the ii chord's root — the first note — in the [note widget](/user-guide/interface/variable-widget) and press the **▲** next to its frequency. That transposes it by the arrow interval, which is 2/1 until you change it in **Settings → Arrows**.
+Drop **ii – V – I** onto a note. Now select the ii root — the first dashed line — and press the **▲** next to its frequency in the [note widget](/user-guide/interface/variable-widget). That transposes it by the arrow interval, which is 2/1 until you change it in **Settings → Arrows**.
 
-The **entire progression** goes with it. Every chord, every third, every seventh. The V root is still a fourth above the ii root, because that is literally what it says. You did not transpose eleven notes; you moved one note, and ten notes were defined relative to it.
+The **entire progression** goes with it. Every chord, every third, every seventh. The V root is still a fourth above the ii root, because that is literally what it says. You did not transpose fourteen notes; you moved one, and everything else was defined relative to it.
 
 Now try retuning instead of transposing: open that same root and multiply its frequency by `81/80`, a syntonic comma. The whole progression shifts with it, still perfectly in tune with itself.
 :::
@@ -93,7 +96,7 @@ Cadences work the same way, with two chords instead of three or four.
 
 ### Melodies and scales chain too
 
-Melodies are written as scale degrees against `base`, with start times in time units: `(5/4) * base.f`, `base.t + base.d * 3`. Change the BaseNote and the whole tune transposes. Drop it on a note and it plays from there.
+Melodies are written as scale degrees against `base`, the tonic: `(5/4) * base.f`. Each note begins when the one before it ends, `[p].t + [p].d` (plus a rest when there is one, `[p].t + [p].d + base.d * (1/2)`), so lengthening one note moves the rest of the tune with it. Change the BaseNote and the whole tune transposes. Drop it on a note and it plays from there.
 
 Scale systems are **chained note to note** — each step lifts off the one below it:
 
@@ -244,7 +247,7 @@ Public-domain tunes, written as scale degrees against the BaseNote.
 | Bach Minuet in G | 16 | `2/5` | 150 BPM |
 | Scarborough Fair | 15 | `2/5` | 150 BPM |
 
-Each melody's pace is its BaseNote's duration, the time unit, and every note length is written against it. The "Reads as" column is `60 / base.d`, which the note widget shows next to the duration. Dropped on a note, a melody takes that note's duration as its time unit; see [Loading Modules](/user-guide/modules/loading-modules#drop-a-library-module-onto-a-note).
+Each melody's pace is its BaseNote's duration, the time unit, and every note length is written against it. The "Reads as" column is `60 / base.d`, which the note widget shows next to the duration. Dropped on a note, a melody takes that note's start and pitch and keeps the workspace's time unit (`base.d` stays `base.d`); see [Loading Modules](/user-guide/modules/loading-modules#drop-a-library-module-onto-a-note).
 Drop one on a note and it plays from there, in tune with everything around it. Frère Jacques is a round: drop a second copy onto a note partway through the first and it sings against itself.
 
 ## Scale Systems — 6 modules

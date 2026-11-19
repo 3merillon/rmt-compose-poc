@@ -84,14 +84,14 @@ The **Chords** section ships 11 chords, each written as a ratio over its own roo
 
 Two of these deserve a note. **Dominant 7th** uses `16/9` for its seventh, not `7/4` — `16/9` against the `5/4` third gives the classic `64/45` tritone. The septimal chord with `7/4` in it is the separate **Harmonic 7th** (4:5:6:7). And **Base-3** / **Base-5** are the RMT-native shapes: consecutive odd harmonics stacked over an odd root.
 
-The shipped Major chord looks like this:
+The shipped Major chord looks like this (its root is the BaseNote; the other tones start with the root tone and last as long):
 
 ```json
 {
   "notes": [
-    { "id": 1, "frequency": "base.f",         "startTime": "base.t", "duration": "base.d * 2" },
-    { "id": 2, "frequency": "(5/4) * [1].f",  "startTime": "[1].t",  "duration": "base.d * 2" },
-    { "id": 3, "frequency": "(3/2) * [1].f",  "startTime": "[1].t",  "duration": "base.d * 2" }
+    { "id": 1, "frequency": "base.f",          "startTime": "base.t", "duration": "base.d * 2" },
+    { "id": 2, "frequency": "(5/4) * base.f",  "startTime": "[1].t",  "duration": "[1].d" },
+    { "id": 3, "frequency": "(3/2) * base.f",  "startTime": "[1].t",  "duration": "[1].d" }
   ]
 }
 ```
