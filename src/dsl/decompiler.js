@@ -123,6 +123,13 @@ export class DSLDecompiler {
           break;
         }
 
+        case OP.APPROX: {
+          // Follows a constant: ~261.63, ~-3, ~(3/2)
+          const [a] = this.pop();
+          this.push(`~${a}`, Precedence.ATOMIC);
+          break;
+        }
+
         case OP.POW: {
           const [exp, expPrec] = this.pop();
           const [base, basePrec] = this.pop();

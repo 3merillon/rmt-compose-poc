@@ -4,8 +4,8 @@
  * Evaluate to BaseNote and re-anchoring a moved note rewrite an expression from
  * its evaluated value. They read the exact value (src/value/exact.js), so a
  * tempered pitch is written as the power it is (`base.f * 2^(7/12)`), never as a
- * float-derived fraction. An approximate value cannot be written exactly: these
- * functions then return null and the caller keeps the expression it has.
+ * float-derived fraction. An approximate value is written with `~` (`~(26163/100)`),
+ * so it never passes as exact.
  */
 import Fraction from 'fraction.js';
 import * as X from '../value/exact.js';
@@ -13,19 +13,24 @@ import * as X from '../value/exact.js';
 const ZERO = new Fraction(0);
 const ONE = new Fraction(1);
 
-/** A value as a factor in a product: `3`, `(3/2)`, `2^(7/12)`, `(1 + 2^(1/2))`; null when approximate. */
+const literal = (f) => {
+  const n = f.s * f.n;
+  return f.d === 1n ? `${n}` : `(${n}/${f.d})`;
+};
+
+/** A value as a factor in a product: `3`, `(3/2)`, `2^(7/12)`, `(1 + 2^(1/2))`, `~(26163/100)`; null for no value. */
 export function valueFactor(v) {
-  if (v == null || X.isApprox(v)) return null;
+  if (v == null) return null;
+  if (X.isApprox(v)) return '~' + literal(v.frac);
   if (X.isRational(v)) {
-    const n = v.s * v.n;
-    if (v.d === 1n) return n < 0n ? `(${n})` : `${n}`;
-    return `(${n}/${v.d})`;
+    const t = literal(v);
+    return t.startsWith('-') ? `(${t})` : t;
   }
   const t = X.toText(v);
   return (v.terms.length > 1 || t.startsWith('-')) ? `(${t})` : t;
 }
 
-/** `ref * k` (or `ref` when k is 1); null when approximate. */
+/** `ref * k` (or `ref` when k is 1). */
 function scaled(ref, k) {
   if (X.isRational(k) && k.equals(1)) return ref;
   const f = valueFactor(k);
@@ -51,7 +56,7 @@ export function startTimeExpr(t, baseT, unit) {
   return c > 0 ? `base.t + ${span}` : `base.t - ${span}`;
 }
 
-/** A frequency relative to the BaseNote's: `base.f * 2^(7/12)`; null when it cannot be written exactly. */
+/** A frequency relative to the BaseNote's: `base.f * 2^(7/12)`; null when the BaseNote's is 0. */
 export function frequencyExpr(f, baseF) {
   if (X.isZero(baseF)) return null;
   return scaled('base.f', X.div(f, baseF));
@@ -63,7 +68,7 @@ export function amplitudeExpr(a, baseA) {
   return scaled('base.a', X.div(a, baseA));
 }
 
-/** `k * ref` for re-anchoring a frequency on another note (`ref` alone when k is 1); null when approximate. */
+/** `k * ref` for re-anchoring a frequency on another note (`ref` alone when k is 1); null when the anchor's is 0. */
 export function ratioToAnchorExpr(value, anchorValue, ref) {
   if (X.isZero(anchorValue)) return null;
   const k = X.div(value, anchorValue);

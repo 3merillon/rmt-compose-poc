@@ -10,7 +10,7 @@ import {
 import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { escapeHtml } from '../utils/html-escape.js';
-import { startTimeExpr, timeUnitsExpr, frequencyExpr, amplitudeExpr } from '../utils/value-expr.js';
+import { startTimeExpr, timeUnitsExpr, frequencyExpr, amplitudeExpr, valueFactor } from '../utils/value-expr.js';
 import { isMeasureNote, isReferenceNote } from '../note.js';
 import { CORRUPT } from '../binary-note.js';
 import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.js';
@@ -686,21 +686,6 @@ function showNotification(message, type = 'info') {
 
 
 // ===== Feature: Evaluate to BaseNote =====
-// Helper to convert an exact value to a DSL fraction/number string
-function toDSLFractionString(value) {
-    try {
-        const frac = value instanceof Fraction ? value : new Fraction(value);
-        const val = frac.s * frac.n;
-        if (frac.d === 1n) {
-            return `${val}`;
-        }
-        return `(${val}/${frac.d})`;
-    } catch (e) {
-        console.warn('toDSLFractionString: inexact fallback for', value, e?.message ?? e);
-        return `${value}`;
-    }
-}
-
 // The expression of a note's variable relative to the BaseNote, written from its
 // exact value (src/utils/value-expr.js): a tempered pitch stays the power it is,
 // `base.f * 2^(7/12)`. null when the value cannot be written exactly (an
@@ -846,18 +831,11 @@ export function liberateDependencies(noteId) {
         if (selectedNote.variables[varName + "String"]) {
             selectedRaw[varName] = selectedNote.variables[varName + "String"];
         } else {
-            // A DSL fraction from the exact fields: digit-exact at any
-            // magnitude, and never toString()'s repeating decimals
-            const frac = selectedNote.getVariable(varName);
-            if (frac == null) {
-                selectedRaw[varName] = (varName === "frequency") ? "1" : "0";
-            } else {
-                let f = frac;
-                if (!(f instanceof Fraction)) {
-                    f = new Fraction(typeof f.toFraction === "function" ? f.toFraction() : f);
-                }
-                selectedRaw[varName] = toDSLFractionString(f);
-            }
+            // The exact value: an irrational one exactly, an approximate one with ~
+            const exact = selectedNote.getExactVariable(varName);
+            selectedRaw[varName] = (exact == null)
+                ? ((varName === "frequency") ? "1" : "0")
+                : valueFactor(exact);
         }
     });
     // amplitude, attack and release only when the note defines its own; left

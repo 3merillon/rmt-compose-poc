@@ -137,7 +137,7 @@ tetThird.mul(bpStep);
 
 ## Corruption, end to end
 
-The `CORRUPT` bitmask (`src/binary-note.js:103-110`):
+The `CORRUPT` bitmask (`src/binary-note.js:104-111`):
 
 ```javascript
 export const CORRUPT = {

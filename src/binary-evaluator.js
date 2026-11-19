@@ -1222,6 +1222,16 @@ export class BinaryEvaluator {
           break;
         }
 
+        case OP.APPROX: {
+          // `~261.63`: an approximate number. It flags the evaluation like an
+          // irrational power does (the note is not exact), and everything
+          // computed from it is approximate.
+          const v = this.pop();
+          this._lastEvalWasCorrupted = true;
+          this.push(new X.Approx(X.shadow(own(v))));
+          break;
+        }
+
         case OP.DUP: {
           const top = this.peek();
           this.push(this.pool.allocFrom(top));

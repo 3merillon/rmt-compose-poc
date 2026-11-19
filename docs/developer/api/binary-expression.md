@@ -203,7 +203,7 @@ is used only when the numerator or denominator falls outside the i32 range
 `LOAD_REF` encodes the id as a `u16`, and `dependencies` is a `Uint16Array`.
 `Module.loadFromJSON()` guards the boundary: it rejects (skips, with a console warning) any note
 whose id is above 65535. The DSL parser enforces the same range at compile time —
-`[70000].f` is a parse error (`src/dsl/parser.js:253`), and so is `module.getNoteById(70000)` in
+`[70000].f` is a parse error (`src/dsl/parser.js:284`), and so is `module.getNoteById(70000)` in
 the converter of the retired method-chain syntax — so an id can never wrap.
 
 ## Worked example
@@ -313,7 +313,7 @@ decompiler.decompile(expr)   // sourceText verbatim if present, else decompileTo
 decompileToDSL(expr)         // always walks the bytecode, always emits DSL
 ```
 
-`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:74`),
+`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:80`),
 so for anything compiled from text it is a pass-through. A synthesised expression (empty
 `sourceText`) is decompiled to DSL.
 

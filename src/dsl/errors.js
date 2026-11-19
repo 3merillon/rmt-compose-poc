@@ -170,6 +170,10 @@ export const ErrorMessages = {
    * @param {string} name - beat, tempo or measure
    * @returns {string}
    */
+  approximateNeedsNumber() {
+    return "'~' marks a number as approximate: write it before a number, e.g. ~261.63, ~-3 or ~(3/2)";
+  },
+
   retiredTimeFunction(name) {
     if (name === 'beat') return `'beat()' was removed: the reference note's duration is the time unit, so write base.d for beat(base), or [N].d to relate to note N`;
     if (name === 'measure') return `'measure()' was removed: a measure bar is a silent note with a duration, so write [N].d for measure([N])`;

@@ -18,6 +18,7 @@ export const TokenType = {
   STAR: 'STAR',               // *
   SLASH: 'SLASH',             // /
   CARET: 'CARET',             // ^
+  TILDE: 'TILDE',             // ~ (an approximate number: ~261.63)
 
   // Delimiters
   LPAREN: 'LPAREN',           // (

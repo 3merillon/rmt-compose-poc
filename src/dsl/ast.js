@@ -11,6 +11,7 @@ export const NodeType = {
   // Literals
   NumberLiteral: 'NumberLiteral',       // 440, -5, 3.14
   FractionLiteral: 'FractionLiteral',   // (3/2), (1/12)
+  Approximate: 'Approximate',           // ~261.63, ~(3/2): a number that is not exact
 
   // References
   NoteReference: 'NoteReference',       // [246].f, base.t
@@ -43,6 +44,19 @@ export function createNumberLiteral(value, numerator, denominator) {
  * @param {number} denominator - The denominator
  * @returns {Object} AST node
  */
+/**
+ * An approximate number: a literal marked with `~` (a measurement, a rounded
+ * value). It evaluates to an approximate value, and so does everything computed
+ * from it (src/value/exact.js).
+ * @param {Object} literal - NumberLiteral or FractionLiteral, possibly negated (UnaryOp '-')
+ */
+export function createApproximate(literal) {
+  return {
+    type: NodeType.Approximate,
+    literal,
+  };
+}
+
 export function createFractionLiteral(numerator, denominator) {
   return {
     type: NodeType.FractionLiteral,
@@ -203,6 +217,9 @@ export function printAST(node, indent = 0) {
 
     case NodeType.FractionLiteral:
       return `${pad}Fraction(${node.numerator}/${node.denominator})`;
+
+    case NodeType.Approximate:
+      return `${pad}Approximate\n${printAST(node.literal, indent + 1)}`;
 
     case NodeType.NoteReference:
       return `${pad}Ref([${node.noteId}].${node.property})`;

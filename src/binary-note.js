@@ -20,6 +20,7 @@ export const OP = {
   DIV:            0x13,  // Pop 2, push quotient
   NEG:            0x14,  // Pop 1, push negation
   POW:            0x15,  // Pop 2 (base, exponent), push base^exponent (may corrupt to irrational)
+  APPROX:         0x16,  // Pop 1, push it as an approximate value (`~261.63`); follows a constant
 
   // Module lookup operations. 0x20 (FIND_TEMPO) and 0x21 (FIND_MEASURE) were
   // retired with the tempo / measure-length variables; do not reuse them.

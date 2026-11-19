@@ -139,6 +139,42 @@ console.log('\nExact values: Evaluate to BaseNote writes the exact relation');
   }
 }
 
+console.log('\nApproximations: ~');
+{
+  const { compileDSL, decompileToDSL } = await import('../src/dsl/index.js');
+  const { simplifyDSL } = await import('../src/dsl/simplify.js');
+  const { frequencyExpr, valueFactor } = await import('../src/utils/value-expr.js');
+  for (const [src, back] of [['~261.63', '~(26163/100)'], ['~-3', '~-3'], ['~(3/2)', '~(3/2)'], ['[1].f * ~1.4983', '[1].f * ~(14983/10000)'], ['~(-3/4) * base.f', '~(-3/4) * base.f']]) {
+    const got = decompileToDSL(compileDSL(src));
+    check(got === back && decompileToDSL(compileDSL(got)) === back, `${src} compiles and reads back as ${got}`);
+  }
+  for (const src of ['~base.f', '~(1 + 2)', '~', '~[1].f']) {
+    try { compileDSL(src); bad(`${src} compiled; ~ marks a number only`); }
+    catch (e) { check(/'~' marks a number/.test(e.userMessage || e.message), `${src} is refused: ${(e.userMessage || e.message).split(':')[0]}`); }
+  }
+  check(simplifyDSL('base.f * ~(3/2) * 2') === 'base.f * ~(3/2) * 2', 'the simplifier leaves an approximation alone (never folds it into an exact coefficient)');
+  const { scaleDSL } = await import('../src/dsl/simplify.js');
+  for (const e of ['base.f * ~261.63', '~-1.5 * base.f', '~(-3/7) * base.f']) {
+    const up = scaleDSL(e, 2, 1), back = scaleDSL(up, 1, 2);
+    check(back === e && compileDSL(up) && /^2 \* /.test(up), `arrows on "${e}": "${up}" and back to "${back}"`);
+  }
+
+  const mod = await Module.loadFromJSON({ baseNote: { frequency: '263', startTime: '0', duration: '1/2' }, notes: [
+    { id: 1, startTime: 'base.t', duration: 'base.d', frequency: 'base.f * ~1.4983' },
+    { id: 2, startTime: '[1].t + [1].d', duration: 'base.d', frequency: '[1].f * (5/4)' },
+    { id: 3, startTime: 'base.t', duration: 'base.d * ~0.5', frequency: 'base.f' },
+  ] });
+  const ev = mod.evaluateModule();
+  const r1 = ev.get(1), r2 = ev.get(2), r3 = ev.get(3);
+  check(X.isApprox(r1.exact?.frequency) && (r1.corruptionFlags & 0x04) && (r1.approxFlags & 0x04), '~1.4983 makes the note approximate and flags it (hatched)');
+  check(X.isApprox(r2.exact?.frequency) && !(r2.corruptionFlags & 0x04) && (r2.approxFlags & 0x04) && mod.getDependencyGraph().isFrequencyTransitivelyCorrupted(2), 'a dependent is approximate too, and reported transitively');
+  check(!X.equals(r1.exact.frequency, new Fraction(263 * 14983, 10000)), '~1.4983 × 263 does not equal the exact 263 × 14983/10000');
+  check(X.isApprox(r3.exact?.duration) && r3.exact.duration.frac.equals(new Fraction(1, 4)), 'an approximate duration: ~0.5 × base.d');
+  const written = frequencyExpr(mod.getNoteById(2).getExactVariable('frequency'), mod.baseNote.getExactVariable('frequency'));
+  check(written === 'base.f * ~(14983/8000)', `Evaluate to BaseNote writes the approximation with ~: ${written}`);
+  check(valueFactor(new X.Approx(new Fraction(-3))) === '~-3', 'a negative approximation as a factor: ~-3');
+}
+
 console.info = quiet;
 if (failures) { console.error(`\n${failures} failure(s)`); process.exit(1); }
 console.log('\nAll exact-value checks passed');

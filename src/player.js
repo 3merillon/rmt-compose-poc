@@ -9,8 +9,8 @@ import { multiplyExpressionByFraction } from './utils/simplify.js';
 import { Workspace, startParentIdFromRaw, measureChainLinkParentId } from './renderer/webgl2/workspace.js';
 import { isMeasureNote, EXPRESSION_VARS } from './note.js';
 import { menuBar } from './menu/menu-bar.js';
-import { ratioToAnchorExpr } from './utils/value-expr.js';
-import { compare as compareExact } from './value/exact.js';
+import { ratioToAnchorExpr, valueFactor, startTimeExpr, timeUnitsExpr, amplitudeExpr } from './utils/value-expr.js';
+import { compare as compareExact, mul as mulExact } from './value/exact.js';
 import { PropertyMap } from './dsl/constants.js';
 import { compiler } from './expression-compiler.js';
 import { findDependencyCycle } from './variable-deps.js';
@@ -36,21 +36,6 @@ function fracToDSL(f) {
 }
 function fracIsOne(f) {
   return f.s === 1n && f.n === 1n && f.d === 1n;
-}
-
-// Exact offset between two exact start times in time units (base.d, one beat):
-// (t - t0) / unit, clamped at zero. Returns a Fraction; falls back to a
-// float-derived one only when an input is not a Fraction.
-function exactBeatOffset(tFrac, t0Frac, unitFrac) {
-  try {
-    const diff = tFrac.sub(t0Frac);
-    if (diff.s < 0n) return new Fraction(0);
-    return diff.div(unitFrac);
-  } catch (e) {
-    const unit = toNumber(unitFrac, 1) || 1;
-    const off = Math.max(0, toNumber(tFrac) - toNumber(t0Frac)) / unit;
-    try { return new Fraction(off); } catch { return new Fraction(Math.round(off * 4), 4); }
-  }
 }
 
 // k time units as an expression: `base.d` / `base.d * k`. The time unit is the
@@ -701,9 +686,9 @@ document.addEventListener('DOMContentLoaded', async function() {
             if (selectedNote.variables[varName + "String"]) {
                 selectedRaw[varName] = selectedNote.variables[varName + "String"];
             } else {
-                const frac = selectedNote.getVariable(varName);
-                if (frac != null && typeof frac.toFraction === "function") {
-                    selectedRaw[varName] = fracToDSL(frac);
+                const exact = selectedNote.getExactVariable(varName);
+                if (exact != null) {
+                    selectedRaw[varName] = valueFactor(exact);
                 } else {
                     selectedRaw[varName] = (varName === "frequency") ? "1" : "0";
                 }
@@ -2741,9 +2726,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             const rawExpression = note.variables.frequencyString;
 
             if (!rawExpression) {
-                // No raw expression to preserve; fallback to numeric exact fraction.
-                const newFrequency = currentFrequency.mul(new Fraction(factor.n, factor.d));
-                note.setVariable('frequencyString', fracToDSL(newFrequency));
+                // No raw expression to preserve: the exact value times the factor
+                const newFrequency = mulExact(note.getExactVariable('frequency'), new Fraction(factor.n, factor.d));
+                note.setVariable('frequencyString', valueFactor(newFrequency));
             } else {
                 // Fold the factor into the expression's coefficient instead of
                 // prepending another multiplier, so stepping up and back down
@@ -3275,17 +3260,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
         const base = myModule.baseNote;
         const unitFrac = myModule.getTimeUnit();
-        const beatLen = toNumber(unitFrac, 1) || 1;
         const baseFreqFrac = base.getVariable('frequency');
         const baseFreq = toNumber(baseFreqFrac, 0);
         const baseAmpFrac = myModule.findAmplitude(base);
-        const t0Frac = firstTimed.getVariable('startTime');
-
-        const frac = (x) => {
-            try { return new Fraction(x); }
-            catch { return new Fraction(Math.round(Number(x) * 1000), 1000); }
-        };
-        const fracStr = fracToDSL;
+        const t0Exact = firstTimed.getExactVariable('startTime');
+        const unitExact = base.getExactVariable('duration') ?? unitFrac;
 
         const renumber = (raw) => String(raw)
             .replace(/\[(\d+)\]/g, (m, d) => {
@@ -3317,24 +3296,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             } else if (__startChainTouchesSetGL(n, S) && selfContained(sRaw)) {
                 e.startTime = renumber(sRaw);
             } else {
-                // Exact offset in time units from exact Fractions; float diff only as fallback
-                let k;
-                try { k = exactBeatOffset(n.getVariable('startTime'), t0Frac, unitFrac); }
-                catch { k = frac((startOf(n) - t0) / beatLen); }
-                e.startTime = (k.n === 0n) ? 'base.t' : `base.t + ${unitsToDSL(k)}`;
+                // From the exact values (an irrational start stays exact, an
+                // approximate one is written with ~)
+                e.startTime = startTimeExpr(n.getExactVariable('startTime'), t0Exact, unitExact) ?? 'base.t';
             }
 
             // duration
             if (dRaw && selfContained(dRaw)) {
                 e.duration = renumber(dRaw);
             } else if (n.getVariable('duration') != null) {
-                const durFrac = n.getVariable('duration');
-                const durSec = toNumber(durFrac, 0);
+                const durSec = toNumber(n.getVariable('duration'), 0);
                 if (isFinite(durSec) && durSec > 0) {
-                    let beats;
-                    try { beats = durFrac.div(unitFrac); }
-                    catch { beats = frac(durSec / beatLen); }
-                    e.duration = unitsToDSL(beats);
+                    e.duration = timeUnitsExpr(n.getExactVariable('duration'), unitExact);
                 }
             }
 
@@ -3342,13 +3315,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (fRaw && selfContained(fRaw)) {
                 e.frequency = renumber(fRaw);
             } else if (n.getVariable('frequency') != null) {
-                const freqFrac = n.getVariable('frequency');
-                const f = toNumber(freqFrac, 0);
+                const f = toNumber(n.getVariable('frequency'), 0);
                 if (isFinite(f) && f > 0 && baseFreq > 0) {
-                    let r;
-                    try { r = freqFrac.div(baseFreqFrac); }
-                    catch { r = frac(f / baseFreq); }
-                    e.frequency = r.equals(1) ? 'base.f' : `${fracStr(r)} * base.f`;
+                    e.frequency = ratioToAnchorExpr(n.getExactVariable('frequency'), base.getExactVariable('frequency'), 'base.f');
                 }
             }
 
@@ -3359,17 +3328,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (aRaw && selfContained(aRaw)) {
                 e.amplitude = renumber(aRaw);
             } else if (aRaw && n.getVariable('amplitude') != null) {
-                const ampFrac = n.getVariable('amplitude');
-                try {
-                    if (baseAmpFrac.equals(0)) {
-                        e.amplitude = fracStr(ampFrac);
-                    } else {
-                        const r = ampFrac.div(baseAmpFrac);
-                        e.amplitude = r.equals(1) ? 'base.a' : `${fracStr(r)} * base.a`;
-                    }
-                } catch {
-                    e.amplitude = fracStr(ampFrac);
-                }
+                const baseA = base.hasExpression('amplitude') ? base.getExactVariable('amplitude') : baseAmpFrac;
+                e.amplitude = amplitudeExpr(n.getExactVariable('amplitude'), baseA);
             }
 
             // attack and release — shares of the note's own duration, so a plain number
@@ -3380,8 +3340,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 if (selfContained(vRaw)) {
                     e[v] = renumber(vRaw);
                 } else {
-                    const vFrac = n.getVariable(v);
-                    if (vFrac instanceof Fraction) e[v] = fracStr(vFrac);
+                    const vExact = n.getExactVariable(v);
+                    if (vExact != null) e[v] = valueFactor(vExact);
                 }
             }
 
@@ -3400,13 +3360,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             if (typeof raw === 'string' && raw.trim()) {
                 baseOut[v] = raw;
             } else {
-                const bv = base.getVariable(v);
-                if (bv instanceof Fraction) {
-                    baseOut[v] = fracToDSL(bv);
-                } else {
-                    const val = toNumber(bv, NaN);
-                    if (isFinite(val)) baseOut[v] = String(val);
-                }
+                const bv = base.getExactVariable(v);
+                if (bv != null) baseOut[v] = valueFactor(bv);
             }
         }
         baseOut.startTime = '0';
@@ -4975,22 +4930,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 }
               } catch {}
 
-              // Both operands are exact Fractions, so units = dur / base.d stays exact at any depth.
-              const durVal = n.getVariable('duration');
-              const durSec = toNumber(durVal, NaN);
+              // The same length in time units, from the exact values (an
+              // irrational length stays exact, an approximate one is written with ~)
+              const durSec = toNumber(n.getVariable('duration'), NaN);
 
               if (refsLaterNote && isFinite(durSec) && durSec >= 0) {
-                const unitFrac = myModule.getTimeUnit();
-                let bf;
-                try {
-                  bf = durVal.div(unitFrac);
-                } catch {
-                  const beats = durSec / (toNumber(unitFrac, 1) || 1);
-                  try { bf = new Fraction(beats); } catch { bf = new Fraction(Math.round(beats * 4), 4); }
-                }
-
-                const rawDur = unitsToDSL(bf);
-                if (!__retargetWouldCycleGL(n, 'duration', rawDur)) {
+                const unitExact = myModule.baseNote.getExactVariable('duration') ?? myModule.getTimeUnit();
+                const rawDur = timeUnitsExpr(n.getExactVariable('duration'), unitExact);
+                if (rawDur && !__retargetWouldCycleGL(n, 'duration', rawDur)) {
                   n.setVariable('durationString', rawDur);
                 }
               }
@@ -5170,7 +5117,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           // The BaseNote's duration IS the time unit: `base.d * k` would read itself,
           // so its new length is written in seconds, exactly.
           const simplified = (Number(n.id) === 0)
-            ? fracToDSL(beatsFrac.mul(unitFrac))
+            ? valueFactor(mulExact(beatsFrac, myModule.baseNote.getExactVariable('duration') ?? unitFrac))
             : unitsToDSL(beatsFrac);
 
           n.setVariable('durationString', simplified);

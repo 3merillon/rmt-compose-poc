@@ -22,7 +22,7 @@ An expression relates a note to other notes through **six variables** (`VAR`, se
 
 ## Entry point
 
-`ExpressionCompiler.compile(textExpr)` (`src/expression-compiler.js:45`) is the app's door in. `Note._setExpression()`, the validators and the editor all use the module-level singleton `compiler` (`src/expression-compiler.js:79`).
+`ExpressionCompiler.compile(textExpr)` (`src/expression-compiler.js:45`) is the app's door in. `Note._setExpression()`, the validators and the editor all use the module-level singleton `compiler` (`src/expression-compiler.js:85`).
 
 1. **Cache probe.** On a hit the key is deleted and re-inserted (an LRU touch) and a **clone** is returned.
 2. **Retired syntax.** Text that carries a method-chain marker (`new Fraction(`, `module.`, `.getVariable(`, `.mul(` …, or a bare variable name such as `frequency`; `isLegacyExpression()`, `src/migrate/legacy-syntax.js:56`) is refused (`src/expression-compiler.js:53`) with `The method-chain syntax was retired; write expressions in the DSL, e.g. [3].f * (3/2). In the DSL this reads: …`, the last sentence giving the converter's DSL form of what was typed when it has one. Loaded modules never reach this: they were converted before compiling.
@@ -56,7 +56,7 @@ A plain `Map` keyed on the raw expression text, used as an **LRU**: when it is f
 
 ### Properties
 
-`src/dsl/constants.js:42-70`. These aliases and no others:
+`src/dsl/constants.js:43-71`. These aliases and no others:
 
 | Canonical | Accepted spellings | Canonical short form |
 |---|---|---|
@@ -67,7 +67,7 @@ A plain `Map` keyed on the raw expression text, used as an **LRU**: when it is f
 | `attack` | `atk`, `attack` | `attack` |
 | `release` | `rel`, `release` | `release` |
 
-`[0].prop` is parsed as `base.prop` — note id 0 **is** the BaseNote (`src/dsl/parser.js:265-268`).
+`[0].prop` is parsed as `base.prop` — note id 0 **is** the BaseNote (`src/dsl/parser.js:296-299`).
 
 ### No functions
 
@@ -84,7 +84,7 @@ Any other function name gets `Unknown function 'name'. Expressions have no funct
 
 ## Bytecode format
 
-`src/binary-note.js:9-72`:
+`src/binary-note.js:9-73`:
 
 ```javascript
 export const OP = {
@@ -131,7 +131,7 @@ Operands are pushed **before** the opcode — it is a stack machine, nothing nes
 
 ### Variable indices
 
-The export is `VAR`, with a `VAR_NAMES` reverse map (`binary-note.js:80-100`):
+The export is `VAR`, with a `VAR_NAMES` reverse map (`binary-note.js:81-101`):
 
 ```javascript
 export const VAR = {
@@ -150,7 +150,7 @@ Indices 0 to 2 are the language: they relate a note to other notes. Indices from
 
 ### Constant emission
 
-`emitFraction()` (`src/dsl/compiler.js:83-114`) GCD-normalises the fraction **in BigInt** (`bigGcd` from `src/utils/fraction-num.js`), moves the sign to the numerator, then picks the opcode by magnitude: `LOAD_CONST` if numerator and denominator both fit in i32 (`-2147483648 … 2147483647`), otherwise `LOAD_CONST_BIG`. There is no `constBig` AST node — the choice is made at emit time.
+`emitFraction()` (`src/dsl/compiler.js:89-120`) GCD-normalises the fraction **in BigInt** (`bigGcd` from `src/utils/fraction-num.js`), moves the sign to the numerator, then picks the opcode by magnitude: `LOAD_CONST` if numerator and denominator both fit in i32 (`-2147483648 … 2147483647`), otherwise `LOAD_CONST_BIG`. There is no `constBig` AST node — the choice is made at emit time.
 
 Number literals are exact at any size: the digits are parsed straight into a BigInt fraction by `decimalStringToBigFraction()` (`src/utils/fraction-num.js:36`), never through `parseFloat`. A decimal literal is **exact as written** — `3.14159` is `314159/100000` and `0.333333` is `333333/1000000`, not `1/3`.
 
@@ -160,7 +160,7 @@ The evaluator decodes the variable-length BigInts straight into a pooled BigInt-
 
 ## `BinaryExpression`
 
-`binary-note.js:139-457`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
+`binary-note.js:140-458`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -173,7 +173,7 @@ The evaluator decodes the variable-length BigInts straight into a pooled BigInt-
 
 Key methods: `addDependency()`, `getDependencySet()`, `getPropertyDependencies()` (scans the bytecode into a `Map<noteId, Set<varIndex>>` — this is where the [dependency graph](/developer/core/dependency-graph) gets its property-level edges), `referencesProperty()`, `isEmpty()`, `clone()`.
 
-A `LOAD_BASE` does **not** add note 0 as a dependency. Recording it would give the BaseNote a self-cycle; the `referencesBase` flag is tracked separately instead (`emitNoteReference()`, `src/dsl/compiler.js:120`).
+A `LOAD_BASE` does **not** add note 0 as a dependency. Recording it would give the BaseNote a self-cycle; the `referencesBase` flag is tracked separately instead (`emitNoteReference()`, `src/dsl/compiler.js:126`).
 
 ## The retired method-chain syntax
 
@@ -197,9 +197,9 @@ Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.js` kee
 
 ## The decompiler
 
-`ExpressionDecompiler.decompile()` (`src/expression-compiler.js:72`, singleton `decompiler`) returns `binary.sourceText` when it is set, so for anything compiled from text it is a pass-through; otherwise it returns the DSL the bytecode decompiles to (`decompileToDSL()`). `Note.getExpressionSource()` and `Note.toJSON()` use it, so a saved module is always DSL.
+`ExpressionDecompiler.decompile()` (`src/expression-compiler.js:78`, singleton `decompiler`) returns `binary.sourceText` when it is set, so for anything compiled from text it is a pass-through; otherwise it returns the DSL the bytecode decompiles to (`decompileToDSL()`). `Note.getExpressionSource()` and `Note.toJSON()` use it, so a saved module is always DSL.
 
-The DSL decompiler (`src/dsl/decompiler.js`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. Constants come out of the bytecode as BigInts and are stringified directly (`pushConst`, `src/dsl/decompiler.js:186-192`), so a big constant is printed **digit-exact** — it used to be coerced through `Number()`, which rounded and could emit unparseable scientific notation. It prints every `LOAD_REF` / `LOAD_BASE` as a property access (`[N].d`, `base.f`) and reconstructs nothing else: with no functions in the language there is nothing to fold back into a helper.
+The DSL decompiler (`src/dsl/decompiler.js`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. Constants come out of the bytecode as BigInts and are stringified directly (`pushConst`, `src/dsl/decompiler.js:193-199`), so a big constant is printed **digit-exact** — it used to be coerced through `Number()`, which rounded and could emit unparseable scientific notation. It prints every `LOAD_REF` / `LOAD_BASE` as a property access (`[N].d`, `base.f`) and reconstructs nothing else: with no functions in the language there is nothing to fold back into a helper.
 
 The note widget's `Raw:` box shows the decompiled DSL of the note's bytecode (`convertToDSLDisplay()`, `src/modals/variable-controls.js:165`).
 

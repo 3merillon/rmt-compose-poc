@@ -79,7 +79,7 @@ Each is `Map<dependencyId, Set<dependentId>>`.
 
 ## The BaseNote is not an edge
 
-`base.f` sets `BinaryExpression.referencesBase` and lands the note in `baseNoteDependents`. It **never** appears in `dependencies` or `dependents` as an edge to note 0 — that would make the BaseNote depend on itself, and the BaseNote *is* note 0 (`emitNoteReference()`, `src/dsl/compiler.js:120`).
+`base.f` sets `BinaryExpression.referencesBase` and lands the note in `baseNoteDependents`. It **never** appears in `dependencies` or `dependents` as an edge to note 0 — that would make the BaseNote depend on itself, and the BaseNote *is* note 0 (`emitNoteReference()`, `src/dsl/compiler.js:126`).
 
 Consumers simulate the edge instead. `Module.getDependentNotes(0)` unions `getAllDependents(0)` with `getBaseNoteDependents()` (`src/module.js:385-398`) — one level deep, which is what the UI wants.
 
@@ -117,7 +117,7 @@ Dependencies derive purely from a note's compiled expressions. If the note's id,
 This matters because `markNoteDirty()` calls this for **every** marked note — on an interval-arrow change that is every dependent in the closure. The skip avoids rewriting up to 22 maps per untouched note.
 :::
 
-The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:301`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`src/binary-note.js:364`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
+The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:302`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`src/binary-note.js:365`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
 
 `_updateDependencies()` (`:439-493`) diffs old against new, patches the inverse index, and **bumps `_corruptionEpoch` if the dependency set actually changed** — because changing a note's dependencies can change whether *other* notes render as transitively corrupted, even if no corruption flag moved.
 
@@ -164,7 +164,7 @@ The drag path uses the narrower startTime traversals directly: `getAllStartTimeO
 | `getChildrenTreeByAllProperties(id)` | `{edgesByProperty: {frequency: [], startTime: [], duration: []}, maxDepth}` — all three in one traversal. **Not** the same shape as above: the edges are bucketed by originating property, not flat | `:1607` |
 | `getMeasureChain(measureId, isMeasure, getStartTime, isChainLink?)` | `[{id, startSec}]` — the linear measure chain, earliest to latest, O(chain length) | `:1917` |
 
-`getMeasureChain()` is live: `src/player.js:5271` and `src/renderer/webgl2/workspace.js:2478` both use it.
+`getMeasureChain()` is live: `src/player.js:5218` and `src/renderer/webgl2/workspace.js:2478` both use it.
 
 ### Structural
 
@@ -214,7 +214,7 @@ Reading a *different* variable of the same note, or a note that reads this one t
 The evaluator applies the identical rule when it orders a batch, so a cycle that arrives in a hand-written JSON file is reported by name rather than refused — see [True cycles](/developer/core/binary-evaluator#true-cycles).
 
 ::: warning The move and resize gestures still think in whole notes
-After a drag, `player.js` re-anchors the moved note (and dependents that would now start before it) on an ancestor found by walking **start-time parents**, so that nothing references a note that starts later. That walk assumes two notes never read each other; with cross-variable relationships it can arrive back at the note being rewritten. A re-anchor that would close a loop is now skipped (`__retargetWouldCycleGL()`, `src/player.js:2288`) and the note keeps its expression. The gestures do not otherwise understand cross-variable relationships: a move still rewrites the moved note's start, duration and frequency into their canonical forms.
+After a drag, `player.js` re-anchors the moved note (and dependents that would now start before it) on an ancestor found by walking **start-time parents**, so that nothing references a note that starts later. That walk assumes two notes never read each other; with cross-variable relationships it can arrive back at the note being rewritten. A re-anchor that would close a loop is now skipped (`__retargetWouldCycleGL()`, `src/player.js:2273`) and the note keeps its expression. The gestures do not otherwise understand cross-variable relationships: a move still rewrites the moved note's start, duration and frequency into their canonical forms.
 :::
 
 ## Corruption tracking

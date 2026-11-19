@@ -24,6 +24,7 @@ import {
   NodeType,
   createNumberLiteral,
   createFractionLiteral,
+  createApproximate,
   createNoteReference,
   createBinaryOp,
   createUnaryOp,
@@ -139,6 +140,11 @@ export class DSLParser {
       return this.fractionOrGrouped();
     }
 
+    // An approximate number: ~261.63, ~-3, ~(3/2)
+    if (this.check(TokenType.TILDE)) {
+      return this.approximate();
+    }
+
     // Try note reference: [id].prop
     if (this.check(TokenType.LBRACKET)) {
       return this.noteReference();
@@ -163,6 +169,31 @@ export class DSLParser {
       ErrorMessages.unexpectedToken(this.peek().value, 'expression'),
       this.peek()
     );
+  }
+
+  /**
+   * `~` before a number: the number is approximate (a measurement, a rounded
+   * value). It marks a literal only — `~261.63`, `~-3`, `~(3/2)` — never an
+   * expression: what is computed from it is approximate by propagation.
+   */
+  approximate() {
+    const tilde = this.advance(); // consume '~'
+    let literal = null;
+    if (this.check(TokenType.MINUS)) {
+      this.advance();
+      if (this.check(TokenType.NUMBER)) literal = createUnaryOp('-', this.numberLiteral(this.advance()));
+    } else if (this.check(TokenType.NUMBER)) {
+      literal = this.numberLiteral(this.advance());
+    } else if (this.check(TokenType.LPAREN)) {
+      const node = this.fractionOrGrouped();
+      const isLit = (n) => n && (n.type === NodeType.NumberLiteral || n.type === NodeType.FractionLiteral ||
+        (n.type === NodeType.UnaryOp && n.operator === '-' && isLit(n.operand)));
+      if (isLit(node)) literal = node;
+    }
+    if (!literal) {
+      throw new DSLParseError(ErrorMessages.approximateNeedsNumber(), tilde);
+    }
+    return createApproximate(literal);
   }
 
   /**

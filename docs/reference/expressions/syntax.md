@@ -66,6 +66,7 @@ and the comment is gone the next time you open the widget.
 |---|---|
 | Number | `0`–`9`, optionally with a single `.` and more digits (`440`, `1.5`) |
 | Operators | `+` `-` `*` `/` `^` |
+| Approximation mark | `~` (before a number) |
 | Delimiters | `(` `)` `[` `]` `.` |
 | Keyword | `base` |
 | Identifier | letter or `_`, then letters, digits, or `_` — used for property names |
@@ -80,6 +81,7 @@ Any other character is a lexer error: `Unknown character '&' at column 3`.
 | Fraction literal | `(3/2)`, `(1/12)`, `(-5/4)` | Exact rational. The parentheses are **part of the literal** |
 | Decimal | `0.5`, `1.5`, `3.14159` | Converted to a fraction at compile time |
 | Negation | `-2`, `-base.f` | Prefix minus |
+| Approximate number | `~261.63`, `~-3`, `~(3/2)` | The number, marked as approximate; see [Approximate numbers](#approximate-numbers) |
 
 ### Fraction literals versus grouping
 
@@ -114,6 +116,36 @@ A decimal can only ever spell a fraction whose denominator is a power of ten. `0
 exactly `(333333/1000000)` — close to a third, but not `(1/3)`, and no number of extra 3s will
 get there. Use a fraction literal for any value that is not a terminating decimal.
 :::
+
+## Approximate numbers
+
+A number written with **`~`** in front of it is **approximate**: it stands for a value it is not
+exactly, such as a frequency read from a tuning table, a measurement, or a rounded value.
+
+```
+base.f * ~1.4983       # a fifth measured as 1.4983, not the pure 3/2
+~261.63                # a frequency taken from a table
+[2].d * ~0.5
+```
+
+- `~` marks a **number only**: a decimal, an integer, or a fraction literal, optionally negative
+  (`~261.63`, `~-3`, `~(3/2)`). `~base.f` or `~(1 + 2)` is refused with
+  `'~' marks a number as approximate: write it before a number, e.g. ~261.63, ~-3 or ~(3/2)`.
+- **Approximation spreads.** Anything computed from an approximate number is approximate too:
+  `[3].f * (5/4)` is approximate when `[3].f` is. An approximate value never equals an exact one:
+  `~1.5` is not `3/2`.
+- **It is visible.** The note widget shows an approximate value with ≈, and the note is hatched on
+  the canvas like a tempered note: crosshatched when its own expression holds the `~`,
+  single-hatched when its frequency depends on one.
+- **A plain number stays exact.** `1.5` is exactly 3/2 and `131.5` exactly 263/2; only `~` marks an
+  approximation. See [Decimals are rationalized](#decimals-are-rationalized).
+- **The app writes `~` itself** where it rewrites an expression from an approximate value
+  (Evaluate to BaseNote, copying a selection as a module, moving a note): `base.f * ~(14983/10000)`.
+  The interval arrows keep the `~` as written: `base.f * ~1.5` becomes `2 * base.f * ~1.5`.
+
+Irrational values are not approximations. `2^(7/12)` is exact: the app keeps it as the power it
+is, and twelve steps of `2^(1/12)` give exactly 2. See
+[Symbolic Power](/developer/core/symbolic-power).
 
 ## Note references
 
@@ -265,8 +297,9 @@ additive       -> multiplicative (('+' | '-') multiplicative)*
 multiplicative -> unary (('*' | '/') unary)*
 unary          -> '-' unary | power
 power          -> primary ('^' unary)?
-primary        -> fraction | noteRef | '(' expression ')' | number
+primary        -> fraction | noteRef | '(' expression ')' | number | approximate
 fraction       -> '(' number '/' number ')'
+approximate    -> '~' ( '-'? number | fraction | '(' '-'? number ')' )
 noteRef        -> '[' number ']' '.' property | 'base' '.' property
 ```
 

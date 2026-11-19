@@ -62,6 +62,12 @@ export class DSLCompiler {
         this.emitUnaryOp(node);
         break;
 
+      case NodeType.Approximate:
+        // The literal, then APPROX: the value is approximate
+        this.emit(node.literal);
+        this.expr.writeByte(OP.APPROX);
+        break;
+
       default:
         throw new DSLCompileError(`Unknown node type: ${node.type}`, node);
     }
