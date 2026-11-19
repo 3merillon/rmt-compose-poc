@@ -1173,6 +1173,7 @@ export class Module {
     // Compute last note end time — exact add, then one conversion
     let lastNoteEnd = 0;
     for (const id in this.notes) {
+      if (Number(id) === 0) continue; // the BaseNote's duration is the time unit, not a note
       const note = this.notes[id];
       if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
         const noteStart = note.getVariable('startTime');

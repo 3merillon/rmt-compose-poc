@@ -28,7 +28,7 @@ import Fraction from 'fraction.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 
-const { Module } = await import('../src/module.js');
+const { Module, invalidateModuleEndTimeCache } = await import('../src/module.js');
 const { migrateTimeModel, needsTimeMigration } = await import('../src/migrate/relational-time.js');
 const { compileDSL } = await import('../src/dsl/index.js');
 
@@ -136,6 +136,20 @@ console.log('\nRelational time: the language');
   fresh.evaluateModule();
   if (fr(fresh.getTimeUnit()) === '1' && fr(fresh.baseNote.getVariable('frequency')) === '440') ok('a new module\'s reference note is f = 440, t = 0, d = 1');
   else bad('new module defaults');
+
+  // The BaseNote has a start, a duration and a frequency now, yet it is the
+  // reference, not a note: it must not lengthen the module (nor sound, nor draw).
+  const unitOnly = await Module.loadFromJSON({
+    baseNote: { frequency: '440', startTime: '0', duration: '10' },
+    notes: [{ id: 1, startTime: 'base.t', duration: 'base.d / 10', frequency: 'base.f' }],
+  });
+  unitOnly.evaluateModule();
+  const endWithNote = unitOnly.getModuleEndTime();
+  invalidateModuleEndTimeCache(); // the end time is memoised for the app's one module
+  const cleared = await Module.loadFromJSON({ baseNote: { frequency: '440', startTime: '0', duration: '10' }, notes: [] });
+  cleared.evaluateModule();
+  if (endWithNote === 1 && cleared.getModuleEndTime() === 0) ok('the BaseNote\'s duration does not count as a note: a 10 s time unit, one 1 s note, the module ends at 1 (and an empty one at 0)');
+  else bad(`module end with a long time unit: ${endWithNote}, empty: ${cleared.getModuleEndTime()}`);
 }
 
 console.log('\nRelational time: measure bars');

@@ -750,6 +750,8 @@ export class RendererAdapter {
     for (const idStr in module.notes) {
       const note = module.notes[idStr];
       if (!note) continue;
+      // The BaseNote has a duration now (the time unit), but it never sounds and is not drawn as a note.
+      if (Number(note.id) === 0) continue;
       // A measure bar has a start and a duration but is drawn as a bar line and a
       // triangle (_syncMeasureBars), never as a rest.
       if (isMeasureNote(note)) continue;
@@ -4820,7 +4822,7 @@ export class RendererAdapter {
         try {
           for (const id in module.notes) {
             const n = module.notes[id];
-            if (!n) continue;
+            if (!n || Number(id) === 0) continue;   // the BaseNote's duration is the time unit, not a note
             if (hasVar(n, 'startTime') && hasVar(n, 'duration') && hasVar(n, 'frequency')) {
               try {
                 const s = toNumber(n.getVariable('startTime'), 0);

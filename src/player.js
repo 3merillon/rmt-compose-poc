@@ -1019,6 +1019,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         let lastNoteEnd = 0;
         Object.values(myModule.notes).forEach(note => {
+            if (note.id === 0) return; // the BaseNote's duration is the time unit, not a note
             if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
                 const noteStart = note.getVariable('startTime');
                 const noteDuration = note.getVariable('duration');
@@ -1092,7 +1093,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap });
       }
     } catch {}
-    let newNotes = Object.keys(evaluatedNotes).map(id => evaluatedNotes[id]).filter(note =>
+    let newNotes = Object.keys(evaluatedNotes).filter(id => Number(id) !== 0).map(id => evaluatedNotes[id]).filter(note =>
         note.startTime && note.duration && note.frequency
     );
   

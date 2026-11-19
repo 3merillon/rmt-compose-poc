@@ -186,6 +186,8 @@ export class AudioEngine {
         // Build note data list (no oscillators yet)
         const noteDataList = [];
         for (const id in module.notes) {
+          // The BaseNote has a duration now (the time unit), but it never sounds and is not drawn as a note.
+          if (Number(id) === 0) continue;
           const note = module.notes[id];
           const cached = evalCache.get(Number(id));
           if (!cached || !cached.startTime || !cached.duration) continue;
