@@ -29,10 +29,9 @@ With the BaseNote selected, the note widget shows:
 |---|---|
 | `frequency` | The reference pitch, in Hz. Shipped modules use `263`. |
 | `startTime` | The reference time, in seconds. Almost always `0`. |
-| `tempo` | Beats per minute. `beat(base)` is derived from this. |
-| `beatsPerMeasure` | The numerator of the time signature. |
-| `measureLength` | The length of a measure, in seconds. Leave it alone unless you need a measure that is not `beatsPerMeasure` beats long. |
+| `duration` | The **time unit**, in seconds: `base.d`. Every duration in the module is written against it. The widget shows the same number as a tempo ("= 100 BPM"), read only. |
 | `amplitude` | The level of every note that does not set its own, as a relative gain. `1` unless you change it. |
+| `attack`, `release` | The envelope shape of every note that does not set its own, as shares of the note's duration. Leave them unset to use each instrument's own envelope. |
 | `color` | The BaseNote's own color. Unlike `instrument`, it is not inherited by anything. |
 | `instrument` | Pins the timbre for every note that inherits from the BaseNote. |
 
@@ -58,7 +57,7 @@ When the BaseNote is selected there is no At Start / At End choice — the new n
 
 The new note is pre-filled with expressions referencing its parent: `[N].f` for frequency and `[N].t + [N].d` for start time, so it is already relational. Edit from there.
 
-A **silence** is a note with a start time and a duration but no frequency. It occupies time and makes no sound.
+A **silence** is a note with a start time and a duration but no frequency. It occupies time and makes no sound. A **measure bar** is the same silent note with the flag `"measure": true`; the widget's **Add New Measure Chain** and **Add Measure** rows create them. See [Working with Measures](/tutorials/intermediate/measures).
 
 ## Write the expressions
 
@@ -90,23 +89,21 @@ module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(7,
 base.t                     # start with the BaseNote
 [1].t                      # start with note 1 — this is how you build a chord
 [1].t + [1].d              # start when note 1 ends — this is how you build a sequence
-[1].t + measure([1])       # one measure after note 1 starts
-base.t + beat(base) * (3/2)
+[bar].t + [bar].d * (1/4)  # a quarter of the way into a measure bar
+base.t + base.d * (3/2)
 ```
 
 ### Duration
 
 ```
-beat(base)                 # one beat
-beat(base) * 2             # two beats
-beat(base) * (3/4)         # a dotted eighth, in beats
-beat(base) * (1/4)         # a sixteenth
+base.d                     # one time unit
+base.d * 2                 # two time units
+base.d * (3/4)             # a dotted eighth, in time units
+base.d * (1/4)             # a sixteenth
 [1].d                      # the same length as note 1
 ```
 
-Use `beat(base)`, never `60 / tempo(base)`. `beat(base)` is what the app writes for you when you use the note-length buttons in the duration row.
-
-`60 / tempo(base)` does compile — an expression that *starts with a number* is first handed to the legacy compiler, which cannot read it, but the failure falls through to the DSL parser and lands correctly. Still write `beat(base)`: it is what the app writes for you, and it is the only form the decompiler gives back.
+Write durations in `base.d`. It is what the app writes for you when you use the note-length buttons in the duration row. `beat()`, `tempo()` and `measure()` no longer exist; typing one is refused with a message naming the replacement.
 
 If an expression will not compile at all, it is **rejected with an error** — in the note widget the message appears in red under the Save button; in a hand-written file the property is left unset on load, with a `console.error` naming the expression.
 
@@ -123,16 +120,16 @@ That inheritance is why most of the shipped scale-system modules pin `"instrumen
 
 This is the part that separates a module from a snippet.
 
-When you drag a module out of the library and drop it on a note, **its BaseNote is remapped onto your drop target**: every `base.f` becomes `[target].f`, every `base.t` becomes `[target].t`, and its internal `[N]` references are renumbered to fit into your composition. How you wire the module's dependencies decides what it does when that happens.
+When you drag a module out of the library and drop it on a note, **its BaseNote is remapped onto your drop target**: every `base.f` becomes `[target].f` and every `base.t` becomes `[target].t`, and its internal `[N]` references are renumbered to fit into your composition. `base.d` stays `base.d`: the module keeps its rhythm in time units and plays at your workspace's pace, whatever the length of the target. How you wire the module's dependencies decides what it does when that happens.
 
 ### Everything references base
 
 ```json
 {
   "notes": [
-    { "id": 1, "frequency": "base.f",           "startTime": "base.t", "duration": "beat(base)" },
-    { "id": 2, "frequency": "base.f * (5/4)",   "startTime": "base.t", "duration": "beat(base)" },
-    { "id": 3, "frequency": "base.f * (3/2)",   "startTime": "base.t", "duration": "beat(base)" }
+    { "id": 1, "frequency": "base.f",           "startTime": "base.t", "duration": "base.d" },
+    { "id": 2, "frequency": "base.f * (5/4)",   "startTime": "base.t", "duration": "base.d" },
+    { "id": 3, "frequency": "base.f * (3/2)",   "startTime": "base.t", "duration": "base.d" }
   ]
 }
 ```
@@ -144,9 +141,9 @@ Drop this on note 5 and all three notes hang directly off note 5. Move note 5 an
 ```json
 {
   "notes": [
-    { "id": 1, "frequency": "base.f",         "startTime": "base.t", "duration": "beat(base) * 2" },
-    { "id": 2, "frequency": "(5/4) * [1].f",  "startTime": "[1].t",  "duration": "beat(base) * 2" },
-    { "id": 3, "frequency": "(3/2) * [1].f",  "startTime": "[1].t",  "duration": "beat(base) * 2" }
+    { "id": 1, "frequency": "base.f",         "startTime": "base.t", "duration": "base.d * 2" },
+    { "id": 2, "frequency": "(5/4) * [1].f",  "startTime": "[1].t",  "duration": "base.d * 2" },
+    { "id": 3, "frequency": "(3/2) * [1].f",  "startTime": "[1].t",  "duration": "base.d * 2" }
   ]
 }
 ```
@@ -162,9 +159,9 @@ Progressions take this further — each chord's root is expressed off the *previ
 ```json
 {
   "notes": [
-    { "id": 1, "frequency": "base.f",              "startTime": "base.t",       "duration": "beat(base) * (3/4)" },
-    { "id": 2, "frequency": "[1].f * 2 ^ (1/12)",  "startTime": "[1].t + [1].d", "duration": "beat(base) * (3/4)" },
-    { "id": 3, "frequency": "[2].f * 2 ^ (1/12)",  "startTime": "[2].t + [2].d", "duration": "beat(base) * (3/4)" }
+    { "id": 1, "frequency": "base.f",              "startTime": "base.t",       "duration": "base.d * (3/4)" },
+    { "id": 2, "frequency": "[1].f * 2 ^ (1/12)",  "startTime": "[1].t + [1].d", "duration": "base.d * (3/4)" },
+    { "id": 3, "frequency": "[2].f * 2 ^ (1/12)",  "startTime": "[2].t + [2].d", "duration": "base.d * (3/4)" }
   ]
 }
 ```
@@ -175,7 +172,7 @@ This is the head of `scale-systems/TET-12.json`. Each step is *the previous note
 
 Two of them shape how you write a module:
 
-- **A measure bar has no pitch.** Drop on one and `startTime` anchors to it, but every `frequency` falls back to `base.f`. A module whose pitches are written against `base` still sounds right there; one that assumes a pitched target does not.
+- **A measure bar has no pitch.** Drop on one and `startTime` and `duration` map to the bar, but frequency, amplitude, attack and release stay with the BaseNote. A module whose pitches are written against `base` still sounds right there; one that assumes a pitched target does not.
 - **The BaseNote is not a target to re-root onto.** Drop on it and `base.*` references stay exactly as they are — nothing is remapped.
 
 Silences and empty background are rejected outright. For the full table of what each drop target does, and for the **Start** / **End** drop-mode buttons in the module bar's toolbar, see [Loading Modules](/user-guide/modules/loading-modules#where-you-can-drop).
@@ -187,9 +184,9 @@ Nothing stops a module from combining just intonation and equal temperament. Giv
 ```json
 {
   "notes": [
-    { "id": 1, "frequency": "base.f",              "startTime": "base.t", "duration": "beat(base)" },
-    { "id": 2, "frequency": "(3/2) * [1].f",       "startTime": "[1].t",  "duration": "beat(base)" },
-    { "id": 3, "frequency": "[2].f * 2 ^ (4/12)",  "startTime": "[1].t",  "duration": "beat(base)" }
+    { "id": 1, "frequency": "base.f",              "startTime": "base.t", "duration": "base.d" },
+    { "id": 2, "frequency": "(3/2) * [1].f",       "startTime": "[1].t",  "duration": "base.d" },
+    { "id": 3, "frequency": "[2].f * 2 ^ (4/12)",  "startTime": "[1].t",  "duration": "base.d" }
   ]
 }
 ```
@@ -237,7 +234,7 @@ They live in `public/modules/`. Open one in a text editor, and see the [Module L
 ## Tips
 
 1. **Use `base.t`, not `0`.** A module pinned to absolute time cannot be dropped anywhere useful.
-2. **Use `beat(base)`, not seconds.** Durations that follow the tempo survive a tempo change.
+2. **Use `base.d`, not seconds.** Durations written in time units survive a change of pace, and follow the target when the module is dropped.
 3. **Decide what your root is** and hang everything off it. That single decision is what makes a module transposable.
 4. **Start simple.** Get two notes right before you write twelve.
 5. **Save versions.** There is no version history in a module file.

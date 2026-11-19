@@ -155,9 +155,9 @@ opt-level = 1
 ::: warning Do not "optimize for size"
 The project deliberately builds for **speed** (`opt-level = 3`), not size (`opt-level = "z"`). The
 crate exists to make evaluation fast; a smaller, slower binary defeats its only purpose. If you need
-to shrink the payload, the honest lever is to stop shipping the binary on the default path at all —
-today it is fetched on every load and, with the evaluator
-[blocked](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked), never used.
+to shrink the payload, the honest lever is to stop shipping the binary at all — today it ships in
+the bundle and, with the evaluator [disabled](/developer/wasm/overview) until the Rust core is ported
+to the new variable layout, is never fetched or used.
 :::
 
 ## Debug builds
@@ -197,9 +197,11 @@ node scripts/perf/bench-node.mjs chain-1000 --wasm
 Both shim `fetch` for `file://` `.wasm` URLs, because Node's `fetch` cannot load the URL that
 wasm-bindgen's init produces.
 
-Both pass. The browser is where it breaks — see
-[the hang dossier](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked) before you
-spend time chasing it.
+Neither checks anything while `WASM_MATCHES_VARIABLE_LAYOUT` is `false` in
+`src/wasm/evaluator-adapter.js`: `initWasm()` then returns `false` and the swap never happens. They
+become meaningful again once the Rust core is ported to the six-variable layout and the flag is flipped.
+Before the flag, they passed while the browser hung — see
+[the hang dossier](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked).
 
 ## There is no WASM CI
 

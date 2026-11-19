@@ -152,24 +152,34 @@ Used by the compilers; you need these only if you emit bytecode yourself.
 | `NEG` | `0x14` | — | a → −a |
 | `POW` | `0x15` | — | a, b → a^b (may corrupt) |
 
-`OP` also declares `FIND_TEMPO` (`0x20`), `FIND_MEASURE` (`0x21`), `FIND_INSTRUMENT` (`0x22`),
-`DUP` (`0x30`) and `SWAP` (`0x31`). **No compiler emits any of them.** `tempo(x)` and `measure(x)`
-lower to a plain `LOAD_BASE` / `LOAD_REF` with the tempo or measureLength variable index; `beat(x)`
-lowers to `60`, `tempo(x)`, `DIV`. `FIND_INSTRUMENT` is not even handled by the VM. Treat all five
-as reserved.
+`OP` also declares `FIND_INSTRUMENT` (`0x22`), `DUP` (`0x30`) and `SWAP` (`0x31`). **No compiler
+emits any of them.** `FIND_INSTRUMENT` is not even handled by the VM. Treat all three as reserved.
+
+::: warning Removed: FIND_TEMPO and FIND_MEASURE
+The opcodes `FIND_TEMPO` (`0x20`) and `FIND_MEASURE` (`0x21`) are retired together with the tempo
+and measure-length variables. They are no longer in `OP`, and `src/binary-note.js` says not to
+reuse the two byte values.
+:::
 
 ### Variable indices
 
 `VAR` (and its reverse map `VAR_NAMES`) are exported constants:
 
-| Index | Property |
-|---|---|
-| 0 | `startTime` |
-| 1 | `duration` |
-| 2 | `frequency` |
-| 3 | `tempo` |
-| 4 | `beatsPerMeasure` |
-| 5 | `measureLength` |
+| Index | `VAR` name | Variable | Kind |
+|---|---|---|---|
+| 0 | `START_TIME` | `startTime` | language |
+| 1 | `DURATION` | `duration` | language |
+| 2 | `FREQUENCY` | `frequency` | language |
+| 3 | `AMPLITUDE` | `amplitude` | interpretation |
+| 4 | `ATTACK` | `attack` | interpretation |
+| 5 | `RELEASE` | `release` | interpretation |
+
+`FIRST_INTERPRETATION_VAR` is `VAR.AMPLITUDE` (3). Indices below it relate a note to other notes;
+indices from it up interpret the note when it sounds, and **only those fall back to the BaseNote**
+when the note does not define them (`src/variable-deps.js` resolves inheritance for indices
+`>= FIRST_INTERPRETATION_VAR` and nothing else). The variables `tempo`, `beatsPerMeasure` and
+`measureLength` that held indices 3 to 5 before are removed; the indices were reused for amplitude,
+attack and release.
 
 ### Instruction encoding
 
@@ -223,12 +233,18 @@ Stack:
 0x08    10            ADD
 ```
 
-`beat(base)` — 12 bytes, because `beat` is sugar for `60 / tempo(x)`:
+`base.d` — 2 bytes, the time unit (what `beat(base)` used to be):
 
 ```
-0x00    01 00 00 00 3C 00 00 00 01   LOAD_CONST 60/1
-0x09    03 03                        LOAD_BASE varIndex 3 (tempo)
-0x0B    13                           DIV
+0x00    03 01         LOAD_BASE varIndex 1 (duration)
+```
+
+`base.d * 4` — 12 bytes, the length of a four-unit measure bar:
+
+```
+0x00    03 01                        LOAD_BASE varIndex 1 (duration)
+0x02    01 00 00 00 04 00 00 00 01   LOAD_CONST 4/1
+0x0B    12                           MUL
 ```
 
 ## Corruption flags
@@ -241,10 +257,9 @@ The bitmask lives in the same file:
 | `CORRUPT.START_TIME` | `0x01` |
 | `CORRUPT.DURATION` | `0x02` |
 | `CORRUPT.FREQUENCY` | `0x04` |
-| `CORRUPT.TEMPO` | `0x08` |
-| `CORRUPT.BEATS_PER_MEASURE` | `0x10` |
-| `CORRUPT.MEASURE_LENGTH` | `0x20` |
-| `CORRUPT.AMPLITUDE` | `0x40` |
+| `CORRUPT.AMPLITUDE` | `0x08` |
+| `CORRUPT.ATTACK` | `0x10` |
+| `CORRUPT.RELEASE` | `0x20` |
 
 ```javascript
 getCorruptionFlag(VAR.FREQUENCY)  // → 4, i.e. 1 << varIndex
@@ -273,7 +288,8 @@ const expr = compiler.compile('base.f * (3/2)', 'frequency')
    on a hit.
 2. Routes on `isDSLSyntax(text)` — a regex sniff, not a parse — to `compileDSL()`.
 3. Falls back to the legacy method-chain parser, and if *that* throws, retries `compileDSL()` (the
-   sniff can misclassify).
+   sniff can misclassify). The legacy parser throws on a variable name outside the six, and on
+   `module.findTempo(...)` / `module.findMeasureLength(...)`, with a message naming the replacement.
 4. If everything fails, logs a `console.error` and **throws** an `Error` whose message carries both
    parsers' failures — there is no constant-0 fallback.
 
@@ -302,14 +318,13 @@ decompileToDSL(expr)         // always walks the bytecode, always emits DSL
 dslDecompiler.decompile(expr)  // same as decompileToDSL
 ```
 
-`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:786-790`),
+`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:729-732`),
 so for anything compiled from text it is a pass-through — a DSL expression comes back as DSL. Only
 a synthesised expression (empty `sourceText`) actually gets decompiled, and then it comes back as
 legacy JavaScript.
 
-`decompileToDSL()` reconstructs `beat(x)` from the `60 / x.tempo` pattern, but `tempo(x)` and
-`measure(x)` come back as `x.tempo` and `x.ml` — they compile to identical bytecode, so the
-information is gone.
+`decompileToDSL()` prints each `LOAD_REF` / `LOAD_BASE` as a property access (`base.d`, `[2].f`).
+The DSL has no functions, so there is nothing to reconstruct beyond the six variables.
 
 ## Error handling
 
@@ -336,7 +351,7 @@ try {
 } catch (e) {
   if (e instanceof DSLError) console.error(e.formatWithContext('base.z'))
 }
-// Unknown property 'z'. Valid properties: f (frequency), t (startTime), d (duration), a (amplitude), tempo, bpm, ml (at column 6)
+// Unknown property 'z'. Valid properties: f (frequency), t (startTime), d (duration), a (amplitude), attack, release (at column 6)
 //
 // base.z
 //      ^
@@ -344,6 +359,15 @@ try {
 
 Validate before you compile if you want a structured `{ valid, error }` result rather than a
 thrown `Error`.
+
+The names of the old time model are refused with a message that names the replacement. `beat()`,
+`tempo()` and `measure()` are not functions any more (the DSL has no functions), and `.tempo`,
+`.bpm`, `.beatsPerMeasure`, `.ml` and `.measureLength` are not properties:
+
+```javascript
+validateDSL('beat(base)')
+// → { valid: false, error: "'beat()' was removed: the reference note's duration is the time unit, so write base.d for beat(base), or [N].d to relate to note N (at column 1)" }
+```
 
 ## Performance
 
@@ -355,7 +379,7 @@ npm run perf:bench     # scripts/perf/bench-node.mjs
 
 ## The other two classes in this file
 
-`src/binary-note.js` also exports `BinaryNote` (seven `BinaryExpression`s plus cached values) and
+`src/binary-note.js` also exports `BinaryNote` (six `BinaryExpression`s plus cached values) and
 `BinaryModule` (a `Map` of them). **Neither is on the live path** — nothing imports them (their
 last consumer, the dead `src/module-serializer.js`, has been deleted from the repo). The live
 containers are `Note` and `Module`. Do not build against them without checking that first.
@@ -364,5 +388,5 @@ containers are `Note` and `Module`. Do not build against them without checking t
 
 - [Expression Compiler](/developer/core/expression-compiler) — routing, the legacy parser, the cache
 - [Binary Evaluator](/developer/core/binary-evaluator) — the stack VM, `POW`, and the fallback defaults
-- [Note Class](/developer/api/note) — the owner of seven of these
+- [Note Class](/developer/api/note) — the owner of six of these
 - [Expression Syntax](/reference/expressions/syntax) — the DSL grammar

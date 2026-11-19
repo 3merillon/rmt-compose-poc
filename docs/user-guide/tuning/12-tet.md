@@ -85,10 +85,9 @@ The library's **Scale Systems** section ships a **12-TET** module. (The file is 
 |---|---|
 | Notes | 13 — twelve steps plus the note you start on |
 | Base frequency | `(263/4)` = 65.75 Hz |
-| Tempo | 100 |
-| Beats per measure | 4 |
+| BaseNote duration (time unit) | `3/5` s, shown as 100 BPM |
 | Instrument | `sine-wave` |
-| Note duration | `beat(base) * (3/4)` |
+| Note duration | `base.d * (3/4)` |
 | Step | `[n].f * 2 ^ (1/12)` |
 
 Note 1 is `base.f`. Every later note is the previous note times one semitone, so the scale is a chain — lift note 1 and all thirteen move with it.

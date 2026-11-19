@@ -48,6 +48,19 @@ Two decisions keep the file exact where it can be:
   note, so `66` BPM is written as 909091 µs. Ticks are computed from the exact tempo, not from
   the stored one; only the tempo event is rounded.
 
+### Tempo and time signature
+
+A module stores no tempo, so the file's tempo is derived: the BaseNote's duration is the time unit
+and the export writes it as **one quarter note**, which makes the tempo `60 / base.d` BPM (`base.d`
+of `1/2` writes 120 BPM). A BaseNote duration that is not positive writes 60 BPM.
+
+The time signature comes from the **first measure bar**, the one with the earliest start (a note
+for which `isMeasureNote()` is true). Its duration in time units is the numerator over a quarter-
+note denominator: a bar of `base.d * 4` writes 4/4, a bar of `base.d * 7/2` writes 7/8. Later bars
+do not add meter changes; the file has one time signature. **No time signature is written** when
+the module has no measure bar, or when the first bar's length cannot be written as one (a length
+such as 5/3 time units, or more than 255). Only the second case adds a warning.
+
 `toNumber()` (`src/utils/fraction-num.js`) is the only place a fraction becomes a float, as
 everywhere else: for the frequency (its key and bend need a logarithm), for the gain, and for the
 numbers in the report.
@@ -84,10 +97,10 @@ Returns an object:
 |---|---|
 | `ppq` | Ticks per quarter note |
 | `bendRange` | Pitch-bend range of the member channels, in semitones |
-| `usPerQuarter` | The tempo as stored: microseconds per quarter note |
-| `timeSignature` | `{ numerator, denominator }`, or `null` when `beatsPerMeasure` has no such form |
+| `usPerQuarter` | The tempo as stored: microseconds per quarter note (derived from `60 / base.d`) |
+| `timeSignature` | `{ numerator, denominator }` from the first measure bar, or `null` when there is no bar or its length has no such form |
 | `title` | Name of the conductor track |
-| `endTick` | Where the file ends: the last note end or the end of the last measure |
+| `endTick` | Where the file ends: the last note end or the end of the last measure bar (its start plus its duration) |
 | `tracks` | One entry per note track: `{ name, instrument, zone, memberChannels, notes }` |
 | `report` | See [The report](#the-report) |
 
@@ -241,7 +254,7 @@ lines; a script can read it directly.
 | `instruments` | Per instrument: `notes`, `maxPolyphony`, `tracks` |
 | `tracks` | Per track: `index`, `name`, `notes` |
 | `accuracy` | `maxPitchErrorCents`, `maxStartErrorTicks`, `maxLengthErrorTicks` |
-| `warnings` | Sentences for a person: one per instrument that overflowed, one per cause of skipped notes, and one each for a clamped amplitude, a floored velocity, a lengthened note, a missing time signature and an unstorable tempo |
+| `warnings` | Sentences for a person: one per instrument that overflowed, one per cause of skipped notes, and one each for a clamped amplitude, a floored velocity, a lengthened note, a first measure bar that cannot be written as a time signature and an unstorable tempo |
 
 `driftAtEndSeconds` is how far a player using the stored (rounded) tempo is from the module's own
 clock at the end of the file.

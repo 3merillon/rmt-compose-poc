@@ -30,7 +30,7 @@ While you are there:
 | **Limiter** | on (default) | Stops a stack of sustained sines from clipping |
 | **Default instrument** | `sine-wave` | A pure tone shows the beat rate between fundamentals most cleanly |
 
-**Use long notes.** Beating takes time to become audible. `beat(base) * 4` is a sensible minimum.
+**Use long notes.** Beating takes time to become audible. `base.d * 4` is a sensible minimum.
 
 **Loop it.** Shift-click (or long-press) the **Play** button. The play icon's bars become dashes
 orbiting a figure-8 while the loop runs. Park on a sustained dyad and let it beat at you while you
@@ -50,7 +50,7 @@ Two notes, sounding together, one of which you retune.
 
 | Note | frequency | startTime | duration |
 |---|---|---|---|
-| 1 (reference) | `base.f` | `base.t` | `beat(base) * 4` |
+| 1 (reference) | `base.f` | `base.t` | `base.d * 4` |
 | 2 (the variable) | `[1].f * 2^(1/19)` | `[1].t` | `[1].d` |
 
 Edit note 2's `frequency` in its `Raw:` field, press **Save**, listen. Repeat.

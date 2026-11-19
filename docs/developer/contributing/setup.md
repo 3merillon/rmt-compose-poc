@@ -67,14 +67,13 @@ WASM artifacts in `src/wasm/`.
 
 ### `npm test`
 
-There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs five scripts.
+There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs six scripts.
 The first, `scripts/validate-modules.mjs`, walks every item in the v2 manifest
 `public/modules/library.json` and checks five things per module:
 
 1. **Structure** — a `baseNote` object and a `notes` array.
-2. **Expressions** — every string under the seven expression keys (`startTime`, `duration`,
-   `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`) passes
-   `validateExpressionSyntax`.
+2. **Expressions** — every string under the six expression keys (`startTime`, `duration`,
+   `frequency`, `amplitude`, `attack`, `release`) passes `validateExpressionSyntax`.
 3. **Self-containment** — every `[id]` / `getNoteById(id)` reference resolves to a note defined in
    the same file (or to the base, id 0). This is what lets a module be dropped onto *any* target
    note: on import, id 0 is remapped to the target and the internal ids are renumbered.
@@ -107,18 +106,19 @@ cycle-checked per (note, variable) rather than per note:
 
 1. **Two notes reading each other** through different variables (`[1].f` from `[2].f`, `[2].t`
    from `[1].t + [1].d`) evaluate exactly, on the first evaluation.
-2. **A note's own variables** may read each other in any direction (the BaseNote's tempo from its
-   frequency), including through an inherited tempo or a computed measure length.
+2. **A note's own variables** may read each other in any direction (a start from the same note's
+   duration, the BaseNote's duration from its own frequency), including through an inherited
+   amplitude, attack or release.
 3. **A true cycle is still refused** — by `validateExpression()` with the widget's two messages,
    and by the evaluator with a console error that names the loop and values that do not drift.
 4. **An unresolved reference is named** in a console error instead of vanishing into a default.
 5. **Incremental equals fresh** — after seeded random edits (cyclic ones included) every module
    must equal a fresh load of its own JSON, variable for variable.
 6. **Amplitude is part of all of it** — ordered per variable, inherited from the BaseNote and
-   cycle-checked like `tempo`. One thing differs: an amplitude nobody sets is 1 by definition,
+   cycle-checked like `duration`. One thing differs: an amplitude nobody sets is 1 by definition,
    so reading it is not an unresolved reference.
 
-The fourth, `scripts/test-amplitude.mjs`, covers the seventh variable, `amplitude`, on its own:
+The fourth, `scripts/test-amplitude.mjs`, covers the variable `amplitude` on its own:
 
 1. **Old modules are untouched** — no shipped module gains an `amplitude` key when saved, and
    every note in them sounds at exactly 1.
@@ -126,7 +126,7 @@ The fourth, `scripts/test-amplitude.mjs`, covers the seventh variable, `amplitud
    `[N].a` reads what such a note sounds at, and `a`, `amp` and `amplitude` compile to the same
    bytecode.
 3. **Exactness** — a 50-note `(121/100)` chain keeps every digit, and an irrational amplitude sets
-   corruption flag `0x40` and no other.
+   corruption flag `0x08` and no other.
 4. **Round trips** — a snapshot and a saved (reindexed) file evaluate to the same gains, and
    removing a note's amplitude removes the key from the file.
 5. **The clamp** — the audio boundary limits the gain to 0–4 while the module keeps the exact value.
@@ -136,6 +136,30 @@ the bytes back with a Standard MIDI File parser that shares no code with the exp
 requires every note within 0.1 cent and one tick of the module's evaluated value, on a channel of
 its own. It covers the default module, all 79 library modules and synthetic cases — see
 [MIDI Export](/developer/api/midi-export#the-check).
+
+The sixth, `scripts/test-relational-time.mjs`, locks in relational time:
+
+1. **Old modules convert exactly.** `scripts/fixtures/old-time-oracle.json` holds every start,
+   duration, frequency and amplitude of the library modules and of the old-format fixtures in
+   `scripts/fixtures/old-time/`, as evaluated by the engine that still had tempo, beats per measure
+   and measure length (the engine at commit `6bf71cf`). Each module is loaded now and every value must be
+   the same fraction. A bar's new duration must equal its old measure length, and the BaseNote's
+   duration must equal `60 /` its old tempo.
+2. **The language.** `beat()`, `tempo()`, `measure()`, `.bpm` and the other removed names are refused
+   with a message naming what replaced them; `base.d` is the time unit.
+3. **Measure bars.** Add Measure chains `[p].t + [p].d` / `[p].d`, and a saved module keeps the bar
+   flag and no old key.
+4. **Interpretation.** `attack` and `release` evaluate and fall back to the BaseNote's like
+   `amplitude`; start, duration and frequency never fall back.
+
+`node scripts/test-relational-time.mjs --oracle <file> <root>` compares another oracle, made with the
+old engine, against the files under `<root>`.
+
+Two more scripts are not part of `npm test`. `node scripts/migrate-modules.mjs <file-or-folder>
+[--dry-run]` converts module files on disk to relational time in place, with the same conversion the
+app applies on load (files already converted are left untouched). `node scripts/check-doc-citations.mjs
+[docs/folder-or-page.md]` prints every source line citation in the docs beside the line it names now;
+run it after editing `src/`, because the developer pages cite line numbers.
 
 `npm test` exits non-zero on any failure. Run it after **any** change to the DSL, the expression
 compiler, the evaluator, or anything under `public/modules/`.
@@ -158,7 +182,7 @@ rmt-compose-poc/
 │   ├── main.js             # entry point
 │   ├── player.js           # orchestrator: transport, selection, commits, undo wiring
 │   ├── module.js           # Module: notes, dep registration, evaluation, JSON load/save
-│   ├── note.js             # Note: seven BinaryExpressions + color/instrument
+│   ├── note.js             # Note: six BinaryExpressions + color/instrument/measure
 │   ├── expression-compiler.js  # legacy parser + format router + LRU compile cache
 │   ├── binary-note.js      # bytecode format (OP / VAR / CORRUPT)
 │   ├── binary-evaluator.js # stack VM + incremental evaluator
@@ -168,6 +192,7 @@ rmt-compose-poc/
 │   ├── renderer/webgl2/    # renderer, workspace, camera-controller, renderer-config
 │   ├── player/             # audio-engine, audio-graph, reverb, amplitude
 │   ├── midi/               # midi-export: module → Standard MIDI File
+│   ├── migrate/            # relational-time: old time model → relational form, on load
 │   ├── instruments/        # synths + multisampled piano/violin
 │   ├── modals/             # note widget, group widget
 │   ├── menu/               # module library / module bar
@@ -202,10 +227,11 @@ None of these has UI. They are read from the URL query string or `localStorage`.
 | `?perf` (any value, e.g. `?perf=1`) | Loads `src/dev/perf-harness.js` and exposes `window.__rmtPerf`, `window.__rmtRenderer`, `window.__rmtWorkspace`. The harness is a separate lazily-fetched chunk — it never downloads without this flag. |
 | `?atlas=0` / `?atlas=1` | Force the glyph atlas off/on. Default on. Also settable via the `rmt:atlas` localStorage key. |
 | `?evaluator=js` | Force the JavaScript evaluator. Same as the default, but explicit. |
-| `?evaluator=wasm` | Opt in to the WASM evaluator hot-swap. **Currently hangs the tab** — see below. |
+| `?evaluator=wasm` | Ignored with a console warning: the WASM evaluator is disabled until the Rust core is ported — see below. |
 
-localStorage keys the app uses: `rmt:moduleSnapshot:v1` (the autosaved composition), `rmt:settings:v1`
-(the settings store), `ui-state` (the module-library layout), `rmt:atlas`.
+localStorage keys the app uses: `rmt:moduleSnapshot:v1` (the autosaved composition),
+`rmt:moduleSnapshot:v1:unloadable` (a saved session that could not be loaded; the default module opens
+instead), `rmt:settings:v1` (the settings store), `ui-state` (the module-library layout), `rmt:atlas`.
 
 ## WebAssembly
 
@@ -214,15 +240,15 @@ evaluator. You do not need it to develop:
 
 - `src/wasm/rmt_core.js` and `src/wasm/rmt_core_bg.wasm` are **committed build artifacts**. They are
   what the app imports and what the deploy ships. `rust/pkg/` is gitignored.
-- On the default path the WASM binary is **not fetched at all**: `initWasm()` returns `false` early
-  unless `?evaluator=wasm` is in the URL (headless Node — benches and tests — still initializes).
-  The 384 KB download and instantiation happen only behind the opt-in.
+- The WASM binary is **not fetched at all**: `initWasm()` returns `false` early because
+  `isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:50-54`), in a browser and
+  in headless Node alike.
 
-::: danger Do not enable the WASM evaluator
-`?evaluator=wasm` opts into the hot-swap (`src/wasm/evaluator-adapter.js:37-41`). A full
-re-evaluation cycle then hangs the main thread forever inside the WASM binary. Every shipped code
-path runs on the JavaScript evaluator. Do not tell a user to pass this flag, and do not build a
-feature on it.
+::: danger The WASM evaluator is disabled
+The Rust core still has the old variable layout (`tempo`, `beatsPerMeasure`, `measureLength`), so
+`WASM_MATCHES_VARIABLE_LAYOUT` is `false` in `src/wasm/evaluator-adapter.js`, `?evaluator=wasm` is
+ignored with a console warning, and every code path runs on the JavaScript evaluator. Porting the
+Rust core is planned. Do not tell a user to pass the flag, and do not build a feature on it.
 :::
 
 Rebuilding the core, if you touched `rust/src/`:
@@ -331,7 +357,7 @@ Expected. Use `npx vite build`, or install Rust and wasm-pack. See the warning a
 ### `WebGL2 not available` in the console
 
 The renderer logs this and bails out when `canvas.getContext('webgl2')` returns `null`
-(`src/renderer/webgl2/renderer.js:457`). Update the browser, enable hardware acceleration, check GPU
+(`src/renderer/webgl2/renderer.js:477`). Update the browser, enable hardware acceleration, check GPU
 drivers. There is no fallback renderer — the workspace does not initialise without WebGL2.
 
 ### The port is taken

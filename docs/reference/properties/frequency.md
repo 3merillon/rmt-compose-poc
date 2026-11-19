@@ -33,8 +33,8 @@ same thing: note id 0 *is* the BaseNote.
 
 ::: warning
 Frequency does **not** inherit. `[5].f` on a note that has no frequency expression does not walk up
-to its parent — it falls back to the hard-coded `440`. Only `tempo`, `beatsPerMeasure` and
-`measureLength` inherit from the BaseNote.
+to its parent — it falls back to the hard-coded `440`. Of the six variables, only the three
+interpretation variables (`amplitude`, `attack` and `release`) inherit from the BaseNote.
 :::
 
 ## Where you edit it
@@ -218,7 +218,7 @@ So retuning a note against a different parent can also change what it sounds lik
   `BaseNote` (or `Note [N]` when a note with a frequency is selected — the guides re-reference
   themselves to the selection), plus `+1`, `+2`, `-1`, … for the octaves around it.
 - The **vertical dashed lines** are measure bars, not octaves. See
-  [beatsPerMeasure](/reference/properties/beats-per-measure).
+  [Measure bars](/reference/module-schema#measure-bars).
 
 ## In playback
 

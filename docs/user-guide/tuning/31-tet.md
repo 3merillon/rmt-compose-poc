@@ -112,13 +112,12 @@ The library's **Scale Systems** section ships a **31-TET** module (file `scale-s
 |---|---|
 | Notes | 32 — thirty-one steps plus the note you start on |
 | Base frequency | 440 Hz |
-| Tempo | 120 |
-| Beats per measure | 4 |
+| BaseNote duration (time unit) | `1/2` s, shown as 120 BPM |
 | Instrument | `sine-wave` |
-| Note duration | `beat(base) * (1/4)` |
+| Note duration | `base.d * (1/4)` |
 | Step | `[n].f * 2 ^ (1/31)` |
 
-The short note duration matters: at 120 BPM with sixteenth-note steps, all 31 degrees go by in about four seconds, which is what you want when you are listening for the shape of the scale rather than individual pitches.
+The short note duration matters: with a time unit of `1/2` s (120 BPM) and sixteenth-note steps, all 31 degrees go by in about four seconds, which is what you want when you are listening for the shape of the scale rather than individual pitches.
 
 To load it, drag the tile from **Scale Systems** (or search `31` or the `microtonal` tag with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 

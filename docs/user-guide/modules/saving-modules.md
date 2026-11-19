@@ -35,11 +35,12 @@ The file has exactly two top-level keys: `baseNote` and `notes`.
 | Per note | |
 |---|---|
 | `id` | The note's number |
-| The seven expression keys | `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude` — each only if the note defines it |
+| The six expression keys | `startTime`, `duration`, `frequency`, `amplitude`, `attack`, `release` — each only if the note defines it |
 | `color` | If set |
 | `instrument` | If set |
+| `measure` | `true` on a measure bar |
 
-There is **no `measures` array**. Measure bars are saved as ordinary entries in `notes` — a measure bar is a note with a `startTime` and no `duration` and no `frequency`. Silences are entries with a `startTime` and a `duration` but no `frequency`. All three kinds share the same array and the same id space. See [Module Format](/user-guide/modules/module-format#note-kinds-are-inferred-not-declared).
+There is **no `measures` array**. Measure bars are saved as ordinary entries in `notes` — a measure bar is a silent note flagged `"measure": true`. Silences are entries with a `startTime` and a `duration` but no `frequency` and no flag. All three kinds share the same array and the same id space. See [Module Format](/user-guide/modules/module-format#note-kinds-are-inferred-not-declared).
 
 There is no metadata block: no name, no author, no version, no description. Any extra key you add to the file is dropped on the next save.
 
@@ -66,11 +67,15 @@ Saving does **not** convert legacy expressions to DSL, or DSL to legacy. The sou
 
 </details>
 
-### Two things change on the way out
+### What changes on the way out
 
 **The file is reindexed.** Measure bars are renumbered first (sorted by start time), then the remaining notes (also by start time), starting at id 1, and every `[N]` reference is rewritten to match. The ids in the downloaded file will generally differ from the ids you saw on screen. **Reorder Module** in the **+** menu applies the same renumbering to the live workspace, behind a confirmation — it is not something you need to do before saving.
 
-**The BaseNote gains a `measureLength`,** even if it never had one. It is written in DSL form — `beat(base) * base.bpm` — so a pure-DSL file stays pure DSL on the way out.
+**Nothing is added to the BaseNote.** The file holds the expressions the BaseNote has, including its `duration`, the time unit. No tempo is stored.
+
+::: warning A file saved here does not open in the published editor
+Files saved by this version use `duration` on the BaseNote and the `measure` flag on bars. The published editor does not read them. Older files load here and are converted; see [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions).
+:::
 
 ## Is there an autosave?
 
@@ -166,7 +171,7 @@ For a DAW or a synthesizer, **Export MIDI** in the same menu writes the piece as
 
 1. **Rename the download.** Every export is `module.json`. Rename it the moment it lands.
 2. **Save before you load.** Loading a file replaces the whole workspace. It is undoable with `Ctrl/Cmd + Z`, but do not make undo your backup strategy.
-3. **Use `base.f` and `beat(base)`, not numbers.** A module written in absolute Hz and seconds cannot be re-rooted and is much less useful to anyone else.
+3. **Use `base.f` and `base.d`, not numbers.** A module written in absolute Hz and seconds cannot be re-rooted and is much less useful to anyone else.
 4. **Test after saving.** Load the file back and listen. Reindexing renumbers everything, so this is a real check, not a formality.
 5. **Version by hand.** `my-song-v1.json`, `my-song-v2.json`. There is no version history in the file.
 

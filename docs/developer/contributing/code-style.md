@@ -76,7 +76,7 @@ Write DSL in code, in comments, in tests and in docs:
 ```
 base.f * (3/2)          # perfect fifth above the BaseNote
 [1].t + [1].d           # starts when note 1 ends
-beat(base) * 2          # two beats long
+base.d * 2              # two time units long (base.d is the time unit)
 2^(7/12)                # 12-TET fifth
 ```
 
@@ -87,23 +87,22 @@ Property shortnames — use these, and no others:
 | frequency | `f`, `freq`, `frequency` |
 | startTime | `t`, `s`, `start`, `startTime` |
 | duration | `d`, `dur`, `duration` |
-| tempo | `tempo` |
-| beatsPerMeasure | `bpm`, `beatsPerMeasure` |
-| measureLength | `ml`, `measureLength` |
+| amplitude | `a`, `amp`, `amplitude` |
+| attack | `atk`, `attack` |
+| release | `rel`, `release` |
 
-Helper functions: `tempo(ref)`, `measure(ref)`, `beat(ref)` (`src/dsl/constants.js`).
-
-**Use `beat(base)`, never `60 / tempo(base)`.** They compute the same quantity; the whole shipped
-library uses `beat(base) * (1/4)`, `beat(base) * 2` and so on, and `60 / tempo(` appears exactly zero
-times in `public/modules/`. An expression that spells out the arithmetic is one a reader has to
-decode.
+The DSL has **no functions** (`src/dsl/constants.js` keeps `RetiredTimeFunctions` and
+`RetiredTimeProperties` only to explain the removed names). `beat()`, `tempo()`, `measure()`, `.tempo`,
+`.bpm`, `.beatsPerMeasure`, `.ml` and `.measureLength` are refused with a message that names the
+replacement. A beat is the BaseNote's duration: **write `base.d`**, never a division by a tempo; the
+shipped library writes `base.d * (1/4)`, `base.d * 2` and so on. A measure bar's length is `[N].d`.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.getNoteById(1).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(1)))
+module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))
 ```
 
 Still parsed, still supported, still present in saved files. Do not write new code that *emits* it
@@ -115,8 +114,8 @@ except on the legacy branch required by the invariant below.
 ::: danger Any code that writes an expression must handle both formats
 A note's expression is stored as source text and round-trips verbatim — saving does **not** convert
 legacy to DSL. So a single module can hold both formats at once whenever a legacy-authored file is
-loaded. (The code-level defaults no longer leak legacy into DSL modules: the BaseNote's default
-`measureLength` is now the DSL string `beat(base) * base.bpm`.)
+loaded. (The code-level defaults no longer leak legacy into DSL modules: the BaseNote's defaults are
+plain constants, and `Module.generateMeasures()` always writes DSL.)
 
 If you emit a new expression for an existing note, you must emit it in **the format that note is
 already written in**. Emitting DSL onto a legacy note (or the reverse) produces an expression the
@@ -129,23 +128,19 @@ The pattern, everywhere in the codebase: read the note's current source text, sn
 ```javascript
 import { isDSLSyntax } from './dsl/index.js';
 
-// src/module.js:841-853 — chaining a new measure onto the previous one
-const prevRaw = prevNote.variables?.startTimeString || '';
-const useDSL = isDSLSyntax(prevRaw) || (i === 0 && isDSLSyntax(fromNote.variables?.startTimeString || ''));
-
-let rawString;
-if (useDSL) {
-  const pRef = (prevNote.id === 0) ? 'base' : `[${prevNote.id}]`;
-  rawString = `${pRef}.t + measure(${pRef})`;
-} else if (prevNote.id === 0) {
-  rawString = "module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))";
+// src/utils/simplify.js:106 — rewrite an expression in the format it is written in
+if (isDSLSyntax(expr)) {
+  out = simplifyDSL(expr);            // the DSL has its own canonical form
 } else {
-  rawString = `module.getNoteById(${prevNote.id}).getVariable('startTime')`
-            + `.add(module.findMeasureLength(module.getNoteById(${prevNote.id})))`;
+  const ast = parseToSumOfProducts(expr);   // the method-chain form
+  // ...
 }
 ```
 
-Note the BaseNote special case in each branch: the emitted reference for id 0 is **`base` in DSL and
+Code that creates a new expression from nothing, such as `Module.generateMeasures()` (always DSL:
+`[p].t + [p].d` and `[p].d`), has no existing format to follow and writes DSL.
+
+Note the BaseNote special case: the emitted reference for id 0 is **`base` in DSL and
 `module.baseNote` in legacy**. (`[0]` does parse, but nothing in the codebase or the shipped library
 emits it, and `reindexModule()` normalises the legacy form to `module.baseNote`.)
 
@@ -159,8 +154,8 @@ still evaluates to the same value before returning it. Copy that shape:
 3. Where the rewrite could change the value (folding a coefficient, for example), **evaluate before
    and after and fall back to the original if they disagree** — see `multiplyExpressionByFraction()`.
 
-Call sites that already do this and are worth reading: `src/module.js` (`generateMeasures`,
-`findInstrument`), `src/player.js` (drag/resize commit, module import, the interval arrows),
+Call sites that already do this and are worth reading: `src/module.js` (`findInstrument`),
+`src/player.js` (drag/resize commit, module import, the interval arrows),
 `src/modals/variable-controls.js`.
 
 ## Error handling: throw at the compiler, catch at the boundary
@@ -170,7 +165,7 @@ Call sites that already do this and are worth reading: `src/module.js` (`generat
 expression, after logging `Failed to compile expression: …` via `console.error`
 (`src/expression-compiler.js:99-108`). `Note._setExpression()` and the constructor wrap the
 compile in `try/catch` and, on failure, `console.warn` and leave the previous expression in place
-(`src/note.js:201-209`) — so callers of `setVariable()` still see no exception.
+(`src/note.js:228-236`) — so callers of `setVariable()` still see no exception.
 :::
 
 This is a deliberate convention — a bad expression degrades a single property instead of tearing
@@ -218,8 +213,8 @@ codebase has already paid for these lessons; do not re-introduce them.
 
 | Pattern | Where | Why |
 |---|---|---|
-| The `note.variables` Proxy is **memoized per note** | `src/note.js:367-374` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame. |
-| Dependency re-registration is skipped by key | `src/module.js:174-204` — `_depsRegKey` = `generation:id:epoch` | `markNoteDirty` registers every marked note. The key skips rewriting ~15 graph maps for notes whose expressions did not change. |
+| The `note.variables` Proxy is **memoized per note** | `src/note.js:396-403` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame. |
+| Dependency re-registration is skipped by key | `src/module.js:176-207` — `_depsRegKey` = `generation:id:epoch` | `markNoteDirty` registers every marked note. The key skips rewriting ~15 graph maps for notes whose expressions did not change. |
 | The compile cache is LRU-capped at **4000** | `src/expression-compiler.js:23` | Every drag commit mints a fresh fraction string, so an uncapped cache grows without bound across a session. |
 | Per-gesture state is built **once**, not per pointermove | `workspace.js`, `renderer.setDragOffsetPreview`, `setDragOverlay` | Rebuilding the moving-id set every move made allocation scale with dependent count and triggered mid-drag GC hitches. Identity-check the incoming Set and short-circuit. |
 | Keep overlay work **O(visible), not O(module)** | `renderer.js` viewport cull | This is what makes 100,000 notes tractable. |

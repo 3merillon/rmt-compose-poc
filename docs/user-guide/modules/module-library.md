@@ -38,7 +38,7 @@ The Perfect 5th module holds exactly one note (plus its own `baseNote` block and
 {
   "id": 1,
   "startTime": "base.t",
-  "duration": "beat(base)",
+  "duration": "base.d",
   "frequency": "(3/2) * base.f"
 }
 ```
@@ -47,7 +47,7 @@ Drop it on a note and `base.f` becomes that note's frequency. You get a fifth ab
 
 ### A chord is a root, with tones hanging off it
 
-The Major chord, frequencies only (note 1 starts at `base.t`, notes 2 and 3 at `[1].t`, and all three last `beat(base) * 2`):
+The Major chord, frequencies only (note 1 starts at `base.t`, notes 2 and 3 at `[1].t`, and all three last `base.d * 2`):
 
 ```json
 { "id": 1, "frequency": "base.f" }
@@ -93,7 +93,7 @@ Cadences work the same way, with two chords instead of three or four.
 
 ### Melodies and scales chain too
 
-Melodies are written as scale degrees against `base`, with start times in beats: `(5/4) * base.f`, `base.t + beat(base) * 3`. Change the BaseNote and the whole tune transposes. Drop it on a note and it plays from there.
+Melodies are written as scale degrees against `base`, with start times in time units: `(5/4) * base.f`, `base.t + base.d * 3`. Change the BaseNote and the whole tune transposes. Drop it on a note and it plays from there.
 
 Scale systems are **chained note to note** — each step lifts off the one below it:
 
@@ -114,7 +114,7 @@ The **Tesla** scale is the exception: it is built entirely from whole-number rat
 
 ## Intervals — 46 modules
 
-Each is a single note, one beat long, at a fixed ratio above whatever you drop it on. The tile shows the ratio as a fraction with its size in cents underneath.
+Each is a single note, one time unit long, at a fixed ratio above whatever you drop it on. The tile shows the ratio as a fraction with its size in cents underneath.
 
 **3-limit** — built from 2s and 3s only. Pythagorean tuning.
 
@@ -189,7 +189,7 @@ Each is a single note, one beat long, at a fixed ratio above whatever you drop i
 
 ## Chords — 11 modules
 
-Each is a root plus its tones, all starting together, two beats long. The tile shows the name with the chord's harmonic ratio underneath.
+Each is a root plus its tones, all starting together, two time units long. The tile shows the name with the chord's harmonic ratio underneath.
 
 | Name | Ratio | Tones above the root |
 |---|---|---|
@@ -226,7 +226,7 @@ Both live in the **Progressions** section. Every root is expressed as a move fro
 | Deceptive (V–vi) | Major → Minor | 3/2 → 5/3 |
 | Half (I–V) | Major → Major | 1/1 → 3/2 |
 
-Each chord lasts two beats; the resolving chord in **ii – V – I** lasts four.
+Each chord lasts two time units; the resolving chord in **ii – V – I** lasts four.
 
 Because the roots chain, a progression is a single object with a single handle. Grab the first root and the progression moves. That is not a feature that was added — it falls out of writing the music down honestly.
 
@@ -234,16 +234,17 @@ Because the roots chain, a progression is a single object with a single handle. 
 
 Public-domain tunes, written as scale degrees against the BaseNote.
 
-| Name | Notes | Tempo | Beats/measure |
+| Name | Notes | BaseNote duration | Reads as |
 |---|---|---|---|
-| Ode to Joy | 15 | 120 | 4 |
-| Twinkle Twinkle | 14 | 120 | 4 |
-| Frère Jacques | 32 | 120 | 4 |
-| Amazing Grace | 32 | 150 | 3 |
-| Greensleeves | 19 | 200 | 3 |
-| Bach Minuet in G | 16 | 150 | 3 |
-| Scarborough Fair | 15 | 150 | 3 |
+| Ode to Joy | 15 | `1/2` | 120 BPM |
+| Twinkle Twinkle | 14 | `1/2` | 120 BPM |
+| Frère Jacques | 32 | `1/2` | 120 BPM |
+| Amazing Grace | 32 | `2/5` | 150 BPM |
+| Greensleeves | 19 | `3/10` | 200 BPM |
+| Bach Minuet in G | 16 | `2/5` | 150 BPM |
+| Scarborough Fair | 15 | `2/5` | 150 BPM |
 
+Each melody's pace is its BaseNote's duration, the time unit, and every note length is written against it. The "Reads as" column is `60 / base.d`, which the note widget shows next to the duration. Dropped on a note, a melody takes that note's duration as its time unit; see [Loading Modules](/user-guide/modules/loading-modules#drop-a-library-module-onto-a-note).
 Drop one on a note and it plays from there, in tune with everything around it. Frère Jacques is a round: drop a second copy onto a note partway through the first and it sings against itself.
 
 ## Scale Systems — 6 modules
@@ -252,12 +253,12 @@ Chained scales: each note is a step above the previous one, so the scale is a la
 
 | Name | Notes | Step | Note length | Repeats at |
 |---|---|---|---|---|
-| 12-TET | 13 | `× 2 ^ (1/12)` | ¾ beat | the octave |
-| 19-TET | 20 | `× 2 ^ (1/19)` | ½ beat | the octave |
-| 31-TET | 32 | `× 2 ^ (1/31)` | ¼ beat | the octave |
-| Bohlen–Pierce | 14 | `× 3 ^ (1/13)` | ½ beat | the **tritave** (3/1) |
-| Tesla | 81 | odd harmonics — see below | 1 beat | never |
-| Mixed-Base | 12 | mixed 2-, 3- and 5-based steps | ½ beat | returns to `base.f` |
+| 12-TET | 13 | `× 2 ^ (1/12)` | ¾ time unit | the octave |
+| 19-TET | 20 | `× 2 ^ (1/19)` | ½ time unit | the octave |
+| 31-TET | 32 | `× 2 ^ (1/31)` | ¼ time unit | the octave |
+| Bohlen–Pierce | 14 | `× 3 ^ (1/13)` | ½ time unit | the **tritave** (3/1) |
+| Tesla | 81 | odd harmonics — see below | 1 time unit | never |
+| Mixed-Base | 12 | mixed 2-, 3- and 5-based steps | ½ time unit | returns to `base.f` |
 
 Each equal temperament runs one full period plus the note it started on, so you hear it close.
 

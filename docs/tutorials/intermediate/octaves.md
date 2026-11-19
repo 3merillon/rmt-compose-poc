@@ -156,7 +156,7 @@ Now move, resize or transpose Note 4. The bass tracks all three.
 
 ### 2. Arpeggiated octaves
 
-Four sixteenth notes climbing by octaves and falling back. Set every duration to `beat(base) * (1/4)`.
+Four sixteenth notes climbing by octaves and falling back. Set every duration to `base.d * (1/4)`.
 
 | Note | Frequency | Start time |
 |---|---|---|

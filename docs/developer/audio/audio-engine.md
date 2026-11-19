@@ -5,7 +5,7 @@ description: AudioEngine owns the AudioContext, prepares note data, schedules vo
 
 # Audio Engine
 
-`AudioEngine` (`src/player/audio-engine.js`) is the transport's back end. It owns the
+`AudioEngine` (`src/player/audio-engine.js:38`) is the transport's back end. It owns the
 `AudioContext`, builds the [signal graph](/developer/audio/audio-graph), holds the
 [instrument registry](/developer/audio/instruments), and turns a module into sound with a
 [streaming scheduler](/developer/audio/streaming).
@@ -19,7 +19,7 @@ It does **not** own transport state. `isPlaying`, the playhead and the loop icon
 import { audioEngine } from './player/audio-engine.js';
 ```
 
-`audio-engine.js:727` ends with `export const audioEngine = new AudioEngine()`. That runs at
+`audio-engine.js:740` ends with `export const audioEngine = new AudioEngine()`. That runs at
 **module import time**, so the `AudioContext` — and with it the whole `AudioGraph`, including the
 first offline reverb render — exists before the user has touched anything.
 
@@ -41,8 +41,8 @@ const engine = new AudioEngine({ initialVolume: 0.2, rampTime: 0.2 });
 | `initialVolume` | `0.2` | Peak gain of a single note's envelope. **Not** the master volume. |
 | `rampTime` | `0.2` | Default fade length for `pauseFade()`, in seconds. |
 
-The shipped singleton is constructed with **no options** (`audio-engine.js:727`), so both defaults
-apply as written. Nothing overrides them: `src/player.js:69` declares its own `INITIAL_VOLUME` and
+The shipped singleton is constructed with **no options** (`audio-engine.js:740`), so both defaults
+apply as written. Nothing overrides them: `src/player.js:81` declares its own `INITIAL_VOLUME` and
 `GENERAL_VOLUME_RAMP_TIME` at the same `0.2`, and passes them per call to `play()` and `pauseFade()`.
 
 Master volume is a separate thing entirely and lives on the graph — see [`setVolume()`](#setvolume).
@@ -61,7 +61,7 @@ Two of those keys are **back-compat aliases**, not separate nodes:
 | `compressor` | `graph.limiter` |
 
 There is no "general volume" node and no compressor any more. The names survive because
-`player.js:4581` destructures them. New code should reach through `audioEngine.graph`.
+`player.js:4530` destructures them. New code should reach through `audioEngine.graph`.
 
 ## unlock()
 
@@ -86,7 +86,7 @@ Both halves matter, and `ensureResumed()` is not a substitute for either:
 - The context can report `running` and still stay muted on iOS until a source has actually been
   *started* inside a gesture. That is what the silent buffer is for.
 
-Its only call site is the `pointerdown` handler on `#playPauseBtn` (`player.js:5105`). If you add
+Its only call site is the `pointerdown` handler on `#playPauseBtn` (`player.js:5054`). If you add
 another entry point to playback, it needs this call too.
 
 ## ensureResumed()
@@ -111,15 +111,21 @@ Evaluates the module and returns a plain array — **no oscillators are created 
   id: 3,
   startTime: 0.5,      // seconds, relative to fromTime
   duration: 0.25,
-  frequency: 440,      // null for measure markers
-  temperedFrequency: 442.3,  // the same pitch on the nearest of 12 equal steps from the BaseNote; null for measure markers
-  instrument: 'piano', // null for measure markers; lowercased
+  frequency: 440,      // null for a silence or a measure bar
+  temperedFrequency: 442.3,  // the same pitch on the nearest of 12 equal steps from the BaseNote; null when there is no frequency
+  instrument: 'piano', // null when there is no frequency; lowercased
   amplitude: 1,        // gain on the envelope peak, clamped to 0..4; 1 when unset
-  panPos: 0.33         // null for measure markers
+  attack: 0.125,       // the note's own (else the BaseNote's) attack as a share of its duration; null when neither sets one
+  release: null,       // likewise for release; null means the instrument's own envelope applies
+  panPos: 0.33         // null when there is no frequency
 }
 ```
 
-What it does, in order (`audio-engine.js:136-274`):
+The BaseNote never sounds, although it has a duration now (the time unit), so it is skipped. Attack
+and release are the evaluated values, passed on as shares of the note's own duration, converted with
+`toNumber()`; the clamp to `[0, 1]` happens later, in the envelope.
+
+What it does, in order (`audio-engine.js:136-286`):
 
 1. Resumes the context if suspended.
 2. Reads `module.getModuleEndTime()` and the evaluation cache.
@@ -140,7 +146,7 @@ What it does, in order (`audio-engine.js:136-274`):
 8. Resolves.
 
 ::: warning It does not reject
-On a sample-load failure it logs and resolves `[]` (`audio-engine.js:269-272`). There is no
+On a sample-load failure it logs and resolves `[]` (`audio-engine.js:281-284`). There is no
 autoplay-policy rejection path to catch here — `preparePlayback` never throws `NotAllowedError`.
 :::
 
@@ -164,18 +170,18 @@ covered in [Streaming Scheduler](/developer/audio/streaming).
 
 | Method | Location | Behaviour |
 |---|---|---|
-| `armLoop(loop)` | `:437` | Turns looping on for a playback **already in flight**, with no audio restart. Restarts the pump if it had already retired. Returns `boolean`. |
-| `disarmLoop()` | `:461` | Stops looping but lets the pass in flight finish. Returns the absolute ctx time of the final seam, or `null`. |
-| `isLooping()` | `:476` | Whether the loop is currently armed. |
-| `getLoopEndTime()` | `:481` | Absolute ctx time of the final seam once disarmed, else `null`. |
+| `armLoop(loop)` | `:449` | Turns looping on for a playback **already in flight**, with no audio restart. Restarts the pump if it had already retired. Returns `boolean`. |
+| `disarmLoop()` | `:473` | Stops looping but lets the pass in flight finish. Returns the absolute ctx time of the final seam, or `null`. |
+| `isLooping()` | `:488` | Whether the loop is currently armed. |
+| `getLoopEndTime()` | `:493` | Absolute ctx time of the final seam once disarmed, else `null`. |
 
-A loop descriptor is validated by `_applyLoop()` (`:410`) and **refused** if the period is
+A loop descriptor is validated by `_applyLoop()` (`:422`) and **refused** if the period is
 non-finite or `< MIN_LOOP_PERIOD` (0.05 s), if the note array is empty, or if no entry has both a
 `frequency` and an `instrument` (an all-measure-marker module). This is not defensive dressing: a
 NaN period makes every comparison in the pump false, so the horizon break never fires and the tab
 hangs.
 
-`disarmLoop()` cancels pending voices via `_cancelScheduledFrom(atTime)` (`:501`), which kills every
+`disarmLoop()` cancels pending voices via `_cancelScheduledFrom(atTime)` (`:513`), which kills every
 voice whose **own `startTime`** is at or after the seam. It keys on start time, not on the cycle
 counter, because around a seam the active set holds voices from two passes at once — the outgoing
 pass's release tails overlap the incoming pass's attacks — and the pump's `cycle` runs ahead of the
@@ -202,7 +208,7 @@ audioEngine.stopAll();          // 20 ms declick fade — the default
 audioEngine.stopAll(0);         // no fade; only correct if you already faded
 ```
 
-`stopAll(fadeSec = DECLICK_FADE)` (`:684`). The 20 ms fade is the default for a reason, and it is
+`stopAll(fadeSec = DECLICK_FADE)` (`:697`). The 20 ms fade is the default for a reason, and it is
 the fix for the "pshhh" on Stop:
 
 > Cutting a sounding voice with `stop(now)` + `disconnect()` steps the bus from the voice's
@@ -229,7 +235,7 @@ It is not `initialVolume`.
 
 ## Scheduling one note
 
-`_scheduleNote(noteData, passStartTime, initialVolume)` (`:524`) builds the voice chain:
+`_scheduleNote(noteData, passStartTime, initialVolume)` (`:536`) builds the voice chain:
 
 ```
 voice → gainNode (envelope) → [StereoPanner] → graph.getBus(instrument)
@@ -239,9 +245,10 @@ voice → gainNode (envelope) → [StereoPanner] → graph.getBus(instrument)
 looping; the note's absolute start is `passStartTime + noteData.startTime`.
 
 The voice is created at `noteData.frequency` — or at `noteData.temperedFrequency` when
-`graph.temperedEnabled` is true at that moment (`:532`). See [Tempered playback](#tempered-playback).
+`graph.temperedEnabled` is true at that moment (`:544`). See [Tempered playback](#tempered-playback).
 
-The envelope peak is `initialVolume * noteData.amplitude`. The amplitude comes from the note's
+The envelope peak is `initialVolume * noteData.amplitude`. `noteData.attack` and `noteData.release` go to
+`applyEnvelope()` as a `shape` (`{ attack, release }`, each a share of the duration or `null`). The amplitude comes from the note's
 `amplitude` expression (its own, else the BaseNote's, else 1), clamped once by `amplitudeToGain()`
 in `src/player/amplitude.js` to `[0, 4]`. A note whose amplitude is 0 is skipped by the pump — no
 voice is built for it.
@@ -262,7 +269,7 @@ Two invariants in this file exist to keep the output free of clicks. Break eithe
 
 ```javascript
 const gainNode = ctx.createGain();
-gainNode.gain.value = 0;   // audio-engine.js:545 — deliberate
+gainNode.gain.value = 0;   // audio-engine.js:557 — deliberate
 ```
 
 Voices are built up to `LOOKAHEAD` (2 s) before they sound. The default of `1.0` is what a *pending*
@@ -292,13 +299,15 @@ Snapshot `g.value`, cancel, `setValueAtTime(cur, now)`, then ramp. Every time.
 ### Where the envelope lives
 
 `_scheduleNote` does not shape the envelope itself — it calls
-`instrumentManager.applyEnvelope(...)`, which routes to the shared `applyVoiceEnvelope()` in
-`src/instruments/instrument-manager.js`. Its floors, ratios and hard-zero ending are documented in
+`instrumentManager.applyEnvelope(instrument, gainNode, start, duration, peak, shape)`, where `shape` is
+`{ attack: noteData.attack ?? null, release: noteData.release ?? null }`. That routes to the shared
+`applyVoiceEnvelope()` in `src/instruments/instrument-manager.js`. Its floors, ratios, the note's own
+attack and release, and the hard-zero ending are documented in
 [Instruments](/developer/audio/instruments#the-envelope-core).
 
 The one fact that belongs here: the envelope always reaches zero **inside** `[start, start + duration]`,
 and the engine stops the source `RELEASE_TAIL = 0.15 s` later, while it is already silent
-(`audio-engine.js:580-584`). Stopping past gain-zero is what lets exponential releases finish without
+(`audio-engine.js:593-597`). Stopping past gain-zero is what lets exponential releases finish without
 a click. Note *lengths* are unaffected.
 
 ## Tempered playback
@@ -344,10 +353,10 @@ are handed with the setting off and on, and that no other field of the note list
 | `MIN_LOOP_PERIOD` | `0.05` s | module-level, `:11` |
 | `MAX_CYCLES_PER_BATCH` | `64` | module-level, `:15` |
 | `SEAM_EPS` | `1e-6` | module-level, `:17` |
-| `LOOKAHEAD` | `2.0` s | **local inside `play()`**, `:308` |
-| `BATCH_INTERVAL` | `100` ms | **local inside `play()`**, `:309` |
-| `RELEASE_TAIL` | `0.15` s | **local inside `_scheduleNote()`**, `:580` |
-| playback head-room | `ctx.currentTime + 0.1` s | `:301` |
+| `LOOKAHEAD` | `2.0` s | **local inside `play()`**, `:320` |
+| `BATCH_INTERVAL` | `100` ms | **local inside `play()`**, `:321` |
+| `RELEASE_TAIL` | `0.15` s | **local inside `_scheduleNote()`**, `:593` |
+| playback head-room | `ctx.currentTime + 0.1` s | `:313` |
 | pan and tempering `baseF` fallback | `440` Hz | `:170` |
 
 ## There is no dispose()

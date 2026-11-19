@@ -30,7 +30,7 @@ Selecting **two or more** notes swaps the note widget for the group widget. See 
 Drag the **body** of the note. The cursor becomes a grabbing hand.
 
 - A drag moves the note **in time only**. Dragging up and down does not change the pitch — pitch is set by the frequency expression or by the arrows.
-- Start times **snap to a sixteenth** — a quarter of a beat, using the tempo in effect at that note.
+- Start times **snap to a sixteenth** — a quarter of the time unit, `base.d`.
 - A note can never be dragged earlier than the BaseNote's start time.
 - Notes whose **start time** depends on the note you are dragging preview their new positions as you move.
 
@@ -88,7 +88,7 @@ new Fraction(440)
 ```
 base.t                    # start with the BaseNote
 [2].t + [2].d             # start when note 2 ends
-base.t + beat(base) * 2   # two beats after the BaseNote
+base.t + base.d * 2       # two time units after the BaseNote
 ```
 
 <details>
@@ -106,11 +106,11 @@ The duration row has a strip of note-length icons above the Raw field.
 
 | Button | Length |
 |---|---|
-| Whole | 4 beats |
-| Half | 2 beats |
-| Quarter | 1 beat |
-| Eighth | 1/2 beat |
-| Sixteenth | 1/4 beat |
+| Whole | 4 time units |
+| Half | 2 time units |
+| Quarter | 1 time unit |
+| Eighth | 1/2 time unit |
+| Sixteenth | 1/4 time unit |
 | `.` | multiplies the chosen length by 3/2 |
 | `..` | multiplies the chosen length by 7/4 |
 
@@ -119,9 +119,9 @@ Clicking an icon **writes the expression into the Raw field and reveals `Save`. 
 The widget highlights whichever icon matches the note's current duration. A duration that no icon can express — a triplet, say — leaves all of them unhighlighted.
 
 ```
-beat(base)              # a quarter note
-beat(base) * 2          # a half note
-beat(base) * (3/4)      # a dotted eighth
+base.d                  # a quarter note
+base.d * 2              # a half note
+base.d * (3/4)          # a dotted eighth
 [3].d                   # the same length as note 3, and tied to it
 ```
 
@@ -129,15 +129,31 @@ beat(base) * (3/4)      # a dotted eighth
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
-new Fraction(60).div(module.findTempo(module.baseNote))
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
+module.baseNote.getVariable('duration')
+module.baseNote.getVariable('duration').mul(new Fraction(2))
 module.getNoteById(3).getVariable('duration')
 ```
 </details>
 
-::: tip `1` is not one beat
-`1` is one **second**. At the default tempo of 100 that is closer to 1.67 beats. Use `beat(base)` for a beat.
+::: tip `1` is not one time unit
+`1` is one **second**. In the default module the time unit is `3/5` s, so `1` is about 1.67 units. Use `base.d` for one unit.
 :::
+
+The BaseNote's own duration row is different: its value *is* the time unit, and the widget shows `60 / base.d` beside it, for example "= 100 BPM", read only. It has no icon strip. A measure bar's row is labelled `duration (bar length)` and shows "= 4 time units"; it has no icon strip either. See [Note Widget](/user-guide/interface/variable-widget#the-basenotes-duration).
+
+### Amplitude, attack and release
+
+These three rows are **interpretation variables**: they say how a note is played, not where it sits. They are the only rows that fall back to the BaseNote.
+
+- `amplitude` is a relative gain, `1` by default.
+- `attack` and `release` are **shares of the note's own duration**, such as `1/8`, clamped to 0–1. The row reads `Default: instrument envelope` when neither the note nor the BaseNote sets one, and `Inherited: <value>` when only the BaseNote does.
+
+```
+1/8                     # attack lasts an eighth of the note
+base.rel                # release as the BaseNote sets it
+```
+
+Type an expression and press `Save`; clear the field and press `Save` to go back to inheriting. See [attack and release](/reference/properties/attack-release) and [Instruments](/user-guide/playback/instruments#attack-and-release).
 
 ### Instrument
 
@@ -164,7 +180,7 @@ The widget's **EVALUATE** section holds three buttons. Which ones appear depends
 | Button | Available on | What it does |
 |---|---|---|
 | **`Liberate Dependencies`** | notes and silences | Rewrites every note that references this one so it references what *this* note references instead. The note itself survives, now with nothing depending on it. |
-| **`Evaluate to BaseNote`** | every note except the BaseNote — including measure bars | Rewrites this note's start time, duration and frequency so they reference only the BaseNote. TET power terms are preserved rather than flattened into an ugly fraction. |
+| **`Evaluate to BaseNote`** | every note except the BaseNote — including measure bars | Rewrites this note's start time, duration and frequency (a bar: start time and duration) so they reference only the BaseNote. TET power terms are preserved rather than flattened into an ugly fraction. |
 | **`Evaluate Module`** | the BaseNote only | Does the same to every note in the module at once. |
 
 `Liberate Dependencies` is not offered on measure bars. `Evaluate to BaseNote` is not offered on the BaseNote — it is already there.

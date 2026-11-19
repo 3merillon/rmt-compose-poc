@@ -102,10 +102,9 @@ The library's **Scale Systems** section ships a **19-TET** module (file `scale-s
 |---|---|
 | Notes | 20 — nineteen steps plus the note you start on |
 | Base frequency | 440 Hz |
-| Tempo | 100 |
-| Beats per measure | 4 |
+| BaseNote duration (time unit) | `3/5` s, shown as 100 BPM |
 | Instrument | `sine-wave` |
-| Note duration | `beat(base) * (1/2)` |
+| Note duration | `base.d * (1/2)` |
 | Step | `[n].f * 2 ^ (1/19)` |
 
 Note 1 is `base.f`; every later note is the previous one times `2 ^ (1/19)`. It is a chain, so moving note 1 moves the whole scale.

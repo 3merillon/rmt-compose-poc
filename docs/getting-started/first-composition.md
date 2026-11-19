@@ -11,7 +11,7 @@ You'll start from an empty workspace, create three notes — a root, a perfect f
 
 Go to [rmt.world](https://rmt.world), or run `npm run dev` locally and open `http://localhost:3000`.
 
-The app boots with the **default module** already loaded: 169 notes, with the BaseNote at 263 Hz and tempo 100. Play it, drag things around, get a feel for it. Then clear it out.
+The app boots with the **default module** already loaded: 169 notes, with the BaseNote at 263 Hz and a time unit of 3/5 s (100 BPM). Play it, drag things around, get a feel for it. Then clear it out.
 
 ![The RMT Compose workspace: notes as coloured rectangles on a frequency/time grid, with the orange BaseNote circle at the left](/img/workspace-overview.png)
 
@@ -25,9 +25,9 @@ The app boots with the **default module** already loaded: 169 notes, with the Ba
 Everything disappears except the BaseNote.
 
 ::: info The BaseNote is not a note
-The BaseNote (id 0) makes no sound. It is the reference every other note is measured against: it holds the base **frequency**, **startTime**, **tempo** and **beatsPerMeasure** for the whole module. To hear anything, you have to add notes that reference it.
+The BaseNote (id 0) makes no sound. It is the reference every other note is measured against: it holds the base **frequency**, **startTime** and **duration** (the time unit) for the whole module. To hear anything, you have to add notes that reference it.
 
-In the default module those values are 263 Hz, 0, tempo 100, 4 beats per measure.
+In the default module those values are 263 Hz, 0 and 3/5 s, which the note widget shows as 100 BPM.
 :::
 
 ## Step 3: Read the workspace
@@ -58,7 +58,7 @@ For a note created from the BaseNote, the defaults are:
 | Field | Expression | Meaning |
 |---|---|---|
 | Frequency | `base.f` | the BaseNote's frequency — 263 Hz |
-| Duration | `beat(base)` | one beat, at the BaseNote's tempo |
+| Duration | `base.d` | one time unit, the BaseNote's duration |
 | Start Time | `base.t` | the BaseNote's start time — 0 |
 
 Leave all three alone and click **Create**.
@@ -137,7 +137,7 @@ The **frequency** row of a selected note has **▲** and **▼** buttons. By def
 
 ### Change a duration
 
-The **duration** row has five note-length buttons — **Whole**, **Half**, **Quarter**, **Eighth**, **Sixteenth** — plus two dot buttons: `.` multiplies by 3/2, `..` by 7/4. Quarter is one beat, so it writes `beat(base)`; a dotted eighth writes `beat(base) * (3/4)`.
+The **duration** row has five note-length buttons — **Whole**, **Half**, **Quarter**, **Eighth**, **Sixteenth** — plus two dot buttons: `.` multiplies by 3/2, `..` by 7/4. Quarter is one time unit, so it writes `base.d`; a dotted eighth writes `base.d * (3/4)`.
 
 ### Try other intervals
 
@@ -180,7 +180,7 @@ The same submenu holds **Reset Default Module**, which restores the composition 
 ## What you've learned
 
 - The **BaseNote** is the reference; it makes no sound.
-- Every note property is an **expression** — `base.f * (3/2)`, `beat(base)`, `[1].t + [1].d`.
+- Every note property is an **expression** — `base.f * (3/2)`, `base.d`, `[1].t + [1].d`.
 - New notes are created from the **ADD NOTE / SILENCE** section of the note widget, and inherit the pitch of the note you create them from.
 - Referencing another note creates a **dependency**: change the parent, the child follows.
 - Ratios like 3/2 and 5/4 are stored exactly, so transposing is a single edit.

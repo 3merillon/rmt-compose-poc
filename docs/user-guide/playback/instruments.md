@@ -58,10 +58,10 @@ The change applies to the **next** playback, not the one in progress — an inst
 
 ```json
 {
-  "baseNote": { "frequency": "263", "startTime": "0", "tempo": "100", "beatsPerMeasure": "4" },
+  "baseNote": { "frequency": "263", "startTime": "0", "duration": "3/5" },
   "notes": [
-    { "id": 1, "startTime": "base.t", "duration": "beat(base)", "frequency": "base.f", "instrument": "piano" },
-    { "id": 2, "startTime": "[1].t + [1].d", "duration": "beat(base)", "frequency": "[1].f * (3/2)" }
+    { "id": 1, "startTime": "base.t", "duration": "base.d", "frequency": "base.f", "instrument": "piano" },
+    { "id": 2, "startTime": "[1].t + [1].d", "duration": "base.d", "frequency": "[1].f * (3/2)" }
   ]
 }
 ```
@@ -98,6 +98,19 @@ When you delete a note with **Keep Dependencies** (the note widget's DELETE NOTE
 
 See [Dependencies](/user-guide/notes/dependencies) for what else that operation rewrites.
 
+## Attack and release
+
+Every instrument has an envelope: how a note swells in at its start and fades at its end. Each instrument carries its own, written as shares of the note's length. A note can override two of its parts with the interpretation variables **`attack`** (alias `atk`) and **`release`** (alias `rel`).
+
+- Both are **shares of the note's own duration**, such as `1/8`, clamped to 0–1.
+- A note's own value replaces the instrument's ratio for that part. When neither the note nor the BaseNote sets one, the instrument's own envelope applies. Each is replaced on its own: setting only `attack` leaves the instrument's release.
+- The BaseNote's `attack` and `release` apply to every note that sets none of its own, like `amplitude`.
+- Set them in the `ATTACK` and `RELEASE` rows of the [note widget](/user-guide/interface/variable-widget#attack-and-release), which read `Default: instrument envelope`, `Inherited: <value>` or `Evaluated: <value>`.
+
+The anti-click floors stay: an attack is never shorter than 3 ms and a release never shorter than 15 ms, so a very short note cannot click. If a note's own attack and release together exceed its duration, both are scaled down to fit, and an `attack` of `1` is a swell to the very end. Instrument defaults leave at least 10% of the note as its body.
+
+The harmonium voices, whose attack and release are fixed times, are overridden the same way. See [attack and release](/reference/properties/attack-release) for the exact rules.
+
 ## The synth voices
 
 `sine-wave` and `triangle-wave` are one oscillator each — a pure sine, and a triangle with a gentler harmonic series.
@@ -118,7 +131,7 @@ Two notes a ratio `p/q` apart share an overtone: the `p`-th harmonic of the lowe
 |---|---|---|
 | Harmonics | **Every one from the 1st to the 16th** | `sine-wave` has one; `organ` has no 2nd and no 7th; `triangle-wave` and `square-wave` have only the odd ones |
 | Steadiness | One oscillator. No unison, no detune, no vibrato | `square-wave` and `sawtooth-wave` detune three oscillators by ±4 cents, which makes even a single note waver |
-| Attack and release | **Fixed times**: 30 ms and 80 ms (`harmonium`), 60 ms and 120 ms (`harmonium-soft`) | Fractions of the note's length: a long chord swells slowly and fades through its last tenth or more |
+| Attack and release | **Fixed times**: 30 ms and 80 ms (`harmonium`), 60 ms and 120 ms (`harmonium-soft`), unless a note sets its own [attack and release](#attack-and-release) | Fractions of the note's length: a long chord swells slowly and fades through its last tenth or more |
 | Between them | Full level, held | A decay to a lower sustain level |
 
 So a `7/4` has the 7th harmonic to meet on, an `11/8` the 11th, a `13/8` the 13th.

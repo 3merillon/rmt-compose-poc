@@ -9,14 +9,29 @@ description: The stack VM that executes note bytecode — the fraction pool, rep
 
 | Export | Role |
 |---|---|
-| `BinaryEvaluator` | the stack VM (`:831`) |
-| `IncrementalEvaluator` | dirty tracking + per-variable evaluation order (`:1699`) |
-| `MusicValue` | rational / irrational / symbolic value wrapper (`:332`) |
-| `SymbolicPower` | algebraic form of an irrational power (`:60`) — see [SymbolicPower](/developer/core/symbolic-power) |
+| `BinaryEvaluator` | the stack VM (`src/binary-evaluator.js:829`) |
+| `IncrementalEvaluator` | dirty tracking + per-variable evaluation order (`:1584`) |
+| `MusicValue` | rational / irrational / symbolic value wrapper (`:330`) |
+| `SymbolicPower` | algebraic form of an irrational power (`:58`) — see [SymbolicPower](/developer/core/symbolic-power) |
 
 ::: info This is the path that actually runs
-A browser session runs the **JavaScript** evaluator. The WASM evaluator exists but its hot-swap is opt-in via `?evaluator=wasm` (`src/wasm/evaluator-adapter.js:37-41`, and the comment at `src/module.js:59-62`), and that path currently hangs the main thread on a full re-evaluation cycle. Everything on this page describes the shipping JS path. See [WASM Overview](/developer/wasm/overview).
+Every browser session runs the **JavaScript** evaluator. The WASM evaluator is disabled: the Rust core still has the old variable layout (`tempo`, `beatsPerMeasure`, `measureLength` at indices 3 to 5, no attack or release), so `WASM_MATCHES_VARIABLE_LAYOUT` is `false` in `src/wasm/evaluator-adapter.js`, `?evaluator=wasm` is ignored with a console warning, and the hot-swap in `Module` never arms. Porting the Rust core is planned. See [WASM Overview](/developer/wasm/overview).
 :::
+
+## The six variables
+
+A note has six variables, addressed by the `VAR` indices in `src/binary-note.js`:
+
+| Index | `VAR` | Variable | Kind |
+|---|---|---|---|
+| 0 | `START_TIME` | `startTime` | language |
+| 1 | `DURATION` | `duration` | language |
+| 2 | `FREQUENCY` | `frequency` | language |
+| 3 | `AMPLITUDE` | `amplitude` | interpretation |
+| 4 | `ATTACK` | `attack` | interpretation |
+| 5 | `RELEASE` | `release` | interpretation |
+
+`FIRST_INTERPRETATION_VAR` is `3`. The language variables relate a note to other notes; the BaseNote holds the only absolute values (a frequency in Hz, a start and a duration in seconds, with `base.d` the time unit). The interpretation variables say how a note sounds: `amplitude` is a relative gain, `attack` and `release` are shares of the note's own duration. There is no stored tempo, beats-per-measure or measure length, and no computed measure length: a measure bar is an ordinary note whose duration is its length.
 
 ## The machine
 
@@ -37,31 +52,30 @@ class BinaryEvaluator {
 
 The stack holds **only pooled `Fraction`s** — BigInt-backed since fraction.js 5.x, so a pooled value is exact at any magnitude. `SymbolicPower` appears transiently inside the `POW` handler and never survives it (see [POW](#pow-and-corruption)).
 
-`evaluate(expr, evalCache)` (`:1034`) walks the bytecode with a `pc` cursor and returns the single remaining stack value. `LOAD_CONST_BIG` decodes its variable-length BigInts straight into a pooled fraction (`:1061-1073`) — the old path routed them through a double-backed `Fraction` constructor, which silently rounded anything past 2^53.
+`evaluate(expr, evalCache)` (`:1031`) walks the bytecode with a `pc` cursor and returns the single remaining stack value. `LOAD_CONST_BIG` decodes its variable-length BigInts straight into a pooled fraction (`:1058-1070`) — the old path routed them through a double-backed `Fraction` constructor, which silently rounded anything past 2^53.
 
 ## Value resolution — `LOAD_REF` and `LOAD_BASE`
 
-There is **no recursion**. The [evaluation order](#evaluation-order-per-variable) guarantees that every variable an expression reads is already in the cache by the time it is evaluated. `LOAD_REF` (`:1074-1131`) resolves in this order:
+There is **no recursion**. The [evaluation order](#evaluation-order-per-variable) guarantees that every variable an expression reads is already in the cache by the time it is evaluated. `LOAD_REF` (`:1071-1126`) resolves in this order:
 
 1. the caller's `evalCache` entry for that note id;
 2. the evaluator's own internal `cache` (`getCachedValue()`) — only a standalone `evaluateNote()` fills it; the incremental path never does, so it cannot serve a stale value there;
-3. **for `TEMPO`, `BEATS_PER_MEASURE`, `MEASURE_LENGTH` and `AMPLITUDE` only** — the same two lookups again against note **0**, the BaseNote (`:1078-1095`);
+3. **for the interpretation variables only** (`varIdx >= FIRST_INTERPRETATION_VAR`: `AMPLITUDE`, `ATTACK`, `RELEASE`) — the same two lookups again against note **0**, the BaseNote (`:1098-1115`);
 4. a **hard-coded default**.
 
-Step 3 is the inheritance rule users feel: `[5].tempo` on a note with no tempo expression yields the BaseNote's tempo, and `[5].a` on a note with no amplitude yields the BaseNote's amplitude. `startTime`, `duration` and `frequency` do **not** inherit.
+Step 3 is the inheritance rule users feel: `[5].a` on a note with no amplitude yields the BaseNote's amplitude, and `[5].attack` and `[5].release` work the same way. `startTime`, `duration` and `frequency` do **not** inherit: they are relations, written or absent, so a reference to one that a note does not define gets the default below. `src/variable-deps.js` states the same rule for the scheduler (`resolveVariableRef()`, `>= FIRST_INTERPRETATION_VAR` only).
 
 ::: warning Unresolvable references do not throw — they get a default, and a console error
-| Property | Default pushed |
+| Variable | Default pushed |
 |---|---|
 | `startTime` | `0` |
 | `duration` | `1` |
 | `frequency` | `440` |
-| `tempo` | `60` |
-| `beatsPerMeasure` | `4` |
-| `measureLength` | `4` |
 | `amplitude` | `1` |
+| `attack` | `0` |
+| `release` | `0` |
 
-(`UNRESOLVED_DEFAULTS`, `binary-evaluator.js:31`, pushed by `pushDefault()` at `:984`.) The default is no longer silent. `evaluate()` records every reference it replaced in `_lastEvalUnresolved`, and module evaluation reports them once per batch, naming both ends and the reason (`reportProblems()`, `:1619`):
+(`UNRESOLVED_DEFAULTS`, `binary-evaluator.js:28`, pushed by `pushDefault()` at `:982`.) The default is no longer silent. `evaluate()` records every reference it replaced in `_lastEvalUnresolved`, and module evaluation reports them once per batch, naming both ends and the reason (`reportProblems()`, `:1504`):
 
 ```
 Unresolved reference! A hard-coded default was used instead:
@@ -71,7 +85,7 @@ Unresolved reference! A hard-coded default was used instead:
 
 Code that calls `evaluate()` directly — the widget's live previews and the validators — still gets the default without a message; it is the module evaluation that reports.
 
-`amplitude` is the one variable whose default is not a stand-in. A note that sets none, under a BaseNote that sets none, sounds at `1` **by definition**, so `[5].a` on such a note pushes `1` and records nothing (`amplitudeIsUnset()`). It is reported like the others only when the note it names does not exist, or when an amplitude that *is* set has no value because of a cycle or a failed evaluation.
+`amplitude` is the one variable whose default is not a stand-in. A note that sets none, under a BaseNote that sets none, sounds at `1` **by definition**, so `[5].a` on such a note pushes `1` and records nothing (`amplitudeIsUnset()`, `:999`). It is reported like the others only when the note it names does not exist, or when an amplitude that *is* set has no value because of a cycle or a failed evaluation. `attack` and `release` have no such exemption: a reference to one that neither the note nor the BaseNote sets pushes `0` and is reported.
 
 Delete a note and its dependents evaluate against these defaults — a dependent's frequency becomes 440 Hz. `Module.removeNote()` still does not rewrite dependents, but it warns about every dependent left dangling **and marks them dirty**, so they show at once what a reload would show (the UI's delete paths liberate dependents first; this guards programmatic callers and hand-authored JSON).
 :::
@@ -80,17 +94,17 @@ Delete a note and its dependents evaluate against these defaults — a dependent
 
 | Situation | What happens |
 |---|---|
-| `DIV` with a zero divisor | `console.warn('Division by zero in binary evaluator, using 1')`, pushes `1`, **and sets the corruption flag** for the property being evaluated — the note crosshatches, same path as an irrational `POW` (`:1190-1204`) |
-| Stack depth ≠ 1 at the end | `console.warn('Stack has N items after evaluation, expected 1')`, returns the top (`:1345-1347`) |
-| `pop()` on an empty stack | throws `Stack underflow in binary evaluator` (`:954-957`) |
+| `DIV` with a zero divisor | `console.warn('Division by zero in binary evaluator, using 1')`, pushes `1`, **and sets the corruption flag** for the property being evaluated — the note crosshatches, same path as an irrational `POW` (`:1184-1200`) |
+| Stack depth ≠ 1 at the end | `console.warn('Stack has N items after evaluation, expected 1')`, returns the top (`:1253-1255`) |
+| `pop()` on an empty stack | throws `Stack underflow in binary evaluator` (`:952-958`) |
 | `peek()` on an empty stack | throws `Stack empty in binary evaluator` |
-| Unknown opcode byte | throws `Unknown opcode: 0x..` (`:1340-1341`) |
+| Unknown opcode byte | throws `Unknown opcode: 0x..` (`:1249`) |
 
-`FIND_TEMPO`, `FIND_MEASURE`, `DUP` and `SWAP` have cases in the switch but **no compiler emits them**, so they are unreachable. `FIND_INSTRUMENT` has no case at all.
+`DUP` and `SWAP` have cases in the switch but **no compiler emits them**, so they are unreachable. `FIND_INSTRUMENT` has no case at all. `FIND_TEMPO` (`0x20`) and `FIND_MEASURE` (`0x21`) are retired: they are no longer in `OP`, so a byte with either value is an unknown opcode.
 
 ## `POW` and corruption
 
-`OP.POW` (`:1215-1242`) is the only place a value can leave the rationals.
+`OP.POW` (`:1209-1232`) is the only place a value can leave the rationals.
 
 ```javascript
 case OP.POW: {
@@ -109,9 +123,9 @@ case OP.POW: {
 }
 ```
 
-`MusicValue.pow()` (`:616-648`) tries `tryRationalPower()` first — an exact integer power, or a perfect n-th root, computed in BigInt so it is exact at any magnitude (the root check is an exact binary search, `integerNthRoot` at `:724`; the old float version silently missed perfect roots past 2^53).
+`MusicValue.pow()` (`:571`) tries `tryRationalPower()` (`:644`) first — an exact integer power, or a perfect n-th root, computed in BigInt so it is exact at any magnitude (the root check is an exact binary search, `integerNthRoot` at `:722`; the old float version silently missed perfect roots past 2^53).
 
-Two DoS caps bound exact exponentiation (`:621-622`): integer exponents beyond **65536**, or results beyond **~1 Mbit per component**, are treated as irrational — corruption flag plus float approximation, the same UX as an inexact root. Without the caps a `x^(10^9)` expression would allocate gigabit integers (on 4.x it silently overflowed to `Infinity` instead).
+Two DoS caps bound exact exponentiation (`:619-620`): integer exponents beyond **65536**, or results beyond **~1 Mbit per component**, are treated as irrational — corruption flag plus float approximation, the same UX as an inexact root. Without the caps a `x^(10^9)` expression would allocate gigabit integers (on 4.x it silently overflowed to `Infinity` instead).
 
 If `tryRationalPower()` fails and the base is a positive integer below 2^53 (`SymbolicPower` stores bases as Numbers; real bases are small TET integers), it builds a `SymbolicPower`. That symbolic value is then **immediately flattened back to an approximated rational** by the branch above. Verified against the running VM:
 
@@ -139,7 +153,7 @@ It carries **no corruption bitmask**. Corruption bits are accumulated per-note b
 
 ## The fraction pool
 
-`FractionPool` (`:749-828`) is a **bump allocator**, not a ring buffer. Its fields are **always BigInt** — fraction.js 5.x arithmetic throws on mixed Number/BigInt fields, so `alloc()` coerces Number arguments once at the door:
+`FractionPool` (`:747-826`) is a **bump allocator**, not a ring buffer. Its fields are **always BigInt** — fraction.js 5.x arithmetic throws on mixed Number/BigInt fields, so `alloc()` coerces Number arguments once at the door:
 
 ```javascript
 alloc(n = 0n, d = 1n) {
@@ -151,80 +165,77 @@ alloc(n = 0n, d = 1n) {
 reset() { this.index = 0; }            // rewind — called once per batch
 ```
 
-`allocFrom()` (`:795`) copies BigInt fields directly and coerces duck-typed `{s, n, d}` values with Number fields (the WASM adapter can produce those) so they cannot poison downstream arithmetic.
+`allocFrom()` (`:793`) copies BigInt fields directly and coerces duck-typed `{s, n, d}` values with Number fields (the WASM adapter can produce those) so they cannot poison downstream arithmetic.
 
-`IncrementalEvaluator.evaluateDirty()` calls `evaluator.beginBatch()` (`:1793`), which calls `pool.reset()`. Everything allocated during the previous batch is recycled at that instant.
+`IncrementalEvaluator.evaluateDirty()` calls `evaluator.beginBatch()` (`:1678`, defined at `:885`), which calls `pool.reset()`. Everything allocated during the previous batch is recycled at that instant.
 
 ::: danger Never cache a pooled fraction
-`reset()` rewinds the index, so the next batch mutates the very objects the last batch handed out. `evaluateVariable()` copies every result into a fresh `new Fraction(...)` before storing it (`:1556-1559`). If you add a code path that keeps a value returned by `evaluate()` across a batch boundary, copy it first.
+`reset()` rewinds the index, so the next batch mutates the very objects the last batch handed out. `evaluateVariable()` copies every result into a fresh `new Fraction(...)` before storing it (`:1467`). If you add a code path that keeps a value returned by `evaluate()` across a batch boundary, copy it first.
 :::
 
 ## `evaluateNote()` and `evaluateVariable()`
 
-`evaluateNote(note, evalCache)` (`:1364`) evaluates one note's seven expressions and returns:
+`evaluateNote(note, evalCache)` (`:1272`) evaluates one note's six expressions and returns:
 
 ```javascript
 {
-  startTime, duration, frequency, tempo, beatsPerMeasure, measureLength,
-  amplitude,        // null unless the note defines one
-  corruptionFlags   // u8 bitmask
+  startTime, duration, frequency,
+  amplitude, attack, release,   // null unless the note defines one
+  corruptionFlags               // bitmask, see below
 }
 ```
 
-The unit of evaluation is the **variable**, not the note. `evaluateVariable(note, varIndex, record, evalCache)` (`:1550`) runs one expression and writes one field of the record; `evaluateNote()` is a group of one handed to [`evaluateVariables()`](#evaluation-order-per-variable), which decides the order. A note's variables may read each other — the BaseNote's tempo from its own frequency, a start from the same note's duration — so the in-progress record is written into the shared cache *before* evaluation begins:
+The unit of evaluation is the **variable**, not the note. `evaluateVariable(note, varIndex, record, evalCache)` (`:1458`) runs one expression and writes one field of the record; `evaluateNote()` is a group of one handed to [`evaluateVariables()`](#evaluation-order-per-variable), which decides the order. A note's variables may read each other — the BaseNote's duration from its own frequency, a start from the same note's duration — so the in-progress record is written into the shared cache *before* evaluation begins:
 
 ```javascript
 const workingCache = evalCache || new Map();
-workingCache.set(note.id, result);   // :1348-1349
+workingCache.set(note.id, result);   // :1281-1282
 ```
 
 ::: tip There is no fixed order inside a note
-There used to be one: tempo → beatsPerMeasure → frequency → measureLength → startTime → duration. An expression that read a variable *later* in that list got the hard-coded default, or whatever the note had evaluated to last time — `tempo: base.f * (15/64)` on the BaseNote computed from 440, then from the previous frequency after every edit. The same list, with `amplitude` appended, survives as `VAR_ORDER` (`:22`), but only as the order in which the walk *starts*; anything a variable reads is evaluated ahead of it.
+There used to be one. An expression that read a variable *later* in it got the hard-coded default, or whatever the note had evaluated to last time — a BaseNote variable computed from 440, then from the previous frequency after every edit. The list survives as `VAR_ORDER` (`:21`: frequency, startTime, duration, amplitude, attack, release), but only as the order in which the walk *starts*; anything a variable reads is evaluated ahead of it.
 :::
 
-After each variable, if `_lastEvalWasCorrupted` was set by a `POW`, the matching bit is OR-ed into `corruptionFlags` (`:1572-1574`). The bits are the `CORRUPT` mask from `binary-note.js:55-62`: `startTime 0x01`, `duration 0x02`, `frequency 0x04`, `tempo 0x08`, `beatsPerMeasure 0x10`, `measureLength 0x20`, `amplitude 0x40`.
+After each variable, if `_lastEvalWasCorrupted` was set by a `POW`, the matching bit is OR-ed into `corruptionFlags` (`:1479-1481`). The bits are the `CORRUPT` mask from `src/binary-note.js:62-69`, `1 << varIndex`: `startTime 0x01`, `duration 0x02`, `frequency 0x04`, `amplitude 0x08`, `attack 0x10`, `release 0x20`.
 
-### The synthetic `measureLength`
+### No computed measure length
 
-If `measureLength` was not explicitly defined **and** the note is a measure bar (has `startTime`, no `duration`, no `frequency`) or is the BaseNote, it is computed as `beatsPerMeasure.mul(60).div(tempo)` and stored as a **real, exact `Fraction`** (`:1588-1608`). It used to be a duck-typed `{s, n, d, valueOf}` object quantized to 1e-6 — that impostor drifted against the exact expression path and its Number fields would poison BigInt-backed consumers. Regular notes skip this entirely.
-
-Whether a note is a measure bar is read from which expressions it *has* (`hasComputedMeasureLength()`, `src/variable-deps.js:53`), so the answer is known before anything is evaluated: the computed value is a variable like any other, with `beatsPerMeasure` and `tempo` as its dependencies.
+Earlier versions computed a `measureLength` for a measure bar and for the BaseNote (`beatsPerMeasure × 60 / tempo`) as a seventh value of the record. That is gone, with the variables it used. A measure bar is an ordinary note (a start, a duration, no frequency, flagged `measure`) and its length is its own `duration`, evaluated like any other. The evaluator does not look at the flag.
 
 ## Incremental evaluation
 
 ```javascript
-new IncrementalEvaluator(module, dependencyGraph, evaluator)   // :1669
+new IncrementalEvaluator(module, dependencyGraph, evaluator)   // :1585
 ```
 
 Fields: `graph`, `evaluator`, `dirty` (a `Set`), `cache` (`Map<noteId, result>`), `generation`.
 
 | Method | Effect |
 |---|---|
-| `invalidate(noteId, dependents?)` (`:1731`) | marks the note **and everything that must follow it** dirty, via `graph.getEvaluationDependents()` — transitive, and across the BaseNote. A caller that already holds that set passes it in. Bumps `generation`. |
-| `markDirtyOnly(noteId)` (`:1750`) | marks dirty **without** re-registration or bytecode invalidation. |
-| `invalidateAll()` (`:1757`) | clears both caches, bumps generation, marks every note dirty |
-| `evaluateDirty()` (`:1787`) | `beginBatch()` → a blank record for every dirty note → `evaluateVariables()` → `reportProblems()` → clear dirty → return the cache |
+| `invalidate(noteId, dependents?)` (`:1616`) | marks the note **and everything that must follow it** dirty, via `graph.getEvaluationDependents()` — transitive, and across the BaseNote. A caller that already holds that set passes it in. Bumps `generation`. |
+| `markDirtyOnly(noteId)` (`:1635`) | marks dirty **without** re-registration or bytecode invalidation. |
+| `invalidateAll()` (`:1642`) | clears both caches, bumps generation, marks every note dirty |
+| `evaluateDirty()` (`:1672`) | `beginBatch()` → a blank record for every dirty note → `evaluateVariables()` → `reportProblems()` → clear dirty → return the cache |
 | `getEvaluatedNote(id)`, `isCacheValid()` | accessors |
 
-`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` (`src/module.js:213`) uses it for dependents whose *values* changed but whose *bytecode* did not, and so does the batch path (`:252`). It was added to reach parity with the WASM evaluator; before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
+`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` (`src/module.js:235-237`) uses it for dependents whose *values* changed but whose *bytecode* did not, and so does the batch path (`src/module.js:310-313`). It was added to reach parity with the WASM evaluator; before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
 
 Dirty tracking stays **per note**: a change to any expression of a note re-evaluates all of that note and of every note downstream. That is a superset of what strictly has to change, and it is what keeps the dirty set one cheap graph walk. Only the *order* is per variable.
 
 ::: tip A dirty note never reads its own last value
-`evaluateDirty()` installs a blank record for every dirty note before it evaluates anything (`:1805-1820`). From then on a variable can read only what this batch has computed, or what a clean note holds. The old code kept the previous record until the note's turn came, so anything read out of order silently got last time's value — the reason a wrong result used to "fix itself" on the second evaluation, and a looped one grew on every edit.
+`evaluateDirty()` installs a blank record for every dirty note before it evaluates anything (`:1690-1705`). From then on a variable can read only what this batch has computed, or what a clean note holds. The old code kept the previous record until the note's turn came, so anything read out of order silently got last time's value — the reason a wrong result used to "fix itself" on the second evaluation, and a looped one grew on every edit.
 :::
 
 ### Evaluation order per variable
 
-`evaluateVariables(notes, records, evalCache)` (`:1407-1540`) takes the dirty notes (ascending by id) and evaluates their variables one at a time, each after the variables it reads.
+`evaluateVariables(notes, records, evalCache)` (`:1315-1452`) takes the dirty notes (ascending by id) and evaluates their variables one at a time, each after the variables it reads.
 
 What a variable reads comes from `src/variable-deps.js`, the one place that states it:
 
 | A variable reads… | Resolved by |
 |---|---|
-| every `LOAD_REF` / `LOAD_BASE` in its bytecode, `base.x` being note 0 | `BinaryExpression.getVariableRefs()` (`binary-note.js:291`), decoded once per expression |
-| the BaseNote's variable instead, when the reference is to a `tempo`, `beatsPerMeasure`, `measureLength` or `amplitude` the named note does not define | `resolveVariableRef()` (`variable-deps.js:92`) |
-| `beatsPerMeasure` and `tempo`, for a [synthetic `measureLength`](#the-synthetic-measurelength) | `getVariableRefs()` (`variable-deps.js:74`) |
+| every `LOAD_REF` / `LOAD_BASE` in its bytecode, `base.x` being note 0 | `BinaryExpression.getVariableRefs()` (`binary-note.js:295`), decoded once per expression |
+| the BaseNote's variable instead, when the reference is to an `amplitude`, `attack` or `release` the named note does not define (indices `>= FIRST_INTERPRETATION_VAR`) | `resolveVariableRef()` (`variable-deps.js:81`) |
 | nothing schedulable, when no note defines it — `evaluate()` falls back to the default and reports it | — |
 
 The walk is depth-first and iterative (explicit stacks, so a 1000-deep chain cannot overflow the call stack). It starts from every variable in turn — notes in ascending id, variables in `VAR_ORDER` — and before evaluating one, descends into whatever it reads **inside the dirty set**. Variables of clean notes are final and are read as they are.
@@ -239,10 +250,10 @@ Between whole notes that is a loop — the old per-note Kahn sort reported `Depe
 
 ### True cycles
 
-A variable that depends on itself has no order. The walk is Tarjan's strongly-connected-components algorithm, so it finds each set of mutually dependent variables **whole**, and then (`:1510-1528`):
+A variable that depends on itself has no order. The walk is Tarjan's strongly-connected-components algorithm, so it finds each set of mutually dependent variables **whole**, and then (`:1411-1436`):
 
-1. evaluates the members in ascending (note id, variable) order — a member read before its turn falls back to the hard-coded default (or, for an inheritable variable, to the BaseNote's value), exactly like any other unresolved reference;
-2. hands one loop per set to `reportProblems()` (`:1619`).
+1. evaluates the members in ascending (note id, variable) order — a member read before its turn falls back to the hard-coded default (or, for an interpretation variable, to the BaseNote's value), exactly like any other unresolved reference;
+2. hands one loop per set to `reportProblems()` (`:1504`).
 
 ```
 Dependency cycle detected! These variables depend on themselves, so some of their reads fell back to defaults:
@@ -254,7 +265,7 @@ It does **not** throw, and the loop still gets values. Because the order inside 
 Cycles are meant to be prevented upstream, by `validateExpression()` in `src/modals/validation.js`, which uses the same per-variable rule — see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable).
 
 ::: info The WASM path still orders whole notes
-The Rust evaluator evaluates a note's six expressions in the old fixed order, and both WASM incremental evaluators sort **notes** with the Kahn algorithm this page used to describe (`WasmIncrementalEvaluator.topoSort()`, `src/wasm/evaluator-adapter.js:576`). Under `?evaluator=wasm` a module that needs per-variable order therefore still reports a false cycle. Nothing of this section has been ported.
+The Rust evaluator evaluates a note's expressions in the old fixed order and with the old variable layout, and both WASM incremental evaluators sort **notes** with the Kahn algorithm this page used to describe (`WasmIncrementalEvaluator.topoSort()`, `src/wasm/evaluator-adapter.js:589`). Nothing of this section has been ported, which is one reason the WASM evaluator is disabled.
 :::
 
 ## From corruption flag to pixels
@@ -263,13 +274,13 @@ This is the whole point of tracking corruption, and it crosses four files:
 
 ```
 POW produces an irrational
-  → BinaryEvaluator._lastEvalWasCorrupted = true          binary-evaluator.js:1230
-  → evaluateVariable ORs the property's bit into corruptionFlags   :1545-1547
-  → Module._updateCorruptionFlags() pushes it into the graph   module.js:683-706
-      → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1756
-  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:824-914
+  → BinaryEvaluator._lastEvalWasCorrupted = true          binary-evaluator.js:1224
+  → evaluateVariable ORs the property's bit into corruptionFlags   :1479-1481
+  → Module._updateCorruptionFlags() pushes it into the graph   module.js:682-705
+      → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1746
+  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:910-957
       0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
-  → the note widget prefixes the frequency with ≈             variable-controls.js:64-80
+  → the note widget prefixes the frequency with ≈             variable-controls.js:127-143
 ```
 
 `_updateCorruptionFlags` is scoped to the dirty set, not all notes.
@@ -301,12 +312,12 @@ Two costs matter now. **Depth** decides how much of the module a commit touches 
 
 | Thing | Value | Source |
 |---|---|---|
-| VM stack | 32 entries, doubles when exhausted | `binary-evaluator.js:836` |
-| Fraction pool (evaluator) | 256, doubles when exhausted | `:840` (class default is 128, `:750`) |
+| VM stack | 32 entries, doubles when exhausted | `binary-evaluator.js:834` |
+| Fraction pool (evaluator) | 256, doubles when exhausted | `:838` (class default is 128, `:748`) |
 | Fraction backing | `fraction.js@5.3.4` — `n`/`d`/`s` are **BigInt**, arbitrary precision | `node_modules/fraction.js` |
-| POW exponent cap | integer exponent ≤ **65536**, result ≤ **~1 Mbit** per component | `:621-622` |
-| Note id in bytecode | `u16` → max **65535** | `binary-note.js:124-128` |
-| Note id accepted anywhere | integer `0 … 65535` — enforced by the loader **and both expression parsers** | `module.js:915`, `dsl/parser.js:253`, `expression-compiler.js:215` |
+| POW exponent cap | integer exponent ≤ **65536**, result ≤ **~1 Mbit** per component | `:619-620` |
+| Note id in bytecode | `u16` → max **65535** | `binary-note.js:128` |
+| Note id accepted anywhere | integer `0 … 65535` — enforced by the loader **and both expression parsers** | `module.js:873`, `dsl/parser.js:253`, `expression-compiler.js:215` |
 
 ::: tip Arbitrary precision, end to end
 fraction.js 5.x is BigInt-backed, so exact rational arithmetic survives **any depth** of module tree: a 200-note `(3/2)` chain evaluates to its exact 98-digit numerator, and `(81/80)^400` is exact (see the `comma-chain-400` stress shape). `scripts/test-exactness.mjs` (part of `npm test`) locks this in: compile → evaluate → decompile → save → load → re-evaluate must reproduce every digit. The only remaining approximations are the *documented* ones — irrational `POW` results (corruption flag) and the float boundary `toNumber()` in `src/utils/fraction-num.js` where values leave for GL, Web Audio, and display.

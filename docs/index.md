@@ -72,10 +72,10 @@ base.f * (5/4)      # a major third above it
 base.f * (3/2)      # a perfect fifth above it
 ```
 
-Time works the same way. `beat(base)` is one beat in seconds, and `[1].t + [1].d` means "start exactly when note 1 ends":
+Time works the same way. `base.d` is the BaseNote's duration, the time unit (one beat, if you count in beats), and `[1].t + [1].d` means "start exactly when note 1 ends":
 
 ```
-beat(base) * 2      # two beats long
+base.d * 2          # two time units long
 [1].t + [1].d       # starts when note 1 ends
 ```
 

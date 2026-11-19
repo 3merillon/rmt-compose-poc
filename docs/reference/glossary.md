@@ -10,7 +10,7 @@ Terms used across the app and these docs. Where a term names something you can c
 ## A
 
 ### Amplitude
-A note's loudness, written as a relative gain: `1` is the default level, `2` twice the amplitude, `(1/2)` half. It is an expression like any other property (`a`), so it can be written against another note — `(121/100) * [3].a`. Inherited from the BaseNote unless a note defines its own. Playback clamps it to 0–4. See [amplitude](/reference/properties/amplitude).
+A note's loudness, written as a relative gain: `1` is the default level, `2` twice the amplitude, `(1/2)` half. It is an expression like any other variable (`a`), so it can be written against another note — `(121/100) * [3].a`. An [interpretation variable](#interpretation-variable): inherited from the BaseNote unless a note defines its own. Playback clamps it to 0–4. See [amplitude](/reference/properties/amplitude).
 
 ### Approximation (≈)
 The prefix shown in the [note widget](/user-guide/interface/variable-widget) before a value the app cannot represent exactly — an irrational one. Both directly and transitively [corrupted](#corruption) values display with `≈`. A **directly** corrupted value is shown as a decimal, to 8 significant figures (`≈1.0594631`); a **transitively** corrupted one is shown as a fraction. Either way the text is rendered in a warm amber, in italics.
@@ -25,18 +25,19 @@ The ratio the ▲ / ▼ [note arrows](#note-arrows) apply. Configurable in **Set
 `Independent` mode ships with no editor for the down interval. Selecting it freezes the down ratio at whatever it last held. See [Settings Reference](/reference/settings-reference).
 :::
 
+### Attack
+The share of a note's own duration it takes to rise to full level, written `attack` (alias `atk`), between 0 and 1. An [interpretation variable](#interpretation-variable). With none set on the note or the BaseNote, the instrument's own envelope applies; a 3 ms floor always stays. See [attack and release](/reference/properties/attack-release).
+
 ## B
 
 ### BaseNote
-The reference note of every module, id **0**. It supplies frequency, start time, tempo, beats per measure and measure length, and it is where the octave guide lines are anchored. Notes reference it as `base.f`, `base.t`, `beat(base)`, and so on. `[0].f` means exactly the same thing as `base.f`.
-
-The BaseNote has **no duration**.
+The reference note of every module, id **0**. It holds the only absolute values: a frequency in Hz, and a start and a duration in seconds (by default 440, 0 and 1). Its duration is the [time unit](#time-unit). It is also where the octave guide lines are anchored. Notes reference it as `base.f`, `base.t`, `base.d`, and so on. `[0].f` means exactly the same thing as `base.f`.
 
 ### Beat
-`beat(x)` — one beat of note *x*'s tempo, in seconds. It compiles to `60 / tempo(x)`. It is the idiom the app itself writes for every note-length button.
+No longer a term of the language. `beat(base)` became `base.d`: one beat is one [time unit](#time-unit). The function was removed, and typing it is refused with a message naming `base.d`.
 
 ### Beats per measure
-The number of beats in one measure — the numerator of the time signature. Inherited from the BaseNote unless a note overrides it.
+No longer stored. A meter is the length of a [measure bar](#measure-bar): beats per measure B is a bar of `base.d * B`.
 
 ### Binary bytecode
 The compiled form of an expression: a short sequence of opcodes (`LOAD_CONST`, `LOAD_REF`, `MUL`, `POW`, …) run on a stack VM with exact rational arithmetic. Expressions are never `eval`'d.
@@ -59,7 +60,7 @@ On the canvas, corruption shows as hatching:
 Both kinds display their value with an `≈` prefix in the note widget.
 
 ### Copy to Modules
-The [group widget](#group-widget) action that turns the current multi-selection into a new, self-contained module in the library's **Custom** section, named `Selection (N notes)`. The copy is **rooted at the selection's earliest note** — that note starts exactly on the new module's BaseNote (`base.t`), and the rest keep their relative times as `base.t + beat(base) * k`. References that point *inside* the selection are kept and renumbered, so the dependency tree survives; references that point outside it are frozen to the value they had. Colors and per-note instruments come across unchanged.
+The [group widget](#group-widget) action that turns the current multi-selection into a new, self-contained module in the library's **Custom** section, named `Selection (N notes)`. The copy is **rooted at the selection's earliest note** — that note starts exactly on the new module's BaseNote (`base.t`), and the rest keep their relative times as `base.t + base.d * k`. References that point *inside* the selection are kept and renumbered, so the dependency tree survives; references that point outside it are frozen to the value they had. Colors and per-note instruments come across unchanged.
 
 ### Custom (library section)
 The module-library section that [Copy to Modules](#copy-to-modules) writes into. It is not where uploads land: an uploaded module joins whichever section's **+** placeholder you clicked.
@@ -87,7 +88,7 @@ A **thick** line points at something the selected note depends on. A **thin** li
 **Start** (the default) or **End**, set by the two drop-mode buttons in the [module bar](#module-bar)'s toolbar — ⇤ for **Start**, ⇥ for **End**, just left of **Undo**/**Redo**; exactly one is lit at a time. It decides whether a module you drag onto a note anchors its imported start times to that note's **start** or to its **end**.
 
 ### DSL
-The expression language: `base.f * (3/2)`, `[1].t + [1].d`, `beat(base)`, `2^(7/12)`. Infix operators, note references in square brackets, three helper functions. It is the primary format — every shipped module uses it, and the note widget always *displays* it (a legacy expression is decompiled into DSL for the input box). Edits the app performs for you — a drag, a resize, an arrow press — rewrite an expression in whatever format it already uses; pressing **Save** in the note widget is what converts a legacy expression to DSL. See the [syntax reference](/reference/expressions/syntax).
+The expression language: `base.f * (3/2)`, `[1].t + [1].d`, `base.d * (1/2)`, `2^(7/12)`. Infix operators and note references in square brackets; it has no functions. It is the primary format — every shipped module uses it, and the note widget always *displays* it (a legacy expression is decompiled into DSL for the input box). Edits the app performs for you — a drag, a resize, an arrow press — rewrite an expression in whatever format it already uses; pressing **Save** in the note widget is what converts a legacy expression to DSL. See the [syntax reference](/reference/expressions/syntax).
 
 ## E
 
@@ -98,7 +99,7 @@ A tuning that divides an interval into *n* equal steps. `n`-TET usually means *n
 The number an expression computes to, shown on the `Evaluated:` line of the note widget. Contrast the **raw expression**, the text you typed.
 
 ### Expression
-The text stored for a note property. Seven properties are expressions: `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`. Nothing is stored as a number.
+The text stored for a note variable. Six variables are expressions: `startTime`, `duration`, `frequency`, `amplitude`, `attack`, `release`. Nothing is stored as a number.
 
 ## F
 
@@ -111,6 +112,9 @@ An exact rational value (numerator / denominator). All arithmetic in RMT Compose
 The floating panel that appears when several notes are selected. It carries two actions: **Copy to Modules** (save the selection into the library's Custom section) and **Delete all**. It is white, not orange, to match the white multi-selection highlight on the canvas. See [Selection & Group Editing](/user-guide/notes/selection).
 
 ## I
+
+### Interpretation variable
+A variable that says how a note sounds, not what it relates to: `amplitude`, `attack` and `release`. The other three, `frequency`, `startTime` and `duration`, are the language, the notation itself. The interpretation variables are the only ones that fall back to the BaseNote when a note does not define them. See [Expression Syntax](/reference/expressions/syntax).
 
 ### Interval
 The ratio between two frequencies. `2/1` octave, `3/2` fifth, `4/3` fourth, `5/4` major third, `81/80` syntonic comma.
@@ -126,7 +130,7 @@ Tuning by exact whole-number ratios drawn from the harmonic series: `3/2`, `5/4`
 ## L
 
 ### Legacy syntax
-The original method-chain expression format: `module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))`. It still loads and still saves back verbatim, and it compiles to exactly the same bytecode as the DSL. You will only meet it in old files and on the BaseNote's default `measureLength`.
+The original method-chain expression format: `module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))`. It still loads and still saves back verbatim, and it compiles to exactly the same bytecode as the DSL. You will only meet it in old files.
 
 ### Liberation (Liberate Dependencies)
 The **Liberate Dependencies** button in the note widget. It cuts every note that *depends on* the selected note free from it, by substituting the selected note's own expressions in place of the references to it. The dependents keep their current positions and pitches — they simply stop following the note. Undoable. Not available on measure bars.
@@ -145,10 +149,10 @@ Hidden transport mode: **shift-click** the Play button, or **long-press** it, to
 The rectangle you rubber-band across the workspace to select several notes at once: **shift-drag** on empty background with a mouse, **long-press then drag** on touch. Long-pressing a note on touch toggles it in or out of the selection.
 
 ### Measure bar
-A note that has a `startTime` and **nothing else** — no duration, no frequency. It is drawn as a vertical dashed line across the workspace and carries the meter (`beatsPerMeasure`) for the bar it opens.
+A silent note with a start and a duration, no frequency, and the flag `"measure": true`. The duration is the length of the bar, so a bar's length is its own `.d`. It is drawn as a vertical dashed line with a triangle, never as a rest. A silent note without the flag is a [silence](#silence); a note with only a start is a plain marker. See [Measure bars](/reference/module-schema#measure-bars).
 
 ### Measure chain
-A run of [measure bars](#measure-bar) where each one starts one measure after the previous: `[1].t + measure([1])`, `[2].t + measure([2])`, and so on. Change the tempo or the meter anywhere in the chain and every bar after it moves. This is how a composition gets its grid.
+A run of [measure bars](#measure-bar) where each one starts where the previous ends and is as long as it: `[1].t + [1].d` and `[1].d`, and so on. The first is `base.t` and `base.d * 4`. Give one bar a different duration, a meter change, and the bars after it follow. This is how a composition gets its grid.
 
 ### Module
 One composition: a `baseNote` plus a flat array of notes, saved as `module.json`. See the [module schema](/reference/module-schema).
@@ -208,6 +212,9 @@ A fraction naming a frequency relationship. `3/2` means "1.5 × the reference fr
 ### Raw expression
 The text of an expression, before compilation. It is what the `Raw:` field of the note widget shows and what a module file stores.
 
+### Release
+The share of a note's own duration it takes to fall to silence at its end, written `release` (alias `rel`), between 0 and 1. An [interpretation variable](#interpretation-variable). The floor is 15 ms. See [attack and release](/reference/properties/attack-release).
+
 ## S
 
 ### Scale controls
@@ -228,7 +235,7 @@ There is **no** "Settings…" entry in the **+** menu. The gear is the only open
 The audio path every note travels: voice gain → an optional stereo panner → the instrument's bus → a dry path plus a reverb send → the master gain → an optional limiter → the output.
 
 ### Silence
-A note with a `startTime` and a `duration` but **no frequency**. It occupies time and makes no sound. It is drawn with a dashed outline and the word "silence", it has no arrows, and it cannot be a drop target for a library module.
+A note with a `startTime` and a `duration` but **no frequency** and no `measure` flag (with the flag it is a [measure bar](#measure-bar)). It occupies time and makes no sound. It is drawn with a dashed outline and the word "silence", it has no arrows, and it cannot be a drop target for a library module.
 
 ### Stack VM
 The virtual machine that runs the bytecode, pushing and popping exact fractions.
@@ -242,7 +249,7 @@ The algebraic form `coefficient × Π baseᵢ^expᵢ` used when the simplifier r
 **Settings → Audio → Play tempered (12-TET)**: every note sounds on the nearest of twelve equal steps to the octave, counted from the [BaseNote](#basenote), instead of at its own frequency. It is for hearing the same module pure and then tempered. Only the sound changes — the module's exact ratios are untouched. See [Pure / Tempered](/user-guide/playback/audio#pure-tempered).
 
 ### Tempo
-Speed in beats per minute. Inherited from the BaseNote; any note may override it, and the override applies to everything that inherits from it.
+Not stored. Speed in beats per minute is 60 / `base.d`, a read-only view shown beside the BaseNote's duration in the note widget (`= 100 BPM`). To set a tempo T, set the BaseNote's duration to `60/T`. See [the time unit](/reference/properties/duration#the-time-unit).
 
 ### TET
 *n*-tone equal temperament — **not** "tone equal temperament". See **Equal temperament** above.
@@ -253,6 +260,9 @@ One named color in a theme preset. Fifteen of them have a picker in **Settings �
 ::: warning
 Several pickers currently have no visible effect — see [Themes & Appearance](/user-guide/interface/themes) for which.
 :::
+
+### Time unit
+`base.d`, the BaseNote's duration: one beat, if you count in beats. Every other duration is written against it or against another note's duration. A module dropped on a note takes that note's duration as its own time unit. See [the time unit](/reference/properties/duration#the-time-unit).
 
 ### Topological sort
 The ordering that guarantees a value is evaluated after everything it depends on. It is worked out per property, not per note, so two notes may depend on each other through different properties.
@@ -268,7 +278,7 @@ The module **library layout** — sections, icon order, collapse state, drop mod
 ## V
 
 ### Variable
-Any of the seven expression properties of a note: `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`.
+Any of the six expression variables of a note: the language (`frequency`, `startTime`, `duration`) and the [interpretation variables](#interpretation-variable) (`amplitude`, `attack`, `release`).
 
 ## W
 

@@ -174,10 +174,15 @@ export default defineConfig({
           items: [
             { text: 'frequency', link: '/reference/properties/frequency' },
             { text: 'startTime', link: '/reference/properties/start-time' },
-            { text: 'duration', link: '/reference/properties/duration' },
-            { text: 'tempo', link: '/reference/properties/tempo' },
-            { text: 'beatsPerMeasure', link: '/reference/properties/beats-per-measure' },
-            { text: 'amplitude', link: '/reference/properties/amplitude' }
+            { text: 'duration', link: '/reference/properties/duration' }
+          ]
+        },
+        {
+          text: 'Interpretation',
+          collapsed: false,
+          items: [
+            { text: 'amplitude', link: '/reference/properties/amplitude' },
+            { text: 'attack / release', link: '/reference/properties/attack-release' }
           ]
         },
         {

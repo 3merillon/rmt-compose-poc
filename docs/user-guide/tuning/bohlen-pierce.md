@@ -113,10 +113,9 @@ The library's **Scale Systems** section ships a **Bohlen–Pierce** module (file
 |---|---|
 | Notes | 14 — thirteen steps plus the note you start on |
 | Base frequency | 440 Hz |
-| Tempo | 80 |
-| Beats per measure | 4 |
+| BaseNote duration (time unit) | `3/4` s, shown as 80 BPM |
 | Instrument | `sine-wave` |
-| Note duration | `beat(base) * (1/2)` |
+| Note duration | `base.d * (1/2)` |
 | Step | `[n].f * 3 ^ (1/13)` |
 
 Note 1 is `base.f`; every later note is the previous one times `3 ^ (1/13)`. Note 14 is therefore exactly three times note 1 — the tritave, not an octave. Listen for it: the scale closes somewhere your ear does not expect.

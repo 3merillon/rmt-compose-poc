@@ -48,7 +48,7 @@ Change Note 1 once and the other two move with it, exactly in tune, forever. Tha
 ### Step 1: the root
 
 1. Click the **BaseNote**, **Clean Slate** the workspace, then click the BaseNote again.
-2. In **ADD NOTE / SILENCE**, accept the defaults (`base.f`, `beat(base)`, `base.t`) and click **Create**.
+2. In **ADD NOTE / SILENCE**, accept the defaults (`base.f`, `base.d`, `base.t`) and click **Create**.
 
 Note 1 inherits the BaseNote's pitch — **263 Hz** by default.
 
@@ -112,10 +112,10 @@ Start when Note 1 starts. The **At Start** radio writes this. This is how chords
 ### An offset
 
 ```
-[1].t + beat(base) * (1/2)
+[1].t + base.d * (1/2)
 ```
 
-Half a beat after Note 1 starts. Write the offset in beats, not seconds — `[1].t + (1/2)` would mean half a *second*, which will not survive a tempo change.
+Half a time unit after Note 1 starts. Write the offset in time units, not seconds — `[1].t + (1/2)` would mean half a *second*, which will not survive a change of the BaseNote's duration.
 
 ### Shared duration
 
@@ -123,7 +123,7 @@ Give several notes the same length by pointing them all at one:
 
 | Note | Duration | Role |
 |---|---|---|
-| 1 | `beat(base) * 2` | the master |
+| 1 | `base.d * 2` | the master |
 | 2, 3, 4 | `[1].d` | followers |
 
 Resize Note 1 and they all resize. Purple lines will show you the group.

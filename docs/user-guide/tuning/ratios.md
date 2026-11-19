@@ -99,9 +99,9 @@ The shipped Major chord looks like this:
 ```json
 {
   "notes": [
-    { "id": 1, "frequency": "base.f",         "startTime": "base.t", "duration": "beat(base) * 2" },
-    { "id": 2, "frequency": "(5/4) * [1].f",  "startTime": "[1].t",  "duration": "beat(base) * 2" },
-    { "id": 3, "frequency": "(3/2) * [1].f",  "startTime": "[1].t",  "duration": "beat(base) * 2" }
+    { "id": 1, "frequency": "base.f",         "startTime": "base.t", "duration": "base.d * 2" },
+    { "id": 2, "frequency": "(5/4) * [1].f",  "startTime": "[1].t",  "duration": "base.d * 2" },
+    { "id": 3, "frequency": "(3/2) * [1].f",  "startTime": "[1].t",  "duration": "base.d * 2" }
   ]
 }
 ```

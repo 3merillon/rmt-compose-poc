@@ -49,7 +49,7 @@ oscillators (a unison stack, an FM carrier + modulator) plus a filter, and the e
 identically. A bare `OscillatorNode` also satisfies this shape natively, which is why the
 multisample fallback can just return one.
 
-Build one with `makeVoice()` (`instrument-manager.js:73`):
+Build one with `makeVoice()` (`instrument-manager.js:126`):
 
 ```javascript
 export function makeVoice(sources, output, frequency, onStart)
@@ -70,10 +70,10 @@ take the pump down with it.
 One function shapes every note, synth and sample alike:
 
 ```javascript
-applyVoiceEnvelope(gainNode, startTime, duration, peak, env)
+applyVoiceEnvelope(gainNode, startTime, duration, peak, env, shape)
 ```
 
-`instrument-manager.js:28`. `env` comes from the instrument's `getEnvelopeSettings()`, and the keys
+`instrument-manager.js:31`. `env` comes from the instrument's `getEnvelopeSettings()`, and the keys
 are:
 
 ```javascript
@@ -120,6 +120,25 @@ Attack and release are **scaled down together** if they would exceed **90% of th
 least 10% of body. So a 5 ms note still gets a real attack and a real release, proportionally
 squeezed, rather than a rectangle.
 
+### The note's own attack and release
+
+`shape` is `{ attack, release }`, the note's `attack` and `release` variables (its own, else the
+BaseNote's), each a **share of the note's own duration** (`1/8` is an eighth of it) or `null`. A given
+value replaces the instrument's `attackTimeRatio` or `releaseTimeRatio` for that note; a `null` leaves
+the instrument's ratio (defaults `0.01` and `0.05`). The values are clamped to 0 to 1 (`noteShape()` in
+`src/instruments/instrument-manager.js`). `envelopeTimes()` turns the ratios into seconds:
+
+- The anti-click floors stay: `ATTACK_FLOOR` 3 ms and `RELEASE_FLOOR` 15 ms still apply to a note's own
+  values.
+- When the note's own attack plus release exceed its duration, they are scaled down together to fit.
+  A note that sets either one may use the whole duration (attack `1` is a swell to the end); instrument
+  defaults still leave at least 10% as the body.
+- `envelopeShares()` returns the same envelope as fractions of the duration. The renderer draws it
+  inside the note, so what is seen is what is heard.
+
+Every `applyEnvelope()` in the instrument classes takes the `shape` as its last argument and passes it
+to `applyVoiceEnvelope()`.
+
 The envelope always reaches zero **inside** `[start, start + duration]`. Note lengths are unchanged
 by it. The engine stops the source `RELEASE_TAIL = 0.15 s` later, while it is already silent.
 
@@ -142,14 +161,14 @@ Attack / decay / release are ratios of duration; sustain is a fraction of peak.
 
 The two `harmonium` rows are **seconds, not ratios** — see [The harmonic voices](#the-harmonic-voices).
 
-The per-note `peak` is `initialVolume` — **0.2** (`player.js:69`, and the `AudioEngine` constructor
+The per-note `peak` is `initialVolume` — **0.2** (`player.js:81`, and the `AudioEngine` constructor
 default). That is not master volume; master volume lives on the
 [audio graph](/developer/audio/audio-graph#master-volume). Three instruments scale it: `piano` by its
 manifest's `gainDb`, `harmonium` by a `level` of 0.6 and `harmonium-soft` by 0.42.
 
 ## SynthInstrument
 
-`instrument-manager.js:95`. Subclasses set fields; the base class builds the voice.
+`instrument-manager.js:148`. Subclasses set fields; the base class builds the voice.
 
 ```javascript
 export class SquareInstrument extends SynthInstrument {
@@ -296,7 +315,7 @@ into a biquad — **lowpass** at `min(0.48 × sampleRate, 16000 / √ratio)` whe
 at `max(20, 60 × √ratio)` when shifting down, `Q = 0.5` either way.
 
 `applyEnvelope()` multiplies the peak by `this.gain` (from the manifest's `gainDb`) and then calls the
-shared `applyVoiceEnvelope` with `getEnvelopeSettings(duration)` — the note's duration is what lets
+shared `applyVoiceEnvelope` with `getEnvelopeSettings(duration)` and the note's `shape` — the note's duration is what lets
 the manifest's absolute `attack`/`release` seconds be converted to per-note ratios.
 
 ### The manifest (schema 1)
@@ -374,7 +393,7 @@ audioEngine.registerInstruments(SynthInstruments, SampleInstruments);
 ```
 
 which calls `instrumentManager.registerBuiltInInstruments(SynthInstruments, SampleInstruments)`
-(`instrument-manager.js:284`). It instantiates every class value in both maps, passing the
+(`instrument-manager.js:343`). It instantiates every class value in both maps, passing the
 `AudioContext` to the constructor, and skips any class literally named `SampleInstrument`.
 
 The single-instrument entry point is **`registerInstrument(instrument)`** — not `register()` — and it
@@ -386,7 +405,7 @@ instrumentManager.getAvailableInstruments();  // registered keys, in registratio
 ```
 
 ::: warning Two different defaults, both spelled `sine-wave`
-`InstrumentManager.defaultInstrument` (`:281`) is a **hardcoded** unknown-name fallback. It never
+`InstrumentManager.defaultInstrument` (`instrument-manager.js:340`) is a **hardcoded** unknown-name fallback. It never
 follows the settings system. `module.js`'s `_defaultInstrumentName` is the **inheritance** fallback,
 and it *does* follow `audio.defaultInstrument`.
 
@@ -400,7 +419,7 @@ the registry exactly, but a newly registered instrument will not appear there au
 
 ## Instrument inheritance
 
-A note usually carries no instrument of its own. `Module.findInstrument(note)` (`module.js:806`)
+A note usually carries no instrument of its own. `Module.findInstrument(note)` (`module.js:764`)
 resolves one, in this order:
 
 1. The note has its own `instrument` property → **use it**. An explicit pin always wins.
@@ -427,7 +446,7 @@ Three consequences worth stating plainly:
   `audio.defaultInstrument`. That is what makes the setting reach ordinary compositions. A BaseNote
   that *does* pin an instrument in its JSON overrides the setting for everything below it.
 
-`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1232-1245`)
+`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1206-1221`)
 via `setDefaultInstrument()`. It is resolved once per note when playback is prepared, so a change
 takes effect on the **next** playback, not mid-playback.
 

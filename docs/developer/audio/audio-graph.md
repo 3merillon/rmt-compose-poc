@@ -5,15 +5,15 @@ description: AudioGraph owns every node downstream of a voice — per-instrument
 
 # Audio Graph
 
-`AudioGraph` (`src/player/audio-graph.js`, 264 lines) owns every node **downstream** of a per-note
+`AudioGraph` (`src/player/audio-graph.js:37`, 264 lines) owns every node **downstream** of a per-note
 voice, and it is the only class that turns an `audio.*` setting into an audio node. Reverb, stereo
 spread, the limiter and master volume all reach the speakers through this class — live, without
 restarting playback.
 
 Two `audio.*` keys are read outside it as well, and neither builds a node: `player.js` mirrors
 `audio.masterVolume` onto the transport slider and feeds it back through `audioEngine.setVolume()`
-(`player.js:1199-1226`), and it hands `audio.defaultInstrument` to `module.js`
-(`player.js:1232-1245`).
+(`player.js:1170-1204`), and it hands `audio.defaultInstrument` to `module.js`
+(`player.js:1206-1221`).
 
 One key is held here without building a node at all: `audio.tempered.enabled` becomes
 `graph.temperedEnabled`, a flag the engine reads as it schedules each voice — see
@@ -114,7 +114,7 @@ left-to-right**: three octaves above the BaseNote is hard right, three below is 
 BaseNote itself is dead centre. It returns `0` if either frequency is non-positive.
 
 **Width is not applied here.** The caller multiplies by `graph.stereoWidth`
-(`audio-engine.js:563`). The split is deliberate: `panPos` is baked once, at
+(`audio-engine.js:576`). The split is deliberate: `panPos` is baked once, at
 `preparePlayback` time, while the enable flag and width are read when the voice is *scheduled*.
 
 Stereo defaults **OFF** (`audio.stereo.enabled`, `settings-schema.js:87`). Out of the box, playback

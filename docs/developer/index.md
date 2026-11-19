@@ -21,14 +21,15 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 | **WebGL2** | The workspace. A hard requirement — `player.js` probes for a context and, without one, never constructs the `Workspace`. There is no DOM fallback renderer. |
 | **Web Audio API** | Synthesis, sample playback, the reverb/limiter signal graph. |
 | **fraction.js 5.3.4** | Exact rational arithmetic. BigInt-backed — arbitrary precision, at any magnitude and depth. |
-| **Rust → WASM** | An alternative evaluator core that ships in the bundle but is **off by default**. |
+| **Rust → WASM** | An alternative evaluator core that ships in the bundle but is **disabled** until it is ported to the new variable layout. |
 | **VitePress** | This documentation site (`docs/`, deployed separately). |
 
-::: warning The WASM evaluator is not the default path
-The `rmt-core` WASM binary is **not even fetched** on a normal page load — `initWasm()` returns
-early without the URL flag `?evaluator=wasm` (`src/wasm/evaluator-adapter.js:37-41`), and that
-flag currently hangs the tab on a full re-evaluation. Everything you experience in the app runs
-on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
+::: warning The WASM evaluator is disabled
+The `rmt-core` WASM binary is **not fetched** on any page load — `initWasm()` returns early because
+`isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:50-54`): the Rust core still
+has the old variable layout, so `WASM_MATCHES_VARIABLE_LAYOUT` is `false` and `?evaluator=wasm` is
+ignored with a console warning. Everything you experience in the app runs on the **JavaScript**
+evaluator. See [WASM Overview](/developer/wasm/overview).
 :::
 
 ## The layers
@@ -58,7 +59,7 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 │ State                                                                │
 │  store/app-state.js · store/history.js · utils/event-bus.js          │
 ├──────────────────────────────────────────────────────────────────────┤
-│ wasm/  (alternative evaluator core — opt-in, currently blocked)      │
+│ wasm/  (alternative evaluator core — disabled until ported)          │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -125,7 +126,8 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 | `src/main.js` | Entry point (`index.html` loads this). Registers instruments, boots WASM, modals, menu, settings. |
 | `src/player.js` | The orchestrator: transport, selection, drag/resize commits, undo wiring, scale controls. ~6.6k lines. |
 | `src/module.js` | `Module` — notes, dependency registration, evaluation, JSON load/save, reindexing. |
-| `src/note.js` | `Note` — seven `BinaryExpression`s plus `color` / `instrument`. |
+| `src/note.js` | `Note` — six `BinaryExpression`s plus `color` / `instrument` / `measure`; `EXPRESSION_VARS`, `isMeasureNote()`. |
+| `src/migrate/relational-time.js` | `migrateTimeModel()` — converts a module of the old time model (tempo, beats per measure, `beat()`, `measure()`) on load. |
 | `src/dsl/` | The primary expression language: `lexer` → `parser` → `compiler` → `decompiler`, plus `simplify`. |
 | `src/expression-compiler.js` | The **legacy** method-chain parser, the format router (`isDSLSyntax`), and the 4000-entry LRU compile cache. |
 | `src/binary-note.js` | `OP`, `VAR`, `CORRUPT`, `BinaryExpression`. |

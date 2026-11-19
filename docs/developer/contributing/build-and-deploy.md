@@ -35,7 +35,7 @@ All 13, and what each one really does.
 | `dev` | `vite` | Dev server on port 3000, auto-opens the browser |
 | `build` | `npm run wasm:build && vite build` | Full build. **Requires Rust + wasm-pack.** Vercel does *not* use this |
 | `preview` | `vite preview` | Serves the built `dist/` on Vite's default preview port (4173) |
-| `test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-variable-deps.mjs && node scripts/test-amplitude.mjs && node scripts/test-midi-export.mjs` | **Not a unit-test runner.** Validates every library module, proves arbitrary-precision exactness end to end, then checks per-variable evaluation order and cycle detection, the amplitude variable and the MIDI export |
+| `test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-variable-deps.mjs && node scripts/test-amplitude.mjs && node scripts/test-midi-export.mjs && node scripts/test-relational-time.mjs` | **Not a unit-test runner.** Validates every library module, proves arbitrary-precision exactness end to end, then checks per-variable evaluation order and cycle detection, the amplitude variable, the MIDI export and relational time (the conversion of old-model modules, against `scripts/fixtures/old-time-oracle.json`) |
 | `gen:intervals` | `node scripts/gen-interval-catalog.mjs` | Regenerates `public/modules/intervals/` and patches the `intervals` section of `library.json` |
 | `wasm:build` | `cd rust && wasm-pack build --target web --out-dir pkg && cd .. && node scripts/sync-wasm.mjs` | Builds the Rust crate, then copies the artifacts into `src/wasm/` |
 | `wasm:sync` | `node scripts/sync-wasm.mjs` | The copy step alone |
@@ -52,7 +52,7 @@ run **`npx vite build`** — byte for byte what Vercel runs.
 :::
 
 ::: warning `npm test` is not a test suite
-There is no Jest and no Vitest anywhere in this repo. `npm test` runs five scripts and exits
+There is no Jest and no Vitest anywhere in this repo. `npm test` runs six scripts and exits
 non-zero if any fails: `scripts/validate-modules.mjs`, which validates every module referenced
 by `public/modules/library.json`; `scripts/test-exactness.mjs`, which proves exact rational
 arithmetic survives a 200-note `(3/2)` chain (checked against native BigInt) and that a ~98-digit
@@ -61,7 +61,9 @@ checks that evaluation is ordered per (note, variable), that only true cycles ar
 an incremental evaluation always equals a fresh load; `scripts/test-amplitude.mjs`, which checks
 that `amplitude` inherits from the BaseNote, stays exact, and is never written to a module that
 did not set it; and `scripts/test-midi-export.mjs`, which parses exported MIDI files back and
-requires every note within 0.1 cent and one tick. Run it before you touch anything under
+requires every note within 0.1 cent and one tick; and `scripts/test-relational-time.mjs`, which checks
+that old-model modules convert to exactly the values the old engine gave them, that the removed names
+are refused, and that measure bars and `attack` / `release` behave. Run it before you touch anything under
 `public/modules/`, the compilers, or the evaluator. The checks are detailed in
 [Development Setup](/developer/contributing/setup#npm-test).
 :::
@@ -74,7 +76,9 @@ Run these with `node` directly.
 |---|---|
 | `scripts/gen-chords-progressions.mjs` | Generates the chords / progressions / cadences modules and patches `library.json` |
 | `scripts/gen-melodies.mjs` | Generates the public-domain melodies and the `scale-systems` category |
-| `scripts/perf/test-wasm-swap.mjs` | Headless end-to-end test of the WASM evaluator hot-swap |
+| `scripts/migrate-modules.mjs` | Converts module JSON files (a file or a folder) to relational time in place, with the same conversion the app applies on load; `--dry-run` reports without writing |
+| `scripts/check-doc-citations.mjs` | Prints every source line citation in the docs beside the line it names now, so stale `file.js:N` citations can be found after a `src/` edit |
+| `scripts/perf/test-wasm-swap.mjs` | Headless end-to-end test of the WASM evaluator hot-swap. Cannot swap while `WASM_MATCHES_VARIABLE_LAYOUT` is `false` |
 | `scripts/perf/bench-render.mjs`, `bench-drag.mjs`, `bench-hover.mjs`, `bench-pick.mjs`, `bench-marquee.mjs`, `profile-sync.mjs`, `converge.mjs`, `who-dirties.mjs` | Playwright render/interaction benchmarks. They drive a **running** dev server |
 | `scripts/perf/visual-regress.mjs` | Playwright pixel-diff regression harness (`--capture` / `--compare`) |
 
@@ -150,10 +154,10 @@ Rust toolchain. **The committed `src/wasm/` files are what gets bundled and ship
 change under `rust/`, run `npm run wasm:build` and commit the two synced files, or the deploy keeps
 serving the old binary with no warning.
 
-The binary ships in the bundle but is **not fetched on a normal page load**: `initWasm()` returns
-early unless `?evaluator=wasm` is present, because the WASM evaluator is
-[opt-in and currently blocked](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked).
-Only the opt-in (or headless Node) pays the download and instantiation.
+The binary ships in the bundle but is **not fetched on any page load**: `initWasm()` returns early
+because the WASM evaluator is disabled until the Rust core is ported to the new variable layout
+(`WASM_MATCHES_VARIABLE_LAYOUT` is `false`; see the
+[status dossier](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked)).
 
 ## Deploys
 

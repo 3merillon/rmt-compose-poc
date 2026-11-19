@@ -11,7 +11,7 @@ description: The algebraic representation of irrationals like 2^(1/12) — its r
 value = coefficient × base₁^exp₁ × base₂^exp₂ × … × baseₙ^expₙ
 ```
 
-`src/binary-evaluator.js:60-324`.
+`src/binary-evaluator.js:58-322`.
 
 ## The problem
 
@@ -62,14 +62,14 @@ So the evaluator's stack holds **only pooled `Fraction`s**. Every consumer downs
 What survives the flattening is not the algebra but the **flag**: `_lastEvalWasCorrupted`, which becomes the note's `corruptionFlags` bit, which becomes the crosshatch you see on the canvas. That flag is the entire payoff of the `POW` design in the shipping app.
 
 ::: info Rational powers are exact — at any magnitude, up to a cap
-`MusicValue.pow()` (`:573`) calls `tryRationalPower()` (`:646`) first, which handles integer exponents (`rationalIntPower`, `:673`) and **perfect n-th roots** (`tryPerfectNthRoot`, `:696`) — both computed in BigInt, so they are exact regardless of how many digits the operands have. The root check is an exact binary search (`integerNthRoot`, `:724`); the old float version silently missed perfect roots past 2^53. Two DoS caps bound the exact path (`:621-622`): an integer exponent above **65536**, or a result beyond **~1 Mbit per component**, is treated as irrational instead of allocating gigabit integers. `4^(1/2)` really is `2`, exactly, and is **not** flagged as corrupted. Only irrational powers — and over-cap ones — corrupt.
+`MusicValue.pow()` (`:571`) calls `tryRationalPower()` (`:644`) first, which handles integer exponents (`rationalIntPower`, `:671`) and **perfect n-th roots** (`tryPerfectNthRoot`, `:694`) — both computed in BigInt, so they are exact regardless of how many digits the operands have. The root check is an exact binary search (`integerNthRoot`, `:722`); the old float version silently missed perfect roots past 2^53. Two DoS caps bound the exact path (`:619-620`): an integer exponent above **65536**, or a result beyond **~1 Mbit per component**, is treated as irrational instead of allocating gigabit integers. `4^(1/2)` really is `2`, exactly, and is **not** flagged as corrupted. Only irrational powers — and over-cap ones — corrupt.
 
-`SymbolicPower` is only constructed at all when the base is a **positive integer below 2^53** (`:585-586` — the class stores bases as Numbers; real bases are small TET integers). A non-integer, negative, or oversized base falls straight to `MusicValue.irrational` — a plain f64.
+`SymbolicPower` is only constructed at all when the base is a **positive integer below 2^53** (`:583-584` — the class stores bases as Numbers; real bases are small TET integers). A non-integer, negative, or oversized base falls straight to `MusicValue.irrational` — a plain f64.
 :::
 
 ### Where the algebra *is* live
 
-`src/dsl/simplify.js`. This is an independent re-implementation of the same normal form, and it runs on **save**, not on evaluation. Its header (`:1-21`) states the contract: a value is a rational coefficient times a product of `base^exp` terms, like bases merge, and coefficients never migrate into a power term.
+`src/dsl/simplify.js`. This is an independent re-implementation of the same normal form, and it runs on **save**, not on evaluation. Its header (`:1-20`) states the contract: a value is a rational coefficient times a product of `base^exp` terms, like bases merge, and coefficients never migrate into a power term.
 
 That is what makes these rewrites happen when you save a variable:
 
@@ -93,7 +93,7 @@ scaleDSL('base.f * 2^(7/12)', 3, 2)         → (3/2) * base.f * 2^(7/12)
 
 ## API
 
-`SymbolicPower` (`binary-evaluator.js:60-324`). Note the field is **`exp`**, not `exponent`.
+`SymbolicPower` (`binary-evaluator.js:58-322`). Note the field is **`exp`**, not `exponent`.
 
 ```javascript
 class SymbolicPower {
@@ -114,7 +114,7 @@ class SymbolicPower {
 }
 ```
 
-There is no `simplify()`, no `fromFraction()`, no `valueOf()`, and no `isCorrupted()` on this class. (`isCorrupted()` is on `MusicValue` — `:385`.)
+There is no `simplify()`, no `fromFraction()`, no `valueOf()`, and no `isCorrupted()` on this class. (`isCorrupted()` is on `MusicValue` — `:383`.)
 
 ### 12-TET octave closure
 
@@ -147,16 +147,16 @@ tetThird.mul(bpStep);
 
 ## Corruption, end to end
 
-The `CORRUPT` bitmask (`src/binary-note.js:57-65`):
+The `CORRUPT` bitmask (`src/binary-note.js:62-69`):
 
 ```javascript
 export const CORRUPT = {
-  START_TIME:        0x01,
-  DURATION:          0x02,
-  FREQUENCY:         0x04,
-  TEMPO:             0x08,
-  BEATS_PER_MEASURE: 0x10,
-  MEASURE_LENGTH:    0x20,
+  START_TIME: 0x01,
+  DURATION:   0x02,
+  FREQUENCY:  0x04,
+  AMPLITUDE:  0x08,
+  ATTACK:     0x10,
+  RELEASE:    0x20,
 };
 ```
 
@@ -164,11 +164,11 @@ The path from an irrational power to a pixel:
 
 ```
 POW produces an irrational
-  → BinaryEvaluator._lastEvalWasCorrupted = true           binary-evaluator.js:1230
+  → BinaryEvaluator._lastEvalWasCorrupted = true           binary-evaluator.js:1224
   → evaluateVariable() ORs the property's bit into corruptionFlags   :1545-1547
-  → Module._updateCorruptionFlags()                        module.js:683-706
-      → DependencyGraph.setCorruptionFlags(id, flags)      dependency-graph.js:1756
-  → RendererAdapter.sync() → a_corruptionType per note     renderer.js:862-937
+  → Module._updateCorruptionFlags()                        module.js:682-705
+      → DependencyGraph.setCorruptionFlags(id, flags)      dependency-graph.js:1746
+  → RendererAdapter.sync() → a_corruptionType per note     renderer.js:910-957
   → the shader hatches the note
 ```
 
@@ -180,10 +180,10 @@ On the canvas:
 | `1.0` | transitively corrupted — depends on something corrupt | single 45° diagonal hatch |
 | `2.0` | directly corrupted — corrupt, with no corrupt dependency | crosshatch |
 
-In the note widget, a transitively-corrupted **frequency** displays as `≈<fraction>` with the `corrupted-value` class (`src/modals/variable-controls.js:70-79`; `public/styles.css:1308-1311`).
+In the note widget, a transitively-corrupted **frequency** displays as `≈<fraction>` with the `corrupted-value` class (`src/modals/variable-controls.js:133-142`; `public/styles.css:1308-1311`).
 
 ::: warning The direct-corruption float readout
-The widget's *directly*-corrupted branch (`≈1.0594631`, eight significant figures) keys on `value.isCorrupted || ev._irrational || ev._floatValue !== undefined` (`variable-controls.js:60`). `value.isCorrupted` is the dependency graph's per-property corruption bit (`src/modals/index.js:338`), so the branch fires on the JS path too; `_irrational` / `_floatValue` are only ever set by the WASM evaluator adapter (`src/wasm/evaluator-adapter.js:949-950`). The float it prints is `ev._floatValue` when present, otherwise the approximated fraction converted through `toNumber()` (`variable-controls.js:67`) — the documented lossy boundary in `src/utils/fraction-num.js`.
+The widget's *directly*-corrupted branch (`≈1.0594631`, eight significant figures) keys on `value.isCorrupted || ev._irrational || ev._floatValue !== undefined` (`variable-controls.js:123`). `value.isCorrupted` is the dependency graph's per-property corruption bit (`src/modals/index.js:365`), so the branch fires on the JS path too; `_irrational` / `_floatValue` are only ever set by the WASM evaluator adapter (`src/wasm/evaluator-adapter.js:962-963`). The float it prints is `ev._floatValue` when present, otherwise the approximated fraction converted through `toNumber()` (`variable-controls.js:130`) — the documented lossy boundary in `src/utils/fraction-num.js`.
 :::
 
 Exact values can wear an `≈` too, without any corruption: once a fraction's numerator plus denominator pass 24 digits, the widget collapses the readout to an eight-significant-figure approximation and keeps the exact (elided) `n/d` form in the row's `title` tooltip (`src/modals/fraction-display.js`). The stored value stays exact — only the rendering approximates.

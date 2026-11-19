@@ -63,14 +63,14 @@ Set start times the same way, so each note follows the last:
 [1].t + [1].d
 ```
 
-And give every note a duration in beats rather than seconds, so the scale follows the tempo:
+And give every note a duration in time units rather than seconds, so the scale follows the BaseNote's duration:
 
 ```
-beat(base) * (1/2)
+base.d * (1/2)
 ```
 
-::: warning `"duration": "1"` is one second, not one beat
-A bare number is seconds. It will not track the tempo. Every shipped scale module uses `beat(base) * (1/2)` or similar. Use `beat(base)`.
+::: warning `"duration": "1"` is one second, not one time unit
+A bare number is seconds. It will not follow the BaseNote's duration. Every shipped scale module uses `base.d * (1/2)` or similar. Use `base.d`.
 :::
 
 ## Divisions worth trying
@@ -138,23 +138,21 @@ If you are hand-writing the file, this is the shape the shipped TET modules use:
   "baseNote": {
     "startTime": "0",
     "frequency": "440",
-    "tempo": "100",
-    "beatsPerMeasure": "4",
-    "measureLength": "beat(base) * base.bpm",
+    "duration": "3/5",
     "instrument": "sine-wave"
   },
   "notes": [
     {
       "id": 1,
       "startTime": "base.t",
-      "duration": "beat(base) * (1/2)",
+      "duration": "base.d * (1/2)",
       "frequency": "base.f",
       "color": "rgba(100,149,237,0.7)"
     },
     {
       "id": 2,
       "startTime": "[1].t + [1].d",
-      "duration": "beat(base) * (1/2)",
+      "duration": "base.d * (1/2)",
       "frequency": "[1].f * 2 ^ (1/17)",
       "color": "rgba(100,149,237,0.7)"
     }
@@ -164,9 +162,9 @@ If you are hand-writing the file, this is the shape the shipped TET modules use:
 
 Four things to copy from it:
 
-- **`"measureLength": "beat(base) * base.bpm"`** on the BaseNote. Without it the measure grid will not match your tempo.
+- **`"duration"`** on the BaseNote: the time unit. Every note's duration is written against it, so changing it changes the pace of the whole scale.
 - **`instrument`** set once on the BaseNote. Notes inherit it; you do not need it on every note.
-- **`duration` in beats**, not seconds.
+- **`duration` in time units** (`base.d * k`), not seconds.
 - **`color`** on every note. Notes without one fall back to default colouring.
 
 Expressions may reference `base` or any note **inside the same module** — a module must be self-contained, or it cannot be dropped onto an arbitrary note. Every module the app ships is written in DSL. The legacy method-chain format still loads, but nothing ships in it any more.

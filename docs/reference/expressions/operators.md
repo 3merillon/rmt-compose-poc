@@ -26,7 +26,7 @@ Loosest first. Tighter binds first.
 | 2 | `*` `/` | Left |
 | 3 | `-` (prefix) | Prefix |
 | 4 | `^` | **Right** |
-| 5 | Literals, `[N].p`, `base.p`, `beat(x)`, `( … )` | — |
+| 5 | Literals, `[N].p`, `base.p`, `( … )` | — |
 
 | Expression | Parses as | Value |
 |---|---|---|
@@ -45,7 +45,7 @@ Parentheses override all of this.
 1 + 2                  # 3
 (1/2) + (1/3)          # 5/6
 [5].t + [5].d          # the moment note 5 ends
-base.t + beat(base)    # one beat after the BaseNote starts
+base.t + base.d        # one time unit after the BaseNote starts
 ```
 
 Exact. `(1/2) + (1/3)` is `5/6`, not `0.8333…`.
@@ -83,7 +83,7 @@ module.getNoteById(3).getVariable('startTime').sub(new Fraction(1, 2))
 3 * 2                  # 6
 (3/2) * (5/4)          # 15/8
 base.f * (3/2)         # a perfect fifth above the BaseNote
-beat(base) * 2         # two beats
+base.d * 2             # two time units
 ```
 
 Multiplication is how you build intervals. See [Pure Ratios](/user-guide/tuning/ratios).
@@ -113,15 +113,15 @@ value does announce itself. `(5/0)` behaves the same way — it is not read as a
 it falls back to a grouped division.
 :::
 
-For a beat duration, write `beat(base)`. It compiles to `60 / tempo(base)` and, unlike the long
-form, it survives a save as `beat(base)`.
+For a length, write it against the time unit: `base.d / 2` or `base.d * (1/2)`. A tempo is never
+divided into a duration: `60 / base.d` is only the BPM view shown in the note widget.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
 
 ```javascript
 new Fraction(3, 2).div(new Fraction(3))
-new Fraction(60).div(module.findTempo(module.baseNote))   // one beat
+module.baseNote.getVariable('duration').div(new Fraction(2))   // half a time unit
 ```
 </details>
 
@@ -256,11 +256,9 @@ Operators compile to a stack machine. This is what an expression becomes:
 | `-` (prefix) | `NEG` | `0x14` | pop 1, push negation |
 | `^` | `POW` | `0x15` | pop base and exponent, push the power; may set the corruption flag |
 
-The built-in functions have no opcodes of their own. `tempo(x)` and `measure(x)` compile to a
-plain property load (`LOAD_BASE` / `LOAD_REF`); `beat(x)` compiles to `LOAD_CONST 60`, then the
-tempo load, then `DIV`. The `FIND_TEMPO` (`0x20`), `FIND_MEASURE` (`0x21`),
-`FIND_INSTRUMENT` (`0x22`), `DUP` (`0x30`) and `SWAP` (`0x31`) opcodes are defined but no
-compiler emits them.
+The language has no functions, so there are no call opcodes. `FIND_TEMPO` (`0x20`) and
+`FIND_MEASURE` (`0x21`) are retired and not reused. `FIND_INSTRUMENT` (`0x22`), `DUP` (`0x30`) and
+`SWAP` (`0x31`) are defined but no compiler emits them.
 
 See [Binary Evaluator](/developer/core/binary-evaluator) for how the bytecode runs.
 
@@ -281,5 +279,5 @@ The `Evaluated:` line in the note widget still repays a glance after saving anyt
 
 - [Expression Syntax](/reference/expressions/syntax) — the full grammar
 - [Fraction API](/reference/expressions/fraction-api) — exactness, and the legacy surface
-- [Module API](/reference/expressions/module-api) — references and built-in functions
+- [Module API](/reference/expressions/module-api) — note references and the six properties
 - [Binary Evaluator](/developer/core/binary-evaluator) — bytecode execution

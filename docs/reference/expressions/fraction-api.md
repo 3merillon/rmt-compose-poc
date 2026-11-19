@@ -134,16 +134,16 @@ base.f / (4/3)         # a perfect fourth below
 [1].f * (5/4)          # a major third above note 1
 ```
 
-### Beat durations
+### Durations
 
 ```
-beat(base)             # one beat at the base tempo
-beat(base) * 2         # two beats
-beat(base) * (1/2)     # half a beat
-beat(base) * (3/2)     # a dotted beat
+base.d                 # one time unit (one beat, if you count in beats)
+base.d * 2             # two time units
+base.d * (1/2)         # half of one
+base.d * (3/2)         # a dotted unit
 ```
 
-`beat(base) * (n/d)` is exactly what the note-length buttons in the note widget write.
+`base.d * (n/d)` is exactly what the note-length buttons in the note widget write.
 
 ### Sequential timing
 
@@ -173,11 +173,11 @@ module.baseNote.getVariable('frequency').mul(new Fraction(2))
 // Perfect fourth below
 module.baseNote.getVariable('frequency').div(new Fraction(4, 3))
 
-// One beat
-new Fraction(60).div(module.findTempo(module.baseNote))
+// One time unit
+module.baseNote.getVariable('duration')
 
-// Two beats
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(2))
+// Two time units
+module.baseNote.getVariable('duration').mul(new Fraction(2))
 
 // Start when note 7 ends
 module.getNoteById(7).getVariable('startTime')
@@ -199,10 +199,10 @@ new Fraction(2).pow(new Fraction(1, 12))
 | `.pow(…)` | Yes |
 | `module.baseNote.getVariable('name')` | Yes |
 | `module.getNoteById(N).getVariable('name')` | Yes |
-| `module.findTempo(ref)` | Yes |
-| `module.findMeasureLength(ref)` | Yes |
 
-That is the whole list.
+That is the whole list. `module.findTempo(…)` and `module.findMeasureLength(…)` were removed; typed,
+they are refused with a message pointing at `module.baseNote.getVariable('duration')`. Any variable
+name other than `startTime`, `duration`, `frequency`, `amplitude`, `attack` and `release` is an error.
 
 ### What it does not accept
 
@@ -242,9 +242,8 @@ not part of the language in either format.
 | `new Fraction(5).neg()` | `-5` |
 | `module.baseNote.getVariable('frequency')` | `base.f` |
 | `module.getNoteById(1).getVariable('startTime')` | `[1].t` |
-| `module.findTempo(module.baseNote)` | `tempo(base)` |
-| `module.findMeasureLength(module.baseNote)` | `measure(base)` |
-| `new Fraction(60).div(module.findTempo(module.baseNote))` | `beat(base)` |
+| `module.baseNote.getVariable('duration')` | `base.d` |
+| `module.getNoteById(1).getVariable('duration')` | `[1].d` |
 
 One thing, and one thing only, rewrites a legacy expression as DSL: pressing **Save** in the
 note widget. The `Raw:` field is already showing you the DSL, so saving it stores the DSL.
@@ -259,5 +258,5 @@ still loads, and it still works.
 
 - [Expression Syntax](/reference/expressions/syntax) — the full grammar
 - [Operators](/reference/expressions/operators) — what each operator produces
-- [Module API](/reference/expressions/module-api) — references and built-in functions
+- [Module API](/reference/expressions/module-api) — note references and the six properties
 - [SymbolicPower](/developer/core/symbolic-power) — how irrational values are handled

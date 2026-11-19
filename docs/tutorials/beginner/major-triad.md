@@ -46,7 +46,7 @@ Every chord module shipped in the library uses the second form. So will you.
 1. Click the **BaseNote** (the orange circle).
 2. Scroll to **DELETE ALL NOTES** and click **Clean Slate**, then **Yes, Clean Slate**.
 
-The BaseNote keeps its defaults: 263 Hz, 100 BPM.
+The BaseNote keeps its defaults: 263 Hz, duration `3/5` s (100 BPM).
 
 ## Step 2: Create the root
 
@@ -54,7 +54,7 @@ The BaseNote keeps its defaults: 263 Hz, 100 BPM.
 2. Scroll to **ADD NOTE / SILENCE**. Kind stays on **Note**.
 3. Set the fields:
    - **Frequency:** `base.f`
-   - **Duration:** `beat(base) * 2` (a half note — long enough to hear the chord ring)
+   - **Duration:** `base.d * 2` (a half note — long enough to hear the chord ring)
    - **Start Time:** `base.t`
 4. Click **Create**.
 

@@ -192,10 +192,10 @@ Four notes, each starting where the previous one ends, each pitched off note 1:
 
 | Note | frequency | startTime | duration |
 |---|---|---|---|
-| 1 | `base.f` | `base.t` | `beat(base)` |
-| 2 | `[1].f * 2^(3/19)` | `[1].t + [1].d` | `beat(base)` |
-| 3 | `[1].f * 2^(6/19)` | `[2].t + [2].d` | `beat(base)` |
-| 4 | `[1].f * 2^(8/19)` | `[3].t + [3].d` | `beat(base)` |
+| 1 | `base.f` | `base.t` | `base.d` |
+| 2 | `[1].f * 2^(3/19)` | `[1].t + [1].d` | `base.d` |
+| 3 | `[1].f * 2^(6/19)` | `[2].t + [2].d` | `base.d` |
+| 4 | `[1].f * 2^(8/19)` | `[3].t + [3].d` | `base.d` |
 
 Create every note from the **ADD NOTE / SILENCE** section of a widget. Note 1 comes from the
 BaseNote's widget, which has no **At Start** / **At End** toggle — it always writes `base.t` — and
@@ -209,7 +209,7 @@ All four notes share note 1's start and length; only the pitch differs.
 
 | Note | frequency | startTime | duration |
 |---|---|---|---|
-| 1 (root) | `base.f` | `base.t` | `beat(base) * 2` |
+| 1 (root) | `base.f` | `base.t` | `base.d * 2` |
 | 2 (major 3rd) | `[1].f * (5/4)` | `[1].t` | `[1].d` |
 | 3 (fifth) | `[1].f * (3/2)` | `[1].t` | `[1].d` |
 | 4 (harmonic 7th) | `[1].f * (7/4)` | `[1].t` | `[1].d` |
@@ -257,7 +257,7 @@ Open the Settings panel from the top-bar gear, go to the **Audio** tab and switc
 ### Use sustained notes
 
 Beating between two nearly-in-tune pitches takes time to become audible. Give test notes at least
-a couple of beats. `beat(base) * 4` is a reasonable starting length.
+a couple of beats. `base.d * 4` is a reasonable starting length.
 
 ### Pick a timbre that reveals it
 

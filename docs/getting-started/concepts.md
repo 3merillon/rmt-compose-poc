@@ -1,11 +1,11 @@
 ---
 title: Core Concepts
-description: The BaseNote, exact ratios, expressions, dependencies, modules and the ≈ symbol — the six ideas RMT Compose is built on.
+description: The BaseNote, exact ratios, expressions, dependencies, measure bars, modules and the ≈ symbol — the ideas RMT Compose is built on.
 ---
 
 # Core Concepts
 
-Six ideas carry the whole tool: the **BaseNote**, **ratios**, **expressions**, **dependencies**, **modules**, and the **≈ symbol**.
+A handful of ideas carry the whole tool: the **BaseNote**, **ratios**, **expressions**, **dependencies**, **measure bars**, **modules**, and the **≈ symbol**.
 
 ## Relative music theory
 
@@ -15,10 +15,11 @@ Musical relationships are ratios. RMT Compose takes that literally: nothing is s
 
 **Relative:** the BaseNote is *whatever you say it is*. The note above it is `base.f * (3/2)`. The fifth is explicit, and exactly a fifth.
 
-That buys you three things:
+That buys you four things:
 
 - **Pure intervals.** 3/2 is stored as the fraction 3/2 and evaluated as a fraction. It never becomes 1.5000001.
 - **One-edit transposition.** Change the base frequency; everything defined against it moves, in tune.
+- **Time works the same way.** Starts and lengths are relationships too, so changing one note's duration can stretch everything built on it.
 - **Tunings as arithmetic.** `2^(1/12)` is a 12-TET semitone. `3^(1/13)` is a Bohlen-Pierce step. No special mode required.
 
 ## The BaseNote
@@ -29,23 +30,28 @@ Every module has one **BaseNote** — note id 0, drawn as the orange circle. It 
 |----------|-----------|------------|--------------|
 | `frequency` | `f` | Reference frequency in Hz | 440 |
 | `startTime` | `t` | Reference start time in seconds | 0 |
-| `tempo` | `tempo` | Beats per minute | 60 |
-| `beatsPerMeasure` | `bpm` | Beats in a measure | 4 |
-| `measureLength` | `ml` | Length of a measure in seconds | derived: `60 / tempo × beatsPerMeasure` |
-| `amplitude` | `a` | Loudness of every note that sets none of its own, as a relative gain | 1 |
+| `duration` | `d` | Reference length in seconds — the **time unit** | 1 |
 
 ::: info Defaults vs. the default module
-The table's right-hand column is what a module gets when it is constructed with no JSON. The **default module the app boots with** overrides them: **frequency 263, startTime 0, tempo 100, beatsPerMeasure 4**. That is what a new user actually sees, and it is what the examples on this page use.
+The table's right-hand column is what a module gets when it is constructed with no JSON. The **default module the app boots with** overrides them: **frequency 263, startTime 0, duration 3/5** (a time unit of 0.6 s, which the note widget shows as 100 BPM). That is what a new user actually sees, and it is what the examples on this page use.
 :::
 
-**The BaseNote has no `duration`.** It is a reference point, not a sounding note — `base.d` resolves to nothing. When you want a length in terms of the BaseNote's tempo, use `beat(base)`.
+### Every value is a relation; only the BaseNote is absolute
+
+A note has three **language variables**: `frequency` (`f`), `startTime` (`t`) and `duration` (`d`). Each one is an exact expression relating the note to other notes. The BaseNote holds the only absolute values in the module: a frequency in hertz, and a start and a duration in seconds.
+
+### The time unit
+
+`base.d` is the **time unit**: one beat, if you count in beats. A quarter note is `base.d`, an eighth is `base.d * (1/2)`, and a note of three units is `base.d * 3`. Change the BaseNote's duration and every length written this way changes with it.
+
+There is no stored tempo. The BaseNote's duration row in the [note widget](/user-guide/interface/variable-widget) shows `60 / base.d` beside the value, for example "= 100 BPM", as a read-only view. To change the pace, edit the duration. See [the time unit](/reference/properties/duration#the-time-unit).
 
 Every other note can reference it:
 
 ```
 base.f * (3/2)      # a perfect fifth above the base
 base.t              # start when the BaseNote starts
-beat(base) * 2      # two beats long, at the BaseNote's tempo
+base.d * 2          # two time units long
 ```
 
 <details>
@@ -54,6 +60,7 @@ beat(base) * 2      # two beats long, at the BaseNote's tempo
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 module.baseNote.getVariable('startTime')
+module.baseNote.getVariable('duration').mul(new Fraction(2))
 ```
 </details>
 
@@ -119,9 +126,8 @@ Every property has a short form, and that short form is what the app writes:
 | frequency | `f`, `freq`, `frequency` |
 | startTime | `t`, `s`, `start`, `startTime` |
 | duration | `d`, `dur`, `duration` |
-| tempo | `tempo` |
-| beatsPerMeasure | `bpm`, `beatsPerMeasure` |
-| measureLength | `ml`, `measureLength` |
+
+Two further variables are not part of the notation: `amplitude` (`a`), and `attack` and `release` (`atk`, `rel`). See [Interpretation variables](#interpretation-variables).
 
 ### Operations
 
@@ -130,7 +136,7 @@ Every property has a short form, and that short form is what the app writes:
 | Add | `+` | `[3].t + [3].d` |
 | Subtract | `-` | `[3].t - (1/4)` |
 | Multiply | `*` | `base.f * (3/2)` |
-| Divide | `/` | `beat(base) / 2` |
+| Divide | `/` | `base.d / 2` |
 | Power | `^` | `2^(1/12)` |
 | Negate | `-` (prefix) | `-base.f` |
 
@@ -149,21 +155,11 @@ Precedence runs `+ -` loosest, then `* /`, then unary minus, then `^` tightest. 
 | Negate | `.neg()` |
 </details>
 
-### Helper functions
+### No functions
 
-There are exactly three, and each takes a bare note reference (`base` or `[N]`) — not an expression.
+The language has no functions. Older versions had `beat()`, `tempo()` and `measure()`; they are gone, along with the `tempo`, `beatsPerMeasure` and `measureLength` variables. Typing one is refused with a message naming the replacement: `base.d` for `beat(base)`, and `[N].d` for the length of note N. See [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions).
 
-| Call | Meaning |
-|------|---------|
-| `beat(x)` | one beat of x's tempo, in seconds — i.e. `60 / tempo(x)` |
-| `tempo(x)` | x's tempo |
-| `measure(x)` | x's measure length, in seconds |
-
-`beat(base)` is the idiom for durations. A quarter note is `beat(base)`; a dotted eighth is `beat(base) * (3/4)`; a whole measure is `beat(base) * base.bpm`.
-
-::: info `tempo()` and `measure()` are input sugar
-They compile to the same bytecode as `x.tempo` and `x.ml`, and that is how they come back when you re-open the note. Only `beat()` survives a save as-is. Comments (`#` to end of line) are dropped on save too.
-:::
+A quarter note is `base.d`; a dotted eighth is `base.d * (3/4)`; a whole measure of four is `base.d * 4`.
 
 ## Dependencies
 
@@ -204,6 +200,30 @@ A note with a **start time** and a **duration** but **no frequency** is a **sile
 
 Silences are still full participants in the dependency graph: other notes can hang their start times off a silence's end. See [Creating Notes](/user-guide/notes/creating-notes).
 
+## Measure bars
+
+A **measure bar** is a silent note with a start and a duration, no frequency, and the flag `"measure": true` in the saved file. It is a note like any other: its start and length are expressions, and other notes can depend on them.
+
+The editor draws bars as dashed lines with triangles, never as rests. A silent note without the flag is a silence; a note with only a start is a plain marker, not a bar.
+
+Bars chain. The first bar starts at `base.t` and lasts `base.d * 4`. Each next bar starts where the one before it ends and, unless you change it, is as long:
+
+```
+[1].t + [1].d       # bar 2: starts when bar 1 ends
+[1].d               # bar 2: the same length as bar 1
+```
+
+A meter change is one bar's duration; the bars after it follow. Notes attach to a bar through `[bar].t` and `[bar].d * (1/4)`. See [Measures](/tutorials/intermediate/measures) and [Measure bars](/reference/module-schema#measure-bars).
+
+## Interpretation variables
+
+`amplitude` (`a`), `attack` (`atk`) and `release` (`rel`) are not part of the notation. They say how a note is played, not where it sits in pitch or time. They are the only variables that fall back to the BaseNote when a note does not set them.
+
+- `amplitude` is a relative gain, default 1.
+- `attack` and `release` are **shares of the note's own duration**, such as `1/8`, clamped to 0–1. When neither the note nor the BaseNote sets one, the instrument's own envelope applies.
+
+See [attack and release](/reference/properties/attack-release).
+
 ## Transposition arrows
 
 Selecting a note puts **▲** and **▼** buttons on its frequency row, and draws the same arrows on the note in the workspace. They multiply the note's frequency by a ratio.
@@ -225,15 +245,14 @@ A **module** is a collection of notes: a whole composition, or a reusable fragme
   "baseNote": {
     "frequency": "263",
     "startTime": "0",
-    "tempo": "100",
-    "beatsPerMeasure": "4"
+    "duration": "3/5"
   },
   "notes": [
     {
       "id": 1,
       "frequency": "base.f",
       "startTime": "base.t",
-      "duration": "beat(base) * 2",
+      "duration": "base.d * 2",
       "color": "rgba(255, 100, 100, 0.7)",
       "instrument": "sine-wave"
     },
@@ -241,18 +260,18 @@ A **module** is a collection of notes: a whole composition, or a reusable fragme
       "id": 2,
       "frequency": "(5/4) * [1].f",
       "startTime": "[1].t",
-      "duration": "beat(base) * 2"
+      "duration": "base.d * 2"
     },
     {
       "id": 3,
       "startTime": "[1].t + [1].d",
-      "duration": "beat(base)"
+      "duration": "base.d"
     }
   ]
 }
 ```
 
-Note 2 is a major third above note 1 — defined against *note 1*, not against the base. Note 3 has no `frequency`: it is a silence.
+Note 2 is a major third above note 1 — defined against *note 1*, not against the base. Note 3 has no `frequency`: it is a silence. All three lengths are written in time units, so editing the BaseNote's `duration` changes the pace of the whole module.
 
 <details>
 <summary>Legacy JavaScript syntax (still loads)</summary>
@@ -289,7 +308,7 @@ The [module bar](/user-guide/interface/module-bar) under the top bar ships **79 
 | **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
 | **Custom** | 1 | Where your own modules land. Ships with `canon base`. |
 
-Every module in the library is **relational and self-contained** — no expression refers to anything outside its own file. That is what lets you **drag a module onto any note** and have it re-root there: its `base.f` references become that note's frequency, its `base.t` references become that note's start time, and the internal structure survives intact. Drop the ii–V–I onto a note a fourth up and you get the same progression, a fourth up.
+Every module in the library is **relational and self-contained** — no expression refers to anything outside its own file. That is what lets you **drag a module onto any note** and have it re-root there: its `base.f` and `base.t` references become that note's frequency and start time, and the internal structure survives intact. Its `base.d` stays `base.d`: the module keeps its rhythm in time units and plays at your workspace's pace, whatever the length of the note you drop it on. Drop the ii–V–I onto a note a fourth up and you get the same progression, a fourth up.
 
 [The Module Library](/user-guide/modules/module-library) lists every module and how to search them.
 
@@ -353,17 +372,19 @@ So two semitones up stays a single exact symbolic step of `2^(1/6)`, rather than
 
 | Concept | In one line |
 |---------|-------------|
-| **BaseNote** | Note 0. Silent. The reference every ratio is measured from. |
+| **BaseNote** | Note 0. Silent. The only absolute values: a frequency in Hz, a start and a duration in seconds. |
+| **Time unit** | `base.d`. One beat, if you count in beats. |
 | **Ratio** | An exact fraction. 3/2 is a fifth. |
-| **Expression** | The text that defines a property: `base.f * (3/2)`, `beat(base)`, `[1].t + [1].d`. |
+| **Expression** | The text that defines a property: `base.f * (3/2)`, `base.d`, `[1].t + [1].d`. |
 | **Dependency** | One note referencing another. Change the parent, the child follows. |
 | **Silence** | A note with time but no frequency. |
+| **Measure bar** | A silent note flagged `measure`. Bars chain by `[p].t + [p].d`. |
 | **Module** | A collection of notes. Self-contained, so it can be dropped anywhere. |
 | **≈** | This value is irrational. The note is hatched on the canvas. |
 
 ## Next steps
 
-- [Your First Composition](/getting-started/first-composition) — put all six ideas on screen in five minutes
+- [Your First Composition](/getting-started/first-composition) — put the main ideas on screen in five minutes
 - [Expression syntax reference](/reference/expressions/syntax) — the complete language
 - [Dependencies](/user-guide/notes/dependencies) — the graph in detail
 - [Tutorials](/tutorials/) — hands-on

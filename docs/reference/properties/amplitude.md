@@ -18,6 +18,11 @@ relationship to another note rather than as an absolute:
 
 Change note 3's amplitude and this note follows, keeping its 121 : 100 ratio exactly.
 
+Amplitude is an **interpretation variable**. It is not part of the notation, which is only
+[frequency](/reference/properties/frequency), [startTime](/reference/properties/start-time) and
+[duration](/reference/properties/duration): it says how loudly a note is played, not which note it
+is. The others are [attack and release](/reference/properties/attack-release).
+
 ## Aliases
 
 | Write | Meaning |
@@ -37,9 +42,9 @@ type `[3].amplitude`, and it comes back as `[3].a`.
 | A note without one | the BaseNote's amplitude |
 | The BaseNote without one | `1` |
 
-Amplitude is one of the four **inheriting** properties, along with `tempo`, `beatsPerMeasure` and
-`measureLength`. `[5].a` on a note that defines no amplitude of its own yields the BaseNote's. That
-is what makes a single `amplitude` on the BaseNote scale a whole piece.
+Amplitude is one of the three **interpretation variables**, with `attack` and `release`, and these
+are the only variables that fall back to the BaseNote. `[5].a` on a note that defines no amplitude
+of its own yields the BaseNote's. That is what makes a single `amplitude` on the BaseNote scale a whole piece.
 
 An unset amplitude is not stored. A module that never mentions the property loads, plays and saves
 exactly as it did before the property existed — no `amplitude` key is ever written for a note that
@@ -59,8 +64,8 @@ relationship if you want it:
 ## Where you edit it
 
 The note widget has an `amplitude` row with the same `Evaluated:` readout and `Raw:` input as the
-other expression rows. On a note it sits between `frequency` and `color`; on the BaseNote it
-follows `beatsPerMeasure`.
+other expression rows. It sits below `frequency`, followed by the `attack` and `release`
+rows, on a note and on the BaseNote alike.
 
 - A note with no amplitude of its own shows **`Inherited:`** and the value it is sounding at, in
   grey, with an empty `Raw:` field — the same presentation as an inherited instrument. The
@@ -192,16 +197,15 @@ holds its labels. The note stays centred on its pitch line.
 Amplitude `1` — and so every note of a module that sets none — draws exactly as before. Silences
 are never scaled. The exact value is in the widget row.
 
-::: info The optional WASM evaluator
-The Rust evaluator behind the opt-in `?evaluator=wasm` flag does not know this property yet. On
-that path every note plays at `1`, and an expression that reads `.a` fails to evaluate there. The
-default JavaScript evaluator — what the app runs unless you add the flag — supports it fully.
-:::
+::: info The WASM evaluator is off
+The Rust core still has the old variable layout, so the WASM evaluator is disabled
+(`WASM_MATCHES_VARIABLE_LAYOUT = false` in `src/wasm/evaluator-adapter.js`). `?evaluator=wasm` is
+ignored with a console warning, and the JavaScript evaluator always runs.:::
 
 ## See also
 
 - [frequency](/reference/properties/frequency)
-- [tempo](/reference/properties/tempo) — the other property a note inherits from the BaseNote
+- [attack and release](/reference/properties/attack-release) — the other interpretation variables
 - [Module API](/reference/expressions/module-api#inheritance) — inheritance rules
 - [Module JSON Schema](/reference/module-schema)
 - [Instruments](/user-guide/playback/instruments)

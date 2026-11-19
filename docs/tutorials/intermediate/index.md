@@ -19,7 +19,7 @@ Use the ▲/▼ arrows on a note — which default to the octave but apply any i
 
 ### [Working with Measures](/tutorials/intermediate/measures)
 
-Build measure chains from the note widget, set a per-measure time signature, and place notes by measure and beat instead of by absolute time.
+Build bar chains from the note widget, change the meter on one bar, and attach notes to bars instead of absolute time.
 
 ## Prerequisites
 

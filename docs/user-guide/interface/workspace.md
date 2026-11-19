@@ -97,7 +97,7 @@ All three of these gestures act on **one note**, whether or not it was selected 
 
 Drag the **body** of the note (anywhere except the arrow column on the left and the pull tab on the right). The cursor shows `grab` over a body and `grabbing` while you drag.
 
-- The start time snaps to a **quarter of a beat** — a sixteenth note when the beat is a quarter note. The beat length comes from the tempo in effect at that note.
+- The start time snaps to a **quarter of the time unit** (`base.d`) — a sixteenth note when the time unit is a quarter note.
 - A note can never be dragged to start before the BaseNote.
 - Notes that depend on the one you are dragging **preview their new positions** as you go.
 - Dragging changes start time only. **Nothing you drag ever changes a pitch** — pitch comes from the arrows or from the expression.
@@ -108,7 +108,7 @@ On touch, the drag commits after about 6 px of travel; before that a second fing
 
 Drag the **pull tab** — the strip on the inner-right edge of the note, about half the note's height wide. The cursor turns into `ew-resize`.
 
-Duration snaps to the same quarter-beat grid, and cannot go below one grid step.
+Duration snaps to the same quarter-unit grid, and cannot go below one grid step.
 
 ### Transpose a note
 
@@ -123,11 +123,11 @@ See [Transposing with Arrows](/user-guide/notes/transposing).
 
 ## Measures
 
-A measure bar is a note too — it has a start time and takes part in the dependency graph — but it is drawn as a vertical line rather than a rectangle.
+A measure bar is a note too — a silent one with a start time and a duration, flagged `measure` — and it takes part in the dependency graph. It is drawn as a dashed vertical line with a triangle, never as a rest rectangle.
 
-**You select and drag a measure by its triangle handle at the bottom of the screen, not by its line.** The line itself is not clickable. Drag a triangle and the measure moves; the measures downstream of it in the same chain follow.
+**You select and drag a measure bar by its triangle handle at the bottom of the screen, not by its line.** The line itself is not clickable. Dragging a triangle changes the length of the **previous** bar; the dragged bar keeps its own length, and the bars after it follow because each starts where the one before ends.
 
-Measure chains are what a `measure([N])` reference in a start-time expression resolves against — see [Expressions](/user-guide/notes/expressions) for the helper functions.
+Other notes attach to a bar with `[N].t` and `[N].d` in their expressions. See [Working with Measures](/tutorials/intermediate/measures).
 
 ## Multi-note selection
 

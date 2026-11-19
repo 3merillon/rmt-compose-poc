@@ -11,9 +11,11 @@ undo stack, the renderer's hatching — exists to make that idea fast and honest
 
 ## Design principles
 
-1. **Expression-driven.** All seven note properties (`startTime`, `duration`, `frequency`, `tempo`,
-   `beatsPerMeasure`, `measureLength`, `amplitude`) are text expressions. Move a parent and its children follow,
-   because they never held a number in the first place.
+1. **Expression-driven.** All six note variables (`startTime`, `duration`, `frequency`, `amplitude`,
+   `attack`, `release`) are text expressions. The first three are the language: each relates a note to
+   other notes, and the BaseNote holds the only absolute values (a frequency in Hz, a start and a
+   duration in seconds; its duration, `base.d`, is the time unit). The last three interpret a note when
+   it sounds. Move a parent and its children follow, because they never held a number in the first place.
 2. **Compiled, never evaluated.** Expressions compile to a compact bytecode and run on a stack VM.
    Nothing in the app calls `eval()` or `new Function()` — that is a security guarantee, enforced in
    `src/utils/safe-expression-validator.js`.
@@ -61,7 +63,7 @@ flowchart TB
         SET[settingsStore]
     end
 
-    JSON -->|Module.loadFromJSON| MOD
+    JSON -->|"Module.loadFromJSON (migrateTimeModel first)"| MOD
     UI --> MOD
     MOD --> NOTE
     NOTE --> ROUTE
@@ -90,13 +92,18 @@ Two syntaxes compile to the **same bytecode**. `ExpressionCompiler.compile()`
 (`src/expression-compiler.js:54`) is the single routing point: it probes an LRU cache, calls
 `isDSLSyntax()`, and sends the text to the DSL pipeline or the legacy parser accordingly.
 
-- **DSL** (`src/dsl/`, 9 files) is primary. `base.f * (3/2)`, `[1].t + [1].d`, `beat(base)`, infix
-  `+ - * / ^`. Every shipped module file uses it, the note widget always *displays* it, and every
-  expression the app writes on your behalf is DSL.
+- **DSL** (`src/dsl/`, 9 files) is primary. `base.f * (3/2)`, `[1].t + [1].d`, `base.d * 4`, infix
+  `+ - * / ^`. It has no functions. Every shipped module file uses it, the note widget always *displays*
+  it, and every expression the app writes on your behalf is DSL.
 - **Legacy** is the old method-chain form
-  (`module.baseNote.getVariable('frequency').mul(new Fraction(3,2))`). It still loads, and the
-  constant defaults `new Module()` seeds its BaseNote with are still written in it (the
-  `measureLength` default is now the DSL `beat(base) * base.bpm`).
+  (`module.baseNote.getVariable('frequency').mul(new Fraction(3,2))`). It still loads. Its compiler
+  throws on a variable name outside the six and on `module.findTempo` / `module.findMeasureLength`,
+  which no longer exist.
+
+A module of the old time model (tempo, beats per measure, `beat()`, `measure()`) is not compiled as
+written. `Module.loadFromJSON()` first runs it through `migrateTimeModel()`
+(`src/migrate/relational-time.js`), an exact conversion on the JSON text that refuses rather than
+guesses. See [Module System](/developer/architecture/module-system#loading-old-modules).
 
 ::: warning A failed compile throws
 If both parsers fail, `compile()` logs a `console.error` and **throws** an error carrying both
@@ -111,8 +118,8 @@ note widget shows it under Save); the load paths catch per-note and leave the pr
 graph, the evaluators, and the dirty set. It is also the JSON load/save path. See
 [Module System](/developer/architecture/module-system).
 
-**`Note`** (`src/note.js`) holds seven `BinaryExpression`s plus non-expression `properties.color` and
-`properties.instrument`.
+**`Note`** (`src/note.js`) holds six `BinaryExpression`s plus non-expression `properties.color`,
+`properties.instrument` and `properties.measure` (the measure-bar flag, read with `isMeasureNote()`).
 
 **`BinaryExpression`** (`src/binary-note.js`) is a growable `Uint8Array` of bytecode plus a
 `Uint16Array` of referenced note ids. It can hand back a `Map<noteId, Set<varIndex>>` by scanning
@@ -182,19 +189,19 @@ Three things do the work:
 
 **One draw per visual class, not per note.** Note bodies are a single
 `gl.drawArraysInstanced(TRIANGLE_FAN, 0, 4, N)` for the entire score
-(`renderer.js:2791`). So are the silence rings, the octave guides, the measure bars, the dependency
+(`renderer.js:2877`). So are the silence rings, the octave guides, the measure bars, the dependency
 link-lines and every glyph. `renderer.js` holds 53 `drawArraysInstanced` call sites in total — one
 *per pass*, not per note (the one exception is `_drawRingIdxList`, which still loops per instance
 while a drag is active). The GPU is not the bottleneck; CPU-side per-note work is.
 
 **An idle canvas issues zero draw calls.** The rAF loop always ticks, but `_render()` early-returns
-on `!this.needsRedraw` (`renderer.js:2703`). Two change-guards make that gate real: `setPlayhead()`
-returns early when the time did not move (`renderer.js:1301`), and `updateViewportBasis()` returns
-early on an unchanged camera basis (`renderer.js:574-578`). Without them, `player.js`'s own rAF loop
+on `!this.needsRedraw` (`renderer.js:2789`). Two change-guards make that gate real: `setPlayhead()`
+returns early when the time did not move (`renderer.js:1351`), and `updateViewportBasis()` returns
+early on an unchanged camera basis (`renderer.js:594-598`). Without them, `player.js`'s own rAF loop
 kept the scene permanently dirty.
 
 **Viewport culling on the overlay pass.** The per-note loop that emits pull tabs, arrows, fraction
-dividers and text is culled against the viewport (`renderer.js:6906-6937`). This is what makes 100k
+dividers and text is culled against the viewport (`renderer.js:6986-7017`). This is what makes 100k
 notes tractable — without it, overlay cost scaled with the size of the *module* rather than with
 what is on screen.
 
@@ -211,7 +218,7 @@ src/
 ├── main.js                     # entry point (index.html loads this)
 ├── player.js                   # orchestrator: transport, selection, commits, undo wiring
 ├── module.js                   # Module: notes, deps, evaluation, JSON load/save, reindex
-├── note.js                     # Note: seven BinaryExpressions + color/instrument
+├── note.js                     # Note: six BinaryExpressions + color/instrument/measure
 ├── stack-click.js              # click-through a stack of overlapping notes
 ├── expression-compiler.js      # LEGACY parser + format routing + LRU compile cache
 ├── binary-note.js              # OP / VAR / CORRUPT / BinaryExpression
@@ -237,6 +244,7 @@ src/
 │   ├── instrument-manager.js  synth-instruments.js
 │   ├── sample-instruments.js  multisample-instrument.js
 ├── midi/midi-export.js         # module → Standard MIDI File (pure: runs in Node too)
+├── migrate/relational-time.js  # migrateTimeModel: old time model → relational form, on load
 ├── modals/                     # note widget, group widget, creation, actions, validation
 ├── menu/                       # module bar + icon factory
 ├── settings/                   # settings-schema.js, settings-store.js, settings-panel.js
@@ -262,12 +270,11 @@ An opcode is only real once **all four** of these know about it:
 
 `src/expression-compiler.js` only needs touching if the *legacy* syntax must also spell it.
 
-::: info Five opcodes exist but are dead
-`FIND_TEMPO` (0x20), `FIND_MEASURE` (0x21), `FIND_INSTRUMENT` (0x22), `DUP` (0x30) and `SWAP` (0x31)
-are defined in `OP`. All except `FIND_INSTRUMENT` are implemented in the VM switch, but **no compiler
-emits any of them**. `tempo(x)` and `measure(x)` lower to a plain `LOAD_REF` (or `LOAD_BASE`) with the
-tempo / measureLength var index; `beat(x)` lowers to `LOAD_CONST 60; LOAD_REF tempo; DIV`. Do not
-build on them.
+::: info Three opcodes exist but are dead
+`FIND_INSTRUMENT` (0x22), `DUP` (0x30) and `SWAP` (0x31) are defined in `OP`. `DUP` and `SWAP` are
+implemented in the VM switch and `FIND_INSTRUMENT` is not, and **no compiler emits any of them**. Do not
+build on them. `FIND_TEMPO` (0x20) and `FIND_MEASURE` (0x21) are retired, not dead: they were removed
+from `OP` with the tempo and measure-length variables, and their byte values are not to be reused.
 :::
 
 ### Adding an instrument
@@ -285,11 +292,11 @@ There is no serializer to update. The touch-points are:
 
 1. `src/binary-note.js` — `VAR`, `VAR_NAMES` and `CORRUPT` (the var index the bytecode carries and
    its corruption bit), and the expression, cache field and accessors on `BinaryNote`. A variable
-   is addressed in three bits, so there is room for eight; `amplitude` is the seventh.
-2. `src/note.js` — the `expressions` map in the constructor, and the lists of expression names
-   beside it.
-3. `src/module.js` — the `baseExprs` array inside `createModuleJSON()`, or the property never
-   round-trips to JSON, and the list of names `reindexModule()` rewrites references in.
+   is addressed in three bits, so there is room for eight; six are used (`release` is the sixth).
+2. `src/note.js` — `EXPRESSION_VARS`, the one list of the evaluated variables, which the `Note` constructor
+   and `module.js` read.
+3. `src/module.js` — `createModuleJSON()` and `reindexModule()` both read `EXPRESSION_VARS`, so
+   the property round-trips to JSON and has its references rewritten without a second list.
 4. `src/dsl/constants.js` — `PropertyMap` (input aliases) and `PropertyShortNames` (what the
    decompiler prints); then `varNameToIndex()` in `src/dsl/compiler.js` and in
    `src/expression-compiler.js`, with the legacy compiler's own name tables.
@@ -297,10 +304,13 @@ There is no serializer to update. The touch-points are:
    `createEvaluationRecord()`, the `switch` in `evaluateVariable()`, and the three places a value
    is read back (`getCachedValue()`, `LOAD_REF`, `LOAD_BASE`); and the matching `switch` in
    `getVariableExpression()` (`src/variable-deps.js`). A property that inherits from the BaseNote
-   takes an index of `VAR.TEMPO` or above and joins the inheritable list in `LOAD_REF`.
+   takes an index of `FIRST_INTERPRETATION_VAR` or above, which makes `LOAD_REF` and
+   `resolveVariableRef()` fall back to the BaseNote for it; a language variable (a relation) takes a
+   lower index and never inherits.
 6. The two validators that list a module file's expression keys — the import validator in
-   `src/menu/menu-bar.js` and `EXPR_KEYS` in `scripts/validate-modules.mjs`. A key missing from
-   them is not refused; its expression simply goes unchecked on upload and in `npm test`.
+   `src/menu/menu-bar.js` (which reads `EXPRESSION_VARS`, plus the old time-model keys so that old modules
+   are still checked before they are converted) and `EXPR_KEYS` in `scripts/validate-modules.mjs`. A key
+   missing from them is not refused; its expression simply goes unchecked on upload and in `npm test`.
 7. The renderer and the note widget, if it is visible.
 8. `rust/src/` — the Rust evaluator keeps its own table of variables.
 

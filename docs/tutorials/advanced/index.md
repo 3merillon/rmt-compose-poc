@@ -33,7 +33,7 @@ You should be comfortable with:
 
 - [Dependencies](/tutorials/intermediate/dependencies) — referencing other notes
 - [Octaves](/tutorials/intermediate/octaves) — the `^` operator and the ▲/▼ arrows
-- [Measures](/tutorials/intermediate/measures) — tempo, beats, measure chains
+- [Measures](/tutorials/intermediate/measures) — the time unit, measure bars, meter changes
 
 ## Before you type anything
 

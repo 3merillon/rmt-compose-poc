@@ -50,7 +50,7 @@ Backing-store size is DPR-driven and internal (`_resizeCanvasToDisplaySize()`). 
 The rAF loop always ticks. What is gated is the work inside it:
 
 ```javascript
-// renderer.js:524
+// renderer.js:544
 const loop = () => {
   this._render();
   this.animHandle = window.requestAnimationFrame(loop);
@@ -64,7 +64,7 @@ and `player.js`'s own loop keep running every frame. What is gated is the body o
 bottom of the file wrap it in turn. The outermost wrapper is the one that matters:
 
 ```javascript
-// renderer.js:10790 — the gate
+// renderer.js:10870 — the gate
 const _prevRender = proto._render;
 proto._render = function () {
   if (!this.needsRedraw) return;
@@ -74,7 +74,7 @@ proto._render = function () {
 ```
 
 ::: warning The overlay passes are not frame-idempotent
-The innermost `_render()` has *always* early-returned on `!this.needsRedraw` (`renderer.js:2703`),
+The innermost `_render()` has *always* early-returned on `!this.needsRedraw` (`renderer.js:2789`),
 but that alone was never enough. The passes layered on top of it by the wrappers — note overlays,
 measure bars, dependency lines, marquee — were called **unconditionally**, so an idle frame still
 paid the full per-note cost of every one of them and re-blended their output onto an uncleared
@@ -82,7 +82,7 @@ canvas. Measured before the outer gate landed: **46 ms/frame at 5k notes, 1034 m
 with the picture on screen never changing.
 
 If you add a pass, add it **inside** the gate, and assume it is *not* safe to run twice on the same
-frame. The marquee wrapper (`renderer.js:10945`) has to snapshot `needsRedraw` *before* delegating
+frame. The marquee wrapper (`renderer.js:11025`) has to snapshot `needsRedraw` *before* delegating
 and bail if it was false, precisely because re-blending a translucent rectangle over itself darkens
 it.
 :::
@@ -93,8 +93,8 @@ no visible symptom:
 
 | Guard | Why |
 |---|---|
-| `setPlayhead()` — `if (t === this.playheadTimeSec) return;` (`renderer.js:1301`) | `player.js` calls this from its rAF loop on **every** frame, playing or not. |
-| `updateViewportBasis()` — unchanged-basis early return (`renderer.js:574-578`) | `player.js`'s rAF loop pushes a camera update every frame to release the tracking X-lock. Without the guard `_viewEpoch` was bumped 60×/s on a still canvas, invalidating every view-keyed cache. |
+| `setPlayhead()` — `if (t === this.playheadTimeSec) return;` (`renderer.js:1351`) | `player.js` calls this from its rAF loop on **every** frame, playing or not. |
+| `updateViewportBasis()` — unchanged-basis early return (`renderer.js:594-598`) | `player.js`'s rAF loop pushes a camera update every frame to release the tracking X-lock. Without the guard `_viewEpoch` was bumped 60×/s on a still canvas, invalidating every view-keyed cache. |
 
 Every mutation that can change the image sets `needsRedraw`; no render pass sets it. So the gate
 cannot drop a frame that matters, and it cannot spin.
@@ -133,7 +133,9 @@ renderer.sync({
 
 This is the only entry point that takes the module; it caches a `_moduleRef` for the on-the-fly
 lookups the link-line pass needs mid-drag. It rebuilds the instance arrays (`posSize`, `colors`,
-silence flags, corruption types, fraction label strings), rebuilds `_noteIdToIndex`, recomputes the
+silence flags, corruption types, envelope shares, fraction label strings), rebuilds `_noteIdToIndex`,
+skips measure bars (`isMeasureNote()`: they are drawn as dashed bars with triangles, never as notes or
+silences), recomputes the
 dependency-highlight index sets, and uploads to the GPU.
 
 `sync()` runs on every re-evaluation of the module — a commit, an import, a module load — and on a
@@ -157,7 +159,7 @@ enum per note into `_corruptionType`, a `Float32Array` bound as instance attribu
 | `1.0` | **transitive** — depends on something corrupt | single 45° diagonal hatch |
 | `2.0` | **direct** — corrupt, with no corrupt dependency | crosshatch |
 
-The scan (`renderer.js:862-937`) used to call `depGraph.getAllDependencies(noteId)` — a full
+The scan (`renderer.js:910-957`) used to call `depGraph.getAllDependencies(noteId)` — a full
 transitive BFS — **for every note on every sync**, so cost scaled with dependency *depth*: 28.5 ms
 for `chain-1000` (depth 1000) against 1.4 ms for `fan-1000` (depth 1) at identical note counts.
 
@@ -169,7 +171,7 @@ So **one multi-source BFS over the dependents graph, seeded by the corrupt set**
 every note at once — O(N+E). The corrupt set is empty in the overwhelmingly common case, and
 `_corruptionType` is zero-filled first, so a clean module does **no work at all**.
 
-The old per-note logic is retained verbatim as a fallback branch (`renderer.js:910`) for graph
+The old per-note logic is retained verbatim as a fallback branch (`renderer.js:958`) for graph
 objects that lack `getCorruptedNotes` / `getDependents`.
 
 See [Dependency Graph](/developer/core/dependency-graph) for the graph itself, and
@@ -178,7 +180,7 @@ See [Dependency Graph](/developer/core/dependency-graph) for the graph itself, a
 ## Instance attributes
 
 These are the attribute slots on the shared note VAO. The note-body program (`rectBorderProgram`)
-declares 0, 1, 2, 3, 5, 6 and 7; slot 4 belongs to the tab/arrow overlay programs and rides on the
+declares 0, 1, 2, 3, 5, 6, 7 and 8; slot 4 belongs to the tab/arrow overlay programs and rides on the
 same VAO. Note that `a_flags` is **silence**, not corruption:
 
 | Loc | Name | Type | Meaning |
@@ -191,10 +193,17 @@ same VAO. Note that `a_flags` is **silence**, not corruption:
 | 5 | `a_flags` | `float` | `1.0` = silence, `0.0` = normal |
 | 6 | `a_dragFlag` | `float` | `1.0` = apply `u_dragOffset` |
 | 7 | `a_corruptionType` | `float` | `0` = none, `1` = transitive, `2` = direct |
+| 8 | `a_env` | `vec4` | The note's envelope as shares of its duration: attack, decay, sustain level, release. Zeros mean none. Buffer `rectInstanceEnvBuffer`, filled from `_envShape` in `sync()` |
+
+The envelope is drawn inside a note (a band about its centre line, full colour inside it, alpha × 0.3
+outside it) when the note or the BaseNote sets `attack` or `release`. Its shape comes from
+`envelopeShares()` in `src/instruments/instrument-manager.js` (through `_envelopeSharesFor()`), the same
+function the audio engine uses for `applyVoiceEnvelope()`, so what is drawn matches playback. A note
+that sets neither has zeros in `a_env` and no band.
 
 All flag attributes are declared `in float` and uploaded as `Float32Array`. Attribute 4 is shared
 across programs on one VAO and must be disabled during the body pass and re-enabled afterwards
-(an ANGLE/D3D safety measure) — `_setAttr4Enabled()`, `renderer.js:1569`.
+(an ANGLE/D3D safety measure) — `_setAttr4Enabled()`, `renderer.js:1619`.
 
 ## Passes, in draw order
 
@@ -202,7 +211,7 @@ There are 22 GL programs. The order below is the flattened wrapper chain; nothin
 the clear, and octave guides are drawn **late**, not first.
 
 1. Clear (colour + depth)
-2. **Note bodies** — one `drawArraysInstanced` for the whole score (`renderer.js:2791`)
+2. **Note bodies** — one `drawArraysInstanced` for the whole score (`renderer.js:2877`)
 3. Dependency-highlight rings, then the multi-selection ring — `_drawRingIdxList()`
 4. Selection ring / fill wash, hover ring
 5. Playhead
@@ -219,7 +228,7 @@ Everything below is added by the prototype wrappers at the bottom of the file:
 
 ### Viewport culling
 
-The per-note overlay loop (step 6) is culled against the viewport (`renderer.js:6906-6937`). Every
+The per-note overlay loop (step 6) is culled against the viewport (`renderer.js:6986-7017`). Every
 overlay it emits is scissored to that note's own rect, so a note entirely off-canvas cannot produce
 a single pixel — the cull is **exact**, not an approximation, which is why the picture stays
 pixel-identical. Without it, overlay cost scaled with the size of the *module*; with it, it scales
@@ -239,7 +248,7 @@ Note bodies need no cull: they are one instanced draw regardless of how many are
 
 ### The dependency-ring pass
 
-`_drawRingIdxList(indices, rgba, borderPx)` (`renderer.js:2588`) draws one bucket of rings. It has
+`_drawRingIdxList(indices, rgba, borderPx)` (`renderer.js:2674`) draws one bucket of rings. It has
 two paths:
 
 - **No drag active** — `u_dragOffset` is `(0,0)` for every ring, so the whole bucket shares
@@ -250,7 +259,7 @@ two paths:
 - **Drag active** — per-instance drag offsets differ (moving vs anchor vs static), so the exact
   per-instance loop is kept for correctness.
 
-Ring colours are **hardcoded** in `_render()` (`renderer.js:2820-2838`), one triple per property,
+Ring colours are **hardcoded** in `_render()` (`renderer.js:2906-2924`), one triple per property,
 with dimmed variants used during a drag:
 
 | Property | Colour | Parent chain (`dep`) | Dependents (`rdep`) |
@@ -268,7 +277,7 @@ frequency → duration so overlapping dependencies all stay visible.
 
 All on-note text — ID labels, fraction numerators/denominators, the word "silence", the ▲/▼ arrow
 glyphs, measure and octave-guide labels — is drawn through a single texture atlas and a single
-instanced call (`_drawAtlasGlyphInstances`, `renderer.js:8777`).
+instanced call (`_drawAtlasGlyphInstances`, `renderer.js:8857`).
 
 - One RGBA atlas texture, `min(1024, MAX_TEXTURE_SIZE)` square, glyphs rasterized on demand at
   `text.glyphBasePx` (64) in `Roboto Mono` and packed into rows. A seed set
@@ -315,7 +324,7 @@ to tune the renderer; `src/renderer/webgl2/renderer-config.js` holds the default
 | `text.softTextureCapPx` | `1024` | device px (soft cap; hard cap queried from the GPU) |
 
 ::: info
-`selection.multiRingThicknessPxAtZoom1` is read at `renderer.js:1566` with a `?? 4.0` fallback but is
+`selection.multiRingThicknessPxAtZoom1` is read at `renderer.js:1616` with a `?? 4.0` fallback but is
 **absent from `defaultRendererConfig`**. Its effective default is 4.0 px, and it will not appear if
 you dump the config.
 :::
@@ -352,7 +361,7 @@ renderer.setThemeColors({
 | `depFrequency` / `depStartTime` / `depDuration` | The dependency-highlight rings and dependency link lines |
 | `textPrimary` | Stored as `noteText` / `noteTextHex` — all on-note glyph text: fraction digits, "silence", ▲/▼ glyphs, the BaseNote fraction |
 
-Every key reaches a draw path; the accessors (`renderer.js:380-394`) carry fallbacks matching the
+Every key reaches a draw path; the accessors (`renderer.js:383-397`) carry fallbacks matching the
 pre-theme literals so an unthemed boot renders identically.
 
 Note **body** colours are deliberately not themed — they are per-note user data (`note.color`).

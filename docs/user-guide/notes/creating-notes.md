@@ -8,12 +8,12 @@ description: Add notes and silences from the note widget, drop a library module 
 There are three ways to get notes into a composition: the [note widget](/user-guide/interface/variable-widget), dropping a **library module** onto an existing note, and editing a module's **JSON** by hand. The widget is the one you will use most.
 
 ::: tip Everything is in seconds
-`startTime` and `duration` evaluate to **seconds**, not beats. To think in beats, use `beat(base)` — one beat at the BaseNote's tempo. The default module's tempo is `100`, so `beat(base)` is `0.6` seconds. Writing `"duration": "1"` gives you a one-second note, not a one-beat note. See [Expressions](/user-guide/notes/expressions#units-seconds-and-the-beat-idiom).
+`startTime` and `duration` evaluate to **seconds**, not beats. To think in beats, use `base.d` — the BaseNote's duration, the **time unit**. The default module's time unit is `3/5` s (shown as 100 BPM), so `base.d` is `0.6` seconds. Writing `"duration": "1"` gives you a one-second note, not a one-unit note. See [Expressions](/user-guide/notes/expressions#units-seconds-and-the-time-unit).
 :::
 
 ## From the note widget
 
-Click a note, a silence, or the BaseNote. The note widget opens with an **ADD NOTE / SILENCE** section below the property rows, above EVALUATE and DELETE NOTE. (Click a measure bar instead and you get an **Add Measure** section — no note creation.)
+Click a note, a silence, or the BaseNote. The note widget opens with an **ADD NOTE / SILENCE** section below the property rows, above EVALUATE and DELETE NOTE. (Click a measure bar instead and you get an **Add Measure** section, on the last bar of a chain — no note creation.)
 
 ![The note widget open on a note, showing the Evaluated and Raw rows for start time, duration and frequency, and the ADD NOTE / SILENCE section below them](/img/note-widget.png)
 
@@ -34,7 +34,7 @@ Starting from **note N**:
 | Duration | note N's own duration expression | note N's own duration expression |
 | Start Time | `[N].t + [N].d` | `[N].t` |
 
-Duration is copied as an **expression**, not as a reference. If note 3's duration is `beat(base) * (3/2)`, the new note's Duration field is pre-filled with `beat(base) * (3/2)` — the two notes end up the same length but neither depends on the other for it. (When the parent has no compiled duration expression, the field falls back to `[N].d`, which *is* a dependency.)
+Duration is copied as an **expression**, not as a reference. If note 3's duration is `base.d * (3/2)`, the new note's Duration field is pre-filled with `base.d * (3/2)` — the two notes end up the same length but neither depends on the other for it. (When the parent has no compiled duration expression, the field falls back to `[N].d`, which *is* a dependency.)
 
 Frequency is `[N].f` only when note N *has* a frequency. Start from a **silence** and the Frequency field falls back to `base.f`, because there is no `[N].f` to point at.
 
@@ -43,7 +43,7 @@ Starting from the **BaseNote**:
 | Field | Value |
 |---|---|
 | Frequency | `base.f` |
-| Duration | `beat(base)` |
+| Duration | `base.d` |
 | Start Time | `base.t` |
 
 The new note **inherits the parent note's colour**. If the parent has none, it gets a random one.
@@ -84,7 +84,7 @@ Every note property is a string expression. The shipped modules are all written 
       "id": 1,
       "frequency": "base.f * (3/2)",
       "startTime": "base.t",
-      "duration": "beat(base)",
+      "duration": "base.d",
       "color": "rgba(255, 100, 100, 0.7)",
       "instrument": "sine-wave"
     }
@@ -104,7 +104,7 @@ Older modules use method chains. They still load, and the app converts them to D
       "id": 1,
       "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
       "startTime": "module.baseNote.getVariable('startTime')",
-      "duration": "new Fraction(60).div(module.findTempo(module.baseNote))",
+      "duration": "module.baseNote.getVariable('duration')",
       "color": "rgba(255, 100, 100, 0.7)",
       "instrument": "sine-wave"
     }
@@ -122,7 +122,7 @@ See [Module Format](/user-guide/modules/module-format) for the full schema.
 | `id` | Yes | Unique integer. Assigned for you by the widget. |
 | `frequency` | For notes | Pitch in Hz. **Omit it to make the note a silence.** |
 | `startTime` | Yes | When the note begins, in seconds. |
-| `duration` | For notes and silences | How long the note lasts, in seconds. A note with a `startTime` but no `duration` and no `frequency` is a **measure bar**. |
+| `duration` | For notes and silences | How long the note lasts, in seconds; write it in time units, `base.d * 2`. |
 | `color` | No | Any CSS colour. Inherited from the parent when created in the widget. |
 | `instrument` | No | Overrides the inherited instrument. Left unset, the note inherits along its frequency reference; see [Editing Notes](/user-guide/notes/editing-notes#instrument). |
 
@@ -132,13 +132,14 @@ The three shapes a note can take are decided purely by which properties exist:
 |---|---|---|---|
 | Yes | Yes | Yes | A **note** |
 | Yes | Yes | No | A **silence** |
-| Yes | No | No | A **measure bar** |
+
+A silent note flagged `"measure": true` is a **measure bar**, drawn as a bar line and not as a rest. A note with only a `startTime` is a plain marker, not a bar. See [Measure bars](/reference/module-schema#measure-bars).
 
 ## Building a melody
 
 Each note starts when the previous one ends.
 
-1. Select the BaseNote and click **`Create`**. You get a note at `base.t`, one beat long, at the base frequency.
+1. Select the BaseNote and click **`Create`**. You get a note at `base.t`, one time unit long, at the base frequency.
 2. Select that note. Leave the position on **`At End`**.
 3. Set the Frequency field — say `base.f * (9/8)` for a whole tone above the base.
 4. Click **`Create Note`**.

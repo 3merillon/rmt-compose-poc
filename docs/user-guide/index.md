@@ -65,7 +65,7 @@ Expressions are written in the DSL. `base` is the BaseNote; `[N]` is the note wi
 base.f                  # the BaseNote's frequency
 [3].f * (3/2)           # a perfect fifth above note 3
 [3].t + [3].d           # starts exactly when note 3 ends
-beat(base) * 2          # two beats long
+base.d * 2              # two time units long
 ```
 
 Property shortnames:
@@ -75,9 +75,11 @@ Property shortnames:
 | frequency | `f`, `freq`, `frequency` |
 | startTime | `t`, `s`, `start`, `startTime` |
 | duration | `d`, `dur`, `duration` |
-| tempo | `tempo` |
-| beatsPerMeasure | `bpm`, `beatsPerMeasure` |
-| measureLength | `ml`, `measureLength` |
+| amplitude | `a`, `amp`, `amplitude` |
+| attack | `atk`, `attack` |
+| release | `rel`, `release` |
+
+The first three are the notation; the last three say how a note is played. `base.d`, the BaseNote's duration, is the **time unit**: there is no tempo variable, and the language has no functions.
 
 ### Common intervals
 

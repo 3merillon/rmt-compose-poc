@@ -107,14 +107,14 @@ Load any TET module and every note but the first will carry the ≈. That is cor
 
 The library ships **six** scale modules in a section called **Scale Systems**. It sits in the library bar under the top bar, below **Melodies** — which holds seven public-domain tunes, not scales. Everything on this page lives in Scale Systems.
 
-| Module | Notes | Base | Tempo | Step |
+| Module | Notes | Base | BaseNote duration | Step |
 |---|---|---|---|---|
-| **12-TET** | 13 | `(263/4)` ≈ 65.75 Hz | 100 | `× 2 ^ (1/12)` |
-| **19-TET** | 20 | 440 Hz | 100 | `× 2 ^ (1/19)` |
-| **31-TET** | 32 | 440 Hz | 120 | `× 2 ^ (1/31)` |
-| **Bohlen–Pierce** | 14 | 440 Hz | 80 | `× 3 ^ (1/13)` |
-| **Tesla** | 81 | 131.5 Hz | 260 | odd-harmonic ratios (no powers) |
-| **Mixed-Base** | 12 | 440 Hz | 90 | alternating 2-, 3- and 5-based steps |
+| **12-TET** | 13 | `(263/4)` ≈ 65.75 Hz | `3/5` | `× 2 ^ (1/12)` |
+| **19-TET** | 20 | 440 Hz | `3/5` | `× 2 ^ (1/19)` |
+| **31-TET** | 32 | 440 Hz | `1/2` | `× 2 ^ (1/31)` |
+| **Bohlen–Pierce** | 14 | 440 Hz | `3/4` | `× 3 ^ (1/13)` |
+| **Tesla** | 81 | 131.5 Hz | `3/13` | odd-harmonic ratios (no powers) |
+| **Mixed-Base** | 12 | 440 Hz | `2/3` | alternating 2-, 3- and 5-based steps |
 
 The tiles show the module **name**, not the filename. `TET-12.json` is what's on disk; **12-TET** is what you click.
 

@@ -26,7 +26,7 @@ The filename is fixed, like `module.json`. Rename it as soon as it lands.
 | | |
 |---|---|
 | Format | Standard MIDI File, type 1, 960 ticks per quarter note |
-| First track | The tempo and the time signature, both from the BaseNote |
+| First track | The tempo, from the BaseNote's duration, and the time signature, from the first measure bar |
 | One track per instrument | Named after the instrument — `organ`, `fm-epiano`, `sine-wave` |
 | Sound | A General MIDI program for each instrument, set before every note |
 | Pitch | The nearest 12-TET key (A4 = 440 Hz) plus a 14-bit pitch bend |
@@ -64,6 +64,17 @@ These are the nearest General MIDI sounds, not the app's own; how they sound dep
 ::: warning In a DAW
 A track holds one instrument's notes, but spread over many channels. Give the track an instrument that listens on all channels with a bend of its own per channel — a multitimbral General MIDI synth, or an MPE instrument with its bend range at 2 semitones. An instrument that listens on one channel plays only part of the track.
 :::
+
+## Tempo and time signature
+
+A module stores no tempo, so the export reads one off the time unit. The time unit, `base.d`, is taken as the quarter note:
+
+| Written | From |
+|---|---|
+| Tempo | `60 / base.d` BPM. A BaseNote duration of `3/5` s is 100 BPM. |
+| Time signature | The length of the **first measure bar** (the one that starts earliest), in time units. A bar of `4` is 4/4, `7/2` is 7/8. |
+
+When the module has no measure bar, or the first bar's length cannot be written as a time signature, none is stored. A bar of `5/3` time units is such a length. See [Measure bars](/reference/module-schema#measure-bars).
 
 ## What is rounded
 
@@ -113,7 +124,7 @@ A plain export answers with a cyan toast. When the file could not carry somethin
 | Amplitude 0 | The note is not exported. It is silent in playback too. |
 | A note shorter than one tick | It is given a length of one tick. |
 | A note that starts before time zero | It starts at zero, as in playback. One that also ends before zero is not exported. |
-| A `beatsPerMeasure` with no time signature | `4` is written as 4/4 and `(7/2)` as 7/8; `(5/3)` has no such form, and no time signature is stored. |
+| A first measure bar with no time signature | `base.d * 4` is written as 4/4 and `base.d * (7/2)` as 7/8; `base.d * (5/3)` has no such form, and no time signature is stored. |
 | A tempo below 3.58 BPM | MIDI cannot store it. The nearest storable tempo is used for the whole file. |
 
 If nothing could be written, no file is downloaded and a red toast says so.
@@ -126,7 +137,7 @@ If nothing could be written, no file is downloaded and a red toast says so.
 - **Reverb, stereo spread and the limiter.** Those are playback settings, not part of the module.
 - **Colours.**
 - **Silences.** A silence is a rest; nothing is written for it.
-- **Measure bars as events.** They make no sound. The last measure does set where the file ends, so a piece that closes on an empty bar keeps it.
+- **Measure bars as events.** They make no sound. The last bar does set where the file ends (its start plus its duration), so a piece that closes on an empty bar keeps it.
 - **The expressions.** `[1].f * (3/2)` leaves as a key and a bend.
 
 ## Tips

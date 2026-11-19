@@ -168,14 +168,15 @@ The tree survives the trip:
 - An expression is copied **as written** when every note it names travels with it. `[1].t + [1].d`
   stays `[1].t + [1].d`, with the ids renumbered `1..N` in time order.
 - An expression that reaches **outside** the selection would dangle, so it is rebuilt against the
-  new base from the note's current value: `base.t + beat(base) * 4`, `beat(base) * (1/2)`,
+  new base from the note's current value: `base.t + base.d * 4`, `base.d * (1/2)`,
   `(3/2) * base.f`.
 - A note whose start-time chain leaves the selection is always re-anchored to the new base, even if
   its expression names no note at all. Otherwise it would stay pinned to its original absolute time
   instead of following the module to wherever you drop it.
-- The new module's BaseNote is a **copy of the current one** — same frequency, tempo and meter — so
-  `base.f`, `beat(base)` and `tempo(base)` keep meaning what they meant. Pitches survive as
-  **ratios**, not frozen numbers, which is what lets the copy transpose correctly when you drop it
+- The new module's BaseNote is a **copy of the current one** — same frequency, duration (the time
+  unit) and interpretation, with its start time set to 0 — so `base.f` and `base.d` keep meaning
+  what they meant. Pitches survive as **ratios** and rhythms as multiples of the time unit, not
+  frozen numbers, which is what lets the copy transpose correctly when you drop it
   on a different note.
 - Per-note colour and instrument come along when they are set.
 

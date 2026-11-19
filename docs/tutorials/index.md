@@ -15,7 +15,7 @@ Start here if you have never used RMT Compose.
 
 1. [Build a Major Scale](/tutorials/beginner/major-scale) — eight notes, eight pure ratios
 2. [Create a Major Triad](/tutorials/beginner/major-triad) — three notes that sound at once
-3. [Add Rhythm](/tutorials/beginner/rhythm) — beats, durations and silences
+3. [Add Rhythm](/tutorials/beginner/rhythm) — time units, durations and silences
 
 ### Intermediate
 
@@ -23,7 +23,7 @@ Start here if you have never used RMT Compose.
 
 4. [Note Dependencies](/tutorials/intermediate/dependencies) — make one note follow another
 5. [Octave Manipulation](/tutorials/intermediate/octaves) — the ▲/▼ arrows and the `^` operator
-6. [Working with Measures](/tutorials/intermediate/measures) — measure chains and time signatures
+6. [Working with Measures](/tutorials/intermediate/measures) — measure bars and meter changes
 
 ### Advanced
 
@@ -58,10 +58,9 @@ RMT Compose boots into a 169-note demo composition. Its BaseNote is:
 |---|---|
 | frequency | `263` Hz |
 | startTime | `0` |
-| tempo | `100` BPM |
-| beatsPerMeasure | `4` |
+| duration | `3/5` s, the time unit (shown as 100 BPM) |
 
-Every beginner tutorial starts by clearing that composition: click the BaseNote, scroll to **DELETE ALL NOTES**, click **Clean Slate**, confirm. The tutorials do not assume you changed the BaseNote's frequency or tempo, so their numbers are ratios, not hertz.
+Every beginner tutorial starts by clearing that composition: click the BaseNote, scroll to **DELETE ALL NOTES**, click **Clean Slate**, confirm. The tutorials do not assume you changed the BaseNote's frequency or duration, so their numbers are ratios, not hertz.
 
 ## How editing works
 
@@ -72,7 +71,7 @@ Three facts save a lot of confusion:
 - **Undo works.** `Ctrl+Z` / `Ctrl+Y`, or the Undo/Redo buttons in the "+" menu and in the module library toolbar. You do not need to save defensively.
 
 ::: tip
-Expressions are written in the DSL: `base.f * (3/2)`, `[1].t + [1].d`, `beat(base)`. Write fractions parenthesised — `(3/2)` — which is the form the app itself emits and normalises to. Parentheses are load-bearing under `^`: `2^(7/12)` is a 12-TET fifth, while `2^7/12` parses as `(2^7)/12` and is quietly something else. See the [expression syntax reference](/reference/expressions/syntax).
+Expressions are written in the DSL: `base.f * (3/2)`, `[1].t + [1].d`, `base.d`. Write fractions parenthesised — `(3/2)` — which is the form the app itself emits and normalises to. Parentheses are load-bearing under `^`: `2^(7/12)` is a 12-TET fifth, while `2^7/12` parses as `(2^7)/12` and is quietly something else. See the [expression syntax reference](/reference/expressions/syntax).
 :::
 
 ## Tutorial format

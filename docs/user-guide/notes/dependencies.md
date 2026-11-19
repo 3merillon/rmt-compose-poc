@@ -66,26 +66,29 @@ Retune the BaseNote to 220 and all three follow, keeping their intervals exactly
 
 ## The BaseNote
 
-The BaseNote (ID 0) is the root. It depends on nothing, and nearly everything depends on it — directly, or by way of a chain. It carries the properties the rest of the module reads: `frequency`, `startTime`, `tempo`, `beatsPerMeasure` and `measureLength`.
+The BaseNote (ID 0) is the root. It depends on nothing, and nearly everything depends on it — directly, or by way of a chain. It carries the only absolute values in the module: a `frequency` in hertz, and a `startTime` and a `duration` in seconds. Its duration is the **time unit**, `base.d`, and every other length is written against it, directly or through a chain. (It can also carry the interpretation variables `amplitude`, `attack` and `release`, which notes without their own read from it.)
 
 `base.f` and `[0].f` are the same reference.
 
 ## Measure chains
 
-Measure bars are notes too — a measure is a note with a `startTime` and nothing else. They form their own chain, each measure hanging off the previous one:
+Measure bars are notes too — a measure bar is a silent note with a start and a duration and the flag `measure`. They form their own chain, each bar hanging off the previous one through both its start and its length:
 
 ```
-# Measure 1
-base.t
+# Bar 1
+startTime:  base.t
+duration:   base.d * 4
 
-# Measure 2
-[1].t + measure([1])
+# Bar 2
+startTime:  [1].t + [1].d
+duration:   [1].d
 
-# Measure 3
-[2].t + measure([2])
+# Bar 3
+startTime:  [2].t + [2].d
+duration:   [2].d
 ```
 
-Change the BaseNote's tempo or beats-per-measure and the whole bar grid re-lays itself, because every measure's start time is expressed in terms of the one before it. `measure(x)` is the measure length of `x`, in seconds. (The widget redisplays it as `[1].ml` — see [Expressions](/user-guide/notes/expressions#the-three-helper-functions).)
+Change the BaseNote's duration, or any one bar's duration, and the bars after it re-lay themselves, because every bar's start and length are expressed in terms of the one before it. A meter change is one bar's `duration`. See [Working with Measures](/tutorials/intermediate/measures).
 
 ## Instruments ride the frequency edge
 

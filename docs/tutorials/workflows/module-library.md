@@ -65,8 +65,8 @@ What you get is a genuinely reusable module, not a snapshot:
 - Expressions that reference only notes *inside* the selection are copied **verbatim** (ids
   renumbered). So `[1].t + [1].d` stays `[1].t + [1].d` — internal branching survives.
 - Expressions that reached *outside* the selection would dangle, so they are rebuilt against the new
-  base as ratios and beat offsets: `k * base.f`, `base.t + beat(base) * k`, `beat(base) * k`.
-- The new BaseNote is a copy of your current one, so `base.f` and `beat(base)` keep meaning what
+  base as ratios and time-unit offsets: `k * base.f`, `base.t + base.d * k`, `base.d * k`.
+- The new BaseNote is a copy of your current one, so `base.f` and `base.d` keep meaning what
   they meant, and pitches survive as **ratios** — which is what lets the copy transpose correctly
   when you drop it on a different note.
 
@@ -109,9 +109,9 @@ its internal ids renumbered so nothing collides.
 
 | Drop target | Result |
 |---|---|
-| A note | Imported and re-rooted onto that note |
+| A note | Imported and re-rooted onto that note's start and pitch; its durations stay in the workspace's time unit |
 | The BaseNote circle | Imported keeping its `base.*` anchors |
-| A measure bar | Timing anchors to the measure; **frequency stays on `base.f`** (a measure bar has no pitch) |
+| A measure bar | Start and duration anchor to the bar; **frequency stays on `base.f`** (a bar has no pitch) |
 | A silence | **Rejected** — *"Cannot drop onto a silence."* |
 | Empty background | **Rejected** — *"Drop onto a note or the BaseNote circle to import a module."* |
 

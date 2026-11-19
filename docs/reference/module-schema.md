@@ -19,7 +19,7 @@ A **module** is a composition saved as JSON. It has exactly two top-level keys: 
 | `baseNote` | object | yes | The root reference note. It is note id **0**. |
 | `notes` | array | yes | Flat array of note objects. Order does not matter; the app sorts by `id` on export. |
 
-There is **no** `version`, `name`, `author`, `tempo map`, `measures[]`, or `parentId` field. A module has no metadata at all: the library takes a module's display name from the [library manifest](#the-library-manifest) or from the uploaded file's name, never from the file's contents. Parentage is reconstructed from the expressions themselves.
+There is **no** `version`, `name`, `author`, `tempo`, `measures[]`, or `parentId` field. A module has no metadata at all: the library takes a module's display name from the [library manifest](#the-library-manifest) or from the uploaded file's name, never from the file's contents. Parentage is reconstructed from the expressions themselves.
 
 ::: warning `notes` is mandatory in practice
 The structure check on **Load Module** tolerates a file with no `notes` key, but the loader then throws and you get a red `Error loading module: …` banner. Always include `notes`, even if empty.
@@ -34,14 +34,13 @@ This is `public/modules/intervals/3-2.json`, shipped with the app in full:
   "baseNote": {
     "frequency": "263",
     "startTime": "0",
-    "tempo": "60",
-    "beatsPerMeasure": "4"
+    "duration": "1"
   },
   "notes": [
     {
       "id": 1,
       "startTime": "base.t",
-      "duration": "beat(base)",
+      "duration": "base.d",
       "frequency": "(3/2) * base.f",
       "color": "rgba(242,167,27,0.7)"
     }
@@ -49,25 +48,27 @@ This is `public/modules/intervals/3-2.json`, shipped with the app in full:
 }
 ```
 
-One note, a perfect fifth above the BaseNote, one beat long, starting where the BaseNote starts.
+One note, a perfect fifth above the BaseNote, one time unit long, starting where the BaseNote starts. The BaseNote holds the only absolute values: a frequency in Hz, and a start and a duration in seconds.
 
 ## The `baseNote` object
 
-Every field is optional. An omitted field falls back to the **class default** below — *not* to the values in the default module you see when you open the app (263 Hz / 100 BPM).
+Every field is optional. An omitted field falls back to the **class default** below — *not* to the values in the default module you see when you open the app (263 Hz, a duration of 3/5 s).
 
 | Field | Type | Default if omitted | Notes |
 |---|---|---|---|
-| `frequency` | expression string | `440` Hz | Shipped modules use `263`. |
+| `frequency` | expression string | `440` Hz | Shipped modules use `263` or `440`. |
 | `startTime` | expression string | `0` s | Shipped modules use `0`. |
-| `tempo` | expression string | `60` BPM | In beats per minute. |
-| `beatsPerMeasure` | expression string | `4` | The numerator of the time signature. |
-| `measureLength` | expression string | `60 / tempo × beatsPerMeasure` | Five of the six scale-system modules are the only shipped modules that set it explicitly, as `beat(base) * base.bpm`. |
-| `amplitude` | expression string | `1` | A relative gain. Every note without its own inherits it, so it scales the whole piece. Written to the file only when set. No shipped module uses it. See [amplitude](/reference/properties/amplitude). |
+| `duration` | expression string | `1` s | The **time unit**, `base.d`: one beat if you count in beats. `60 / duration` is the tempo in BPM, shown by the note widget and stored nowhere. See [the time unit](/reference/properties/duration#the-time-unit). |
+| `amplitude` | expression string | `1` | A relative gain. Every note without its own inherits it, so it scales the whole piece. Written to the file only when set. See [amplitude](/reference/properties/amplitude). |
+| `attack` | expression string | none | A share of each note's duration, `0`–`1`. Every note without its own inherits it. With none set, the instrument's own envelope applies. See [attack and release](/reference/properties/attack-release). |
+| `release` | expression string | none | The same, for the fall at the end of a note. |
 | `color` | CSS color string | none | Accepted by the loader and the exporter. No shipped module uses it. |
 | `instrument` | instrument name | none → the `audio.defaultInstrument` setting | See [Instruments](#instruments). |
 
-::: warning The BaseNote has no duration
-`duration` is not among the BaseNote's defaults, and none of the 79 shipped modules sets `baseNote.duration`. `base.d` compiles, but it reads an empty expression. Do not write one, and do not depend on it.
+The first three rows are the **language**: the BaseNote's frequency, start and duration are the only absolute values in a module, and every other note relates to them. `amplitude`, `attack` and `release` are **interpretation variables**: how the notes sound, not what they relate to.
+
+::: warning There is no tempo, beatsPerMeasure or measureLength
+These three keys were removed. A module that still has them is converted exactly when it loads, see [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions). Typing `tempo`, `bpm` or `ml` in an expression is refused with a message naming the replacement.
 :::
 
 ## The `notes` array
@@ -76,34 +77,70 @@ Every field is optional. An omitted field falls back to the **class default** be
 |---|---|---|---|
 | `id` | integer | **yes** | `0 ≤ id ≤ 65535`. `0` is reserved for the BaseNote. Duplicates are rejected by the library validator. |
 | `startTime` | expression string | in practice, yes | Seconds from time zero. |
-| `duration` | expression string | no | Seconds. Absent = a measure bar. |
-| `frequency` | expression string | no | Hz. Absent (with a `duration` present) = a silence. |
-| `tempo` | expression string | no | Per-note override. |
-| `beatsPerMeasure` | expression string | no | Per-note override — this is how measure bars carry a meter change. |
-| `measureLength` | expression string | no | Per-note override. |
+| `duration` | expression string | no | Seconds. Absent = a plain marker with no length. |
+| `frequency` | expression string | no | Hz. Absent (with a `duration` present) = a silence, or a measure bar. |
 | `amplitude` | expression string | no | Relative gain, e.g. `"(121/100) * [3].a"`. Absent = the BaseNote's. |
+| `attack` | expression string | no | A share of the note's duration, e.g. `"(1/8)"`. Absent = the BaseNote's, else the instrument's. |
+| `release` | expression string | no | The same, for the end of the note. |
 | `color` | CSS color string | no | e.g. `"rgba(242,167,27,0.7)"`. |
 | `instrument` | instrument name | no | Inherited along the frequency chain when absent. |
+| `measure` | `true` | no | Marks a silent note as a [measure bar](#measure-bars). Any other value is read as absent. Written only when `true`. |
 
-The seven **expression keys** are exactly `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`. The three **non-expression keys** are `id`, `color`, `instrument`. Anything else in a note object is ignored.
+The six **expression keys** are exactly `startTime`, `duration`, `frequency`, `amplitude`, `attack`, `release`. The first three are the language; the last three are interpretation. The **non-expression keys** are `id`, `color`, `instrument` and `measure`. Anything else in a note object is ignored.
 
-### Note kinds are inferred, not declared
+### Note kinds
 
-There is no `type` field. What a note *is* follows from which expressions it has:
+What a note *is* follows from which keys it has. The one flag, `measure`, separates a measure bar from a silence.
 
 | Kind | Rule | Drawn as |
 |---|---|---|
 | **Note** | `startTime` + `duration` + `frequency` | A filled bar at its pitch |
-| **Silence** | `startTime` + `duration`, **no** `frequency` | A dashed outline, no sound |
-| **Measure bar** | `startTime`, **no** `duration`, **no** `frequency` | A vertical dashed line across the workspace |
+| **Silence** (rest) | `startTime` + `duration`, **no** `frequency`, no `measure` flag | A dashed outline, no sound |
+| **Measure bar** | `startTime` + `duration`, **no** `frequency`, `"measure": true` | A vertical dashed line with a triangle |
+| **Marker** | `startTime` only | A point to anchor other notes to; not a bar, and not scheduled |
 
-A chain of measure bars, each starting one measure after the last, is a [measure chain](/reference/glossary#measure-chain):
+## Measure bars
+
+A **measure bar** is a silent note with a start and a duration, no frequency, and the flag `"measure": true`. The duration is the length of the bar. The flag decides how the editor draws and treats the note; evaluation reads a bar like any other note (`isMeasureNote()` in `src/note.js`).
+
+### The chain form
+
+**Add Measure** (`Module.generateMeasures`, `src/module.js`) writes the first bar from the BaseNote, and each next bar from the one before it:
 
 ```json
-{ "id": 1, "startTime": "base.t" },
-{ "id": 2, "startTime": "[1].t + measure([1])" },
-{ "id": 3, "startTime": "[2].t + measure([2])" }
+{ "id": 1, "startTime": "base.t", "duration": "base.d * 4", "measure": true },
+{ "id": 2, "startTime": "[1].t + [1].d", "duration": "[1].d", "measure": true },
+{ "id": 3, "startTime": "[2].t + [2].d", "duration": "[2].d", "measure": true }
 ```
+
+The first bar is four time units long. Each next bar starts where the previous one ends and is as long as it. A chain like this is a [measure chain](/reference/glossary#measure-chain). The row that adds a bar is labelled **Add New Measure Chain** on the BaseNote and **Add Measure** on the last bar of a chain, and appears nowhere else.
+
+### A meter change
+
+A different bar length is a different meter. Give one bar its own duration, and the bars after it follow, because each reads the one before:
+
+```json
+{ "id": 1, "startTime": "base.t", "duration": "base.d * 4", "measure": true },
+{ "id": 2, "startTime": "[1].t + [1].d", "duration": "base.d * 3", "measure": true },
+{ "id": 3, "startTime": "[2].t + [2].d", "duration": "[2].d", "measure": true }
+```
+
+Bar 1 is four time units, bars 2 and 3 are three. There is no time-signature object: a meter is a bar length. In the bar's widget the duration row reads **duration (bar length)** and shows the length in time units, for example `= 3 time units`.
+
+### Bar, silence or marker
+
+| | Has | Sounds | Drawn as |
+|---|---|---|---|
+| **Measure bar** | start, duration, `measure: true` | no | dashed line with a triangle, never as a rest |
+| **Silence** | start, duration, no frequency | no | a rest: a dashed outline the length of the note |
+| **Marker** | start only | no | not drawn as a bar |
+
+### Editing a bar
+
+- Dragging a bar's triangle changes the **previous** bar's length; the dragged bar keeps its own.
+- The module ends at the larger of the last bar's start plus its duration, and the last note's end.
+- Dropping a library module on a bar maps `t` and `d` to the bar, and leaves frequency, amplitude, attack and release with the BaseNote.
+- MIDI export writes the first bar's length in time units as the time signature (4 as 4/4, 7/2 as 7/8), and none when there is no bar or the length cannot be a signature. See [Exporting MIDI](/user-guide/modules/exporting-midi).
 
 ## Expression strings
 
@@ -116,12 +153,12 @@ Two formats compile to the same bytecode and may be mixed freely in one file. Th
 ```
 base.f * (3/2)          # a fifth above the base
 [1].t + [1].d           # start when note 1 ends
-[1].t + measure([1])    # one measure after note 1 starts
-beat(base) * (3/4)      # a dotted eighth
+base.d * (3/4)          # a dotted eighth
+[1].d                   # as long as note 1
 2^(1/12)                # one 12-TET semitone
 ```
 
-See the [expression syntax reference](/reference/expressions/syntax) for the full grammar.
+See the [expression syntax reference](/reference/expressions/syntax) for the full grammar. The language has no functions.
 
 <details>
 <summary>Legacy JavaScript syntax</summary>
@@ -131,16 +168,14 @@ Method-chain expressions still load, and still round-trip verbatim:
 ```javascript
 module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
 module.getNoteById(1).getVariable('startTime')
-new Fraction(60).div(module.findTempo(module.baseNote))
+module.baseNote.getVariable('duration')
 ```
 
 </details>
 
 ### Format detection
 
-A string is compiled as **DSL** when it contains `[N].` or `base.` anywhere, or **starts with** a fraction literal like `(3/2)` or a call to `tempo(`, `measure(`, `beat(`. It is compiled as **legacy** when it contains `new Fraction(`, `module.`, `.getVariable(`, or a `.mul(`/`.div(`/`.add(`/`.sub(`/`.pow(` chain.
-
-Position matters for the helper calls only in the *first* routing pass: `beat(base) * 2` is sniffed as DSL directly, while `2 * beat(base)` has no leading marker and is routed to the legacy parser first. That is no longer fatal — when the legacy parser fails, the compiler retries the string as DSL, so `2 * beat(base)` still compiles. See [the beat unit](/reference/properties/tempo#the-beat-unit).
+A string is compiled as **DSL** when it contains `[N].` or `base.` anywhere, or **starts with** a fraction literal like `(3/2)`. It is compiled as **legacy** when it contains `new Fraction(`, `module.`, `.getVariable(`, or a `.mul(`/`.div(`/`.add(`/`.sub(`/`.pow(` chain.
 
 A string that is **pure arithmetic with no references** — `440`, `263`, `2 * 263`, `(1/2) * 263` — is routed to the **DSL** compiler directly.
 
@@ -189,15 +224,9 @@ This is why most scale-system modules pin `"instrument": "sine-wave"` on their B
 
 1. **It is reindexed.** Measure bars are renumbered first (sorted by evaluated `startTime`), then the remaining notes (also by `startTime`), starting at id 1. Every `[N]` reference is rewritten to match. Ids in the saved file will generally differ from the ids you saw on screen. There is no byte-stable round trip.
 2. **Expression source text is preserved verbatim.** Saving does **not** convert legacy expressions to DSL, and it does not convert DSL to legacy.
-3. **The BaseNote gains a `measureLength`,** even if your source file omitted it. It is emitted in DSL form — the class default. Round-tripping the file above produces:
+3. **Nothing is added.** `amplitude`, `attack` and `release` are written only for the notes (and the BaseNote) that define one, and `measure` only on a bar, so a file that never used them is saved without them. A pure-DSL source file round-trips as pure DSL.
 
-```json
-"measureLength": "beat(base) * base.bpm"
-```
-
-A pure-DSL source file therefore round-trips as pure DSL.
-
-No other key is added. In particular `amplitude` is written only for the notes (and the BaseNote) that define one, so a file that never used it is saved without it.
+Files saved by this version do not load in the published editor.
 
 ## Limits and validation
 
@@ -291,6 +320,7 @@ Do not confuse the two. A `ui-state.json` will not load as a module, and a `modu
 | `localStorage` key | Contents |
 |---|---|
 | `rmt:moduleSnapshot:v1` | The current composition, in module-JSON shape. Written on every undoable edit, on tab-hide, and on unload. Loaded on boot instead of the default module. |
+| `rmt:moduleSnapshot:v1:unloadable` | A saved session that could not be loaded is kept here, and the default module opens. |
 | `ui-state` | The library layout (the `Save UI` payload). |
 | `rmt:settings:v1` | The [settings tree](/reference/settings-reference). |
 

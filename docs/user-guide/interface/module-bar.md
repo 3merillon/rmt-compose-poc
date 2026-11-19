@@ -133,9 +133,9 @@ Drop mode is **ignored when you drop on the BaseNote**. A module dropped on the 
 
 | Target | What happens |
 |---|---|
-| **A note** | Start time, duration and frequency all re-anchor to that note. The drop mode applies. |
+| **A note** | Start time and frequency re-anchor to that note (`base.t` and `base.f` become its `t` and `f`). Durations stay in the workspace's time unit (`base.d` stays `base.d`), so the module plays at the workspace's pace. The drop mode applies. |
 | **The BaseNote** | The module keeps its `base.*` anchors — you get it exactly as the author wrote it. Drop mode is ignored. |
-| **A measure bar** | Start time and duration anchor to the measure bar. Frequency stays anchored to `base.f`, because a measure bar has no pitch. |
+| **A measure bar** | Start time and duration anchor to the bar. Frequency, amplitude, attack and release stay with the BaseNote, because a bar has no pitch. |
 | **A silence** | Rejected: *"Cannot drop onto a silence. Drop on a note or the BaseNote instead."* |
 | **Empty background** | Rejected. Modules import onto something, not into space. |
 

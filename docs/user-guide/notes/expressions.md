@@ -1,6 +1,6 @@
 ---
 title: Expressions
-description: Write note properties as expressions — fractions, references to other notes, beat(base), and TET powers — and understand what the app does with them.
+description: Write note properties as expressions — fractions, references to other notes, the time unit base.d, and TET powers — and understand what the app does with them.
 ---
 
 # Expressions
@@ -19,25 +19,27 @@ base.f * (3/2)     # arithmetic on a reference — a perfect fifth above it
 
 That is the whole language. Everything else is detail.
 
-## Units: seconds, and the beat idiom
+## Units: seconds, and the time unit
 
 `startTime` and `duration` are measured in **seconds**. Frequency is in **Hz**.
 
-Music is not written in seconds, so the language gives you `beat(base)` — the length of one beat at the BaseNote's tempo, in seconds.
+Music is not written in seconds, so you write lengths against the BaseNote's duration, `base.d`. That is the **time unit**: one beat, if you count in beats. It is the only absolute length in a module.
 
 ```
-beat(base)              # one beat
-beat(base) * 4          # a whole note
-beat(base) * (1/2)      # an eighth note
-beat(base) * (3/4)      # a dotted eighth
-base.t + beat(base) * 2 # two beats after the BaseNote starts
+base.d                  # one time unit
+base.d * 4              # a whole note
+base.d * (1/2)          # an eighth note
+base.d * (3/4)          # a dotted eighth
+base.t + base.d * 2     # two time units after the BaseNote starts
 ```
 
 ::: warning `1` means one second
-At the default tempo of 100, one beat is `0.6` seconds — so `"duration": "1"` is a note about 1⅔ beats long, which is almost certainly not what you meant. Reach for `beat(base)`.
+In the default module `base.d` is `3/5` s (shown as 100 BPM), so `"duration": "1"` is a note about 1⅔ time units long, which is almost certainly not what you meant. Reach for `base.d`.
 :::
 
-Every shipped module writes its durations this way, and so does the app: the note-length icon buttons in the widget emit `beat(base)` for a quarter, and `beat(base) * 2`, `beat(base) * (1/2)` and so on for the rest.
+Every shipped module writes its durations this way, and so does the app: the note-length icon buttons in the widget emit `base.d` for a quarter, and `base.d * 2`, `base.d * (1/2)` and so on for the rest.
+
+There is no stored tempo. The BaseNote's duration row shows `60 / base.d` beside the value, for example "= 100 BPM", as a read-only view. To change the pace, edit the duration. See [the time unit](/reference/properties/duration#the-time-unit).
 
 ## Literals
 
@@ -69,13 +71,20 @@ The property goes after the dot. The short names are the ones you will see every
 | frequency | `f` | `freq`, `frequency` |
 | startTime | `t` | `s`, `start`, `startTime` |
 | duration | `d` | `dur`, `duration` |
-| tempo | `tempo` | — |
-| beatsPerMeasure | `bpm` | `beatsPerMeasure` |
-| measureLength | `ml` | `measureLength` |
 
-So `[3].d` is note 3's duration and `base.bpm` is the BaseNote's beats-per-measure. There is no `l` alias for duration.
+So `[3].d` is note 3's duration, and `base.d` is the BaseNote's. There is no `l` alias for duration. These three are the **language variables**: each relates a note to other notes, and none falls back to the BaseNote.
 
-`tempo`, `bpm` and `ml` **fall back to the BaseNote** when the note you name doesn't define them — `[5].tempo` on a note with no tempo of its own gives you the BaseNote's tempo. `f`, `t` and `d` do not fall back.
+Three more variables are interpretation, not notation:
+
+| Property | Short | Also accepted |
+|---|---|---|
+| amplitude | `a` | `amp`, `amplitude` |
+| attack | `atk` | `attack` |
+| release | `rel` | `release` |
+
+Only these fall back to the BaseNote when the note you name doesn't define them — `[5].a` on a note with no amplitude of its own gives you the BaseNote's. `attack` and `release` are shares of the note's own duration; see [attack and release](/reference/properties/attack-release).
+
+Writing `tempo`, `bpm` or `ml` is refused: those variables were removed.
 
 ## Arithmetic
 
@@ -87,19 +96,16 @@ So `[3].d` is note 3's duration and `base.bpm` is the BaseNote's beats-per-measu
 
 Use `(` `)` to group. Use `#` to start a comment — but note that **comments are dropped when the expression is saved**.
 
-## The three helper functions
+## No functions
 
-There are exactly three, and each takes a bare note reference (`base` or `[N]`) — not an expression.
+The language has no functions. `beat()`, `tempo()` and `measure()` were removed. Typing one is refused, with a message that names the replacement:
 
-| Call | Gives you |
+| Old | Write now |
 |---|---|
-| `beat(x)` | one beat at x's tempo, in seconds |
-| `tempo(x)` | x's tempo |
-| `measure(x)` | x's measure length, in seconds |
+| `beat(base)`, `beat([N])` | `base.d` |
+| `measure([N])` on a bar | `[N].d` |
 
-::: info `tempo()` and `measure()` don't survive a save
-They compile to exactly the same thing as `x.tempo` and `x.ml`, and that's the form that comes back when the expression is redisplayed. Type `measure([1])` and it works, but the widget will show you `[1].ml` afterwards. **`beat()` is the one helper that round-trips** — write it and it stays written.
-:::
+A tempo T is a BaseNote duration of `60/T`; beats per measure B is a measure bar of `base.d * B`. Older files are converted when they load; see [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions).
 
 ## The patterns you'll actually use
 
@@ -120,15 +126,15 @@ base.f * 3^(1/13)   # one Bohlen-Pierce step
 base.t                    # start with the BaseNote
 [1].t + [1].d             # start the moment note 1 ends
 [1].t                     # start with note 1 (chord)
-[1].t + measure([1])      # start one measure after note 1
-base.t + beat(base) * 3   # three beats in
+[bar].t + [bar].d * (1/4) # a quarter of the way into a measure bar
+base.t + base.d * 3       # three time units in
 ```
 
 **Length**
 
 ```
-beat(base)              # a quarter note
-beat(base) * (7/4)      # a double-dotted quarter
+base.d                  # a quarter note
+base.d * (7/4)          # a double-dotted quarter
 [3].d                   # exactly as long as note 3 — and tied to it
 ```
 
@@ -176,7 +182,7 @@ Unresolved reference! A hard-coded default was used instead:
   [7].frequency reads [999].frequency, but note 999 does not exist (used 440)
 ```
 
-If a note is stubbornly sitting at 440 Hz, check its IDs. The same happens when the note exists but lacks the property — `[3].d` when note 3 is a measure bar.
+If a note is stubbornly sitting at 440 Hz, check its IDs. The same happens when the note exists but lacks the property — `[3].f` when note 3 is a measure bar or a silence.
 :::
 
 ### Self-references and cycles are rejected
@@ -202,7 +208,7 @@ The check is per property, so these are fine:
 ```
 
 ::: warning Dragging rewrites what it moves
-Moving a note re-emits its start time, duration and frequency in their standard forms (`[p].t + beat([p]) * k`, `beat([p]) * k`, `k * [p].f`), anchored on a note that starts no later than it does. A relationship outside those forms — a duration tied to another note's duration, a pitch tied to a note that starts later — becomes an equal value in the standard form when you drag that note. Set such relationships in the widget, and re-check them after a drag.
+Moving a note re-emits its start time, duration and frequency in their standard forms (`[p].t + base.d * k`, `base.d * k`, `k * [p].f`), anchored on a note that starts no later than it does. A relationship outside those forms — a duration tied to another note's duration, a pitch tied to a note that starts later — becomes an equal value in the standard form when you drag that note. Set such relationships in the widget, and re-check them after a drag.
 :::
 
 ### Rejections tell you why

@@ -11,7 +11,7 @@ ten-second one.
 
 ::: warning There is no `StreamingScheduler` class
 Do not go looking for one. The scheduler is a **closure** — `const pump = () => {…}` — over a mutable
-state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:300-396`). There is no
+state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:312-408`). There is no
 scheduler file, no scheduler object, and no `scheduler.debug` flag.
 :::
 
@@ -120,9 +120,9 @@ and quits (and for a module shorter than the lookahead, it quits immediately).
 
 | Constant | Value | Scope |
 |---|---|---|
-| `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:308`) |
-| `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:309`) — not `SCHEDULE_INTERVAL` |
-| `RELEASE_TAIL` | **0.15 s** | local inside `_scheduleNote()` (`:580`) |
+| `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:320`) |
+| `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:321`) — not `SCHEDULE_INTERVAL` |
+| `RELEASE_TAIL` | **0.15 s** | local inside `_scheduleNote()` (`:593`) |
 | `MIN_LOOP_PERIOD` | **0.05 s** | module-level (`:11`) |
 | `MAX_CYCLES_PER_BATCH` | **64** | module-level (`:15`) |
 | `SEAM_EPS` | **1e-6** | module-level (`:17`) |
@@ -244,7 +244,7 @@ None of these are scheduler methods. There is no `scheduler.pause()`, `resume(fr
 |---|---|
 | Pause | `audioEngine.pauseFade()` — 200 ms fade, then `stopAll(0)`. The streaming state is dropped. |
 | Stop | `audioEngine.stopAll()` — 20 ms declick fade, then teardown. |
-| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:4629`). |
+| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:4578`). |
 | Seek | Same: stop, then prepare and play from the new time. |
 
 There is no seek-within-a-running-pump. Every position change is a fresh `play()`.

@@ -36,7 +36,8 @@ const written = [];
 const problems = [];
 const consoleErrors = new Set();
 
-const browser = await chromium.launch({ headless: true });
+// Bundled Chromium when installed, else the system Edge (Playwright's msedge channel)
+const browser = await chromium.launch({ headless: true }).catch(() => chromium.launch({ headless: true, channel: 'msedge' }));
 
 async function newPage({ width = VW, height = VH, hasTouch = false } = {}) {
   const ctx = await browser.newContext({
