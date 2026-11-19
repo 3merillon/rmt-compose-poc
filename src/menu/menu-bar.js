@@ -2569,8 +2569,7 @@ const menuAPI = (function() {
             .library-tempo-slider::-moz-range-thumb { width: 12px; height: 12px; border: none; border-radius: 50%; background: var(--rmt-accent, #ffa800); box-shadow: 0 0 8px rgba(var(--rmt-accent-rgb), 0.6); }
             .library-tempo-slider:active::-webkit-slider-thumb, .library-tempo-slider:hover::-webkit-slider-thumb { background: var(--rmt-danger, #ff0000); box-shadow: 0 0 8px rgba(var(--rmt-danger-rgb), 0.6); }
             .library-tempo-slider:active::-moz-range-thumb, .library-tempo-slider:hover::-moz-range-thumb { background: var(--rmt-danger, #ff0000); }
-            .library-tempo-value { min-width: 3ch; margin-right: -4px; text-align: right; font-family: 'Roboto Mono', monospace; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--rmt-text-primary, #ffa800); white-space: nowrap; user-select: none; -webkit-user-select: none; }
-            .library-tempo.changed .library-tempo-value { color: var(--rmt-accent, #ffa800); }
+            .library-tempo-value { min-width: 3ch; margin-right: -4px; text-align: right; font-family: 'Roboto Mono', monospace; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--rmt-accent, #ffa800); white-space: nowrap; user-select: none; -webkit-user-select: none; }
             .library-tempo-unit { font-family: 'Roboto Mono', monospace; font-size: 13px; color: var(--rmt-text-secondary, rgba(255,168,0,0.5)); user-select: none; -webkit-user-select: none; }
             .library-tempo-commit[hidden] { display: none; }
             /* Phones: the row was already full. A shorter slider, no unit, and the tempo
