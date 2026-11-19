@@ -11,7 +11,7 @@ ten-second one.
 
 ::: warning There is no `StreamingScheduler` class
 Do not go looking for one. The scheduler is a **closure** — `const pump = () => {…}` — over a mutable
-state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:312-408`). There is no
+state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:324-430`). There is no
 scheduler file, no scheduler object, and no `scheduler.debug` flag.
 :::
 
@@ -27,6 +27,8 @@ outside. It is exposed as `audioEngine._streamingState` for the test harness.
 | `baseStartTime` | Absolute ctx time at which pass 0 begins — `ctx.currentTime + 0.1`. |
 | `initialVolume` | Per-note envelope peak. |
 | `list` | The note array of the pass **currently being scheduled**. |
+| `firstList` | Pass 0's note array (the list `play()` was given), kept so `setRate()` can rewind into it. |
+| `map` | The playback's [`TimeMap`](#live-tempo): score time to clock time at the live rate. |
 | `nextIndex` | How far into `list` the pump has got. |
 | `cycle` | `0` = the initial (possibly partial) pass. |
 | `cycleStart` | Playback-relative time at which `list`'s pass begins. |
@@ -34,22 +36,26 @@ outside. It is exposed as `audioEngine._streamingState` for the test harness.
 | `cutRel`, `loopEndTime` | Set by `disarmLoop()`: the final seam. Nothing at or after it sounds. |
 | `pump` | The closure itself, so `armLoop()` can restart it. |
 
-## Two time bases
+## Three time bases
 
 Mixing these up is the easy bug in this file.
 
 | Name | Definition |
 |---|---|
-| `rel` | Playback-relative seconds: `ctx.currentTime − baseStartTime`. |
+| clock rel | Playback-relative clock seconds: `ctx.currentTime − baseStartTime`. |
+| `rel` | Playback-relative **score** seconds: `s.map.scoreAt(clock rel)`. Every other time in the state (`cycleStart`, `firstLen`, `period`, `cutRel`) is score time, so pass boundaries do not move when the tempo does. |
 | `cycleStart` | The `rel`-time at which the current pass begins. |
 
 A note's **absolute** start is therefore:
 
 ```
-baseStartTime + cycleStart + noteData.startTime
+baseStartTime + s.map.clockAt(cycleStart + noteData.startTime)
 ```
 
-which is exactly what gets passed to `_scheduleNote(noteData, s.baseStartTime + s.cycleStart, …)`.
+At rate 1 the map is the identity and this is `baseStartTime + cycleStart + noteData.startTime`, as it
+was before live tempo. `_scheduleNote()` still receives a `passStartTime` such that
+`passStartTime + noteData.startTime` is the absolute start (the loop harness relies on that), plus the
+note's clock length through the map and its score position.
 
 ## The pump
 
@@ -58,8 +64,8 @@ const pump = () => {
   if (this._streamingState !== s || s.stopped) return;
   s.timerId = null;
 
-  const rel = this.audioContext.currentTime - s.baseStartTime;
-  const targetTime = rel + LOOKAHEAD;      // the horizon
+  const clockRel = this.audioContext.currentTime - s.baseStartTime;
+  const targetTime = s.map.scoreAt(clockRel + LOOKAHEAD);   // the horizon, in score time
   let more = true;
 
   for (let guard = 0; guard < MAX_CYCLES_PER_BATCH; guard++) {
@@ -74,7 +80,10 @@ const pump = () => {
       if (at > targetTime) { horizonReached = true; break; }
 
       if (noteData.frequency && noteData.instrument) {          // skip measure markers
-        this._scheduleNote(noteData, s.baseStartTime + s.cycleStart, s.initialVolume);
+        const startClock = s.map.clockAt(at);
+        const duration = s.map.clockAt(at + noteData.duration) - startClock;
+        this._scheduleNote(noteData, s.baseStartTime + startClock - noteData.startTime,
+                           s.initialVolume, { duration, scoreStart: at });
       }
       s.nextIndex++;
     }
@@ -127,6 +136,7 @@ and quits (and for a module shorter than the lookahead, it quits immediately).
 | `MAX_CYCLES_PER_BATCH` | **64** | module-level (`:15`) |
 | `SEAM_EPS` | **1e-6** | module-level (`:17`) |
 | `DECLICK_FADE` | **0.02 s** | module-level (`:7`) |
+| `RATE_CHANGE_LEAD` | **0.05 s** | module-level (`:21`): how far ahead of the clock a tempo change takes effect |
 
 There is no `MIN_NOTE_DURATION`. Short notes are handled by the envelope's attack/release floors and
 its 1 ms duration floor — see
@@ -219,6 +229,48 @@ every iteration of the `for` "exhausts" the pass and advances a cycle. With a **
 `nextStart > targetTime` break never fires either — every comparison with NaN is false — and the tab
 hangs outright.
 
+## Live tempo
+
+Playback can run faster or slower than the piece is written, without touching the module: a
+performance setting outside the notation. The rate is **score seconds per clock second** (2 plays
+twice as fast); frequencies never pass through it. It lives in `audioEngine.rate`, and `player.js`
+resets it to 1 whenever a module is loaded.
+
+Each playback carries a `TimeMap` (`src/player/time-map.js:28`): a chain of segments, each holding one
+rate from a clock instant on. `scoreAt(c)` and `clockAt(s)` are the only things the scheduler and the
+playhead ask of it, so a tempo curve (an accelerando drawn over time) can later replace a segment's
+linear law by its integral without touching either.
+
+`setRate(rate)` (`src/player/audio-engine.js:545`) does four things:
+
+1. **Splits the map** `RATE_CHANGE_LEAD` (50 ms) ahead of the clock (`TimeMap.setRate`,
+   `time-map.js:61`). Everything before that instant keeps the times it had, so the playhead does not
+   jump and nothing already heard moves.
+2. **Cancels the voices that start after it**, by their score position (`entry.scoreStart`), the
+   same number the rewind compares, so a note is either kept or rescheduled, never both or neither.
+   They have not sounded yet, so this is silent. A voice already begun keeps its length.
+3. **Rewinds the pump** to the pass holding that instant and the first note at or after it (it never
+   moves the pump forward: a pump that is behind keeps its place).
+4. **Restarts the pump**, which schedules those notes again through the new map.
+
+**The loop stays seamless.** Pass boundaries are score times, so at any rate the seam is just another
+pair of notes one score interval apart; the clock gap across it is the same as inside a pass.
+`getLoopEndTime()` recomputes the final seam's clock time from the map, so a tempo change after a
+disarm moves it too, and the playhead stops where the sound does.
+
+**The playhead** follows `scoreElapsed()` (`:528`), the score time through the same map, plus the
+time the playback started from. It no longer derives its position from `ctx.currentTime` directly.
+
+**Commit tempo** (`commitLiveTempo()`, `src/player.js:4833`) writes the rate into the piece. The live
+BPM (60 / `base.d` × rate) is first snapped to the whole number the toolbar shows, then `base.d`
+becomes exactly 60 / BPM (`snapTempo()`, `time-map.js:86`); a float is never written as if it were
+exact. Every time in the module scales with `base.d`, the rate returns to 1, and the commit is one
+undo step. MIDI export reads the module, so it writes the committed tempo, never a live rate.
+
+`node scripts/test-live-tempo.mjs` checks the map, the rescheduling at a change (each note exactly
+once, before-change notes unmoved, after-change notes where the new map puts them, a continuous
+playhead), the loop seam across a change, and the commit.
+
 ## Voice teardown
 
 Each scheduled voice is tracked as `{ voice, gainNode, panner, startTime }` in the
@@ -244,7 +296,7 @@ None of these are scheduler methods. There is no `scheduler.pause()`, `resume(fr
 |---|---|
 | Pause | `audioEngine.pauseFade()` — 200 ms fade, then `stopAll(0)`. The streaming state is dropped. |
 | Stop | `audioEngine.stopAll()` — 20 ms declick fade, then teardown. |
-| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:4578`). |
+| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:4587`). |
 | Seek | Same: stop, then prepare and play from the new time. |
 
 There is no seek-within-a-running-pump. Every position change is a fresh `play()`.

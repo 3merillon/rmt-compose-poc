@@ -2,6 +2,7 @@ import { toNumber } from '../utils/fraction-num.js';
 import { InstrumentManager } from '../instruments/instrument-manager.js';
 import { AudioGraph } from './audio-graph.js';
 import { amplitudeToGain } from './amplitude.js';
+import { TimeMap, clampRate } from './time-map.js';
 
 // Short enough to read as instant, long enough that the cut is not a step.
 const DECLICK_FADE = 0.02; // seconds
@@ -15,6 +16,9 @@ const MIN_LOOP_PERIOD = 0.05; // seconds
 const MAX_CYCLES_PER_BATCH = 64;
 // Float slop when comparing a note's scheduled time against a pass boundary.
 const SEAM_EPS = 1e-6;
+// A live tempo change takes effect this far ahead of the audio clock, so no voice
+// is ever rescheduled into the past (the pump runs on a 100 ms timer).
+const RATE_CHANGE_LEAD = 0.05; // seconds
 
 /**
  * The same pitch on the nearest key of a keyboard tuned from the BaseNote:
@@ -55,6 +59,10 @@ export class AudioEngine {
 
     // Streaming playback state
     this._streamingState = null;
+
+    // Live tempo: score seconds per clock second (see time-map.js). Outside the
+    // notation; player.js resets it to 1 when a module is loaded.
+    this.rate = 1;
 
     // Pending pause-fade teardown (cancelable so a quick pause→play can't let a
     // stale timer stopAll() the new playback).
@@ -299,10 +307,14 @@ export class AudioEngine {
    * looping cannot be done by calling play() again from the playhead (that path
    * re-anchors at currentTime + 0.1 and stopAll()s the tail: a ≥100 ms hole).
    *
-   * Time is measured two ways here, and mixing them up is the easy bug:
-   *   - `rel`        playback-relative seconds  (ctx.currentTime - baseStartTime)
+   * Time is measured three ways here, and mixing them up is the easy bug:
+   *   - clock rel    playback-relative clock seconds (ctx.currentTime - baseStartTime)
+   *   - `rel`        playback-relative SCORE seconds: s.map.scoreAt(clock rel). Every
+   *                  other time in the state (cycleStart, firstLen, period, cutRel) is
+   *                  score time, so pass boundaries do not move when the tempo does.
    *   - `cycleStart` rel-time at which the current pass begins
-   * A note's absolute start is therefore baseStartTime + cycleStart + startTime.
+   * A note's absolute start is therefore baseStartTime + map.clockAt(cycleStart + startTime);
+   * at rate 1 that is baseStartTime + cycleStart + startTime, as before live tempo.
    *
    * @param {Array} noteDataList notes for the FIRST pass (from preparePlayback(fromTime),
    *   so their startTimes are relative to fromTime and the head note may be truncated)
@@ -327,6 +339,9 @@ export class AudioEngine {
       baseStartTime,
       initialVolume,
       list: noteDataList, // notes of the pass currently being scheduled
+      firstList: noteDataList, // pass 0's notes (setRate() may rewind into it)
+      // Score time -> clock time for this playback, at the live rate.
+      map: new TimeMap(this.rate),
       nextIndex: 0,
       cycle: 0,           // 0 = the initial (possibly partial) pass
       cycleStart: 0,      // rel-time at which `list`'s pass begins
@@ -348,8 +363,8 @@ export class AudioEngine {
       if (this._streamingState !== s || s.stopped) return;
       s.timerId = null;
 
-      const rel = this.audioContext.currentTime - s.baseStartTime;
-      const targetTime = rel + LOOKAHEAD;
+      const clockRel = this.audioContext.currentTime - s.baseStartTime;
+      const targetTime = s.map.scoreAt(clockRel + LOOKAHEAD); // score time
 
       // `more` = this playback still has notes to schedule at some point.
       let more = true;
@@ -372,7 +387,14 @@ export class AudioEngine {
           // Skip notes without frequency (measure markers) and silent notes
           // (amplitude 0): there is nothing to hear, so no voice is built.
           if (noteData.frequency && noteData.instrument && noteData.amplitude !== 0) {
-            this._scheduleNote(noteData, s.baseStartTime + s.cycleStart, s.initialVolume);
+            // Through the time map: the clock start, and the clock length of the
+            // note's score span (attack and release are shares of it, so they scale).
+            const startClock = s.map.clockAt(at);
+            const duration = s.map.clockAt(at + noteData.duration) - startClock;
+            const start = s.baseStartTime + startClock;
+            // passStartTime keeps its contract (passStartTime + noteData.startTime is
+            // the note's absolute start) at any rate.
+            this._scheduleNote(noteData, start - noteData.startTime, s.initialVolume, { duration, scoreStart: at });
           }
           s.nextIndex++;
         }
@@ -474,12 +496,12 @@ export class AudioEngine {
     const s = this._streamingState;
     if (!s || s.stopped || !s.looping) return null;
 
-    const rel = this.audioContext.currentTime - s.baseStartTime;
+    const rel = s.map.scoreAt(this.audioContext.currentTime - s.baseStartTime);
     const cutRel = this._nextSeamRel(rel, s);
 
     s.looping = false;
     s.cutRel = cutRel;
-    s.loopEndTime = s.baseStartTime + cutRel;
+    s.loopEndTime = s.baseStartTime + s.map.clockAt(cutRel);
 
     this._cancelScheduledFrom(s.loopEndTime);
     return s.loopEndTime;
@@ -492,7 +514,75 @@ export class AudioEngine {
 
   getLoopEndTime() {
     const s = this._streamingState;
-    return s ? s.loopEndTime : null;
+    if (!s) return null;
+    // Recomputed: a tempo change after the disarm moves the final seam on the clock.
+    if (s.cutRel != null && s.map) s.loopEndTime = s.baseStartTime + s.map.clockAt(s.cutRel);
+    return s.loopEndTime;
+  }
+
+  /**
+   * Score seconds elapsed in the playback in flight (negative during the 0.1 s
+   * lead-in), through the same map the voices were scheduled with: the playhead
+   * follows this, so it moves with the sound at any rate. null when nothing plays.
+   */
+  scoreElapsed() {
+    const s = this._streamingState;
+    if (!s || s.stopped || !s.map) return null;
+    return s.map.scoreAt(this.audioContext.currentTime - s.baseStartTime);
+  }
+
+  /**
+   * Live tempo. From RATE_CHANGE_LEAD ahead of now the playback in flight runs at
+   * `rate` score seconds per clock second; later playbacks start at it.
+   *
+   * Voices that begin after the change are cancelled (they have not sounded) and
+   * the pump rewinds to the first note at or after that score instant, so they are
+   * scheduled again through the new map. Voices already begun keep their length.
+   * Pass boundaries are score times, so a loop stays seamless across a change.
+   * Frequencies are untouched.
+   * @returns {number} the rate now in force
+   */
+  setRate(rate) {
+    const r = clampRate(rate);
+    this.rate = r;
+    const s = this._streamingState;
+    if (!s || s.stopped || !s.map) return r;
+    if (r === s.map.rate) return r;
+
+    const cutClock = Math.max(0, this.audioContext.currentTime - s.baseStartTime + RATE_CHANGE_LEAD);
+    const cutScore = s.map.setRate(r, cutClock);
+
+    // Cancel by score position: the same numbers the rewind below compares, so a
+    // note is either kept or rescheduled, never both and never neither.
+    for (const entry of Array.from(this.activeOscillators)) {
+      if (entry.scoreStart == null || entry.scoreStart < cutScore) continue;
+      this.activeOscillators.delete(entry);
+      try { entry.voice.stop(entry.startTime); } catch {}
+      try { entry.voice.disconnect(); } catch {}
+      try { entry.gainNode.disconnect(); } catch {}
+      try { entry.panner && entry.panner.disconnect(); } catch {}
+    }
+
+    // Rewind the pump to the pass holding cutScore and the first note at or after it.
+    let cycle = 0, cycleStart = 0, list = s.firstList;
+    if (s.loopNotes && s.period > 0 && cutScore >= s.firstLen) {
+      cycle = Math.floor((cutScore - s.firstLen) / s.period) + 1;
+      cycleStart = s.firstLen + (cycle - 1) * s.period;
+      list = s.loopNotes;
+    }
+    let i = 0;
+    while (i < list.length && cycleStart + list[i].startTime < cutScore) i++;
+    // Only ever rewind: a pump that is behind keeps its place (nothing it has not
+    // scheduled yet was cancelled).
+    if (cycle < s.cycle || (cycle === s.cycle && i < s.nextIndex)) {
+      s.cycle = cycle;
+      s.cycleStart = cycleStart;
+      s.list = list;
+      s.nextIndex = i;
+    }
+    if (s.timerId) { clearTimeout(s.timerId); s.timerId = null; }
+    if (s.pump) s.pump();
+    return r;
   }
 
   /** Playback-relative time of the first pass boundary STRICTLY after `rel`. */
@@ -530,13 +620,16 @@ export class AudioEngine {
    * The source's pitch is the note's own frequency, or its tempered twin when
    * the `audio.tempered` setting is on at this moment.
    *
-   * @param {number} passStartTime absolute ctx time at which this note's PASS begins
-   *   (baseStartTime for a normal playback; baseStartTime + cycleStart when looping)
+   * @param {number} passStartTime absolute ctx time such that passStartTime +
+   *   noteData.startTime is the note's start (at rate 1: baseStartTime + cycleStart)
+   * @param {{duration?:number, scoreStart?:number}} [timing] the note's clock length
+   *   through the time map (default noteData.duration), and its score position,
+   *   which setRate() cancels against
    */
-  _scheduleNote(noteData, passStartTime, initialVolume) {
+  _scheduleNote(noteData, passStartTime, initialVolume, timing = null) {
     const ctx = this.audioContext;
     const start = passStartTime + noteData.startTime;
-    const duration = noteData.duration;
+    const duration = (timing && Number.isFinite(timing.duration) && timing.duration > 0) ? timing.duration : noteData.duration;
 
     // Pure or tempered (Settings → Audio), read here like the stereo placement:
     // per voice, as it is scheduled. A note prepared without a tempered pitch
@@ -600,7 +693,7 @@ export class AudioEngine {
     // holds voices from two passes at once (the outgoing pass's release tails overlap
     // the incoming pass's attacks), so "which pass is this voice in" can only be
     // answered from its own scheduled time.
-    const entry = { voice, gainNode, panner, startTime: start };
+    const entry = { voice, gainNode, panner, startTime: start, scoreStart: timing ? timing.scoreStart : null };
     this.activeOscillators.add(entry);
 
     const cleanup = () => {

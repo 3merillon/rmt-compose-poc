@@ -100,6 +100,10 @@ The slider is the **master output level**, from 0 to 100%. It defaults to **100%
 
 If a module is too loud, this is the knob. The limiter downstream catches peaks, but it is not a volume control.
 
+## Tempo
+
+The live tempo control is in the module bar's toolbar, next to the search magnifier. It changes how fast playback runs while it plays, without changing the piece; the check-mark button commits the shown tempo into the piece. See [Module Bar → Live tempo](/user-guide/interface/module-bar#live-tempo).
+
 ## Editing pauses playback for you
 
 You do not have to stop before editing. Creating a note, editing a variable, deleting notes, transposing with the arrows, and undo/redo all pause playback automatically.

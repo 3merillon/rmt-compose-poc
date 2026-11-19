@@ -85,7 +85,7 @@ properly idle)"*, and `bench-render.mjs` reports **0/100 idle frames redrawn** a
 notes.
 
 This does **not** mean rAF is descheduled. Both loops still tick every frame — the renderer's
-(`renderer.js:544-548`) and the player's (`player.js:2143-2163`, which updates the DOM playhead and
+(`renderer.js:544-548`) and the player's (`player.js:2145-2165`, which updates the DOM playhead and
 measure-bar transforms). What is gated is the *body* of `_render()`:
 
 ```javascript
@@ -326,7 +326,7 @@ notes. See [Picking](/developer/rendering/picking).
 - Snapshots are stored as **minified JSON strings**, not parsed object graphs (~3–5× less retained
   heap). Each restore `JSON.parse`s fresh, giving the same isolation the old deep-clone did.
 - The old 2–3× per-action serialize was deduped: `captureSnapshot` serializes **once** and shares one
-  `snapshotStr` between the history capture and the localStorage autosave (`player.js:5882-5883`).
+  `snapshotStr` between the history capture and the localStorage autosave (`player.js:5998-5999`).
 - Two caps, both in `_enforceCaps()` (`history.js:35-43`): a count cap of **50** entries and a byte
   cap of **12 MB**. The byte cap drops oldest but always keeps **≥ 2** entries, so undo survives even
   one enormous snapshot.

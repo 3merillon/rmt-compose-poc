@@ -12,14 +12,14 @@ restarting playback.
 
 Two `audio.*` keys are read outside it as well, and neither builds a node: `player.js` mirrors
 `audio.masterVolume` onto the transport slider and feeds it back through `audioEngine.setVolume()`
-(`player.js:1170-1204`), and it hands `audio.defaultInstrument` to `module.js`
-(`player.js:1206-1221`).
+(`player.js:1172-1206`), and it hands `audio.defaultInstrument` to `module.js`
+(`player.js:1208-1223`).
 
 One key is held here without building a node at all: `audio.tempered.enabled` becomes
 `graph.temperedEnabled`, a flag the engine reads as it schedules each voice — see
 [Tempered playback](/developer/audio/audio-engine#tempered-playback).
 
-It is constructed once, by `AudioEngine`'s constructor (`audio-engine.js:48`), and reachable as
+It is constructed once, by `AudioEngine`'s constructor (`audio-engine.js:52`), and reachable as
 `audioEngine.graph`.
 
 ## The node chain
@@ -114,7 +114,7 @@ left-to-right**: three octaves above the BaseNote is hard right, three below is 
 BaseNote itself is dead centre. It returns `0` if either frequency is non-positive.
 
 **Width is not applied here.** The caller multiplies by `graph.stereoWidth`
-(`audio-engine.js:576`). The split is deliberate: `panPos` is baked once, at
+(`audio-engine.js:669`). The split is deliberate: `panPos` is baked once, at
 `preparePlayback` time, while the enable flag and width are read when the voice is *scheduled*.
 
 Stereo defaults **OFF** (`audio.stereo.enabled`, `settings-schema.js:91`). Out of the box, playback

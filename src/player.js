@@ -21,6 +21,7 @@ import { showGroupWidget, hideGroupWidget } from './modals/group-widget.js';
 import { registerPanel, raisePanel } from './utils/panel-stack.js';
 import { toNumber } from './utils/fraction-num.js';
 import { planMidi, encodeMidi } from './midi/midi-export.js';
+import { snapTempo } from './player/time-map.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -97,6 +98,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     let loopEndAudioTime = null; // absolute audioContext time that final pass ends
     let loopPeriod = 0;          // frozen getModuleEndTime() for the active playback; 0 = don't wrap
     let playbackBaseTime = 0;    // baseStartTime of the active playback (to arm mid-play)
+    let playbackFromTime = 0;    // score time the active playback started from (the playhead is this + engine.scoreElapsed())
 
     let stackClickState = { lastClickPosition: null, stackedNotes: [], currentIndex: -1 };
     // Workspace density. The Scale Controls widget and Settings → Scale are two
@@ -4013,11 +4015,17 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
             
             if (isPlaying && !isPaused && !isFadingOut) {
-                const elapsed = audioContext.currentTime - currentTime + totalPausedTime;
+                // Score time, through the engine's time map: at a live tempo the
+                // playhead moves with the sound, and a rate change does not jump it.
+                const se = audioEngine.scoreElapsed();
+                const elapsed = se == null ? (audioContext.currentTime - currentTime + totalPausedTime) : playbackFromTime + se;
                 if (loopPeriod > 0) {
                     // Looping. The audio pump wraps on its own, so the playhead just
                     // follows the same clock modulo the pass length — it never restarts
                     // playback, which is what keeps the seam gapless.
+                    // The engine recomputes the final seam's clock time, which a tempo
+                    // change after the disarm moves.
+                    if (isLoopDisarming) { const t = audioEngine.getLoopEndTime(); if (t != null) loopEndAudioTime = t; }
                     if (isLoopDisarming && loopEndAudioTime != null &&
                         audioContext.currentTime >= loopEndAudioTime) {
                         // The mode was switched off mid-pass; this is that pass's end.
@@ -4120,6 +4128,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     function updateVisualNotes(nextEvaluated) {
         // GL-only: update evaluated notes and sync the workspace renderer. No DOM mirroring.
         evaluatedNotes = nextEvaluated;
+        try { refreshTempoUI(); } catch {}
         if (glWorkspace) {
             try {
                 glWorkspace.sync({
@@ -4581,6 +4590,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 isPaused = false;
 
                 currentTime = baseStartTime - fromTime;
+                playbackFromTime = fromTime;
                 playheadTime = fromTime;
                 totalPausedTime = 0;
 
@@ -4608,7 +4618,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         isFadingOut = true;
 
         const currentPauseTime = audioContext.currentTime - currentTime;
-        let pos = currentPauseTime + totalPausedTime;
+        const se = audioEngine.scoreElapsed();
+        let pos = se == null ? currentPauseTime + totalPausedTime : playbackFromTime + se;
         // Wrap into the module. After the first pass this clock runs past the module
         // end, and play() treats a fromTime >= end as "start over" — so pausing on
         // pass 3 and hitting play would silently jump to 0 instead of resuming.
@@ -4727,7 +4738,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             preparePlayback(0).then((loopNotes) => {
                 // The user may have toggled off, paused or stopped while we evaluated.
                 if (!isLoopEnabled || !isPlaying || isPaused || isFadingOut) return;
-                const firstLen = (currentTime + endTime) - playbackBaseTime;
+                // Score time: the pass in flight ends endTime - fromTime after it began.
+                const firstLen = endTime - playbackFromTime;
                 if (!(firstLen > 0)) return;
                 if (audioEngine.armLoop({ period: endTime, notes: loopNotes, firstCycleAudioLength: firstLen })) {
                     loopPeriod = endTime;
@@ -4762,6 +4774,93 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     function setVolume(value) {
         audioEngine.setVolume(value);
         return;
+    }
+
+    // ── Live tempo ───────────────────────────────────────────────────────────────
+    // A performance setting outside the notation: playback runs at a rate (score
+    // seconds per clock second) and the module is not touched. The slider shows the
+    // effective BPM, 60 / base.d × rate, in whole BPM. "Commit" writes the shown BPM
+    // into the piece as the exact BaseNote duration 60 / BPM (a float is never
+    // written as if it were exact). The rate is reset to 1 whenever a module loads.
+    // MIDI export reads the module, so it uses the committed tempo, never the rate.
+    function notatedBpm() {
+        try {
+            const d = myModule && myModule.baseNote && myModule.baseNote.getVariable('duration');
+            const v = d ? toNumber(d, NaN) : NaN;
+            return v > 0 ? 60 / v : 60;
+        } catch { return 60; }
+    }
+    // A declaration, not a const: refreshTempoUI() first runs during the initial load,
+    // before this part of the closure has executed.
+    function fmtBpm(v) { return Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(2); }
+    // The control sits in the library toolbar, which menu-bar.js builds; look it up
+    // when needed rather than caching it at boot.
+    function refreshTempoUI() {
+        const slider = document.getElementById('tempoSlider');
+        const valueEl = document.getElementById('tempoValue');
+        const commitBtn = document.getElementById('tempoCommitBtn');
+        if (!slider) return;
+        const base = notatedBpm();
+        const rate = audioEngine.rate;
+        // The slider spans a quarter to four times the notated tempo.
+        slider.min = String(Math.max(1, Math.floor(base / 4)));
+        slider.max = String(Math.max(2, Math.ceil(base * 4)));
+        const live = base * rate;
+        if (document.activeElement !== slider) slider.value = String(Math.round(live));
+        const changed = rate !== 1;
+        if (slider.parentElement) slider.parentElement.classList.toggle('changed', changed);
+        if (valueEl) {
+            valueEl.textContent = changed ? String(Math.round(live)) : fmtBpm(base);   // "BPM" is its own span
+            valueEl.title = changed
+                ? `Live tempo; the piece is written at ${fmtBpm(base)} BPM. Double-click to return to it.`
+                : 'The tempo the piece is written at (60 / the BaseNote\'s duration)';
+        }
+        if (commitBtn) commitBtn.hidden = !changed;
+    }
+    function setLiveTempoBpm(bpm) {
+        const base = notatedBpm();
+        const b = Number(bpm);
+        if (!(b > 0)) return;
+        // Exactly 1 when the slider sits on the notated tempo, so nothing changes.
+        const rate = Math.abs(b - base) < 1e-9 ? 1 : b / base;
+        audioEngine.setRate(rate);
+        refreshTempoUI();
+    }
+    function resetLiveTempo() {
+        audioEngine.setRate(1);
+        refreshTempoUI();
+    }
+    function commitLiveTempo() {
+        if (!myModule || !myModule.baseNote || audioEngine.rate === 1) return;
+        const unit = myModule.baseNote.getVariable('duration');
+        if (!unit) return;
+        const snap = snapTempo(unit, audioEngine.rate);
+        const oldD = toNumber(unit, NaN);
+        const newD = Number(snap.numerator) / Number(snap.denominator);
+        // Where the playhead is, in the new time unit: every time scales with base.d.
+        const wasPlaying = isPlaying && !isPaused && !isFadingOut;
+        let pos = playheadTime;
+        if (wasPlaying) { const se = audioEngine.scoreElapsed(); if (se != null) pos = playbackFromTime + se; }
+        if (loopPeriod > 0 && pos > 0) pos = pos % loopPeriod;
+        if (isPlaying || isPaused) stop(false);
+        try {
+            myModule.baseNote.setVariable('durationString', snap.text);
+            for (const id of Object.keys(myModule.notes)) { try { myModule.markNoteDirty(Number(id)); } catch {} }
+            evaluatedNotes = myModule.evaluateModule();
+            setEvaluatedNotes(evaluatedNotes);
+            updateVisualNotes(evaluatedNotes);
+            createMeasureBars();
+            invalidateModuleEndTimeCache();
+            try { captureSnapshot(`Commit tempo ${snap.bpm} BPM`); } catch {}
+        } catch (e) {
+            console.error('Commit tempo failed', e);
+            return;
+        }
+        audioEngine.setRate(1);
+        playheadTime = oldD > 0 && newD > 0 ? pos * (newD / oldD) : 0;
+        refreshTempoUI();
+        if (wasPlaying) play(playheadTime);
+        else updatePlayhead();
     }
 
     document.addEventListener('mousedown', (event) => {
@@ -4924,6 +5023,20 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         // over the + button, instead of unrolling invisibly behind it.
         if (opening) raisePanel(domCache.generalWidget);
     });
+
+    // Delegated: the toolbar may be built after this runs.
+    document.addEventListener('input', (e) => {
+        if (e.target && e.target.id === 'tempoSlider') setLiveTempoBpm(parseFloat(e.target.value));
+    });
+    document.addEventListener('dblclick', (e) => {
+        if (e.target && e.target.closest && e.target.closest('.library-tempo')) resetLiveTempo();
+    });
+    document.addEventListener('click', (e) => {
+        if (e.target && e.target.closest && e.target.closest('#tempoCommitBtn')) commitLiveTempo();
+    });
+    refreshTempoUI();
+    // The toolbar is usually built after this point (and after the first refresh).
+    eventBus.on('toolbar:built', () => { try { refreshTempoUI(); } catch {} });
 
     domCache.volumeSlider.addEventListener('touchstart', function() {
         this.classList.add('active');
@@ -5233,6 +5346,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
             myModule = newModule;
             setModule(newModule, { skipBackgroundEval: true });
+            resetLiveTempo();   // live tempo is never carried into another module
             console.log('[RMT] Reset to Module');
 
             // loadFromJSON already calls invalidateAll(), no need to mark dirty again
@@ -5284,6 +5398,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             Module.loadFromJSON(data).then(newModule => {
                 myModule = newModule;
                 setModule(newModule, { skipBackgroundEval: true });
+                resetLiveTempo();   // live tempo is never carried into another module
 
                 // loadFromJSON already calls invalidateAll(), no need for manual cache clearing
                 initializeModule();
@@ -5418,6 +5533,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
                     myModule = newModule;
                     setModule(newModule, { skipBackgroundEval: true });
+                    resetLiveTempo();   // live tempo is never carried into another module
 
                     // loadFromJSON already calls invalidateAll(), no need to mark dirty again
                     initializeModule();
