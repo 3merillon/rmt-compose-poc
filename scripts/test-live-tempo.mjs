@@ -178,5 +178,22 @@ console.log('\nLive tempo: commit\n');
   check(plan.report.tempo.exactBpm === '120' || Number(plan.report.tempo.exactBpm) === 120, `D7 MIDI export writes the committed tempo (${plan.report.tempo.exactBpm} BPM)`);
 }
 
+// --- E: the slider's range (Settings > Audio > Live tempo > Tempo range) --------
+console.log('\nLive tempo: the slider range\n');
+{
+  const { defaultSettings, validateSettings, tempoSliderBounds } = await import('../src/settings/settings-schema.js');
+  const def = defaultSettings().audio.tempoRange;
+  check(def.min === 20 && def.max === 300, 'E1 the default range is 20-300 BPM');
+  check(validateSettings({ audio: { tempoRange: { min: 300, max: 40 } } }).audio.tempoRange.min === 20, 'E2 an inverted range falls back to the default');
+  const v = validateSettings({ audio: { tempoRange: { min: 40.4, max: 5000 } } }).audio.tempoRange;
+  check(v.min === 40 && v.max === 1000, 'E3 whole BPM, clamped to 1-1000');
+  const b1 = tempoSliderBounds({ min: 20, max: 300 }, 100);
+  check(b1[0] === 20 && b1[1] === 300, 'E4 at 100 BPM written, the slider spans the range');
+  const b2 = tempoSliderBounds({ min: 20, max: 300 }, 10);
+  check(b2[0] === 10 && b2[1] === 100, 'E5 at 10 BPM written: down to the written tempo, up to 10x it (the rate rail)');
+  const b3 = tempoSliderBounds({ min: 60, max: 120 }, 40);
+  check(b3[0] === 40 && b3[1] === 120, 'E6 and it always reaches the written tempo, here below the range');
+}
+
 console.log(`\n${failures ? `${failures} failure(s).` : 'All live-tempo checks passed.'}`);
 process.exit(failures ? 1 : 0);

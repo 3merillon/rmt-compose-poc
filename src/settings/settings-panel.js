@@ -23,7 +23,7 @@
  */
 
 import { settingsStore } from './settings-store.js';
-import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep } from './settings-schema.js';
+import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep, TEMPO_HARD_MIN, TEMPO_HARD_MAX } from './settings-schema.js';
 import { THEME_PRESETS, getPreset } from '../theme/presets.js';
 import { eventBus } from '../utils/event-bus.js';
 import { showConfirmation } from '../utils/confirm-dialog.js';
@@ -433,6 +433,9 @@ function buildAudioTab(container) {
   container.appendChild(row('Spread notes by pitch', toggle('audio.stereo.enabled'), 'Places low notes toward the left speaker and high notes toward the right, as if seated at the instrument. Off = centered (mono-position).'));
   container.appendChild(row('Amount', slider('audio.stereo.width', 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`)));
 
+  container.appendChild(el('div', 'rmt-set-subhead', 'Live tempo'));
+  container.appendChild(row('Tempo range', tempoRangeControl(), 'The span of the live-tempo slider in the module bar, in BPM. It always reaches the tempo the piece is written at.'));
+
   const lmHeader = el('div', 'rmt-set-subhead', 'Master');
   container.appendChild(lmHeader);
   container.appendChild(row('Limiter', toggle('audio.limiter.enabled'), 'Gentle output limiting to avoid clipping.'));
@@ -506,6 +509,46 @@ function scaleControl(axis) {
 // The min/max pair for one axis, written as ONE store update: two separate sets
 // would leave the tree momentarily inverted, and the schema resets an inverted
 // range to defaults.
+// The live-tempo slider's span, as ONE store update (an inverted pair would be
+// reset to the defaults by the schema). Whole BPM; the edited field wins.
+function tempoRangeControl() {
+  const wrap = el('div', 'rmt-set-range');
+  const mk = () => {
+    const i = el('input');
+    i.type = 'number';
+    i.className = 'rmt-set-number';
+    i.step = 1;
+    i.min = TEMPO_HARD_MIN;
+    i.max = TEMPO_HARD_MAX;
+    return i;
+  };
+  const loIn = mk();
+  const hiIn = mk();
+  const seed = () => {
+    const r = settingsStore.get('audio.tempoRange') || {};
+    if (loIn !== document.activeElement) loIn.value = r.min;
+    if (hiIn !== document.activeElement) hiIn.value = r.max;
+  };
+  const commit = (edited) => {
+    let lo = clamp(Math.round(parseFloat(loIn.value)), TEMPO_HARD_MIN, TEMPO_HARD_MAX);
+    let hi = clamp(Math.round(parseFloat(hiIn.value)), TEMPO_HARD_MIN, TEMPO_HARD_MAX);
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) { seed(); return; }
+    if (hi <= lo) {
+      if (edited === 'lo') hi = Math.min(TEMPO_HARD_MAX, lo + 1);
+      else lo = Math.max(TEMPO_HARD_MIN, hi - 1);
+    }
+    if (hi <= lo) { seed(); return; }
+    settingsStore.set('audio.tempoRange', { min: lo, max: hi });
+    seed();
+  };
+  loIn.addEventListener('change', () => commit('lo'));
+  hiIn.addEventListener('change', () => commit('hi'));
+  seed();
+  wrap.append(loIn, el('span', 'rmt-set-ratio-slash', '–'), hiIn);
+  addSync(null, seed);
+  return wrap;
+}
+
 function limitControl(axis) {
   const wrap = el('div', 'rmt-set-range');
   const mk = () => {

@@ -23,6 +23,7 @@ import { registerPanel, raisePanel } from './utils/panel-stack.js';
 import { toNumber } from './utils/fraction-num.js';
 import { planMidi, encodeMidi } from './midi/midi-export.js';
 import { snapTempo } from './player/time-map.js';
+import { tempoSliderBounds } from './settings/settings-schema.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -4803,9 +4804,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         if (!slider) return;
         const base = notatedBpm();
         const rate = audioEngine.rate;
-        // The slider spans a quarter to four times the notated tempo.
-        slider.min = String(Math.max(1, Math.floor(base / 4)));
-        slider.max = String(Math.max(2, Math.ceil(base * 4)));
+        // The span is Settings > Audio > Tempo range, within the engine's rate rails,
+        // and always reaches the written tempo.
+        const [lo, hi] = tempoSliderBounds(settingsStore.get('audio.tempoRange'), base);
+        slider.min = String(lo);
+        slider.max = String(hi);
         const live = base * rate;
         if (document.activeElement !== slider) slider.value = String(Math.round(live));
         const changed = rate !== 1;
@@ -5038,6 +5041,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     refreshTempoUI();
     // The toolbar is usually built after this point (and after the first refresh).
     eventBus.on('toolbar:built', () => { try { refreshTempoUI(); } catch {} });
+    settingsStore.subscribe(({ path }) => {
+        if (!path || path === 'audio' || path.indexOf('audio.tempoRange') === 0) { try { refreshTempoUI(); } catch {} }
+    });
 
     domCache.volumeSlider.addEventListener('touchstart', function() {
         this.classList.add('active');

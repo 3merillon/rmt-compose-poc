@@ -161,7 +161,7 @@ Attack / decay / release are ratios of duration; sustain is a fraction of peak.
 
 The two `harmonium` rows are **seconds, not ratios** — see [The harmonic voices](#the-harmonic-voices).
 
-The per-note `peak` is `initialVolume` — **0.2** (`player.js:83`, and the `AudioEngine` constructor
+The per-note `peak` is `initialVolume` — **0.2** (`player.js:84`, and the `AudioEngine` constructor
 default). That is not master volume; master volume lives on the
 [audio graph](/developer/audio/audio-graph#master-volume). Three instruments scale it: `piano` by its
 manifest's `gainDb`, `harmonium` by a `level` of 0.6 and `harmonium-soft` by 0.42.
@@ -446,7 +446,7 @@ Three consequences worth stating plainly:
   `audio.defaultInstrument`. That is what makes the setting reach ordinary compositions. A BaseNote
   that *does* pin an instrument in its JSON overrides the setting for everything below it.
 
-`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1209-1224`)
+`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1210-1225`)
 via `setDefaultInstrument()`. It is resolved once per note when playback is prepared, so a change
 takes effect on the **next** playback, not mid-playback.
 

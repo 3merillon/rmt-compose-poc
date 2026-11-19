@@ -21,6 +21,27 @@ export const SETTINGS_VERSION = 1;
 export const SCALE_HARD_MIN = 0.001;
 export const SCALE_HARD_MAX = 1000;
 
+// The rails a live-tempo range may span, in whole BPM.
+export const TEMPO_HARD_MIN = 1;
+export const TEMPO_HARD_MAX = 1000;
+
+/**
+ * The live-tempo slider's span for a piece written at `notatedBpm`: the user's
+ * range, kept within the engine's 0.1x-10x rate rails, and always reaching the
+ * written tempo (so the slider can return to it). Whole BPM.
+ * @returns {[number, number]}
+ */
+export function tempoSliderBounds(range, notatedBpm) {
+  const r = range || { min: 20, max: 300 };
+  const base = notatedBpm > 0 ? notatedBpm : 60;
+  let lo = Math.max(Number(r.min) || 20, Math.ceil(base * 0.1));
+  let hi = Math.min(Number(r.max) || 300, Math.floor(base * 10));
+  lo = Math.min(lo, Math.floor(base));
+  hi = Math.max(hi, Math.ceil(base));
+  if (hi <= lo) hi = lo + 1;
+  return [lo, hi];
+}
+
 /**
  * Slider detent for a scale range: about a fiftieth of the span, snapped to a
  * 1/2/5 ladder so the numbers stay round. The default ranges land on 0.02 (X)
@@ -92,6 +113,10 @@ export function defaultSettings() {
         width: 0.6,
       },
       limiter: { enabled: true },
+      // The span of the live-tempo slider (module bar toolbar), in BPM. The slider
+      // also stays within 0.1x-10x of the written tempo (the engine's rate rails)
+      // and always reaches the written tempo itself.
+      tempoRange: { min: 20, max: 300 },
     },
     library: {
       iconSizePx: 56,
@@ -203,6 +228,10 @@ export function validateSettings(raw, prev) {
   d.audio.stereo.enabled = asBool(st.enabled, d.audio.stereo.enabled);
   d.audio.stereo.width = clampNum(st.width, 0, 1, d.audio.stereo.width);
   d.audio.limiter.enabled = asBool(lm.enabled, d.audio.limiter.enabled);
+  const tr = au.tempoRange || {};
+  const tLo = clampNum(Math.round(tr.min), TEMPO_HARD_MIN, TEMPO_HARD_MAX, d.audio.tempoRange.min);
+  const tHi = clampNum(Math.round(tr.max), TEMPO_HARD_MIN, TEMPO_HARD_MAX, d.audio.tempoRange.max);
+  if (tHi > tLo) d.audio.tempoRange = { min: tLo, max: tHi };
 
   const lib = src.library || {};
   d.library.iconSizePx = clampNum(lib.iconSizePx, 32, 96, d.library.iconSizePx);

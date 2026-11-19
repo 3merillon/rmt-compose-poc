@@ -12,8 +12,8 @@ restarting playback.
 
 Two `audio.*` keys are read outside it as well, and neither builds a node: `player.js` mirrors
 `audio.masterVolume` onto the transport slider and feeds it back through `audioEngine.setVolume()`
-(`player.js:1173-1207`), and it hands `audio.defaultInstrument` to `module.js`
-(`player.js:1209-1224`).
+(`player.js:1174-1208`), and it hands `audio.defaultInstrument` to `module.js`
+(`player.js:1210-1225`).
 
 One key is held here without building a node at all: `audio.tempered.enabled` becomes
 `graph.temperedEnabled`, a flag the engine reads as it schedules each voice — see
@@ -91,7 +91,7 @@ instrument is cheaper than one per voice. Do not describe them as a mixing desk.
 | `attack` | **0.003 s** |
 | `release` | **0.25 s** |
 
-Default **ON** (`audio.limiter.enabled`, `settings-schema.js:94`).
+Default **ON** (`audio.limiter.enabled`, `settings-schema.js:115`).
 
 ::: danger These are not the old numbers
 Earlier documentation described a compressor at `threshold −24 / knee 30 / ratio 12`. That was
@@ -117,7 +117,7 @@ BaseNote itself is dead centre. It returns `0` if either frequency is non-positi
 (`audio-engine.js:669`). The split is deliberate: `panPos` is baked once, at
 `preparePlayback` time, while the enable flag and width are read when the voice is *scheduled*.
 
-Stereo defaults **OFF** (`audio.stereo.enabled`, `settings-schema.js:91`). Out of the box, playback
+Stereo defaults **OFF** (`audio.stereo.enabled`, `settings-schema.js:112`). Out of the box, playback
 is centred.
 
 ## Master volume

@@ -104,6 +104,8 @@ Turning **Show note arrows** off does three things at once: the arrows stop bein
 | *Stereo width* | | |
 | **Spread notes by pitch** | on / off | **off** |
 | **Amount** | 0–100%, step 1% | 60% |
+| *Live tempo* | | |
+| **Tempo range** | 1–1000 BPM, two fields | **20–300** |
 | *Master* | | |
 | **Limiter** | on / off | **on** |
 

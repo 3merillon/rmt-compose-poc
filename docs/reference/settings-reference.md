@@ -37,6 +37,7 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `audio.stereo.enabled` | boolean | **`false`** | — | Spread notes by pitch |
 | `audio.stereo.width` | number | `0.6` | 0 – 1, step 0.01 | Amount |
 | `audio.limiter.enabled` | boolean | **`true`** | — | Limiter |
+| `audio.tempoRange` | `{min, max}` | `{min: 20, max: 300}` | whole BPM, 1 – 1000, `min < max` (an inverted pair resets to the default) | Tempo range |
 | `library.iconSizePx` | number | `56` | 32 – 96, step 4 | Icon size |
 | `library.showCents` | boolean | `true` | — | Show cents |
 | `library.layoutVersion` | number | `2` | any number | **no UI, no consumer** |
@@ -151,9 +152,14 @@ In **Independent up/down** mode a **Down interval (ratio)** row renders below th
 | *Stereo width* | | | | |
 | **Spread notes by pitch** | checkbox | — | **off** | "Places low notes toward the left speaker and high notes toward the right, as if seated at the instrument. Off = centered (mono-position)." |
 | **Amount** | slider, `%` | 0 – 1, step 0.01 | 60% | — |
+| *Live tempo* | | | | |
+| **Tempo range** | two number fields, `min – max` | 1 – 1000 BPM, step 1 | 20 – 300 | "The span of the live-tempo slider in the module bar, in BPM. It always reaches the tempo the piece is written at." |
 | *Master* | | | | |
 | **Limiter** | checkbox | — | **on** | "Gentle output limiting to avoid clipping." |
 
+The live-tempo slider spans the **Tempo range**, kept within 0.1× to 10× of the written tempo (the
+engine's rate limits) and always reaching the written tempo itself: a piece written at 10 BPM gets a
+slider from 10 to 100. Editing one end so that it passes the other moves the other end by 1 BPM.
 The tab's footer reads: *"Tempered playback, reverb, stereo and the limiter apply live during playback."*
 
 ### Instrument names
@@ -247,7 +253,8 @@ Everything lives in one `localStorage` key.
     "tempered": { "enabled": false },
     "reverb": { "enabled": true, "roomSize": 0.5, "decaySec": 1.8, "damping": 0.5, "preDelayMs": 20, "wet": 0.25 },
     "stereo": { "enabled": false, "width": 0.6 },
-    "limiter": { "enabled": true }
+    "limiter": { "enabled": true },
+    "tempoRange": { "min": 20, "max": 300 }
   },
   "library": { "iconSizePx": 56, "showCents": true, "layoutVersion": 2 },
   "scale": {

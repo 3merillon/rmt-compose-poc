@@ -35,7 +35,7 @@ Drag the slider and playback runs faster or slower **at once, while it plays**, 
 - **Check mark (Commit tempo)**: writes the shown tempo into the piece. The BaseNote's duration becomes exactly 60 / BPM (120 BPM gives `1/2`), every note keeps its relation to it, and the change is one undo step. MIDI export then uses the new tempo.
 - **Double-click** the slider or the number to go back to the written tempo.
 
-The live tempo is not saved: loading a module, or reloading the page, plays at the written tempo again. Only Commit keeps it. On a phone the slider is shorter, and the control steps aside while the search field is open.
+The slider spans **Settings → Audio → Tempo range** (20–300 BPM unless you change it), and always reaches the written tempo. The live tempo itself is not saved: loading a module, or reloading the page, plays at the written tempo again. Only Commit keeps it. On a phone the slider is shorter, and the control steps aside while the search field is open.
 
 ### Search
 

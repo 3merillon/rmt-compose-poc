@@ -107,7 +107,7 @@ roundedCornerPxAtZoom1: 4`. The sliders remain the fine-tuning control afterward
 :::
 
 Overrides are **not validated**: `validateSettings` copies `appearance.overrides` verbatim
-(`settings-schema.js:172`). No key whitelist, no hex check. Garbage keys are stored harmlessly; a
+(`settings-schema.js:197`). No key whitelist, no hex check. Garbage keys are stored harmlessly; a
 value that is not `#rrggbb` shows as `#000000` in the picker.
 
 ## Projection 1: CSS custom properties
@@ -264,7 +264,7 @@ actually costs.
 
 | GL element | Colour | Source |
 |---|---|---|
-| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2427`, `note-creation.js:476-488` |
+| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2428`, `note-creation.js:476-488` |
 
 ![The Appearance tab of the Settings panel: theme dropdown, three geometry sliders, and fifteen colour pickers grouped into Interface, Workspace and Dependency highlights](/img/settings-appearance.png)
 
@@ -358,7 +358,7 @@ Full token tables are in the [Settings reference](/reference/settings-reference)
 - **There is no OS light/dark detection.** No `prefers-color-scheme` handling for app theming
   anywhere. `mono-light` is chosen by hand or not at all.
 - **There is a boot flash.** The `:root` literals in `styles.css` are classic-orange, and
-  `themeManager.init()` only runs once the GL workspace exists (`player.js:1231`). A user on
+  `themeManager.init()` only runs once the GL workspace exists (`player.js:1232`). A user on
   `mono-light` sees a brief dark/orange flash on every load. Do not promise flicker-free theming.
 - **Selecting a preset silently discards every colour override** and overwrites the geometry
   sliders with the preset's declared geometry, with no confirmation. Only the explicit "Reset
