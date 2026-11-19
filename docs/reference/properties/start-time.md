@@ -61,9 +61,18 @@ start relative to it:
 
 | Situation | Expression written |
 |---|---|
+| Dropped exactly at the end of **any** note (it now follows that note) | `[P].t + [P].d`, P being that note |
 | Dropped exactly at the anchor's start | `[P].t` |
 | Dropped exactly at the anchor's end | `[P].t + [P].d` |
 | Dropped elsewhere | `[P].t + base.d * (n/d)` (or `- base.d * (n/d)`) |
+
+The first row is a relation, not an offset: the moved note now starts wherever P ends, so it moves
+when P's start or length changes. It applies to a single-note move. P can be any sounding note or
+silence, not a measure bar (a bar's end is the next bar's start, which the bar chain already offers),
+and not a note that depends on the moved one (that would be a cycle). When several notes end there,
+the note's current anchor wins, then the one that starts latest. A group move keeps the anchor rule,
+because the other notes in the group are still moving while each commits. Offsets that land anywhere
+else stay in time units (`base.d`): time is the workspace's, not the followed note's.
 
 When the anchor is the BaseNote, `[P]` is written as `base`. Moving a note can also rewrite *other*
 notes' expressions: if a move would leave a note referencing a note that now starts after it, the

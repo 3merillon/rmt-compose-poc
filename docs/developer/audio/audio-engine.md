@@ -42,7 +42,7 @@ const engine = new AudioEngine({ initialVolume: 0.2, rampTime: 0.2 });
 | `rampTime` | `0.2` | Default fade length for `pauseFade()`, in seconds. |
 
 The shipped singleton is constructed with **no options** (`audio-engine.js:833`), so both defaults
-apply as written. Nothing overrides them: `src/player.js:82` declares its own `INITIAL_VOLUME` and
+apply as written. Nothing overrides them: `src/player.js:83` declares its own `INITIAL_VOLUME` and
 `GENERAL_VOLUME_RAMP_TIME` at the same `0.2`, and passes them per call to `play()` and `pauseFade()`.
 
 Master volume is a separate thing entirely and lives on the graph — see [`setVolume()`](#setvolume).
@@ -61,7 +61,7 @@ Two of those keys are **back-compat aliases**, not separate nodes:
 | `compressor` | `graph.limiter` |
 
 There is no "general volume" node and no compressor any more. The names survive because
-`player.js:4539` destructures them. New code should reach through `audioEngine.graph`.
+`player.js:4540` destructures them. New code should reach through `audioEngine.graph`.
 
 ## unlock()
 
@@ -86,7 +86,7 @@ Both halves matter, and `ensureResumed()` is not a substitute for either:
 - The context can report `running` and still stay muted on iOS until a source has actually been
   *started* inside a gesture. That is what the silent buffer is for.
 
-Its only call site is the `pointerdown` handler on `#playPauseBtn` (`player.js:5167`). If you add
+Its only call site is the `pointerdown` handler on `#playPauseBtn` (`player.js:5168`). If you add
 another entry point to playback, it needs this call too.
 
 ## ensureResumed()

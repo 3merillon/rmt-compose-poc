@@ -628,5 +628,37 @@ console.log('\nF. Amplitude: ordered, inherited and cycle-checked like the other
   check(lines.length === 0, `F32 nothing reported (${lines.length} console line(s)${lines[0] ? `: ${lines[0].text}` : ''})`);
 }
 
+// --- G: a drag that lands at a note's end follows it (src/utils/followed-note.js) ---
+console.log('\nG. A note dragged exactly to the end of another follows it\n');
+{
+  const { findFollowedNote, followExpr } = await import('../src/utils/followed-note.js');
+  const mod = await Module.loadFromJSON({
+    baseNote: { frequency: '263', startTime: '0', duration: '1/2' },
+    notes: [
+      { id: 1, startTime: 'base.t', duration: 'base.d * 4', measure: true },
+      { id: 2, startTime: 'base.t', duration: 'base.d * 2', frequency: 'base.f' },
+      { id: 3, startTime: 'base.t + base.d', duration: 'base.d', frequency: '(5/4) * base.f' },
+      { id: 4, startTime: 'base.t + base.d * 3', duration: 'base.d', frequency: '(3/2) * [2].f' },
+      { id: 5, startTime: '[4].t', duration: 'base.d * (1/2)', frequency: '(2/1) * [4].f' },
+      { id: 6, startTime: '[1].t + [1].d', duration: '[1].d', measure: true },
+    ],
+  });
+  captureConsole(() => mod.evaluateModule());
+  const n = (id) => mod.getNoteById(id);
+  // Notes 2 and 3 both end at 1 s. 3 starts later, so it is the one followed.
+  const f1 = findFollowedNote(mod, n(4), 1);
+  check(f1 && f1.id === 3, `G1 at 1 s notes 2 and 3 both end; the later-starting 3 is followed (got ${f1 && f1.id})`);
+  const f2 = findFollowedNote(mod, n(4), 1, n(2));
+  check(f2 && f2.id === 2, 'G2 the current start parent wins when it ends there too');
+  check(findFollowedNote(mod, n(4), 1.125) === null, 'G3 no note ends at 1.125 s: nothing to follow');
+  check(findFollowedNote(mod, n(3), 4) === null, 'G4 a bar is never followed (bar 6 ends at 4 s, the only end there)');
+  // 5 depends on 4 (t and f). Moving 4 to 5's end would make 4 hang from 5: a cycle.
+  check(findFollowedNote(mod, n(4), 1.75) === null, 'G5 a note that depends on the moved one is not followed (no cycle)');
+  n(4).setVariable('startTimeString', followExpr(3));
+  captureConsole(() => mod.evaluateModule());
+  check(n(4).variables.startTimeString === '[3].t + [3].d' && n(4).getVariable('startTime').equals(new Fraction(1)),
+    'G6 written [3].t + [3].d, it evaluates to exactly 1 s, and note 5 follows it');
+}
+
 console.log(`\n${failures ? `${failures} failure(s).` : 'All variable-dependency checks passed.'}`);
 process.exit(failures ? 1 : 0);

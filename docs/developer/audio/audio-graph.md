@@ -12,8 +12,8 @@ restarting playback.
 
 Two `audio.*` keys are read outside it as well, and neither builds a node: `player.js` mirrors
 `audio.masterVolume` onto the transport slider and feeds it back through `audioEngine.setVolume()`
-(`player.js:1172-1206`), and it hands `audio.defaultInstrument` to `module.js`
-(`player.js:1208-1223`).
+(`player.js:1173-1207`), and it hands `audio.defaultInstrument` to `module.js`
+(`player.js:1209-1224`).
 
 One key is held here without building a node at all: `audio.tempered.enabled` becomes
 `graph.temperedEnabled`, a flag the engine reads as it schedules each voice — see

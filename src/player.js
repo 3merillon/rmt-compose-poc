@@ -13,6 +13,7 @@ import { isDSLSyntax } from './dsl/index.js';
 import { PropertyMap } from './dsl/constants.js';
 import { compiler } from './expression-compiler.js';
 import { findDependencyCycle } from './variable-deps.js';
+import { findFollowedNote, followExpr } from './utils/followed-note.js';
 import { escapeHtml } from './utils/html-escape.js';
 import { settingsStore } from './settings/settings-store.js';
 import { scaleStep } from './settings/settings-schema.js';
@@ -6014,7 +6015,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       // It deliberately does NOT retarget dependents, re-evaluate, re-render or
       // snapshot. The caller owns those, so a group move can do them ONCE for the
       // whole batch and land as a single undo entry.
-      function commitNoteStartGL(n, newStartSec) {
+      function commitNoteStartGL(n, newStartSec, { followEnd = false } = {}) {
           if (!n || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
           const noteId = n.id;
 
@@ -6022,9 +6023,17 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           const oldRaw = n.variables.startTimeString || '';
           const oldStart = toNumber(n.getVariable('startTime'), 0);
 
-          // Legacy-like remapping: select suitable parent and emit relative startTime expression
-          const parent = selectSuitableParentForStartGL(n, newStartSec);
-          const raw = emitStartTimeExprForParentGL(parent, newStartSec, n);
+          // Legacy-like remapping: select suitable parent and emit relative startTime expression.
+          // A single-note move that lands exactly at the end of another note follows it:
+          // `[P].t + [P].d` (see src/utils/followed-note.js). Group moves keep the plain rule,
+          // because the other movers' positions are not final while this one commits.
+          let parent = selectSuitableParentForStartGL(n, newStartSec);
+          let raw = null;
+          if (followEnd) {
+            const followed = findFollowedNote(myModule, n, newStartSec, parent);
+            if (followed) { parent = followed; raw = followExpr(followed.id); }
+          }
+          if (!raw) raw = emitStartTimeExprForParentGL(parent, newStartSec, n);
 
           // Minimal guarded trace: enable via window.__RMT_DEBUG_GL_MOVE = true in console
           try {
@@ -6290,7 +6299,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           // Pause playback during edit if needed
           try { eventBus.emit('player:requestPause'); } catch {}
 
-          commitNoteStartGL(n, newStartSec);
+          commitNoteStartGL(n, newStartSec, { followEnd: true });
 
           // Retarget dependents that would reference a future-starting note
           try { retargetDependentStartAndDurationOnTemporalViolationGL(n); } catch {}
