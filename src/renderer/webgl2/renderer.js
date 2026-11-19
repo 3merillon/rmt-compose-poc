@@ -2,6 +2,8 @@ import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './ren
 import { toNumber } from '../../utils/fraction-num.js';
 import { amplitudeToGain } from '../../player/amplitude.js';
 import { isMeasureNote } from '../../note.js';
+import { envelopeShares } from '../../instruments/instrument-manager.js';
+import { getInstrumentManager } from '../../store/app-state.js';
 /**
  * WebGL2 RendererAdapter
  * - Non-interactive overlay renderer for notes and playhead
@@ -415,6 +417,23 @@ export class RendererAdapter {
     return s < 0.6 ? 0.6 : (s > 2 ? 2 : s);
   }
   _noteCenterY(freq) { return this._frequencyToY(freq) + this._cfgCenterAnchor(); }
+  // The envelope of one note as shares of its duration, from the same function the
+  // audio engine uses (envelopeShares in instrument-manager.js): the note's own
+  // attack and release, the instrument's ratios for what it leaves unset, the
+  // anti-click floors. Returns [attack, decay, sustainLevel, release] or null.
+  _envelopeSharesFor(module, note, durSec, attack, release) {
+    try {
+      const shape = { attack: attack ? toNumber(attack, null) : null, release: release ? toNumber(release, null) : null };
+      let env = {};
+      const im = getInstrumentManager();
+      if (im && typeof im.getInstrument === 'function') {
+        const inst = im.getInstrument(String(module.findInstrument(note) || '').toLowerCase());
+        if (inst && typeof inst.getEnvelopeSettings === 'function') env = inst.getEnvelopeSettings(durSec) || {};
+      }
+      const s = envelopeShares(env, durSec, shape);
+      return [s.attack, s.decay, s.sustain, s.release];
+    } catch { return null; }
+  }
 
   init(containerEl) {
     if (!containerEl) throw new Error('RendererAdapter.init: containerEl required');
@@ -721,6 +740,9 @@ export class RendererAdapter {
     // What a note without an amplitude of its own inherits: the BaseNote's.
     const baseEvForAmp = getEv(0);
     const baseHeightScale = (baseEvForAmp && baseEvForAmp.amplitude) ? this._amplitudeHeightScale(baseEvForAmp.amplitude) : 1;
+    // And its attack and release, which a note without its own inherits.
+    const baseAttack = baseEvForAmp ? baseEvForAmp.attack : null;
+    const baseRelease = baseEvForAmp ? baseEvForAmp.release : null;
     // Latest end time across playable notes, accumulated here for free because this loop
     // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
     // re-derive it with a second full pass over module.notes (~31ms at 100k notes).
@@ -794,9 +816,19 @@ export class RendererAdapter {
         const baseColor = this._resolveColor(ev, note, module);
         const color = isSilence ? [0.0, 0.0, 0.0, 0.75] : baseColor;
 
+        // The envelope a note sounds with, drawn inside it (see rectBorderFS) when
+        // the note or the BaseNote sets an attack or a release. Otherwise null, and
+        // the note draws exactly as before.
+        let env = null;
+        if (!isSilence) {
+          const atk = (ev && ev.attack) || baseAttack;
+          const rel = (ev && ev.release) || baseRelease;
+          if (atk || rel) env = this._envelopeSharesFor(module, note, durSec, atk, rel);
+        }
+
         // Carry freqVal so the fraction-label pass below does not have to look the note up in
         // evaluatedNotes a second time and re-unwrap the Fraction.
-        items.push({ id: note.id, x, y, w, h, color, isSilence, freqVal });
+        items.push({ id: note.id, x, y, w, h, color, isSilence, freqVal, env });
       } catch {
         // Ignore malformed notes
       }
@@ -827,6 +859,9 @@ export class RendererAdapter {
       this._dragFlags = new Float32Array(N);
       this._corruptionType = new Float32Array(N);
     }
+    if (!this._envShape || this._envShape.length !== N * 4) {
+      this._envShape = new Float32Array(N * 4);
+    }
 
     // Fill arrays with reordered data
     for (let i = 0; i < N; i++) {
@@ -842,6 +877,13 @@ export class RendererAdapter {
       this.colors[o + 1] = it.color[1];
       this.colors[o + 2] = it.color[2];
       this.colors[o + 3] = it.color[3];
+
+      // Envelope shape (attack, decay, sustain, release); all zeros = none drawn
+      const env = it.env;
+      this._envShape[o + 0] = env ? env[0] : 0;
+      this._envShape[o + 1] = env ? env[1] : 0;
+      this._envShape[o + 2] = env ? env[2] : 0;
+      this._envShape[o + 3] = env ? env[3] : 0;
 
       // Per-instance flags: 1 for silence, 0 otherwise
       if (this._instanceFlags) {
@@ -1186,6 +1228,11 @@ export class RendererAdapter {
       if (this.rectInstanceCorruptionBuffer && this._corruptionType) {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceCorruptionBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, this._corruptionType, gl.DYNAMIC_DRAW);
+      }
+      // Envelope shapes follow the same order, so they are uploaded with it
+      if (this.rectInstanceEnvBuffer && this._envShape) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceEnvBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, this._envShape, gl.DYNAMIC_DRAW);
       }
 
       // Ensure all enabled per-instance attribute buffers are large enough for instanceCount draws
@@ -1772,6 +1819,7 @@ export class RendererAdapter {
       layout(location=5) in float a_flags;     // 1.0 = silence, 0.0 = normal
       layout(location=6) in float a_dragFlag;  // 1.0 = apply drag offset, 0.0 = no offset
       layout(location=7) in float a_corruptionType; // 0=none, 1=transitive, 2=direct
+      layout(location=8) in vec4 a_env;        // envelope (attack, decay, sustain, release); zeros = none
 
       uniform mat3 u_matrix;                   // world -> screen (page CSS px)
       uniform vec2 u_viewport;                 // (canvas CSS width, canvas CSS height)
@@ -1787,6 +1835,7 @@ export class RendererAdapter {
       out vec2 v_noteSize;                     // note size in CSS px
       out float v_isSilence;                   // flag propagated to FS
       out float v_corruptionType;              // corruption type for hatching
+      out vec4 v_env;                          // envelope shape for the FS
 
       void main() {
         // Apply drag offset only to flagged instances
@@ -1809,6 +1858,7 @@ export class RendererAdapter {
         v_noteSize = sizeAdjusted * u_scale;
         v_isSilence = a_flags;
         v_corruptionType = a_corruptionType;
+        v_env = a_env;
       }
     `;
     const rectBorderFS = `#version 300 es
@@ -1819,6 +1869,7 @@ export class RendererAdapter {
       in vec2 v_noteSize;             // CSS px
       in float v_isSilence;           // 1.0 for silence -> suppress solid border
       in float v_corruptionType;      // 0=none, 1=transitive, 2=direct
+      in vec4 v_env;                  // (attack, decay, sustain, release) shares; zeros = none
 
       uniform float u_cornerRadius;   // CSS px (scaled with zoom)
       uniform float u_borderWidth;    // CSS px (scaled with zoom)
@@ -1897,11 +1948,34 @@ export class RendererAdapter {
         // Composite: apply hatch color over note color in interior
         vec3 hatchedRgb = mix(v_color.rgb, u_hatchColor.rgb, hatchMask * u_hatchColor.a);
 
+        // Envelope: the gain the note sounds with, as a band about its centre line
+        // (attack ramp, decay to the sustain level, hold, release ramp). Inside the
+        // band the note has its full colour; outside it is dimmed. A note without
+        // an attack or release of its own (or the BaseNote's) has v_env = 0 and
+        // draws as before.
+        float interiorAlpha = v_color.a;
+        if (v_env.x > 0.0) {   // attack is never 0 when drawn (floor); a disabled attribute reads (0,0,0,1)
+          float x = clamp(v_uv.x, 0.0, 1.0);
+          float atk = max(v_env.x, 1e-5);
+          float dec = v_env.y;
+          float sus = v_env.z;
+          float rel = max(v_env.w, 1e-5);
+          float level;
+          if (x < atk) level = x / atk;
+          else if (x < atk + dec) level = mix(1.0, sus, (x - atk) / max(dec, 1e-5));
+          else if (x < 1.0 - rel) level = sus;
+          else level = sus * clamp((1.0 - x) / rel, 0.0, 1.0);
+          float halfBand = level * he.y;
+          float dy = abs(p.y) - halfBand;           // CSS px outside the band (negative inside)
+          float band = 1.0 - smoothstep(-0.75, 0.75, dy);
+          interiorAlpha = v_color.a * mix(0.3, 1.0, band);
+        }
+
         // Composite color and alpha:
         // - Border draws with u_borderColor on the ring (if not silence)
         // - Interior draws with hatched note color
         vec3 rgb = u_borderColor.rgb * ring + hatchedRgb * interior;
-        float a   = u_borderColor.a   * ring + v_color.a   * interior;
+        float a   = u_borderColor.a   * ring + interiorAlpha * interior;
 
         // Discard fragments with no coverage to avoid unnecessary blending
         if (a <= 0.0) discard;
@@ -2540,6 +2614,15 @@ export class RendererAdapter {
     gl.enableVertexAttribArray(7);
     gl.vertexAttribPointer(7, 1, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(7, 1); // per-instance
+
+    // Envelope shape (loc 8) - (attack, decay, sustain level, release) as shares of
+    // the note; all zeros = no envelope drawn
+    this.rectInstanceEnvBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceEnvBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(8);
+    gl.vertexAttribPointer(8, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(8, 1); // per-instance
 
     // Dedicated buffer for single-instance draws (avoid corrupting shared per-instance buffer)
     this._singlePosSizeBuffer = gl.createBuffer();
