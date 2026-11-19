@@ -7,7 +7,7 @@ description: How equal temperament works, how RMT Compose stores TET values, wha
 
 Equal temperament divides an interval into equal steps. Twelve equal divisions of the octave give you a piano. Nineteen give you better thirds. Thirteen equal divisions of the *tritave* give you Bohlen–Pierce.
 
-In RMT Compose a TET step is an exponent: `2 ^ (1/12)` is a semitone, `3 ^ (1/13)` is a Bohlen–Pierce step. You write them in the expression; the app keeps the power term intact rather than flattening it to a decimal.
+In RMT Compose a TET step is an exponent: `2 ^ (1/12)` is a semitone, `3 ^ (1/13)` is a Bohlen–Pierce step. You write them in the expression; the app keeps the power exactly, never turning it into a decimal or a float-derived fraction.
 
 ## Why temper at all
 
@@ -72,27 +72,27 @@ Only note 1 touches `base`. That makes the scale a chain: lift one note and ever
 
 This is the part that matters, and it is narrower than it looks.
 
-**The expression stays symbolic.** `2 ^ (1/12)` is stored as a power term, not as `1.0594630943592953`. It survives saving, loading, dragging and the ▲/▼ arrows.
+**The expression stays symbolic, and so does the value.** `2 ^ (1/12)` is stored as a power term, not as `1.0594630943592953`, and it is evaluated as that power: a value computed from it, such as `263 * 2^(7/12)`, is exact. It survives saving, loading, dragging and the ▲/▼ arrows.
 
-**Like bases merge on save.** Type `2^(1/12) * 2^(1/12) * base.f`, press Save, and the simplifier stores `2^(1/6) * base.f`. Twelve semitones collapse to `2`, exactly.
+**Like bases merge on save.** Type `2^(1/12) * 2^(1/12) * base.f`, press Save, and the simplifier stores `2^(1/6) * base.f`. Twelve semitones collapse to `2`, exactly: with a base of 263/4, twelve 12-TET steps give exactly 263/2.
 
-**Perfect roots resolve.** `4^(1/2) * base.f` saves as `2 * base.f`. The note is no longer irrational, and the ≈ marker disappears.
+**Perfect roots resolve.** `4^(1/2) * base.f` saves as `2 * base.f`. The note is no longer irrational, and the hatching disappears.
 
-**Only positive integer bases stay symbolic.** `MusicValue.pow` creates a symbolic power for bases like 2, 3 and 5. A non-integer base — say `(1618/1000)` for a golden-ratio scale — takes the float path instead and every step downstream is ordinary floating-point arithmetic.
+**Any positive rational base stays exact.** Bases are factored into primes: `6^(1/2)` is `2^(1/2) * 3^(1/2)`, and a base such as `(1618/1000)` for a golden-ratio scale is factored the same way. The exponent is reduced (`2^(3/12)` shows as `2^(1/4)`).
 
-::: warning The evaluated number is still an approximation
-Keeping `2^(1/12)` in the *expression* is not the same as evaluating it exactly. When the app computes a note's actual frequency, an irrational power is converted straight back to an approximating rational for the audio and render pipeline, and the note is flagged as corrupted. The algebra is exact; the number you hear is a very good approximation of it. Do not expect a TET note to report a closed-form value.
+::: tip The evaluated value is exact
+When the app computes a note's frequency, an irrational power is kept exact: the note widget shows `(263/4) * 2^(1/4) = 78.190368…`, the exact form and its value. Only sound, drawing and MIDI use a number: the nearest double of the exact value, computed from the powers directly. A value is approximate only when you write it with `~`, or when an operation cannot be kept exact; see [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
 :::
 
 ## The ≈ marker
 
-A note whose frequency involves an irrational power is **corrupted** — the app's word for "this value is not a rational number".
+A note whose frequency involves an irrational power is **corrupted** — the app's word for "this value is tempered or approximate, not a pure ratio".
 
-- On the canvas, the note is **cross-hatched** and its fraction label is prefixed with **≈**. Notes that merely *depend* on a corrupted note get a single diagonal hatch and the same ≈ prefix.
-- The fraction shown next to ≈ is the note's **ratio to the BaseNote**, approximated with a maximum denominator of 8192. It is a readable landmark, not the stored value.
-- In the note widget, the **Evaluated:** line shows `≈` followed by the approximated value, in italic amber.
+- On the canvas, the note is **cross-hatched** and its fraction label is prefixed with **≈**. Notes that merely *depend* on a corrupted note get a single diagonal hatch and the same label.
+- The fraction shown next to ≈ on the canvas is the note's **ratio to the BaseNote**, approximated with a maximum denominator of 8192. It is a readable landmark, not the stored value, which stays exact.
+- In the note widget, the **Evaluated:** line shows the exact form and its value, in italic amber, for example `(263/4) * 2^(1/4) = 78.190368…`. A tempered chain that lands on a rational, such as the 12-TET octave, shows its fraction (`263/2`). `≈` there means only "approximate".
 
-Load any TET module and every note but the first will carry the ≈. That is correct and expected. A scale made of pure ratios — such as the **Tesla** module — shows plain fractions and no hatching, because it never raises anything to a fractional power.
+Load any TET module and every note but the first will be hatched. That is correct and expected. A scale made of pure ratios — such as the **Tesla** module — shows plain fractions and no hatching, because it never raises anything to a fractional power.
 
 ## The Scale Systems section
 

@@ -83,7 +83,7 @@ Compare a fifth in two systems:
 
 The difference is small and audible. The just fifth locks; the tempered one beats slightly.
 
-RMT Compose stores ratios with [fraction.js](https://github.com/rawify/Fraction.js), so a 3/2 is kept as the numerator/denominator pair **3, 2** — an exact rational — rather than a float. Arithmetic on rationals stays rational and stays exact. (Irrational values, like a TET step, are a separate case; see [the ≈ symbol](#the-symbol-approximation) below.)
+RMT Compose stores ratios with [fraction.js](https://github.com/rawify/Fraction.js), so a 3/2 is kept as the numerator/denominator pair **3, 2** — an exact rational — rather than a float. Arithmetic on rationals stays rational and stays exact. (Irrational values, like a TET step, are kept exact as powers; see [the ≈ symbol](#the-symbol-approximation) below.)
 
 ## Expressions
 
@@ -289,29 +289,29 @@ See [Saving Modules](/user-guide/modules/saving-modules).
 
 ## The ≈ symbol (approximation) {#the-symbol-approximation}
 
-Some values display with a leading **≈**. That means the value is **irrational** — it cannot be written as an exact fraction.
+A value is one of three kinds. A **rational** value is an exact fraction (3/2). An **irrational** value is exact but not a fraction: it is kept as a power, like `2^(7/12)`. An **approximate** value is a number that stands for a value it is not exactly, like a measured `~261.63`. A leading **≈** in the note widget means only one thing: the value is approximate.
 
 ### When does that happen?
 
-Equal temperament. A 12-TET semitone is:
+Equal temperament produces irrational values. A 12-TET semitone is:
 
 ```
-2^(1/12)            # ≈ 1.0594630943...
+2^(1/12)            # 1.0594630943...
 ```
 
-There is no fraction that equals it. RMT Compose calls such a value **corrupted** — not broken, just no longer exact — and marks it everywhere it appears.
+There is no fraction that equals it, so RMT Compose keeps it as the power it is. Everything computed from it stays exact: twelve semitones multiply to exactly 2, so the 12-TET octave is exactly 2. A value becomes approximate only when you write it with `~`, or when an operation cannot be kept exact (a division by a sum of irrational terms, a division by zero). See [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
 
-### How corruption is shown
+### How it is shown
 
-- In the note widget, the **frequency** value is prefixed with **≈** and shown in italic amber — whether the note is corrupted directly or through something it depends on.
-- On the canvas, the note is **hatched**, and the hatch pattern tells you which:
+- In the note widget, an irrational value shows its exact form and its value, for example `(263/4) * 2^(1/4) = 78.190368…`. An approximate value shows `≈493.12500`. A rational value shows its fraction, also when a tempered chain lands on one.
+- On the canvas, the note is **hatched** when it is tempered or approximate (not a pure ratio), and the hatch pattern tells you which:
 
 | Hatching | Meaning |
 |----------|---------|
-| **Crosshatch** (both diagonals) | **Directly** corrupted — this note's own expression contains an irrational power |
-| **Single diagonal hatch** | **Transitively** corrupted — the note is clean itself, but something it depends on isn't |
+| **Crosshatch** (both diagonals) | This note's own expression contains an irrational power, a `~` number or a division by zero |
+| **Single diagonal hatch** | The note is pure itself, but something it depends on is tempered or approximate |
 
-Not every `^` corrupts. `4^(1/2)` is 2 — a perfect root, so the result is rational and the note stays clean. Only genuinely irrational powers corrupt.
+The app's internal word for the hatched state is *corrupted*; nothing is broken. Not every `^` hatches: `4^(1/2)` is exactly 2, a perfect root, so the result is rational and the note stays clean.
 
 ### Symbolic simplification
 
@@ -323,15 +323,15 @@ When you save an expression, RMT Compose simplifies it algebraically, and it mer
 4^(1/2) * base.f                 ->   2 * base.f
 ```
 
-So two semitones up stays a single exact symbolic step of `2^(1/6)`, rather than degenerating into a stack of floats. The **stored form** keeps its algebraic structure; the **displayed value** is a rational approximation of it, and the ≈ is there to remind you of the difference.
+So two semitones up stays a single exact step of `2^(1/6)`. Evaluation keeps the same exact form, so nothing is rounded along the way.
 
 ### Just intonation vs equal temperament
 
 | | Just intonation | Equal temperament |
 |--|-----------------|-------------------|
-| Ratios | exact fractions (3/2) | irrational powers (2^(7/12)) |
+| Ratios | exact fractions (3/2) | exact irrational powers (2^(7/12)) |
 | Sound | pure, locked | a compromise that works in every key |
-| Display | no marking | ≈, and hatching on the note |
+| Display | no marking | hatching on the note |
 
 [Pure Ratios](/user-guide/tuning/ratios) and [Equal Temperament](/user-guide/tuning/equal-temperament) go further into both.
 
@@ -347,7 +347,7 @@ So two semitones up stays a single exact symbolic step of `2^(1/6)`, rather than
 | **Silence** | A note with time but no frequency. |
 | **Measure bar** | A silent note flagged `measure`. Bars chain by `[p].t + [p].d`. |
 | **Module** | A collection of notes. Self-contained, so it can be dropped anywhere. |
-| **≈** | This value is irrational. The note is hatched on the canvas. |
+| **≈** | This value is approximate (written with `~`, or a fallback). Tempered and approximate notes are hatched on the canvas. |
 
 ## Next steps
 

@@ -145,7 +145,7 @@ base.f * ~1.4983       # a fifth measured as 1.4983, not the pure 3/2
 
 Irrational values are not approximations. `2^(7/12)` is exact: the app keeps it as the power it
 is, and twelve steps of `2^(1/12)` give exactly 2. See
-[Symbolic Power](/developer/core/symbolic-power).
+[Exact Values](/developer/core/symbolic-power).
 
 ## Note references
 
@@ -324,8 +324,8 @@ coefficient, so a TET note stays TET.
 ## What happens when you save
 
 Saving runs the expression through a simplifier that puts it in a canonical form. The rewrite
-is applied only if it evaluates to the same value **and** does not change whether the value is
-irrational; otherwise your original text is kept.
+is applied only if it evaluates to the same value **and** does not change whether the note is
+hatched; otherwise your original text is kept.
 
 | You type | It is saved as |
 |---|---|
@@ -368,8 +368,8 @@ Two things that look like errors are not.
 
 **Division by zero.** `(5/0)` is accepted. It is not read as a fraction literal — it falls back
 to a grouped division, and at evaluation time a division by zero yields **1** with a console
-warning. The property is additionally **marked corrupted**, so the note crosshatches on the
-canvas the same way an irrational power does.
+warning. The value is additionally **approximate**, so the note crosshatches on the
+canvas the same way a tempered note does.
 
 **An unresolvable reference.** See the defaults table above. Evaluation degrades rather than
 failing.

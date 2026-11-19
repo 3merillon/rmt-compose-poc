@@ -1,222 +1,136 @@
 ---
-title: SymbolicPower
-description: The algebraic representation of irrationals like 2^(1/12) — its real API, where it is actually live in the shipping app, and where it is not.
+title: Exact Values
+description: How RMT Compose keeps 2^(1/12) exact through evaluation — the three kinds of value (rational, irrational, approximate), their canonical form, what is closed and what falls back, and where numbers leave the exact world.
 ---
 
-# SymbolicPower
+# Exact Values
 
-**SymbolicPower** represents an irrational value by its algebraic structure instead of its numeric value:
+Every value the evaluator computes has one of three kinds (`src/value/exact.js`):
 
-```
-value = coefficient × base₁^exp₁ × base₂^exp₂ × … × baseₙ^expₙ
-```
+| Kind | Representation | Example |
+|---|---|---|
+| **rational** | a `Fraction` (fraction.js, BigInt-backed). The common case and the fast path: never wrapped | `3/2`, `263` |
+| **irrational** | an `Irrational` (`src/value/exact.js:49`): an exact algebraic value | `2^(1/12)`, `263 * 2^(7/12)` |
+| **approximate** | an `Approx` (`src/value/exact.js:57`): a Fraction standing for a number it is not exactly | `~261.63` |
 
-`src/binary-evaluator.js:93-325`.
+`2^(7/12)` is exact but irrational: it is a relation, kept as the power it is. `~261.63` is a measurement: a rational number marked as not exact. The two are never confused.
 
-## The problem
+## The problem this solves
 
-Equal temperament needs irrational frequency ratios:
+Equal temperament needs irrational ratios. A float loses precision with every operation, and a rational approximation of a float compounds its error under multiplication. Before v2 the evaluator turned `2^(1/12)` into the fraction `2739815/2586041`, so twelve 12-TET steps above 263/4 gave 131.4999999999982, not 131.5. Now they give exactly 263/2.
 
-```javascript
-Math.pow(2, 1/12) === 1.0594630943592953   // 12-TET semitone
-```
-
-Store that as a float and you lose precision with every operation: multiply it by itself twelve times and you do **not** get exactly 2. Approximate it as a rational instead — the evaluator's `POW` lands on `2739815/2586041` — and the error compounds under multiplication, so twelve of them still miss 2.
-
-## The solution
-
-Store the algebraic form. `2^(1/12)` is not a number to be computed; it is a *base* and an *exponent* to be carried around.
-
-```javascript
-SymbolicPower.fromPower(2, new Fraction(1, 12))
-// { coefficient: Fraction(1), powers: [ { base: 2, exp: Fraction(1, 12) } ] }
-```
-
-Multiplication then merges like bases by **adding exponents**, so `2^(1/12) × 2^(1/12)` is `2^(1/6)` exactly — no float ever enters the calculation.
-
-::: danger This is not what happens during evaluation
-Read the next section before you build anything on that promise. In the shipping app, `SymbolicPower` **does not survive a single opcode boundary** on the evaluator's stack. The class is real and correct; the evaluator does not use it the way this section implies.
-:::
-
-## What actually happens at runtime
-
-Since Phase C1 (v2) the evaluator keeps irrational powers **exact**. `OP.POW` (`binary-evaluator.js:1213-1223`) calls `pow()` in `src/value/exact.js`, which returns a rational `Fraction`, an exact `Irrational` (a sum of terms `c × Π b^e`, canonical: like bases merge, integer parts of exponents move into the coefficient, bases are factored into primes) or an `Approx`. Dependents compute from the exact value, so:
+## The irrational form
 
 ```
-2^(1/12)                    →  2^(1/12)              irrational
-2^(7/12) * 263              →  263 * 2^(7/12)        irrational
-twelve steps of 2^(1/12)    →  2                     rational, exactly
-4^(1/2), (2^(1/2))^2        →  2                     rational, not flagged
+value = Σ  c_k × Π  b_i ^ e_i        c_k rational ≠ 0, b_i integers > 1, 0 < e_i < 1
 ```
 
-Each record keeps a `Fraction` shadow (the nearest double) next to the exact value, for the code that reads Fractions; see [Binary Evaluator](/developer/core/binary-evaluator#pow-and-corruption). The flag is unchanged: `_lastEvalWasCorrupted` marks a note whose own expression makes the irrational value, and it becomes the crosshatch.
+It is kept **canonical**, so equal values are equal structurally (`equals()`, `src/value/exact.js:376`):
 
-The `MusicValue` / `SymbolicPower` classes below predate this and are no longer used by `POW`; the C3 documentation pass rewrites this page.
+- like bases merge: `2^(1/12) × 2^(1/12) = 2^(1/6)`;
+- the integer part of an exponent moves into the coefficient: `2^(13/12) = 2 * 2^(1/12)`;
+- bases are factored into primes by trial division up to 65536 (`FACTOR_LIMIT`, `src/value/exact.js:32`): `4^(1/2)` is the rational `2`, `6^(1/2)` is `2^(1/2) * 3^(1/2)`. A cofactor beyond the limit stays as one opaque base: still exact, though two such values may not compare equal structurally;
+- terms with the same radical part add up: `3 * 2^(1/2) + 2^(1/2) = 4 * 2^(1/2)`;
+- when no radical is left, the value is a `Fraction` again: twelve semitones are the rational `2`.
 
-::: info Rational powers are exact — at any magnitude, up to a cap
-`tryRationalPower()` (`:647`) handles integer exponents (`rationalIntPower`, `:674`) and **perfect n-th roots** (`tryPerfectNthRoot`, `:697`) in BigInt; the root check is an exact binary search (`integerNthRoot`, `:725`). Two DoS caps bound exact exponentiation (`:622-623`): an integer exponent above **65536**, or a result beyond **~1 Mbit per component**. `src/value/exact.js` applies the same caps; past them a value is approximate.
-:::
+## What is closed, and what falls back
 
-### Where the algebra *is* live
+| Operation | Result |
+|---|---|
+| `+`, `−` | exact: terms merge or are appended |
+| `×` | exact: distribute and merge, up to **64 terms** (`MAX_TERMS`, `src/value/exact.js:30`) |
+| `÷` by a single term | exact: the term is inverted (`div()`, `src/value/exact.js:289`) |
+| a rational power of a single term | exact: `(c × 2^(1/12))^(1/2)` raises the coefficient too (`pow()`, `src/value/exact.js:345`) |
+| a rational power of a rational | exact: integer powers and perfect roots stay rational, the rest is factored (`rationalPow()`, `src/value/exact.js:306`) |
+| an integer power 0 … 8 of a sum | exact: repeated multiplication (`MAX_INT_POW`) |
+| `÷` by a sum, a non-integer power of a sum, more than 64 terms | **approximate** |
+| an irrational or approximate exponent | **approximate** |
+| an even root of a negative number | **approximate** (not a real number) |
+| an integer exponent above 65536, a result beyond ~1 Mbit per component | **approximate** (the DoS caps, `src/value/exact.js:33-34`) |
 
-`src/dsl/simplify.js`. This is an independent re-implementation of the same normal form, and it runs on **save**, not on evaluation. Its header (`:1-21`) states the contract: a value is a rational coefficient times a product of `base^exp` terms, like bases merge, and coefficients never migrate into a power term.
+A fallback never fails and never passes as exact: its result is an `Approx`, flagged and shown with ≈. Single-term values are what music produces (every TET pitch, every chain of tempered intervals); sums appear only where irrational durations are added to times, and stay well below the cap.
 
-That is what makes these rewrites happen when you save a variable:
+## Approximate values
+
+An approximate value comes from `~` in an expression (`base.f * ~1.4983`, see [Approximate numbers](/reference/expressions/syntax#approximate-numbers)) or from a fallback above. Everything computed from it is approximate (`add`, `mul`, `div` and `pow` all check first), and it never equals an exact value: `~1.5` is not `3/2`. The DSL compiles `~x` to the literal followed by the opcode `APPROX` (0x16), which the evaluator turns into an `Approx` (`src/binary-evaluator.js:562`).
+
+## In the evaluator
+
+- **The stack** holds pooled `Fraction`s for rational values and immutable `Irrational` / `Approx` objects otherwise. `ADD`, `SUB`, `MUL`, `DIV` and `NEG` take the old fraction path when both operands are rational, and the exact module otherwise. A pooled Fraction is copied out of the pool before an exact value keeps it, because the pool reuses its objects.
+- **`POW`** (`src/binary-evaluator.js:550`) calls `pow()` and pushes whatever kind it returns.
+- **Records** keep, for each variable, a `Fraction` in the usual field (`record.frequency`) and the exact value in `record.exact.frequency` when it is not rational (`createEvaluationRecord()`, `src/binary-evaluator.js:34`). The Fraction is the **shadow**: the value itself when rational, the approximation when approximate, and the exact binary value of the nearest double when irrational (`shadow()`, `src/value/exact.js:218`). `record.approxFlags` has a bit per approximate variable.
+- **References read the exact value** (`recordValue()`, `src/binary-evaluator.js:63`), so a dependent is computed from `263 * 2^(7/12)`, never from its shadow. `evaluate()` still returns a Fraction (the shadow), with the exact value in `_lastExact` (`src/binary-evaluator.js:600`); `Note.getExactVariable(name)` (`src/note.js:226`) gives the exact value of an evaluated note.
+
+## Where numbers leave
+
+Drawing, sound and MIDI read the shadow through `toNumber()`. For an irrational value that is the same double as `toNumber(exact)` (`src/value/exact.js:183`), which computes each term in floating point: the boundary is crossed once, at the moment a float is needed.
+
+**Ordering** (`compare()`, `src/value/exact.js:390`) is exact: equal values compare equal structurally; otherwise the sign of the float difference decides, and when the two doubles are within 1e-12 relative, a 192-bit fixed-point evaluation does (`fixedPoint()`, `src/value/exact.js:232`). The start-time sorts of `Module.reindexModule()` and the player use it.
+
+## Code that writes expressions from values
+
+Evaluate to BaseNote, Evaluate Module, re-anchoring a moved note, Liberate, the arrows on a note without an expression and Copy selection as module rewrite an expression from an evaluated value. They read the exact value and write it with `src/utils/value-expr.js` (`valueFactor()`, `src/utils/value-expr.js:22`): a rational as a fraction, an irrational as its exact form (`base.f * 2^(7/12)`, `2^(5/6) * [1].f`), an approximate value with `~` (`base.f * ~(14983/8000)`). Nothing guesses an irrational back from a float any more.
+
+## The flags and the hatching
+
+The `CORRUPT` bitmask (`src/binary-note.js:63-70`) has a bit per variable (`0x01` start … `0x20` release). A variable's bit is set when **its own expression** makes a non-exact value: an irrational power (`src/binary-evaluator.js:557`), a `~` literal (`src/binary-evaluator.js:567`), a division by zero (`src/binary-evaluator.js:533`), or an approximation of the exact algebra (`pushResult()`, `src/binary-evaluator.js:373`). A note that only *reads* such a value gets no bit of its own; the dependency graph reports it transitively.
+
+```
+POW makes an irrational, or ~ / a fallback makes an approximation
+  → BinaryEvaluator._lastEvalWasCorrupted = true
+  → evaluateVariable() ORs the variable's bit into corruptionFlags   binary-evaluator.js:830
+  → Module._updateCorruptionFlags()                                  module.js:683
+      → DependencyGraph.setCorruptionFlags(id, flags)                dependency-graph.js:1746
+  → RendererAdapter.sync() → a_corruptionType per note               renderer.js:931
+  → the shader hatches the note
+```
+
+| `a_corruptionType` | Meaning | Visual |
+|---|---|---|
+| `0.0` | exact rational, nothing tempered upstream | none |
+| `1.0` | transitive: depends on a tempered or approximate note | single 45° diagonal hatch |
+| `2.0` | direct: its own expression is tempered or approximate | crosshatch |
+
+The note widget shows the kind in words (`buildEvaluatedDiv()`, `src/modals/variable-controls.js:111`): an irrational value as its exact form and its value (`(263/4) * 2^(1/4) = 78.190368…`), an approximate value as `≈493.12500`, a rational value as its fraction, also when a tempered chain lands on one (the octave of 12-TET shows `263/2`). A very long exact fraction is still elided to eight significant figures with the full form in the tooltip (`src/modals/fraction-display.js`); that is display only.
+
+## The simplifier
+
+`src/dsl/simplify.js` re-implements the same normal form on expression **text**, and runs when a variable is saved and for the ▲/▼ interval arrows. Coefficients never migrate into a power term, so a TET expression keeps its shape; an approximation `~x` is an opaque factor, never folded into the exact coefficient, and keeps its decimal form.
 
 | You type | It is saved as |
 |---|---|
 | `2 * (1/2) * base.f` | `base.f` |
 | `base.f + base.f` | `2 * base.f` |
-| `4^(1/2) * base.f` | `2 * base.f` — the perfect root folds; the note stays **un**corrupted |
-| `2^(1/12) * 2^(1/12) * base.f` | `2^(1/6) * base.f` — like bases merge; still corrupted |
+| `4^(1/2) * base.f` | `2 * base.f` — the perfect root folds; the note is not hatched |
+| `2^(1/12) * 2^(1/12) * base.f` | `2^(1/6) * base.f` — like bases merge |
 | `2 * base.f * 2^(7/12)` | unchanged — the coefficient stays out of the power |
 
-A rewrite is rejected and the original kept if re-evaluating it does not give exactly the same value (exact values, irrational ones included) or **flips the corruption flag** (`src/utils/simplify.js:84-98`).
-
-The same machinery backs the ▲/▼ interval arrows (Settings → Arrows; default up ×2/1, down ×1/2 — they are not octave-only): `scaleDSL()` folds the arrow's factor into the expression's rational coefficient rather than prepending a multiplier, so up-then-down returns to exactly `base.f` and a TET note stays TET. Verified:
+A rewrite is kept only if it evaluates to exactly the same value, with the same flag (`src/utils/simplify.js:84-98`). The arrows fold their factor into the coefficient (`scaleDSL()`), so up-then-down returns to exactly what was written:
 
 ```
-scaleDSL('base.f', 2, 1)                    → 2 * base.f
-scaleDSL('2 * base.f', 1, 2)                → base.f
-scaleDSL('base.f * 2^(7/12)', 3, 2)         → (3/2) * base.f * 2^(7/12)
+scaleDSL('base.f * 2^(7/12)', 3, 2)   → (3/2) * base.f * 2^(7/12)
+scaleDSL('base.f * ~1.5', 2, 1)       → 2 * base.f * ~1.5
 ```
 
-## API
+## The Rust core
 
-`SymbolicPower` (`binary-evaluator.js:93-325`). Note the field is **`exp`**, not `exponent`.
-
-```javascript
-class SymbolicPower {
-  coefficient;   // Fraction
-  powers;        // [{ base: number, exp: Fraction }]  — base is a positive integer
-
-  static fromPower(base, exp)   // :35  — base^exp, coefficient 1
-  static fromRational(frac)     // :42  — a rational, no power terms
-
-  toFloat()                     // :49  — f64, for audio and rendering
-  isRational()                  // :60  — no powers, or every exp has d === 1
-  toRationalFraction()          // :67  — Fraction if rational, else null
-  normalize()                   // :88  — drop zero exponents, sort by base
-
-  mul(other)                    // :101 — merge like bases by adding exponents
-  div(other)
-  pow(frac)
-}
-```
-
-There is no `simplify()`, no `fromFraction()`, no `valueOf()`, and no `isCorrupted()` on this class. (`isCorrupted()` is on `MusicValue` — `:386`.)
-
-### 12-TET octave closure
-
-```javascript
-const semitone = SymbolicPower.fromPower(2, new Fraction(1, 12));
-
-let octave = semitone;
-for (let i = 1; i < 12; i++) octave = octave.mul(semitone);
-// → { coefficient: 1, powers: [ { base: 2, exp: 1/1 } ] }
-
-octave.isRational();            // true   — the exponent's denominator is 1
-octave.toRationalFraction();    // Fraction 2/1 — exactly 2
-```
-
-`mul()` alone leaves you with `2^1`; `toRationalFraction()` is the step that collapses it to the rational `2`. Verified by running the real class.
-
-### Multi-base
-
-Bases that cannot be combined algebraically are kept separate:
-
-```javascript
-const tetThird = SymbolicPower.fromPower(2, new Fraction(4, 12));  // 12-TET major third
-const bpStep   = SymbolicPower.fromPower(3, new Fraction(1, 13));  // Bohlen-Pierce step
-
-tetThird.mul(bpStep);
-// { coefficient: 1, powers: [ {base: 2, exp: 1/3}, {base: 3, exp: 1/13} ] }
-```
-
-`normalize()` sorts `powers` by base and drops zero exponents, so the representation is canonical.
-
-## Corruption, end to end
-
-The `CORRUPT` bitmask (`src/binary-note.js:104-111`):
-
-```javascript
-export const CORRUPT = {
-  START_TIME: 0x01,
-  DURATION:   0x02,
-  FREQUENCY:  0x04,
-  AMPLITUDE:  0x08,
-  ATTACK:     0x10,
-  RELEASE:    0x20,
-};
-```
-
-The path from an irrational power to a pixel:
-
-```
-POW produces an irrational
-  → BinaryEvaluator._lastEvalWasCorrupted = true           binary-evaluator.js:1220
-  → evaluateVariable() ORs the property's bit into corruptionFlags   :1545-1547
-  → Module._updateCorruptionFlags()                        module.js:683-706
-      → DependencyGraph.setCorruptionFlags(id, flags)      dependency-graph.js:1746
-  → RendererAdapter.sync() → a_corruptionType per note     renderer.js:931-978
-  → the shader hatches the note
-```
-
-On the canvas:
-
-| `a_corruptionType` | Meaning | Visual |
-|---|---|---|
-| `0.0` | clean | none |
-| `1.0` | transitively corrupted — depends on something corrupt | single 45° diagonal hatch |
-| `2.0` | directly corrupted — corrupt, with no corrupt dependency | crosshatch |
-
-In the note widget, a transitively-corrupted **frequency** displays as `≈<fraction>` with the `corrupted-value` class (`src/modals/variable-controls.js:124-130`; `public/styles.css:1308-1311`).
-
-::: warning The direct-corruption float readout
-The widget's *directly*-corrupted branch (`≈1.0594631`, eight significant figures) keys on `value.isCorrupted || ev._irrational || ev._floatValue !== undefined` (`variable-controls.js:121`). `value.isCorrupted` is the dependency graph's per-property corruption bit (`src/modals/index.js:369`), so the branch fires on the JS path too; `_irrational` / `_floatValue` are only ever set by the WASM evaluator adapter (`src/wasm/evaluator-adapter.js:962-963`). The float it prints is `ev._floatValue` when present, otherwise the approximated fraction converted through `toNumber()` (`variable-controls.js:127`) — the documented lossy boundary in `src/utils/fraction-num.js`.
-:::
-
-Exact values can wear an `≈` too, without any corruption: once a fraction's numerator plus denominator pass 24 digits, the widget collapses the readout to an eight-significant-figure approximation and keeps the exact (elided) `n/d` form in the row's `title` tooltip (`src/modals/fraction-display.js`). The stored value stays exact — only the rendering approximates.
-
-## The Rust mirror
-
-`rust/src/value.rs:20-40`. The struct is **`PowerTerm`**, and `base` is a `u32` — matching the JS rule that only positive integer bases become symbolic:
-
-```rust
-pub struct PowerTerm {
-    pub base: u32,
-    pub exponent: Fraction,
-}
-
-pub struct SymbolicPower {
-    pub coefficient: Fraction,
-    pub powers: Vec<PowerTerm>,
-}
-```
-
-The Rust evaluator's stack really does hold `Value::{Rational, Irrational, Symbolic}`, so it preserves the symbolic form across operations where the JS VM flattens. But that path is **opt-in and currently unusable** — see [WASM Overview](/developer/wasm/overview). Every user today is on the JS path.
+`rust/src/value.rs` has its own `SymbolicPower` (`PowerTerm { base: u32, exponent }`) and does not yet know the exact form above, `~` or the `APPROX` opcode. Porting this value type is part of Phase D; until then the WASM evaluator stays off (see [WASM Overview](/developer/wasm/overview)).
 
 ## Scale systems
 
-The modules that exercise this live in the module library's **Scale Systems** section (`public/modules/scale-systems/`), not at the top level: `TET-12`, `TET-19`, `TET-31`, `BP-13`, `Mixed-Base`, `tesla`.
+The modules that exercise this live in the module library's **Scale Systems** section (`public/modules/scale-systems/`): `TET-12`, `TET-19`, `TET-31`, `BP-13`, `Mixed-Base`, `tesla`.
 
 ```
 [1].f * 2^(1/12)     # one 12-TET semitone above note 1
-[1].f * 2^(1/31)     # one 31-TET step above note 1
 [1].f * 3^(1/13)     # one Bohlen-Pierce step (13 equal divisions of the 3:1 tritave)
+[7].f * 2 ^ (-1/12) * 3 ^ (-1/13)    # Mixed-Base: two bases in one expression
 ```
 
-`Mixed-Base` is the interesting one: it mixes bases 2, 3 and 5 in a single module, and even within a single expression —
-
-```
-[7].f * 2 ^ (-1/12) * 3 ^ (-1/13)
-```
-
-— which is exactly the case the multi-base `powers` array and `normalize()` exist for.
+Evaluated, every pitch of the three TET modules is irrational except the octaves, which are exactly rational, and none is approximate; `scripts/test-exact-values.mjs` checks this, and that writing each pitch back relative to `base.f` gives exactly the same values.
 
 ## See also
 
-- [Binary Evaluator](/developer/core/binary-evaluator) — where `POW` builds and then discards a `SymbolicPower`
-- [Dependency Graph](/developer/core/dependency-graph) — where corruption flags are stored and made transitive
+- [Binary Evaluator](/developer/core/binary-evaluator) — the stack VM
+- [Dependency Graph](/developer/core/dependency-graph) — where the flags are stored and made transitive
+- [Expression Syntax](/reference/expressions/syntax#approximate-numbers) — `~` for users
 - [Equal Temperament](/user-guide/tuning/equal-temperament) — the user-facing guide
-- [Custom TET](/user-guide/tuning/custom-tet) — building your own system

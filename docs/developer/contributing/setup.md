@@ -126,7 +126,8 @@ The fourth, `scripts/test-amplitude.mjs`, covers the variable `amplitude` on its
    `[N].a` reads what such a note sounds at, and `a`, `amp` and `amplitude` compile to the same
    bytecode.
 3. **Exactness** — a 50-note `(121/100)` chain keeps every digit, and an irrational amplitude sets
-   corruption flag `0x08` and no other.
+   corruption flag `0x08` and no other. `scripts/test-exact-values.mjs` checks the exact values
+   (twelve `2^(1/12)` give exactly 2, `~` propagates, Evaluate to BaseNote writes exact relations).
 4. **Round trips** — a snapshot and a saved (reindexed) file evaluate to the same gains, and
    removing a note's amplitude removes the key from the file.
 5. **The clamp** — the audio boundary limits the gain to 0–4 while the module keeps the exact value.

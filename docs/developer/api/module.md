@@ -202,7 +202,7 @@ interpretation variables stay `null` when the note does not define them; readers
 BaseNote's. Index and flag values are in the
 [VAR table](/developer/api/binary-expression#variable-indices).
 
-`corruptionFlags` is the per-property irrational marker — see
+`corruptionFlags` is the per-property "tempered or approximate" marker — see
 [BinaryExpression](/developer/api/binary-expression#corruption-flags). After each evaluation the
 module pushes those flags into the dependency graph, which is what drives the hatched rendering of
 TET notes.

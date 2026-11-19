@@ -143,13 +143,15 @@ Exponents are reduced on save: `base.f * 2^(4/12)` is stored as `base.f * 2^(1/3
 
 ## Irrational frequencies (corruption)
 
-A `^` whose result is irrational marks the property **corrupted**. `2^(1/12)` corrupts;
+A `^` whose result is irrational marks the property **corrupted** (tempered, not a pure ratio), and
+the value stays exact. `2^(1/12)` corrupts;
 `4^(1/2)` does not, because it is exactly 2 — `base.f * 4^(1/2)` is simplified to `base.f * 2` on
 save.
 
-A corrupted frequency shows in the widget with an **`≈`** prefix and in italics. In the workspace the
+The widget shows an irrational frequency as its exact form and its value (`(263/4) * 2^(1/4) = 78.190368…`); only an approximate one (written with `~`) gets an **`≈`** prefix. In the workspace the
 note is **hatched**: a crosshatch means the note is corrupted at the source, a single diagonal hatch
-means it merely depends on something corrupted.
+means it merely depends on something corrupted. A tempered chain that lands on a rational shows its
+fraction: twelve 12-TET steps are exactly 2.
 
 Simplification merges like bases: `2^(1/12) * 2^(1/12) * base.f` saves as `2^(1/6) * base.f`.
 

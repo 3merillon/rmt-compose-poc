@@ -72,7 +72,7 @@ once. A group move does the same per mover.
 ## 3. Evaluation
 
 `Module.evaluateModule()` (`src/module.js:637`) delegates to
-`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1685`):
+`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1022`):
 
 ```
 evaluateDirty()
@@ -85,7 +85,7 @@ evaluateDirty()
 ```
 
 **The order is per variable, on the evaluator, not the graph.** The dirty set is a set of *notes*;
-inside it, `evaluateVariables()` (`binary-evaluator.js:1322`) walks depth-first from every variable
+inside it, `evaluateVariables()` (`binary-evaluator.js:659`) walks depth-first from every variable
 and evaluates whatever it reads first. Each variable is one node: `[1].f` may read `[2].f` while
 `[2].t` reads `[1].t` and `[1].d`, and a note's own variables may read each other in any direction.
 What a variable reads comes straight from its bytecode, `base.x` included. Notes start in ascending
@@ -93,8 +93,8 @@ id, so the order is deterministic. On a true cycle — a variable that reads its
 throw: it `console.error`s `Dependency cycle detected!` with the loop named, and evaluates the
 members in a fixed order against defaults.
 
-`evaluateVariable()` (`binary-evaluator.js:1465`) evaluates one expression into the note's record
-and ORs a corruption bit for that property when an irrational `^` result appeared.
+`evaluateVariable()` (`binary-evaluator.js:802`) evaluates one expression into the note's record
+and ORs a corruption bit for that property when its expression made an irrational `^` result or an approximation. Irrational values stay exact (`record.exact`); see [Exact Values](/developer/core/symbolic-power).
 
 A cache entry is:
 

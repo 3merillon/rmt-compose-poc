@@ -19,9 +19,10 @@ undo stack, the renderer's hatching — exists to make that idea fast and honest
 2. **Compiled, never evaluated.** Expressions compile to a compact bytecode and run on a stack VM.
    Nothing in the app calls `eval()` or `new Function()` — that is a security guarantee, enforced in
    `src/utils/safe-expression-validator.js`.
-3. **Exact where it can be.** Values are `fraction.js` rationals — BigInt-backed, so exact at
-   any magnitude and any dependency depth. Only an irrational power (`2^(1/12)`) forces an
-   approximation, and when it does the note is flagged **corrupted** and visibly hatched.
+3. **Exact.** Rational values are `fraction.js` rationals — BigInt-backed, so exact at any
+   magnitude and any dependency depth — and irrational powers stay exact too (`2^(1/12)` is kept as
+   that power, `src/value/exact.js`). A note that is tempered, or holds an approximate `~` number,
+   is flagged **corrupted** and visibly hatched.
 4. **Dependency-aware.** An inverse index answers "who depends on note 5?" in O(dependents), so an
    edit re-evaluates only what it must.
 5. **O(visible), not O(module).** The renderer culls per-note overlay work to the viewport, so a
@@ -214,7 +215,8 @@ src/
 ├── stack-click.js              # click-through a stack of overlapping notes
 ├── expression-compiler.js      # DSL compile entry point + LRU compile cache
 ├── binary-note.js              # OP / VAR / CORRUPT / BinaryExpression
-├── binary-evaluator.js         # stack VM, IncrementalEvaluator, FractionPool, SymbolicPower
+├── binary-evaluator.js         # stack VM, IncrementalEvaluator, FractionPool
+├── value/exact.js              # rational / irrational / approximate values
 ├── binary-utils.js
 ├── dependency-graph.js         # forward/inverse + per-property indexes + corruption flags
 ├── dsl/                        # THE primary expression language

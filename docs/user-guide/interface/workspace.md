@@ -31,12 +31,12 @@ Every note carries two labels:
 - `[N]` at the top-left — the note's **id**. This is the number you write in an expression: `[5].t`, `[5].f`.
 - A **fraction** in the middle — the note's frequency as a ratio of the base frequency.
 
-A note whose frequency is irrational (any TET step, for instance) cannot be written as an exact fraction. Those notes show a fractional **approximation** prefixed with `≈`, and they are **hatched**:
+A note whose frequency is irrational (any TET step, for instance) cannot be written as an exact fraction. The app keeps its value exact, but the label on the canvas can only show a fractional **approximation**, prefixed with `≈`, and the note is **hatched** (tempered or approximate, not a pure ratio):
 
 | Hatching | Meaning |
 |---|---|
-| Crosshatch (two diagonals) | **Directly** corrupted — this note's own expression is irrational. |
-| Single diagonal | **Transitively** corrupted — the note is exact in itself, but something it depends on is not. |
+| Crosshatch (two diagonals) | **Directly** corrupted — this note's own expression is tempered or approximate. |
+| Single diagonal | **Transitively** corrupted — the note is a pure ratio in itself, but something it depends on is not. |
 
 ## Navigating
 

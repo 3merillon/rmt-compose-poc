@@ -197,7 +197,7 @@ sounding, the note opens — or joins — a further zone, written as a further t
 | Starts before zero, ends after | Written from tick 0 | `notes.clippedAtStart` |
 | Shorter than one tick | Written one tick long | `notes.lengthened` |
 
-Irrational (corrupted) values are exported by their evaluated value, like playback.
+Irrational and approximate values are exported by their evaluated value (the nearest double of the exact value), like playback.
 
 ## The file, byte by byte
 

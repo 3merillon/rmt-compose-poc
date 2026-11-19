@@ -249,8 +249,10 @@ Stack:
 
 ## Corruption flags
 
-A `POW` whose result is irrational (`2^(1/12)`) marks the property being evaluated as **corrupted**.
-The bitmask lives in the same file:
+A property whose own expression makes a value that is not an exact rational marks it as
+**corrupted**: a `POW` with an irrational result (`2^(1/12)`, kept exact — see
+[Exact Values](/developer/core/symbolic-power)), a `~` number, a division by zero, or a fallback
+of the exact algebra to an approximation. The bitmask lives in the same file:
 
 | Flag | Value |
 |---|---|
@@ -265,7 +267,7 @@ The bitmask lives in the same file:
 getCorruptionFlag(VAR.FREQUENCY)  // → 4, i.e. 1 << varIndex
 ```
 
-`evaluateVariable()` ORs the flag for whichever property was being evaluated when the irrational
+`evaluateVariable()` ORs the flag for whichever property was being evaluated when such a value
 appeared, and returns it as `corruptionFlags` on the evaluated record. `Module.evaluateModule()`
 forwards those into the dependency graph, which is what lets the renderer hatch directly-corrupted
 notes and, through `isFrequencyTransitivelyCorrupted()`, their descendants.

@@ -80,7 +80,7 @@ base.f / (3/2)         # a fifth below the BaseNote
 
 ::: warning Division by zero is not an error
 `5 / 0` compiles. At evaluation the result is **1**, a warning goes to the browser console, and
-the property is **marked corrupted** — the note crosshatches on the canvas, so the substituted
+the value is **approximate** — the note crosshatches on the canvas, so the substituted
 value does announce itself. `(5/0)` behaves the same way — it is not read as a fraction literal,
 it falls back to a grouped division.
 :::
@@ -100,7 +100,8 @@ Prefix `-` binds tighter than `*` and `/` but looser than `^`, so `-2^2` is `-4`
 
 ## Power: `^`
 
-`a ^ b` raises `a` to the power `b`. Both operands must evaluate to rationals. `^` is
+`a ^ b` raises `a` to the power `b`. The exponent should be a rational; an irrational or
+approximate exponent gives an approximate value. `^` is
 right-associative and binds tighter than every other operator.
 
 ```
@@ -108,8 +109,8 @@ right-associative and binds tighter than every other operator.
 3 ^ 2                  # 9
 2 ^ (-1)               # 1/2
 4 ^ (1/2)              # 2 — a perfect square root, still exact
-2 ^ (1/12)             # the 12-TET semitone — irrational
-3 ^ (1/13)             # one Bohlen-Pierce step — irrational
+2 ^ (1/12)             # the 12-TET semitone — irrational, kept exact
+3 ^ (1/13)             # one Bohlen-Pierce step — irrational, kept exact
 ```
 
 ### What `^` produces
@@ -117,34 +118,39 @@ right-associative and binds tighter than every other operator.
 The result type depends on the exponent, and it is the single most consequential thing about
 this operator.
 
-| Case | Result | Property is |
+| Case | Result | Hatched |
 |---|---|---|
-| Integer exponent (`2^3`, `2^-1`) | Exact rational | clean |
-| Fractional exponent with an exact root (`4^(1/2)` → 2, `8^(1/3)` → 2) | Exact rational | clean |
-| Fractional exponent with no exact root (`2^(1/12)`) | Irrational, approximated to a rational | **corrupted** |
-| Integer exponent past the safety caps (`2^100000`) | Approximated to a rational | **corrupted** |
+| Integer exponent (`2^3`, `2^-1`) | Exact rational | no |
+| Fractional exponent with an exact root (`4^(1/2)` → 2, `8^(1/3)` → 2) | Exact rational | no |
+| Fractional exponent with no exact root (`2^(1/12)`) | Exact irrational: kept as the power | yes |
+| Irrational or approximate exponent, integer exponent past the safety caps (`2^100000`) | Approximate | yes |
 
-A property whose value came out irrational is flagged **corrupted**. That flag is what drives
-the visuals and the display:
+An irrational power is never turned into a fraction. `2^(1/12)` stays `2^(1/12)`, values computed
+from it are exact (`263 * 2^(7/12)`), and twelve steps of `2^(1/12)` give exactly 2. The exponent
+is reduced (`2^(3/12)` is `2^(1/4)`) and the base is factored into primes (`6^(1/2)` is
+`2^(1/2) * 3^(1/2)`).
 
-- The note is drawn with a **crosshatch** — a note that merely *depends* on a corrupted note
-  gets a single diagonal hatch instead.
-- The value in the note widget is prefixed with **`≈`** to say "this is an approximation".
+A property that holds a tempered or approximate value is hatched, and the display follows its kind:
 
-Corruption is not damage. Every equal-tempered scale in the module library is built out of
-corrupted notes. It is a marker that the value is no longer an exact ratio, which means it can
-no longer be reasoned about as one. See [SymbolicPower](/developer/core/symbolic-power).
+- The note is drawn with a **crosshatch** when its own expression holds the power — a note that
+  merely *depends* on a tempered or approximate note gets a single diagonal hatch instead.
+- The value in the note widget shows an irrational value as its exact form and its value, for
+  example `(263/4) * 2^(1/4) = 78.190368…`. Only an approximate value is prefixed with **`≈`**.
+
+The hatching means "tempered or approximate, not a pure ratio"; the app's internal word for it is
+*corrupted*. It is not damage: every equal-tempered scale in the module library is built out of
+hatched notes. See [Exact Values](/developer/core/symbolic-power).
 
 ::: tip Perfect roots stay clean
-`4^(1/2)` is 2 exactly, so the note is not corrupted — and the simplifier will rewrite the
+`4^(1/2)` is 2 exactly, so the note is not hatched — and the simplifier will rewrite the
 expression to `2`. Perfect roots are found exactly at any magnitude. Only genuinely irrational
-powers corrupt.
+powers hatch.
 :::
 
 ::: warning Very large powers are capped
 Exact exponentiation has two safety caps: an integer exponent larger than **65536**, or a
 result that would exceed roughly **a megabit per component**, is not computed exactly. The
-power is treated like an irrational instead — the property is flagged corrupted and the value
+result is approximate instead — the property is hatched and the value
 is an approximation. Below the caps, integer powers and perfect roots are exact regardless of
 how many digits the result has.
 :::
@@ -215,8 +221,8 @@ See [Binary Evaluator](/developer/core/binary-evaluator) for how the bytecode ru
 |---|---|
 | `1 +`, `base.`, `a & b` | Rejected on save; the reason appears in red under the Save button |
 | `5 / 0` | Accepted. Evaluates to **1** with a console warning, and the property is flagged corrupted (crosshatch) |
-| `2^(1/12)` | Accepted. Irrational — the property is flagged corrupted |
-| `2^100000` | Accepted. Past the exact-power caps — approximated, and the property is flagged corrupted |
+| `2^(1/12)` | Accepted. Irrational, kept exact — the property is hatched (crosshatch) |
+| `2^100000` | Accepted. Past the exact-power caps — approximate, and the property is hatched |
 | `[70000].f` | Rejected on save: `Note IDs must be integers between 0 and 65535` |
 | Anything the compiler cannot parse | Rejected: `console.error` plus a thrown compile error; the widget shows the message, and on a file load the property is left unset |
 

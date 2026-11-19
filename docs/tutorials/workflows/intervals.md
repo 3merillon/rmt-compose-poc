@@ -160,8 +160,8 @@ Add a third note and compare the same interval two ways.
 Play 1+2: smooth, beatless. Play 1+3: a slow shimmer. The gap is 13.7 cents, and on a sustained tone
 it is unmistakable.
 
-Note 3 will be **crosshatched** and its value shown with a `≈` prefix — that is the app telling you
-`2^(4/12)` is irrational and has been approximated. See
+Note 3 will be **crosshatched** — that is the app telling you
+`2^(4/12)` is irrational (tempered, not a pure ratio). Its value is kept exact: the widget shows `2^(1/3)` with its value. See
 [Understanding SymbolicPower](/tutorials/advanced/symbolic-power).
 
 ## Interval inversion

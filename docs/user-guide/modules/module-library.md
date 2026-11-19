@@ -107,9 +107,9 @@ Scale systems are **chained note to note** — each step lifts off the one below
 Only the first note touches `base`. Lift note 5 and every note above it rises with it, because they are all defined as steps above their predecessor. This is what makes the scale modules useful for experimenting with tunings rather than only hearing them.
 
 ::: info
-The scale systems are the only part of the catalog that deliberately makes notes **irrational**. `2 ^ (1/12)` cannot be written as a fraction, so notes built on it are flagged as corrupted in the workspace — shown with a `≈` and a hatched fill. That is honest labelling, not an error. See [Equal Temperament](/user-guide/tuning/equal-temperament).
+The scale systems are the only part of the catalog that deliberately makes notes **irrational**. `2 ^ (1/12)` cannot be written as a fraction, so notes built on it are flagged as corrupted in the workspace — shown with a hatched fill (tempered, not a pure ratio). Their values are still exact. That is honest labelling, not an error. See [Equal Temperament](/user-guide/tuning/equal-temperament).
 
-The **Tesla** scale is the exception: it is built entirely from whole-number ratios, so every note in it stays exact.
+The **Tesla** scale is the exception: it is built entirely from whole-number ratios, so every note in it is a pure ratio.
 :::
 
 ## Intervals — 46 modules

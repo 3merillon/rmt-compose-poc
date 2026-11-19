@@ -77,7 +77,7 @@ evaluator. See [WASM Overview](/developer/wasm/overview).
 - **[Expression Compiler](/developer/core/expression-compiler)** — text → bytecode, and the conversion of retired syntax on load
 - **[Binary Evaluator](/developer/core/binary-evaluator)** — the stack VM and incremental evaluation
 - **[Dependency Graph](/developer/core/dependency-graph)** — property-specific forward and inverse indexes
-- **[SymbolicPower](/developer/core/symbolic-power)** — irrational algebra and what actually survives evaluation
+- **[Exact Values](/developer/core/symbolic-power)** — rational, irrational and approximate values, kept exact through evaluation
 
 ### Rendering
 
@@ -132,7 +132,8 @@ evaluator. See [WASM Overview](/developer/wasm/overview).
 | `src/dsl/` | The expression language: `lexer` → `parser` → `compiler` → `decompiler`, plus `simplify`. |
 | `src/expression-compiler.js` | The compile entry point: the 4000-entry LRU cache in front of the DSL compiler, and the decompiler that gives an expression's text back. |
 | `src/binary-note.js` | `OP`, `VAR`, `CORRUPT`, `BinaryExpression`. |
-| `src/binary-evaluator.js` | `BinaryEvaluator` (stack VM), `IncrementalEvaluator`, `FractionPool`, `SymbolicPower`. |
+| `src/binary-evaluator.js` | `BinaryEvaluator` (stack VM), `IncrementalEvaluator`, `FractionPool`. |
+| `src/value/exact.js` | The three kinds of value: rational, irrational (exact powers), approximate (`~`). |
 | `src/dependency-graph.js` | Forward and inverse dependency indexes, per-property indexes, corruption flags. |
 | `src/renderer/webgl2/renderer.js` | `RendererAdapter` — 22 shader programs, all instance buffers, `sync()`, CPU picking. |
 | `src/renderer/webgl2/workspace.js` | `Workspace` — pointer interaction, drag/marquee/multi-select arbitration. |

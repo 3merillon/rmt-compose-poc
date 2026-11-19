@@ -20,17 +20,11 @@ To divide interval `I` into `N` equal steps, one step is `I ^ (1/N)`:
 
 `k` steps is `I ^ (k/N)`.
 
-## Use integer bases
+## Any positive rational base
 
-::: danger Non-integer bases are not kept symbolic
-`MusicValue.pow` only builds a symbolic power for **positive integer bases**. Give it anything else — `(1618/1000)` for a golden-ratio scale, say — and it falls straight through to `Math.pow()` on floats.
+The interval of equivalence can be any positive rational, not only an integer. Bases are factored into primes, so the power stays exact: `(1618/1000)^(1/7)` for a golden-ratio scale is kept as the exact product `(1/10) * 2^(5/7) * 5^(4/7) * 809^(1/7)` (1618/1000 is 809/500), and every step is exact. Steps chain without error, and the scale closes exactly at the top.
 
-Every step of such a scale is then raw floating-point, every downstream multiplication compounds the error, and the scale will not close exactly at the top. Simplification cannot merge the terms either, because there is no symbolic term to merge.
-
-`2^(1/17)`, `3^(1/8)` and `5^(1/5)` are fine. `(1618/1000)^(1/7)` is not — it will play, but none of the exactness guarantees apply to it.
-:::
-
-If you want a non-integer interval of equivalence, the honest options are to accept the float behaviour knowingly, or to pick an integer-based approximation of the interval you actually want.
+`2^(1/17)`, `3^(1/8)`, `5^(1/5)` and `(1618/1000)^(1/7)` are all exact. A plain decimal such as `1.618` is exactly 1618/1000. Only a base written with `~` (for example `~1.618`) is approximate, and so is anything computed from it; see [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
 
 ## Building the scale
 
@@ -162,7 +156,7 @@ Expressions may reference `base` or any note **inside the same module** — a mo
 
 ## What to expect once it loads
 
-**Every note will show ≈ and cross-hatching.** `2^(k/17)` is irrational, so the frequency is flagged. The fraction drawn beside the ≈ is the note's approximate ratio to the BaseNote (maximum denominator 8192), not its stored value.
+**Every note will be cross-hatched, with a ≈ label on the canvas.** `2^(k/17)` is irrational, so the frequency is flagged as tempered. The fraction drawn beside the ≈ is the note's approximate ratio to the BaseNote (maximum denominator 8192), not its stored value.
 
 **The arrows will not step by your scale.** ▲/▼ apply a rational interval configured in **Settings → Arrows** — positive integers, ratio within `[1/16, 16]`. A TET step is not expressible that way. Use the arrows to move octaves (or fifths, or commas); edit the exponent to move by degrees.
 

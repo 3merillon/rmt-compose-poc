@@ -143,9 +143,9 @@ A gain of *d* decibels is `10^(d/20)`:
 base.a * 10^(-6/20)     # 6 dB below the piece's level, ≈ 0.501
 ```
 
-Unless the power happens to be rational this is an irrational number, so the value is shown with
-`≈` and the note is drawn crosshatched like any note carrying an irrational value. See
-[Corruption](/reference/glossary#corruption). If you want an exact fraction instead, `(1/2)` is
+Unless the power happens to be rational this is an irrational number, kept exact: the widget shows
+its exact form and its value, and the note is drawn crosshatched like any note carrying an
+irrational value. See [Corruption](/reference/glossary#corruption). If you want an exact fraction instead, `(1/2)` is
 −6.02 dB.
 
 ## Dependencies
@@ -158,8 +158,8 @@ Referencing another note's amplitude (`[3].a`) creates a real dependency on note
   so they keep their level.
 - **Delete → Delete Dependencies** on note 3 removes the notes that read its amplitude too.
 - **Evaluate to BaseNote** rewrites a note's amplitude as a ratio of the BaseNote's:
-  `base.a * (121/100)`. An irrational amplitude is left as written, so its power is not replaced
-  by an approximation — which also means it keeps any dependency its expression names.
+  `base.a * (121/100)`. An irrational amplitude is written as its exact form (`base.a * 2^(1/4)`), never
+  as a float-derived fraction; an approximate one is written with `~`.
 - Dropping a module onto a note re-roots `base.a` onto that note (`[N].a`), like every other
   `base.` reference. Dropped onto a measure bar it stays `base.a` — a measure bar has no level.
 

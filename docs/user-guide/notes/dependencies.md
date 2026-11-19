@@ -123,7 +123,7 @@ base.f * (45/16)
 
 because 3/2 × 5/4 × 3/2 = 45/16. Note 3 now transposes with the BaseNote but no longer follows notes 1 and 2.
 
-The conversion traces the chain **algebraically**, so a TET note stays a TET note — `base.f * 2^(7/12)` does not degrade into a decimal approximation.
+The conversion traces the chain **algebraically**, so a TET note stays a TET note — the exact relation `base.f * 2^(7/12)` is written, never a fraction derived from a float. An approximate value is written with `~`, for example `base.f * ~(14983/8000)`.
 
 **`Evaluate Module`**, on the BaseNote, does this to every note at once. Useful for flattening a module before you share it.
 

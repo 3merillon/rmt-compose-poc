@@ -110,7 +110,7 @@ renderer side is `_envelopeSharesFor` and the envelope block in `rectBorderFS` i
 
 ## Dependencies
 
-Referencing another note's `attack` or `release` creates a real dependency, as `[3].f` does. Evaluated values can be irrational: a power such as `2^(1/12)` in either flags the value corrupted, with the `≈` display and crosshatch described under [Corruption](/reference/glossary#corruption). The corruption flags are `0x10` for attack and `0x20` for release.
+Referencing another note's `attack` or `release` creates a real dependency, as `[3].f` does. Evaluated values can be irrational: a power such as `2^(1/12)` in either is kept exact and flags the value corrupted (tempered, not a pure ratio), with the crosshatch and display described under [Corruption](/reference/glossary#corruption). The corruption flags are `0x10` for attack and `0x20` for release.
 
 ## See also
 

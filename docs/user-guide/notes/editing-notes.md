@@ -151,7 +151,7 @@ The widget's **EVALUATE** section holds three buttons. Which ones appear depends
 | Button | Available on | What it does |
 |---|---|---|
 | **`Liberate Dependencies`** | notes and silences | Rewrites every note that references this one so it references what *this* note references instead. The note itself survives, now with nothing depending on it. |
-| **`Evaluate to BaseNote`** | every note except the BaseNote — including measure bars | Rewrites this note's start time, duration and frequency (a bar: start time and duration) so they reference only the BaseNote. TET power terms are preserved rather than flattened into an ugly fraction. |
+| **`Evaluate to BaseNote`** | every note except the BaseNote — including measure bars | Rewrites this note's start time, duration and frequency (a bar: start time and duration) so they reference only the BaseNote. The exact relation is written (`base.f * 2^(7/12)`, `base.f * 2` for an octave), never a fraction derived from a float; an approximate value is written with `~`. |
 | **`Evaluate Module`** | the BaseNote only | Does the same to every note in the module at once. |
 
 `Liberate Dependencies` is not offered on measure bars. `Evaluate to BaseNote` is not offered on the BaseNote — it is already there.

@@ -62,8 +62,8 @@ The exhaustive tables live on the pages that own them. These are the ones you lo
 | 31-TET | `2^(1/31)` | ≈ 1.022611 |
 | Bohlen-Pierce (13 divisions of the tritave) | `3^(1/13)` | ≈ 1.088182 |
 
-`n` steps is `2^(n/12)`, `2^(n/19)`, and so on. All of these are irrational, so a note using one
-is flagged corrupted and drawn crosshatched. See [Operators](/reference/expressions/operators).
+`n` steps is `2^(n/12)`, `2^(n/19)`, and so on. All of these are irrational and kept exact, so a note using one
+is drawn crosshatched (tempered, not a pure ratio); twelve 12-TET steps are exactly 2. See [Operators](/reference/expressions/operators).
 
 ### Note lengths
 
@@ -132,7 +132,7 @@ Indices 3 and up are the interpretation variables (`FIRST_INTERPRETATION_VAR` in
 
 ### Corruption flags
 
-A bitmask, one bit per property, recording which of a note's values came out irrational.
+A bitmask, one bit per property, recording which of a note's values are tempered or approximate (an irrational power, a `~` number, a fallback).
 
 | Flag | Property |
 |---|---|
@@ -176,7 +176,7 @@ plain `LOAD_BASE` of variable index 1.
 | Decimal → fraction | Exact as written — the digits over the matching power of ten, reduced (`0.333333` is `333333/1000000`) |
 | Constant fits `LOAD_CONST` when both parts are within | −2 147 483 648 to 2 147 483 647 (bigger constants use `LOAD_CONST_BIG`, exact at any size) |
 | Note id in a reference | 0 – 65 535, enforced when the expression compiles |
-| Exact `^` caps | Integer exponent ≤ 65 536 and result ≤ ~1 Mbit per component; past either, the value is approximated and flagged corrupted |
+| Exact `^` caps | Integer exponent ≤ 65 536 and result ≤ ~1 Mbit per component; past either, the value is approximate and flagged corrupted |
 | Maximum expression length accepted on import | 10 000 characters |
 | Compiled-expression cache | 4 000 entries, least-recently-used eviction |
 

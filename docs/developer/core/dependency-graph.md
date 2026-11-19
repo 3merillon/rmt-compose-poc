@@ -74,7 +74,7 @@ Each is `Map<dependencyId, Set<dependentId>>`.
 
 | Field | Shape | Purpose |
 |---|---|---|
-| `corruptionFlags` | `Map<id, u8>` | which properties of a note hold an irrational value |
+| `corruptionFlags` | `Map<id, u8>` | which properties of a note are tempered or approximate by their own expression |
 | `_corruptionEpoch` | number | lets the renderer skip a buffer upload when nothing changed |
 
 ## The BaseNote is not an edge
@@ -117,7 +117,7 @@ Dependencies derive purely from a note's compiled expressions. If the note's id,
 This matters because `markNoteDirty()` calls this for **every** marked note — on an interval-arrow change that is every dependent in the closure. The skip avoids rewriting up to 22 maps per untouched note.
 :::
 
-The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:302`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`src/binary-note.js:365`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
+The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:233`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`src/binary-note.js:296`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
 
 `_updateDependencies()` (`:439-493`) diffs old against new, patches the inverse index, and **bumps `_corruptionEpoch` if the dependency set actually changed** — because changing a note's dependencies can change whether *other* notes render as transitively corrupted, even if no corruption flag moved.
 
@@ -219,7 +219,7 @@ After a drag, `player.js` re-anchors the moved note (and dependents that would n
 
 ## Corruption tracking
 
-The graph owns this and nothing else does. A property is *corrupted* when a `^` produced an irrational — `2^(1/12)`. See [SymbolicPower](/developer/core/symbolic-power).
+The graph owns this and nothing else does. A property is *corrupted* when its own expression made a value that is not an exact rational — an irrational `^` such as `2^(1/12)` (kept exact), a `~` number, a division by zero. See [Exact Values](/developer/core/symbolic-power).
 
 | Method | Effect | Line |
 |---|---|---|
@@ -256,5 +256,5 @@ There is no single multiplier. The graph keeps:
 
 - [Binary Evaluator](/developer/core/binary-evaluator) — `getEvaluationDependents()` decides what is re-evaluated; the order is per variable
 - [Expression Compiler](/developer/core/expression-compiler) — `getPropertyDependencies()` is where the edges come from
-- [SymbolicPower](/developer/core/symbolic-power) — what sets a corruption flag
+- [Exact Values](/developer/core/symbolic-power) — what sets a corruption flag
 - [Dependencies](/user-guide/notes/dependencies) — the user-facing view

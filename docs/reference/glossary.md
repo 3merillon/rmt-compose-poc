@@ -13,7 +13,7 @@ Terms used across the app and these docs. Where a term names something you can c
 A note's loudness, written as a relative gain: `1` is the default level, `2` twice the amplitude, `(1/2)` half. It is an expression like any other variable (`a`), so it can be written against another note — `(121/100) * [3].a`. An [interpretation variable](#interpretation-variable): inherited from the BaseNote unless a note defines its own. Playback clamps it to 0–4. See [amplitude](/reference/properties/amplitude).
 
 ### Approximation (≈)
-The prefix shown in the [note widget](/user-guide/interface/variable-widget) before a value the app cannot represent exactly — an irrational one. Both directly and transitively [corrupted](#corruption) values display with `≈`. A **directly** corrupted value is shown as a decimal, to 8 significant figures (`≈1.0594631`); a **transitively** corrupted one is shown as a fraction. Either way the text is rendered in a warm amber, in italics.
+The prefix shown in the [note widget](/user-guide/interface/variable-widget) before an **approximate** value: a number written with `~` (like `~261.63`), or the fallback result of an operation that cannot be kept exact. The value is shown as a decimal, to 8 significant figures (`≈493.12500`), in a warm amber, in italics. An irrational value is exact and does not carry `≈`: the widget shows its exact form and its value (`(263/4) * 2^(1/4) = 78.190368…`). See [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
 
 ### Arrow interval
 The ratio the ▲ / ▼ [note arrows](#note-arrows) apply. Configurable in **Settings → Arrows**; the default is `2/1`, the octave. The numerator and denominator must be positive integers, the ratio must lie in `[1/16, 16]`, and it may not equal 1. See [Transposing with Arrows](/user-guide/notes/transposing).
@@ -48,16 +48,16 @@ A tuning system that divides the [tritave](#tritave) (3:1) into 13 equal steps i
 ## C
 
 ### Corruption
-The app's internal name for "this value is irrational". A property is flagged corrupted when a `^` produced an irrational result — `2^(1/12)` corrupts, `4^(1/2)` (which is exactly 2) does not. Corruption is tracked per property, per note, and it propagates: a note whose frequency depends on a corrupted note is *transitively* corrupted.
+The app's internal name for "this value is tempered or approximate, not a pure ratio". A property is flagged corrupted when its own expression holds an irrational power (`2^(1/12)`), a `~` number or a division by zero; `4^(1/2)` (which is exactly 2) does not. The value itself stays exact when it is irrational. Corruption is tracked per property, per note, and it propagates: a note whose frequency depends on a corrupted note is *transitively* corrupted.
 
 On the canvas, corruption shows as hatching:
 
 | Hatching | Meaning |
 |---|---|
-| **Crosshatch** (two diagonals) | Directly corrupted — this note's own expression contains an irrational power |
-| **Single diagonal hatch** | Transitively corrupted — it inherits an irrational value from a note it depends on |
+| **Crosshatch** (two diagonals) | Directly corrupted — this note's own expression is tempered or approximate |
+| **Single diagonal hatch** | Transitively corrupted — it depends on a tempered or approximate note |
 
-Both kinds display their value with an `≈` prefix in the note widget.
+In the note widget the value shows by its kind: an irrational value as its exact form and its value, an approximate value with an `≈` prefix, a rational value as its fraction.
 
 ### Copy to Modules
 The [group widget](#group-widget) action that turns the current multi-selection into a new, self-contained module in the library's **Custom** section, named `Selection (N notes)`. The copy is **rooted at the selection's earliest note** — that note starts exactly on the new module's BaseNote (`base.t`), and the rest keep their relative times as `base.t + base.d * k`. References that point *inside* the selection are kept and renumbered, so the dependency tree survives; references that point outside it are frozen to the value they had. Colors and per-note instruments come across unchanged.
@@ -93,7 +93,7 @@ The expression language: `base.f * (3/2)`, `[1].t + [1].d`, `base.d * (1/2)`, `2
 ## E
 
 ### Equal temperament (ET / TET)
-A tuning that divides an interval into *n* equal steps. `n`-TET usually means *n* equal divisions of the **octave**: one step of 12-TET is `2^(1/12)`. Steps of an equal temperament are irrational, so they [corrupt](#corruption).
+A tuning that divides an interval into *n* equal steps. `n`-TET usually means *n* equal divisions of the **octave**: one step of 12-TET is `2^(1/12)`. Steps of an equal temperament are irrational, kept exact as powers, and hatched on the canvas (see [corruption](#corruption)).
 
 ### Evaluated value
 The number an expression computes to, shown on the `Evaluated:` line of the note widget. Contrast the **raw expression**, the text you typed.
@@ -125,7 +125,7 @@ The half of the [dependency graph](#dependency-graph) that answers "what depends
 ## J
 
 ### Just intonation
-Tuning by exact whole-number ratios drawn from the harmonic series: `3/2`, `5/4`, `7/4`. Ratios are rational, so they never corrupt.
+Tuning by exact whole-number ratios drawn from the harmonic series: `3/2`, `5/4`, `7/4`. Ratios are rational, so they are never hatched.
 
 ## L
 
@@ -221,7 +221,7 @@ The two workspace-density factors — horizontal (time) and vertical (pitch). Th
 The module-library section holding the whole-scale modules (the TET systems and friends) — six of them.
 
 ### Semitone
-One step of 12-TET: `2^(1/12)` ≈ 1.0595. Irrational, so it [corrupts](#corruption).
+One step of 12-TET: `2^(1/12)` ≈ 1.0595. Irrational and exact; the note is hatched (see [corruption](#corruption)).
 
 ### Settings panel
 The floating, draggable, non-modal panel opened from the **gear in the top bar**. Five tabs: **Appearance**, **Arrows**, **Audio**, **Library**, **Scale**. Every change applies immediately — there is no OK/Apply, and no undo (module Undo/Redo does not cover settings). Settings persist under the `rmt:settings:v1` key. See the [Settings Reference](/reference/settings-reference).
@@ -238,7 +238,7 @@ A note with a `startTime` and a `duration` but **no frequency** and no `measure`
 The virtual machine that runs the bytecode, pushing and popping exact fractions.
 
 ### SymbolicPower
-The algebraic form `coefficient × Π baseᵢ^expᵢ` used when the simplifier reshapes an expression — it is what lets `2^(1/12) * 2^(1/12)` merge into `2^(1/6)` while refusing to let a coefficient migrate into a power term. That refusal is what keeps a TET note's crosshatch from silently disappearing.
+The developer name for the exact irrational value `coefficient × Π baseᵢ^expᵢ`, kept canonical (exponents reduced, bases factored into primes) so `2^(1/12) * 2^(1/12)` is `2^(1/6)` and twelve steps of `2^(1/12)` are exactly 2. The simplifier uses the same form on expression text, and it refuses to let a coefficient migrate into a power term. See [Exact Values](/developer/core/symbolic-power).
 
 ## T
 

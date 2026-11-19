@@ -214,7 +214,7 @@ export default defineConfig({
             { text: 'Expression Compiler', link: '/developer/core/expression-compiler' },
             { text: 'Binary Evaluator', link: '/developer/core/binary-evaluator' },
             { text: 'Dependency Graph', link: '/developer/core/dependency-graph' },
-            { text: 'SymbolicPower', link: '/developer/core/symbolic-power' }
+            { text: 'Exact Values', link: '/developer/core/symbolic-power' }
           ]
         },
         {

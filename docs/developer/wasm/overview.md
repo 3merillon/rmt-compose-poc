@@ -115,8 +115,9 @@ pub struct SymbolicPower {
 ```
 
 This shape is what lets `2^(1/12) * 2^(1/12)` collapse to `2^(1/6)`, and what lets an arrow
-multiplier fold into the `coefficient` instead of stacking another term. It mirrors the JS
-[SymbolicPower](/developer/core/symbolic-power).
+multiplier fold into the `coefficient` instead of stacking another term. The JS evaluator has
+since moved to a more general exact form (sums of terms, prime bases, approximate values,
+[Exact Values](/developer/core/symbolic-power)); porting it is part of Phase D.
 
 ### EvaluatedNote
 
@@ -312,4 +313,4 @@ swap means porting that as well.
 - [Building WASM](/developer/wasm/building) — rebuilding the crate and syncing the artifacts
 - [Build & Deploy](/developer/contributing/build-and-deploy) — why the committed artifacts are what ships
 - [Binary Evaluator](/developer/core/binary-evaluator) — the JS evaluator that actually runs
-- [SymbolicPower](/developer/core/symbolic-power) — the JS side of the symbolic value model
+- [Exact Values](/developer/core/symbolic-power) — the JS side of the value model

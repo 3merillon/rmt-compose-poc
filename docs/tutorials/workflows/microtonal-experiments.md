@@ -79,8 +79,8 @@ or build them as four separate pairs).
 - **19-TET** — 7.4¢ *flat*. Beats the other way, slower than 12-TET.
 - **31-TET** — 0.8¢ sharp. Very nearly as still as pure.
 
-Notes 3, 4 and 5 will be **crosshatched** and show `≈` — their powers are irrational and have been
-approximated. Note 2 is clean. That is correct, and it is worth knowing why:
+Notes 3, 4 and 5 will be **crosshatched** — their powers are irrational, kept exact but tempered
+rather than pure. Note 2 is clean. That is correct, and it is worth knowing why:
 [Understanding SymbolicPower](/tutorials/advanced/symbolic-power).
 
 ::: tip Skip the typing

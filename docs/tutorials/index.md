@@ -30,7 +30,7 @@ Start here if you have never used RMT Compose.
 [Section overview](/tutorials/advanced/)
 
 7. [Microtonal Composition](/tutorials/advanced/microtonal) — TET systems and Bohlen-Pierce
-8. [Understanding SymbolicPower](/tutorials/advanced/symbolic-power) — the algebra behind TET
+8. [Understanding SymbolicPower](/tutorials/advanced/symbolic-power) — exact irrational values behind TET
 9. [Complex Dependencies](/tutorials/advanced/complex-dependencies) — branching and diamond structures
 
 ### Workflows

@@ -146,7 +146,7 @@ base.f * 2^(7/12)        ▲ octave →   2 * base.f * 2^(7/12)
 ```
 
 The rewrite is checked before it is kept: the new expression must evaluate to the old value times
-the factor, **and** must not change the note's corruption flag. If either check fails, the app
+the factor, **and** must not change the note's corruption flag (its hatching). A `~` number is kept as written. If either check fails, the app
 falls back to an explicit multiplier wrapped around the whole expression, so the pitch is always
 right even when the expression cannot be tidied.
 

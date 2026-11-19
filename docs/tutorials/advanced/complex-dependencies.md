@@ -259,8 +259,8 @@ default values, rather than dropping the notes.
 **Trace the chain.** Select the last note. Follow the **thick** lines — orange for pitch, teal for
 timing, purple for length — back to their source. Thick means "this is what I depend on."
 
-**Check the hatching.** A crosshatched note produced an irrational value itself; a single-diagonal
-note inherited one. See [Understanding SymbolicPower](/tutorials/advanced/symbolic-power).
+**Check the hatching.** A crosshatched note holds a tempered or approximate value itself; a single-diagonal
+note depends on one. See [Understanding SymbolicPower](/tutorials/advanced/symbolic-power).
 
 **Common mistakes:**
 
@@ -269,7 +269,7 @@ note inherited one. See [Understanding SymbolicPower](/tutorials/advanced/symbol
 | Save does nothing | Invalid expression — check the console |
 | Note jumps to 0 / 440 Hz | The referenced note id does not exist; the evaluator substitutes a default rather than failing, and names the reference in the console (`Unresolved reference!`) |
 | Wrong note moved | You referenced `[2]` when you meant `[3]` — ids are not stable across a **Save Module** (it reindexes) |
-| Value shows `≈` unexpectedly | Something upstream is irrational |
+| Value shows `≈` unexpectedly | Something upstream is approximate: a `~` number, or a division by a sum of irrational terms or by zero |
 
 ::: warning Note ids change when you save
 **Save Module** reindexes the whole module in one run from 1 — measures first, then notes, each

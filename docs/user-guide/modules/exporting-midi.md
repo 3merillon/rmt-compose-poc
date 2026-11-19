@@ -129,7 +129,7 @@ A plain export answers with a cyan toast. When the file could not carry somethin
 
 If nothing could be written, no file is downloaded and a red toast says so.
 
-**Irrational values** — the ones shown with `≈` — are exported by their evaluated value, exactly as they are played.
+**Irrational and approximate values** are exported by the nearest double of their exact value, exactly as they are played.
 
 ## What is not in the file
 

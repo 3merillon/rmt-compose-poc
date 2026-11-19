@@ -99,21 +99,29 @@ The widget decompiles the compiled expression and shows you DSL.
 
 ### The `≈` symbol
 
-Fractions are exact; powers usually are not. `base.f * 2^(7/12)` — a 12-TET fifth — has an irrational result the evaluator can only approximate. When that happens the **`Evaluated:`** readout is prefixed with **`≈`** and the value prints as a decimal to 8 significant figures, in italic brown.
+Fractions are exact, and so are powers: `base.f * 2^(7/12)` — a 12-TET fifth — is an exact irrational value. The **`Evaluated:`** readout shows the kind of value you have:
 
-Any row whose **own expression** is irrational carries the `≈` — a startTime or duration built on a power shows it just like a frequency does. The *transitive* case — a note that merely inherits an irrational frequency from a note further up its chain — is tracked for **frequency only**, so the whole of a TET scale built on `[1].f * 2^(1/12)` reads `≈` on its `FREQUENCY` rows.
+| Kind | Readout |
+|---|---|
+| Rational | The fraction. Also when a tempered chain lands on a rational: the 12-TET octave note shows `263/2` |
+| Irrational | The exact form and its value, in italic brown: `(263/4) * 2^(1/4) = 78.190368…` (no `≈`) |
+| Approximate | `≈` and a decimal to 8 significant figures, in italic brown: `≈493.12500` |
 
-A value can also earn an `≈` with nothing irrational in sight. Exact fractions can grow enormous in deep chains, and once one passes 24 digits (numerator and denominator together) the readout collapses to an eight-figure approximation — hover the `Evaluated:` line and the tooltip shows the exact, elided `n/d` form. The value underneath is still exact; only the readout is compressed, and it is not shown in brown.
+The `≈` sign means only "approximate": a number you wrote with `~` (see [Approximate numbers](/reference/expressions/syntax#approximate-numbers)), or the fallback result of an operation that cannot be kept exact, such as a division by zero. Anything computed from an approximate value is approximate.
+
+Any row whose **own expression** holds a power, a `~` number or a division by zero is marked — a startTime or duration built on a power shows it just like a frequency does. The *transitive* case — a note that merely inherits a tempered frequency from a note further up its chain — is tracked for **frequency only**.
+
+A very long exact fraction is also shortened. Exact fractions can grow enormous in deep chains, and once one passes 24 digits (numerator and denominator together) the readout collapses to an eight-figure decimal — hover the `Evaluated:` line and the tooltip shows the exact, elided `n/d` form. The value underneath is still exact; only the readout is compressed, and it is not shown in brown.
 
 On the canvas the same notes are hatched, and the hatching tells you *which* kind you are looking at:
 
 | Hatching | Meaning |
 |---|---|
-| **Crosshatch** (both diagonals) | Directly corrupted — this note's own expression is irrational |
-| **Single diagonal hatch** | Transitively corrupted — it depends on a corrupted note |
-| None | Exact |
+| **Crosshatch** (both diagonals) | Directly corrupted — this note's own expression is tempered or approximate |
+| **Single diagonal hatch** | Transitively corrupted — it depends on a tempered or approximate note |
+| None | A pure ratio |
 
-Nothing is lost: the note plays at the approximated value and the expression you wrote is preserved verbatim.
+Nothing is lost: the note plays at the nearest double of the exact value and the expression you wrote is preserved verbatim.
 
 ## Transpose arrows (▲ / ▼)
 

@@ -160,7 +160,7 @@ Select a note, click **Evaluate to BaseNote**, confirm.
 
 This rewrites the selected note's own startTime, duration and frequency so they reference nothing but the BaseNote. The note stops depending on anything else, and it does not move.
 
-It is smarter than freezing numbers: it traces the frequency chain algebraically, so a TET note written `base.f * 2^(7/12)` stays a power expression rather than collapsing into an ugly approximate fraction.
+It is smarter than freezing numbers: it traces the frequency chain algebraically, so a TET note written `base.f * 2^(7/12)` stays a power expression rather than collapsing into a fraction. An approximate value is written with `~`.
 
 From the **BaseNote**, the same section offers **Evaluate Module**, which does this to every note at once. It flattens the entire dependency graph onto the BaseNote — useful before exporting, destructive to the structure you built.
 

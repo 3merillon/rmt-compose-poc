@@ -157,17 +157,17 @@ A rewrite is rejected and your original kept if it would change the value, so si
 
 ## Irrational values and the ≈ badge
 
-Equal temperament needs irrational numbers: `2^(1/12)` is not a fraction. The app cannot hold those exactly, so it flags them.
+Equal temperament needs irrational numbers: `2^(1/12)` is not a fraction. The app keeps them exact, as powers, and flags them as tempered.
 
-A note whose frequency is irrational — or which depends on one that is — is called **corrupted**, and shows up two ways:
+A note whose frequency is irrational — or which depends on one that is — is called **corrupted** (tempered or approximate, not a pure ratio), and shows up two ways:
 
-- In the note widget, the **`Evaluated:`** value gets an **`≈`** prefix and turns italic amber.
-- In the workspace, the note is drawn with diagonal **hatching**. A **crosshatch** (both diagonals) means the note is *directly* irrational. A **single diagonal** means it *inherited* the problem from a note it depends on.
+- In the note widget, the **`Evaluated:`** value shows the exact form and its value (`(263/4) * 2^(1/4) = 78.190368…`) in italic amber; a value you wrote with `~` shows `≈` and a decimal; a rational value, such as the 12-TET octave, shows its fraction.
+- In the workspace, the note is drawn with diagonal **hatching**. A **crosshatch** (both diagonals) means the note is *directly* tempered or approximate. A **single diagonal** means it *inherited* the problem from a note it depends on.
 
-This is information, not an error. TET music is supposed to look like this. It is telling you where exactness stops. [Equal Temperament](/user-guide/tuning/equal-temperament) goes into what stays exact and what does not.
+This is information, not an error. TET music is supposed to look like this. It is telling you where the pure ratios stop; the values themselves stay exact. [Equal Temperament](/user-guide/tuning/equal-temperament) goes into what stays exact and what does not.
 
 ::: info Every row can carry the ≈ badge
-An irrational start time or duration is marked just like an irrational frequency — the row shows `≈` and a decimal to 8 significant figures. Only the *transitive* case (inheriting an irrational value from up the chain) is tracked for frequency alone.
+An irrational start time or duration is marked just like an irrational frequency — the row shows its exact form and value. Only the *transitive* case (inheriting an irrational value from up the chain) is tracked for frequency alone.
 :::
 
 ## Things that go wrong

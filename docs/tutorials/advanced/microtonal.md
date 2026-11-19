@@ -213,27 +213,27 @@ same structure the shipped **Harmonic 7th** chord module uses (4:5:6:7).
 
 Type `base.f * 2^(1/12)` and two things happen.
 
-**In the note widget**, the `Evaluated:` line shows a value with a `≈` prefix, in italic amber.
+**In the note widget**, the `Evaluated:` line shows the exact form and its value, in italic amber: `(263/4) * 2^(1/4) = 78.190368…`.
 
 **In the workspace**, the note rectangle is hatched:
 
 | Hatch | Meaning |
 |---|---|
-| **Crosshatch** (two diagonals) | The note's *own* expression produced an irrational value |
-| **Single diagonal** | The note is clean, but something it depends on is not |
+| **Crosshatch** (two diagonals) | The note's *own* expression holds an irrational power (or a `~` number) |
+| **Single diagonal** | The note is pure itself, but something it depends on is tempered or approximate |
 
-Both cases display `≈`. The hatching is what tells them apart.
+Both cases show the exact value. The hatching is what tells them apart.
 
-::: warning `≈` means approximated, not merely rounded
-When a `^` produces a genuinely irrational result, the evaluator converts it straight back to a
-rational approximation and marks the property corrupted. The stored value really is an
-approximation — subsequent arithmetic works on the approximation, not on a symbolic form.
+::: tip Irrational values are exact
+When a `^` produces a genuinely irrational result, the evaluator keeps it as the power it is, so
+`2^(1/12)` twelve times over is exactly 2. `≈` is used only for an *approximate* value: a number
+you wrote with `~`, or the fallback of an operation that cannot be kept exact.
 
-A power that resolves to a rational is *not* corrupted: `2^(12/12)` is exactly 2, and `4^(1/2)` is
+A power that resolves to a rational is *not* hatched: `2^(12/12)` is exactly 2, and `4^(1/2)` is
 exactly 2. Only genuinely irrational powers hatch.
 
-[Understanding SymbolicPower](/tutorials/advanced/symbolic-power) works through exactly where the
-line falls and how much error accumulates when you chain irrational steps.
+[Understanding SymbolicPower](/tutorials/advanced/symbolic-power) works through the three kinds of
+value and what the hatching means.
 :::
 
 ## Listening well

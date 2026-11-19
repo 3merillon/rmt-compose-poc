@@ -50,7 +50,7 @@ A plain `Map` keyed on the raw expression text, used as an **LRU**: when it is f
 | `src/dsl/constants.js` | `TokenType`, `PropertyMap`, `RetiredTimeFunctions`, `RetiredTimeProperties`, `Precedence` | the tables; the two `Retired*` lists exist only to explain the removed names |
 | `src/dsl/errors.js` | `DSLLexerError`, `DSLParseError`, `DSLCompileError`, `ErrorMessages` | typed errors with a `userMessage` |
 | `src/dsl/index.js` | `compileDSL`, `decompileToDSL`, `validateDSL` | the public API |
-| `src/dsl/simplify.js` | `simplifyDSL`, `scaleDSL` | DSL-native canonicaliser (see [SymbolicPower](/developer/core/symbolic-power)) |
+| `src/dsl/simplify.js` | `simplifyDSL`, `scaleDSL` | DSL-native canonicaliser (see [Exact Values](/developer/core/symbolic-power#the-simplifier)) |
 
 `compileDSL('')` returns bytecode for the constant `0/1` rather than throwing (`src/dsl/index.js:26-34`).
 
@@ -84,7 +84,7 @@ Any other function name gets `Unknown function 'name'. Expressions have no funct
 
 ## Bytecode format
 
-`src/binary-note.js:9-73`:
+`src/binary-note.js:9-32`:
 
 ```javascript
 export const OP = {
@@ -131,7 +131,7 @@ Operands are pushed **before** the opcode — it is a stack machine, nothing nes
 
 ### Variable indices
 
-The export is `VAR`, with a `VAR_NAMES` reverse map (`binary-note.js:81-101`):
+The export is `VAR`, with a `VAR_NAMES` reverse map (`binary-note.js:40-60`):
 
 ```javascript
 export const VAR = {
@@ -155,12 +155,12 @@ Indices 0 to 2 are the language: they relate a note to other notes. Indices from
 Number literals are exact at any size: the digits are parsed straight into a BigInt fraction by `decimalStringToBigFraction()` (`src/utils/fraction-num.js:36`), never through `parseFloat`. A decimal literal is **exact as written** — `3.14159` is `314159/100000` and `0.333333` is `333333/1000000`, not `1/3`.
 
 ::: info `LOAD_CONST_BIG` carries BigInts, and they survive
-The evaluator decodes the variable-length BigInts straight into a pooled BigInt-backed fraction (`binary-evaluator.js:1081-1093`), so a big constant keeps every digit through parse → emit → decode → evaluate → decompile — `scripts/test-exactness.mjs` (part of `npm test`) proves it with a ~98-digit literal. The old path routed the decode through a double-backed `Fraction` constructor, which silently rounded anything past 2^53: the encoding preserved the *bytecode* but not the precision.
+The evaluator decodes the variable-length BigInts straight into a pooled BigInt-backed fraction (`binary-evaluator.js:418-430`), so a big constant keeps every digit through parse → emit → decode → evaluate → decompile — `scripts/test-exactness.mjs` (part of `npm test`) proves it with a ~98-digit literal. The old path routed the decode through a double-backed `Fraction` constructor, which silently rounded anything past 2^53: the encoding preserved the *bytecode* but not the precision.
 :::
 
 ## `BinaryExpression`
 
-`binary-note.js:140-458`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
+`binary-note.js:85-395`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -269,5 +269,5 @@ In the widget the message lands under the Save button; the validators return `va
 
 - [Binary Evaluator](/developer/core/binary-evaluator) — the stack VM that runs this bytecode
 - [Dependency Graph](/developer/core/dependency-graph) — what consumes `getPropertyDependencies()`
-- [SymbolicPower](/developer/core/symbolic-power) — what `POW` does with an irrational result
+- [Exact Values](/developer/core/symbolic-power) — what `POW` returns, and `~`
 - [Expression Syntax](/reference/expressions/syntax) — the user-facing reference

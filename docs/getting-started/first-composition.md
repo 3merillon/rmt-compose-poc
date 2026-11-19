@@ -141,7 +141,7 @@ The **duration** row has five note-length buttons — **Whole**, **Half**, **Qua
 | Harmonic seventh | 7/4 | `base.f * (7/4)` |
 | 12-TET semitone | 2^(1/12) | `base.f * 2^(1/12)` |
 
-A 12-TET semitone is irrational, so that last note displays with a leading **≈** and is hatched on the canvas. That is expected — see [the ≈ symbol](/getting-started/concepts#the-symbol-approximation).
+A 12-TET semitone is irrational, so that last note is hatched on the canvas, and its widget shows the exact form with its value. That is expected — see [the ≈ symbol](/getting-started/concepts#the-symbol-approximation).
 
 ### Undo
 

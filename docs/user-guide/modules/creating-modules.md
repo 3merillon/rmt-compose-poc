@@ -180,7 +180,7 @@ Nothing stops a module from combining just intonation and equal temperament. Giv
 }
 ```
 
-Note 3 will render **crosshatched**: `2^(4/12)` is irrational, so its value is only an approximation. That is direct [corruption](/user-guide/notes/dependencies), and it is a feature — the workspace tells you which pitches are exact and which are not. Anything hanging off note 3 picks up a single diagonal hatch instead, marking it as corrupted by inheritance.
+Note 3 will render **crosshatched**: `2^(4/12)` is irrational, so it is tempered rather than a pure ratio. That is direct [corruption](/user-guide/notes/dependencies), and it is a feature — the workspace tells you which pitches are pure ratios and which are not. Anything hanging off note 3 picks up a single diagonal hatch instead, marking it as corrupted by inheritance.
 
 ::: warning There is no assignment in the expression language
 `[2].f = base.f * (3/2)` is not valid syntax. An expression is only ever the right-hand side; the property it belongs to is the JSON key, or the row in the note widget.

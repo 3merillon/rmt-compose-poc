@@ -121,7 +121,7 @@ export function evaluateExpressionSafe(expr, moduleInstance, evalCache = null) {
             return result;
         }
         if (typeof result.toFraction === 'function') {
-            // Exact either way: MusicValue yields a Fraction, Fraction-likes an 'n/d' string
+            // Exact either way: a Fraction-like toFraction() gives a Fraction or an 'n/d' string
             const exact = result.toFraction();
             return exact instanceof Fraction ? exact : new Fraction(exact);
         }

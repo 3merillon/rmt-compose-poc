@@ -1,6 +1,6 @@
 ---
 title: Fraction API
-description: How numbers work in RMT Compose expressions — exact rationals, literal forms, normalization, and irrational results.
+description: How numbers work in RMT Compose expressions — exact rationals, literal forms, normalization, and exact irrational results.
 ---
 
 # Fraction API
@@ -81,37 +81,42 @@ the text you type, the stored constant, and every arithmetic result.
 
 ## Exactness and irrationals
 
-Addition, subtraction, multiplication and division are closed over the rationals: they can
-never produce a value that is not an exact fraction. Only one operator can.
+Addition, subtraction, multiplication and division of fractions are closed over the rationals.
+`^` with a fractional exponent produces an **irrational** value unless the root happens to be
+exact. An irrational value is not turned into a fraction: it is kept exact, as the power it is.
 
-`^` with a fractional exponent produces an irrational number unless the root happens to be
-exact:
-
-| Expression | Result | Exact? |
+| Expression | Result | Kind |
 |---|---|---|
-| `2^3` | 8 | Yes |
-| `2^(-1)` | 1/2 | Yes |
-| `4^(1/2)` | 2 | Yes — a perfect square root |
-| `8^(1/3)` | 2 | Yes — a perfect cube root |
-| `2^(1/12)` | ≈ 1.059463… | **No** |
-| `3^(1/13)` | ≈ 1.088182… | **No** |
+| `2^3` | 8 | rational |
+| `2^(-1)` | 1/2 | rational |
+| `4^(1/2)` | 2 | rational (a perfect square root) |
+| `8^(1/3)` | 2 | rational (a perfect cube root) |
+| `2^(1/12)` | `2^(1/12)` (1.059463…) | irrational, exact |
+| `3^(1/13)` | `3^(1/13)` (1.088182…) | irrational, exact |
 
-When a property's value comes out irrational it is flagged **corrupted**. The value is stored as
-the closest rational approximation, the note is drawn with a crosshatch, and the note widget
-prefixes the value with **`≈`**. A note that only *depends* on a corrupted note is drawn with a
-single diagonal hatch and also shows `≈`.
+Values computed from an irrational stay exact: `263 * 2^(7/12)` is an exact value, and twelve
+steps of `2^(1/12)` give exactly 2. A note whose own expression holds an irrational power is drawn
+with a crosshatch, and a note that only *depends* on one is drawn with a single diagonal hatch.
+The hatching means "tempered or approximate, not a pure ratio"; the app's internal word for it is
+*corrupted*. In the note widget an irrational value shows its exact form and its value; the **`≈`**
+prefix is used only for an approximate value.
+
+A value is **approximate** when you write it with `~` (see
+[Approximate numbers](/reference/expressions/syntax#approximate-numbers)), or when an operation
+cannot be kept exact: a division by a sum of irrational terms, a non-integer power of a sum, more
+than 64 terms, or a division by zero. Anything computed from an approximate value is approximate,
+and it never equals an exact value. A plain decimal such as `1.5` stays exact (3/2).
 
 Exact exponentiation is also capped for safety: an integer exponent above **65536**, or a result
-that would exceed roughly a megabit per component, is treated the same way — flagged and
-approximated rather than computed exactly. See [Operators](/reference/expressions/operators#power).
+that would exceed roughly a megabit per component, gives an approximate value rather than an exact
+one. See [Operators](/reference/expressions/operators#power).
 
-This is how every equal-tempered scale in the module library is built. It is a marker, not a
-fault. See [Operators](/reference/expressions/operators) and
-[SymbolicPower](/developer/core/symbolic-power).
+This is how every equal-tempered scale in the module library is built. See
+[Operators](/reference/expressions/operators) and [Exact Values](/developer/core/symbolic-power).
 
 The simplifier will merge like bases when it can: `2^(1/12) * 2^(1/12)` becomes `2^(1/6)`, and
 `4^(1/2)` folds all the way down to the rational `2`. A rewrite is never applied if it would
-change whether the value is corrupted.
+change the value or the hatching.
 
 ## Common patterns
 
@@ -150,4 +155,4 @@ The method-chain syntax of earlier versions (`new Fraction(3, 2)`, `.mul()` and 
 - [Expression Syntax](/reference/expressions/syntax) — the full grammar
 - [Operators](/reference/expressions/operators) — what each operator produces
 - [Module API](/reference/expressions/module-api) — note references and the six properties
-- [SymbolicPower](/developer/core/symbolic-power) — how irrational values are handled
+- [Exact Values](/developer/core/symbolic-power) — how irrational values are handled

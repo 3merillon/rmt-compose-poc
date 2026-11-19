@@ -128,8 +128,8 @@ one value.
 | Value | Meaning | Visual |
 |---|---|---|
 | `0.0` | clean | none |
-| `1.0` | transitively corrupted (depends on something irrational) | single 45° diagonal hatch |
-| `2.0` | directly corrupted (irrational, no corrupt dependency) | crosshatch |
+| `1.0` | transitively corrupted (depends on a tempered or approximate note) | single 45° diagonal hatch |
+| `2.0` | directly corrupted (its own expression is tempered or approximate) | crosshatch |
 
 ## `sync()` — the per-edit rebuild
 
