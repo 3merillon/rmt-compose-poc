@@ -6,11 +6,10 @@
  */
 
 import Fraction from 'fraction.js';
-import { OP, VAR, VAR_NAMES, getCorruptionFlag } from './binary-note.js';
+import { OP, VAR, VAR_NAMES, FIRST_INTERPRETATION_VAR, getCorruptionFlag } from './binary-note.js';
 import {
   getVariableExpression,
   getVariableRefs,
-  hasComputedMeasureLength,
   definesVariable,
   resolveVariableRef,
   findVariableCycle,
@@ -20,15 +19,13 @@ import {
 // Order in which a note's variables are visited when nothing forces another
 // one. Dependencies are pulled in ahead on demand, so this only breaks ties.
 const VAR_ORDER = [
-  VAR.TEMPO, VAR.BEATS_PER_MEASURE, VAR.FREQUENCY,
-  VAR.MEASURE_LENGTH, VAR.START_TIME, VAR.DURATION,
-  VAR.AMPLITUDE,
+  VAR.FREQUENCY, VAR.START_TIME, VAR.DURATION,
+  VAR.AMPLITUDE, VAR.ATTACK, VAR.RELEASE,
 ];
 
 // What a reference evaluates to when nothing defines the variable it names,
-// indexed by VAR: startTime, duration, frequency, tempo, beatsPerMeasure,
-// measureLength, amplitude.
-const UNRESOLVED_DEFAULTS = [0, 1, 440, 60, 4, 4, 1];
+// indexed by VAR: startTime, duration, frequency, amplitude, attack, release.
+const UNRESOLVED_DEFAULTS = [0, 1, 440, 1, 0, 0];
 
 // Longest list of cycles / unresolved references written to the console
 const MAX_REPORTED_PROBLEMS = 10;
@@ -38,12 +35,13 @@ function createEvaluationRecord() {
     startTime: null,
     duration: null,
     frequency: null,
-    tempo: null,
-    beatsPerMeasure: null,
-    measureLength: null,
-    // Stays null when the note does not define it: readers fall back to the
-    // BaseNote's amplitude, then to 1 (see Module.findAmplitude).
+    // The interpretation variables stay null when the note does not define
+    // them: readers fall back to the BaseNote's, then to the default
+    // (amplitude 1, see Module.findAmplitude; attack and release the
+    // instrument's own envelope).
     amplitude: null,
+    attack: null,
+    release: null,
     corruptionFlags: 0, // Track irrational values (TET scales)
   };
 }
@@ -1016,10 +1014,9 @@ export class BinaryEvaluator {
       case VAR.START_TIME: return cached.startTime;
       case VAR.DURATION: return cached.duration;
       case VAR.FREQUENCY: return cached.frequency;
-      case VAR.TEMPO: return cached.tempo;
-      case VAR.BEATS_PER_MEASURE: return cached.beatsPerMeasure;
-      case VAR.MEASURE_LENGTH: return cached.measureLength;
       case VAR.AMPLITUDE: return cached.amplitude;
+      case VAR.ATTACK: return cached.attack;
+      case VAR.RELEASE: return cached.release;
       default: return null;
     }
   }
@@ -1086,10 +1083,9 @@ export class BinaryEvaluator {
                 case VAR.START_TIME: value = cached.startTime; break;
                 case VAR.DURATION: value = cached.duration; break;
                 case VAR.FREQUENCY: value = cached.frequency; break;
-                case VAR.TEMPO: value = cached.tempo; break;
-                case VAR.BEATS_PER_MEASURE: value = cached.beatsPerMeasure; break;
-                case VAR.MEASURE_LENGTH: value = cached.measureLength; break;
                 case VAR.AMPLITUDE: value = cached.amplitude; break;
+                case VAR.ATTACK: value = cached.attack; break;
+                case VAR.RELEASE: value = cached.release; break;
               }
             }
           }
@@ -1099,18 +1095,17 @@ export class BinaryEvaluator {
             value = this.getCachedValue(noteId, varIdx);
           }
 
-          // For inheritable properties (tempo, beatsPerMeasure, measureLength,
-          // amplitude), fall back to base note if not found on the target note
-          if (!value && (varIdx === VAR.TEMPO || varIdx === VAR.BEATS_PER_MEASURE || varIdx === VAR.MEASURE_LENGTH || varIdx === VAR.AMPLITUDE)) {
+          // Interpretation variables (amplitude, attack, release) fall back to
+          // the BaseNote's when the target note has none. Time and pitch never do.
+          if (!value && varIdx >= FIRST_INTERPRETATION_VAR) {
             // Try base note (ID 0)
             if (evalCache) {
               const baseCache = evalCache.get(0);
               if (baseCache) {
                 switch (varIdx) {
-                  case VAR.TEMPO: value = baseCache.tempo; break;
-                  case VAR.BEATS_PER_MEASURE: value = baseCache.beatsPerMeasure; break;
-                  case VAR.MEASURE_LENGTH: value = baseCache.measureLength; break;
                   case VAR.AMPLITUDE: value = baseCache.amplitude; break;
+                  case VAR.ATTACK: value = baseCache.attack; break;
+                  case VAR.RELEASE: value = baseCache.release; break;
                 }
               }
             }
@@ -1142,10 +1137,9 @@ export class BinaryEvaluator {
                 case VAR.START_TIME: value = cached.startTime; break;
                 case VAR.DURATION: value = cached.duration; break;
                 case VAR.FREQUENCY: value = cached.frequency; break;
-                case VAR.TEMPO: value = cached.tempo; break;
-                case VAR.BEATS_PER_MEASURE: value = cached.beatsPerMeasure; break;
-                case VAR.MEASURE_LENGTH: value = cached.measureLength; break;
                 case VAR.AMPLITUDE: value = cached.amplitude; break;
+                case VAR.ATTACK: value = cached.attack; break;
+                case VAR.RELEASE: value = cached.release; break;
               }
             }
           }
@@ -1237,92 +1231,6 @@ export class BinaryEvaluator {
           break;
         }
 
-        case OP.FIND_TEMPO: {
-          // Find tempo for a note (walks parent chain)
-          const noteRef = this.pop();
-          // For now, use base note tempo (most notes inherit from base)
-          let tempoValue = null;
-          if (evalCache) {
-            const baseCache = evalCache.get(0);
-            if (baseCache) tempoValue = baseCache.tempo;
-          }
-          if (!tempoValue) {
-            tempoValue = this.getCachedValue(0, VAR.TEMPO);
-          }
-          if (tempoValue) {
-            this.push(this.pool.allocFrom(tempoValue));
-          } else {
-            this.push(this.pool.alloc(60, 1)); // Default tempo 60 BPM
-          }
-          break;
-        }
-
-        case OP.FIND_MEASURE: {
-          // Find measure length for a note: beatsPerMeasure / tempo * 60
-          const noteRef = this.pop();
-          // noteRef is a Fraction containing the note ID
-          const noteId = noteRef ? Math.round(noteRef.valueOf()) : 0;
-
-          // Get beatsPerMeasure - try note first, then base note
-          let beatsPerMeasure = null;
-          if (evalCache) {
-            const noteCache = evalCache.get(noteId);
-            if (noteCache && noteCache.beatsPerMeasure) {
-              beatsPerMeasure = noteCache.beatsPerMeasure;
-            }
-            if (!beatsPerMeasure) {
-              const baseCache = evalCache.get(0);
-              if (baseCache && baseCache.beatsPerMeasure) {
-                beatsPerMeasure = baseCache.beatsPerMeasure;
-              }
-            }
-          }
-          if (!beatsPerMeasure) {
-            beatsPerMeasure = this.getCachedValue(noteId, VAR.BEATS_PER_MEASURE);
-          }
-          if (!beatsPerMeasure) {
-            beatsPerMeasure = this.getCachedValue(0, VAR.BEATS_PER_MEASURE);
-          }
-          if (!beatsPerMeasure) {
-            beatsPerMeasure = this.pool.alloc(4, 1); // Default 4 beats
-          }
-
-          // Get tempo - try note first, then base note
-          let tempo = null;
-          if (evalCache) {
-            const noteCache = evalCache.get(noteId);
-            if (noteCache && noteCache.tempo) {
-              tempo = noteCache.tempo;
-            }
-            if (!tempo) {
-              const baseCache = evalCache.get(0);
-              if (baseCache && baseCache.tempo) {
-                tempo = baseCache.tempo;
-              }
-            }
-          }
-          if (!tempo) {
-            tempo = this.getCachedValue(noteId, VAR.TEMPO);
-          }
-          if (!tempo) {
-            tempo = this.getCachedValue(0, VAR.TEMPO);
-          }
-          if (!tempo) {
-            tempo = this.pool.alloc(60, 1); // Default 60 BPM
-          }
-
-          // Compute measureLength = beatsPerMeasure * 60 / tempo.
-          // Fraction methods return new instances (they never mutate) — the
-          // old code discarded every result and pushed 1/1.
-          try {
-            const ml = beatsPerMeasure.mul(60).div(tempo);
-            this.push(this.pool.allocFrom(ml));
-          } catch (e) {
-            this.push(this.pool.alloc(4, 1));
-          }
-          break;
-        }
-
         case OP.DUP: {
           const top = this.peek();
           this.push(this.pool.allocFrom(top));
@@ -1353,8 +1261,8 @@ export class BinaryEvaluator {
    * Evaluate a note and cache the results
    *
    * The note's variables are evaluated in dependency order, so a variable may
-   * read another variable of the same note (the BaseNote's tempo from its
-   * frequency, a measureLength from tempo). Everything it reads from OTHER
+   * read another variable of the same note (a start from its own duration, an
+   * attack from its own release). Everything it reads from OTHER
    * notes must already be in `evalCache` (or in this evaluator's own cache).
    *
    * @param {Note|BinaryNote} note - The note to evaluate (supports both Note and BinaryNote)
@@ -1465,7 +1373,7 @@ export class BinaryEvaluator {
               candidate = (targetPosition << 3) | refVar;
             } else {
               // A start, duration or frequency of a note outside the group is final
-              if (targetPosition === undefined && refVar < VAR.TEMPO) continue;
+              if (targetPosition === undefined && refVar < FIRST_INTERPRETATION_VAR) continue;
               // Otherwise the read may be inherited from the BaseNote
               const target = resolveVariableRef(getNote, ref);
               if (target < 0) continue; // nothing defines it: evaluate() falls back to the default
@@ -1543,7 +1451,7 @@ export class BinaryEvaluator {
    * Evaluate one variable of a note into the note's record
    *
    * @param {Note|BinaryNote} note
-   * @param {number} varIndex - VAR.START_TIME ... VAR.AMPLITUDE
+   * @param {number} varIndex - VAR.START_TIME ... VAR.RELEASE
    * @param {Object} record - The note's evaluated values; must already be in evalCache
    * @param {Map} evalCache - noteId -> evaluated values of everything it reads
    */
@@ -1561,10 +1469,9 @@ export class BinaryEvaluator {
           case VAR.START_TIME: record.startTime = value; break;
           case VAR.DURATION: record.duration = value; break;
           case VAR.FREQUENCY: record.frequency = value; break;
-          case VAR.TEMPO: record.tempo = value; break;
-          case VAR.BEATS_PER_MEASURE: record.beatsPerMeasure = value; break;
-          case VAR.MEASURE_LENGTH: record.measureLength = value; break;
           case VAR.AMPLITUDE: record.amplitude = value; break;
+          case VAR.ATTACK: record.attack = value; break;
+          case VAR.RELEASE: record.release = value; break;
         }
 
         // Check if the evaluation actually produced an irrational value
@@ -1582,28 +1489,6 @@ export class BinaryEvaluator {
         }
       } catch (e) {
         console.warn(`Failed to evaluate ${VAR_NAMES[varIndex]} for note ${note.id}:`, e);
-      }
-    }
-
-    // If measureLength wasn't explicitly defined but this is a measure note or base note,
-    // compute it from beatsPerMeasure and tempo. This is needed because findMeasureLength()
-    // references are compiled as LOAD_REF which looks up measureLength in the cache.
-    // Only for measure notes (have startTime, no duration/frequency) or base note (id=0)
-    // to avoid expensive Fraction operations for regular notes.
-    if (varIndex === VAR.MEASURE_LENGTH && record.measureLength === null && hasComputedMeasureLength(note)) {
-      // Use this note's beatsPerMeasure and tempo, or fall back to the base note's
-      const baseRecord = evalCache.get(0);
-      const beats = record.beatsPerMeasure || (baseRecord ? baseRecord.beatsPerMeasure : null);
-      const tempo = record.tempo || (baseRecord ? baseRecord.tempo : null);
-      // Compute measureLength = beatsPerMeasure * 60 / tempo as an exact
-      // Fraction. The old duck-typed {s,n,d,valueOf} POJO quantized to 1e-6
-      // AND its Number fields would poison BigInt-backed consumers.
-      try {
-        const b = beats instanceof Fraction ? beats : new Fraction(4);
-        const t = tempo instanceof Fraction ? tempo : new Fraction(60);
-        record.measureLength = b.mul(60).div(t);
-      } catch (e) {
-        record.measureLength = new Fraction(4);
       }
     }
   }
@@ -1672,7 +1557,7 @@ export class BinaryEvaluator {
       reason = 'which has no value because of a dependency cycle or a failed evaluation';
     } else if (noteId === 0) {
       reason = `but the BaseNote has no ${name}`;
-    } else if (varIndex >= VAR.TEMPO) {
+    } else if (varIndex >= FIRST_INTERPRETATION_VAR) {
       const base = this.lookupNote(0);
       reason = base && definesVariable(base, varIndex)
         ? `which note ${noteId} inherits from the BaseNote, where it has no value because of a dependency cycle or a failed evaluation`

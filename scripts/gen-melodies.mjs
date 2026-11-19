@@ -4,9 +4,9 @@
  * Public-domain melodies for the module library.
  *
  * MELODIES are relational: every note frequency is a just-intonation scale
- * degree times base.f, and timing is measured from base.t in beats. So the whole
+ * degree times base.f, and timing is measured from base.t in units of base.d. So the whole
  * tune transposes when the base changes and RE-ROOTS onto the target when dropped
- * on a note (base.f -> [target].f, base.t -> [target].t). Imports onto note AND base.
+ * on a note (base.f, base.t, base.d -> the target's f, t, d). Imports onto note AND base.
  *
  * SCALE SYSTEMS: the equal-temperament / non-octave scales (TET-12/19/31, BP-13,
  * Mixed-Base) move out of "melodies" into their own section, plus a Tesla 9-EDO
@@ -49,7 +49,7 @@ function tokenRatio(tok) {
 }
 
 const freqExpr = (ratio) => (ratio.n === 1n && ratio.d === 1n) ? 'base.f' : `(${ratio.n}/${ratio.d}) * base.f`;
-const beatMul = (bn, bd) => (bn === bd) ? 'beat(base)' : `beat(base) * (${bn}/${bd})`;
+const beatMul = (bn, bd) => (bn === bd) ? 'base.d' : `base.d * (${bn}/${bd})`;
 
 // melody note colour by scale-degree pitch (subtle rainbow, cohesive teal-ish)
 const DEG_COLOR = {
@@ -65,7 +65,7 @@ function buildMelody(seq, baseNote) {
   seq.forEach(([tok, beats], i) => {
     const b = typeof beats === 'number' ? F(Math.round(beats * 12), 12) : F(beats[0], beats[1]);
     const ratio = tokenRatio(tok);
-    const startExpr = (cum.n === 0n) ? 'base.t' : `base.t + beat(base) * (${cum.n}/${cum.d})`;
+    const startExpr = (cum.n === 0n) ? 'base.t' : `base.t + base.d * (${cum.n}/${cum.d})`;
     notes.push({
       id: i + 1,
       startTime: startExpr,
@@ -78,8 +78,8 @@ function buildMelody(seq, baseNote) {
   return { baseNote: { ...baseNote }, notes };
 }
 
-const MEL_BASE = { frequency: '263', startTime: '0', tempo: '120', beatsPerMeasure: '4' };
-const WALTZ_BASE = { frequency: '263', startTime: '0', tempo: '150', beatsPerMeasure: '3' };
+const MEL_BASE = { frequency: '263', startTime: '0', duration: '1/2' };
+const WALTZ_BASE = { frequency: '263', startTime: '0', duration: '2/5' };
 
 // [token, beats] — beats in quarter-note units (fractional ok)
 const MELODIES = [
@@ -180,8 +180,8 @@ function chainedScale(ratios, color, base) {
     }
     notes.push({
       id: i + 1,
-      startTime: i === 0 ? 'base.t' : `[${i}].t + beat(base)`,
-      duration: 'beat(base)',
+      startTime: i === 0 ? 'base.t' : `[${i}].t + base.d`,
+      duration: 'base.d',
       frequency,
       color,
     });
@@ -198,7 +198,7 @@ const TESLA_N = 81;
 const TESLA = Array.from({ length: TESLA_N }, (_, i) => [9 + 2 * i, 9]);
 writeFileSync(
   join(scalesDir, 'tesla.json'),
-  JSON.stringify(chainedScale(TESLA, 'rgba(53,196,215,0.75)', { frequency: '131.5', startTime: '0', tempo: '260', beatsPerMeasure: '4' }), null, 2) + '\n'
+  JSON.stringify(chainedScale(TESLA, 'rgba(53,196,215,0.75)', { frequency: '131.5', startTime: '0', duration: '3/13' }), null, 2) + '\n'
 );
 
 const scaleItems = [

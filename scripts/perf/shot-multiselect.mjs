@@ -127,7 +127,7 @@ const findChains = (page) => page.evaluate(() => {
     if (/\bbase\./.test(raw) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(raw)) return 0;
     return null;
   };
-  const isMeasure = (n) => !!(n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency);
+  const isMeasure = (n) => !!n.properties?.measure;
 
   const ids = Object.keys(mod.notes).map(Number).filter((i) => i !== 0);
   const P = new Map();

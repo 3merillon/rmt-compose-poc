@@ -21,9 +21,8 @@ export const OP = {
   NEG:            0x14,  // Pop 1, push negation
   POW:            0x15,  // Pop 2 (base, exponent), push base^exponent (may corrupt to irrational)
 
-  // Module lookup operations
-  FIND_TEMPO:     0x20,  // Pop noteRef, push tempo lookup result
-  FIND_MEASURE:   0x21,  // Pop noteRef, push measureLength lookup result
+  // Module lookup operations. 0x20 (FIND_TEMPO) and 0x21 (FIND_MEASURE) were
+  // retired with the tempo / measure-length variables; do not reuse them.
   FIND_INSTRUMENT: 0x22, // Pop noteRef, push instrument lookup result
 
   // Stack operations
@@ -32,25 +31,31 @@ export const OP = {
 };
 
 // Variable indices for compact storage
+//
+// 0-2 are the language: a note's frequency, start and duration, each a
+// relation to other notes. 3-5 interpret a note when it sounds: amplitude
+// (relative gain), attack and release (shares of the note's own duration).
+// Only the interpretation variables fall back to the BaseNote when unset.
 export const VAR = {
   START_TIME: 0,
   DURATION: 1,
   FREQUENCY: 2,
-  TEMPO: 3,
-  BEATS_PER_MEASURE: 4,
-  MEASURE_LENGTH: 5,
-  AMPLITUDE: 6,
+  AMPLITUDE: 3,
+  ATTACK: 4,
+  RELEASE: 5,
 };
+
+/** First variable index that interprets rather than relates (inherits from the BaseNote). */
+export const FIRST_INTERPRETATION_VAR = VAR.AMPLITUDE;
 
 // Reverse mapping for decompilation
 export const VAR_NAMES = {
   0: 'startTime',
   1: 'duration',
   2: 'frequency',
-  3: 'tempo',
-  4: 'beatsPerMeasure',
-  5: 'measureLength',
-  6: 'amplitude',
+  3: 'amplitude',
+  4: 'attack',
+  5: 'release',
 };
 
 // Corruption flags (bitmask indicating which properties contain irrational values)
@@ -58,15 +63,14 @@ export const CORRUPT = {
   START_TIME:       0x01,
   DURATION:         0x02,
   FREQUENCY:        0x04,
-  TEMPO:            0x08,
-  BEATS_PER_MEASURE: 0x10,
-  MEASURE_LENGTH:   0x20,
-  AMPLITUDE:        0x40,
+  AMPLITUDE:        0x08,
+  ATTACK:           0x10,
+  RELEASE:          0x20,
 };
 
 /**
  * Get corruption flag for a variable index
- * @param {number} varIndex - Variable index (0-6)
+ * @param {number} varIndex - Variable index (0-5)
  * @returns {number} Corruption flag bitmask
  */
 export function getCorruptionFlag(varIndex) {
@@ -327,17 +331,6 @@ export class BinaryExpression {
           addRef(bytecode[pc++]); // note 0
           break;
 
-        // No compiler emits these two, but the evaluator still runs them:
-        // both read the BaseNote's tempo, FIND_MEASURE also its beatsPerMeasure.
-        case OP.FIND_MEASURE:
-          addRef(VAR.BEATS_PER_MEASURE);
-          addRef(VAR.TEMPO);
-          break;
-
-        case OP.FIND_TEMPO:
-          addRef(VAR.TEMPO);
-          break;
-
         // All other ops have no operands
         default:
           break;
@@ -412,10 +405,9 @@ export class BinaryNote {
     this.startTime = new BinaryExpression();
     this.duration = new BinaryExpression();
     this.frequency = new BinaryExpression();
-    this.tempo = new BinaryExpression();
-    this.beatsPerMeasure = new BinaryExpression();
-    this.measureLength = new BinaryExpression();
     this.amplitude = new BinaryExpression();
+    this.attack = new BinaryExpression();
+    this.release = new BinaryExpression();
 
     // Non-expression properties (stored directly)
     this.color = 'rgba(255, 0, 0, 0.5)';
@@ -425,10 +417,9 @@ export class BinaryNote {
     this._cachedStart = null;
     this._cachedDur = null;
     this._cachedFreq = null;
-    this._cachedTempo = null;
-    this._cachedBPM = null;
-    this._cachedMeasureLen = null;
     this._cachedAmp = null;
+    this._cachedAttack = null;
+    this._cachedRelease = null;
 
     // Generation counter for cache invalidation
     this._cacheGen = -1;
@@ -442,10 +433,9 @@ export class BinaryNote {
       case 'startTime': return this.startTime;
       case 'duration': return this.duration;
       case 'frequency': return this.frequency;
-      case 'tempo': return this.tempo;
-      case 'beatsPerMeasure': return this.beatsPerMeasure;
-      case 'measureLength': return this.measureLength;
       case 'amplitude': return this.amplitude;
+      case 'attack': return this.attack;
+      case 'release': return this.release;
       default: return null;
     }
   }
@@ -458,10 +448,9 @@ export class BinaryNote {
       case 'startTime': this.startTime = expr; break;
       case 'duration': this.duration = expr; break;
       case 'frequency': this.frequency = expr; break;
-      case 'tempo': this.tempo = expr; break;
-      case 'beatsPerMeasure': this.beatsPerMeasure = expr; break;
-      case 'measureLength': this.measureLength = expr; break;
       case 'amplitude': this.amplitude = expr; break;
+      case 'attack': this.attack = expr; break;
+      case 'release': this.release = expr; break;
     }
   }
 
@@ -473,10 +462,9 @@ export class BinaryNote {
       case 'startTime': return this._cachedStart;
       case 'duration': return this._cachedDur;
       case 'frequency': return this._cachedFreq;
-      case 'tempo': return this._cachedTempo;
-      case 'beatsPerMeasure': return this._cachedBPM;
-      case 'measureLength': return this._cachedMeasureLen;
       case 'amplitude': return this._cachedAmp;
+      case 'attack': return this._cachedAttack;
+      case 'release': return this._cachedRelease;
       default: return null;
     }
   }
@@ -489,10 +477,9 @@ export class BinaryNote {
       case 'startTime': this._cachedStart = value; break;
       case 'duration': this._cachedDur = value; break;
       case 'frequency': this._cachedFreq = value; break;
-      case 'tempo': this._cachedTempo = value; break;
-      case 'beatsPerMeasure': this._cachedBPM = value; break;
-      case 'measureLength': this._cachedMeasureLen = value; break;
       case 'amplitude': this._cachedAmp = value; break;
+      case 'attack': this._cachedAttack = value; break;
+      case 'release': this._cachedRelease = value; break;
     }
   }
 
@@ -503,10 +490,9 @@ export class BinaryNote {
     this._cachedStart = null;
     this._cachedDur = null;
     this._cachedFreq = null;
-    this._cachedTempo = null;
-    this._cachedBPM = null;
-    this._cachedMeasureLen = null;
     this._cachedAmp = null;
+    this._cachedAttack = null;
+    this._cachedRelease = null;
     this._cacheGen = -1;
   }
 
@@ -525,10 +511,9 @@ export class BinaryNote {
     addDeps(this.startTime);
     addDeps(this.duration);
     addDeps(this.frequency);
-    addDeps(this.tempo);
-    addDeps(this.beatsPerMeasure);
-    addDeps(this.measureLength);
     addDeps(this.amplitude);
+    addDeps(this.attack);
+    addDeps(this.release);
 
     return deps;
   }
@@ -540,10 +525,9 @@ export class BinaryNote {
     return this.startTime.referencesBase ||
            this.duration.referencesBase ||
            this.frequency.referencesBase ||
-           this.tempo.referencesBase ||
-           this.beatsPerMeasure.referencesBase ||
-           this.measureLength.referencesBase ||
-           this.amplitude.referencesBase;
+           this.amplitude.referencesBase ||
+           this.attack.referencesBase ||
+           this.release.referencesBase;
   }
 
   /**
@@ -554,10 +538,9 @@ export class BinaryNote {
     copy.startTime = this.startTime.clone();
     copy.duration = this.duration.clone();
     copy.frequency = this.frequency.clone();
-    copy.tempo = this.tempo.clone();
-    copy.beatsPerMeasure = this.beatsPerMeasure.clone();
-    copy.measureLength = this.measureLength.clone();
     copy.amplitude = this.amplitude.clone();
+    copy.attack = this.attack.clone();
+    copy.release = this.release.clone();
     copy.color = this.color;
     copy.instrument = this.instrument;
     return copy;

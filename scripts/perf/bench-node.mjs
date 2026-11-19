@@ -97,7 +97,7 @@ async function bench(name) {
   // 2) Mid-chain commit: change one note's startTime, re-evaluate.
   {
     const original = midNote.variables.startTimeString;
-    const alt = `(${original}) + beat(base) / 8`;
+    const alt = `(${original}) + base.d / 8`;
     const samples = [];
     for (let i = 0; i < 20; i++) {
       const expr = i % 2 === 0 ? alt : original;

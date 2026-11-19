@@ -205,10 +205,9 @@ function evaluateExpr(expr, moduleInstance) {
           startTime: baseNote.getVariable('startTime'),
           duration: baseNote.getVariable('duration'),
           frequency: baseNote.getVariable('frequency'),
-          tempo: baseNote.getVariable('tempo'),
-          beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
-          measureLength: moduleInstance.findMeasureLength?.(baseNote),
-          amplitude: baseNote.getVariable('amplitude')
+          amplitude: baseNote.getVariable('amplitude'),
+          attack: baseNote.getVariable('attack'),
+          release: baseNote.getVariable('release')
         });
       } catch {}
     }
@@ -220,10 +219,9 @@ function evaluateExpr(expr, moduleInstance) {
             startTime: noteObj.getVariable?.('startTime'),
             duration: noteObj.getVariable?.('duration'),
             frequency: noteObj.getVariable?.('frequency'),
-            tempo: moduleInstance.findTempo?.(noteObj),
-            beatsPerMeasure: noteObj.getVariable?.('beatsPerMeasure'),
-            measureLength: moduleInstance.findMeasureLength?.(noteObj),
-            amplitude: noteObj.getVariable?.('amplitude')
+            amplitude: noteObj.getVariable?.('amplitude'),
+            attack: noteObj.getVariable?.('attack'),
+            release: noteObj.getVariable?.('release')
           });
         } catch {}
       }

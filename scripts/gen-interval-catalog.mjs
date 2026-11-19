@@ -7,7 +7,7 @@
  * section of public/modules/library.json with computed cents + metadata.
  *
  * Each interval module is a subtree of the base note:
- *   note 1: frequency = "(N/D) * base.f", startTime base.t, duration beat(base).
+ *   note 1: frequency = "(N/D) * base.f", startTime base.t, duration base.d.
  * So it imports cleanly onto BOTH a note and the base note (the invariant).
  *
  * Cents are computed from the ratio (1200·log2(N/D)) so they are always exact.
@@ -23,7 +23,7 @@ const root = join(here, '..');
 const intervalsDir = join(root, 'public', 'modules', 'intervals');
 const libraryPath = join(root, 'public', 'modules', 'library.json');
 
-const BASE_NOTE = { frequency: '263', startTime: '0', tempo: '60', beatsPerMeasure: '4' };
+const BASE_NOTE = { frequency: '263', startTime: '0', duration: '1' };
 
 // Family → tile hue (matches icon-factory) as an rgba note colour.
 const FAMILY_COLOR = {
@@ -105,7 +105,7 @@ function moduleJson(n, d, color) {
       {
         id: 1,
         startTime: 'base.t',
-        duration: 'beat(base)',
+        duration: 'base.d',
         frequency: `(${n}/${d}) * base.f`,
         color,
       },

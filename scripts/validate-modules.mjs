@@ -29,7 +29,7 @@ const modulesDir = join(root, 'public', 'modules');
 const { Module } = await import('../src/module.js');
 const { validateExpressionSyntax } = await import('../src/utils/safe-expression-validator.js');
 
-const EXPR_KEYS = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+const EXPR_KEYS = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
 
 let failures = 0;
 let checked = 0;

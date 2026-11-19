@@ -2,14 +2,13 @@
   "baseNote": {
     "frequency": "263",
     "startTime": "0",
-    "tempo": "60",
-    "beatsPerMeasure": "4"
+    "duration": "1"
   },
   "notes": [
     {
       "id": 1,
       "startTime": "base.t",
-      "duration": "beat(base)",
+      "duration": "base.d",
       "frequency": "(32805/32768) * base.f",
       "color": "rgba(154,160,166,0.7)"
     }

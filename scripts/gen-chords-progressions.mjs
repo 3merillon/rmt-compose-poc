@@ -28,7 +28,7 @@ const chordsDir = join(modulesDir, 'chords');
 const progDir = join(modulesDir, 'progressions');
 const libraryPath = join(modulesDir, 'library.json');
 
-const BASE_NOTE = { frequency: '263', startTime: '0', tempo: '120', beatsPerMeasure: '4' };
+const BASE_NOTE = { frequency: '263', startTime: '0', duration: '1/2' };
 
 // ---- BigInt fraction helpers (for the self-check) ----
 const gcd = (a, b) => { a = a < 0n ? -a : a; b = b < 0n ? -b : b; while (b) { [a, b] = [b, a % b]; } return a || 1n; };
@@ -96,11 +96,11 @@ function buildChords(chords) {
 
     // root note
     const rootRef = ci === 0 ? 'base' : `[${prevRootId}]`;
-    const startExpr = ci === 0 ? 'base.t' : `[${prevRootId}].t + beat(base) * ${chords[ci - 1].beats}`;
+    const startExpr = ci === 0 ? 'base.t' : `[${prevRootId}].t + base.d * ${chords[ci - 1].beats}`;
     notes.push({
       id: rootId,
       startTime: startExpr,
-      duration: `beat(base) * ${beats}`,
+      duration: `base.d * ${beats}`,
       frequency: rootFreq(ch.root, rootRef),
       color: 'rgba(128,128,128,0.7)',
     });
@@ -111,7 +111,7 @@ function buildChords(chords) {
       notes.push({
         id: toneId,
         startTime: `[${rootId}].t`,
-        duration: `beat(base) * ${beats}`,
+        duration: `base.d * ${beats}`,
         frequency: ratioFreq(shape[k], `[${rootId}]`),
         color: toneColor(shape[k]),
       });

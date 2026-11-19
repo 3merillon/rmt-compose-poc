@@ -62,10 +62,6 @@ export class DSLCompiler {
         this.emitUnaryOp(node);
         break;
 
-      case NodeType.HelperCall:
-        this.emitHelperCall(node);
-        break;
-
       default:
         throw new DSLCompileError(`Unknown node type: ${node.type}`, node);
     }
@@ -182,76 +178,6 @@ export class DSLCompiler {
   }
 
   /**
-   * Emit a helper function call
-   * @param {Object} node - HelperCall node
-   */
-  emitHelperCall(node) {
-    switch (node.helper) {
-      case 'tempo':
-        this.emitFindTempo(node.noteArg);
-        break;
-
-      case 'measure':
-        this.emitFindMeasure(node.noteArg);
-        break;
-
-      case 'beat':
-        this.emitBeatUnit(node.noteArg);
-        break;
-
-      default:
-        throw new DSLCompileError(`Unknown helper function: ${node.helper}`, node);
-    }
-  }
-
-  /**
-   * Emit findTempo lookup
-   * @param {number|'base'} noteArg
-   */
-  emitFindTempo(noteArg) {
-    if (noteArg === 'base' || noteArg === 0) {
-      this.expr.writeByte(OP.LOAD_BASE);
-      this.expr.writeByte(VAR.TEMPO);
-      this.expr.referencesBase = true;
-    } else {
-      this.expr.writeByte(OP.LOAD_REF);
-      this.expr.writeUint16(noteArg);
-      this.expr.writeByte(VAR.TEMPO);
-      this.expr.addDependency(noteArg);
-    }
-  }
-
-  /**
-   * Emit findMeasureLength lookup
-   * @param {number|'base'} noteArg
-   */
-  emitFindMeasure(noteArg) {
-    if (noteArg === 'base' || noteArg === 0) {
-      this.expr.writeByte(OP.LOAD_BASE);
-      this.expr.writeByte(VAR.MEASURE_LENGTH);
-      this.expr.referencesBase = true;
-    } else {
-      this.expr.writeByte(OP.LOAD_REF);
-      this.expr.writeUint16(noteArg);
-      this.expr.writeByte(VAR.MEASURE_LENGTH);
-      this.expr.addDependency(noteArg);
-    }
-  }
-
-  /**
-   * Emit beat unit: 60 / tempo(ref)
-   * @param {number|'base'} noteArg
-   */
-  emitBeatUnit(noteArg) {
-    // Emit: 60
-    this.emitFraction(60, 1);
-    // Emit: tempo(ref)
-    this.emitFindTempo(noteArg);
-    // Emit: DIV
-    this.expr.writeByte(OP.DIV);
-  }
-
-  /**
    * Convert variable name to index
    * @param {string} varName - Canonical variable name
    * @returns {number}
@@ -264,14 +190,12 @@ export class DSLCompiler {
         return VAR.DURATION;
       case 'frequency':
         return VAR.FREQUENCY;
-      case 'tempo':
-        return VAR.TEMPO;
-      case 'beatsPerMeasure':
-        return VAR.BEATS_PER_MEASURE;
-      case 'measureLength':
-        return VAR.MEASURE_LENGTH;
       case 'amplitude':
         return VAR.AMPLITUDE;
+      case 'attack':
+        return VAR.ATTACK;
+      case 'release':
+        return VAR.RELEASE;
       default:
         throw new DSLCompileError(`Unknown variable name: ${varName}`);
     }

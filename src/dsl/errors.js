@@ -153,7 +153,7 @@ export const ErrorMessages = {
    * @returns {string}
    */
   unknownProperty(name) {
-    return `Unknown property '${name}'. Valid properties: f (frequency), t (startTime), d (duration), a (amplitude), tempo, bpm, ml`;
+    return `Unknown property '${name}'. Valid properties: f (frequency), t (startTime), d (duration), a (amplitude), attack, release`;
   },
 
   /**
@@ -162,7 +162,27 @@ export const ErrorMessages = {
    * @returns {string}
    */
   unknownHelper(name) {
-    return `Unknown function '${name}'. Valid functions: tempo(), measure(), beat()`;
+    return `Unknown function '${name}'. Expressions have no functions: write references such as [3].d or base.d`;
+  },
+
+  /**
+   * A function of the old time model
+   * @param {string} name - beat, tempo or measure
+   * @returns {string}
+   */
+  retiredTimeFunction(name) {
+    if (name === 'beat') return `'beat()' was removed: the reference note's duration is the time unit, so write base.d for beat(base), or [N].d to relate to note N`;
+    if (name === 'measure') return `'measure()' was removed: a measure bar is a silent note with a duration, so write [N].d for measure([N])`;
+    return `'tempo()' was removed: tempo is no longer stored; durations relate to other durations (base.d is the time unit, 60 / base.d the tempo)`;
+  },
+
+  /**
+   * A property of the old time model
+   * @param {string} name - tempo, bpm, ml, ...
+   * @returns {string}
+   */
+  retiredTimeProperty(name) {
+    return `'.${name}' was removed: tempo, beats per measure and measure length are no longer stored. Relate durations instead (base.d is the time unit; a measure bar's length is its .d)`;
   },
 
   /**

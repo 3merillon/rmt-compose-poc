@@ -1,5 +1,6 @@
 import Fraction from 'fraction.js';
-import { Note } from './note.js';
+import { Note, EXPRESSION_VARS, isMeasureNote } from './note.js';
+import { migrateTimeModel } from './migrate/relational-time.js';
 import { toNumber } from './utils/fraction-num.js';
 import { DependencyGraph } from './dependency-graph.js';
 import { inheritsFromBase } from './variable-deps.js';
@@ -75,21 +76,19 @@ export class Module {
     this._evaluating = false; // reentrancy guard for evaluateModule()
 
     // Create base note with default values
+    // The reference note holds the only absolute values: a frequency in Hz,
+    // a start and a duration in seconds. Its duration is the time unit every
+    // other duration relates to (`base.d`); 60 / base.d is the tempo, as a view.
     const defaultBaseNoteVariables = {
-      frequency: 'new Fraction(440)',
-      startTime: 'new Fraction(0)',
-      tempo: 'new Fraction(60)',
-      beatsPerMeasure: 'new Fraction(4)',
+      frequency: '440',
+      startTime: '0',
+      duration: '1',
       // No hardcoded base instrument: with none set, findInstrument() resolves
       // the base note (and everything inheriting from it) to the global default
       // instrument (_defaultInstrumentName, default 'sine-wave' → behavior
       // unchanged at defaults). This is what makes the audio.defaultInstrument
       // setting reach the common inheriting-note case. A caller/JSON may still
       // pass an explicit `instrument` to pin the base note's timbre.
-      // DSL form of 60/tempo(base) * base.bpm — compiles to the exact same
-      // bytecode (LOAD_CONST 60, LOAD_BASE tempo, DIV, LOAD_BASE bpm, MUL) as
-      // the old legacy method-chain string, but keeps saved modules pure DSL.
-      measureLength: 'beat(base) * base.bpm',
     };
 
     // Merge defaults with provided variables (convert functions to strings if needed)
@@ -187,7 +186,7 @@ export class Module {
     const allDeps = note.getAllDependencies();
     const refsBase = note.referencesBaseNote();
     this._dependencyGraph._updateDependencies(note.id, allDeps, refsBase);
-    // Measure bars and `beat([n])`-style reads can follow the base note
+    // An `[n].a` read of a note without an amplitude follows the base note
     // without naming it; re-evaluation has to know about those too.
     this._dependencyGraph.setImplicitBaseDependent(note.id, inheritsFromBase(note));
 
@@ -221,8 +220,8 @@ export class Module {
     }
 
     // Everything that reads this note, directly or through other notes. The walk
-    // crosses the base note: whatever reads it (module.baseNote, findTempo,
-    // findMeasureLength, an inherited tempo) follows, and so does whatever reads those.
+    // crosses the base note: whatever reads it (base.d, base.f, an inherited
+    // amplitude) follows, and so does whatever reads those.
     const dependents = this._dependencyGraph.getEvaluationDependents(numId);
 
     // Invalidate incremental evaluator (this note's bytecode may have changed)
@@ -637,7 +636,7 @@ export class Module {
   evaluateModule() {
     if (this._evaluating) {
       // Reentrant call from an evaluation callback (bytecode CALL ops like
-      // findTempo/getVariable re-enter via getEvaluationCache). Serve the
+      // getVariable re-enter via getEvaluationCache). Serve the
       // in-progress cache: topological order guarantees any dependency the
       // callback needs is already finalized. Recursing here instead used to
       // re-run the whole dirty set per callback.
@@ -730,60 +729,19 @@ export class Module {
   }
 
   /**
-   * Find tempo for a note (walks inheritance chain)
+   * The time unit: the reference note's evaluated duration in seconds (one
+   * beat, if you count in beats). 60 / getTimeUnit() is the tempo in BPM, a
+   * view only; nothing stores it.
+   * @returns {Fraction}
    */
-  findTempo(note) {
-    if (!note) return this.baseNote.getVariable('tempo') || new Fraction(60);
-
-    let current = note;
-    while (current) {
-      if (current.hasExpression('tempo')) {
-        return current.getVariable('tempo');
-      }
-      current = current.parentId !== undefined ? this.getNoteById(current.parentId) : null;
-    }
-    return this.baseNote.getVariable('tempo') || new Fraction(60);
+  getTimeUnit() {
+    const d = this.baseNote.getVariable('duration');
+    return (d && typeof d.compare === 'function' && d.compare(0) > 0) ? d : new Fraction(1);
   }
 
-  /**
-   * Find measure length for a note
-   */
-  findMeasureLength(note) {
-    const tempo = this.findTempo(note);
-
-    // Find beatsPerMeasure
-    let beatsPerMeasure = null;
-    const isMeasure = (n) => {
-      try {
-        return !!(n && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
-      } catch {
-        return false;
-      }
-    };
-
-    // Check direct per-note override
-    if (note && note.hasExpression('beatsPerMeasure')) {
-      beatsPerMeasure = note.getVariable('beatsPerMeasure');
-    } else {
-      // Walk up ancestry (skip measure ancestors)
-      let cur = note;
-      while (cur && cur.id !== 0) {
-        cur = this.getNoteById(cur.parentId);
-        if (!cur) break;
-        if (cur.hasExpression('beatsPerMeasure') && !isMeasure(cur)) {
-          beatsPerMeasure = cur.getVariable('beatsPerMeasure');
-          break;
-        }
-      }
-      if (!beatsPerMeasure) {
-        beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
-      }
-    }
-
-    if (!beatsPerMeasure) beatsPerMeasure = new Fraction(4);
-    if (!tempo) return beatsPerMeasure.mul(1); // 1 second per beat default
-
-    return beatsPerMeasure.div(tempo).mul(60);
+  /** All measure bars, unordered. */
+  getMeasureNotes() {
+    return Object.values(this.notes).filter(isMeasureNote);
   }
 
   /**
@@ -848,32 +806,23 @@ export class Module {
   }
 
   /**
-   * Generate measure notes starting from a given note
+   * Append `n` measure bars after `fromNote`. A bar is a silent note flagged
+   * `measure`: it starts where the previous one ends and lasts as long
+   * (`[p].t + [p].d`, `[p].d`), so changing one bar's duration carries to the
+   * bars that follow. From the BaseNote, the first bar starts at `base.t` and
+   * lasts four time units (`base.d * 4`).
    */
   generateMeasures(fromNote, n) {
     const notesArray = [];
 
     for (let i = 0; i < n; i++) {
       const prevNote = (i === 0) ? fromNote : this.getNoteById(notesArray[i - 1].id);
+      const vars = (!prevNote || prevNote.id === 0 || !isMeasureNote(prevNote))
+        ? { startTime: 'base.t', duration: 'base.d * 4', measure: true }
+        : { startTime: `[${prevNote.id}].t + [${prevNote.id}].d`, duration: `[${prevNote.id}].d`, measure: true };
 
-      // Detect DSL vs legacy from the previous note's startTime expression
-      const prevRaw = prevNote.variables?.startTimeString || '';
-      const useDSL = isDSLSyntax(prevRaw) || (i === 0 && isDSLSyntax(fromNote.variables?.startTimeString || ''));
-
-      let rawString;
-      if (useDSL) {
-        const pRef = (prevNote.id === 0) ? 'base' : `[${prevNote.id}]`;
-        rawString = `${pRef}.t + measure(${pRef})`;
-      } else if (prevNote.id === 0) {
-        rawString = "module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))";
-      } else {
-        rawString = `module.getNoteById(${prevNote.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevNote.id})))`;
-      }
-
-      const newNote = this.addNote({
-        startTime: rawString
-      });
-      newNote.parentId = prevNote.id;
+      const newNote = this.addNote(vars);
+      newNote.parentId = prevNote ? prevNote.id : 0;
       notesArray.push(newNote);
     }
 
@@ -891,6 +840,15 @@ export class Module {
       data = await response.json();
     } else {
       data = source;
+    }
+
+    // A module written for the old time model (tempo, beats per measure,
+    // beat()/measure()) is converted first, exactly; see migrate/relational-time.js.
+    // A module it cannot convert throws a TimeMigrationError, never loads wrong.
+    const migration = migrateTimeModel(data);
+    if (migration.migrated) {
+      data = migration.data;
+      console.info('[RMT] Converted a module to relational time: ' + migration.report.join('; '));
     }
 
     // Create base note variables from JSON
@@ -964,7 +922,7 @@ export class Module {
 
     // Export base note
     const baseObj = {};
-    const baseExprs = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+    const baseExprs = EXPRESSION_VARS;
     for (const name of baseExprs) {
       const source = this.baseNote.getExpressionSource(name);
       if (source) {
@@ -989,6 +947,7 @@ export class Module {
       }
       if (note.properties.color) noteObj.color = note.properties.color;
       if (note.properties.instrument) noteObj.instrument = note.properties.instrument;
+      if (note.properties.measure) noteObj.measure = true;
 
       notesArray.push(noteObj);
     }
@@ -1013,11 +972,7 @@ export class Module {
       const note = this.notes[id];
       if (Number(id) === 0) continue;
 
-      const isMeasure = note.hasExpression('startTime') &&
-                        !note.hasExpression('duration') &&
-                        !note.hasExpression('frequency');
-
-      if (isMeasure) {
+      if (isMeasureNote(note)) {
         measureNotes.push(note);
       } else {
         regularNotes.push(note);
@@ -1063,7 +1018,7 @@ export class Module {
 
     // Update expression references (supports both DSL and legacy formats)
     const updateReferences = (exprText) => {
-      // DSL format: [N].prop, beat([N]), measure([N]), tempo([N])
+      // DSL format: [N].prop
       let updated = exprText.replace(/\[(\d+)\]/g, (match, p1) => {
         const oldRefId = parseInt(p1, 10);
         const newRefId = newMapping[oldRefId];
@@ -1102,7 +1057,7 @@ export class Module {
 
       // Create new variables with updated references
       const variables = {};
-      const exprNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+      const exprNames = EXPRESSION_VARS;
 
       for (const name of exprNames) {
         const source = note.getExpressionSource(name);
@@ -1113,6 +1068,7 @@ export class Module {
 
       if (note.properties.color) variables.color = note.properties.color;
       if (note.properties.instrument) variables.instrument = note.properties.instrument;
+      if (note.properties.measure) variables.measure = true;
 
       const newNote = new Note(updatedId, variables);
       newNote.module = this;
@@ -1185,9 +1141,7 @@ export class Module {
     this.evaluateModule();
 
     // Compute measure end time
-    const measureNotes = Object.values(this.notes).filter(note =>
-      note.variables.startTime && !note.variables.duration && !note.variables.frequency
-    );
+    const measureNotes = this.getMeasureNotes();
 
     let measureEnd = 0;
     if (measureNotes.length > 0) {
@@ -1210,8 +1164,9 @@ export class Module {
         }
       }
 
-      if (lastMeasureStart) {
-        measureEnd = toNumber(lastMeasureStart.add(this.findMeasureLength(lastMeasure)));
+      const lastMeasureLength = lastMeasure.getVariable('duration');
+      if (lastMeasureStart && lastMeasureLength) {
+        measureEnd = toNumber(lastMeasureStart.add(lastMeasureLength));
       }
     }
 

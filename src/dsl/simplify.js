@@ -2,7 +2,7 @@
  * DSL Expression Simplifier
  *
  * Folds the rational coefficients of a DSL expression while leaving every note
- * reference, helper call and irrational power exactly where the author put them.
+ * reference and irrational power exactly where the author put them.
  *
  * The normal form mirrors the evaluator's SymbolicPower algebra (see
  * binary-evaluator.js): a value is a rational coefficient times a product of
@@ -136,7 +136,6 @@ function canonicalize(node, ctx) {
     }
 
     case NodeType.NoteReference:
-    case NodeType.HelperCall:
       return [termFromAtom(atomFor(node), ctx)];
 
     case NodeType.UnaryOp: {
@@ -450,7 +449,6 @@ function precOf(node) {
     case NodeType.FractionLiteral:
       return node.numerator < 0 ? PREC.UNARY : PREC.ATOMIC;
     case NodeType.NoteReference:
-    case NodeType.HelperCall:
       return PREC.ATOMIC;
     case NodeType.UnaryOp:
       return PREC.UNARY;
@@ -472,11 +470,6 @@ function printNode(node) {
     case NodeType.NoteReference: {
       const target = node.noteId === 'base' ? 'base' : `[${node.noteId}]`;
       return `${target}.${getShortPropertyName(node.property)}`;
-    }
-
-    case NodeType.HelperCall: {
-      const arg = node.noteArg === 'base' ? 'base' : `[${node.noteArg}]`;
-      return `${node.helper}(${arg})`;
     }
 
     case NodeType.UnaryOp:

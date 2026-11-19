@@ -14,7 +14,7 @@
  *      `amplitude` are the same property; the legacy syntax works too.
  *   C. Exactness — a 50-note chain of `(121/100) * [prev].a` evaluates to
  *      exactly (121/100)^50 (compared against native BigInt).
- *   D. Irrational gains raise the amplitude corruption bit (0x40) and no other.
+ *   D. Irrational gains raise the amplitude corruption bit (0x08) and no other.
  *   E. A BaseNote amplitude edit reaches notes that only name another note.
  *   F. Save → load round-trips, including the reindexing "Save Module" does.
  *   G. Clearing a note's amplitude puts it back on the inherited value.
@@ -38,11 +38,11 @@ const fail = (msg) => { failures++; console.error(`  ✗ ${msg}`); };
 const ok = (msg) => console.log(`  ✓ ${msg}`);
 const check = (cond, msg) => (cond ? ok(msg) : fail(msg));
 
-const BASE = { frequency: '440', startTime: '0', tempo: '60', beatsPerMeasure: '4' };
+const BASE = { frequency: '440', startTime: '0', duration: '1' };
 const note = (id, extra = {}) => ({
   id,
   startTime: id === 1 ? 'base.t' : `[${id - 1}].t + [${id - 1}].d`,
-  duration: 'beat(base)',
+  duration: 'base.d',
   frequency: 'base.f',
   ...extra,
 });
@@ -123,7 +123,7 @@ console.log('\nAmplitude: irrational values\n');
 {
   const mod = await load(BASE, [note(1, { amplitude: '10^(-6/20)' }), note(2, { frequency: 'base.f * 2^(7/12)' })]);
   const cache = mod.evaluateModule();
-  check(cache.get(1).corruptionFlags === 0x40, 'D1 an irrational amplitude sets flag 0x40 and nothing else');
+  check(cache.get(1).corruptionFlags === 0x08, 'D1 an irrational amplitude sets flag 0x08 and nothing else');
   check(cache.get(2).corruptionFlags === 0x04, 'D2 an irrational frequency still sets only 0x04');
   check(Math.abs(amplitudeToGain(mod.findAmplitude(mod.getNoteById(1))) - Math.pow(10, -6 / 20)) < 1e-9, 'D3 -6 dB evaluates to ≈0.501187');
 }
@@ -147,8 +147,8 @@ console.log('\nAmplitude: save and load\n');
 {
   // Out of time order on purpose, so "Save Module" has to renumber the ids.
   const mod = await load({ ...BASE, amplitude: '(2/3)' }, [
-    { id: 7, startTime: 'base.t + beat(base) * 2', duration: 'beat(base)', frequency: 'base.f', amplitude: '[9].a * (5/4)' },
-    { id: 9, startTime: 'base.t', duration: 'beat(base)', frequency: 'base.f', amplitude: 'base.a * (9/10)' },
+    { id: 7, startTime: 'base.t + base.d * 2', duration: 'base.d', frequency: 'base.f', amplitude: '[9].a * (5/4)' },
+    { id: 9, startTime: 'base.t', duration: 'base.d', frequency: 'base.f', amplitude: 'base.a * (9/10)' },
   ]);
   const snap = await Module.loadFromJSON(JSON.parse(JSON.stringify(mod.createModuleJSON())));
   snap.evaluateModule();

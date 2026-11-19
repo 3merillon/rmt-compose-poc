@@ -10,9 +10,10 @@
  *
  * WHAT THE FILE CONTAINS
  *
- *   Track 0        the conductor: title, tempo (from the BaseNote), time
- *                  signature (from the BaseNote's beatsPerMeasure, when it can
- *                  be written as one).
+ *   Track 0        the conductor: title, tempo (60 / the BaseNote's duration:
+ *                  the time unit is the quarter note), time signature (the
+ *                  first measure bar's length in time units, when there is a
+ *                  bar and it can be written as one).
  *   Track 1..N     one per instrument, named after it. Each is an MPE lower
  *                  zone of its own: an MPE Configuration Message on channel 1
  *                  (RPN 6 = 15 member channels), the pitch-bend range on every
@@ -54,6 +55,7 @@
 import Fraction from 'fraction.js';
 import { toNumber } from '../utils/fraction-num.js';
 import { amplitudeToGain, MAX_AMPLITUDE } from '../player/amplitude.js';
+import { isMeasureNote } from '../note.js';
 
 /** MPE lower zone: master on channel 1 (index 0), members on channels 2–16. */
 const MASTER_CHANNEL = 0;
@@ -167,8 +169,10 @@ export function planMidi(module, options = {}) {
   const warnings = [];
 
   // --- tempo -----------------------------------------------------------------
-  let exactTempo = asFraction(base.tempo);
-  if (!exactTempo || exactTempo.compare(0) <= 0) exactTempo = new Fraction(60);
+  // Nothing stores a tempo: the BaseNote's duration is the time unit, written
+  // to the file as one quarter note.
+  const unit = asFraction(base.duration);
+  const exactTempo = (unit && unit.compare(0) > 0) ? new Fraction(60).div(unit) : new Fraction(60);
 
   const idealUs = roundToInteger(new Fraction(60000000).div(exactTempo));
   const usPerQuarter = Math.min(0xFFFFFF, Math.max(1, idealUs == null ? 0xFFFFFF : idealUs));
@@ -185,7 +189,16 @@ export function planMidi(module, options = {}) {
   const tempoRelativeError = Math.abs(storedTempo - toNumber(gridTempo)) / toNumber(gridTempo);
 
   // --- time signature ----------------------------------------------------------
-  const timeSignature = timeSignatureFor(asFraction(base.beatsPerMeasure));
+  // The first measure bar's length in time units (quarter notes), if any.
+  let firstBar = null;
+  for (const n of Object.values(module.notes)) {
+    if (!isMeasureNote(n)) continue;
+    const r = cache.get(n.id);
+    const t = r && asFraction(r.startTime);
+    if (t && (!firstBar || t.compare(firstBar.t) < 0)) firstBar = { t, d: asFraction(r.duration) };
+  }
+  const barUnits = firstBar && firstBar.d ? firstBar.d.mul(exactTempo).div(60) : null;
+  const timeSignature = timeSignatureFor(barUnits);
 
   // --- notes -------------------------------------------------------------------
   const skipped = { silent: [], noPitch: [], outOfRange: [], noLength: [], beforeStart: [] };
@@ -203,15 +216,14 @@ export function planMidi(module, options = {}) {
     const start = asFraction(r.startTime);
     if (!start) continue;
 
-    if (!r.duration) {
-      // A measure bar. It makes no sound, but its measure extends the file.
-      try {
-        const ml = asFraction(module.findMeasureLength(note));
-        const t = ml ? roundToInteger(start.add(ml).mul(ticksPerSecond)) : null;
-        if (t != null && t > endTick) endTick = t;
-      } catch { /* a measure that cannot be measured does not extend the file */ }
+    if (isMeasureNote(note)) {
+      // A measure bar. It makes no sound, but its length extends the file.
+      const ml = asFraction(r.duration);
+      const t = ml ? roundToInteger(start.add(ml).mul(ticksPerSecond)) : null;
+      if (t != null && t > endTick) endTick = t;
       continue;
     }
+    if (!r.duration) continue;                       // a start alone: a marker, no sound
     if (!r.frequency) { silences++; continue; }      // a silence: a rest, nothing to write
 
     const duration = asFraction(r.duration);
@@ -355,7 +367,7 @@ export function planMidi(module, options = {}) {
   if (amplitudeClamped) warnings.push(`${amplitudeClamped} note${amplitudeClamped === 1 ? ' has' : 's have'} an amplitude above ${MAX_AMPLITUDE}; like playback, the export treats it as ${MAX_AMPLITUDE} (velocity 127).`);
   if (velocityFloored) warnings.push(`${velocityFloored} note${velocityFloored === 1 ? ' is' : 's are'} too quiet for velocity 1 and ${velocityFloored === 1 ? 'was' : 'were'} written at velocity 1.`);
   if (lengthened) warnings.push(`${lengthened} note${lengthened === 1 ? ' is' : 's are'} shorter than one tick and ${lengthened === 1 ? 'was' : 'were'} given a length of one tick.`);
-  if (!timeSignature) warnings.push(`beatsPerMeasure ${base.beatsPerMeasure ? asFraction(base.beatsPerMeasure).toFraction() : '(unset)'} cannot be written as a time signature; none is stored.`);
+  if (!timeSignature && barUnits) warnings.push(`The first measure bar is ${barUnits.toFraction()} time units long, which cannot be written as a time signature; none is stored.`);
 
   const report = {
     ppq,
@@ -450,7 +462,7 @@ function maxPolyphony(notes) {
 }
 
 /**
- * beatsPerMeasure as a MIDI time signature over a quarter-note beat: 4 -> 4/4,
+ * A bar length in time units as a MIDI time signature over a quarter-note beat: 4 -> 4/4,
  * 7/2 -> 7/8. Null when it has no such form (5/3 beats, more than 255 beats).
  */
 function timeSignatureFor(beats) {

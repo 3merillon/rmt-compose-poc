@@ -30,7 +30,7 @@ export const TokenType = {
   BASE: 'BASE',               // base
 
   // Identifiers (properties and helpers)
-  IDENTIFIER: 'IDENTIFIER',   // f, t, d, a, tempo, measure, beat, etc.
+  IDENTIFIER: 'IDENTIFIER',   // f, t, d, a, attack, release
 
   // End of input
   EOF: 'EOF',
@@ -56,21 +56,17 @@ export const PropertyMap = {
   'dur': 'duration',
   'duration': 'duration',
 
-  // Tempo
-  'tempo': 'tempo',
-
-  // Beats per measure
-  'bpm': 'beatsPerMeasure',
-  'beatsPerMeasure': 'beatsPerMeasure',
-
-  // Measure length
-  'ml': 'measureLength',
-  'measureLength': 'measureLength',
-
+  // Interpretation (how the note sounds, not what it relates to)
   // Amplitude (relative gain)
   'a': 'amplitude',
   'amp': 'amplitude',
   'amplitude': 'amplitude',
+
+  // Attack and release: shares of the note's own duration
+  'atk': 'attack',
+  'attack': 'attack',
+  'rel': 'release',
+  'release': 'release',
 };
 
 /**
@@ -80,16 +76,17 @@ export const PropertyShortNames = {
   'frequency': 'f',
   'startTime': 't',
   'duration': 'd',
-  'tempo': 'tempo',
-  'beatsPerMeasure': 'bpm',
-  'measureLength': 'ml',
   'amplitude': 'a',
+  'attack': 'attack',
+  'release': 'release',
 };
 
 /**
- * List of helper function names
+ * Names of the old time model (removed): kept only to explain the change when
+ * someone types them. `beat(base)` is now `base.d`.
  */
-export const HelperFunctions = ['tempo', 'measure', 'beat'];
+export const RetiredTimeFunctions = ['beat', 'tempo', 'measure'];
+export const RetiredTimeProperties = ['tempo', 'bpm', 'beatsPerMeasure', 'ml', 'measureLength'];
 
 /**
  * Check if a string is a valid property name
@@ -100,14 +97,6 @@ export function isPropertyName(name) {
   return name in PropertyMap;
 }
 
-/**
- * Check if a string is a helper function name
- * @param {string} name - The name to check
- * @returns {boolean}
- */
-export function isHelperFunction(name) {
-  return HelperFunctions.includes(name);
-}
 
 /**
  * Get canonical property name from shorthand

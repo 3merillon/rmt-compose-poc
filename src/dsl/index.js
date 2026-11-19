@@ -11,8 +11,8 @@ import { parse, DSLParser } from './parser.js';
 import { compile, DSLCompiler } from './compiler.js';
 import { decompile, DSLDecompiler } from './decompiler.js';
 import { DSLError, DSLLexerError, DSLParseError, DSLCompileError, ErrorMessages } from './errors.js';
-import { TokenType, PropertyMap, PropertyShortNames, HelperFunctions, getCanonicalPropertyName, getShortPropertyName } from './constants.js';
-import { NodeType, createNumberLiteral, createFractionLiteral, createNoteReference, createBinaryOp, createUnaryOp, createHelperCall, collectDependencies, referencesBase, printAST } from './ast.js';
+import { TokenType, PropertyMap, PropertyShortNames, getCanonicalPropertyName, getShortPropertyName } from './constants.js';
+import { NodeType, createNumberLiteral, createFractionLiteral, createNoteReference, createBinaryOp, createUnaryOp, collectDependencies, referencesBase, printAST } from './ast.js';
 
 /**
  * Check if a string uses DSL syntax (vs legacy JavaScript syntax)
@@ -37,7 +37,8 @@ export function isDSLSyntax(expr) {
   if (/^base\./.test(trimmed)) return true;
   // Fraction literal: (3/2) at start or after operator
   if (/^\(\s*-?\d+\s*\/\s*-?\d+\s*\)/.test(trimmed)) return true;
-  // Helper functions: tempo(...), measure(...), beat(...)
+  // The old time helpers beat(...), tempo(...), measure(...) are DSL spellings:
+  // routed to the DSL parser, they get a message saying what replaced them.
   if (/^(tempo|measure|beat)\s*\(/.test(trimmed)) return true;
   // Contains DSL-style references anywhere
   if (/\[[\d]+\]\./.test(trimmed)) return true;
@@ -169,11 +170,13 @@ Note References:
   [id].f     - frequency of note id
   [id].t     - startTime of note id
   [id].d     - duration of note id
-  [id].tempo - tempo of note id
-  [id].bpm   - beatsPerMeasure of note id
-  [id].ml    - measureLength of note id
-  [id].a     - amplitude (relative gain) of note id
-  base.f     - baseNote frequency (same as [0].f)
+  base.f     - reference note frequency (same as [0].f)
+  base.d     - reference note duration: the time unit (one beat)
+
+Interpretation (how a note sounds; not relations of the notation):
+  [id].a       - amplitude (relative gain)
+  [id].attack  - attack, as a share of the note's own duration
+  [id].release - release, as a share of the note's own duration
 
 Literals:
   440        - integer
@@ -188,16 +191,12 @@ Operators:
   a ^ b      - power (e.g., 2^(1/12) for semitone)
   -a         - negation
 
-Helpers:
-  tempo([id])   - get tempo for note
-  measure([id]) - get measure length for note
-  beat([id])    - get beat duration (60/tempo)
-
 Examples:
   base.f * (3/2)           - perfect fifth
   [1].t + [1].d            - end time of note 1
   base.f * 2^(7/12)        - 12-TET perfect fifth
-  beat(base) * (1/4)       - quarter beat
+  base.d * (1/4)           - a quarter of the time unit
+  [4].d * 3                - three times as long as note 4
 `;
 }
 
@@ -226,7 +225,6 @@ export {
   TokenType,
   PropertyMap,
   PropertyShortNames,
-  HelperFunctions,
   getCanonicalPropertyName,
   getShortPropertyName,
 
@@ -237,7 +235,6 @@ export {
   createNoteReference,
   createBinaryOp,
   createUnaryOp,
-  createHelperCall,
   collectDependencies,
   referencesBase,
   printAST,

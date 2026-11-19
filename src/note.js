@@ -3,6 +3,24 @@ import { BinaryExpression } from './binary-note.js';
 import { compiler, decompiler } from './expression-compiler.js';
 
 /**
+ * The evaluated variables of a note. The first three are the language (each a
+ * relation to other notes); the last three interpret the note when it sounds.
+ */
+export const EXPRESSION_VARS = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
+
+/**
+ * Whether a note is a measure bar: a silent note (a start and a duration, no
+ * frequency) that the editor draws as a bar line rather than as a rest. The
+ * flag is display only; evaluation treats a bar like any other note. Accepts a
+ * Note or a plain note object from JSON.
+ */
+export function isMeasureNote(note) {
+  if (!note || Number(note.id) === 0) return false;
+  if (note.properties) return note.properties.measure === true;
+  return note.measure === true;
+}
+
+/**
  * Note class - Binary-native implementation
  *
  * Stores expressions as compiled BinaryExpressions and evaluates
@@ -19,10 +37,9 @@ export class Note {
       startTime: new BinaryExpression(),
       duration: new BinaryExpression(),
       frequency: new BinaryExpression(),
-      tempo: new BinaryExpression(),
-      beatsPerMeasure: new BinaryExpression(),
-      measureLength: new BinaryExpression(),
       amplitude: new BinaryExpression(),
+      attack: new BinaryExpression(),
+      release: new BinaryExpression(),
     };
 
     // Non-expression properties.
@@ -32,9 +49,11 @@ export class Note {
     // default 'sine-wave' → unchanged behavior), which is what lets the
     // audio.defaultInstrument setting take effect. An explicitly loaded/edited
     // instrument still pins it.
+    // `measure` marks a measure bar (see isMeasureNote).
     this.properties = {
       color: null,
       instrument: null,
+      measure: false,
     };
 
     // Bumped whenever an expression changes; the module uses it (together
@@ -57,7 +76,7 @@ export class Note {
    * Handles both legacy format (*String properties, functions) and new format
    */
   _initFromVariables(variables) {
-    const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+    const expressionVars = EXPRESSION_VARS;
 
     for (const [key, value] of Object.entries(variables)) {
       // Skip legacy *String properties - we'll use them as source
@@ -105,6 +124,8 @@ export class Note {
       // Handle non-expression properties
       if (key === 'color' || key === 'instrument') {
         this.properties[key] = value;
+      } else if (key === 'measure') {
+        this.properties.measure = value === true;
       }
     }
   }
@@ -117,6 +138,7 @@ export class Note {
     // Handle non-expression properties
     if (name === 'color') return this.properties.color;
     if (name === 'instrument') return this.properties.instrument;
+    if (name === 'measure') return this.properties.measure;
 
     // Handle *String requests - return source text
     if (name.endsWith('String')) {
@@ -159,6 +181,11 @@ export class Note {
       this._notifyChange();
       return;
     }
+    if (name === 'measure') {
+      this.properties.measure = value === true;
+      this._notifyChange();
+      return;
+    }
 
     // Handle *String properties - compile to binary
     if (name.endsWith('String')) {
@@ -170,7 +197,7 @@ export class Note {
     }
 
     // Handle expression variables
-    const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+    const expressionVars = EXPRESSION_VARS;
     if (expressionVars.includes(name)) {
       if (typeof value === 'string') {
         // Expression text
@@ -287,7 +314,7 @@ export class Note {
     const result = {};
 
     // Add evaluated expression values
-    const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+    const expressionVars = EXPRESSION_VARS;
     for (const name of expressionVars) {
       const value = this.getVariable(name);
       if (value !== null) {
@@ -303,6 +330,7 @@ export class Note {
     // Add properties
     if (this.properties.color) result.color = this.properties.color;
     if (this.properties.instrument) result.instrument = this.properties.instrument;
+    if (this.properties.measure) result.measure = true;
 
     return result;
   }
@@ -323,6 +351,7 @@ export class Note {
     // Add properties
     if (this.properties.color) obj.color = this.properties.color;
     if (this.properties.instrument) obj.instrument = this.properties.instrument;
+    if (this.properties.measure) obj.measure = true;
 
     return obj;
   }
@@ -379,7 +408,7 @@ export class Note {
         }
         // Handle expression variables - return a function wrapper for legacy code
         // Only return a function if the expression actually exists
-        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+        const expressionVars = EXPRESSION_VARS;
         if (expressionVars.includes(prop)) {
           // Check if this expression actually exists
           if (!note.hasExpression(prop)) {
@@ -409,6 +438,7 @@ export class Note {
         // Handle properties
         if (prop === 'color') return note.properties.color;
         if (prop === 'instrument') return note.properties.instrument;
+        if (prop === 'measure') return note.properties.measure || undefined;
         return undefined;
       },
       set(target, prop, value) {
@@ -419,11 +449,12 @@ export class Note {
         if (prop === 'color' || prop === 'instrument') {
           return note.properties[prop] !== null;
         }
+        if (prop === 'measure') return note.properties.measure === true;
         if (typeof prop === 'string' && prop.endsWith('String')) {
           const baseName = prop.slice(0, -6);
           return note.hasExpression(baseName);
         }
-        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+        const expressionVars = EXPRESSION_VARS;
         if (expressionVars.includes(prop)) {
           return note.hasExpression(prop);
         }
@@ -431,7 +462,7 @@ export class Note {
       },
       ownKeys(target) {
         const keys = [];
-        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+        const expressionVars = EXPRESSION_VARS;
         for (const name of expressionVars) {
           if (note.hasExpression(name)) {
             keys.push(name);
@@ -440,6 +471,7 @@ export class Note {
         }
         if (note.properties.color) keys.push('color');
         if (note.properties.instrument) keys.push('instrument');
+        if (note.properties.measure) keys.push('measure');
         return keys;
       },
       getOwnPropertyDescriptor(target, prop) {

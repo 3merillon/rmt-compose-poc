@@ -30,6 +30,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Fraction from 'fraction.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -166,7 +167,7 @@ function readNotes(smf) {
 function expectedNotes(mod, ppq) {
   const cache = mod.evaluateModule();
   const base = cache.get(0);
-  const tempo = base.tempo;
+  const tempo = new Fraction(60).div(base.duration);       // the time unit is a quarter note
   const notes = [];
   for (const id of Object.keys(mod.notes).map(Number)) {
     if (id === 0) continue;
@@ -281,7 +282,7 @@ const build = async (baseNote, notes) => {
   mod.evaluateModule();
   return mod;
 };
-const BASE = { frequency: '263', startTime: '0', tempo: '100', beatsPerMeasure: '4' };
+const BASE = { frequency: '263', startTime: '0', duration: '3/5' };     // 100 BPM
 
 // --- 1. real modules -------------------------------------------------------------
 console.log('MIDI export: real modules, read back from the bytes\n');
@@ -322,8 +323,8 @@ console.log('\nMIDI export: the mpe layout, more notes at once than a zone has c
 {
   const notes = [];
   // A 40-note piano cluster and a 20-note organ cluster, all sounding together.
-  for (let k = 1; k <= 40; k++) notes.push({ id: k, startTime: 'base.t', duration: 'beat(base) * 4', frequency: `base.f * (${k + 8}/8)`, instrument: 'piano' });
-  for (let k = 41; k <= 60; k++) notes.push({ id: k, startTime: 'base.t + beat(base)', duration: 'beat(base) * 2', frequency: `base.f * (${k}/32)`, instrument: 'organ' });
+  for (let k = 1; k <= 40; k++) notes.push({ id: k, startTime: 'base.t', duration: 'base.d * 4', frequency: `base.f * (${k + 8}/8)`, instrument: 'piano' });
+  for (let k = 41; k <= 60; k++) notes.push({ id: k, startTime: 'base.t + base.d', duration: 'base.d * 2', frequency: `base.f * (${k}/32)`, instrument: 'organ' });
   const v = verify(await build(BASE, notes), { layout: 'mpe' });
   const r = v.plan.report;
   check(v.problems.length === 0 && v.matched === 60, `all 60 notes are in the file: ${describe(v)}`);
@@ -340,7 +341,7 @@ console.log('\nMIDI export: the mpe layout, channel rotation\n');
 {
   // A 40-note legato line: each note starts where the previous one ends.
   const notes = [];
-  for (let k = 1; k <= 40; k++) notes.push({ id: k, startTime: k === 1 ? 'base.t' : `[${k - 1}].t + [${k - 1}].d`, duration: 'beat(base) * (1/2)', frequency: `base.f * (${k + 15}/16)` });
+  for (let k = 1; k <= 40; k++) notes.push({ id: k, startTime: k === 1 ? 'base.t' : `[${k - 1}].t + [${k - 1}].d`, duration: 'base.d * (1/2)', frequency: `base.f * (${k + 15}/16)` });
   const v = verify(await build(BASE, notes), { layout: 'mpe' });
   const order = [...v.file.notes].sort((a, b) => a.startTick - b.startTick).map((n) => n.channel + 1);
   check(v.problems.length === 0 && v.file.tracks.length === 2, `a monophonic line stays in one track: ${describe(v)}`);
@@ -355,8 +356,8 @@ console.log('\nMIDI export: the default layout plays in an ordinary player\n');
   // Four instruments sounding together, twelve notes at once, then a legato line.
   const voices = ['organ', 'fm-epiano', 'vibraphone', 'triangle-wave'];
   const notes = [];
-  for (let k = 0; k < 12; k++) notes.push({ id: k + 1, startTime: 'base.t', duration: 'beat(base) * 4', frequency: `base.f * (${k + 8}/8)`, instrument: voices[k % 4] });
-  for (let k = 0; k < 30; k++) notes.push({ id: 20 + k, startTime: `base.t + beat(base) * ${4 + k}`, duration: 'beat(base)', frequency: `base.f * (${k + 16}/16)`, instrument: voices[k % 4] });
+  for (let k = 0; k < 12; k++) notes.push({ id: k + 1, startTime: 'base.t', duration: 'base.d * 4', frequency: `base.f * (${k + 8}/8)`, instrument: voices[k % 4] });
+  for (let k = 0; k < 30; k++) notes.push({ id: 20 + k, startTime: `base.t + base.d * ${4 + k}`, duration: 'base.d', frequency: `base.f * (${k + 16}/16)`, instrument: voices[k % 4] });
   const v = verify(await build(BASE, notes));
   const used = [...new Set(v.file.notes.map((n) => n.channel + 1))].sort((a, b) => a - b);
   check(v.problems.length === 0 && v.matched === 42, `all 42 notes, each alone on its channel across the whole file: ${describe(v)}`);
@@ -370,7 +371,7 @@ console.log('\nMIDI export: the default layout plays in an ordinary player\n');
 
   // More than fifteen notes at once do not fit one port.
   const cluster = [];
-  for (let k = 1; k <= 40; k++) cluster.push({ id: k, startTime: 'base.t', duration: 'beat(base) * 4', frequency: `base.f * (${k + 8}/8)`, instrument: 'piano' });
+  for (let k = 1; k <= 40; k++) cluster.push({ id: k, startTime: 'base.t', duration: 'base.d * 4', frequency: `base.f * (${k + 8}/8)`, instrument: 'piano' });
   const big = verify(await build(BASE, cluster));
   check(big.problems.length === 0 && big.matched === 40, `a 40-note cluster is all in the file: ${describe(big)}`);
   check(big.file.tracks.slice(1).map((x) => `${x.name}:${x.notes}@${x.port}`).join(' ') === 'piano:15@0 piano (port 2):15@1 piano (port 3):10@2'
@@ -385,8 +386,8 @@ console.log('\nMIDI export: the default layout plays in an ordinary player\n');
 console.log('\nMIDI export: amplitude to velocity\n');
 {
   const amps = ['(1/4)', '(1/2)', '1', '(121/100)', '2', '4', '9', '0'];
-  const notes = amps.map((a, i) => ({ id: i + 1, startTime: `base.t + beat(base) * ${i}`, duration: 'beat(base)', frequency: 'base.f', amplitude: a }));
-  notes.push({ id: 9, startTime: 'base.t + beat(base) * 8', duration: 'beat(base)', frequency: 'base.f' });     // inherits the BaseNote's
+  const notes = amps.map((a, i) => ({ id: i + 1, startTime: `base.t + base.d * ${i}`, duration: 'base.d', frequency: 'base.f', amplitude: a }));
+  notes.push({ id: 9, startTime: 'base.t + base.d * 8', duration: 'base.d', frequency: 'base.f' });     // inherits the BaseNote's
   const v = verify(await build({ ...BASE, amplitude: '(9/16)' }, notes));
   const velocities = [...v.file.notes].sort((a, b) => a.startTick - b.startTick).map((n) => n.velocity);
   check(v.problems.length === 0, `velocities match 64·√amplitude: ${describe(v)}`);
@@ -401,23 +402,23 @@ console.log('\nMIDI export: pitch\n');
 {
   // 12-TET from A = 440 is exactly the MIDI key grid: every bend must be centred.
   const tet = [];
-  for (let k = 0; k <= 12; k++) tet.push({ id: k + 1, startTime: `base.t + beat(base) * ${k}`, duration: 'beat(base)', frequency: `base.f * 2^(${k}/12)` });
+  for (let k = 0; k <= 12; k++) tet.push({ id: k + 1, startTime: `base.t + base.d * ${k}`, duration: 'base.d', frequency: `base.f * 2^(${k}/12)` });
   let v = verify(await build({ ...BASE, frequency: '440' }, tet));
   check(v.problems.length === 0 && v.file.notes.every((n) => n.bend === 8192) && v.file.notes.map((n) => n.key).join() === '69,70,71,72,73,74,75,76,77,78,79,80,81',
     `irrational 12-TET steps from 440 Hz land on keys 69–81 with no bend: ${describe(v)}`);
 
   // Just intervals: the bend carries the difference from equal temperament.
   const ji = [['(3/2)', 1.955], ['(5/4)', -13.686], ['(7/4)', -31.174], ['(11/8)', -48.682]];
-  v = verify(await build({ ...BASE, frequency: '440' }, ji.map(([ratio], i) => ({ id: i + 1, startTime: `base.t + beat(base) * ${i}`, duration: 'beat(base)', frequency: `base.f * ${ratio}` }))));
+  v = verify(await build({ ...BASE, frequency: '440' }, ji.map(([ratio], i) => ({ id: i + 1, startTime: `base.t + base.d * ${i}`, duration: 'base.d', frequency: `base.f * ${ratio}` }))));
   const cents = [...v.file.notes].sort((a, b) => a.startTick - b.startTick).map((n) => ((n.bend - 8192) / 8192) * 200);
   check(v.problems.length === 0 && cents.every((c, i) => Math.abs(c - ji[i][1]) < 0.02),
     `3/2, 5/4, 7/4, 11/8 are bent by ${cents.map((c) => c.toFixed(2)).join(', ')} cents`);
 
   // Outside what the keys can reach.
   const far = [
-    { id: 1, startTime: 'base.t', duration: 'beat(base)', frequency: '20000' },
-    { id: 2, startTime: 'base.t', duration: 'beat(base)', frequency: '5' },
-    { id: 3, startTime: 'base.t', duration: 'beat(base)', frequency: '13000' },      // key 127 plus 62 cents: reachable
+    { id: 1, startTime: 'base.t', duration: 'base.d', frequency: '20000' },
+    { id: 2, startTime: 'base.t', duration: 'base.d', frequency: '5' },
+    { id: 3, startTime: 'base.t', duration: 'base.d', frequency: '13000' },      // key 127 plus 62 cents: reachable
   ];
   v = verify(await build(BASE, far));
   const r = v.plan.report;
@@ -431,7 +432,7 @@ console.log('\nMIDI export: time\n');
 {
   // Septuplets do not divide 960; each start is rounded on its own, never accumulated.
   const notes = [];
-  for (let k = 0; k < 70; k++) notes.push({ id: k + 1, startTime: `base.t + beat(base) * (${k}/7)`, duration: 'beat(base) * (1/7)', frequency: 'base.f' });
+  for (let k = 0; k < 70; k++) notes.push({ id: k + 1, startTime: `base.t + base.d * (${k}/7)`, duration: 'base.d * (1/7)', frequency: 'base.f' });
   let v = verify(await build(BASE, notes));
   check(v.problems.length === 0 && v.maxStart <= 0.5 + 1e-9, `70 septuplets at 960 PPQ: ${describe(v)}`);
   const sorted = [...v.file.notes].sort((a, b) => a.startTick - b.startTick);
@@ -440,16 +441,18 @@ console.log('\nMIDI export: time\n');
   v = verify(await build(BASE, notes), { ppq: 20160 });
   check(v.problems.length === 0 && v.maxStart === 0 && v.maxLength === 0 && v.file.ppq === 20160, `the same at ppq 20160 (= 21 × 960, divisible by 7): exact — ${describe(v)}`);
 
-  v = verify(await build({ ...BASE, tempo: '66', beatsPerMeasure: '(7/2)' }, notes));
+  // 66 BPM is a time unit of 10/11 s; a first bar 7/2 units long is 7/8
+  v = verify(await build({ ...BASE, duration: '10/11' },
+    [...notes, { id: 999, startTime: 'base.t', duration: 'base.d * (7/2)', measure: true }]));
   check(v.problems.length === 0 && v.file.usPerQuarter === 909091 && v.file.timeSignature.numerator === 7 && v.file.timeSignature.denominator === 8,
-    `66 BPM is stored as 909091 µs/quarter and 7/2 beats per measure as 7/8; module clock off by ≤ ${v.maxDriftMs.toFixed(4)} ms`);
+    `base.d = 10/11 s (66 BPM) is stored as 909091 µs/quarter and a bar of base.d * (7/2) as 7/8; module clock off by ≤ ${v.maxDriftMs.toFixed(4)} ms`);
 
   // The edges of the grid. The report counts a note only when it is written.
   const plan = planMidi(await build(BASE, [
-    { id: 1, startTime: 'base.t', duration: 'beat(base) * (1/100000)', frequency: 'base.f' },             // shorter than a tick
-    { id: 2, startTime: 'base.t - beat(base)', duration: 'beat(base) * 2', frequency: 'base.f' },          // begins before zero
-    { id: 3, startTime: 'base.t - beat(base) * 2', duration: 'beat(base)', frequency: 'base.f' },          // over before zero
-    { id: 4, startTime: 'base.t', duration: 'beat(base) * (1/100000)', frequency: 'base.f * 1024' },       // too short and out of range
+    { id: 1, startTime: 'base.t', duration: 'base.d * (1/100000)', frequency: 'base.f' },             // shorter than a tick
+    { id: 2, startTime: 'base.t - base.d', duration: 'base.d * 2', frequency: 'base.f' },          // begins before zero
+    { id: 3, startTime: 'base.t - base.d * 2', duration: 'base.d', frequency: 'base.f' },          // over before zero
+    { id: 4, startTime: 'base.t', duration: 'base.d * (1/100000)', frequency: 'base.f * 1024' },       // too short and out of range
   ]));
   const written = plan.tracks.flatMap((t) => t.notes);
   const short = written.find((n) => n.id === 1), early = written.find((n) => n.id === 2);

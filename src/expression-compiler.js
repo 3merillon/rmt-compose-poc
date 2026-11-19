@@ -219,25 +219,11 @@ export class ExpressionCompiler {
       return { type: 'noteRef', noteId, varName };
     }
 
-    // 4. Try findTempo: module.findTempo(ref)
-    const tempoMatch = trimmed.match(/^module\.findTempo\s*\(\s*(module\.baseNote|module\.getNoteById\s*\(\s*\d+\s*\))\s*\)$/);
-    if (tempoMatch) {
-      const ref = this.parseRefArg(tempoMatch[1]);
-      return { type: 'findTempo', ref };
-    }
-
-    // 5. Try findMeasureLength: module.findMeasureLength(ref)
-    const measureMatch = trimmed.match(/^module\.findMeasureLength\s*\(\s*(module\.baseNote|module\.getNoteById\s*\(\s*\d+\s*\))\s*\)$/);
-    if (measureMatch) {
-      const ref = this.parseRefArg(measureMatch[1]);
-      return { type: 'findMeasure', ref };
-    }
-
-    // 6. Try beat unit pattern: new Fraction(60).div(module.findTempo(ref))
-    const beatMatch = trimmed.match(/^new\s*Fraction\s*\(\s*60\s*\)\s*\.div\s*\(\s*module\.findTempo\s*\(\s*(module\.baseNote|module\.getNoteById\s*\(\s*\d+\s*\))\s*\)\s*\)$/);
-    if (beatMatch) {
-      const ref = this.parseRefArg(beatMatch[1]);
-      return { type: 'beatUnit', ref };
+    // 4-6. module.findTempo / module.findMeasureLength / the beat unit belonged
+    // to the old time model; modules using them are converted on load
+    // (migrate/relational-time.js). Typed now, they are refused with a reason.
+    if (/module\.find(Tempo|MeasureLength)\s*\(/.test(trimmed)) {
+      throw new Error("module.findTempo / module.findMeasureLength were removed: the reference note's duration is the time unit (module.baseNote.getVariable('duration')), and a measure bar's length is its duration");
     }
 
     // 7. Try simple number literal (and convert decimals to fractions)
@@ -314,8 +300,8 @@ export class ExpressionCompiler {
     }
 
     // 10. Handle bare variable names (legacy compatibility)
-    // If someone passes just "tempo" or "beatsPerMeasure", treat as baseNote reference
-    const bareVarNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength', 'amplitude'];
+    // If someone passes just "frequency" or "duration", treat as baseNote reference
+    const bareVarNames = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
     if (bareVarNames.includes(trimmed)) {
       console.warn(`Bare variable name detected: ${trimmed} - treating as module.baseNote.getVariable('${trimmed}')`);
       return { type: 'baseRef', varName: trimmed };
@@ -546,22 +532,6 @@ export class ExpressionCompiler {
         this.emitNoteRef(binary, ast.noteId, ast.varName);
         break;
 
-      case 'findTempo':
-        this.emitFindTempo(binary, ast.ref);
-        break;
-
-      case 'findMeasure':
-        this.emitFindMeasure(binary, ast.ref);
-        break;
-
-      case 'beatUnit':
-        // Beat unit = 60 / tempo
-        // Emit: LOAD_CONST 60, FIND_TEMPO, DIV
-        this.emitConstant(binary, 60, 1);
-        this.emitFindTempo(binary, ast.ref);
-        binary.writeByte(OP.DIV);
-        break;
-
       case 'sum':
         this.emitSum(binary, ast.terms);
         break;
@@ -680,40 +650,6 @@ export class ExpressionCompiler {
   }
 
   /**
-   * Emit findTempo lookup
-   */
-  emitFindTempo(binary, ref) {
-    if (ref.kind === 'base') {
-      binary.writeByte(OP.LOAD_BASE);
-      binary.writeByte(VAR.TEMPO);
-      binary.referencesBase = true;
-      // Note: Don't add explicit dependency on 0 to avoid self-cycle on base note
-    } else {
-      binary.writeByte(OP.LOAD_REF);
-      binary.writeUint16(ref.id);
-      binary.writeByte(VAR.TEMPO);
-      binary.addDependency(ref.id);
-    }
-  }
-
-  /**
-   * Emit findMeasureLength lookup
-   */
-  emitFindMeasure(binary, ref) {
-    if (ref.kind === 'base') {
-      binary.writeByte(OP.LOAD_BASE);
-      binary.writeByte(VAR.MEASURE_LENGTH);
-      binary.referencesBase = true;
-      // Note: Don't add explicit dependency on 0 to avoid self-cycle on base note
-    } else {
-      binary.writeByte(OP.LOAD_REF);
-      binary.writeUint16(ref.id);
-      binary.writeByte(VAR.MEASURE_LENGTH);
-      binary.addDependency(ref.id);
-    }
-  }
-
-  /**
    * Emit a sum of terms
    */
   emitSum(binary, terms) {
@@ -767,13 +703,13 @@ export class ExpressionCompiler {
       case 'startTime': return VAR.START_TIME;
       case 'duration': return VAR.DURATION;
       case 'frequency': return VAR.FREQUENCY;
-      case 'tempo': return VAR.TEMPO;
-      case 'beatsPerMeasure': return VAR.BEATS_PER_MEASURE;
-      case 'measureLength': return VAR.MEASURE_LENGTH;
       case 'amplitude': return VAR.AMPLITUDE;
+      case 'attack': return VAR.ATTACK;
+      case 'release': return VAR.RELEASE;
       default:
-        console.warn(`Unknown variable name: ${varName}`);
-        return VAR.START_TIME;
+        // Reading the wrong variable silently would be worse than failing:
+        // 'tempo', 'beatsPerMeasure' and 'measureLength' no longer exist.
+        throw new Error(`Unknown variable name: ${varName}`);
     }
   }
 }
@@ -893,18 +829,6 @@ export class ExpressionDecompiler {
           break;
         }
 
-        case OP.FIND_TEMPO: {
-          const ref = stack.pop();
-          stack.push(`module.findTempo(${ref})`);
-          break;
-        }
-
-        case OP.FIND_MEASURE: {
-          const ref = stack.pop();
-          stack.push(`module.findMeasureLength(${ref})`);
-          break;
-        }
-
         case OP.DUP: {
           const top = stack[stack.length - 1];
           stack.push(top);
@@ -971,10 +895,9 @@ export class ExpressionDecompiler {
       case VAR.START_TIME: return 'startTime';
       case VAR.DURATION: return 'duration';
       case VAR.FREQUENCY: return 'frequency';
-      case VAR.TEMPO: return 'tempo';
-      case VAR.BEATS_PER_MEASURE: return 'beatsPerMeasure';
-      case VAR.MEASURE_LENGTH: return 'measureLength';
       case VAR.AMPLITUDE: return 'amplitude';
+      case VAR.ATTACK: return 'attack';
+      case VAR.RELEASE: return 'release';
       default: return 'startTime';
     }
   }
