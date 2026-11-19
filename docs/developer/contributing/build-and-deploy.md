@@ -78,6 +78,7 @@ Run these with `node` directly.
 | `scripts/gen-melodies.mjs` | Generates the public-domain melodies and the `scale-systems` category |
 | `scripts/migrate-modules.mjs` | Converts module JSON files (a file or a folder) to relational time in place, with the same conversion the app applies on load; `--dry-run` reports without writing |
 | `scripts/check-doc-citations.mjs` | Prints every source line citation in the docs beside the line it names now, so stale `file.js:N` citations can be found after a `src/` edit |
+| `scripts/shift-doc-citations.py` | Re-points the docs' `file.js:N` citations (and bare `` `:N` `` ones after a cited file on the same line) after a `src/` edit, by mapping each cited line of the file at a given commit to the same line now: `python scripts/shift-doc-citations.py . v2 src/player.js` |
 | `scripts/perf/test-wasm-swap.mjs` | Headless end-to-end test of the WASM evaluator hot-swap. Cannot swap while `WASM_MATCHES_VARIABLE_LAYOUT` is `false` |
 | `scripts/perf/bench-render.mjs`, `bench-drag.mjs`, `bench-hover.mjs`, `bench-pick.mjs`, `bench-marquee.mjs`, `profile-sync.mjs`, `converge.mjs`, `who-dirties.mjs` | Playwright render/interaction benchmarks. They drive a **running** dev server |
 | `scripts/perf/visual-regress.mjs` | Playwright pixel-diff regression harness (`--capture` / `--compare`) |
