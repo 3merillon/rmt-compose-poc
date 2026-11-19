@@ -18,6 +18,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Fraction from 'fraction.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
@@ -30,6 +31,29 @@ let failures = 0;
 const ok = (msg) => console.log(`  ✓ ${msg}`);
 const bad = (msg) => { failures++; console.error(`  ✗ ${msg}`); };
 const fr = (v) => (v == null ? null : v.toFraction());
+
+// Phase C: a tempered value (an irrational power, or computed from one) was
+// recorded by the old engines as a float-derived fraction; it is now exact.
+// Such a value may differ from the record, by less than 1e-9 relative, and
+// only when the evaluation marks the variable as tempered.
+const VAR_BITS = { t: 0x01, d: 0x02, f: 0x04, a: 0x08, atk: 0x10, rel: 0x20 };
+const VAR_NAMES_BY_KEY = { t: 'startTime', d: 'duration', f: 'frequency', a: 'amplitude', atk: 'attack', rel: 'release' };
+let temperedChanged = 0, temperedNowRational = 0;
+function temperedMatch(mod, rec, id, k, want, got) {
+  if (want == null || got == null) return false;
+  const w = new Fraction(want), g = new Fraction(got);
+  const rel = Math.abs(g.div(w).valueOf() - 1);
+  if (!(rel < 1e-9)) return false;
+  const name = VAR_NAMES_BY_KEY[k];
+  const ex = rec.exact && rec.exact[name];
+  const graph = mod.getDependencyGraph?.();
+  const tempered = (rec.corruptionFlags & VAR_BITS[k]) || (ex && ex.kind === 'irrational') ||
+    (k === 'f' && graph?.isFrequencyTransitivelyCorrupted?.(Number(id)));
+  if (!tempered) return false;
+  temperedChanged++;
+  if (!ex) temperedNowRational++;
+  return true;
+}
 
 const quiet = console.info;
 console.info = () => {};
@@ -58,7 +82,7 @@ console.log('\nOne syntax: old modules convert exactly');
       };
       for (const k of Object.keys(want)) {
         values++;
-        if (!got || got[k] !== want[k]) {
+        if (!got || (got[k] !== want[k] && !(k !== 'c' && temperedMatch(mod, rec, id, k, want[k], got[k])))) {
           if (wrong++ < 3) bad(`${key} note ${id} ${k}: expected ${want[k]}, got ${got ? got[k] : 'no record'}`);
         }
       }
@@ -66,7 +90,7 @@ console.log('\nOne syntax: old modules convert exactly');
     if (wrong > 3) bad(`${key}: ${wrong - 3} more differences`);
     modules++;
   }
-  if (failures === 0) ok(`${modules} modules, ${values} values identical to the method-chain engine`);
+  if (failures === 0) ok(`${modules} modules, ${values} values identical to the method-chain engine, except ${temperedChanged} tempered values now exact (${temperedNowRational} of them rational)`);
 
   for (const f of ['shapes.json', 'defaultModule.json', 'TET-12.json', 'twinkle.json', 'ii-V-I.json']) {
     const data = JSON.parse(readFileSync(join(here, 'fixtures', 'legacy-syntax', f), 'utf8'));

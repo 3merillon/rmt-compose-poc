@@ -15,6 +15,7 @@ import {
   findVariableCycle,
   describeVariable,
 } from './variable-deps.js';
+import * as X from './value/exact.js';
 
 // Order in which a note's variables are visited when nothing forces another
 // one. Dependencies are pulled in ahead on demand, so this only breaks ties.
@@ -42,9 +43,43 @@ function createEvaluationRecord() {
     amplitude: null,
     attack: null,
     release: null,
-    corruptionFlags: 0, // Track irrational values (TET scales)
+    // Bit per variable (1 << VAR index): the variable's own expression made an
+    // irrational value (a power such as 2^(1/12)) or an approximation (a
+    // division by zero, a fallback of the exact algebra). Inherited values are
+    // reported transitively by the dependency graph, not here.
+    corruptionFlags: 0,
+    // Bit per variable: its value is approximate (src/value/exact.js), own or inherited.
+    approxFlags: 0,
+    // The exact value of each variable that is not rational: { frequency: Irrational|Approx, ... }.
+    // The fields above then hold a Fraction shadow (the nearest double) for the
+    // code that reads Fractions; evaluation itself reads these.
+    exact: null,
   };
 }
+
+const VAR_FIELDS = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
+
+/** What a reference to this variable of a record reads: the exact value, else the Fraction. */
+export function recordValue(rec, varIdx) {
+  const name = VAR_FIELDS[varIdx];
+  if (name === undefined || !rec) return null;
+  const ex = rec.exact;
+  if (ex) {
+    const v = ex[name];
+    if (v != null) return v;
+  }
+  return rec[name];
+}
+
+/** The exact value of a record's variable by name (Fraction, Irrational or Approx), or null. */
+export function exactValue(rec, name) {
+  if (!rec) return null;
+  const v = rec.exact && rec.exact[name];
+  return v != null ? v : (rec[name] ?? null);
+}
+
+/** A pooled stack Fraction copied out of the pool, so an exact value can keep it. */
+const own = (v) => (v.kind === undefined ? new Fraction(v.s * v.n, v.d) : v);
 
 /**
  * SymbolicPower represents an irrational value preserving its algebraic structure:
@@ -814,6 +849,8 @@ export class BinaryEvaluator {
     // Track if the last evaluation produced an irrational value (corruption)
     // This is set during evaluate() when a POW operation produces an irrational result
     this._lastEvalWasCorrupted = false;
+    // The exact value of the last evaluate() when it was not rational (src/value/exact.js)
+    this._lastExact = null;
 
     // References the last evaluate() could not resolve and replaced with a
     // hard-coded default: packed (noteId << 3) | varIndex, or null when none
@@ -977,16 +1014,28 @@ export class BinaryEvaluator {
   getCachedValue(noteId, varIndex) {
     const cached = this.cache.get(noteId);
     if (!cached) return null;
+    return recordValue(cached, varIndex);
+  }
 
-    switch (varIndex) {
-      case VAR.START_TIME: return cached.startTime;
-      case VAR.DURATION: return cached.duration;
-      case VAR.FREQUENCY: return cached.frequency;
-      case VAR.AMPLITUDE: return cached.amplitude;
-      case VAR.ATTACK: return cached.attack;
-      case VAR.RELEASE: return cached.release;
-      default: return null;
+  /**
+   * Push a value read from a record or computed by src/value/exact.js: a
+   * Fraction goes through the pool, an exact value (immutable) as it is.
+   */
+  pushValue(v) {
+    if (v.kind === undefined) this.push(this.pool.allocFrom(v));
+    else this.push(v);
+  }
+
+  /**
+   * Push the result of an operation on exact values. An approximation the
+   * operation made itself (not one it inherited from an operand) flags the
+   * evaluation, like an irrational power does.
+   */
+  pushResult(v, a, b) {
+    if (v.kind === 'approx' && a.kind !== 'approx' && (b === undefined || b.kind !== 'approx')) {
+      this._lastEvalWasCorrupted = true;
     }
+    this.pushValue(v);
   }
 
   /**
@@ -999,7 +1048,10 @@ export class BinaryEvaluator {
   evaluate(expr, evalCache = null) {
     // Reset corruption flag for this evaluation
     this._lastEvalWasCorrupted = false;
+    // The exact value of the last evaluate() when it was not rational (src/value/exact.js)
+    this._lastExact = null;
     this._lastEvalUnresolved = null;
+    this._lastExact = null;
 
     if (expr.isEmpty()) {
       return this.pool.alloc(0, 1);
@@ -1046,16 +1098,7 @@ export class BinaryEvaluator {
           let value = null;
           if (evalCache) {
             const cached = evalCache.get(noteId);
-            if (cached) {
-              switch (varIdx) {
-                case VAR.START_TIME: value = cached.startTime; break;
-                case VAR.DURATION: value = cached.duration; break;
-                case VAR.FREQUENCY: value = cached.frequency; break;
-                case VAR.AMPLITUDE: value = cached.amplitude; break;
-                case VAR.ATTACK: value = cached.attack; break;
-                case VAR.RELEASE: value = cached.release; break;
-              }
-            }
+            if (cached) value = recordValue(cached, varIdx);
           }
 
           if (!value) {
@@ -1069,13 +1112,7 @@ export class BinaryEvaluator {
             // Try base note (ID 0)
             if (evalCache) {
               const baseCache = evalCache.get(0);
-              if (baseCache) {
-                switch (varIdx) {
-                  case VAR.AMPLITUDE: value = baseCache.amplitude; break;
-                  case VAR.ATTACK: value = baseCache.attack; break;
-                  case VAR.RELEASE: value = baseCache.release; break;
-                }
-              }
+              if (baseCache) value = recordValue(baseCache, varIdx);
             }
             if (!value) {
               value = this.getCachedValue(0, varIdx);
@@ -1087,8 +1124,8 @@ export class BinaryEvaluator {
             // graceful degradation when expressions can't be fully resolved
             this.pushDefault(noteId, varIdx);
           } else {
-            // Push a copy to avoid mutation issues
-            this.push(this.pool.allocFrom(value));
+            // A Fraction is copied into the pool; an exact value is immutable
+            this.pushValue(value);
           }
           break;
         }
@@ -1100,16 +1137,7 @@ export class BinaryEvaluator {
           let value = null;
           if (evalCache) {
             const cached = evalCache.get(0); // Base note is ID 0
-            if (cached) {
-              switch (varIdx) {
-                case VAR.START_TIME: value = cached.startTime; break;
-                case VAR.DURATION: value = cached.duration; break;
-                case VAR.FREQUENCY: value = cached.frequency; break;
-                case VAR.AMPLITUDE: value = cached.amplitude; break;
-                case VAR.ATTACK: value = cached.attack; break;
-                case VAR.RELEASE: value = cached.release; break;
-              }
-            }
+            if (cached) value = recordValue(cached, varIdx);
           }
 
           if (!value) {
@@ -1120,7 +1148,7 @@ export class BinaryEvaluator {
             // Return sensible defaults for base note variables
             this.pushDefault(0, varIdx);
           } else {
-            this.push(this.pool.allocFrom(value));
+            this.pushValue(value);
           }
           break;
         }
@@ -1128,74 +1156,69 @@ export class BinaryEvaluator {
         case OP.ADD: {
           const b = this.pop();
           const a = this.pop();
-          const result = a.add(b);
-          this.push(this.pool.allocFrom(result));
+          if (a.kind === undefined && b.kind === undefined) {
+            this.push(this.pool.allocFrom(a.add(b)));
+          } else {
+            this.pushResult(X.add(own(a), own(b)), a, b);
+          }
           break;
         }
 
         case OP.SUB: {
           const b = this.pop();
           const a = this.pop();
-          const result = a.sub(b);
-          this.push(this.pool.allocFrom(result));
+          if (a.kind === undefined && b.kind === undefined) {
+            this.push(this.pool.allocFrom(a.sub(b)));
+          } else {
+            this.pushResult(X.sub(own(a), own(b)), a, b);
+          }
           break;
         }
 
         case OP.MUL: {
           const b = this.pop();
           const a = this.pop();
-          const result = a.mul(b);
-          this.push(this.pool.allocFrom(result));
+          if (a.kind === undefined && b.kind === undefined) {
+            this.push(this.pool.allocFrom(a.mul(b)));
+          } else {
+            this.pushResult(X.mul(own(a), own(b)), a, b);
+          }
           break;
         }
 
         case OP.DIV: {
           const b = this.pop();
           const a = this.pop();
-          // Check for division by zero (pool fields are BigInt)
-          if (b.n === 0n) {
+          if (X.isZero(b)) {
             console.warn('Division by zero in binary evaluator, using 1');
-            // Flag the result as corrupted so the note's property picks up a
-            // corruption flag (same path POW uses for irrational results) —
-            // the substituted 1 is not the expression's real value.
+            // The substituted 1 is not the expression's value: it is
+            // approximate, and flags the note like an irrational power does.
             this._lastEvalWasCorrupted = true;
-            this.push(this.pool.alloc(1, 1));
+            this.push(new X.Approx(new Fraction(1)));
+          } else if (a.kind === undefined && b.kind === undefined) {
+            this.push(this.pool.allocFrom(a.div(b)));
           } else {
-            const result = a.div(b);
-            this.push(this.pool.allocFrom(result));
+            this.pushResult(X.div(own(a), own(b)), a, b);
           }
           break;
         }
 
         case OP.NEG: {
           const a = this.pop();
-          const result = a.neg();
-          this.push(this.pool.allocFrom(result));
+          if (a.kind === undefined) this.push(this.pool.allocFrom(a.neg()));
+          else this.pushValue(X.neg(a));
           break;
         }
 
         case OP.POW: {
-          // Power operation for TET support
-          // Note: This is handled by the WASM evaluator in most cases,
-          // but we implement it here for completeness and fallback
+          // Exact: 2^(1/12) stays 2^(1/12) (src/value/exact.js). A power that
+          // is not rational flags the evaluation (the note is tempered); an
+          // approximation it had to make flags it too.
           const exp = this.pop();
           const base = this.pop();
-
-          // Convert to MusicValue for power calculation
-          const baseValue = MusicValue.rational(new Fraction(base.s * base.n, base.d));
-          const expValue = MusicValue.rational(new Fraction(exp.s * exp.n, exp.d));
-          const powResult = baseValue.pow(expValue);
-
-          // Convert back to pooled Fraction
-          if (powResult.isCorrupted()) {
-            // Track that this evaluation produced an irrational result
-            this._lastEvalWasCorrupted = true;
-            // Approximate as fraction (toFraction is guarded against the
-            // NaN/Infinity floats the 5.x constructor refuses)
-            this.push(this.pool.allocFrom(powResult.toFraction()));
-          } else {
-            this.push(this.pool.allocFrom(powResult.fraction));
-          }
+          const result = X.pow(own(base), own(exp));
+          if (result.kind === 'irrational') this._lastEvalWasCorrupted = true;
+          this.pushResult(result, base, exp);
           break;
         }
 
@@ -1222,7 +1245,13 @@ export class BinaryEvaluator {
       console.warn(`Stack has ${this.stackTop} items after evaluation, expected 1`);
     }
 
-    return this.stackTop > 0 ? this.pop() : this.pool.alloc(0, 1);
+    if (this.stackTop === 0) return this.pool.alloc(0, 1);
+    const result = this.pop();
+    if (result.kind === undefined) return result;
+    // Not rational: the exact value stays available as _lastExact, the caller
+    // gets its Fraction shadow (the nearest double, or the approximation)
+    this._lastExact = result;
+    return this.pool.allocFrom(X.shadow(result));
   }
 
   /**
@@ -1433,6 +1462,12 @@ export class BinaryEvaluator {
         // Pooled fractions get reused when pool.reset() is called, which would
         // corrupt our cached values.
         const value = new Fraction(pooledValue.s * pooledValue.n, pooledValue.d);
+        const exact = this._lastExact;
+        if (exact !== null) {
+          if (record.exact === null) record.exact = {};
+          record.exact[VAR_FIELDS[varIndex]] = exact;
+          if (exact.kind === 'approx') record.approxFlags |= getCorruptionFlag(varIndex);
+        }
         switch (varIndex) {
           case VAR.START_TIME: record.startTime = value; break;
           case VAR.DURATION: record.duration = value; break;

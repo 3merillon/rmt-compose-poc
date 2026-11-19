@@ -32,8 +32,8 @@ feature. The JS path carries the app on its own: a full re-evaluation of the 100
 |---|---|---|
 | `initWasm()` is called eagerly at import time | `src/store/app-state.js:6` | **Returns `false` early**: `isEvaluatorHotSwapEnabled()` is false while the layout flag is false — no fetch |
 | `initWasm()` is `await`ed during `initApp()` | `src/main.js:82` | Same early-out |
-| `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:65-74` | Same call, same gate, deduped by a `wasmInitialized` guard |
-| `Module` constructor registers a hot-swap callback | `src/module.js:65-71` | **Never**: `isEvaluatorHotSwapEnabled()` is false everywhere |
+| `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:64-73` | Same call, same gate, deduped by a `wasmInitialized` guard |
+| `Module` constructor registers a hot-swap callback | `src/module.js:66-72` | **Never**: `isEvaluatorHotSwapEnabled()` is false everywhere |
 | Evaluation | `src/binary-evaluator.js` | JS |
 
 So the 384 KB `rmt_core_bg.wasm` is **never downloaded or instantiated** — every boot-time caller
@@ -217,7 +217,7 @@ comes first.
 - **The hot-swap.** WASM init is async and normally loses the race against `Module` construction, so
   a module starts on the JS evaluator. `Module`'s constructor registers an `onWasmReady` callback
   (holding a `WeakRef(this)` so discarded modules don't leak) that calls `_upgradeEvaluators()`
-  (`src/module.js:137`): it swaps `_binaryEvaluator` / `_incrementalEvaluator` atomically, clears the
+  (`src/module.js:138`): it swaps `_binaryEvaluator` / `_incrementalEvaluator` atomically, clears the
   evaluation cache and marks every note dirty, so the next `evaluateModule()` re-evaluates on the new
   engine. Values are identical across engines, so nothing goes visually stale mid-swap.
 - **In Node.** `node scripts/perf/test-wasm-swap.mjs` builds a `Module` *before* init completes,

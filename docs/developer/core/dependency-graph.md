@@ -81,7 +81,7 @@ Each is `Map<dependencyId, Set<dependentId>>`.
 
 `base.f` sets `BinaryExpression.referencesBase` and lands the note in `baseNoteDependents`. It **never** appears in `dependencies` or `dependents` as an edge to note 0 — that would make the BaseNote depend on itself, and the BaseNote *is* note 0 (`emitNoteReference()`, `src/dsl/compiler.js:120`).
 
-Consumers simulate the edge instead. `Module.getDependentNotes(0)` unions `getAllDependents(0)` with `getBaseNoteDependents()` (`src/module.js:384-397`) — one level deep, which is what the UI wants.
+Consumers simulate the edge instead. `Module.getDependentNotes(0)` unions `getAllDependents(0)` with `getBaseNoteDependents()` (`src/module.js:385-398`) — one level deep, which is what the UI wants.
 
 Re-evaluation needs more than that, and gets it from `getEvaluationDependents(id)` (`:780`): the transitive closure over `dependents` that, whenever it reaches note 0, continues into `baseNoteDependents` **and** `implicitBaseDependents` and on through everything that reads those. Before it existed, a BaseNote edit dirtied only the notes that wrote `base` themselves; a note defined purely against another note (`[1].f * (5/4)`) kept its old value.
 
@@ -93,7 +93,7 @@ Any diagram showing note 0 as a graph edge target is wrong.
 
 ## Registration
 
-The graph does not build itself. It has no `buildFromModule()`. **The module drives registration**, one note at a time, from `Module._registerNoteDependencies(note)` (`src/module.js:176-207`) — which takes a **Note object**, not an id:
+The graph does not build itself. It has no `buildFromModule()`. **The module drives registration**, one note at a time, from `Module._registerNoteDependencies(note)` (`src/module.js:177-208`) — which takes a **Note object**, not an id:
 
 ```javascript
 _registerNoteDependencies(note) {
@@ -112,12 +112,12 @@ _registerNoteDependencies(note) {
 ```
 
 ::: tip Re-registration is skipped when dependencies cannot have changed
-Dependencies derive purely from a note's compiled expressions. If the note's id, its expression epoch (`Note._depsEpoch`, declared at `src/note.js:103` and bumped on every expression mutation — `src/note.js:273`, `src/note.js:286`, `src/note.js:301`, `src/note.js:318`) and the graph generation are all unchanged, the note is already registered identically.
+Dependencies derive purely from a note's compiled expressions. If the note's id, its expression epoch (`Note._depsEpoch`, declared at `src/note.js:103` and bumped on every expression mutation — `src/note.js:287`, `src/note.js:300`, `src/note.js:315`, `src/note.js:332`) and the graph generation are all unchanged, the note is already registered identically.
 
 This matters because `markNoteDirty()` calls this for **every** marked note — on an interval-arrow change that is every dependent in the closure. The skip avoids rewriting up to 22 maps per untouched note.
 :::
 
-The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:287`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`src/binary-note.js:350`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
+The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:301`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`src/binary-note.js:364`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
 
 `_updateDependencies()` (`:439-493`) diffs old against new, patches the inverse index, and **bumps `_corruptionEpoch` if the dependency set actually changed** — because changing a note's dependencies can change whether *other* notes render as transitively corrupted, even if no corruption flag moved.
 
@@ -136,7 +136,7 @@ These are the real method names.
 | `getAllDependencies(id)` | `Set` — transitive, upward | `:1331` |
 | `getBaseNoteDependents()` | `Set` | `:1360` |
 
-`Module.getDirectDependencies(id)` and `Module.getDependentNotes(id)` wrap these and return **Arrays**, not Sets (`src/module.js:376`, `src/module.js:384`).
+`Module.getDirectDependencies(id)` and `Module.getDependentNotes(id)` wrap these and return **Arrays**, not Sets (`src/module.js:377`, `src/module.js:385`).
 
 ### Property-scoped traversals
 
@@ -148,7 +148,7 @@ These back the property-coloured dependency lines and the drag preview. Each is 
 | `getAllAffectedByStartTimeChange(id)` | …its **startTime** changes | `:1245` |
 | `getAllAffectedByDurationChange(id)` | …its **duration** changes | `:1159` |
 
-`Module.getDependentsByProperty(id)` (`src/module.js:411`) calls all three and returns `{frequency: [], startTime: [], duration: []}` — which is exactly what the renderer colours:
+`Module.getDependentsByProperty(id)` (`src/module.js:412`) calls all three and returns `{frequency: [], startTime: [], duration: []}` — which is exactly what the renderer colours:
 
 ![Dependency lines radiating from a selected note, coloured by property: orange for frequency, teal for startTime, purple for duration](/img/dependency-lines.png)
 
@@ -164,7 +164,7 @@ The drag path uses the narrower startTime traversals directly: `getAllStartTimeO
 | `getChildrenTreeByAllProperties(id)` | `{edgesByProperty: {frequency: [], startTime: [], duration: []}, maxDepth}` — all three in one traversal. **Not** the same shape as above: the edges are bucketed by originating property, not flat | `:1607` |
 | `getMeasureChain(measureId, isMeasure, getStartTime, isChainLink?)` | `[{id, startSec}]` — the linear measure chain, earliest to latest, O(chain length) | `:1917` |
 
-`getMeasureChain()` is live: `src/player.js:5627` and `src/renderer/webgl2/workspace.js:2478` both use it.
+`getMeasureChain()` is live: `src/player.js:5271` and `src/renderer/webgl2/workspace.js:2478` both use it.
 
 ### Structural
 
@@ -214,7 +214,7 @@ Reading a *different* variable of the same note, or a note that reads this one t
 The evaluator applies the identical rule when it orders a batch, so a cycle that arrives in a hand-written JSON file is reported by name rather than refused — see [True cycles](/developer/core/binary-evaluator#true-cycles).
 
 ::: warning The move and resize gestures still think in whole notes
-After a drag, `player.js` re-anchors the moved note (and dependents that would now start before it) on an ancestor found by walking **start-time parents**, so that nothing references a note that starts later. That walk assumes two notes never read each other; with cross-variable relationships it can arrive back at the note being rewritten. A re-anchor that would close a loop is now skipped (`__retargetWouldCycleGL()`, `src/player.js:2287`) and the note keeps its expression. The gestures do not otherwise understand cross-variable relationships: a move still rewrites the moved note's start, duration and frequency into their canonical forms.
+After a drag, `player.js` re-anchors the moved note (and dependents that would now start before it) on an ancestor found by walking **start-time parents**, so that nothing references a note that starts later. That walk assumes two notes never read each other; with cross-variable relationships it can arrive back at the note being rewritten. A re-anchor that would close a loop is now skipped (`__retargetWouldCycleGL()`, `src/player.js:2288`) and the note keeps its expression. The gestures do not otherwise understand cross-variable relationships: a move still rewrites the moved note's start, duration and frequency into their canonical forms.
 :::
 
 ## Corruption tracking
@@ -233,7 +233,7 @@ The graph owns this and nothing else does. A property is *corrupted* when a `^` 
 | `getAllFrequencyDependencies(id)` | transitive frequency ancestors | `:1857` |
 | `clearCorruptionFlags(id)` | delete | `:1802` |
 
-Flags arrive from `Module._updateCorruptionFlags()` after each evaluation (`src/module.js:682-705`), scoped to the dirty set.
+Flags arrive from `Module._updateCorruptionFlags()` after each evaluation (`src/module.js:683-706`), scoped to the dirty set.
 
 ### How the renderer consumes it
 

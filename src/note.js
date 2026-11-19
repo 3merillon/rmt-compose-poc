@@ -219,6 +219,20 @@ export class Note {
   }
 
   /**
+   * The exact evaluated value of an expression variable (src/value/exact.js):
+   * a Fraction when rational, else an Irrational or an Approx. getVariable()
+   * returns a Fraction in every case (the nearest double when not rational).
+   */
+  getExactVariable(name) {
+    const shadowValue = this.getVariable(name);
+    if (shadowValue == null || !this.module) return shadowValue;
+    const cache = this.module.getEvaluationCache();
+    const rec = cache && cache.get(this.id);
+    const exact = rec && rec.exact && rec.exact[name];
+    return exact != null ? exact : shadowValue;
+  }
+
+  /**
    * Set a variable value
    * Compiles expression text to binary and triggers re-evaluation
    */

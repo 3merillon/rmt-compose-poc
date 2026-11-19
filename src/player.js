@@ -9,7 +9,8 @@ import { multiplyExpressionByFraction } from './utils/simplify.js';
 import { Workspace, startParentIdFromRaw, measureChainLinkParentId } from './renderer/webgl2/workspace.js';
 import { isMeasureNote, EXPRESSION_VARS } from './note.js';
 import { menuBar } from './menu/menu-bar.js';
-import { parseFrequencyAlgebra } from './utils/frequency-algebra.js';
+import { ratioToAnchorExpr } from './utils/value-expr.js';
+import { compare as compareExact } from './value/exact.js';
 import { PropertyMap } from './dsl/constants.js';
 import { compiler } from './expression-compiler.js';
 import { findDependencyCycle } from './variable-deps.js';
@@ -797,7 +798,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         let lastMeasure = measureNotes[0];
         for (let i = 1; i < measureNotes.length; i++) {
             try {
-                if (measureNotes[i].getVariable('startTime').compare(lastMeasure.getVariable('startTime')) > 0) {
+                if (compareExact(measureNotes[i].getExactVariable('startTime'), lastMeasure.getExactVariable('startTime')) > 0) {
                     lastMeasure = measureNotes[i];
                 }
             } catch { /* non-Fraction value — keep current candidate */ }
@@ -834,11 +835,11 @@ document.addEventListener('DOMContentLoaded', async function() {
             // collapses rationals that differ past double precision, and a
             // NaN comparator key would leave loop/transport end times wrong.
             measureNotes.sort((a, b) => {
-                const aStart = a.getVariable('startTime');
-                const bStart = b.getVariable('startTime');
+                const aStart = a.getExactVariable('startTime');
+                const bStart = b.getExactVariable('startTime');
                 if (!aStart || !bStart) return a.id - b.id;
                 try {
-                    const cmp = aStart.compare(bStart);
+                    const cmp = compareExact(aStart, bStart);
                     if (cmp !== 0) return cmp;
                 } catch (e) { /* non-Fraction value — fall through */ }
                 return a.id - b.id;
@@ -2329,339 +2330,18 @@ function __parseParentFromStartTimeStringGL(note) {
 }
 
 /**
- * Parse a frequency expression to extract algebra and note reference
- * (utils/frequency-algebra.js). Returns { algebra: {coeff, powers}, noteRef }
- * or null; noteRef is null for the BaseNote, otherwise the note ID.
+ * The frequency of `note` written relative to `newAnchor`, from their exact values
+ * (src/value/exact.js, src/utils/value-expr.js): `k * [a].f`, with k exact — a
+ * power such as 2^(7/12) stays a power. null when the ratio is approximate; the
+ * note then keeps its expression.
  */
-function parseFrequencyExpressionLocal(exprText) {
-  return parseFrequencyAlgebra(exprText);
-}
-
-/**
- * Trace frequency algebra from a note back to baseNote.
- * Returns combined algebra or null if tracing fails.
- */
-function traceFrequencyAlgebraToBaseNote(noteId, moduleInstance, visited = new Set()) {
-  if (visited.has(noteId)) return null;
-  visited.add(noteId);
-
-  if (noteId === 0 || noteId === null) {
-    return { coeff: new Fraction(1), powers: [] };
-  }
-
-  const note = moduleInstance.getNoteById(noteId);
-  if (!note) return null;
-
-  const exprText = note.variables?.frequencyString;
-  if (!exprText) return null;
-
-  const parsed = parseFrequencyExpressionLocal(exprText, moduleInstance);
-  if (!parsed) return null;
-
-  if (parsed.noteRef === null) {
-    // Already references baseNote directly
-    return parsed.algebra;
-  }
-
-  // Recursively trace the referenced note
-  const refAlgebra = traceFrequencyAlgebraToBaseNote(parsed.noteRef, moduleInstance, visited);
-  if (!refAlgebra) return null;
-
-  // Combine: this note's algebra applied to the referenced note's algebra
-  return multiplyAlgebrasLocal(parsed.algebra, refAlgebra);
-}
-
-/**
- * Multiply two frequency algebras together
- */
-function multiplyAlgebrasLocal(a, b) {
-  const gcdLocal = (x, y) => y === 0 ? Math.abs(x) : gcdLocal(y, x % y);
-  const newCoeff = a.coeff.mul(b.coeff);
-
-  // Merge power terms
-  const map = new Map();
-  for (const p of a.powers) {
-    map.set(p.base, { base: p.base, expNum: p.expNum, expDen: p.expDen });
-  }
-  for (const p of b.powers) {
-    if (map.has(p.base)) {
-      const existing = map.get(p.base);
-      const newNum = existing.expNum * p.expDen + p.expNum * existing.expDen;
-      const newDen = existing.expDen * p.expDen;
-      const g = gcdLocal(Math.abs(newNum), newDen);
-      map.set(p.base, { base: p.base, expNum: newNum / g, expDen: newDen / g });
-    } else {
-      map.set(p.base, { base: p.base, expNum: p.expNum, expDen: p.expDen });
-    }
-  }
-
-  const newPowers = [...map.values()].filter(p => p.expNum !== 0)
-    .sort((x, y) => (x.base < y.base ? -1 : x.base > y.base ? 1 : 0));
-  return { coeff: newCoeff, powers: newPowers };
-}
-
-/**
- * Divide algebra a by algebra b (a / b)
- */
-function divideAlgebrasLocal(a, b) {
-  const gcdLocal = (x, y) => y === 0 ? Math.abs(x) : gcdLocal(y, x % y);
-  const newCoeff = a.coeff.div(b.coeff);
-
-  // Subtract power exponents
-  const map = new Map();
-  for (const p of a.powers) {
-    map.set(p.base, { base: p.base, expNum: p.expNum, expDen: p.expDen });
-  }
-  for (const p of b.powers) {
-    if (map.has(p.base)) {
-      const existing = map.get(p.base);
-      // Subtract: a/b - c/d = (ad - bc) / bd
-      const newNum = existing.expNum * p.expDen - p.expNum * existing.expDen;
-      const newDen = existing.expDen * p.expDen;
-      const g = gcdLocal(Math.abs(newNum), newDen);
-      map.set(p.base, { base: p.base, expNum: newNum / g, expDen: newDen / g });
-    } else {
-      // Subtracting means negative exponent
-      map.set(p.base, { base: p.base, expNum: -p.expNum, expDen: p.expDen });
-    }
-  }
-
-  const newPowers = [...map.values()].filter(p => p.expNum !== 0)
-    .sort((x, y) => (x.base < y.base ? -1 : x.base > y.base ? 1 : 0));
-  return { coeff: newCoeff, powers: newPowers };
-}
-
-/**
- * Convert algebra to expression string relative to an anchor
- */
-function algebraToExpressionLocal(algebra, anchorRef) {
-  // "(coeff) * anchorRef * base ^ (n/d) * ..."
-  const parts = [];
-
-  if (!algebra.coeff.equals(1)) {
-    parts.push(fracToDSL(algebra.coeff));
-  }
-
-  parts.push(anchorRef); // e.g. "base.f" or "[3].f"
-
-  for (const p of algebra.powers) {
-    const expStr = p.expDen === 1 ? `${p.expNum}` : `(${p.expNum}/${p.expDen})`;
-    parts.push(`${p.base} ^ ${expStr}`);
-  }
-
-  return parts.join(' * ');
-}
-
-/**
- * Rebuild a frequency expression using algebraic preservation.
- * This preserves POW terms exactly by parsing the original expression's algebra
- * and recomposing it relative to the new anchor.
- *
- * @param {Note} note - The note whose frequency expression is being rebuilt
- * @param {Note} newAnchor - The new anchor note to reference
- * @param {Object} moduleInstance - The module instance for tracing
- * @returns {string|null} - New expression string, or null if cannot be rebuilt algebraically
- */
-function rebuildFrequencyAlgebraically(note, newAnchor, moduleInstance) {
-  const debug = typeof window !== 'undefined' && window.__RMT_DEBUG_ALGEBRA;
+function rebuildFrequencyForAnchor(note, newAnchor) {
   try {
-    const exprText = note.variables?.frequencyString;
-    if (!exprText) {
-      if (debug) console.log('[AlgebraRebuild] No frequencyString');
-      return null;
-    }
-
-    // Parse the current expression
-    const parsed = parseFrequencyExpressionLocal(exprText, moduleInstance);
-    if (!parsed) {
-      if (debug) console.log('[AlgebraRebuild] Failed to parse:', exprText);
-      return null;
-    }
-    if (debug) console.log('[AlgebraRebuild] Parsed:', JSON.stringify(parsed, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
-
-    const anchorRef = newAnchor.id === 0 ? 'base.f' : `[${newAnchor.id}].f`;
-
-    // Get the old reference's algebra relative to baseNote
-    const oldRefId = parsed.noteRef;  // null means baseNote
-    const oldRefAlgebra = traceFrequencyAlgebraToBaseNote(oldRefId, moduleInstance);
-    if (!oldRefAlgebra) {
-      if (debug) console.log('[AlgebraRebuild] Failed to trace oldRef:', oldRefId);
-      return null;
-    }
-    if (debug) console.log('[AlgebraRebuild] oldRefAlgebra:', JSON.stringify(oldRefAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
-
-    // Get the new anchor's algebra relative to baseNote
-    const newAnchorAlgebra = traceFrequencyAlgebraToBaseNote(newAnchor.id, moduleInstance);
-    if (!newAnchorAlgebra) {
-      if (debug) console.log('[AlgebraRebuild] Failed to trace newAnchor:', newAnchor.id);
-      return null;
-    }
-    if (debug) console.log('[AlgebraRebuild] newAnchorAlgebra:', JSON.stringify(newAnchorAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
-
-    // The note's absolute algebra (relative to baseNote) is:
-    // noteAbsoluteAlgebra = parsed.algebra * oldRefAlgebra
-    const noteAbsoluteAlgebra = multiplyAlgebrasLocal(parsed.algebra, oldRefAlgebra);
-    if (debug) console.log('[AlgebraRebuild] noteAbsoluteAlgebra:', JSON.stringify(noteAbsoluteAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
-
-    // To express relative to newAnchor, we need:
-    // noteAbsoluteAlgebra = newRelativeAlgebra * newAnchorAlgebra
-    // So: newRelativeAlgebra = noteAbsoluteAlgebra / newAnchorAlgebra
-    const newRelativeAlgebra = divideAlgebrasLocal(noteAbsoluteAlgebra, newAnchorAlgebra);
-    if (debug) console.log('[AlgebraRebuild] newRelativeAlgebra:', JSON.stringify(newRelativeAlgebra, (k, v) => v?.n !== undefined && v?.d !== undefined ? `${v.s*v.n}/${v.d}` : (typeof v === 'bigint' ? v.toString() : v)));
-
-    // Generate the new expression
-    const result = algebraToExpressionLocal(newRelativeAlgebra, anchorRef);
-    if (debug) console.log('[AlgebraRebuild] Result:', result);
-    return result;
-  } catch (e) {
-    if (debug) console.log('[AlgebraRebuild] Exception:', e);
+    const ref = newAnchor.id === 0 ? 'base.f' : `[${newAnchor.id}].f`;
+    return ratioToAnchorExpr(note.getExactVariable('frequency'), newAnchor.getExactVariable('frequency'), ref);
+  } catch {
     return null;
   }
-}
-
-/**
- * Rebuild a frequency expression to target a new anchor while preserving corruption.
- * Corruption is "unwashable" - if the note's frequency involves irrational values,
- * we must express the relationship to the new anchor using .pow() to preserve exactness.
- *
- * @param {Note} note - The note whose frequency expression is being rebuilt
- * @param {Note} newAnchor - The new anchor note to reference
- * @param {Object} depGraph - The dependency graph for corruption checks
- * @returns {string|null} - New expression string, or null if cannot be rebuilt
- */
-function rebuildFrequencyForAnchor(note, newAnchor, depGraph) {
-  try {
-    const anchorRef = newAnchor.id === 0 ? 'base.f' : `[${newAnchor.id}].f`;
-
-    const noteFreq = note.getVariable('frequency');
-    const anchorFreq = newAnchor.getVariable('frequency');
-    if (!noteFreq || !anchorFreq) return null;
-
-    // Exact ratio when both values are rational — this is what keeps
-    // retargeted frequencies exact at any chain depth.
-    let exactRatio = null;
-    if (noteFreq instanceof Fraction && anchorFreq instanceof Fraction && anchorFreq.n !== 0n) {
-      try { exactRatio = noteFreq.div(anchorFreq); } catch { exactRatio = null; }
-    }
-
-    const noteVal = toNumber(noteFreq, NaN);
-    const anchorVal = toNumber(anchorFreq, NaN);
-
-    if (!isFinite(noteVal) || !isFinite(anchorVal) || Math.abs(anchorVal) < 1e-12) return null;
-
-    const ratio = noteVal / anchorVal;
-
-    // If ratio is 1, just reference anchor directly
-    if (exactRatio ? exactRatio.equals(1) : Math.abs(ratio - 1) < 1e-9) {
-      return anchorRef;
-    }
-
-    // Check if corruption is involved
-    const noteTransitivelyCorrupt = depGraph?.isFrequencyTransitivelyCorrupted?.(note.id);
-    const anchorCorrupt = newAnchor.id !== 0 && depGraph?.isPropertyCorrupted?.(newAnchor.id, 0x04);
-
-    // If note is transitively corrupt, we need to express ratio using .pow() to preserve precision
-    if (noteTransitivelyCorrupt && !anchorCorrupt) {
-      // The ratio contains irrational factors - express as base^(n/d) to preserve the exact relationship
-      // Supports multi-base TET systems: base 2 (octave), base 3 (tritave/Bohlen-Pierce), etc.
-
-      // TET configurations: {base, divisions[]}
-      // Ordered by commonality within each base
-      const tetConfigs = [
-        { base: 2, divisions: [12, 24, 19, 31, 53, 1, 2, 3, 4, 6] },  // Standard octave-based
-        { base: 3, divisions: [13, 19, 39, 1, 2, 3] },                 // Bohlen-Pierce (tritave)
-      ];
-
-      const gcd = (a, b) => b === 0 ? Math.abs(a) : gcd(b, a % b);
-
-      // Try each base to find exact TET representation
-      for (const config of tetConfigs) {
-        const logBaseRatio = Math.log(ratio) / Math.log(config.base);
-
-        for (const denom of config.divisions) {
-          const numer = Math.round(logBaseRatio * denom);
-          const reconstructed = Math.pow(config.base, numer / denom);
-
-          // Check if this approximation is exact enough
-          if (Math.abs(reconstructed - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-12) {
-            // Found exact representation
-            const g = gcd(Math.abs(numer), denom);
-            const simpNum = numer / g;
-            const simpDen = denom / g;
-
-            if (simpDen === 1) {
-              // Integer power of base — computed in BigInt so the emitted
-              // multiplier keeps every digit (Math.pow overflows past 2^53)
-              if (simpNum === 0) return anchorRef;
-              const multiplier = BigInt(config.base) ** BigInt(Math.abs(simpNum));
-              return simpNum > 0 ? `${multiplier} * ${anchorRef}` : `(1/${multiplier}) * ${anchorRef}`;
-            }
-            return `${anchorRef} * ${config.base} ^ (${simpNum}/${simpDen})`;
-          }
-        }
-      }
-
-      // Couldn't find clean single-base TET representation - try to factor out the rational part
-      // First, try base 2 (most common), then base 3
-      for (const base of [2, 3]) {
-        const logBaseRatio = Math.log(ratio) / Math.log(base);
-        const defaultDenom = base === 2 ? 12 : 13;  // 12-TET for base 2, 13-BP for base 3
-        const steps = logBaseRatio * defaultDenom;
-        const tetPart = Math.round(steps);
-        const tetRatio = Math.pow(base, tetPart / defaultDenom);
-        const remainingRatio = ratio / tetRatio;
-
-        // Check if remaining ratio is close to a simple fraction
-        try {
-          const remainingFrac = new Fraction(remainingRatio).simplify(1e-9);
-          if (Math.abs(remainingFrac.valueOf() - remainingRatio) / Math.max(Math.abs(remainingRatio), 1e-12) < 1e-9) {
-            // We can express as: rationalPart * anchor * base^(tetPart/defaultDenom)
-            const g = gcd(Math.abs(tetPart), defaultDenom);
-            const simpTetNum = tetPart / g;
-            const simpTetDen = defaultDenom / g;
-
-            const tetMultStr = (b, e) => `${BigInt(b) ** BigInt(Math.abs(e))}`;
-            const parts = [];
-            if (remainingFrac.n !== remainingFrac.d) {
-              parts.push(fracToDSL(remainingFrac));
-            }
-            parts.push(anchorRef);
-            if (simpTetDen === 1) {
-              if (simpTetNum !== 0) {
-                parts.push(simpTetNum > 0 ? tetMultStr(base, simpTetNum) : `(1/${tetMultStr(base, simpTetNum)})`);
-              }
-            } else {
-              parts.push(`${base} ^ (${simpTetNum}/${simpTetDen})`);
-            }
-            return parts.join(' * ');
-          }
-        } catch {}
-      }
-
-      // Last resort: use base 2 TET approximation (may have small error but preserves corruption)
-      const log2Ratio = Math.log2(ratio);
-      const semitones = log2Ratio * 12;
-      const tetPart = Math.round(semitones);
-      const g = gcd(Math.abs(tetPart), 12);
-      return `${anchorRef} * 2 ^ (${tetPart / g}/${12 / g})`;
-    }
-
-    // Clean case or anchor is also corrupt - use rational fraction.
-    // The exact ratio of the two evaluated Fractions is preferred; a
-    // float-derived one is only a fallback for non-Fraction values.
-    try {
-      const ratioFrac = exactRatio || new Fraction(ratio);
-      if (exactRatio || Math.abs(ratioFrac.valueOf() - ratio) / Math.max(Math.abs(ratio), 1e-12) < 1e-9) {
-        return `${fracToDSL(ratioFrac)} * ${anchorRef}`;
-      }
-    } catch {}
-
-    // Fallback: approximate the float as an exact fraction (a raw float
-    // literal can stringify to scientific notation, which never re-parses)
-    try {
-      return `${fracToDSL(new Fraction(ratio))} * ${anchorRef}`;
-    } catch { return null; }
-  } catch { return null; }
 }
 
 function __findNextMeasureInChainGL(measure) {
@@ -2869,7 +2549,7 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
         let newFreqString;
         if (anyCorruption) {
           // Use value-based rebuilding to preserve evaluated frequency exactly
-          newFreqString = rebuildFrequencyForAnchor(dep, replacementTarget, depGraph);
+          newFreqString = rebuildFrequencyForAnchor(dep, replacementTarget);
         } else {
           // Substitute [movedId].f with the new anchor's
           const newRef = (replacementTarget && replacementTarget.id === 0) ? 'base.f'
@@ -5235,48 +4915,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               const anchorIsCorrupt = anchor?.id !== 0 && depGraph?.isPropertyCorrupted?.(anchor.id, 0x04);
               const corruptionInvolved = isTransitivelyCorrupt || anchorIsCorrupt || (fRaw0 && (fRaw0.includes('.pow(') || fRaw0.includes('^')));
 
-              if (corruptionInvolved) {
-                // FIRST: Try algebraic preservation - this preserves POW terms exactly
-                // by parsing the original expression and recomposing relative to the new anchor
-                let newExpr = rebuildFrequencyAlgebraically(n, anchor, myModule);
-
-                // FALLBACK: If algebraic approach fails, use value-based ratio detection
-                if (!newExpr) {
-                  newExpr = rebuildFrequencyForAnchor(n, anchor, depGraph);
-                }
-
-                if (newExpr && !__retargetWouldCycleGL(n, 'frequency', newExpr)) {
-                  n.setVariable('frequencyString', newExpr);
-                }
-                // If newExpr is still null, preserve original expression (safer than corrupting)
-              } else {
-                // No corruption involved - safe to use ratio-based rebuilding with simplification
-                const curFv = n.getVariable('frequency');
-                const ancFv = anchor.getVariable('frequency');
-
-                // Exact ratio of the two evaluated Fractions — the old float
-                // round-trip (new Fraction(valueOf())) fabricated nearby wrong
-                // ratios once values passed 2^53.
-                let ratio = null;
-                if (curFv instanceof Fraction && ancFv instanceof Fraction && ancFv.n !== 0n) {
-                  try { ratio = curFv.div(ancFv); } catch { ratio = null; }
-                }
-                if (!ratio) {
-                  const curVal = toNumber(curFv, NaN);
-                  const ancVal = toNumber(ancFv, NaN);
-                  if (isFinite(curVal) && isFinite(ancVal) && Math.abs(ancVal) > 1e-12) {
-                    try { ratio = new Fraction(curVal / ancVal); } catch { ratio = null; }
-                  }
-                }
-
-                if (ratio) {
-                  const aRef = (anchor.id === 0) ? 'base.f' : `[${anchor.id}].f`;
-                  const rawFreq = ratio.equals(1) ? aRef : `${fracToDSL(ratio)} * ${aRef}`;
-                  if (!__retargetWouldCycleGL(n, 'frequency', rawFreq)) {
-                    n.setVariable('frequencyString', rawFreq);
-                  }
-                }
+              // Rewritten from the exact values: a tempered ratio stays a power
+              const newExpr = rebuildFrequencyForAnchor(n, anchor);
+              if (newExpr && !__retargetWouldCycleGL(n, 'frequency', newExpr)) {
+                n.setVariable('frequencyString', newExpr);
               }
+              // null (an approximate ratio): the original expression is kept
 
               // Enhanced frequency debug logging
               try {

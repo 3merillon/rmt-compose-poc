@@ -38,6 +38,29 @@ const ok = (msg) => { passes++; console.log(`  ✓ ${msg}`); };
 const bad = (msg) => { failures++; console.error(`  ✗ ${msg}`); };
 const fr = (v) => (v == null ? null : v.toFraction());
 
+// Phase C: a tempered value (an irrational power, or computed from one) was
+// recorded by the old engines as a float-derived fraction; it is now exact.
+// Such a value may differ from the record, by less than 1e-9 relative, and
+// only when the evaluation marks the variable as tempered.
+const VAR_BITS = { t: 0x01, d: 0x02, f: 0x04, a: 0x08, atk: 0x10, rel: 0x20 };
+const VAR_NAMES_BY_KEY = { t: 'startTime', d: 'duration', f: 'frequency', a: 'amplitude', atk: 'attack', rel: 'release' };
+let temperedChanged = 0, temperedNowRational = 0;
+function temperedMatch(mod, rec, id, k, want, got) {
+  if (want == null || got == null) return false;
+  const w = new Fraction(want), g = new Fraction(got);
+  const rel = Math.abs(g.div(w).valueOf() - 1);
+  if (!(rel < 1e-9)) return false;
+  const name = VAR_NAMES_BY_KEY[k];
+  const ex = rec.exact && rec.exact[name];
+  const graph = mod.getDependencyGraph?.();
+  const tempered = (rec.corruptionFlags & VAR_BITS[k]) || (ex && ex.kind === 'irrational') ||
+    (k === 'f' && graph?.isFrequencyTransitivelyCorrupted?.(Number(id)));
+  if (!tempered) return false;
+  temperedChanged++;
+  if (!ex) temperedNowRational++;
+  return true;
+}
+
 async function compareOracle(oracleFile, baseDir) {
   const oracle = JSON.parse(readFileSync(oracleFile, 'utf8')).modules;
   let modules = 0, values = 0;
@@ -66,7 +89,7 @@ async function compareOracle(oracleFile, baseDir) {
       if (want.measure) exp.d = want.ml;
       for (const k of ['t', 'd', 'f', 'a']) {
         values++;
-        if (exp[k] !== got[k]) report(id, k, exp[k], got[k]);
+        if (exp[k] !== got[k] && !temperedMatch(mod, rec, id, k, exp[k], got[k])) report(id, k, exp[k], got[k]);
       }
       if (want.measure && !mod.getNoteById(id).properties.measure) report(id, 'bar flag', true, false);
     }
@@ -86,7 +109,7 @@ console.log('\nRelational time: old modules convert exactly');
     process.exit(failures === 0 ? 0 : 1);
   } else {
     const { modules, values } = await compareOracle(join(here, 'fixtures', 'old-time-oracle.json'), root);
-    if (failures === 0) ok(`${modules} modules (library and old-format fixtures), ${values} values identical to the old engine`);
+    if (failures === 0) ok(`${modules} modules (library and old-format fixtures), ${values} values identical to the old engine, except ${temperedChanged} tempered values now exact (${temperedNowRational} of them rational, e.g. an octave of twelve 2^(1/12) steps)`);
   }
 }
 

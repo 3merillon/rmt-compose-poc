@@ -10,8 +10,7 @@ import {
 import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { escapeHtml } from '../utils/html-escape.js';
-import { parseFrequencyAlgebra } from '../utils/frequency-algebra.js';
-import { toNumber } from '../utils/fraction-num.js';
+import { startTimeExpr, timeUnitsExpr, frequencyExpr, amplitudeExpr } from '../utils/value-expr.js';
 import { isMeasureNote, isReferenceNote } from '../note.js';
 import { CORRUPT } from '../binary-note.js';
 import { makeDraggableWidget, MIN_BUFFER, TOP_HEADER_HEIGHT } from '../utils/draggable-widget.js';
@@ -387,6 +386,19 @@ function collectVariables(note, measureId, moduleInstance) {
         };
     }
 
+    // The exact value of each evaluated row (src/value/exact.js), for the
+    // display: an irrational value is shown in its exact form, ≈ only marks an
+    // approximation.
+    const owner = note || (measureId !== null ? module.getNoteById(parseInt(measureId, 10)) : null);
+    if (owner && typeof owner.getExactVariable === 'function') {
+        for (const name of ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release']) {
+            const row = variables[name];
+            if (!row || row.isDefault) continue;
+            const from = (row.isInherited && owner !== module.baseNote) ? module.baseNote : owner;
+            try { row.exact = from.getExactVariable(name); } catch { /* display only */ }
+        }
+    }
+
     return variables;
 }
 
@@ -689,283 +701,29 @@ function toDSLFractionString(value) {
     }
 }
 
-// Check if an expression contains a power
-function containsPowOperation(exprText) {
-    return exprText && /\^/.test(exprText);
-}
-
-// Check if expression already references baseNote frequency
-function referencesBaseNoteFrequency(exprText) {
-    return exprText && /\bbase\.f\b/.test(exprText);
-}
-
-// ===== Symbolic Expression Chain Tracing =====
-// Traces a frequency expression back to baseNote, preserving POW operations algebraically
-// Supports multiple bases (2, 3, 5, etc.) for multi-base TET systems
-
-/**
- * Represents the algebraic form of a frequency expression:
- * frequency = coeff * baseNote.frequency * base1^(exp1) * base2^(exp2) * ...
- *
- * Where coeff is a rational number (Fraction) and powers is an array of {base, expNum, expDen}
- * @param {Fraction} coeff - Rational coefficient
- * @param {Array<{base: number, expNum: number, expDen: number}>} powers - Power terms
- */
-function createFrequencyAlgebra(coeff = new Fraction(1), powers = []) {
-    return { coeff, powers };
-}
-
-/**
- * Merge power terms, combining like bases: base^a * base^b = base^(a+b)
- * Bases and exponents are small TET integers (2/3/5, steps/divisions), so
- * Number arithmetic stays exact here; only coefficients need BigInt Fractions.
- */
-function mergePowerTerms(a, b) {
-    const map = new Map();
-
-    for (const p of a) {
-        map.set(p.base, { base: p.base, expNum: p.expNum, expDen: p.expDen });
-    }
-
-    for (const p of b) {
-        if (map.has(p.base)) {
-            const existing = map.get(p.base);
-            // Add exponents: a/b + c/d = (ad+bc)/bd
-            const newNum = existing.expNum * p.expDen + p.expNum * existing.expDen;
-            const newDen = existing.expDen * p.expDen;
-            const g = gcd(Math.abs(newNum), newDen);
-            map.set(p.base, { base: p.base, expNum: newNum / g, expDen: newDen / g });
-        } else {
-            map.set(p.base, { base: p.base, expNum: p.expNum, expDen: p.expDen });
+// The expression of a note's variable relative to the BaseNote, written from its
+// exact value (src/utils/value-expr.js): a tempered pitch stays the power it is,
+// `base.f * 2^(7/12)`. null when the value cannot be written exactly (an
+// approximation): the note then keeps the expression it has.
+function baseRelativeExpr(note, varName, moduleInstance) {
+    const v = note.getExactVariable(varName);
+    if (v == null) return null;
+    const base = moduleInstance.baseNote;
+    switch (varName) {
+        case 'startTime':
+            return startTimeExpr(v, base.getExactVariable('startTime'), base.getExactVariable('duration'));
+        case 'duration':
+            return timeUnitsExpr(v, base.getExactVariable('duration'));
+        case 'frequency':
+            return frequencyExpr(v, base.getExactVariable('frequency'));
+        case 'amplitude': {
+            // base.a is the piece-wide gain, so the note is written as a ratio of
+            // it and goes on following it (1 when the BaseNote sets none)
+            const baseA = base.hasExpression('amplitude') ? base.getExactVariable('amplitude') : moduleInstance.findAmplitude(base);
+            return amplitudeExpr(v, baseA);
         }
-    }
-
-    // Filter out zero exponents and sort by base
-    return [...map.values()]
-        .filter(p => p.expNum !== 0)
-        .sort((a, b) => a.base - b.base);
-}
-
-/**
- * Multiply two frequency algebras together:
- * (c1 * prod(bi^ei)) * (c2 * prod(bj^ej)) = (c1*c2) * prod(combined powers)
- */
-function multiplyFrequencyAlgebras(a, b) {
-    const newCoeff = a.coeff.mul(b.coeff);
-    const newPowers = mergePowerTerms(a.powers, b.powers);
-    return createFrequencyAlgebra(newCoeff, newPowers);
-}
-
-function gcd(a, b) {
-    return b === 0 ? a : gcd(b, a % b);
-}
-
-/**
- * Trace a frequency expression recursively back to baseNote.
- * Returns the combined algebra, or null if tracing fails.
- */
-function traceFrequencyToBaseNote(noteId, moduleInstance, visited = new Set()) {
-    // Prevent infinite loops
-    if (visited.has(noteId)) return null;
-    visited.add(noteId);
-
-    // BaseNote case
-    if (noteId === 0) {
-        return createFrequencyAlgebra();
-    }
-
-    const note = moduleInstance.getNoteById(noteId);
-    if (!note) return null;
-
-    const exprText = note.getExpressionSource('frequency');
-    if (!exprText) return null;
-
-    const parsed = parseFrequencyAlgebra(exprText);
-    if (!parsed) return null;
-
-    if (parsed.noteRef === null) {
-        // Already references baseNote directly
-        return parsed.algebra;
-    }
-
-    // Recursively trace the referenced note
-    const refAlgebra = traceFrequencyToBaseNote(parsed.noteRef, moduleInstance, visited);
-    if (!refAlgebra) return null;
-
-    // Combine: this note's algebra applied to the referenced note's algebra
-    return multiplyFrequencyAlgebras(parsed.algebra, refAlgebra);
-}
-
-/**
- * Convert a frequency algebra back to an expression string
- * Supports multi-base power terms
- */
-function algebraToExpression(algebra) {
-    // An integer power is rational: fold it into the coefficient (2^1 is 2)
-    let coeff = algebra.coeff;
-    const powers = [];
-    for (const p of algebra.powers) {
-        if (p.expDen === 1) {
-            const k = BigInt(p.base) ** BigInt(Math.abs(p.expNum));
-            coeff = p.expNum > 0 ? coeff.mul(new Fraction(k)) : coeff.div(new Fraction(k));
-        } else {
-            powers.push(p);
-        }
-    }
-
-    let result = 'base.f';
-    if (!coeff.equals(1)) result = `${result} * ${toDSLFractionString(coeff)}`;
-    for (const p of powers) result = `${result} * ${p.base}^(${p.expNum}/${p.expDen})`;
-    return result;
-}
-
-// Try to detect TET interval from frequency ratio relative to baseNote
-// Supports multiple bases:
-// - Base 2: Standard octave-based TET systems (12-TET, 24-TET, 19-TET, 31-TET, 53-TET)
-// - Base 3: Bohlen-Pierce (tritave-based) systems (13-BP, 19-BP, 39-BP)
-// The tolerance is set to handle floating-point accumulation from corrupt dependency chains
-function detectTETInterval(ratio) {
-    if (ratio <= 0) return null;
-
-    // TET configurations: {base, divisions[]}
-    // Ordered by commonality within each base
-    const tetConfigs = [
-        { base: 2, divisions: [12, 24, 19, 31, 53] },    // Standard octave-based
-        { base: 3, divisions: [13, 19, 39] },             // Bohlen-Pierce (tritave)
-    ];
-
-    // Use tolerances that handle floating-point accumulation from corrupt dependency chains
-    // (e.g., noteA depends on noteB depends on baseNote, each adding small FP errors)
-    const stepTolerance = 0.0001; // Tolerance for detecting integer steps
-    const ratioTolerance = 1e-6; // Relative tolerance for verifying reconstructed ratio
-
-    for (const config of tetConfigs) {
-        const logBaseRatio = Math.log(ratio) / Math.log(config.base);
-
-        for (const divisions of config.divisions) {
-            const steps = logBaseRatio * divisions;
-            const roundedSteps = Math.round(steps);
-
-            // Skip if rounded to 0 (would mean ratio ~= 1, handled elsewhere)
-            if (roundedSteps === 0) continue;
-
-            // Check if it's close to an integer number of steps
-            if (Math.abs(steps - roundedSteps) < stepTolerance) {
-                // Verify by computing back - this catches false positives
-                const reconstructedRatio = Math.pow(config.base, roundedSteps / divisions);
-                const relativeError = Math.abs(reconstructedRatio - ratio) / ratio;
-                if (relativeError < ratioTolerance) {
-                    // Simplify the fraction n/divisions
-                    const g = gcd(Math.abs(roundedSteps), divisions);
-                    return {
-                        base: config.base,
-                        numerator: roundedSteps / g,
-                        denominator: divisions / g
-                    };
-                }
-            }
-        }
-    }
-
-    return null;
-}
-
-// Create a POW-based frequency expression from TET interval
-function createTETFrequencyExpr(interval) {
-    const { base, numerator, denominator } = interval;
-    return algebraToExpression({ coeff: new Fraction(1), powers: [{ base, expNum: numerator, expDen: denominator }] });
-}
-
-// A span of time (exact Fraction, seconds) written in time units: base.d * k.
-// With no usable time unit (base.d not positive) the seconds are written as a
-// constant, so the value never changes.
-function createTimeUnitsExpr(seconds, moduleInstance) {
-    const unit = moduleInstance.baseNote.getVariable('duration');
-    if (!unit || typeof unit.compare !== 'function' || unit.compare(0) <= 0) {
-        return toDSLFractionString(seconds);
-    }
-    const k = seconds.div(unit);
-    return k.equals(1) ? 'base.d' : `base.d * ${toDSLFractionString(k)}`;
-}
-
-// Create BaseNote-relative expression for startTime: base.t + base.d * k.
-// Takes the exact evaluated Fraction; all offset algebra stays in Fraction
-// arithmetic so the emitted literal is digit-exact at any magnitude.
-function createBaseNoteStartTimeExpr(noteStartTime, moduleInstance) {
-    const baseStartTime = moduleInstance.baseNote.getVariable('startTime');
-    const offset = noteStartTime.sub(baseStartTime);
-
-    if (offset.equals(0)) return 'base.t';
-
-    const span = createTimeUnitsExpr(offset.abs(), moduleInstance);
-    return offset.compare(0) >= 0 ? `base.t + ${span}` : `base.t - ${span}`;
-}
-
-// Create BaseNote-relative expression for duration: base.d * k (exact Fraction in)
-function createBaseNoteDurationExpr(duration, moduleInstance) {
-    return createTimeUnitsExpr(duration, moduleInstance);
-}
-
-// Create BaseNote-relative expression for frequency (exact Fraction in)
-// Preserves POW expressions by tracing the dependency chain algebraically
-function createBaseNoteFrequencyExpr(frequency, moduleInstance, note = null) {
-    const baseFreq = moduleInstance.baseNote.getVariable('frequency');
-    const ratio = frequency.div(baseFreq);
-
-    // If ratio is exactly 1, just reference baseNote directly
-    if (ratio.equals(1)) {
-        return 'base.f';
-    }
-
-    // Option 1: Try symbolic chain tracing - this preserves POW expressions exactly
-    if (note) {
-        const algebra = traceFrequencyToBaseNote(note.id, moduleInstance);
-        if (algebra) {
-            return algebraToExpression(algebra);
-        }
-    }
-
-    // Option 2: If note has existing POW expression referencing baseNote, preserve it
-    if (note) {
-        const currentExpr = note.getExpressionSource('frequency');
-        if (currentExpr && containsPowOperation(currentExpr) && referencesBaseNoteFrequency(currentExpr)) {
-            return currentExpr;
-        }
-    }
-
-    // Option 3: Try to detect TET interval from the ratio (for non-chain cases).
-    // TET detection is a float heuristic by design — approximate via toNumber.
-    const tetInterval = detectTETInterval(toNumber(ratio));
-    if (tetInterval) {
-        return createTETFrequencyExpr(tetInterval);
-    }
-
-    // Option 4: the exact ratio
-    return `base.f * ${toDSLFractionString(ratio)}`;
-}
-
-// Create BaseNote-relative expression for amplitude (exact Fraction in).
-// base.a is the piece-wide gain, so the note is written as a ratio of it and
-// goes on following it. A BaseNote gain of 0 cannot carry a ratio: the value
-// is then kept as a constant.
-function createBaseNoteAmplitudeExpr(amplitude, moduleInstance) {
-    const baseAmp = moduleInstance.findAmplitude(moduleInstance.baseNote);
-    if (baseAmp.equals(0)) return toDSLFractionString(amplitude);
-
-    const ratio = amplitude.div(baseAmp);
-    if (ratio.equals(1)) return 'base.a';
-    return `base.a * ${toDSLFractionString(ratio)}`;
-}
-
-// An irrational amplitude (e.g. a decibel step written as a power) keeps its
-// own expression: rewriting it from the evaluated value would replace the
-// power with a rational approximation and silently drop the ≈.
-function amplitudeIsExact(moduleInstance, noteId) {
-    try {
-        const depGraph = moduleInstance.getDependencyGraph();
-        return !depGraph.isPropertyCorrupted(noteId, CORRUPT.AMPLITUDE) && !depGraph.isPropertyCorrupted(0, CORRUPT.AMPLITUDE);
-    } catch {
-        return true;
+        default:
+            return null;
     }
 }
 
@@ -983,28 +741,15 @@ export function evaluateNoteToBaseNote(noteId) {
         : ['startTime', 'duration', 'frequency', 'amplitude'];
     let success = true;
 
+    // Every value is read before any expression changes
+    const newExprs = [];
     for (const varName of variablesToProcess) {
         if (!note.variables[varName + 'String']) continue;
-
-        // Get the current evaluated value (exact Fraction)
-        const currentValue = note.getVariable(varName);
-        if (currentValue == null) continue;
-
-        // Create the BaseNote-relative expression directly from the exact value
-        let newExpr;
-        if (varName === 'startTime') {
-            newExpr = createBaseNoteStartTimeExpr(currentValue, moduleInstance);
-        } else if (varName === 'duration') {
-            newExpr = createBaseNoteDurationExpr(currentValue, moduleInstance);
-        } else if (varName === 'frequency') {
-            newExpr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note);
-        } else if (varName === 'amplitude' && amplitudeIsExact(moduleInstance, note.id)) {
-            newExpr = createBaseNoteAmplitudeExpr(currentValue, moduleInstance);
-        }
-
-        if (newExpr) {
-            note.setVariable(varName + 'String', newExpr);
-        }
+        const newExpr = baseRelativeExpr(note, varName, moduleInstance);
+        if (newExpr) newExprs.push([varName, newExpr]);
+    }
+    for (const [varName, newExpr] of newExprs) {
+        note.setVariable(varName + 'String', newExpr);
     }
 
     // re-evaluate and update UI
@@ -1046,41 +791,14 @@ export function evaluateEntireModule() {
         const note = moduleInstance.getNoteById(noteId);
         if (!note) continue;
 
-        // Process startTime for all notes: base.t + base.d * k
-        if (note.hasExpression('startTime')) {
-            const currentValue = note.getVariable('startTime');
-            if (currentValue != null) {
-                const expr = createBaseNoteStartTimeExpr(currentValue, moduleInstance);
-                updates.push({ noteId, varName: 'startTime', expr });
-            }
-        }
-
-        // Process duration for all notes, a measure bar's length included: base.d * k
-        if (note.hasExpression('duration')) {
-            const currentValue = note.getVariable('duration');
-            if (currentValue != null) {
-                const expr = createBaseNoteDurationExpr(currentValue, moduleInstance);
-                updates.push({ noteId, varName: 'duration', expr });
-            }
-        }
-
-        // Process frequency and amplitude only for non-measure notes
-        if (!isMeasureNote(note)) {
-            if (note.hasExpression('frequency')) {
-                const currentValue = note.getVariable('frequency');
-                if (currentValue != null) {
-                    const expr = createBaseNoteFrequencyExpr(currentValue, moduleInstance, note);
-                    updates.push({ noteId, varName: 'frequency', expr });
-                }
-            }
-
-            if (note.hasExpression('amplitude') && amplitudeIsExact(moduleInstance, noteId)) {
-                const currentValue = note.getVariable('amplitude');
-                if (currentValue != null) {
-                    const expr = createBaseNoteAmplitudeExpr(currentValue, moduleInstance);
-                    updates.push({ noteId, varName: 'amplitude', expr });
-                }
-            }
+        // A measure bar has a start and a length (its duration), nothing that sounds
+        const names = isMeasureNote(note)
+            ? ['startTime', 'duration']
+            : ['startTime', 'duration', 'frequency', 'amplitude'];
+        for (const varName of names) {
+            if (!note.hasExpression(varName)) continue;
+            const expr = baseRelativeExpr(note, varName, moduleInstance);
+            if (expr) updates.push({ noteId, varName, expr });
         }
     }
 

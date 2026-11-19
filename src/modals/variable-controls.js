@@ -7,6 +7,7 @@ import Fraction from 'fraction.js';
 import { getModule, setEvaluatedNotes, getInstrumentManager } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
 import { decompileToDSL, compileDSL } from '../dsl/index.js';
+import { isIrrational, isApprox, toText as exactText, toNumber as exactToNumber } from '../value/exact.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
 import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
 import { settingsStore } from '../settings/settings-store.js';
@@ -115,29 +116,20 @@ function buildEvaluatedDiv(value) {
   let exactTitle = '';
   if (value?.evaluated !== null && value?.evaluated !== undefined) {
     const ev = value.evaluated;
-    // Check if this is a directly corrupted (irrational) value — either flagged
-    // per-property by the dependency graph, or marked on the value by WASM
-    const isDirectlyCorrupted = value.isCorrupted || ev._irrational || ev._floatValue !== undefined;
-    // Check if this is transitively corrupted (depends on a corrupted note) - for display only
-    const isTransitivelyCorrupted = value.isTransitivelyCorrupted;
+    const exact = value.exact;
+    // A tempered value (its own power, or read from a tempered note) keeps the
+    // corrupted-value style; the text says what kind of number it is.
+    if (value.isCorrupted || value.isTransitivelyCorrupted) evaluatedDiv.classList.add('corrupted-value');
 
-    if (isDirectlyCorrupted) {
-      // Display as float with reasonable precision
-      // Prefer _floatValue (exact irrational), fall back to the approximated fraction
-      const floatVal = ev._floatValue !== undefined ? ev._floatValue : toNumber(ev, NaN);
-      displayValue = `≈${Number(floatVal).toPrecision(8)}`;
-      evaluatedDiv.classList.add('corrupted-value');
-    } else if (isTransitivelyCorrupted) {
-      // Transitively corrupted: show fraction with ≈ prefix to indicate it's an approximation
-      const huge = hugeFractionDisplay(ev);
-      if (huge) {
-        displayValue = huge.text;
-        exactTitle = huge.title;
-      } else {
-        displayValue = `≈${String(ev)}`;
-      }
+    if (isIrrational(exact)) {
+      // Exact, irrational: its exact form and its value
+      displayValue = `${exactText(exact)} = ${Number(exactToNumber(exact)).toPrecision(8)}…`;
+    } else if (isApprox(exact)) {
+      // An approximation: ≈ and its value
+      displayValue = `≈${Number(exactToNumber(exact)).toPrecision(8)}`;
       evaluatedDiv.classList.add('corrupted-value');
     } else {
+      // Rational, exact (also when a tempered chain lands on a rational, e.g. an octave)
       const huge = hugeFractionDisplay(ev);
       if (huge) {
         displayValue = huge.text;

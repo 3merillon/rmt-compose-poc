@@ -52,7 +52,7 @@ A plain `Map` keyed on the raw expression text, used as an **LRU**: when it is f
 | `src/dsl/index.js` | `compileDSL`, `decompileToDSL`, `validateDSL` | the public API |
 | `src/dsl/simplify.js` | `simplifyDSL`, `scaleDSL` | DSL-native canonicaliser (see [SymbolicPower](/developer/core/symbolic-power)) |
 
-`compileDSL('')` returns bytecode for the constant `0/1` rather than throwing (`src/dsl/index.js:27-35`).
+`compileDSL('')` returns bytecode for the constant `0/1` rather than throwing (`src/dsl/index.js:26-34`).
 
 ### Properties
 
@@ -155,12 +155,12 @@ Indices 0 to 2 are the language: they relate a note to other notes. Indices from
 Number literals are exact at any size: the digits are parsed straight into a BigInt fraction by `decimalStringToBigFraction()` (`src/utils/fraction-num.js:36`), never through `parseFloat`. A decimal literal is **exact as written** — `3.14159` is `314159/100000` and `0.333333` is `333333/1000000`, not `1/3`.
 
 ::: info `LOAD_CONST_BIG` carries BigInts, and they survive
-The evaluator decodes the variable-length BigInts straight into a pooled BigInt-backed fraction (`binary-evaluator.js:1029-1041`), so a big constant keeps every digit through parse → emit → decode → evaluate → decompile — `scripts/test-exactness.mjs` (part of `npm test`) proves it with a ~98-digit literal. The old path routed the decode through a double-backed `Fraction` constructor, which silently rounded anything past 2^53: the encoding preserved the *bytecode* but not the precision.
+The evaluator decodes the variable-length BigInts straight into a pooled BigInt-backed fraction (`binary-evaluator.js:1081-1093`), so a big constant keeps every digit through parse → emit → decode → evaluate → decompile — `scripts/test-exactness.mjs` (part of `npm test`) proves it with a ~98-digit literal. The old path routed the decode through a double-backed `Fraction` constructor, which silently rounded anything past 2^53: the encoding preserved the *bytecode* but not the precision.
 :::
 
 ## `BinaryExpression`
 
-`binary-note.js:139-443`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
+`binary-note.js:139-457`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -189,7 +189,7 @@ Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.js` kee
 
 - `parseLegacy()` (`src/migrate/legacy-syntax.js:88`), a strict recursive-descent parser for exactly the old building blocks (`new Fraction(a[, b])` with decimal arguments, bare decimals, `module.baseNote.getVariable('x')`, `module.getNoteById(N).getVariable('x')`, a bare variable name, parentheses, `.mul .div .add .sub .pow`), which builds a DSL syntax tree;
 - `legacyToDSL()` (`src/migrate/legacy-syntax.js:226`), which compiles that tree, decompiles it to DSL text, compiles the text again and refuses unless both give the same bytecode;
-- `migrateSyntax()` (`src/migrate/legacy-syntax.js:260`), which converts every expression of a module object and is called by `Module.loadFromJSON()` (`src/module.js:842`) right after `migrateTimeModel()`. `scripts/migrate-modules.mjs` applies both conversions to files in place.
+- `migrateSyntax()` (`src/migrate/legacy-syntax.js:260`), which converts every expression of a module object and is called by `Module.loadFromJSON()` (`src/module.js:843`) right after `migrateTimeModel()`. `scripts/migrate-modules.mjs` applies both conversions to files in place.
 
 **It refuses rather than guesses.** The old compiler was a string splitter that read a chain correctly only when its methods came in the order `.pow`, then `.mul`/`.div`, then `.add`/`.sub` (`RANK`, `src/migrate/legacy-syntax.js:47`). It silently dropped a `.mul()` or `.div()` that followed an `.add()` (`a.add(b).mul(c)` evaluated as `a + b`), a `.pow()` that followed a `.mul()`, and every `.neg()`. For those the text and the old engine disagree, so the converter throws a `SyntaxMigrationError`, and `migrateSyntax()` adds the note and variable: the module does not load rather than load with a value nobody wrote. A note id above 65535, an unknown variable (`'tempo'`), a quoted fraction (`new Fraction('1/3')`) and a division by zero are refused too.
 
@@ -201,7 +201,7 @@ Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.js` kee
 
 The DSL decompiler (`src/dsl/decompiler.js`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. Constants come out of the bytecode as BigInts and are stringified directly (`pushConst`, `src/dsl/decompiler.js:186-192`), so a big constant is printed **digit-exact** — it used to be coerced through `Number()`, which rounded and could emit unparseable scientific notation. It prints every `LOAD_REF` / `LOAD_BASE` as a property access (`[N].d`, `base.f`) and reconstructs nothing else: with no functions in the language there is nothing to fold back into a helper.
 
-The note widget's `Raw:` box shows the decompiled DSL of the note's bytecode (`convertToDSLDisplay()`, `src/modals/variable-controls.js:173`).
+The note widget's `Raw:` box shows the decompiled DSL of the note's bytecode (`convertToDSLDisplay()`, `src/modals/variable-controls.js:165`).
 
 ### Round-trip is lossy in specific, harmless ways
 
@@ -225,12 +225,12 @@ The compiler refuses garbage by throwing, but validation is still a separate gat
 | Gate | Where | What it does |
 |---|---|---|
 | UI edits | `validateExpression()`, `src/modals/validation.js:6` | refuses the retired syntax with its DSL form, then `validateDSL()`, `compileDSL()` to prove it yields bytecode, then the self-reference and cycle check on that bytecode — per (note, variable), see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable) |
-| DSL syntax | `validateDSL()`, `src/dsl/index.js:69` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
+| DSL syntax | `validateDSL()`, `src/dsl/index.js:68` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
 | JSON import | `validateExpressionSyntax()`, `src/utils/safe-expression-validator.js:26` | rejects strings over 10 000 chars and a blocklist (`eval(`, `Function(`, `import(`, `document.`, `__proto__`, `<script`, …), then proves the string compiles — a compiler throw comes back as `{valid: false, error}` |
 
 Nothing anywhere calls `eval()` or `new Function()` on an expression.
 
-The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.js:223-238`, `src/modals/variable-controls.js:970`). The user-grade error strings in `src/dsl/errors.js` are what the user actually reads.
+The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.js:215-230`, `src/modals/variable-controls.js:962`). The user-grade error strings in `src/dsl/errors.js` are what the user actually reads.
 
 ## Worked example
 

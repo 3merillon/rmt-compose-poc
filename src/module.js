@@ -8,6 +8,7 @@ import { inheritsFromBase } from './variable-deps.js';
 import { createEvaluator, createIncrementalEvaluator, isWasmBackedEvaluator, isEvaluatorHotSwapEnabled } from './wasm/evaluator-adapter.js';
 import { onWasmReady } from './wasm/index.js';
 import { compiler } from './expression-compiler.js';
+import { compare as compareExact } from './value/exact.js';
 
 let memoizedModuleEndTime = null;
 let moduleLastModifiedTime = 0;
@@ -977,11 +978,11 @@ export class Module {
     // rationals that differ past double precision), with id tie-break so
     // export renumbering stays deterministic.
     const sortByStartTime = (a, b) => {
-      const aStart = a.getVariable('startTime');
-      const bStart = b.getVariable('startTime');
+      const aStart = a.getExactVariable('startTime');
+      const bStart = b.getExactVariable('startTime');
       if (!aStart || !bStart) return a.id - b.id;
       try {
-        const cmp = aStart.compare(bStart);
+        const cmp = compareExact(aStart, bStart);
         if (cmp !== 0) return cmp;
       } catch (e) { /* non-Fraction value — fall through to id order */ }
       return a.id - b.id;
@@ -1127,14 +1128,14 @@ export class Module {
       // one lossy conversion at the end (a NaN from valueOf overflow here
       // used to cascade into silent playback and a never-stopping playhead).
       let lastMeasure = measureNotes[0];
-      let lastMeasureStart = lastMeasure.getVariable('startTime');
+      let lastMeasureStart = lastMeasure.getExactVariable('startTime');
 
       for (let i = 1; i < measureNotes.length; i++) {
         const note = measureNotes[i];
-        const noteStart = note.getVariable('startTime');
+        const noteStart = note.getExactVariable('startTime');
         if (noteStart && lastMeasureStart) {
           try {
-            if (noteStart.compare(lastMeasureStart) > 0) {
+            if (compareExact(noteStart, lastMeasureStart) > 0) {
               lastMeasure = note;
               lastMeasureStart = noteStart;
             }

@@ -12,7 +12,7 @@ import { BinaryEvaluator } from '../binary-evaluator.js';
 import { compileDSL } from '../dsl/index.js';
 import { simplifyDSL, scaleDSL } from '../dsl/simplify.js';
 import { validateExpressionSyntax } from './safe-expression-validator.js';
-import { toNumber } from './fraction-num.js';
+import * as X from '../value/exact.js';
 
 // Memoization caches
 const __simplifyCache = new Map(); // key: kind + '|' + expr
@@ -42,20 +42,13 @@ export function multiplyExpressionByFraction(expr, num, den, kind, moduleInstanc
   // scaleDSL folds the factor into the expression's coefficient, so it can
   // genuinely get the value wrong. Check it: it must land on exactly
   // `factor x original`, without changing the corruption flag.
+  // Values are exact (src/value/exact.js), irrational ones included, so the
+  // check is an equality.
   const before = evaluateExpr(expr, moduleInstance);
   const after = evaluateExpr(scaled, moduleInstance);
-  if (before && after && after.corrupted === before.corrupted) {
-    if (!before.corrupted && before.value instanceof Fraction && after.value instanceof Fraction) {
-      // Rational both sides: the fold must be exact, so compare exactly.
-      if (after.value.equals(before.value.mul(new Fraction(num, den)))) {
-        return scaled;
-      }
-    } else {
-      const expected = toNumber(before.value, NaN) * (num / den);
-      if (isFinite(expected) && closeEnough(toNumber(after.value, NaN), expected)) {
-        return scaled;
-      }
-    }
+  if (before && after && after.corrupted === before.corrupted &&
+      X.equals(after.value, X.mul(before.value, new Fraction(num, den)))) {
+    return scaled;
   }
   // Fall back to an explicit multiplier, parenthesised so it applies to the
   // whole expression even when that expression is a sum.
@@ -80,8 +73,8 @@ function _simplify(expr, kind, moduleInstance) {
 }
 
 /**
- * Safety evaluation: compile old/new; rational results must match exactly,
- * irrational (corrupted) ones within a 1e-12 relative tolerance.
+ * Safety evaluation: compile old/new; the values must be exactly equal
+ * (src/value/exact.js: irrational values are exact too).
  *
  * The corruption flag is part of the comparison. A note is crosshatched when one of
  * its POW ops yields an irrational (TET scales), so a rewrite that folded a power
@@ -94,13 +87,7 @@ function safeEquivalent(oldExpr, newExpr, moduleInstance) {
     const b = evaluateExpr(newExpr, moduleInstance);
     if (a == null || b == null) return false;
     if (a.corrupted !== b.corrupted) return false;
-    if (!a.corrupted && a.value instanceof Fraction && b.value instanceof Fraction) {
-      return a.value.equals(b.value);
-    }
-    const av = toNumber(a.value, NaN);
-    const bv = toNumber(b.value, NaN);
-    if (!isFinite(av) || !isFinite(bv)) return false;
-    return closeEnough(av, bv);
+    return X.equals(a.value, b.value);
   } catch {
     // If evaluation blows up, stay conservative: prefer original
     return false;
@@ -108,24 +95,12 @@ function safeEquivalent(oldExpr, newExpr, moduleInstance) {
 }
 
 /**
- * Rational expressions evaluate exactly, so they compare bit-for-bit. Irrational
- * ones do not: the POW opcode approximates each irrational result as a Fraction,
- * so an exact identity like 2^(1/12) * 2^(1/12) = 2^(1/6) still lands ~1e-11 apart
- * simply because it rounds once instead of twice. The tolerance is therefore
- * relative to magnitude. It stays far tighter than any real algebra slip: dropping
- * or duplicating a factor moves the value by a whole ratio, not by 1e-12 of it.
- */
-function closeEnough(a, b) {
-  const scale = Math.max(1, Math.abs(a), Math.abs(b));
-  return Math.abs(a - b) <= 1e-12 * scale;
-}
-
-/**
  * Safely evaluate an expression using binary compilation.
  * SECURITY: This function DOES NOT use eval() or new Function().
  *
- * @returns {{value: Fraction, corrupted: boolean}|null} `corrupted` is true when the
- *   expression produced an irrational value (what drives the crosshatch overlay).
+ * @returns {{value: Fraction|Irrational|Approx, corrupted: boolean}|null} the exact value;
+ *   `corrupted` is true when the expression made an irrational value itself (what
+ *   drives the crosshatch overlay).
  */
 function evaluateExpr(expr, moduleInstance) {
   const validation = validateExpressionSyntax(expr);
@@ -150,12 +125,12 @@ function evaluateExpr(expr, moduleInstance) {
     if (baseNote) {
       try {
         evalCache.set(0, {
-          startTime: baseNote.getVariable('startTime'),
-          duration: baseNote.getVariable('duration'),
-          frequency: baseNote.getVariable('frequency'),
-          amplitude: baseNote.getVariable('amplitude'),
-          attack: baseNote.getVariable('attack'),
-          release: baseNote.getVariable('release')
+          startTime: baseNote.getExactVariable('startTime'),
+          duration: baseNote.getExactVariable('duration'),
+          frequency: baseNote.getExactVariable('frequency'),
+          amplitude: baseNote.getExactVariable('amplitude'),
+          attack: baseNote.getExactVariable('attack'),
+          release: baseNote.getExactVariable('release')
         });
       } catch {}
     }
@@ -164,12 +139,12 @@ function evaluateExpr(expr, moduleInstance) {
       if (noteObj) {
         try {
           evalCache.set(parseInt(id, 10), {
-            startTime: noteObj.getVariable?.('startTime'),
-            duration: noteObj.getVariable?.('duration'),
-            frequency: noteObj.getVariable?.('frequency'),
-            amplitude: noteObj.getVariable?.('amplitude'),
-            attack: noteObj.getVariable?.('attack'),
-            release: noteObj.getVariable?.('release')
+            startTime: noteObj.getExactVariable?.('startTime'),
+            duration: noteObj.getExactVariable?.('duration'),
+            frequency: noteObj.getExactVariable?.('frequency'),
+            amplitude: noteObj.getExactVariable?.('amplitude'),
+            attack: noteObj.getExactVariable?.('attack'),
+            release: noteObj.getExactVariable?.('release')
           });
         } catch {}
       }
@@ -179,8 +154,9 @@ function evaluateExpr(expr, moduleInstance) {
   // Evaluate using safe binary evaluator
   try {
     const evaluator = new BinaryEvaluator(moduleInstance);
-    const value = evaluator.evaluate(binary, evalCache);
-    if (value == null) return null;
+    const shadowValue = evaluator.evaluate(binary, evalCache);
+    if (shadowValue == null) return null;
+    const value = evaluator._lastExact ?? new Fraction(shadowValue.s * shadowValue.n, shadowValue.d);
     return { value, corrupted: !!evaluator._lastEvalWasCorrupted };
   } catch {
     return null;
