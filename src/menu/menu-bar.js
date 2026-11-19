@@ -452,9 +452,14 @@ const menuAPI = (function() {
         const tempoUnit = document.createElement('span');
         tempoUnit.className = 'library-tempo-unit';
         tempoUnit.textContent = 'BPM';
+        // The number over its unit, both in the accent colour: two short lines in the
+        // 30px control instead of one wide one.
+        const readout = document.createElement('span');
+        readout.className = 'library-tempo-readout';
+        readout.appendChild(tempoValue);
+        readout.appendChild(tempoUnit);
         tempo.appendChild(tempoSlider);
-        tempo.appendChild(tempoValue);
-        tempo.appendChild(tempoUnit);
+        tempo.appendChild(readout);
         const tempoCommit = createToolButton('library-tempo-commit', 'Commit tempo: the BaseNote\'s duration becomes exactly 60 / BPM', ICON_COMMIT);
         tempoCommit.id = 'tempoCommitBtn';
         tempoCommit.hidden = true;
@@ -2569,16 +2574,15 @@ const menuAPI = (function() {
             .library-tempo-slider::-moz-range-thumb { width: 12px; height: 12px; border: none; border-radius: 50%; background: var(--rmt-accent, #ffa800); box-shadow: 0 0 8px rgba(var(--rmt-accent-rgb), 0.6); }
             .library-tempo-slider:active::-webkit-slider-thumb, .library-tempo-slider:hover::-webkit-slider-thumb { background: var(--rmt-danger, #ff0000); box-shadow: 0 0 8px rgba(var(--rmt-danger-rgb), 0.6); }
             .library-tempo-slider:active::-moz-range-thumb, .library-tempo-slider:hover::-moz-range-thumb { background: var(--rmt-danger, #ff0000); }
-            .library-tempo-value { min-width: 3ch; margin-right: -4px; text-align: right; font-family: 'Roboto Mono', monospace; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--rmt-accent, #ffa800); white-space: nowrap; user-select: none; -webkit-user-select: none; }
-            .library-tempo-unit { font-family: 'Roboto Mono', monospace; font-size: 13px; color: var(--rmt-text-secondary, rgba(255,168,0,0.5)); user-select: none; -webkit-user-select: none; }
+            .library-tempo-readout { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; gap: 1px; }
+            .library-tempo-value { min-width: 3ch; text-align: center; font-family: 'Roboto Mono', monospace; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--rmt-accent, #ffa800); white-space: nowrap; user-select: none; -webkit-user-select: none; }
+            .library-tempo-unit { font-family: 'Roboto Mono', monospace; font-size: 8px; letter-spacing: 0.06em; color: var(--rmt-accent, #ffa800); user-select: none; -webkit-user-select: none; }
             .library-tempo-commit[hidden] { display: none; }
-            /* Phones: the row was already full. A shorter slider, no unit, and the tempo
+            /* Phones: the row was already full. A shorter slider, and the tempo
                steps aside while the search field is open so the field keeps its width. */
             @media (max-width: 420px) {
               .library-tempo { gap: 6px; padding: 0 8px; }
               .library-tempo-slider { width: 44px; }
-              .library-tempo-unit { display: none; }
-              .library-tempo-value { margin-right: 0; }
             }
             @media (max-width: 600px) {
               .library-toolbar.search-open .library-tempo, .library-toolbar.search-open .library-tempo-commit { display: none; }

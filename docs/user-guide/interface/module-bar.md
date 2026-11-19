@@ -28,14 +28,14 @@ The bar opens on first run tall enough for the toolbar plus one row of icons. Af
 
 ### Live tempo
 
-Next to the magnifier sits a small slider with a tempo, for example **100 BPM**. It is the tempo the piece is written at: 60 divided by the BaseNote's duration (`base.d`, the time unit).
+Next to the magnifier sits a small slider with a tempo, for example **100** with **BPM** under it. It is the tempo the piece is written at: 60 divided by the BaseNote's duration (`base.d`, the time unit).
 
 Drag the slider and playback runs faster or slower **at once, while it plays**, without changing the piece. The playhead follows the sound, nothing jumps, a loop stays seamless, and pitches never change. The number turns to the accent colour while it differs from the written tempo, and a **check-mark button** appears beside it:
 
 - **Check mark (Commit tempo)**: writes the shown tempo into the piece. The BaseNote's duration becomes exactly 60 / BPM (120 BPM gives `1/2`), every note keeps its relation to it, and the change is one undo step. MIDI export then uses the new tempo.
 - **Double-click** the slider or the number to go back to the written tempo.
 
-The live tempo is not saved: loading a module, or reloading the page, plays at the written tempo again. Only Commit keeps it. On a phone the control is narrower, drops the word BPM, and steps aside while the search field is open.
+The live tempo is not saved: loading a module, or reloading the page, plays at the written tempo again. Only Commit keeps it. On a phone the slider is shorter, and the control steps aside while the search field is open.
 
 ### Search
 
