@@ -1033,15 +1033,85 @@ input:checked + .toggle-slider:before {
     box-shadow: 0 0 10px rgba(var(--rmt-danger-rgb), 0.5);
 }
 
+/* Number fields: the native spin buttons cannot be styled (only filtered, which
+   gave a muddy yellow that turned red on hover). They are hidden, and
+   src/ui/number-stepper.js wraps every number field with two drawn chevrons that
+   look and hover like the library toolbar's buttons. */
 input[type="number"]::-webkit-inner-spin-button,
 input[type="number"]::-webkit-outer-spin-button {
-    filter: sepia(100%) hue-rotate(5deg) saturate(500%);
-    opacity: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    margin: 0;
 }
 
-input[type="number"]::-webkit-inner-spin-button:hover,
-input[type="number"]::-webkit-outer-spin-button:hover {
-    filter: sepia(100%) hue-rotate(-50deg) saturate(700%);
+input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.rmt-stepper {
+    position: relative;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: stretch;
+    max-width: 100%;
+}
+
+.rmt-stepper > input[type="number"] {
+    padding-right: 20px;
+    box-sizing: border-box;
+}
+
+.rmt-stepper-col {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    bottom: 2px;
+    width: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.rmt-stepper-btn {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    margin: 0;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--rmt-accent, #ffa800);
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+    touch-action: manipulation;
+    transition: border-color 0.2s ease-in-out, background-color 0.2s ease-in-out;
+}
+
+.rmt-stepper-btn svg {
+    width: 10px;
+    height: 10px;
+    display: block;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.rmt-stepper-btn:hover,
+.rmt-stepper-btn:active {
+    border-color: var(--rmt-accent, #ffa800);
+    background: rgba(var(--rmt-accent-rgb), 0.18);
+}
+
+.rmt-stepper > input[type="number"]:disabled + .rmt-stepper-col {
+    opacity: 0.3;
+    pointer-events: none;
 }
 
 .input-button-group {

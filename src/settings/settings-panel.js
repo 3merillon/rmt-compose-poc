@@ -481,6 +481,7 @@ function scaleControl(axis) {
     const step = scaleStep(lo, hi);
     range.min = lo; range.max = hi; range.step = step;
     num.min = lo; num.max = hi;
+    num.dataset.step = String(step);   // the arrows step like the slider (number-stepper.js)
     const v = settingsStore.get(path);
     if (range !== document.activeElement) range.value = v;
     if (num !== document.activeElement) num.value = fmtScale(v);

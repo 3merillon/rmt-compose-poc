@@ -6,6 +6,7 @@ import * as SynthInstrumentsModule from './instruments/synth-instruments.js';
 import * as SampleInstrumentsModule from './instruments/sample-instruments.js';
 import { initStackClick } from './stack-click.js';
 import { initViewport } from './utils/viewport.js';
+import { initNumberSteppers } from './ui/number-stepper.js';
 import { eventBus } from './utils/event-bus.js';
 import { modals } from './modals/index.js';
 import { audioEngine } from './player/audio-engine.js';
@@ -40,6 +41,8 @@ try {
 // that awaits the WASM load, and the chrome would spend those frames sized against
 // the wrong viewport.
 try { initViewport(); } catch (e) {}
+// Every number field gets the app's own up/down arrows (the native ones cannot be styled).
+try { initNumberSteppers(); } catch (e) {}
 
 // Create the SynthInstruments object with all instrument classes
 const SynthInstruments = {
