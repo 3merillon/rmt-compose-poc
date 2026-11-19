@@ -1712,12 +1712,15 @@ if (canvasEl) {
             const exprRemapCache = new Map();
 
             // Every DSL property spelling (src/dsl/constants.js PropertyMap), longest first,
-            // and what each one means. The BaseNote frames a dropped module: base.t, base.d
-            // and base.f map to the target note's t, d and f.
+            // and what each one means. A dropped module takes its start and its pitch from
+            // the target (base.t, base.f map to the target's t and f) and keeps the
+            // workspace's time unit: base.d stays base.d, so its pace does not depend on
+            // the length of the note it is dropped on.
             const __dslProps = Object.keys(PropertyMap).sort((a, b) => b.length - a.length).join('|');
             const __dslBaseRefRe = () => new RegExp(`\\bbase\\.(${__dslProps})\\b`, 'g');
             const __dslIdRefRe = () => new RegExp(`\\[(\\d+)\\]\\.(${__dslProps})\\b`, 'g');
             const __isFrequencyProp = (prop) => PropertyMap[prop] === 'frequency';
+            const __isDurationProp = (prop) => PropertyMap[prop] === 'duration';
             // Interpretation variables: a measure bar has no loudness or envelope either,
             // so on a bar these stay with the BaseNote.
             const __interpretationVars = ['amplitude', 'attack', 'release'];
@@ -1753,6 +1756,10 @@ if (canvasEl) {
                         const oldRef = parseInt(idStr, 10);
                         if (mapping.hasOwnProperty(oldRef)) {
                             const newId = mapping[oldRef];
+                            // The time unit stays the workspace's: [0].d is base.d
+                            if (oldRef === 0 && __isDurationProp(prop)) {
+                                return `base.${prop}`;
+                            }
                             // Measure bar drop: frequency refs to base note stay as base.f
                             if (targetIsMeasure && oldRef === 0 && exprType === 'frequency' && __isFrequencyProp(prop)) {
                                 return `base.${prop}`;
@@ -1773,22 +1780,23 @@ if (canvasEl) {
                     }
                 }
 
-                // Remap DSL base references (base.t, base.d, etc.) to target note.
-                // base.d is the dropped module's time unit, so its rhythm scales to the
-                // target's duration. (Runs after ID remaps so [targetId] refs won't be re-remapped.)
+                // Remap DSL base references (base.t, base.f, ...) to the target note.
+                // base.d, the time unit, stays the workspace's. (Runs after ID remaps so
+                // [targetId] refs won't be re-remapped.)
                 if (targetNote.id !== 0 && hasDslBase) {
                     const anchorId = targetNote.id;
 
                     if (targetIsMeasure) {
-                        // A bar has t and d but no frequency, loudness or envelope
+                        // A bar gives a start only: no frequency, loudness or envelope
                         expr = expr.replace(__dslBaseRefRe(), function(match, prop) {
-                            if (__isFrequencyProp(prop) || __isInterpretationProp(prop)) {
+                            if (__isDurationProp(prop) || __isFrequencyProp(prop) || __isInterpretationProp(prop)) {
                                 return `base.${prop}`;
                             }
                             return `[${anchorId}].${prop}`;
                         });
                     } else {
                         expr = expr.replace(__dslBaseRefRe(), function(match, prop) {
+                            if (__isDurationProp(prop)) return `base.${prop}`;
                             return `[${anchorId}].${prop}`;
                         });
                     }
@@ -1799,6 +1807,9 @@ if (canvasEl) {
 
                 // Remap explicit id references using the mapping table (includes 0 -> target id)
                 if (hasIds) {
+                    // The time unit stays the workspace's
+                    expr = expr.replace(/module\.getNoteById\(\s*0\s*\)\.getVariable\(\s*'duration'\s*\)/g,
+                        "module.baseNote.getVariable('duration')");
                     expr = expr.replace(/module\.getNoteById\(\s*(\d+)\s*\)/g, function(match, p1) {
                         const oldRef = parseInt(p1, 10);
                         if (mapping.hasOwnProperty(oldRef)) {
@@ -1826,14 +1837,16 @@ if (canvasEl) {
 
                     if (targetIsMeasure) {
                         expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
-                            // A bar has t and d but no frequency, loudness or envelope
-                            if (varName === 'frequency' || __interpretationVars.includes(varName)) {
+                            // A bar gives a start only: no frequency, loudness or envelope;
+                            // the time unit stays the workspace's
+                            if (varName === 'duration' || varName === 'frequency' || __interpretationVars.includes(varName)) {
                                 return "module.baseNote.getVariable('" + varName + "')";
                             }
                             return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
                         });
                     } else {
                         expr = expr.replace(/module\.baseNote\.getVariable\(\s*'([^']+)'\s*\)/g, function(_, varName) {
+                            if (varName === 'duration') return "module.baseNote.getVariable('duration')";
                             return "module.getNoteById(" + anchorId + ").getVariable('" + varName + "')";
                         });
                     }
@@ -1841,8 +1854,7 @@ if (canvasEl) {
 
                 // Check drop mode - if 'end', add target's duration to startTime expressions.
                 // Every start that hangs from the target's start moves by the target's
-                // duration. (It used to skip a start that already read a duration; with
-                // base.d → [target].d as the time unit nearly every start does.)
+                // duration (whatever else it reads, e.g. a base.d offset).
                 const dropMode = menuBar?.getModuleDropMode?.() || 'start';
                 if (dropMode === 'end' && exprType === 'startTime' && targetNote.id !== 0) {
                     const anchorId = targetNote.id;
