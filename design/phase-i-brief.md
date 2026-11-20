@@ -139,6 +139,32 @@ must settle, with a recommendation for each and the decision left to the owner w
   string). Whether time adjacency alone (an end exactly equal to the next start, without the relation) also
   counts. A glide between pitches (portamento) passes through every impure pitch on the way: recommend it off,
   and ask.
+- **An instrument is a player, and inheritance says who plays.** The owner (20 November): "anything
+  inheriting it's instrument would be the same instrument I suppose. Defining a note's instrument would make
+  it a 'new' instrument. So changing the melody to a single different instruemnt in the canon amounts to
+  changing the instrument for it's first note. (this should be made clear if we have multiple notes selected,
+  that we are defining each not as a seperate piano or violin for example, with the option to define them as
+  a single instrument." So a note that sets `instrument` starts a new player of that instrument; a note that
+  inherits is played by the player it inherits from. The design must settle WHAT a note inherits its
+  instrument from, because today's rule does not give what he describes:
+  - today (`Module.findInstrument`, `src/module.js`) a note without an instrument takes the instrument of
+    the note its FREQUENCY reads (`[N].f`), else the BaseNote's, else the default. In the canon every theme
+    note reads `base.f`, so the theme inherits from the BaseNote, not from its first note: setting the first
+    note's instrument changes only that note. And the second bass reads the first by frequency
+    (`(3/2) * [n].f`), so it inherits the first bass's instrument, note by note: two voices, one player;
+  - what he describes follows the LINE: a note that begins where the previous one ends (`[p].t + [p].d`)
+    inherits that note's instrument, so the first note of a line decides the whole line; a note that starts
+    a line (no such predecessor) inherits as today. In the canon that gives three players from three first
+    notes, the theme, bass 1 and bass 2, and changing the theme's instrument is one edit on its first note;
+  - recommend the rule (the line first, then the frequency parent, then the BaseNote, or another that does
+    what he describes), show what it does to every library module (which notes change player or instrument),
+    and ask. Old modules must keep sounding with the instruments they have unless he accepts a change;
+  - the group widget's INSTRUMENT row (`src/modals/group-widget.js`, `applyGroupEdit` in `src/player.js`,
+    `setGroupProperty` in `src/utils/group-edit.js`) today sets the instrument on EVERY selected note, which
+    under this rule makes each note its own player. Make that explicit, and add the other choice: one
+    player for the selection (set the instrument on the notes the rule says start the selection's lines, and
+    make the others inherit). Propose the wording (for example "each note its own player" and "one player");
+    he designs the look. Same for "inherited".
 - **Sound quality, per instrument.** Piano: natural decay from the samples, more zones if the size budget
   allows (the samples are about 600 KB per instrument today), release that sounds like a damper. Violin: a
   sustain that holds as long as the note (loops or longer samples), a bow attack, a release. Vibraphone and
