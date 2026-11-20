@@ -6,9 +6,10 @@
  */
 
 import Fraction from 'fraction.js';
-import { toNumber } from '../utils/fraction-num.js';
 import { getWasm, isWasmAvailable } from './index.js';
 import { WASM_CONFIG, shouldUseWasm } from './config.js';
+import { VAR_NAMES } from '../binary-note.js';
+import { getVariableExpression } from '../variable-deps.js';
 import { BinaryEvaluator as JSBinaryEvaluator, IncrementalEvaluator as JSIncrementalEvaluator } from '../binary-evaluator.js';
 
 // Dev/A-B override: ?evaluator=js forces the JS path (and disables the
@@ -29,6 +30,50 @@ const EVALUATOR_PARAM = (() => {
 
 const FORCE_JS_EVALUATOR = EVALUATOR_PARAM === 'js';
 
+// The evaluated variables in bytecode index order. Taken from VAR_NAMES so
+// that a variable added there is registered with, and read back from, the
+// Rust core without another list to keep in step.
+const VARIABLE_NAMES = [];
+for (let index = 0; VAR_NAMES[index] !== undefined; index++) {
+  VARIABLE_NAMES.push(VAR_NAMES[index]);
+}
+
+// What PersistentEvaluator.readNote() says about one value (rust/src/evaluator.rs)
+const KIND_SMALL = 1;      // exact: signed numerator, denominator
+const KIND_BIG = 2;        // exact, too large for a number: readBigValue()
+const KIND_IRRATIONAL = 3; // the float, then its magnitude times 1,000,000
+
+// What this adapter calls on the Rust core. A binary built before one of
+// these existed must not be used: it would order whole notes.
+const REQUIRED_CORE_METHODS = [
+  'registerNotes', 'removeNote', 'invalidateAll', 'evaluateDirty',
+  'takeCycles', 'takeUnresolved', 'takeFailures', 'takeDivisionsByZero',
+  'hasCachedNote', 'readNote', 'readBigValue',
+];
+
+/**
+ * A fraction.js value from a numerator and denominator the Rust core has
+ * already reduced to lowest terms. The Fraction constructor would reduce them
+ * again, and for the long fractions of a comma chain that gcd costs more than
+ * the evaluation did. (FractionPool in binary-evaluator.js fills its
+ * instances the same way.)
+ *
+ * @param {bigint} numerator - Signed
+ * @param {bigint} denominator - Positive
+ * @returns {Fraction}
+ */
+function reducedFraction(numerator, denominator) {
+  const fraction = new Fraction(0); // s = 1n, n = 0n, d = 1n
+  if (numerator < 0n) {
+    fraction.s = -1n;
+    fraction.n = -numerator;
+  } else {
+    fraction.n = numerator;
+  }
+  fraction.d = denominator;
+  return fraction;
+}
+
 /**
  * Whether module.js should hot-swap to the WASM evaluator when WASM
  * finishes initializing. Currently opt-in (?evaluator=wasm); headless
@@ -46,8 +91,7 @@ export function isEvaluatorHotSwapEnabled() {
  * @returns {boolean}
  */
 export function isWasmBackedEvaluator(evaluator) {
-  return evaluator instanceof WasmPersistentEvaluatorWrapper ||
-         evaluator instanceof WasmEvaluatorWrapper;
+  return evaluator instanceof WasmPersistentEvaluatorWrapper;
 }
 
 /**
@@ -57,18 +101,11 @@ export function isWasmBackedEvaluator(evaluator) {
  */
 export function createEvaluator(module) {
   if (!FORCE_JS_EVALUATOR && shouldUseWasm('evaluator') && isWasmAvailable()) {
-    const wasm = getWasm();
     try {
-      // Use PersistentEvaluator if available and enabled
-      if (WASM_CONFIG.usePersistentCache && wasm.PersistentEvaluator) {
-        return new WasmPersistentEvaluatorWrapper(wasm, module);
-      }
-      return new WasmEvaluatorWrapper(wasm, module);
+      return new WasmPersistentEvaluatorWrapper(getWasm(), module);
     } catch (e) {
       if (WASM_CONFIG.fallbackOnError) {
-        if (WASM_CONFIG.debug) {
-          console.warn('WASM Evaluator creation failed, using JS fallback:', e);
-        }
+        console.warn('WASM evaluator unusable, using the JavaScript evaluator:', e.message || e);
         return new JSBinaryEvaluator(module);
       }
       throw e;
@@ -85,304 +122,14 @@ export function createEvaluator(module) {
  * @returns {Object} Incremental evaluator instance
  */
 export function createIncrementalEvaluator(module, dependencyGraph, evaluator) {
-  // Use WASM incremental evaluator if the base evaluator is WasmPersistentEvaluatorWrapper
   if (evaluator instanceof WasmPersistentEvaluatorWrapper) {
     return new WasmIncrementalEvaluator(module, dependencyGraph, evaluator);
   }
-  // The non-persistent WASM wrapper evaluates whole notes only
-  if (evaluator instanceof WasmEvaluatorWrapper) {
-    return new WasmNoteOrderIncrementalEvaluator(module, dependencyGraph, evaluator);
-  }
-  // Otherwise use JS incremental evaluator
   return new JSIncrementalEvaluator(module, dependencyGraph, evaluator);
 }
 
-/**
- * Wrapper around WASM Evaluator to match JS interface
- */
-class WasmEvaluatorWrapper {
-  constructor(wasm, module) {
-    this.wasm = wasm;
-    this.module = module;
-    this.evaluator = new wasm.Evaluator();
-    this.cache = new Map();
-    this.generation = 0;
-    // PERFORMANCE: Cache converted eval values to avoid repeated serialization
-    this._convertedCache = null;
-    this._convertedCacheGeneration = -1;
-    this._lastEvalCacheRef = null;
-  }
-
-  setModule(module) {
-    this.module = module;
-    this.invalidateAll();
-  }
-
-  invalidateAll() {
-    this.cache.clear();
-    this.generation++;
-    // Invalidate converted cache
-    this._convertedCache = null;
-    this._convertedCacheGeneration = -1;
-    this._lastEvalCacheRef = null;
-  }
-
-  invalidate(noteId) {
-    this.cache.delete(noteId);
-    this.generation++;
-    // Invalidate converted cache when any note changes
-    this._convertedCache = null;
-  }
-
-  beginBatch() {
-    // Reset converted cache at start of batch for fresh conversion
-    this._convertedCache = null;
-    this._lastEvalCacheRef = null;
-  }
-
-  /**
-   * Evaluate a binary expression
-   * @param {Object} expr - BinaryExpression with bytecode
-   * @param {Map} evalCache - Pre-evaluated note values
-   * @returns {Object} Fraction result
-   */
-  evaluate(expr, evalCache = null) {
-    if (expr.isEmpty()) {
-      return this._createFraction(0, 1);
-    }
-
-    try {
-      // PERFORMANCE: Only convert evalCache once per batch, not per expression
-      // Check if we need to rebuild the converted cache
-      let cacheObj = this._convertedCache;
-      if (!cacheObj || evalCache !== this._lastEvalCacheRef) {
-        cacheObj = {};
-        if (evalCache) {
-          for (const [id, values] of evalCache) {
-            const key = String(id);
-            cacheObj[key] = this._convertEvalValues(values);
-          }
-        }
-        this._convertedCache = cacheObj;
-        this._lastEvalCacheRef = evalCache;
-      }
-
-      // PERFORMANCE: Reuse bytecode view instead of slicing (avoids copy)
-      // If the expression has a pre-created view, use it; otherwise create one
-      let bytecodeView;
-      if (expr._wasmView && expr._wasmViewLength === expr.length) {
-        bytecodeView = expr._wasmView;
-      } else {
-        bytecodeView = expr.bytecode.subarray ?
-          expr.bytecode.subarray(0, expr.length) :
-          expr.bytecode.slice(0, expr.length);
-        // Cache for reuse if expression doesn't change
-        expr._wasmView = bytecodeView;
-        expr._wasmViewLength = expr.length;
-      }
-
-      // Call WASM evaluator
-      const result = this.evaluator.evaluateExpression(
-        bytecodeView,
-        expr.length,
-        cacheObj
-      );
-
-      // Convert result back to fraction.js format
-      return this._fractionFromWasm(result);
-    } catch (e) {
-      if (WASM_CONFIG.fallbackOnError) {
-        if (WASM_CONFIG.debug) {
-          console.warn('WASM evaluation failed, using default:', e);
-        }
-        return this._createFraction(0, 1);
-      }
-      throw e;
-    }
-  }
-
-  /**
-   * Evaluate a note and cache results
-   * @param {Object} note - The note to evaluate
-   * @param {Map} evalCache - Pre-evaluated dependencies
-   * @returns {Object} Evaluated values
-   */
-  evaluateNote(note, evalCache = null) {
-    const result = {
-      startTime: null,
-      duration: null,
-      frequency: null,
-      tempo: null,
-      beatsPerMeasure: null,
-      measureLength: null,
-    };
-
-    // PERFORMANCE: Convert evalCache to WASM format ONCE for all expressions in this note
-    // This avoids O(N * M) serialization where N = notes and M = expressions per note
-    const cacheObj = {};
-    if (evalCache) {
-      for (const [id, values] of evalCache) {
-        const key = String(id);
-        cacheObj[key] = this._convertEvalValues(values);
-      }
-    }
-    // Add this note's partial result (updated as we evaluate each expression)
-    const noteKey = String(note.id);
-    cacheObj[noteKey] = this._convertEvalValues(result);
-
-    // Helper to get expression
-    const getExpr = (name) => {
-      if (note.expressions && note.expressions[name]) {
-        return note.expressions[name];
-      }
-      if (note[name]) {
-        return note[name];
-      }
-      return null;
-    };
-
-    // Direct evaluation without going through this.evaluate() to avoid extra overhead
-    const safeEvaluate = (name) => {
-      try {
-        const expr = getExpr(name);
-        if (expr && !expr.isEmpty()) {
-          // PERFORMANCE: Use subarray instead of slice when possible
-          const bytecodeView = expr.bytecode.subarray ?
-            expr.bytecode.subarray(0, expr.length) :
-            expr.bytecode.slice(0, expr.length);
-
-          const wasmResult = this.evaluator.evaluateExpression(
-            bytecodeView,
-            expr.length,
-            cacheObj
-          );
-
-          // Create a new Fraction for caching
-          const value = this._fractionFromWasm(wasmResult);
-          result[name] = value;
-
-          // Update the converted cache for this note so subsequent expressions can see it
-          cacheObj[noteKey] = this._convertEvalValues(result);
-
-          return value;
-        }
-      } catch (e) {
-        if (WASM_CONFIG.debug) {
-          console.warn(`Failed to evaluate ${name} for note ${note.id}:`, e);
-        }
-      }
-      return null;
-    };
-
-    // Evaluate in dependency order
-    result.tempo = safeEvaluate('tempo');
-    result.beatsPerMeasure = safeEvaluate('beatsPerMeasure');
-    result.frequency = safeEvaluate('frequency');
-    result.measureLength = safeEvaluate('measureLength');
-
-    result.startTime = safeEvaluate('startTime');
-    result.duration = safeEvaluate('duration');
-
-    // If measureLength wasn't explicitly defined but this is a measure note or base note,
-    // compute it from beatsPerMeasure and tempo. This is needed because findMeasureLength()
-    // references are compiled as LOAD_REF which looks up measureLength in the cache.
-    // Only compute for measure notes (have startTime, no duration/frequency) or base note (id=0)
-    // to avoid expensive Fraction operations for regular notes.
-    const isMeasureNote = result.startTime && !result.duration && !result.frequency;
-    if (!result.measureLength && (isMeasureNote || note.id === 0)) {
-      // Get beatsPerMeasure - use this note's value or fall back to base note
-      let beats = result.beatsPerMeasure;
-      if (!beats && evalCache) {
-        const baseCache = evalCache.get(0);
-        if (baseCache) beats = baseCache.beatsPerMeasure;
-      }
-      // Get tempo - use this note's value or fall back to base note
-      let tempo = result.tempo;
-      if (!tempo && evalCache) {
-        const baseCache = evalCache.get(0);
-        if (baseCache) tempo = baseCache.tempo;
-      }
-      // Compute measureLength = beatsPerMeasure * 60 / tempo as an exact
-      // Fraction (mirrors the JS evaluator; a duck-typed {s,n,d} POJO with
-      // Number fields would poison BigInt-backed consumers).
-      try {
-        const b = beats instanceof Fraction ? beats : new Fraction(4);
-        const t = tempo instanceof Fraction ? tempo : new Fraction(60);
-        result.measureLength = b.mul(60).div(t);
-      } catch (e) {
-        result.measureLength = new Fraction(4);
-      }
-    }
-
-    this.cache.set(note.id, result);
-    return result;
-  }
-
-  getCachedValue(noteId, varIndex) {
-    const cached = this.cache.get(noteId);
-    if (!cached) return null;
-
-    const varNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
-    return cached[varNames[varIndex]] || null;
-  }
-
-  getPoolStats() {
-    return { used: 0, total: 0, utilization: 'N/A (WASM)' };
-  }
-
-  // Private helper methods
-
-  _createFraction(num, den) {
-    // Create a fraction.js compatible object
-    return new Fraction(num, den);
-  }
-
-  _fractionFromWasm(wasmResult) {
-    // wasmResult has { s, n, d } format (u32 components from FractionData);
-    // construct instead of mutating internals so the result is a real Fraction
-    const s = wasmResult.s || 1;
-    const n = wasmResult.n || 0;
-    const d = wasmResult.d || 1;
-    return new Fraction(BigInt(s) * BigInt(n), BigInt(d));
-  }
-
-  _convertEvalValues(values) {
-    const result = {};
-    for (const [key, val] of Object.entries(values)) {
-      if (val != null) {
-        result[key] = this._toFractionData(val);
-      }
-    }
-    return result;
-  }
-
-  // The WASM boundary struct (FractionData) holds n/d as u32: components
-  // that fit cross the boundary exactly, anything larger degrades to the
-  // quantized-float fallback (matching the Rust side's overflow handling).
-  _toFractionData(val) {
-    if (typeof val.n === 'bigint' && typeof val.d === 'bigint' && val.s != null) {
-      if (val.n < 4294967296n && val.d < 4294967296n) {
-        const s = Number(val.s);
-        return { s: s === 0 ? 1 : s, n: Number(val.n), d: Number(val.d) };
-      }
-    } else if (typeof val.s === 'number' && typeof val.n === 'number' && typeof val.d === 'number') {
-      if (val.n < 4294967296 && val.d < 4294967296) {
-        const numVal = toNumber(val, 0);
-        return { s: val.s === 0 ? (numVal < 0 ? -1 : 1) : val.s, n: val.n, d: val.d };
-      }
-    }
-    // Plain numbers, oversized components, or malformed fractions
-    const numVal = toNumber(val, 0);
-    return {
-      s: numVal < 0 ? -1 : 1,
-      n: Math.abs(Math.round(numVal * 1000000)),
-      d: 1000000
-    };
-  }
-}
-
 // ============================================================================
-// WasmIncrementalEvaluator - O(N) batch evaluation with WASM-resident cache
+// WasmIncrementalEvaluator - dirty tracking in JS, evaluation in one WASM call
 // ============================================================================
 
 /**
@@ -418,8 +165,14 @@ class LazyWasmCacheProxy {
     return this._localCache.has(noteId) || this._evaluator.hasCachedNote(noteId);
   }
 
+  /**
+   * Drop a note's values. Module.removeNote() calls this when a note is gone,
+   * so WASM has to forget the note as well: left registered, whatever still
+   * references it would go on reading its last values instead of defaults.
+   */
   delete(noteId) {
     this._localCache.delete(noteId);
+    this._evaluator.removeNote(Number(noteId));
   }
 
   clear() {
@@ -457,10 +210,13 @@ class LazyWasmCacheProxy {
 }
 
 /**
- * Incremental evaluator that uses WASM batch evaluation
+ * Incremental evaluator backed by the Rust core.
  *
- * This evaluator registers bytecode once per note, then evaluates
- * all dirty notes in a single WASM call.
+ * Which notes are dirty is tracked here, exactly as JSIncrementalEvaluator
+ * does. Everything else happens in one WASM call per batch: the core orders
+ * the batch per (note, variable), evaluates it, and says what it could not
+ * get right (rust/src/evaluator.rs, the twin of
+ * BinaryEvaluator.evaluateVariables()).
  */
 class WasmIncrementalEvaluator {
   constructor(module, dependencyGraph, evaluator) {
@@ -485,18 +241,20 @@ class WasmIncrementalEvaluator {
   }
 
   /**
-   * Invalidate a note whose bytecode has changed.
-   * Unregisters the note for re-registration and marks dependents dirty.
+   * Invalidate a note whose bytecode may have changed: it is registered
+   * again before the next evaluation, and everything that reads it, also
+   * through the BaseNote, is re-evaluated with it.
+   *
+   * @param {number} noteId
+   * @param {Set<number>} [dependents] - graph.getEvaluationDependents(noteId),
+   *   when the caller has already computed it
    */
-  invalidate(noteId) {
+  invalidate(noteId, dependents = null) {
     this.dirty.add(noteId);
-
-    // Mark this note for re-registration (its bytecode changed)
     this.evaluator.unregisterNote(noteId);
 
-    // Also mark all dependents as dirty (but DON'T unregister - their bytecode is unchanged)
-    const dependents = this.graph.getAllDependents(noteId);
-    for (const dep of dependents) {
+    // Dependents keep their registration: their bytecode is unchanged
+    for (const dep of dependents || this.graph.getEvaluationDependents(noteId)) {
       this.dirty.add(dep);
     }
 
@@ -530,125 +288,47 @@ class WasmIncrementalEvaluator {
   }
 
   /**
-   * Evaluate all dirty notes using batch WASM evaluation
-   * @returns {Map|LazyWasmCacheProxy} Cache (Map-like interface)
+   * Evaluate all dirty notes, one variable at a time, in dependency order
+   * @returns {LazyWasmCacheProxy} Cache (Map-like interface)
    */
   evaluateDirty() {
     if (this.dirty.size === 0) {
       return this.cache;
     }
 
-    // 1. Register bytecode for any notes not yet registered
-    for (const noteId of this.dirty) {
+    // Ascending ids, as the JS evaluator walks them. The core sorts again;
+    // doing it here keeps the registration order fixed as well.
+    const ids = Uint32Array.from(this.dirty).sort();
+
+    // A dirty id without a note is a note that was deleted: WASM forgets it.
+    // A note whose bytecode is new or changed is registered first.
+    const unregistered = [];
+    let count = 0;
+    for (let i = 0; i < ids.length; i++) {
+      const noteId = ids[i];
+      const note = this.module.getNoteById(noteId);
+      if (!note) {
+        this.evaluator.removeNote(noteId);
+        continue;
+      }
       if (!this.evaluator.isRegistered(noteId)) {
-        const note = this.module.getNoteById(noteId);
-        if (note) {
-          this.evaluator.registerNote(note);
-        }
+        unregistered.push(note);
       }
+      ids[count++] = noteId;
+    }
+    this.evaluator.registerNotes(unregistered);
+
+    // Only the notes of the batch change; every other record stays as it is
+    const batch = ids.subarray(0, count);
+    for (let i = 0; i < count; i++) {
+      this.cache._localCache.delete(batch[i]);
     }
 
-    // 2. Topological sort dirty notes
-    const sorted = this.topoSort(this.dirty);
+    // SINGLE WASM CALL - orders and evaluates the whole batch
+    this.evaluator.evaluateDirty(batch);
 
-    // 3. Clear ALL local cache entries BEFORE WASM evaluation
-    // Using clear() instead of selective delete ensures no stale values persist
-    // This is safer than selective clearing because:
-    // - WASM evaluation may affect notes not explicitly in dirty set (via dependencies)
-    // - It avoids subtle bugs where getAllDependents might miss some dependents
-    // - Performance impact is minimal since lazy fetch is O(1) per note
-    this.cache._localCache.clear();
-    // The wrapper's JS cache is also cleared entirely (done in evaluateDirty below)
-
-    // 4. SINGLE WASM CALL - evaluates all dirty notes in order
-    this.evaluator.evaluateDirty(sorted);
-
-    // 5. Clear dirty set
     this.dirty.clear();
-
     return this.cache;
-  }
-
-  /**
-   * Topological sort using Kahn's algorithm
-   * (Same implementation as JSIncrementalEvaluator)
-   */
-  topoSort(noteIds) {
-    const inDegree = new Map();
-    const result = [];
-    const resultSet = new Set();
-
-    const baseNoteDependents = this.graph.getBaseNoteDependents();
-    const hasBaseNote = noteIds.has(0);
-
-    // Calculate in-degrees
-    for (const id of noteIds) {
-      const deps = this.graph.getDependencies(id);
-      let count = 0;
-      for (const d of deps) {
-        if (noteIds.has(d)) count++;
-      }
-      if (hasBaseNote && id !== 0 && baseNoteDependents.has(id)) {
-        count++;
-      }
-      inDegree.set(id, count);
-    }
-
-    // Start with nodes that have no dependencies
-    const queue = [];
-    for (const [id, deg] of inDegree) {
-      if (deg === 0) queue.push(id);
-    }
-    queue.sort((a, b) => a - b);
-
-    // Process queue
-    let queueIdx = 0;
-    while (queueIdx < queue.length) {
-      const id = queue[queueIdx++];
-      result.push(id);
-      resultSet.add(id);
-
-      const dependents = this.graph.getDependents(id);
-      const newZeroDegree = [];
-      const newZeroSet = new Set();
-      for (const dep of dependents) {
-        if (!inDegree.has(dep)) continue;
-        const newDeg = inDegree.get(dep) - 1;
-        inDegree.set(dep, newDeg);
-        if (newDeg === 0) {
-          newZeroDegree.push(dep);
-          newZeroSet.add(dep);
-        }
-      }
-
-      if (id === 0) {
-        for (const dep of baseNoteDependents) {
-          if (!inDegree.has(dep)) continue;
-          const newDeg = inDegree.get(dep) - 1;
-          inDegree.set(dep, newDeg);
-          if (newDeg === 0 && !newZeroSet.has(dep)) {
-            newZeroDegree.push(dep);
-            newZeroSet.add(dep);
-          }
-        }
-      }
-
-      newZeroDegree.sort((a, b) => a - b);
-      queue.push(...newZeroDegree);
-    }
-
-    // Handle cycles
-    if (result.length !== noteIds.size) {
-      console.warn('Dependency cycle detected! Some notes could not be evaluated.');
-      const remaining = [];
-      for (const id of noteIds) {
-        if (!resultSet.has(id)) remaining.push(id);
-      }
-      remaining.sort((a, b) => a - b);
-      result.push(...remaining);
-    }
-
-    return result;
   }
 
   getEvaluatedNote(noteId) {
@@ -660,59 +340,39 @@ class WasmIncrementalEvaluator {
   }
 }
 
-/**
- * Incremental evaluator for the non-persistent WASM wrapper.
- *
- * The JS evaluator orders evaluation per (note, variable). WasmEvaluatorWrapper
- * can only evaluate a whole note at a time, so it keeps the per-note order the
- * rest of the WASM path uses: the same Kahn sort, then one evaluateNote() each.
- */
-class WasmNoteOrderIncrementalEvaluator extends JSIncrementalEvaluator {
-  evaluateDirty() {
-    if (this.dirty.size === 0) {
-      return this.cache;
-    }
-
-    this.evaluator.beginBatch();
-
-    const sorted = WasmIncrementalEvaluator.prototype.topoSort.call(this, this.dirty);
-    for (const noteId of sorted) {
-      const note = this.module.getNoteById(noteId);
-      if (!note) {
-        this.cache.delete(noteId);
-        continue;
-      }
-      this.cache.set(noteId, this.evaluator.evaluateNote(note, this.cache));
-    }
-
-    this.dirty.clear();
-    return this.cache;
-  }
-}
-
 // ============================================================================
-// WasmPersistentEvaluatorWrapper - O(N) evaluation with WASM-resident cache
+// WasmPersistentEvaluatorWrapper - notes and values live in WASM memory
 // ============================================================================
 
 /**
- * Wrapper around PersistentEvaluator for O(N) evaluation
+ * Wrapper around the Rust PersistentEvaluator.
  *
- * This wrapper keeps the evaluation cache in WASM memory to avoid
- * O(N²) serialization overhead. JS only accesses the cache on-demand.
+ * Compiled expressions go to WASM once per note; evaluated values stay there
+ * and are converted to fraction.js objects only for the notes someone reads.
  */
 class WasmPersistentEvaluatorWrapper {
   constructor(wasm, module) {
+    const core = wasm.PersistentEvaluator;
+    if (!core || REQUIRED_CORE_METHODS.some((name) => typeof core.prototype[name] !== 'function')) {
+      throw new Error('src/wasm/rmt_core_bg.wasm is older than its adapter (run `npm run wasm:build`)');
+    }
+
     this.wasm = wasm;
     this.module = module;
-    this.evaluator = new wasm.PersistentEvaluator();
+    this.evaluator = new core();
     this.generation = 0;
 
-    // Local JS cache for Fraction.js objects (lazy conversion from WASM)
+    // fraction.js records of the notes read so far (lazy conversion from WASM)
     this._jsCache = new Map();
-    this._jsCacheGeneration = -1;
 
     // Track which notes have been registered
     this._registeredNotes = new Set();
+
+    // Scratch buffer for registerNotes()
+    this._packed = new Uint8Array(4096);
+
+    // A JS evaluator, created when there is first something to report
+    this._reporter = null;
   }
 
   setModule(module) {
@@ -727,83 +387,61 @@ class WasmPersistentEvaluatorWrapper {
     this.generation++;
   }
 
-  invalidate(noteId) {
-    this.evaluator.invalidateNote(noteId);
-    this._jsCache.delete(noteId);
-    this.generation++;
-  }
+  /**
+   * Hand the compiled expressions of some notes to WASM, in one call.
+   * Registering a note again replaces all of its expressions.
+   * @param {Array<Object>} notes
+   */
+  registerNotes(notes) {
+    if (notes.length === 0) return;
 
-  beginBatch() {
-    // Clear JS cache at start of batch - will be repopulated lazily
-    this._jsCache.clear();
+    // Per note: u32 id, u8 expression count, then per expression
+    // u8 variable index, u32 length, bytecode (integers little-endian)
+    let packed = this._packed;
+    let view = new DataView(packed.buffer);
+    let at = 0;
+    const reserve = (size) => {
+      if (at + size <= packed.length) return;
+      const grown = new Uint8Array(Math.max(packed.length * 2, at + size));
+      grown.set(packed.subarray(0, at));
+      packed = this._packed = grown;
+      view = new DataView(packed.buffer);
+    };
+
+    for (const note of notes) {
+      reserve(5);
+      view.setUint32(at, note.id, true);
+      const countAt = at + 4;
+      at += 5;
+
+      let count = 0;
+      for (let varIndex = 0; varIndex < VARIABLE_NAMES.length; varIndex++) {
+        const expr = getVariableExpression(note, varIndex);
+        if (expr === null) continue;
+        reserve(5 + expr.length);
+        packed[at] = varIndex;
+        view.setUint32(at + 1, expr.length, true);
+        packed.set(expr.bytecode.subarray(0, expr.length), at + 5);
+        at += 5 + expr.length;
+        count++;
+      }
+      packed[countAt] = count;
+    }
+
+    this.evaluator.registerNotes(packed.subarray(0, at));
+    for (const note of notes) {
+      this._registeredNotes.add(note.id);
+      this._jsCache.delete(note.id);
+    }
   }
 
   /**
-   * Register a note's bytecode with WASM (one-time per note)
-   * @param {Object} note - The note to register
+   * Register one note
+   * @param {Object} note
    */
   registerNote(note) {
     if (!note || note.id == null) return;
-
-    const expressions = {};
-    const varNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
-
-    for (const varName of varNames) {
-      const expr = note.expressions?.[varName] || note[varName];
-      if (expr && typeof expr.isEmpty === 'function' && !expr.isEmpty()) {
-        // Use subarray to avoid copying bytecode
-        const bytecodeView = expr.bytecode.subarray ?
-          expr.bytecode.subarray(0, expr.length) :
-          expr.bytecode.slice(0, expr.length);
-
-        expressions[varName] = {
-          bytecode: Array.from(bytecodeView), // Convert to regular array for serialization
-          length: expr.length
-        };
-      }
-    }
-
-    try {
-      this.evaluator.registerNote(note.id, expressions);
-      this._registeredNotes.add(note.id);
-    } catch (e) {
-      if (WASM_CONFIG.debug) {
-        console.warn(`Failed to register note ${note.id}:`, e);
-      }
-    }
-  }
-
-  /**
-   * Mark a note as dirty in WASM
-   * @param {number} noteId - The note ID
-   */
-  markDirty(noteId) {
-    this.evaluator.markDirty(noteId);
-    this._jsCache.delete(noteId);
-  }
-
-  /**
-   * Mark multiple notes as dirty
-   * @param {Array<number>} noteIds - Array of note IDs
-   */
-  markDirtyBatch(noteIds) {
-    this.evaluator.markDirtyBatch(new Uint32Array(noteIds));
-    for (const id of noteIds) {
-      this._jsCache.delete(id);
-    }
-  }
-
-  /**
-   * Evaluate all dirty notes in topological order (single WASM call!)
-   * @param {Array<number>} sortedIds - Topologically sorted note IDs
-   * @returns {number} Number of notes evaluated
-   */
-  evaluateDirty(sortedIds) {
-    const count = this.evaluator.evaluateDirty(new Uint32Array(sortedIds));
-    this.generation++;
-    // Clear JS cache - will be repopulated lazily on access
-    this._jsCache.clear();
-    return count;
+    this.registerNotes([note]);
   }
 
   /**
@@ -825,6 +463,77 @@ class WasmPersistentEvaluatorWrapper {
   }
 
   /**
+   * Forget a note that no longer exists: its expressions and its values
+   * @param {number} noteId - The note ID
+   */
+  removeNote(noteId) {
+    this.evaluator.removeNote(noteId);
+    this._registeredNotes.delete(noteId);
+    this._jsCache.delete(noteId);
+  }
+
+  /**
+   * Evaluate a batch of registered notes in a single WASM call, each
+   * variable after the variables it reads, and report what went wrong.
+   * @param {Uint32Array|Array<number>} noteIds
+   * @returns {number} Number of notes evaluated
+   */
+  evaluateDirty(noteIds) {
+    const ids = noteIds instanceof Uint32Array ? noteIds : new Uint32Array(noteIds);
+    const count = this.evaluator.evaluateDirty(ids);
+    this.generation++;
+
+    // The notes of the batch have new values; nothing else changed
+    for (let i = 0; i < ids.length; i++) {
+      this._jsCache.delete(ids[i]);
+    }
+
+    if (this.evaluator.hasProblems) {
+      this._reportProblems();
+    }
+    return count;
+  }
+
+  /**
+   * Report what the last evaluation could not get right, in the words of the
+   * JS evaluator: true dependency cycles and references that fell back to a
+   * hard-coded default are console errors naming every variable involved.
+   */
+  _reportProblems() {
+    const core = this.evaluator;
+
+    const failures = core.takeFailures();
+    if (failures !== '') {
+      for (const line of failures.split('\n')) {
+        const tab = line.indexOf('\t');
+        const variable = Number(line.slice(0, tab));
+        console.warn(`Failed to evaluate ${VAR_NAMES[variable & 7]} for note ${variable >> 3}:`, line.slice(tab + 1));
+      }
+    }
+
+    for (let n = core.takeDivisionsByZero(); n > 0; n--) {
+      console.warn('Division by zero in binary evaluator, using 1');
+    }
+
+    // Each loop arrives as its length followed by its variables
+    const packedCycles = core.takeCycles();
+    const cycles = [];
+    for (let at = 0; at < packedCycles.length; at += 1 + packedCycles[at]) {
+      cycles.push(Array.from(packedCycles.subarray(at + 1, at + 1 + packedCycles[at])));
+    }
+    const unresolved = core.takeUnresolved(); // (reader, reference) pairs
+
+    if (cycles.length > 0 || unresolved.length > 0) {
+      // The wording, and the reason given for each unresolved reference,
+      // are the JS evaluator's own, so both engines report alike
+      const reporter = this._reporter || (this._reporter = new JSBinaryEvaluator(this.module));
+      reporter.module = this.module;
+      reporter._unresolved = unresolved.length > 0 ? Array.from(unresolved) : null;
+      reporter.reportProblems(cycles.length > 0 ? cycles : null);
+    }
+  }
+
+  /**
    * Check if a note is in the WASM cache
    * @param {number} noteId - The note ID
    * @returns {boolean}
@@ -839,60 +548,46 @@ class WasmPersistentEvaluatorWrapper {
    * @returns {Object|null} Evaluated values with Fraction.js objects
    */
   getEvaluatedNote(noteId) {
-    // Check JS cache first
-    if (this._jsCache.has(noteId)) {
-      return this._jsCache.get(noteId);
+    const cached = this._jsCache.get(noteId);
+    if (cached !== undefined) {
+      return cached;
     }
 
-    // Fetch from WASM and convert to Fraction.js
-    const wasmResult = this.evaluator.getCachedNote(noteId);
-    if (!wasmResult || wasmResult === null) return null;
+    const packed = this.evaluator.readNote(noteId);
+    if (packed.length === 0) return null;
 
-    const jsResult = this._convertToFractionJs(wasmResult);
-    this._jsCache.set(noteId, jsResult);
-    return jsResult;
+    const record = this._toRecord(noteId, packed);
+    this._jsCache.set(noteId, record);
+    return record;
   }
 
   /**
-   * Evaluate a single note (for compatibility with old interface)
+   * Evaluate a single note (for compatibility with the JS evaluator's interface)
    * @param {Object} note - The note to evaluate
-   * @param {Map} evalCache - Ignored (uses internal WASM cache)
    * @returns {Object} Evaluated values
    */
-  evaluateNote(note, evalCache = null) {
-    // Register if not already registered
-    if (!this._registeredNotes.has(note.id)) {
-      this.registerNote(note);
-    }
-
-    // Evaluate single note
-    this.evaluator.evaluateNoteInternal(note.id);
-
-    // Return result
+  evaluateNote(note) {
+    this.registerNote(note);
+    this.evaluateDirty([note.id]);
     return this.getEvaluatedNote(note.id);
   }
 
   /**
    * Evaluate a binary expression (for compatibility)
-   * Note: This is less efficient than batch evaluation
+   * Not available on this evaluator: expressions are evaluated in WASM as
+   * part of a note, by evaluateDirty().
    */
-  evaluate(expr, evalCache = null) {
-    if (expr.isEmpty()) {
-      return this._createFraction(0, 1);
+  evaluate(expr) {
+    if (!expr.isEmpty()) {
+      console.warn('WasmPersistentEvaluatorWrapper.evaluate() called - single expressions are not evaluated on the WASM path');
     }
-
-    // For single expression evaluation, fall back to basic approach
-    // This shouldn't be called in the optimized path
-    console.warn('WasmPersistentEvaluatorWrapper.evaluate() called - use evaluateDirty() for better performance');
-    return this._createFraction(0, 1);
+    return new Fraction(0, 1);
   }
 
   getCachedValue(noteId, varIndex) {
     const cached = this.getEvaluatedNote(noteId);
     if (!cached) return null;
-
-    const varNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
-    return cached[varNames[varIndex]] || null;
+    return cached[VARIABLE_NAMES[varIndex]] || null;
   }
 
   getPoolStats() {
@@ -904,56 +599,57 @@ class WasmPersistentEvaluatorWrapper {
   }
 
   /**
-   * Export the entire cache (for JSON save)
-   * @returns {Object} Cache as plain object
+   * Convert what readNote() returned into the record shape the JS evaluator
+   * produces: one fraction.js value (or null) per variable, and the flags.
+   *
+   * @param {number} noteId
+   * @param {Float64Array} packed - The flags, then (kind, a, b) per variable
+   * @returns {Object}
    */
-  exportCache() {
-    return this.evaluator.exportCache();
-  }
+  _toRecord(noteId, packed) {
+    const record = {};
+    for (const name of VARIABLE_NAMES) {
+      record[name] = null;
+    }
+    record.corruptionFlags = packed[0];
 
-  /**
-   * Import cache from JSON (for undo/redo or file load)
-   * @param {Object} cacheJson - Cache data
-   */
-  importCache(cacheJson) {
-    this.evaluator.importCache(cacheJson);
-    this._jsCache.clear();
-    this.generation++;
-  }
+    // A core built with fewer variables than this side knows simply leaves the rest null
+    const count = Math.min(VARIABLE_NAMES.length, (packed.length - 1) / 3);
+    for (let varIndex = 0; varIndex < count; varIndex++) {
+      const at = 1 + 3 * varIndex;
+      switch (packed[at]) {
+        case KIND_SMALL:
+          record[VARIABLE_NAMES[varIndex]] = reducedFraction(BigInt(packed[at + 1]), BigInt(packed[at + 2]));
+          break;
 
-  // Private helper methods
-
-  _createFraction(num, den) {
-    return new Fraction(num, den);
-  }
-
-  _convertToFractionJs(wasmNote) {
-    const result = {
-      startTime: null,
-      duration: null,
-      frequency: null,
-      tempo: null,
-      beatsPerMeasure: null,
-      measureLength: null,
-      corruptionFlags: wasmNote.corruptionFlags || 0
-    };
-
-    for (const key of ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength']) {
-      const val = wasmNote[key];
-      if (val && val.s !== undefined) {
-        // Rust sends s=0 for zero values; n is 0 there, so the sign is moot
-        const s = (val.s !== undefined && val.s !== null && val.s !== 0) ? val.s : 1;
-        const frac = new Fraction(BigInt(s) * BigInt(val.n || 0), BigInt(val.d || 1));
-        // For irrational values (or large fractions that overflow u32), store the float value
-        if (val.corrupted && val.f !== undefined) {
-          frac._irrational = true;
-          frac._floatValue = val.f;
+        case KIND_BIG: {
+          // Exact at any size: the digits cross the boundary as text,
+          // `-1f/a0`, hexadecimal with the sign on the numerator
+          const text = this.evaluator.readBigValue(noteId, varIndex);
+          const negative = text.charCodeAt(0) === 45;
+          const slash = text.indexOf('/');
+          const magnitude = BigInt('0x' + text.slice(negative ? 1 : 0, slash));
+          record[VARIABLE_NAMES[varIndex]] = reducedFraction(
+            negative ? -magnitude : magnitude,
+            BigInt('0x' + text.slice(slash + 1))
+          );
+          break;
         }
-        result[key] = frac;
+
+        case KIND_IRRATIONAL: {
+          // A fraction to six decimals for whatever reads valueOf(); the
+          // float itself rides along for playback and display
+          const float = packed[at + 1];
+          const value = new Fraction(BigInt(packed[at + 2]) * (float < 0 ? -1n : 1n), 1000000n);
+          value._irrational = true;
+          value._floatValue = float;
+          record[VARIABLE_NAMES[varIndex]] = value;
+          break;
+        }
       }
     }
 
-    return result;
+    return record;
   }
 }
 

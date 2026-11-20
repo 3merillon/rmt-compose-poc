@@ -171,87 +171,6 @@ export class DependencyGraph {
 if (Symbol.dispose) DependencyGraph.prototype[Symbol.dispose] = DependencyGraph.prototype.free;
 
 /**
- * Stack-based evaluator for binary expressions
- *
- * Now supports both rational (Fraction) and irrational (f64) values via the Value type.
- * Operations like Pow may produce irrational results.
- */
-export class Evaluator {
-    __destroy_into_raw() {
-        const ptr = this.__wbg_ptr;
-        this.__wbg_ptr = 0;
-        EvaluatorFinalization.unregister(this);
-        return ptr;
-    }
-    free() {
-        const ptr = this.__destroy_into_raw();
-        wasm.__wbg_evaluator_free(ptr, 0);
-    }
-    /**
-     * Evaluate a single expression from JavaScript
-     *
-     * # Arguments
-     * * `bytecode` - Uint8Array of bytecode
-     * * `length` - Number of valid bytes
-     * * `eval_cache` - JavaScript object mapping noteId to evaluated values
-     *
-     * # Returns
-     * Object with { s, n, d } representing the fraction
-     * @param {Uint8Array} bytecode
-     * @param {number} length
-     * @param {any} eval_cache
-     * @returns {any}
-     */
-    evaluateExpression(bytecode, length, eval_cache) {
-        const ptr0 = passArray8ToWasm0(bytecode, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.evaluator_evaluateExpression(this.__wbg_ptr, ptr0, len0, length, eval_cache);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Evaluate all expressions for a note from JavaScript
-     *
-     * # Arguments
-     * * `expressions` - Object with expression bytecodes for each variable
-     * * `eval_cache` - JavaScript object mapping noteId to evaluated values
-     *
-     * # Returns
-     * Object with evaluated values for each variable
-     * @param {any} expressions
-     * @param {any} eval_cache
-     * @returns {any}
-     */
-    evaluateNote(expressions, eval_cache) {
-        const ret = wasm.evaluator_evaluateNote(this.__wbg_ptr, expressions, eval_cache);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return takeFromExternrefTable0(ret[0]);
-    }
-    /**
-     * Create a new evaluator
-     */
-    constructor() {
-        const ret = wasm.evaluator_new();
-        this.__wbg_ptr = ret >>> 0;
-        EvaluatorFinalization.register(this, this.__wbg_ptr, this);
-        return this;
-    }
-    /**
-     * Get current stack size (for debugging)
-     * @returns {number}
-     */
-    get stackSize() {
-        const ret = wasm.evaluator_stackSize(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-}
-if (Symbol.dispose) Evaluator.prototype[Symbol.dispose] = Evaluator.prototype.free;
-
-/**
  * Expression compiler
  */
 export class ExpressionCompiler {
@@ -563,11 +482,7 @@ export class Fraction {
 if (Symbol.dispose) Fraction.prototype[Symbol.dispose] = Fraction.prototype.free;
 
 /**
- * Persistent evaluator with WASM-resident cache
- *
- * This evaluator keeps the evaluation cache in WASM memory to avoid
- * O(N²) serialization overhead when evaluating large modules.
- * Now supports both rational (Fraction) and irrational (f64) values via the Value type.
+ * Evaluator whose notes and values live in WASM memory across calls
  */
 export class PersistentEvaluator {
     __destroy_into_raw() {
@@ -581,7 +496,7 @@ export class PersistentEvaluator {
         wasm.__wbg_persistentevaluator_free(ptr, 0);
     }
     /**
-     * Get cache size
+     * Number of evaluated notes
      * @returns {number}
      */
     get cacheSize() {
@@ -589,43 +504,25 @@ export class PersistentEvaluator {
         return ret >>> 0;
     }
     /**
-     * Clear all dirty flags
-     */
-    clearDirty() {
-        wasm.persistentevaluator_clearDirty(this.__wbg_ptr);
-    }
-    /**
-     * Evaluate all dirty notes in topological order
-     * Returns the number of notes evaluated
-     * @param {Uint32Array} sorted_ids
+     * Evaluate a batch of notes, one variable at a time in dependency order.
+     *
+     * Every note of the batch is evaluated from scratch; a note outside it
+     * keeps its values and is read as it is. An id that is not registered
+     * names a note that no longer exists, and its values are dropped.
+     *
+     * Returns the number of notes evaluated. Afterwards `hasProblems` tells
+     * whether there is anything to report.
+     * @param {Uint32Array} note_ids
      * @returns {number}
      */
-    evaluateDirty(sorted_ids) {
-        const ptr0 = passArray32ToWasm0(sorted_ids, wasm.__wbindgen_malloc);
+    evaluateDirty(note_ids) {
+        const ptr0 = passArray32ToWasm0(note_ids, wasm.__wbindgen_malloc);
         const len0 = WASM_VECTOR_LEN;
         const ret = wasm.persistentevaluator_evaluateDirty(this.__wbg_ptr, ptr0, len0);
         return ret >>> 0;
     }
     /**
-     * Evaluate a single note using internal cache
-     * Tracks corruption flags for each property
-     * @param {number} note_id
-     * @returns {boolean}
-     */
-    evaluateNoteInternal(note_id) {
-        const ret = wasm.persistentevaluator_evaluateNoteInternal(this.__wbg_ptr, note_id);
-        return ret !== 0;
-    }
-    /**
-     * Export entire cache (for persistence/debug)
-     * @returns {any}
-     */
-    exportCache() {
-        const ret = wasm.persistentevaluator_exportCache(this.__wbg_ptr);
-        return ret;
-    }
-    /**
-     * Get generation counter
+     * Bumped whenever cached values may have changed
      * @returns {bigint}
      */
     get generation() {
@@ -633,26 +530,7 @@ export class PersistentEvaluator {
         return BigInt.asUintN(64, ret);
     }
     /**
-     * Get all cached values for a note
-     * @param {number} note_id
-     * @returns {any}
-     */
-    getCachedNote(note_id) {
-        const ret = wasm.persistentevaluator_getCachedNote(this.__wbg_ptr, note_id);
-        return ret;
-    }
-    /**
-     * Get a single cached value
-     * @param {number} note_id
-     * @param {number} var_index
-     * @returns {any}
-     */
-    getCachedValue(note_id, var_index) {
-        const ret = wasm.persistentevaluator_getCachedValue(this.__wbg_ptr, note_id, var_index);
-        return ret;
-    }
-    /**
-     * Check if a note is in the cache
+     * Whether a note has evaluated values
      * @param {number} note_id
      * @returns {boolean}
      */
@@ -661,48 +539,23 @@ export class PersistentEvaluator {
         return ret !== 0;
     }
     /**
-     * Import cache from JSON (for undo/redo snapshots)
-     * @param {any} cache_json
+     * Whether the last `evaluateDirty` left anything to report
+     * @returns {boolean}
      */
-    importCache(cache_json) {
-        const ret = wasm.persistentevaluator_importCache(this.__wbg_ptr, cache_json);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
-        }
+    get hasProblems() {
+        const ret = wasm.persistentevaluator_hasProblems(this.__wbg_ptr);
+        return ret !== 0;
     }
     /**
-     * Clear the entire cache and bytecode store
-     * This must clear bytecode_store because when a module is replaced (e.g., after reorder),
-     * notes with the same IDs may have different expressions/bytecode.
+     * Forget every note and every value.
+     * Expressions go too: after a module is replaced the same ids may carry
+     * different expressions.
      */
     invalidateAll() {
         wasm.persistentevaluator_invalidateAll(this.__wbg_ptr);
     }
     /**
-     * Invalidate a single note from the cache
-     * @param {number} note_id
-     */
-    invalidateNote(note_id) {
-        wasm.persistentevaluator_invalidateNote(this.__wbg_ptr, note_id);
-    }
-    /**
-     * Mark a note as dirty (needs re-evaluation)
-     * @param {number} note_id
-     */
-    markDirty(note_id) {
-        wasm.persistentevaluator_markDirty(this.__wbg_ptr, note_id);
-    }
-    /**
-     * Mark multiple notes as dirty
-     * @param {Uint32Array} note_ids
-     */
-    markDirtyBatch(note_ids) {
-        const ptr0 = passArray32ToWasm0(note_ids, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.persistentevaluator_markDirtyBatch(this.__wbg_ptr, ptr0, len0);
-    }
-    /**
-     * Create a new persistent evaluator
+     * Create an evaluator with no notes
      */
     constructor() {
         const ret = wasm.persistentevaluator_new();
@@ -711,34 +564,137 @@ export class PersistentEvaluator {
         return this;
     }
     /**
-     * Register bytecode for a single expression
-     * @param {number} note_id
-     * @param {number} var_index
-     * @param {Uint8Array} bytecode
-     * @param {number} length
+     * Number of registered notes
+     * @returns {number}
      */
-    registerExpression(note_id, var_index, bytecode, length) {
-        const ptr0 = passArray8ToWasm0(bytecode, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        wasm.persistentevaluator_registerExpression(this.__wbg_ptr, note_id, var_index, ptr0, len0, length);
+    get noteCount() {
+        const ret = wasm.persistentevaluator_noteCount(this.__wbg_ptr);
+        return ret >>> 0;
     }
     /**
-     * Register all expressions for a note at once
+     * One exact value as text, `numerator/denominator` in hexadecimal with
+     * the sign on the numerator (`-1f/a0`); empty when the note has no exact
+     * value for the variable. For the values `readNote` marks as too large
+     * for a number. Hexadecimal because both ends convert it in time
+     * proportional to its length, which decimal digits do not allow.
      * @param {number} note_id
-     * @param {any} expressions
+     * @param {number} var_index
+     * @returns {string}
      */
-    registerNote(note_id, expressions) {
-        const ret = wasm.persistentevaluator_registerNote(this.__wbg_ptr, note_id, expressions);
-        if (ret[1]) {
-            throw takeFromExternrefTable0(ret[0]);
+    readBigValue(note_id, var_index) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.persistentevaluator_readBigValue(this.__wbg_ptr, note_id, var_index);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
         }
     }
     /**
-     * Remove a note completely (when deleted from module)
+     * The evaluated values of one note; empty when it has none.
+     *
+     * The corruption flags come first, then three numbers per variable in
+     * bytecode index order: a kind and two operands.
+     *
+     * | kind | meaning | operands |
+     * |---|---|---|
+     * | 0 | no value | |
+     * | 1 | exact fraction | signed numerator, denominator |
+     * | 2 | exact fraction too large for a number | none: call `readBigValue` |
+     * | 3 | irrational | the float, its magnitude times 1,000,000 rounded |
+     * @param {number} note_id
+     * @returns {Float64Array}
+     */
+    readNote(note_id) {
+        const ret = wasm.persistentevaluator_readNote(this.__wbg_ptr, note_id);
+        var v1 = getArrayF64FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 8, 8);
+        return v1;
+    }
+    /**
+     * Register notes, replacing all expressions of each.
+     *
+     * `packed` is a sequence of notes, integers little-endian:
+     *
+     * ```text
+     * u32  note id
+     * u8   number of expressions that follow
+     *        u8   variable index
+     *        u32  bytecode length
+     *        ...  bytecode
+     * ```
+     *
+     * Returns the number of notes registered. Evaluated values are left
+     * alone: pass the ids to `evaluateDirty` to bring them up to date.
+     * @param {Uint8Array} packed
+     * @returns {number}
+     */
+    registerNotes(packed) {
+        const ptr0 = passArray8ToWasm0(packed, wasm.__wbindgen_malloc);
+        const len0 = WASM_VECTOR_LEN;
+        const ret = wasm.persistentevaluator_registerNotes(this.__wbg_ptr, ptr0, len0);
+        if (ret[2]) {
+            throw takeFromExternrefTable0(ret[1]);
+        }
+        return ret[0] >>> 0;
+    }
+    /**
+     * Forget a note: its expressions and its values
      * @param {number} note_id
      */
     removeNote(note_id) {
         wasm.persistentevaluator_removeNote(this.__wbg_ptr, note_id);
+    }
+    /**
+     * The true cycles of the last evaluation, and forget them. Each loop is
+     * its length followed by its variables, packed `(noteId << 3) | varIndex`,
+     * each reading the next and the last reading the first.
+     * @returns {Uint32Array}
+     */
+    takeCycles() {
+        const ret = wasm.persistentevaluator_takeCycles(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
+    }
+    /**
+     * How many divisions by zero the last evaluation replaced by 1, and forget them
+     * @returns {number}
+     */
+    takeDivisionsByZero() {
+        const ret = wasm.persistentevaluator_takeDivisionsByZero(this.__wbg_ptr);
+        return ret >>> 0;
+    }
+    /**
+     * The expressions the last evaluation could not run, and forget them:
+     * one line each, the packed variable, a tab, the reason.
+     * @returns {string}
+     */
+    takeFailures() {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.persistentevaluator_takeFailures(this.__wbg_ptr);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * The unresolved references of the last evaluation, and forget them:
+     * pairs of packed variables, the reader and what it tried to read.
+     * @returns {Uint32Array}
+     */
+    takeUnresolved() {
+        const ret = wasm.persistentevaluator_takeUnresolved(this.__wbg_ptr);
+        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
+        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
+        return v1;
     }
 }
 if (Symbol.dispose) PersistentEvaluator.prototype[Symbol.dispose] = PersistentEvaluator.prototype.free;
@@ -786,12 +742,6 @@ function __wbg_get_imports() {
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
         },
-        __wbg___wbindgen_bigint_get_as_i64_8fcf4ce7f1ca72a2: function(arg0, arg1) {
-            const v = arg1;
-            const ret = typeof(v) === 'bigint' ? v : undefined;
-            getDataViewMemory0().setBigInt64(arg0 + 8 * 1, isLikeNone(ret) ? BigInt(0) : ret, true);
-            getDataViewMemory0().setInt32(arg0 + 4 * 0, !isLikeNone(ret), true);
-        },
         __wbg___wbindgen_boolean_get_bbbb1c18aa2f5e25: function(arg0) {
             const v = arg0;
             const ret = typeof(v) === 'boolean' ? v : undefined;
@@ -808,10 +758,6 @@ function __wbg_get_imports() {
             const ret = arg0 in arg1;
             return ret;
         },
-        __wbg___wbindgen_is_bigint_31b12575b56f32fc: function(arg0) {
-            const ret = typeof(arg0) === 'bigint';
-            return ret;
-        },
         __wbg___wbindgen_is_function_0095a73b8b156f76: function(arg0) {
             const ret = typeof(arg0) === 'function';
             return ret;
@@ -821,16 +767,8 @@ function __wbg_get_imports() {
             const ret = typeof(val) === 'object' && val !== null;
             return ret;
         },
-        __wbg___wbindgen_is_string_cd444516edc5b180: function(arg0) {
-            const ret = typeof(arg0) === 'string';
-            return ret;
-        },
         __wbg___wbindgen_is_undefined_9e4d92534c42d778: function(arg0) {
             const ret = arg0 === undefined;
-            return ret;
-        },
-        __wbg___wbindgen_jsval_eq_11888390b0186270: function(arg0, arg1) {
-            const ret = arg0 === arg1;
             return ret;
         },
         __wbg___wbindgen_jsval_loose_eq_9dd77d8cd6671811: function(arg0, arg1) {
@@ -860,10 +798,6 @@ function __wbg_get_imports() {
         }, arguments); },
         __wbg_done_57b39ecd9addfe81: function(arg0) {
             const ret = arg0.done;
-            return ret;
-        },
-        __wbg_entries_58c7934c745daac7: function(arg0) {
-            const ret = Object.entries(arg0);
             return ret;
         },
         __wbg_error_7534b8e9a36f1ab4: function(arg0, arg1) {
@@ -941,10 +875,6 @@ function __wbg_get_imports() {
             const ret = new Error();
             return ret;
         },
-        __wbg_new_dca287b076112a51: function() {
-            const ret = new Map();
-            return ret;
-        },
         __wbg_new_dd2b680c8bf6ae29: function(arg0) {
             const ret = new Uint8Array(arg0);
             return ret;
@@ -959,10 +889,6 @@ function __wbg_get_imports() {
         },
         __wbg_prototypesetcall_bdcdcc5842e4d77d: function(arg0, arg1, arg2) {
             Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
-        },
-        __wbg_set_1eb0999cf5d27fc8: function(arg0, arg1, arg2) {
-            const ret = arg0.set(arg1, arg2);
-            return ret;
         },
         __wbg_set_3f1d0b984ed272ed: function(arg0, arg1, arg2) {
             arg0[arg1] = arg2;
@@ -1015,9 +941,6 @@ function __wbg_get_imports() {
 const DependencyGraphFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_dependencygraph_free(ptr >>> 0, 1));
-const EvaluatorFinalization = (typeof FinalizationRegistry === 'undefined')
-    ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_evaluator_free(ptr >>> 0, 1));
 const ExpressionCompilerFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_expressioncompiler_free(ptr >>> 0, 1));
@@ -1105,6 +1028,11 @@ function debugString(val) {
     return className;
 }
 
+function getArrayF64FromWasm0(ptr, len) {
+    ptr = ptr >>> 0;
+    return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
+}
+
 function getArrayU32FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
@@ -1121,6 +1049,14 @@ function getDataViewMemory0() {
         cachedDataViewMemory0 = new DataView(wasm.memory.buffer);
     }
     return cachedDataViewMemory0;
+}
+
+let cachedFloat64ArrayMemory0 = null;
+function getFloat64ArrayMemory0() {
+    if (cachedFloat64ArrayMemory0 === null || cachedFloat64ArrayMemory0.byteLength === 0) {
+        cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
+    }
+    return cachedFloat64ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -1248,6 +1184,7 @@ function __wbg_finalize_init(instance, module) {
     wasm = instance.exports;
     wasmModule = module;
     cachedDataViewMemory0 = null;
+    cachedFloat64ArrayMemory0 = null;
     cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();

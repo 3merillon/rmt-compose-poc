@@ -69,43 +69,79 @@ pub enum Var {
     MeasureLength = 5,
 }
 
+/// How many variables a note evaluates.
+///
+/// To add a variable: give it the next index in `Var`, raise this count, add
+/// its row to `VARIABLES` and its place in `VAR_ORDER`. Nothing else in the
+/// crate lists the variables. A packed variable reference has room for eight
+/// (see variable_deps.rs).
+pub const VAR_COUNT: usize = 6;
+
+/// What the evaluator needs to know about one variable
+pub struct VarInfo {
+    pub var: Var,
+    /// Its name on the JavaScript side (`VAR_NAMES` in src/binary-note.js)
+    pub name: &'static str,
+    /// What a reference evaluates to when nothing defines the variable
+    /// (`UNRESOLVED_DEFAULTS` in src/binary-evaluator.js)
+    pub default: i32,
+    /// Whether a note without its own value reads the BaseNote's
+    pub inherits: bool,
+}
+
+/// Every variable, at the position of its bytecode index
+pub const VARIABLES: [VarInfo; VAR_COUNT] = [
+    VarInfo { var: Var::StartTime, name: "startTime", default: 0, inherits: false },
+    VarInfo { var: Var::Duration, name: "duration", default: 1, inherits: false },
+    VarInfo { var: Var::Frequency, name: "frequency", default: 440, inherits: false },
+    VarInfo { var: Var::Tempo, name: "tempo", default: 60, inherits: true },
+    VarInfo { var: Var::BeatsPerMeasure, name: "beatsPerMeasure", default: 4, inherits: true },
+    VarInfo { var: Var::MeasureLength, name: "measureLength", default: 4, inherits: true },
+];
+
+/// Order in which a note's variables are visited when nothing forces another
+/// one (`VAR_ORDER` in src/binary-evaluator.js). Dependencies are pulled in
+/// ahead on demand, so this only breaks ties.
+pub const VAR_ORDER: [Var; VAR_COUNT] = [
+    Var::Tempo,
+    Var::BeatsPerMeasure,
+    Var::Frequency,
+    Var::MeasureLength,
+    Var::StartTime,
+    Var::Duration,
+];
+
 impl Var {
     /// Convert a byte to a variable index
     pub fn from_byte(byte: u8) -> Option<Var> {
-        match byte {
-            0 => Some(Var::StartTime),
-            1 => Some(Var::Duration),
-            2 => Some(Var::Frequency),
-            3 => Some(Var::Tempo),
-            4 => Some(Var::BeatsPerMeasure),
-            5 => Some(Var::MeasureLength),
-            _ => None,
-        }
+        VARIABLES.get(byte as usize).map(|info| info.var)
+    }
+
+    /// Position in `VARIABLES`, and in every per-note array of values
+    #[inline]
+    pub fn index(self) -> usize {
+        self as usize
     }
 
     /// Get the variable name as a string
     pub fn name(&self) -> &'static str {
-        match self {
-            Var::StartTime => "startTime",
-            Var::Duration => "duration",
-            Var::Frequency => "frequency",
-            Var::Tempo => "tempo",
-            Var::BeatsPerMeasure => "beatsPerMeasure",
-            Var::MeasureLength => "measureLength",
-        }
+        VARIABLES[*self as usize].name
     }
 
     /// Parse a variable name string to a Var
     pub fn from_name(name: &str) -> Option<Var> {
-        match name {
-            "startTime" => Some(Var::StartTime),
-            "duration" => Some(Var::Duration),
-            "frequency" => Some(Var::Frequency),
-            "tempo" => Some(Var::Tempo),
-            "beatsPerMeasure" => Some(Var::BeatsPerMeasure),
-            "measureLength" => Some(Var::MeasureLength),
-            _ => None,
-        }
+        VARIABLES.iter().find(|info| info.name == name).map(|info| info.var)
+    }
+
+    /// What a reference evaluates to when nothing defines this variable
+    pub fn unresolved_default(self) -> i32 {
+        VARIABLES[self as usize].default
+    }
+
+    /// Whether a note without its own value reads the BaseNote's
+    #[inline]
+    pub fn inherits_from_base(self) -> bool {
+        VARIABLES[self as usize].inherits
     }
 }
 
@@ -178,6 +214,37 @@ pub fn read_big_int_unsigned(bytecode: &[u8], offset: usize) -> Result<(BigInt, 
     Ok((value, 2 + len))
 }
 
+/// Hand-assembled bytecode for the unit tests of this crate
+#[cfg(test)]
+pub(crate) mod build {
+    use super::{write_i32, Op, Var};
+
+    /// The constant `num/den`
+    pub fn constant(num: i32, den: i32) -> Vec<u8> {
+        let mut bytecode = vec![Op::LoadConst as u8];
+        write_i32(&mut bytecode, num);
+        write_i32(&mut bytecode, den);
+        bytecode
+    }
+
+    /// `[note].var`
+    pub fn load_ref(note_id: u16, var: Var) -> Vec<u8> {
+        vec![Op::LoadRef as u8, (note_id >> 8) as u8, note_id as u8, var as u8]
+    }
+
+    /// `base.var`
+    pub fn load_base(var: Var) -> Vec<u8> {
+        vec![Op::LoadBase as u8, var as u8]
+    }
+
+    /// The operands in order, then the operator: `then(&[a, b], Op::Mul)` is `a * b`
+    pub fn then(operands: &[Vec<u8>], op: Op) -> Vec<u8> {
+        let mut bytecode = operands.concat();
+        bytecode.push(op as u8);
+        bytecode
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,7 +260,35 @@ mod tests {
     fn test_var_from_byte() {
         assert_eq!(Var::from_byte(0), Some(Var::StartTime));
         assert_eq!(Var::from_byte(5), Some(Var::MeasureLength));
-        assert_eq!(Var::from_byte(6), None);
+        assert_eq!(Var::from_byte(VAR_COUNT as u8), None);
+    }
+
+    #[test]
+    fn test_variable_table_is_consistent() {
+        // Each row sits at its own bytecode index
+        for (index, info) in VARIABLES.iter().enumerate() {
+            assert_eq!(info.var as usize, index, "{} is in the wrong row", info.name);
+            assert_eq!(Var::from_name(info.name), Some(info.var));
+            assert_eq!(info.var.name(), info.name);
+        }
+        // VAR_ORDER visits every variable exactly once
+        let mut seen = [false; VAR_COUNT];
+        for var in VAR_ORDER {
+            assert!(!seen[var.index()], "{} is in VAR_ORDER twice", var.name());
+            seen[var.index()] = true;
+        }
+        assert!(seen.iter().all(|&s| s));
+        // A packed variable reference keeps three bits for the variable
+        assert!(VAR_COUNT <= 8);
+    }
+
+    #[test]
+    fn test_variable_defaults_and_inheritance() {
+        assert_eq!(Var::Frequency.unresolved_default(), 440);
+        assert_eq!(Var::Duration.unresolved_default(), 1);
+        assert!(Var::Tempo.inherits_from_base());
+        assert!(Var::MeasureLength.inherits_from_base());
+        assert!(!Var::Frequency.inherits_from_base());
     }
 
     #[test]

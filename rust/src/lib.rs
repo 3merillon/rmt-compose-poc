@@ -10,6 +10,7 @@ use wasm_bindgen::prelude::*;
 
 pub mod fraction;
 pub mod bytecode;
+pub mod variable_deps;
 pub mod evaluator;
 pub mod graph;
 pub mod compiler;
@@ -17,7 +18,7 @@ pub mod value;
 
 // Re-export main types for convenience
 pub use fraction::Fraction;
-pub use evaluator::{Evaluator, PersistentEvaluator};
+pub use evaluator::PersistentEvaluator;
 pub use graph::DependencyGraph;
 pub use compiler::ExpressionCompiler;
 pub use value::{Value, ValueData};
