@@ -59,7 +59,7 @@ An approximate value comes from `~` in an expression (`base.f * ~1.4983`, see [A
 - **The stack** holds pooled `Fraction`s for rational values and immutable `Irrational` / `Approx` objects otherwise. `ADD`, `SUB`, `MUL`, `DIV` and `NEG` take the old fraction path when both operands are rational, and the exact module otherwise. A pooled Fraction is copied out of the pool before an exact value keeps it, because the pool reuses its objects.
 - **`POW`** (`src/binary-evaluator.js:550`) calls `pow()` and pushes whatever kind it returns.
 - **Records** keep, for each variable, a `Fraction` in the usual field (`record.frequency`) and the exact value in `record.exact.frequency` when it is not rational (`createEvaluationRecord()`, `src/binary-evaluator.js:34`). The Fraction is the **shadow**: the value itself when rational, the approximation when approximate, and the exact binary value of the nearest double when irrational (`shadow()`, `src/value/exact.js:229`). `record.approxFlags` has a bit per approximate variable.
-- **References read the exact value** (`recordValue()`, `src/binary-evaluator.js:63`), so a dependent is computed from `263 * 2^(7/12)`, never from its shadow. `evaluate()` still returns a Fraction (the shadow), with the exact value in `_lastExact` (`src/binary-evaluator.js:600`); `Note.getExactVariable(name)` (`src/note.js:227`) gives the exact value of an evaluated note.
+- **References read the exact value** (`recordValue()`, `src/binary-evaluator.js:63`), so a dependent is computed from `263 * 2^(7/12)`, never from its shadow. `evaluate()` still returns a Fraction (the shadow), with the exact value in `_lastExact` (`src/binary-evaluator.js:600`); `Note.getExactVariable(name)` (`src/note.js:230`) gives the exact value of an evaluated note.
 
 ## Where numbers leave
 
@@ -79,7 +79,7 @@ The `CORRUPT` bitmask (`src/binary-note.js:63-70`) has a bit per variable (`0x01
 POW makes an irrational, or ~ / a fallback makes an approximation
   → BinaryEvaluator._lastEvalWasCorrupted = true
   → evaluateVariable() ORs the variable's bit into corruptionFlags   binary-evaluator.js:830
-  → Module._updateCorruptionFlags()                                  module.js:709
+  → Module._updateCorruptionFlags()                                  module.js:777
       → DependencyGraph.setCorruptionFlags(id, flags)                dependency-graph.js:1746
   → RendererAdapter.sync() → a_corruptionType per note               renderer.js:1015
   → the shader hatches the note
@@ -91,7 +91,7 @@ POW makes an irrational, or ~ / a fallback makes an approximation
 | `1.0` | transitive: depends on a tempered or approximate note | single 45° diagonal hatch |
 | `2.0` | direct: its own expression is tempered or approximate | crosshatch |
 
-The note widget shows the kind in words (`buildEvaluatedDiv()`, `src/modals/variable-controls.js:112`): an irrational value as its exact form and its value (`(263/4) * 2^(1/4) = 78.190368…`), an approximate value as `≈493.12500`, a rational value as its fraction, also when a tempered chain lands on one (the octave of 12-TET shows `263/2`). A very long exact fraction is still elided to eight significant figures with the full form in the tooltip (`src/modals/fraction-display.js`); that is display only.
+The note widget shows the kind in words (`buildEvaluatedDiv()`, `src/modals/variable-controls.js:113`): an irrational value as its exact form and its value (`(263/4) * 2^(1/4) = 78.190368…`), an approximate value as `≈493.12500`, a rational value as its fraction, also when a tempered chain lands on one (the octave of 12-TET shows `263/2`). A very long exact fraction is still elided to eight significant figures with the full form in the tooltip (`src/modals/fraction-display.js`); that is display only.
 
 ## The simplifier
 
@@ -105,7 +105,7 @@ The note widget shows the kind in words (`buildEvaluatedDiv()`, `src/modals/vari
 | `2^(1/12) * 2^(1/12) * base.f` | `2^(1/6) * base.f` — like bases merge |
 | `2 * base.f * 2^(7/12)` | unchanged — the coefficient stays out of the power |
 
-A rewrite is kept only if it evaluates to exactly the same value, with the same flag (`src/utils/simplify.js:84-98`). The arrows fold their factor into the coefficient (`scaleDSL()`), so up-then-down returns to exactly what was written:
+A rewrite is kept only if it evaluates to exactly the same value, with the same flag (`src/utils/simplify.js:84-95`). The arrows fold their factor into the coefficient (`scaleDSL()`), so up-then-down returns to exactly what was written:
 
 ```
 scaleDSL('base.f * 2^(7/12)', 3, 2)   → (3/2) * base.f * 2^(7/12)

@@ -85,7 +85,7 @@ properly idle)"*, and `bench-render.mjs` reports **0/100 idle frames redrawn** a
 notes.
 
 This does **not** mean rAF is descheduled. Both loops still tick every frame — the renderer's
-(`renderer.js:593-597`) and the player's (`player.js:1875-1895`, which updates the DOM playhead and
+(`renderer.js:593-597`) and the player's (`player.js:1877-1897`, which updates the DOM playhead and
 measure-bar transforms). What is gated is the *body* of `_render()`:
 
 ```javascript
@@ -325,8 +325,10 @@ notes. See [Picking](/developer/rendering/picking).
 
 - Snapshots are stored as **minified JSON strings**, not parsed object graphs (~3–5× less retained
   heap). Each restore `JSON.parse`s fresh, giving the same isolation the old deep-clone did.
-- The old 2–3× per-action serialize was deduped: `captureSnapshot` serializes **once** and shares one
-  `snapshotStr` between the history capture and the localStorage autosave (`player.js:4941-4942`).
+- One text per action, shared: `captureSnapshot` and the note widget's edits hand one `snapshotStr`
+  to both the history capture and the localStorage autosave (`player.js:4943-4944`). It comes from
+  `Module.createModuleJSONString()`, which serializes again only the notes an edit changed (see
+  [The commit](#the-commit-what-an-edit-costs)).
 - Two caps, both in `_enforceCaps()` (`history.js:35-43`): a count cap of **50** entries and a byte
   cap of **12 MB**. The byte cap drops oldest but always keeps **≥ 2** entries, so undo survives even
   one enormous snapshot.
@@ -338,6 +340,45 @@ notes. See [Picking](/developer/rendering/picking).
 
 Full reverse-patch undo was considered and **declined**: it does not reduce the dominant per-undo
 cost (recompile + re-evaluate) and it would add the most delicate correctness surface in the app.
+
+## The commit: what an edit costs
+
+An octave step (`window.__rmtPerf.measureCommit()`, the `player:octaveChange` path) rewrites one
+expression, marks its dependents dirty, evaluates, syncs the renderer, and captures a snapshot.
+Three parts of it used to cost the size of the whole module, whatever the edit changed:
+
+- **The rewrite check.** `multiplyExpressionByFraction()` keeps the folded expression only when it
+  evaluates to exactly the factor times the old one. Each check built a record of every note of the
+  module first, twice per step (240,000 `getExactVariable` calls at 20,000 notes). The evaluator
+  only reads the notes the expression references and the BaseNote, so the records are now built
+  when first read (`noteRecords()`, `src/utils/simplify.js:118`): the same records, for the same
+  ids. The simplifiers share the check.
+- **The snapshot.** The history and the autosave took `JSON.stringify(createModuleJSON())`, and the
+  note widget's edits stringified the object twice. They now take `createModuleJSONString()`: the
+  same text, with each note's text kept and made again only when its fields read differently
+  (`src/module.js:1044`).
+- **`toNumber()`.** It wrote both BigInts of a fraction out in decimal to count their digits, for
+  every value `sync()` reads. A comparison with 10^300 decides the same (`src/utils/fraction-num.js:90`).
+
+`scripts/test-edit-cost.mjs` (in `npm test`) holds all three to what they replaced, and
+`scripts/perf/compare-edits.mjs` runs the same edits and undos on two servers and compares the
+autosave, both history stacks and the renderer's instance buffers at every step.
+
+Headless Edge, `bench-commit-pairs.mjs`, the median of the commit p50s over 5 back-to-back pairs
+(the server that goes first alternates):
+
+| Module | Engine | Before | After | Before / after |
+|---|---|---|---|---|
+| `voices-20000` | JS | 44.7 ms | 26.1 ms | 1.71x |
+| `voices-20000` | WASM | 44.3 ms | 25.5 ms | 1.74x |
+| `chain-1000` | JS | 3.4 ms | 2.2 ms | 1.55x |
+| `chain-1000` | WASM | 3.2 ms | 2.3 ms | 1.39x |
+
+What still costs the module's size, at 20,000 notes (`profile-commit.mjs`): `sync()` about 15 ms,
+since it rebuilds every instance on every commit (see
+[Deferred](#deferred-and-not-shipped)); the autosave's `localStorage.setItem` about 9 ms, since it
+stores the whole module text (3 MB) by design; and `createModuleJSONString()` about 4 ms, since it
+still reads every note's fields to find the ones that changed.
 
 ## Bundle splitting
 
@@ -437,6 +478,9 @@ for `npm run perf:render`.
 | `bench-hover.mjs` | Real mouse movement → end-to-end hover/pick + redraw frame times |
 | `bench-pick.mjs` | `pickAt` / `pickStackAt` / `hitTestSubRegion` ms per call |
 | `profile-sync.mjs` | V8 CPU profile of `sync()` by function self-time |
+| `profile-commit.mjs` | One commit (`measureCommit`) timed, then CPU-profiled: self and total time per function. `--engine js\|wasm`; reads the module from disk |
+| `bench-commit-pairs.mjs` | The commit on two servers (`--before`, `--after`), back to back in alternating pairs |
+| `compare-edits.mjs` | The same edits, undos and redos on two servers: autosave, history stacks and instance buffers compared at every step |
 | `who-dirties.mjs` | Traps writes to `needsRedraw` and reports the call sites during ~100 idle frames |
 | `converge.mjs` | Proves **one** redraw produces the final image |
 | `visual-regress.mjs` | `--capture` / `--compare`: 11 scenes × 3 modules, pixel-diffed |

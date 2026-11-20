@@ -31,7 +31,7 @@ module.notes.get(5)      // ❌ TypeError — notes is not a Map
 
 ### BaseNote defaults
 
-With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js:87-100`):
+With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js:155-168`):
 
 | Property | Stored expression | Evaluates to |
 |---|---|---|
@@ -169,7 +169,7 @@ module.markNotesDirtyBatch(noteIds) // many notes, one pass
 `markNoteDirty()` re-registers the note, calls `invalidate()` on the incremental evaluator (its
 bytecode may have changed), then marks every transitive dependent with **`markDirtyOnly()`** — they
 need re-evaluating but must not be re-registered. A note already reached by a walk of the same dirty
-cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js:236`), so callers
+cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js:304`), so callers
 that mark a note and then each dependent cost one walk. If the note *is* the BaseNote, every
 `baseNoteDependents` entry is marked too.
 
@@ -294,7 +294,7 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 4. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
    `evaluateModule()` does that.
 
-Ids are guarded (`src/module.js:885-897`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
+Ids are guarded (`src/module.js:953-965`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
 `LOAD_REF`) are skipped with a `[RMT Security] Invalid note ID` warning, and `__proto__` /
 `constructor` / `prototype` are blocked outright as prototype-pollution vectors.
 
@@ -391,7 +391,7 @@ fires (via `player:invalidateModuleEndTimeCache`) on every expression change. If
 
 WASM init is async and normally loses the race against `Module` construction, which used to strand
 every module on the JS evaluator for the whole session. The constructor therefore registers an
-`onWasmReady` callback holding a `WeakRef(this)`, and `_upgradeEvaluators()` (`src/module.js:146`)
+`onWasmReady` callback holding a `WeakRef(this)`, and `_upgradeEvaluators()` (`src/module.js:214`)
 atomically swaps `_binaryEvaluator` and `_incrementalEvaluator` for the WASM versions, clears the
 evaluation cache, and marks everything dirty so the next evaluation runs on the new engine.
 

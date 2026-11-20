@@ -291,6 +291,9 @@ There is no serializer to update. The touch-points are:
    and `module.js` read.
 3. `src/module.js` — `createModuleJSON()` and `reindexModule()` both read `EXPRESSION_VARS`, so
    the property round-trips to JSON and has its references rewritten without a second list.
+   `noteJSONText()` (behind `createModuleJSONString()`) reads the six by name for speed: with any
+   other list (`KEEPS_NOTE_TEXT`, `src/module.js:65`) it keeps nothing and the text stays right but
+   every note is serialized on every edit, so give it the new variable too.
 4. `src/dsl/constants.js` — `PropertyMap` (input aliases) and `PropertyShortNames` (what the
    decompiler prints); then `varNameToIndex()` in `src/dsl/compiler.js`. (The converters in
    `src/migrate/` list the variables that existed when the syntax they convert was retired; a new

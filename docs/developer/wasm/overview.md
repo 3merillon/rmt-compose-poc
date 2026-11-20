@@ -42,7 +42,7 @@ engine leaves the other behind. `RMT_EVALUATOR=wasm` in Node still runs the Rust
 | `initWasm()` is called at import time | `src/store/app-state.js:7` | Shares the one initialization |
 | `initWasm()` is `await`ed during `initApp()` | `src/main.js:82` | Shares it |
 | `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:147` | Shares it |
-| `Module` constructor registers a hot-swap callback | `src/module.js:71-77` | Only when the gate is open |
+| `Module` constructor registers a hot-swap callback | `src/module.js:139-145` | Only when the gate is open |
 | Evaluation | `src/binary-evaluator.js` until the swap, then `src/wasm/evaluator-adapter.js` | JavaScript, or WASM after the swap |
 
 `initWasm()` (`src/wasm/index.js:53`) is called three times at boot, and every call now shares one
@@ -51,7 +51,7 @@ the module again, and the last to finish replaced the instance under objects mad
 one: `recursive use of an object` errors, or a hang. With `?evaluator=js`, `initWasm()` returns
 `false` before it fetches anything, so the 294 KB `rmt_core_bg.wasm` is never downloaded.
 
-Otherwise `Module._upgradeEvaluators()` (`src/module.js:146`) swaps each module to the WASM
+Otherwise `Module._upgradeEvaluators()` (`src/module.js:214`) swaps each module to the WASM
 evaluator once the binary is ready. See [the hot-swap](/developer/wasm/adapters#the-hot-swap).
 
 ## The crate
@@ -80,7 +80,7 @@ export `__wbg_init`, which `initWasm()` calls as `wasm.default()`.
 `Q` (`rust/src/rational.rs:19`) is an exact fraction. While the numerator and denominator fit an
 `i64` it is two machine words; past that it is a `BigRational`. The form is canonical: a value that
 fits the small case is always held in it. Its `to_f64` is the twin of `toNumber()` in
-`src/utils/fraction-num.js:75`.
+`src/utils/fraction-num.js:78`.
 
 ### Exact values
 
@@ -187,11 +187,11 @@ On `comma-chain-400` JavaScript takes about 160 ms and WASM 25 to 31 ms.
 `voices-20000`: JavaScript 50 ms, WASM 29 to 33 ms.
 
 **End to end.** A commit (an octave change: expression rewrite, dirty marking, evaluation,
-renderer sync, history snapshot) costs the same on both engines. `chain-1000` takes about 4.2 ms
-(11 ms before the dirty-marking change), `voices-20000` about 55 ms. Evaluation is now a small
-part of it. At 20,000 notes the commit is dominated by expression rewriting (`simplify.js`), the
-history snapshot (`createModuleJSON`, `localStorage`), `note.getVariable` and renderer sync. See
-[Performance](/developer/performance).
+renderer sync, history snapshot) costs the same on both engines: `chain-1000` about 2.2 ms (11 ms
+before the dirty-marking change), `voices-20000` about 26 ms. Evaluation is a small part of it. At
+20,000 notes what remains is renderer sync and the autosave's `localStorage` write; the rewrite
+check and the snapshot text now cost what the edit changed. See
+[Performance](/developer/performance#the-commit-what-an-edit-costs).
 
 ## Limits
 

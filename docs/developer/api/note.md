@@ -42,7 +42,7 @@ is no evaluator to ask) and no dependency registration happens. Source text and 
 :::
 
 The constructor accepts a value per property in several shapes (`_initFromVariables`,
-`src/note.js:119-186`): a plain string (compiled), a `*String` key (preferred over the plain key
+`src/note.js:122-189`): a plain string (compiled), a `*String` key (preferred over the plain key
 when both are present), a legacy function (its `return` expression is extracted), or an existing
 `BinaryExpression` (adopted as-is).
 
@@ -263,8 +263,8 @@ measure bar.
 `toJSON()` runs each expression through `decompiler.decompile()`, which returns `sourceText`
 verbatim when it has it and otherwise decompiles the bytecode to DSL.
 
-The app saves through `Module.createModuleJSON()`, which uses `getExpressionSource()`. Reach for
-that one.
+The app saves through `Module.createModuleJSON()`, which uses `getExpressionSource()`, and
+`Module.createModuleJSONString()`, its text. Reach for those.
 :::
 
 ## Internal methods

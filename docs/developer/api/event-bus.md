@@ -113,8 +113,8 @@ This is every topic in `src/` at the current commit. Payloads are exact.
 
 | Event | Payload | Emitted by | Consumed by |
 |---|---|---|---|
-| `history:capture` | `{ label, snapshot, snapshotStr? }` | every undoable action | `store/history.js` (push) **and** `player.js` (write the localStorage autosave) |
-| `history:seedIfEmpty` | `{ label: 'Initial', snapshot, snapshotStr? }` | the same call sites, just before `history:capture` | `store/history.js` |
+| `history:capture` | `{ label, snapshotStr }` (the module's JSON text, `Module.createModuleJSONString()`), or `{ label, snapshot }` (the object, serialized by each consumer) | every undoable action | `store/history.js` (push) **and** `player.js` (write the localStorage autosave) |
+| `history:seedIfEmpty` | `{ label: 'Initial', snapshotStr }` or `{ label: 'Initial', snapshot }` | the same call sites, just before `history:capture` | `store/history.js` |
 | `history:undo` / `history:redo` | — | the module-bar buttons, the + menu buttons, Ctrl/⌘+Z and Ctrl/⌘+Y | `store/history.js` |
 | `history:requestRestore` | `{ snapshot, source: 'undo' \| 'redo', label }` | `HistoryManager` | `player.js` — rebuilds the module from the snapshot; also clears the selection |
 | `history:stackChanged` | `{ undo, redo, canUndo, canRedo }` | `HistoryManager`, after every push/undo/redo | the undo/redo buttons in the module bar and the + menu |

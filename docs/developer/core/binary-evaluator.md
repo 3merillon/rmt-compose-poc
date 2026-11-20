@@ -196,9 +196,9 @@ Fields: `graph`, `evaluator`, `dirty` (a `Set`), `cache` (`Map<noteId, result>`)
 | `evaluateDirty()` (`:1022`) | `beginBatch()` → a blank record for every dirty note → `evaluateVariables()` → `reportProblems()` → clear dirty → return the cache |
 | `getEvaluatedNote(id)`, `isCacheValid()` | accessors |
 
-`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` (`src/module.js:258-260`) uses it for dependents whose *values* changed but whose *bytecode* did not, and so does the batch path (`src/module.js:333-336`). Both the JavaScript and the WASM incremental evaluators have it. Before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
+`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` (`src/module.js:326-328`) uses it for dependents whose *values* changed but whose *bytecode* did not, and so does the batch path (`src/module.js:401-404`). Both the JavaScript and the WASM incremental evaluators have it. Before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
 
-**One walk per dirty cycle.** `Module.markNoteDirty()` marks a note and every transitive dependent. Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a walk of the same dirty cycle now only re-registers its own bytecode: `Module._dirtyClosed` (`src/module.js:84`, checked at `src/module.js:236`) remembers them, and is cleared whenever the dirty set is. Before, a commit in the middle of `chain-1000` ran 501 walks over 125,000 notes. `scripts/test-dirty-marking.mjs` checks one walk per cycle and values equal to a reload's. Both engines behave this way.
+**One walk per dirty cycle.** `Module.markNoteDirty()` marks a note and every transitive dependent. Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a walk of the same dirty cycle now only re-registers its own bytecode: `Module._dirtyClosed` (`src/module.js:152`, checked at `src/module.js:304`) remembers them, and is cleared whenever the dirty set is. Before, a commit in the middle of `chain-1000` ran 501 walks over 125,000 notes. `scripts/test-dirty-marking.mjs` checks one walk per cycle and values equal to a reload's. Both engines behave this way.
 
 Dirty tracking stays **per note**: a change to any expression of a note re-evaluates all of that note and of every note downstream. That is a superset of what strictly has to change, and it is what keeps the dirty set one cheap graph walk. Only the *order* is per variable.
 
@@ -256,11 +256,11 @@ This is the whole point of tracking corruption, and it crosses four files:
 POW produces an irrational, or ~ / a fallback an approximation
   → BinaryEvaluator._lastEvalWasCorrupted = true          binary-evaluator.js:557
   → evaluateVariable ORs the property's bit into corruptionFlags   :830
-  → Module._updateCorruptionFlags() pushes it into the graph   module.js:709-732
+  → Module._updateCorruptionFlags() pushes it into the graph   module.js:777-800
       → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1746
   → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:1015-1062
       0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
-  → the note widget names the kind: exact form, or ≈ for approximate   variable-controls.js:112
+  → the note widget names the kind: exact form, or ≈ for approximate   variable-controls.js:113
 ```
 
 `_updateCorruptionFlags` is scoped to the dirty set, not all notes.
@@ -297,7 +297,7 @@ Two costs matter now. **Depth** decides how much of the module a commit touches 
 | Fraction backing | `fraction.js@5.3.4` — `n`/`d`/`s` are **BigInt**, arbitrary precision | `node_modules/fraction.js` |
 | POW exponent cap | integer exponent ≤ **65536**, result ≤ **~1 Mbit** per component; beyond, approximate | `src/value/exact.js:33-34` |
 | Note id in bytecode | `u16` → max **65535** | `binary-note.js:129` |
-| Note id accepted anywhere | integer `0 … 65535` — enforced by the loader **and the DSL parser** (and by the converter of the retired method-chain syntax) | `module.js:886`, `dsl/parser.js:284` |
+| Note id accepted anywhere | integer `0 … 65535` — enforced by the loader **and the DSL parser** (and by the converter of the retired method-chain syntax) | `module.js:954`, `dsl/parser.js:284` |
 
 ::: tip Arbitrary precision, end to end
 fraction.js 5.x is BigInt-backed, so exact rational arithmetic survives **any depth** of module tree: a 200-note `(3/2)` chain evaluates to its exact 98-digit numerator, and `(81/80)^400` is exact (see the `comma-chain-400` stress shape). `scripts/test-exactness.mjs` (part of `npm test`) locks this in: compile → evaluate → decompile → save → load → re-evaluate must reproduce every digit. Irrational powers are exact too (`2^(7/12)` stays that power). The only approximations are the *marked* ones — a `~` number, the documented fallbacks of the exact algebra, a division by zero — and the float boundary `toNumber()` where values leave for GL, Web Audio, and display.

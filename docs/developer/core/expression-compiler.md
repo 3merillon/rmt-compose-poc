@@ -189,7 +189,7 @@ Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.js` kee
 
 - `parseLegacy()` (`src/migrate/legacy-syntax.js:88`), a strict recursive-descent parser for exactly the old building blocks (`new Fraction(a[, b])` with decimal arguments, bare decimals, `module.baseNote.getVariable('x')`, `module.getNoteById(N).getVariable('x')`, a bare variable name, parentheses, `.mul .div .add .sub .pow`), which builds a DSL syntax tree;
 - `legacyToDSL()` (`src/migrate/legacy-syntax.js:226`), which compiles that tree, decompiles it to DSL text, compiles the text again and refuses unless both give the same bytecode;
-- `migrateSyntax()` (`src/migrate/legacy-syntax.js:260`), which converts every expression of a module object and is called by `Module.loadFromJSON()` (`src/module.js:861`) right after `migrateTimeModel()`. `scripts/migrate-modules.mjs` applies both conversions to files in place.
+- `migrateSyntax()` (`src/migrate/legacy-syntax.js:260`), which converts every expression of a module object and is called by `Module.loadFromJSON()` (`src/module.js:929`) right after `migrateTimeModel()`. `scripts/migrate-modules.mjs` applies both conversions to files in place.
 
 **It refuses rather than guesses.** The old compiler was a string splitter that read a chain correctly only when its methods came in the order `.pow`, then `.mul`/`.div`, then `.add`/`.sub` (`RANK`, `src/migrate/legacy-syntax.js:47`). It silently dropped a `.mul()` or `.div()` that followed an `.add()` (`a.add(b).mul(c)` evaluated as `a + b`), a `.pow()` that followed a `.mul()`, and every `.neg()`. For those the text and the old engine disagree, so the converter throws a `SyntaxMigrationError`, and `migrateSyntax()` adds the note and variable: the module does not load rather than load with a value nobody wrote. A note id above 65535, an unknown variable (`'tempo'`), a quoted fraction (`new Fraction('1/3')`) and a division by zero are refused too.
 
@@ -201,7 +201,7 @@ Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.js` kee
 
 The DSL decompiler (`src/dsl/decompiler.js`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. Constants come out of the bytecode as BigInts and are stringified directly (`pushConst`, `src/dsl/decompiler.js:193-199`), so a big constant is printed **digit-exact** — it used to be coerced through `Number()`, which rounded and could emit unparseable scientific notation. It prints every `LOAD_REF` / `LOAD_BASE` as a property access (`[N].d`, `base.f`) and reconstructs nothing else: with no functions in the language there is nothing to fold back into a helper.
 
-The note widget's `Raw:` box shows the decompiled DSL of the note's bytecode (`convertToDSLDisplay()`, `src/modals/variable-controls.js:171`).
+The note widget's `Raw:` box shows the decompiled DSL of the note's bytecode (`convertToDSLDisplay()`, `src/modals/variable-controls.js:172`).
 
 ### Round-trip is lossy in specific, harmless ways
 
@@ -230,7 +230,7 @@ The compiler refuses garbage by throwing, but validation is still a separate gat
 
 Nothing anywhere calls `eval()` or `new Function()` on an expression.
 
-The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.js:221-236`, `src/modals/variable-controls.js:990`). The user-grade error strings in `src/dsl/errors.js` are what the user actually reads.
+The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.js:222-237`, `src/modals/variable-controls.js:991`). The user-grade error strings in `src/dsl/errors.js` are what the user actually reads.
 
 ## Worked example
 

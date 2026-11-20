@@ -82,7 +82,7 @@ const geometry = {
 
 `appearance.overrides` is a **sparse diff** — only the tokens the user actually touched. That is
 exactly why the preset dropdown clears `overrides` before writing the new `themeId`
-(`settings-panel.js:262-267`): layering an old override map over a new preset would show a mixture.
+(`settings-panel.js:263-268`): layering an old override map over a new preset would show a mixture.
 
 The stored shape:
 
@@ -101,7 +101,7 @@ The stored shape:
 `validateSettings()` *always* fills `appearance.note.*` with a clamped number (defaults 22 / 1 / 6),
 so those three values are never `null`/`undefined` and the `??` branches above are technically dead.
 Preset geometry reaches the canvas by a different route: **selecting a preset in the Appearance tab
-writes `preset.geometry` into `appearance.note`** (`settings-panel.js:268-274`), re-seeding the
+writes `preset.geometry` into `appearance.note`** (`settings-panel.js:269-275`), re-seeding the
 sliders — switching to `high-contrast` lands its declared `borderPxAtZoom1: 2,
 roundedCornerPxAtZoom1: 4`. The sliders remain the fine-tuning control afterwards.
 :::
@@ -264,7 +264,7 @@ actually costs.
 
 | GL element | Colour | Source |
 |---|---|---|
-| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2169`, `note-creation.js:515-527` |
+| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2171`, `note-creation.js:516-528` |
 
 ![The Appearance tab of the Settings panel: theme dropdown, three geometry sliders, and fifteen colour pickers grouped into Interface, Workspace and Dependency highlights](/img/settings-appearance.png)
 
@@ -290,7 +290,7 @@ The hover ring is a worked example of the full path (it is wired this way today)
    `const hr = this._hoverRingRgba(); gl.uniform4f(uCol, hr[0], hr[1], hr[2], a)`
    (`renderer.js:3364`), keeping the existing alpha logic.
 
-4. **Add a picker** — one entry in `COLOR_TOKEN_GROUPS` (`settings-panel.js:44-57`):
+4. **Add a picker** — one entry in `COLOR_TOKEN_GROUPS` (`settings-panel.js:45-58`):
 
    ```javascript
    { title: 'Workspace', tokens: [
@@ -358,7 +358,7 @@ Full token tables are in the [Settings reference](/reference/settings-reference)
 - **There is no OS light/dark detection.** No `prefers-color-scheme` handling for app theming
   anywhere. `mono-light` is chosen by hand or not at all.
 - **There is a boot flash.** The `:root` literals in `styles.css` are classic-orange, and
-  `themeManager.init()` only runs once the GL workspace exists (`player.js:1067`). A user on
+  `themeManager.init()` only runs once the GL workspace exists (`player.js:1069`). A user on
   `mono-light` sees a brief dark/orange flash on every load. Do not promise flicker-free theming.
 - **Selecting a preset silently discards every colour override** and overwrites the geometry
   sliders with the preset's declared geometry, with no confirmation. Only the explicit "Reset

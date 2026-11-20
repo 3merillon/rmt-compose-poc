@@ -182,7 +182,7 @@ All times are in seconds; sustain is a fraction of the peak.
 | `piano` | sampled | — | — | — | 0.002 | none (the recording decays) | from the pitch: 0.30 at C1 to 0.10 at C6, 1.5 above F#6 |
 | `violin` | sampled | — | — | — | 0.005 | none (the recording decays) | 0.12 |
 
-The per-note `peak` is `initialVolume` — **0.2** (`player.js:66`, and the `AudioEngine` constructor
+The per-note `peak` is `initialVolume` — **0.2** (`player.js:67`, and the `AudioEngine` constructor
 default). That is not master volume; master volume lives on the
 [audio graph](/developer/audio/audio-graph#master-volume). Three instruments scale it: `piano` by its
 manifest's `gainDb`, `harmonium` by a `level` of 0.6 and `harmonium-soft` by 0.42.
@@ -482,7 +482,7 @@ Consequence: a module saved with `"instrument": "cello"` always plays as `sine-w
 validated on module import.
 :::
 
-The Settings → Audio dropdown is a **hardcoded list** in `settings-panel.js:102`. It currently matches
+The Settings → Audio dropdown is a **hardcoded list** in `settings-panel.js:103`. It currently matches
 the registry exactly, but a newly registered instrument will not appear there automatically.
 
 ## Articulation: how a line is played
@@ -507,7 +507,7 @@ sounds (a live tempo change, a loop switched off) restores the release of the vo
 
 ## Instrument inheritance
 
-A note usually carries no instrument of its own. `Module.findInstrument(note, memo)` (`module.js:800`)
+A note usually carries no instrument of its own. `Module.findInstrument(note, memo)` (`module.js:868`)
 calls `instrumentOf()` in `src/players.js`, which resolves one in this order. A **player** is a line of
 notes, each starting where the previous one ends.
 
@@ -536,7 +536,7 @@ Consequences worth stating plainly:
   `audio.defaultInstrument`. That is what makes the setting reach ordinary compositions. A BaseNote
   that *does* pin an instrument in its JSON overrides the setting for everything below it.
 
-`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1045-1060`)
+`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1047-1062`)
 via `setDefaultInstrument()`. It is resolved once per note when playback is prepared, so a change
 takes effect on the **next** playback, not mid-playback.
 
@@ -576,7 +576,7 @@ Then register it in **two** places, and list it in a third:
    it is never registered;
 2. the `SynthInstruments` map exported from `src/instruments/synth-instruments.js`, which the app
    itself does not read but `scripts/perf/check-purity.mjs` does;
-3. `INSTRUMENTS` in `src/settings/settings-panel.js:102`, so it appears in the Settings dropdown.
+3. `INSTRUMENTS` in `src/settings/settings-panel.js:103`, so it appears in the Settings dropdown.
 
 If you need a voice the base class cannot build, override `createOscillator(frequency)` and return
 `makeVoice(sources, output, frequency, onStart)`. Do not return raw nodes unless a bare
