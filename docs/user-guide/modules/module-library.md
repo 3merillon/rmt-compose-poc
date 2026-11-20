@@ -1,11 +1,11 @@
 ---
 title: The Module Library
-description: The 79 shipped modules — intervals, chords, progressions, melodies, scale systems — and why each one is a relational tree you can re-root onto any note.
+description: The 80 shipped modules — intervals, chords, progressions, melodies, scale systems — and why each one is a relational tree you can re-root onto any note.
 ---
 
 # The Module Library
 
-RMT Compose ships **79 modules**. Not one of their notes carries an absolute pitch.
+RMT Compose ships **80 modules**. Not one of their notes carries an absolute pitch.
 
 That is the point. A module does not store "A4 = 440 Hz followed by C♯5". It stores *a fifth above the root*, *a major third above the chord root*, *a fourth above the previous chord's root*. Every note is written against the module's own `base`, and dropping the module throws that `base` away and substitutes the note you dropped on. So you get a real chord, in a real key, at a real pitch — the one that note is at. Drop the same module on a different note and you get the same shape somewhere else, with exactly the same ratios.
 
@@ -22,7 +22,7 @@ So the library is not a bag of samples to paste. It is a set of relationships yo
 | **Progressions** | 8 | Four progressions and four cadences, each a chain of chord roots |
 | **Melodies** | 7 | Public-domain tunes |
 | **Scale Systems** | 6 | 12-, 19-, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 1 | Where copied selections land, and the obvious home for your uploads |
+| **Custom** | 2 | Where copied selections land, and the obvious home for your uploads |
 
 They live in the [module bar](/user-guide/interface/module-bar) under the top bar. Drag one out and drop it on a note.
 
@@ -285,9 +285,9 @@ It is a harmonic series segment stretched over four octaves, not a scale in the 
 
 **Mixed-Base** is an experiment: 12 notes whose steps mix octave-based, tritave-based and 5-based roots (`2^(1/12)`, `3^(1/13)`, `5^(1/7)`, and some inverses), and whose final note jumps straight back to `base.f`. It goes wandering and comes home.
 
-## Custom — 1 module
+## Custom — 2 modules
 
-**Custom** ships with `canon base`, a 74-note canon with four silences in it — a real composition to take apart. It is also where **Copy to Modules** files anything you build from a multi-note selection. Uploaded `.json` files land in whichever section's dashed **`+`** tile you clicked, so Custom is the obvious place to put them, not the only one.
+**Custom** ships with the two parts of the canon per tonos that opens the app: `canon base`, the bass (70 notes), and `canon melody`, the theme (25 notes). In the full piece the bass plays twice, the second time a pure fifth higher and one bar later, every note `(3/2)` of the note it answers — drop `canon base` on a note, then again on a note a fifth above it and one bar later, to build it yourself. It is also where **Copy to Modules** files anything you build from a multi-note selection. Uploaded `.json` files land in whichever section's dashed **`+`** tile you clicked, so Custom is the obvious place to put them, not the only one.
 
 ## Where to go next
 

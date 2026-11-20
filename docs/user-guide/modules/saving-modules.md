@@ -136,7 +136,7 @@ The module bar's footer carries four buttons: **Save UI**, **Load UI**, **Add Ca
 - the full module JSON of anything **uploaded** — an upload has no file on disk to re-fetch, so its data is embedded
 - the drop mode (**Start** or **End**)
 
-Built-in modules are stored **by file path**, not by value, which is what keeps the file small with a 79-module catalog.
+Built-in modules are stored **by file path**, not by value, which is what keeps the file small with a 80-module catalog.
 
 **Load UI** re-validates every embedded module before applying it. Anything that fails is stripped of its data — the icon survives, its module does not — and the toast reads `UI state loaded — N invalid module(s) skipped`.
 

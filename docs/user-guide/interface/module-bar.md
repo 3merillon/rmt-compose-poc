@@ -5,7 +5,7 @@ description: The library bar under the top bar — search, collapsible sections,
 
 # Module Bar
 
-The **module bar** is the panel pinned under the top bar. It holds the shipped catalog — 79 modules across six sections — and it is where you grab a module and drag it onto a note.
+The **module bar** is the panel pinned under the top bar. It holds the shipped catalog — 80 modules across six sections — and it is where you grab a module and drag it onto a note.
 
 The bar is yours to rearrange. Sections collapse, tiles swap places, you can upload your own `.json` modules, add your own sections, and the whole layout is saved in your browser.
 
@@ -171,7 +171,7 @@ The copy is complete: structure and pitches, but also each note's **colour** and
 
 Two settings shape the bar, both on the **Library** tab of [Settings](/user-guide/interface/settings#library): **Icon size** (56 px by default) and **Show cents** (on by default). Both apply immediately.
 
-Turn the icons down and the whole 79-module catalog fits in far less vertical space; turn **Show cents** off if you would rather read ratios alone.
+Turn the icons down and the whole 80-module catalog fits in far less vertical space; turn **Show cents** off if you would rather read ratios alone.
 
 ## Resizing the bar
 
@@ -235,7 +235,7 @@ The per-section `index.json` files under `public/modules/` are a **legacy fallba
 
 ## See also
 
-- [Module Library](/user-guide/modules/module-library) — the 79 shipped modules and how they are built
+- [Module Library](/user-guide/modules/module-library) — the 80 shipped modules and how they are built
 - [Module Format](/user-guide/modules/module-format) — the module JSON schema
 - [Loading Modules](/user-guide/modules/loading-modules) — loading a module as your whole composition
 - [Workspace](/user-guide/interface/workspace) — where you drop them

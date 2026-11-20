@@ -882,6 +882,14 @@
           "tags": [
             "canon"
           ]
+        },
+        {
+          "file": "custom/canon melody.json",
+          "name": "canon melody",
+          "family": "melody",
+          "tags": [
+            "canon"
+          ]
         }
       ]
     }

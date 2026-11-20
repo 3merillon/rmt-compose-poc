@@ -87,7 +87,7 @@ Three consequences worth knowing:
 **The BaseNote normally pins nothing**, so an ordinary composition chains all the way up to it and lands on the default-instrument setting. That is what makes the setting reach anything at all.
 
 ::: warning A BaseNote that does pin an instrument overrides the setting
-Six of the shipped modules pin `"instrument": "sine-wave"` on their BaseNote — `canon base` and the five scale systems (`BP-13`, `Mixed-Base`, `TET-12`, `TET-19`, `TET-31`). Load one of those and changing "Default instrument" appears to do nothing, because every note is inheriting `sine-wave` from the BaseNote. Change the BaseNote's instrument in the note widget instead. `defaultModule` does not pin one, so the setting works there.
+Five of the shipped modules pin `"instrument": "sine-wave"` on their BaseNote — the five scale systems (`BP-13`, `Mixed-Base`, `TET-12`, `TET-19`, `TET-31`). Load one of those and changing "Default instrument" appears to do nothing, because every note is inheriting `sine-wave` from the BaseNote. Change the BaseNote's instrument in the note widget instead. `defaultModule` does not pin one, so the setting works there.
 :::
 
 The BaseNote's widget row agrees with playback: with no instrument of its own it reads `Inherited: <name>`, where the name is your "Default instrument" setting.

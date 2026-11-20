@@ -58,17 +58,22 @@ function temperedMatch(mod, rec, id, k, want, got) {
 const quiet = console.info;
 console.info = () => {};
 
+const RETRANSLATED = ['public/modules/defaultModule.json', 'public/modules/custom/canon base.json'];
+
 // ---------------------------------------------------------------------------
 console.log('\nOne syntax: old modules convert exactly');
 {
   const oracle = JSON.parse(readFileSync(join(here, 'fixtures', 'legacy-syntax-oracle.json'), 'utf8')).modules;
-  let modules = 0, values = 0, rewritten = 0;
+  let modules = 0, values = 0, rewritten = 0, retranslated = 0;
   for (const [key, expected] of Object.entries(oracle)) {
     // Rewritten in Phase L with new note ids (each root a key change plus a root
     // tone), so a note-by-note comparison by id no longer applies; what they play
     // is checked note for note by scripts/test-library.mjs, recorded from the
     // library this test had verified.
     if (key.startsWith('public/modules/progressions/')) { rewritten++; continue; }
+    // Retranslated on 19 November 2026 (the canon with one bass for both voices, the
+    // owner's choice): new pitches and new ids, checked by test-library.mjs instead.
+    if (RETRANSLATED.includes(key)) { retranslated++; continue; }
     let mod;
     try {
       mod = await Module.loadFromJSON(JSON.parse(readFileSync(join(root, key), 'utf8')));
@@ -96,6 +101,7 @@ console.log('\nOne syntax: old modules convert exactly');
     modules++;
   }
   if (rewritten) console.log(`  · ${rewritten} progressions rewritten in Phase L: checked by test-library.mjs instead`);
+  if (retranslated) console.log(`  · ${retranslated} canon modules retranslated (one bass for both voices): checked by test-library.mjs instead`);
   if (failures === 0) ok(`${modules} modules, ${values} values identical to the method-chain engine, except ${temperedChanged} tempered values now exact (${temperedNowRational} of them rational)`);
 
   for (const f of ['shapes.json', 'defaultModule.json', 'TET-12.json', 'twinkle.json', 'ii-V-I.json']) {

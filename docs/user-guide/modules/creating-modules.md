@@ -211,14 +211,14 @@ See [Saving Modules](/user-guide/modules/saving-modules) for both routes and for
 
 ## Learn from the shipped library
 
-79 modules ship with the app, and they are all worked examples of the patterns above:
+80 modules ship with the app, and they are all worked examples of the patterns above:
 
 - **Intervals** (46) — the minimal module: one note, `(N/D) * base.f`.
 - **Chords** (11) — the root-subtree pattern.
 - **Progressions** (8) — root chains, where only the first root touches `base`.
 - **Melodies** (7) — relational tunes; change the base and the whole thing transposes.
 - **Scale Systems** (6) — chained scales, including 12/19/31-TET, Bohlen–Pierce and the 81-note Tesla scale.
-- **Custom** (1) — `canon base`, a 74-note composition to take apart.
+- **Custom** (2) — `canon base` and `canon melody`, the bass and the theme of a canon, to take apart.
 
 They live in `public/modules/`. Open one in a text editor, and see the [Module Library](/user-guide/modules/module-library) for what each section holds and why.
 
@@ -237,5 +237,5 @@ They live in `public/modules/`. Open one in a text editor, and see the [Module L
 - [Dependencies](/user-guide/notes/dependencies) — dependency lines and corruption
 - [Selection](/user-guide/notes/selection) — marquee and group selection
 - [Loading Modules](/user-guide/modules/loading-modules) — dropping modules onto notes
-- [The Module Library](/user-guide/modules/module-library) — the 79 shipped modules, as worked examples
+- [The Module Library](/user-guide/modules/module-library) — the 80 shipped modules, as worked examples
 - [Instruments](/user-guide/playback/instruments) — the eleven voices and the inheritance rules

@@ -34,7 +34,7 @@ The other entry in that dropdown restores the composition the app ships with.
 2. Confirm: *"This will reset the workspace to the default module. This action can be undone/redone via History. Proceed?"* → **Yes, Reset**.
 3. Toast: `Default module reset`. Undoable, like any other load.
 
-The default module is `public/modules/defaultModule.json`: 169 entries at 263 Hz with a BaseNote duration of 3/5 s (shown as 100 BPM), including a chain of measure bars and a handful of silences. It is not part of the module library and does not appear in the module bar.
+The default module is `public/modules/defaultModule.json`: the canon per tonos in three voices, 161 entries at 263 Hz with a BaseNote duration of 3/5 s (shown as 100 BPM): a chain of 8 measure bars, the theme, the bass, and the bass again a fifth higher and one bar later, each of its notes written as `(3/2) * [n].f` of the note it answers. It is not part of the module library and does not appear in the module bar.
 
 ## Drop a library module onto a note
 
@@ -80,7 +80,7 @@ See [Module Bar](/user-guide/interface/module-bar) for dragging, reordering and 
 
 ## Find a module in the library
 
-The library ships 79 modules across six sections — Intervals (46), Chords (11), Progressions (8), Melodies (7), Scale Systems (6) and Custom (1). Scrolling for one is slow.
+The library ships 80 modules across six sections — Intervals (46), Chords (11), Progressions (8), Melodies (7), Scale Systems (6) and Custom (2). Scrolling for one is slow.
 
 Click the **magnifier** at the left of the module bar's toolbar. A search field unfolds; type into it and the library filters live. A module matches if your text appears in its **name**, **ratio**, **family**, **cents**, **tags**, or its file path — so `3-limit`, `701`, `fifth` and `3/2` all find the Perfect 5th.
 
@@ -154,5 +154,5 @@ Open the browser console. The failures that do not surface in the UI all log the
 - [Saving Modules](/user-guide/modules/saving-modules) — export, Save UI, and getting your work into the library
 - [Module Format](/user-guide/modules/module-format) — what is actually in the file
 - [Module Bar](/user-guide/interface/module-bar) — organizing the library
-- [The Module Library](/user-guide/modules/module-library) — what the 79 shipped modules are and how they are built
+- [The Module Library](/user-guide/modules/module-library) — what the 80 shipped modules are and how they are built
 - [Creating Modules](/user-guide/modules/creating-modules) — designing a module that drops well

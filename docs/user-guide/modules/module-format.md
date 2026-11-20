@@ -110,7 +110,7 @@ A measure bar is a silent note with its length written as an expression. This is
 
 A meter change is one bar's `duration`; the bars after it follow. See [Measure bars](/reference/module-schema#measure-bars).
 
-And this is a silence from `custom/canon base.json` — a quarter time unit of nothing:
+And this is a silence — a quarter time unit of nothing:
 
 ```json
 { "id": 1, "startTime": "base.t", "duration": "base.d * (1/4)",

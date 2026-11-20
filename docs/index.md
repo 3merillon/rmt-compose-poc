@@ -32,7 +32,7 @@ features:
     title: Tuning Beyond 12-TET
     details: The library ships 12-TET, 19-TET, 31-TET, Bohlen-Pierce, an 81-note Tesla scale and a mixed-base experiment. Power expressions let you build your own.
   - icon: 📦
-    title: A 79-Module Library
+    title: An 80-Module Library
     details: Six sections — Intervals, Chords, Progressions, Melodies, Scale Systems, Custom — searchable by name, ratio, cents or tag. Drag a module onto a note and the whole structure re-roots itself there.
   - icon: 🎧
     title: Playback With a Room

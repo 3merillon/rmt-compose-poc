@@ -51,7 +51,7 @@ this repo, and a reflowed file buries the real diff.
 npm test
 ```
 
-This runs six scripts. The first, `scripts/validate-modules.mjs`, checks all 79 shipped library
+This runs six scripts. The first, `scripts/validate-modules.mjs`, checks all 80 shipped library
 modules — structure, expression syntax, self-containment, finite evaluation, and ratio/cents
 agreement; the others check exactness, per-variable evaluation, amplitude, the MIDI export and
 relational time (`scripts/test-relational-time.mjs`, whose oracle is

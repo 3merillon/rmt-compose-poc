@@ -48,6 +48,7 @@ let temperedChanged = 0, temperedNowRational = 0;
 function temperedMatch(mod, rec, id, k, want, got) {
   if (want == null || got == null) return false;
   const w = new Fraction(want), g = new Fraction(got);
+  if (w.equals(0)) return false;
   const rel = Math.abs(g.div(w).valueOf() - 1);
   if (!(rel < 1e-9)) return false;
   const name = VAR_NAMES_BY_KEY[k];
@@ -63,13 +64,16 @@ function temperedMatch(mod, rec, id, k, want, got) {
 
 async function compareOracle(oracleFile, baseDir) {
   const oracle = JSON.parse(readFileSync(oracleFile, 'utf8')).modules;
-  let modules = 0, values = 0, rewritten = 0;
+  let modules = 0, values = 0, rewritten = 0, retranslated = 0;
   for (const [key, expected] of Object.entries(oracle)) {
     // Rewritten in Phase L with new note ids (each root a key change plus a root
     // tone), so a note-by-note comparison by id no longer applies; what they play
     // is checked note for note by scripts/test-library.mjs, recorded from the
     // library this test had verified.
     if (key.startsWith('public/modules/progressions/')) { rewritten++; continue; }
+    // Retranslated on 19 November 2026 (the canon with one bass for both voices, the
+    // owner's choice): new pitches and new ids, checked by test-library.mjs instead.
+    if (RETRANSLATED.includes(key)) { retranslated++; continue; }
     const file = join(baseDir, key);
     let mod;
     try {
@@ -102,8 +106,11 @@ async function compareOracle(oracleFile, baseDir) {
     modules++;
   }
   if (rewritten) console.log(`  · ${rewritten} progressions rewritten in Phase L: checked by test-library.mjs instead`);
+  if (retranslated) console.log(`  · ${retranslated} canon modules retranslated (one bass for both voices): checked by test-library.mjs instead`);
   return { modules, values };
 }
+
+const RETRANSLATED = ['public/modules/defaultModule.json', 'public/modules/custom/canon base.json'];
 
 // ---------------------------------------------------------------------------
 console.log('\nRelational time: old modules convert exactly');

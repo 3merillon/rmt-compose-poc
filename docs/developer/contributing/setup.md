@@ -93,7 +93,7 @@ Validating modules across 6 sections...
   scale-systems: 6/6 ok
   custom: 1/1 ok
 
-79 modules validated, 0 failure(s).
+80 modules validated, 0 failure(s).
 ```
 
 The second, `scripts/test-exactness.mjs`, proves the arbitrary-precision guarantee: a 200-note
@@ -135,7 +135,7 @@ The fourth, `scripts/test-amplitude.mjs`, covers the variable `amplitude` on its
 The fifth, `scripts/test-midi-export.mjs`, exports modules with `src/midi/midi-export.js`, reads
 the bytes back with a Standard MIDI File parser that shares no code with the exporter, and
 requires every note within 0.1 cent and one tick of the module's evaluated value, on a channel of
-its own. It covers the default module, all 79 library modules and synthetic cases — see
+its own. It covers the default module, all 80 library modules and synthetic cases — see
 [MIDI Export](/developer/api/midi-export#the-check).
 
 The sixth, `scripts/test-relational-time.mjs`, locks in relational time:
@@ -207,7 +207,7 @@ rmt-compose-poc/
 ├── rust/                   # the rmt-core crate (Cargo.toml, src/*.rs)
 ├── scripts/                # validate-modules, generators, sync-wasm, perf/
 ├── public/
-│   ├── modules/            # library.json (v2 manifest) + the 79 shipped modules
+│   ├── modules/            # library.json (v2 manifest) + the 80 shipped modules
 │   ├── samples/            # CC0 multisampled piano + violin
 │   └── styles.css
 └── docs/                   # this VitePress site (its own package.json)
