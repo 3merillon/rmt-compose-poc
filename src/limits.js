@@ -7,8 +7,9 @@
  * tab's heap stops near 4 GB: 500,000 notes take about 1.1 GB, and a million
  * load. What comes first is the autosave, one IndexedDB value of at most
  * 127 MB (about 800,000 notes of a typical module, half that if its text has
- * a character above U+00FF), and the time an edit takes (about 4 s at
- * 500,000 notes). See "Limits" in docs/developer/performance.md.
+ * a character above U+00FF), and time: at 500,000 notes a commit takes
+ * about 0.5 s and an undo about 13 s. See "Limits" in
+ * docs/developer/performance.md.
  */
 export const MAX_MODULE_NOTES = 500000;
 

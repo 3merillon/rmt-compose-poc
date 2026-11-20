@@ -559,16 +559,17 @@ Evaluation got faster with it: a full evaluation of `voices-100000` in Node went
 1,100 B, the graph about 500 B, the renderer about 330 B, the evaluation records about 240 B, and
 a whole-module string each for the undo history and the autosave's last write (about 155 B each).
 
-In headless Edge, on `voices-*` modules (the module handed to the autosave and the page reloaded,
-or, at 500,000 notes and up, served as the default module; an edit is `__rmtPerf.measureCommit(1)`,
-an octave step through the whole commit; before this pass in parentheses):
+In headless Edge, on `voices-*` modules served as the default module (load: until the module is
+drawn; a commit: one octave step through the whole commit, `__rmtPerf.measureCommit()`, p50 once
+warm; `sync()` and a redraw: `measureSync()`, `measureRedraw()`, p50; undo: until the restored
+module is drawn; the heap before this pass in parentheses):
 
-| Notes | Heap after load | Load | An edit |
-|---|---|---|---|
-| 100,000 | 240 MB | 9 s (12 s) | 0.6 s |
-| 250,000 | 559 MB (1,475 MB) | 23 s (31 s) | 1.4 s (1.7 to 4.3 s) |
-| 500,000 | 1,093 MB | 31 s | 3.9 s |
-| 1,000,000 | about 2,300 MB, before a GC | 63 s | — |
+| Notes | Heap after load | Load | A commit | of it `sync()` | A redraw | Undo |
+|---|---|---|---|---|---|---|
+| 100,000 | 240 MB | 3.4 s | 83 ms | 65 ms | 14 ms | 2.2 s |
+| 250,000 | 559 MB (1,475 MB) | 7.1 s | 203 ms | 179 ms | 35 ms | 6.1 s |
+| 500,000 | 1,093 MB | 13.7 s | 535 ms | 453 ms | 71 ms | 13.4 s |
+| 1,000,000 | about 2,300 MB, before a GC | about 63 s (208 MB, indented) | — | — | — | — |
 
 So memory is no longer the first limit: a million notes load within a tab's heap (about 4 GB).
 Two limits come before it:
@@ -579,7 +580,10 @@ Two limits come before it:
   fallback (`QuotaExceededError`), so that session would not survive a reload. A module whose text
   holds any character above U+00FF is stored at two bytes per character, which halves the size it
   can reach.
-- **Time.** An edit costs about 6 to 8 µs per note of the module, and a load about 60 to 90 µs.
+- **Time.** Everything an edit does still costs the module's size. A commit costs about 1 µs per
+  note, most of it `sync()`, which rebuilds every instance ([Deferred](#deferred-and-not-shipped)); a
+  redraw about 0.14 µs per note; an undo, which restores the whole module through `loadFromJSON`,
+  about 25 µs per note, as long as a load.
 
 The import limits sit below both: 500,000 notes take about 1.1 GB and save as about 79 million
 characters, and a Load Module file of at most 120 MB keeps its text under the 127 MB the autosave can
