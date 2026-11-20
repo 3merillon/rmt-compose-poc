@@ -1,7 +1,7 @@
 import Fraction from 'fraction.js';
 import { Module } from './module.js';
 import { Note } from './note.js';
-import { InstrumentManager, SynthInstrument, SampleInstrument } from './instruments/instrument-manager.js';
+import { InstrumentManager, SynthInstrument } from './instruments/instrument-manager.js';
 import * as SynthInstrumentsModule from './instruments/synth-instruments.js';
 import * as SampleInstrumentsModule from './instruments/sample-instruments.js';
 import { initStackClick } from './stack-click.js';

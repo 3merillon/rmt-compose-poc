@@ -97,17 +97,23 @@ function installPage() {
       // Channel 0: the note.
       const voice = m.createOscillator(name, freq);
       const g = ctx.createGain(); g.gain.value = 0;
-      m.applyEnvelope(name, g, pre, dur, peak, null);
+      m.applyEnvelope(name, g, pre, dur, peak, null, freq);
+      // Stopped where the AudioEngine stops it: since Phase I after the note's tail
+      // (voiceLength), before it at the note's end + RELEASE_TAIL.
+      const noteOff = typeof m.voiceLength === 'function';
+      const length = noteOff ? m.voiceLength(name, dur, null, freq) : dur + tail;
       voice.connect(g); g.connect(merger, 0, 0);
-      voice.start(pre); voice.stop(pre + dur + tail);
+      voice.start(pre); voice.stop(pre + length);
       // Channel 1: the gain curve that envelope schedules (a constant 1 through it).
       const one = ctx.createConstantSource();
       const g2 = ctx.createGain(); g2.gain.value = 0;
-      m.applyEnvelope(name, g2, pre, dur, peak, null);
+      m.applyEnvelope(name, g2, pre, dur, peak, null, freq);
       one.connect(g2); g2.connect(merger, 0, 1);
-      one.start(pre); one.stop(pre + dur + tail);
-      const env = inst.getEnvelopeSettings ? (inst.getEnvelopeSettings(dur) || {}) : {};
+      one.start(pre); one.stop(pre + length);
+      const env = inst.getEnvelopeSettings ? (inst.getEnvelopeSettings(dur, freq) || {}) : {};
       const shares = im.envelopeShares(env, dur, null);
+      // What the workspace draws inside the note: since Phase I the release lies after the end.
+      const drawn = noteOff ? { ...shares, release: 0 } : shares;
       const times = im.envelopeTimes(env, dur, null);
       let zone = null;
       if (inst._zoneFor) {
@@ -115,7 +121,7 @@ function installPage() {
         zone = z && { root: z.root, rootHz: z.rootHz, rate: freq / z.rootHz, seconds: z.buffer ? z.buffer.duration : null };
       }
       const buf = await ctx.startRendering();
-      return { shares, times, env, zone, pcm: b64(buf.getChannelData(0)), gain: b64(buf.getChannelData(1)) };
+      return { shares, drawn, times, env, zone, length, noteOff, pcm: b64(buf.getChannelData(0)), gain: b64(buf.getChannelData(1)) };
     },
     // Every zone of a sampled instrument, decoded, as recorded (rate 1).
     async zones({ name, sr }) {
@@ -210,7 +216,7 @@ function analyseNote(r, { freq, dur }) {
   const at = (t) => rms[Math.min(rms.length - 1, Math.max(0, Math.floor(t / W)))] || 0;
   const rel = (v) => dB(v / peak);
   const tPeak = rms.indexOf(peak) * W - PRE;
-  const end = PRE + dur, stop = end + RELEASE_TAIL;
+  const end = PRE + dur, stop = PRE + r.length;
   // Where sound inside the note last stands above -50 dB re peak: a sample shorter than the note dies before it.
   let lastLoud = Math.floor(PRE / W);
   for (let i = Math.floor(PRE / W); i < Math.floor(end / W); i++) if (rel(rms[i]) > -50) lastLoud = i;
@@ -224,18 +230,18 @@ function analyseNote(r, { freq, dur }) {
   let maxDrawErr = 0, maxDrawErrAt = 0;
   for (let i = Math.floor(PRE * SR); i < Math.floor(end * SR); i += 24) {
     const share = (i / SR - PRE) / dur;
-    const e = Math.abs(gain[i] / gpk - drawnLevel(r.shares, share));
+    const e = Math.abs(gain[i] / gpk - drawnLevel(r.drawn, share));
     if (e > maxDrawErr) { maxDrawErr = e; maxDrawErrAt = share; }
   }
   // Heard level (RMS, normalised) against drawn, at quarter points of the note.
   const heardVsDrawn = [0.25, 0.5, 0.75, 0.95].map((s) => ({
-    share: s, drawn: +drawnLevel(r.shares, s).toFixed(3), scheduledGain: +(gain[Math.floor((PRE + s * dur) * SR)] / gpk).toFixed(3),
+    share: s, drawn: +drawnLevel(r.drawn, s).toFixed(3), scheduledGain: +(gain[Math.floor((PRE + s * dur) * SR)] / gpk).toFixed(3),
     heard: +(at(PRE + s * dur) / peak).toFixed(3),
   }));
   // Held-part slope (long notes): dB/s between 0.4 s and the start of the release.
   let holdSlope = null;
   if (dur >= 2) {
-    const t1 = PRE + 0.4, t2 = Math.min(PRE + dur - r.times.release - 0.05, soundEnd - 0.1);
+    const t1 = PRE + 0.4, t2 = Math.min(PRE + dur - (r.noteOff ? 0 : r.times.release) - 0.05, soundEnd - 0.1);
     holdSlope = (rel(at(t2)) - rel(at(t1))) / (t2 - t1);
   }
   // Spectrum: early (30 ms in), middle, late (just before the release).
@@ -255,11 +261,12 @@ function analyseNote(r, { freq, dur }) {
     }
     return { at: +(t - PRE).toFixed(3), partials, centroid: +(num / den).toFixed(2) };
   };
-  const spectra = [spec(PRE + Math.min(0.03, dur * 0.3)), spec(PRE + dur * 0.5), spec(Math.min(PRE + Math.max(dur * 0.5, dur - r.times.release - 0.06), soundEnd - 0.06))];
+  const relIn = r.noteOff ? 0 : r.times.release;   // release inside the note (before Phase I only)
+  const spectra = [spec(PRE + Math.min(0.03, dur * 0.3)), spec(PRE + dur * 0.5), spec(Math.min(PRE + Math.max(dur * 0.5, dur - relIn - 0.06), soundEnd - 0.06))];
   // Pitch: mean over the middle of the note (long notes) and the pitch track's swing.
   let pitch = null;
   if (dur >= 0.6) {
-    const t1 = PRE + 0.15, t2 = Math.min(PRE + dur - Math.max(0.15, r.times.release + 0.05), soundEnd - 0.1);
+    const t1 = PRE + 0.15, t2 = Math.min(PRE + dur - Math.max(0.15, (r.noteOff ? 0 : r.times.release) + 0.05), soundEnd - 0.1);
     const len = Math.round((t2 - t1) * SR), size = pow2(len * 4);
     const mag = spectrum(x, Math.round(t1 * SR), len, size);
     // The mean pitch from the strongest of partials 1..4 (a low piano string's fundamental is weak; a sine has
@@ -284,7 +291,7 @@ function analyseNote(r, { freq, dur }) {
   const curve = [];
   for (let i = 0; i < rms.length; i += 2) curve.push(+Math.max(-80, rel(rms[i])).toFixed(1));
   return {
-    freq, dur, zone: r.zone, envTimes: r.times, shares: r.shares,
+    freq, dur, zone: r.zone, envTimes: r.times, shares: r.shares, drawn: r.drawn, voiceLength: r.length,
     tPeak: +tPeak.toFixed(3),
     endDb: +rel(at(end - W)).toFixed(1), silentBeforeEnd,
     ringAfterEnd: ringTo == null ? null : +ringTo.toFixed(3),
@@ -327,11 +334,11 @@ function svgFor(name, results) {
     const y0 = 30 + i * Hrow, h = Hrow - 30, span = PRE + r.dur + POST;
     const X = (t) => pad + (t / span) * (Wd - 2 * pad), Y = (db) => y0 + (Math.min(0, Math.max(-60, db)) / -60) * h;
     s += `<rect x="${X(PRE)}" y="${y0}" width="${X(PRE + r.dur) - X(PRE)}" height="${h}" fill="#eee"/>`;
-    s += `<line x1="${X(PRE + r.dur + RELEASE_TAIL)}" x2="${X(PRE + r.dur + RELEASE_TAIL)}" y1="${y0}" y2="${y0 + h}" stroke="#c00" stroke-dasharray="3,3"/>`;
+    s += `<line x1="${X(PRE + r.voiceLength)}" x2="${X(PRE + r.voiceLength)}" y1="${y0}" y2="${y0 + h}" stroke="#c00" stroke-dasharray="3,3"/>`;
     s += `<text x="${pad}" y="${y0 + h + 14}">${r.dur} s note (red dash: voice stopped)</text>`;
     s += `<polyline fill="none" stroke="#1565c0" stroke-width="1.3" points="${r.curve.map((v, k) => `${X(k * 0.01).toFixed(1)},${Y(v).toFixed(1)}`).join(' ')}"/>`;
     const pts = [];
-    for (let k = 0; k <= 400; k++) { const t = PRE + (k / 400) * r.dur; pts.push(`${X(t).toFixed(1)},${Y(dB(drawnLevel(r.shares, k / 400))).toFixed(1)}`); }
+    for (let k = 0; k <= 400; k++) { const t = PRE + (k / 400) * r.dur; pts.push(`${X(t).toFixed(1)},${Y(dB(drawnLevel(r.drawn, k / 400))).toFixed(1)}`); }
     s += `<polyline fill="none" stroke="#ef6c00" stroke-width="1.3" points="${pts.join(' ')}"/>`;
     for (const db of [0, -20, -40, -60]) s += `<text x="4" y="${Y(db) + 4}" fill="#777">${db}</text>`;
   });

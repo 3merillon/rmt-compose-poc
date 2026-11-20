@@ -256,7 +256,7 @@ POW produces an irrational, or ~ / a fallback an approximation
   → evaluateVariable ORs the property's bit into corruptionFlags   :830
   → Module._updateCorruptionFlags() pushes it into the graph   module.js:683-706
       → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1746
-  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:941-988
+  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:944-991
       0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
   → the note widget names the kind: exact form, or ≈ for approximate   variable-controls.js:111
 ```

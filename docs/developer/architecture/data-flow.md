@@ -132,7 +132,7 @@ is ignored with a console warning.
 
 ## 4. Rendering
 
-`RendererAdapter.sync()` (`renderer.js:634`) is the CPU rebuild:
+`RendererAdapter.sync()` (`renderer.js:637`) is the CPU rebuild:
 
 ```javascript
 renderer.sync({
@@ -158,7 +158,7 @@ depend on?" for every note (a transitive BFS per note — O(N²) on deep chains)
 question: *i* transitively depends on a corrupt note **iff** *i* is a transitive dependent of one. So
 a single multi-source BFS over the `dependents` graph, seeded by the (usually empty) corrupt set,
 answers it for all notes at once in O(N+E) — and is a complete no-op when nothing is corrupt
-(`renderer.js:941-988`).
+(`renderer.js:944-991`).
 
 The result lands in `_corruptionType`, a `Float32Array` bound to vertex attribute 7:
 
@@ -201,7 +201,7 @@ reverbInput → preDelay → Convolver(IR) → reverbReturn(wet) → masterGain 
 ```
 
 A note's own `attack` and `release`, or the BaseNote's, travel with it as shares of its duration and
-reach `applyEnvelope()` as a `shape`; with neither set, the instrument's own envelope ratios apply. See
+reach `applyEnvelope()` as a `shape`; with neither set, the instrument's own envelope (in seconds) applies. See
 [Audio Engine](/developer/audio/audio-engine).
 
 `instrument` is resolved by `module.findInstrument(note)`, which walks the note's **frequency**
@@ -242,7 +242,7 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 | Evaluation cache | `Map<noteId, result>` on the module and the incremental evaluator | Invalidated per note when marked dirty. |
 | Module end time | A **module-level** `let` in `src/module.js`, not a per-instance field | Cleared by `invalidateModuleEndTimeCache()`, emitted on every expression change. |
 | Renderer instance arrays | `RendererAdapter` | Rebuilt wholesale on every `sync()`. No per-note tracking. |
-| Children-tree (drag preview) | `renderer.js:10317`, keyed `anchorId\|_posEpoch\|_sceneEpoch` | Survives a drag (which changes neither key), invalidated by any real edit. |
+| Children-tree (drag preview) | `renderer.js:10320`, keyed `anchorId\|_posEpoch\|_sceneEpoch` | Survives a drag (which changes neither key), invalidated by any real edit. |
 
 ## Events
 

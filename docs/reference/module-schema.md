@@ -60,8 +60,8 @@ Every field is optional. An omitted field falls back to the **class default** be
 | `startTime` | expression string | `0` s | Shipped modules use `0`. |
 | `duration` | expression string | `1` s | The **time unit**, `base.d`: one beat if you count in beats. `60 / duration` is the tempo in BPM, shown by the note widget and stored nowhere. See [the time unit](/reference/properties/duration#the-time-unit). |
 | `amplitude` | expression string | `1` | A relative gain. Every note without its own inherits it, so it scales the whole piece. Written to the file only when set. See [amplitude](/reference/properties/amplitude). |
-| `attack` | expression string | none | A share of each note's duration, `0`–`1`. Every note without its own inherits it. With none set, the instrument's own envelope applies. See [attack and release](/reference/properties/attack-release). |
-| `release` | expression string | none | The same, for the fall at the end of a note. |
+| `attack` | expression string | none | A share of each note's duration, `0`–`1`, from the note's start. Every note without its own inherits it. With none set, the instrument's own envelope applies. See [attack and release](/reference/properties/attack-release). |
+| `release` | expression string | none | The same, for the fall after the end of a note: a share of the duration counted from the note's end, `0`–`4`. |
 | `color` | CSS color string | none | Accepted by the loader and the exporter. No shipped module uses it. |
 | `instrument` | instrument name | none → the `audio.defaultInstrument` setting | See [Instruments](#instruments). |
 
@@ -80,8 +80,8 @@ These three keys were removed. A module that still has them is converted exactly
 | `duration` | expression string | no | Seconds. Absent = a plain marker with no length. |
 | `frequency` | expression string | no | Hz. Absent (with a `duration` present) = a silence, or a measure bar. |
 | `amplitude` | expression string | no | Relative gain, e.g. `"(121/100) * [3].a"`. Absent = the BaseNote's. |
-| `attack` | expression string | no | A share of the note's duration, e.g. `"(1/8)"`. Absent = the BaseNote's, else the instrument's. |
-| `release` | expression string | no | The same, for the end of the note. |
+| `attack` | expression string | no | A share of the note's duration, from its start, e.g. `"(1/8)"`, `0`–`1`. Absent = the BaseNote's, else the instrument's. |
+| `release` | expression string | no | The same, for the release after the note's end, `0`–`4`. |
 | `color` | CSS color string | no | e.g. `"rgba(242,167,27,0.7)"`. |
 | `instrument` | instrument name | no | Inherited along the frequency chain when absent. |
 | `measure` | `true` | no | Marks a silent note as a [measure bar](#measure-bars). Any other value is read as absent. Written only when `true`. |

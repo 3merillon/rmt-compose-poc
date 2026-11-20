@@ -24,9 +24,11 @@
  *   { schema, name, displayName, license:{id,source,author,url}, gainDb,
  *     envelope:{attack,release}, zones:[{root, rootHz, lowHz, highHz, url,
  *     loop?, velLayers?}] }
+ * `envelope` is in seconds: the attack from the note's start, the release after
+ * its end (the note's end is a note-off; see instrument-manager.js).
  */
 
-import { applyVoiceEnvelope } from './instrument-manager.js';
+import { applyVoiceEnvelope, envelopeLength } from './instrument-manager.js';
 
 export class MultisampleInstrument {
   /**
@@ -44,7 +46,7 @@ export class MultisampleInstrument {
     /** @type {Array<{rootHz:number, lowHz:number, highHz:number, url:string, buffer:AudioBuffer|null, decoding:Promise|null}>} */
     this.zones = [];
     this.gain = 1;
-    this.envelope = { attack: 0.006, release: 0.18 };
+    this.envelope = { attack: 0.005, release: 0.12 };
     this.manifestLoaded = false;
     this.manifestPromise = this._loadManifest();
   }
@@ -181,32 +183,24 @@ export class MultisampleInstrument {
   }
 
   /**
-   * Envelope for applyVoiceEnvelope, honoring the manifest's `envelope` block.
-   * The manifest declares absolute seconds (`attack`, `release`); when the note
-   * duration is known they override the default ratios below. The ratio keys
-   * (`attackTimeRatio` etc.) may also be declared directly in the manifest.
+   * The envelope, in seconds, from the manifest's `envelope` block: a short
+   * attack (the recording carries its own onset), full gain until the note-off
+   * (the recording carries its own decay), then the release.
    * @param {number} [duration] note length in seconds
+   * @param {number} [frequency] the pitch that sounds
    */
-  getEnvelopeSettings(duration) {
-    const env = {
-      attackTimeRatio: 0.02,
-      decayTimeRatio: 0,
-      sustainLevel: 1,
-      releaseTimeRatio: 0.12,
-    };
+  getEnvelopeSettings(duration, frequency) {
     const e = this.envelope || {};
-    for (const k of Object.keys(env)) {
-      if (e[k] != null && isFinite(e[k])) env[k] = +e[k];
-    }
-    if (isFinite(duration) && duration > 0) {
-      if (e.attack != null && isFinite(e.attack) && e.attack >= 0) env.attackTimeRatio = e.attack / duration;
-      if (e.release != null && isFinite(e.release) && e.release >= 0) env.releaseTimeRatio = e.release / duration;
-    }
-    return env;
+    const sec = (v, d) => (v != null && isFinite(v) && v >= 0 ? +v : d);
+    return { attack: sec(e.attack, 0.005), release: sec(e.release, 0.12) };
   }
 
-  applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null) {
-    // Reuse the shared click-free envelope; samples hold at full then release.
-    applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.gain, this.getEnvelopeSettings(duration), shape);
+  applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null, frequency = null) {
+    applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.gain, this.getEnvelopeSettings(duration, frequency), shape);
+  }
+
+  /** Seconds from the note's start until the voice can be stopped. */
+  voiceLength(duration, shape = null, frequency = null) {
+    return envelopeLength(this.getEnvelopeSettings(duration, frequency), duration, shape);
   }
 }

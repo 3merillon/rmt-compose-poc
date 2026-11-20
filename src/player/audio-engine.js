@@ -16,6 +16,9 @@ const MIN_LOOP_PERIOD = 0.05; // seconds
 const MAX_CYCLES_PER_BATCH = 64;
 // Float slop when comparing a note's scheduled time against a pass boundary.
 const SEAM_EPS = 1e-6;
+// A voice whose envelope could not be computed is stopped this long after its
+// note's end (the length every voice had before the release followed the note-off).
+const FALLBACK_TAIL = 0.15;
 // A live tempo change takes effect this far ahead of the audio clock, so no voice
 // is ever rescheduled into the past (the pump runs on a 100 ms timer).
 const RATE_CHANGE_LEAD = 0.05; // seconds
@@ -654,9 +657,13 @@ export class AudioEngine {
     // at exactly the old peak: x * 1 === x.
     const peak = initialVolume * (noteData.amplitude ?? 1);
 
+    // The note's end is a note-off: its release rings after it, so the voice
+    // lives for `length` seconds, the note and its tail.
+    const shape = { attack: noteData.attack ?? null, release: noteData.release ?? null };
+    let length = duration + FALLBACK_TAIL;
     try {
-      this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, peak,
-        { attack: noteData.attack ?? null, release: noteData.release ?? null });
+      this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, peak, shape, frequency);
+      length = this.instrumentManager.voiceLength(noteData.instrument, duration, shape, frequency);
     } catch (e) {
       console.warn('applyEnvelope failed', e);
     }
@@ -682,11 +689,10 @@ export class AudioEngine {
       }
     } catch {}
 
-    // Stop past gain-zero so exponential releases finish cleanly (no click).
-    const RELEASE_TAIL = 0.15;
+    // Stop once the release has reached zero (no click).
     try {
       voice.start(start);
-      voice.stop(start + duration + RELEASE_TAIL);
+      voice.stop(start + length);
     } catch {}
 
     // `startTime` is what disarmLoop() cancels against — around a loop seam the set
@@ -709,7 +715,7 @@ export class AudioEngine {
     try {
       voice.onended = () => { ended = true; cleanup(); };
     } catch {}
-    const ms = Math.max(0, (start + duration + RELEASE_TAIL - ctx.currentTime) * 1000) + 60;
+    const ms = Math.max(0, (start + length - ctx.currentTime) * 1000) + 60;
     setTimeout(() => { if (!ended) cleanup(); }, ms);
   }
 

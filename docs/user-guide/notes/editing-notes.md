@@ -117,7 +117,7 @@ The BaseNote's own duration row is different: its value *is* the time unit, and 
 These three rows are **interpretation variables**: they say how a note is played, not where it sits. They are the only rows that fall back to the BaseNote.
 
 - `amplitude` is a relative gain, `1` by default.
-- `attack` and `release` are **shares of the note's own duration**, such as `1/8`, clamped to 0–1. The row reads `Default: instrument envelope` when neither the note nor the BaseNote sets one, and `Inherited: <value>` when only the BaseNote does.
+- `attack` and `release` are **shares of the note's own duration**, such as `1/8`. The attack runs from the note's start (clamped to 0–1); the release runs from its end and rings after it (clamped to 0–4). The row reads `Default: instrument envelope` when neither the note nor the BaseNote sets one, and `Inherited: <value>` when only the BaseNote does.
 
 ```
 1/8                     # attack lasts an eighth of the note

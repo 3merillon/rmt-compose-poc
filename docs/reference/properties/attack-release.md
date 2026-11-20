@@ -5,17 +5,17 @@ description: Reference for the attack and release variables - how a note's envel
 
 # attack and release
 
-`attack` and `release` shape the envelope of a note: how quickly it rises to full level at its start, and how long it takes to fall to silence at its end. Each is written as a **share of the note's own duration**, a plain number between `0` and `1`.
+`attack` and `release` shape the envelope of a note: how quickly it rises to full level at its start, and how long it takes to fall to silence once the note has ended. A note's end is a **note-off**, like lifting a key: the sound does not stop there, it dies away. Each is written as a **share of the note's own duration**, a plain number. The attack runs from the note's start; the release runs from the note's end.
 
 ```
-(1/8)       # the first (or last) eighth of the note
-(1/2)       # half the note
+(1/8)       # attack: the first eighth of the note. release: an eighth of the note's length, after its end
+(1/2)       # half the note's length
 0           # as short as the anti-click floor allows
 ```
 
 Like [amplitude](/reference/properties/amplitude), they are **interpretation variables**. They do not belong to the notation: a module with none of them is complete, and the app never writes a pitch or a start from one. They say how a note is *played*, not which note it *is*. The notation itself is only [frequency](/reference/properties/frequency), [startTime](/reference/properties/start-time) and [duration](/reference/properties/duration).
 
-Because they are shares of the duration, they stay proportional when the note is resized, and when the time unit changes (see [the time unit](/reference/properties/duration#the-time-unit)). A note with `attack` `(1/4)` always spends a quarter of its length rising.
+Because they are shares of the duration, they stay proportional when the note is resized, and when the time unit changes (see [the time unit](/reference/properties/duration#the-time-unit)). A note with `attack` `(1/4)` always spends a quarter of its length rising, and one with `release` `(1/4)` always rings for a quarter of its length after its end.
 
 ## Aliases
 
@@ -34,7 +34,7 @@ Because they are shares of the duration, they stay proportional when the note is
 |---|---|
 | A note with its own expression | that expression's value |
 | A note without one | the BaseNote's, when the BaseNote has one |
-| Neither the note nor the BaseNote | the instrument's own envelope ratio |
+| Neither the note nor the BaseNote | the instrument's own envelope time, in seconds |
 
 Like `amplitude`, these are the only variables that fall back to the BaseNote when a note defines none. A single `attack` on the BaseNote therefore gives a whole module the same rise; one note's own value replaces it for that note. `frequency`, `startTime` and `duration` never inherit.
 
@@ -42,12 +42,13 @@ An unset value is not stored. A module that never mentions `attack` or `release`
 
 ## What they do to the sound
 
-The envelope is fitted inside `[startTime, startTime + duration]` and reaches zero at the end, so the audible length is always the duration you wrote.
+The attack and any decay start at the note's start, the sustain (or the instrument's natural decay) lasts until the note's end, and the release starts there. The release is not inside the note: it sounds **after** `startTime + duration`, and the voice is kept alive until it has finished. The note's length on the grid, in the dependency graph and in a MIDI export is unchanged; MIDI still writes the note-off at the note's end.
 
-- The attack takes `duration × attack` seconds; the release takes `duration × release` seconds.
+- The attack takes `duration × attack` seconds from the note's start; the release takes `duration × release` seconds from the note's end. With no value set, the instrument's own times in seconds apply (see [Instruments](/user-guide/playback/instruments)), so a short note keeps the shape of a long one.
 - **Floors.** However small the share, the attack lasts at least **3 ms** and the release at least **15 ms**, so a very short note, or a share of `0`, does not click.
-- **Fitting.** When a note's own attack and release add up to more than its duration, both are scaled down together to fit. An instrument's default ratios are held back further: they leave at least 10% of the note as its body.
-- Each share is clamped to `0`–`1` for the sound only. The module keeps the exact value, and an expression that reads `[N].attack` sees it unclamped.
+- **Fit.** The attack must fit inside the note: a note shorter than its attack is attacked over its whole length. Nothing else has to fit, because the release comes after the note.
+- **Range.** The attack is clamped to `0`-`1` and the release to `0`-`4` (a release may ring for up to four times the note's length), for the sound only. The module keeps the exact value, and an expression that reads `[N].attack` sees it unclamped.
+- A release that rings into the next note simply overlaps it, as a lifted key does.
 
 See `envelopeTimes`, `applyVoiceEnvelope` and `noteShape` in `src/instruments/instrument-manager.js`, and how the engine passes the shares in `src/player/audio-engine.js`.
 
@@ -57,7 +58,7 @@ The note widget has an `attack` row and a `release` row below `amplitude`, with 
 
 | The readout says | Meaning |
 |---|---|
-| `Default:` instrument envelope | Neither the note nor the BaseNote sets one. The instrument's own ratio applies. |
+| `Default:` instrument envelope | Neither the note nor the BaseNote sets one. The instrument's own time applies. |
 | `Inherited:` and a value | The note has none of its own; the BaseNote sets one. |
 | `Evaluated:` and a value | The note has its own. |
 
@@ -71,14 +72,14 @@ Silences and measure bars have no `attack` or `release` row, because neither mak
 
 ```
 (1/20)      # on the BaseNote's attack: every note rises over a twentieth of its length
-(1/4)       # on the BaseNote's release: every note fades over its last quarter
+(1/4)       # on the BaseNote's release: every note rings for a quarter of its length after its end
 ```
 
 ### A note that swells
 
 ```
 1           # attack: the whole note is a rise
-0           # release: nothing after it but the floor
+0           # release: only the 15 ms floor after the note's end
 ```
 
 ### Relative to another note
@@ -96,15 +97,18 @@ The editor draws the envelope inside each note. When a note, or the BaseNote, se
 sounds with:
 
 - the attack ramps up from a point;
-- the instrument's decay falls to its sustain level;
-- the hold runs level;
-- the release ramps down to a point at the note's end.
+- the instrument's decay, or natural decay, falls to the level the sound has at the note's end;
+- the hold runs level.
+
+The release is **not drawn yet**: it sounds after the note's end, outside the note's rectangle, and
+the editor draws no tail past the end (a later step). The band is drawn with a release of zero, so
+the note's right edge is where the key is lifted, not where the sound is silent.
 
 The note's full colour is inside the band; outside it the colour is dimmed (alpha × 0.3). The shape
 comes from the same function as playback, `envelopeShares` and `envelopeTimes` in
-`src/instruments/instrument-manager.js`, so it includes the instrument's own ratios for whatever the
-note leaves unset, the 3 ms and 15 ms floors, and the fit inside the note: what you see is what you
-hear. A note with neither set, its own or the BaseNote's, is drawn as before, with no band. The
+`src/instruments/instrument-manager.js`, so the part that is drawn includes the instrument's own
+times for whatever the note leaves unset, the 3 ms floor, and the fit of the attack inside the note.
+A note with neither set, its own or the BaseNote's, is drawn as before, with no band. The
 renderer side is `_envelopeSharesFor` and the envelope block in `rectBorderFS` in
 `src/renderer/webgl2/renderer.js`.
 

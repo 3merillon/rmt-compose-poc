@@ -310,8 +310,8 @@ New code should use `getVariable()` / `setVariable()` / `getExpressionSource()` 
 | `duration` | how long it sounds, in seconds. On the BaseNote it is the time unit (`base.d`) |
 | `frequency` | pitch in Hz |
 | `amplitude` | relative gain, default 1 (inheritable; playback clamps it to 0–4) |
-| `attack` | a share of the note's own duration, clamped to 0–1 (inheritable); alias `atk` in the DSL |
-| `release` | a share of the note's own duration, clamped to 0–1 (inheritable); alias `rel` in the DSL |
+| `attack` | a share of the note's own duration, counted from its start, clamped to 0–1 (inheritable); alias `atk` in the DSL |
+| `release` | a share of the note's own duration, counted from the note's end (it rings after the note), clamped to 0–4 (inheritable); alias `rel` in the DSL |
 
 The first three are the language; the last three are interpretation and are the only ones that
 fall back to the BaseNote. With no attack or release on the note or the BaseNote, the instrument's

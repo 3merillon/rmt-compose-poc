@@ -79,7 +79,7 @@ No tempo is stored anywhere. The note widget shows `60 / base.d` beside the Base
 | `duration` | no | Seconds, written in time units: `base.d * 2`. Its absence is meaningful — see below. |
 | `frequency` | no | Hz. Its absence is meaningful — see below. |
 | `amplitude` | no | Relative gain, e.g. `"(121/100) * [3].a"`. Absent = the BaseNote's. |
-| `attack`, `release` | no | A share of the note's own duration, e.g. `"1/8"`, clamped to 0–1. Absent = the BaseNote's, then the instrument's. |
+| `attack`, `release` | no | A share of the note's own duration, e.g. `"1/8"`. The attack counts from the note's start, clamped to 0–1; the release from its end, clamped to 0–4. Absent = the BaseNote's, then the instrument's. |
 | `measure` | no | `true` on a measure bar. Saved only when true. |
 | `color` | no | e.g. `"rgba(242,167,27,0.7)"`. |
 | `instrument` | no | Inherited along the frequency chain when absent. |

@@ -231,13 +231,14 @@ other two dim.
 
 ## In playback
 
-The instrument envelope is fitted **inside** `[startTime, startTime + duration]` and reaches zero at
-the end, so the audible length is the duration you wrote. How long the rise and the fall take is a
-share of that duration: see [attack and release](/reference/properties/attack-release), which also
-gives the floors (3 ms and 15 ms) and how the two are fitted inside a short note.
+The note's end is a note-off, as when a key is lifted. The attack, and the sustain or natural decay,
+lie **inside** `[startTime, startTime + duration]`; the release starts at the end and rings **after**
+it. The instrument gives its times in seconds, and a note's own `attack` and `release` are shares of
+its duration: see [attack and release](/reference/properties/attack-release), which also gives the
+floors (3 ms and 15 ms) and the range.
 
-The voice itself is stopped 150 ms after the note ends — while it is already silent — so that
-exponential release curves finish cleanly. A running reverb tail can still be audible after that.
+The voice itself is stopped when its release has finished (plus 4 ms to zero and a 20 ms margin), so
+the exponential release curve is not cut. A running reverb tail can still be audible after that.
 
 Every voice runs through the signal graph: voice gain → optional stereo panner → per-instrument bus
 → dry path plus a reverb send → master → limiter.

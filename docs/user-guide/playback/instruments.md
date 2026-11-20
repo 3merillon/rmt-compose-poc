@@ -19,8 +19,8 @@ The app shows these names exactly as written.
 | `square-wave` | synth | Square, thickened by a 3-oscillator unison and tamed by a lowpass that tracks the pitch |
 | `sawtooth-wave` | synth | Sawtooth, same unison and lowpass treatment, slightly darker filter |
 | `triangle-wave` | synth | A single triangle. Soft, flute-like. |
-| `organ` | synth | A 10-harmonic wave with a high sustain and a short release |
-| `vibraphone` | synth | A 16-harmonic wave with a fast attack and a long decay. Bell-like. |
+| `organ` | synth | A 10-harmonic wave held at full level, with a short release |
+| `vibraphone` | synth | A 16-harmonic wave struck at once and left to die away, longer for low notes than for high ones; the note's end damps it. Bell-like. |
 | `fm-epiano` | synth | A 2-operator FM electric piano — bright, percussive attack settling into a mellow Rhodes-like tine |
 | `harmonium` | synth | A steady reed-organ voice with every harmonic from the 1st to the 16th. Made for hearing pure intervals. |
 | `harmonium-soft` | synth | The same voice, darker, quieter and slower to speak. A bed under a tune. |
@@ -100,16 +100,31 @@ See [Dependencies](/user-guide/notes/dependencies) for what else that operation 
 
 ## Attack and release
 
-Every instrument has an envelope: how a note swells in at its start and fades at its end. Each instrument carries its own, written as shares of the note's length. A note can override two of its parts with the interpretation variables **`attack`** (alias `atk`) and **`release`** (alias `rel`).
+Every instrument has an envelope: how a note swells in at its start and dies away after its end. The end of a note is a **note-off**, like lifting a key: the sound does not stop there, it rings briefly after it. Each instrument carries its own envelope, written in seconds, so a short note keeps the shape of a long one. A note can override two of its parts with the interpretation variables **`attack`** (alias `atk`) and **`release`** (alias `rel`).
 
-- Both are **shares of the note's own duration**, such as `1/8`, clamped to 0–1.
-- A note's own value replaces the instrument's ratio for that part. When neither the note nor the BaseNote sets one, the instrument's own envelope applies. Each is replaced on its own: setting only `attack` leaves the instrument's release.
+- Both are **shares of the note's own duration**, such as `1/8`. The attack runs from the note's start (clamped to 0–1); the release runs from the note's end and rings after it (clamped to 0–4).
+- A note's own value replaces the instrument's time for that part. When neither the note nor the BaseNote sets one, the instrument's own envelope applies. Each is replaced on its own: setting only `attack` leaves the instrument's release.
 - The BaseNote's `attack` and `release` apply to every note that sets none of its own, like `amplitude`.
 - Set them in the `ATTACK` and `RELEASE` rows of the [note widget](/user-guide/interface/variable-widget#attack-and-release), which read `Default: instrument envelope`, `Inherited: <value>` or `Evaluated: <value>`.
 
-The anti-click floors stay: an attack is never shorter than 3 ms and a release never shorter than 15 ms, so a very short note cannot click. If a note's own attack and release together exceed its duration, both are scaled down to fit, and an `attack` of `1` is a swell to the very end. Instrument defaults leave at least 10% of the note as its body.
+The anti-click floors stay: an attack is never shorter than 3 ms and a release never shorter than 15 ms, so a very short note cannot click. The attack has to fit inside the note: a note shorter than its attack is attacked over its whole length, and an `attack` of `1` is a swell to the very end. The release comes after the note, so nothing has to fit around it.
 
-The harmonium voices, whose attack and release are fixed times, are overridden the same way. See [attack and release](/reference/properties/attack-release) for the exact rules.
+Each instrument's times, in seconds:
+
+| Instrument | Attack | After the note's start | Release after the note's end |
+|---|---|---|---|
+| `sine-wave` | 0.015 | held at full level | 0.1 |
+| `triangle-wave` | 0.015 | held at full level | 0.12 |
+| `square-wave`, `sawtooth-wave` | 0.008 | falls over 0.25 s to 70% of the peak, then held | 0.1 |
+| `organ` | 0.03 | held at full level | 0.06 |
+| `vibraphone` | 0.002 | dies away on its own: a 60 dB fall takes 6 s at 65 Hz and 2 s at 2000 Hz | 0.4 |
+| `fm-epiano` | 0.002 | dies away on its own: 5 s at 65 Hz, 1.5 s at 2000 Hz | 0.25 |
+| `harmonium` | 0.03 | held at full level | 0.08 |
+| `harmonium-soft` | 0.06 | held at full level | 0.12 |
+| `piano` | 0.002 | held (the recording carries its own decay) | 0.30 at C1 down to 0.10 at C6, so the bass is damped more slowly; 1.5 above F#6, where a piano has no dampers |
+| `violin` | 0.005 | held (the recording carries its own bowing, and stops after 3.5 s) | 0.12 |
+
+The harmonium voices are overridden the same way. See [attack and release](/reference/properties/attack-release) for the exact rules.
 
 ## The synth voices
 
@@ -117,7 +132,7 @@ The harmonium voices, whose attack and release are fixed times, are overridden t
 
 `square-wave` and `sawtooth-wave` are **not** bare waveforms. Each is three oscillators detuned by up to ±4 cents (a slight chorusing thickness) behind a lowpass filter whose cutoff tracks the note: 12× the note's frequency for square, 10× for sawtooth. The raw square/sawtooth harmonic series is still underneath, but the top of it is rolled off, which is why they sound rounder than a textbook oscillator.
 
-`organ` and `vibraphone` are custom harmonic waves — 10 and 16 partials respectively. The organ sustains almost flat and releases fast; the vibraphone snaps in and decays for a long time.
+`organ` and `vibraphone` are custom harmonic waves — 10 and 16 partials respectively. The organ holds its level until the note's end and then lets go quickly; the vibraphone is struck at once and decays on its own, so a long note is not held level, and the end of the note damps it.
 
 `fm-epiano` is 2-operator FM: a sine carrier frequency-modulated by another sine at the same pitch. The modulation index starts high and falls over the first quarter-second, which is the bright ping-then-mellow of an electric piano tine.
 
@@ -131,8 +146,8 @@ Two notes a ratio `p/q` apart share an overtone: the `p`-th harmonic of the lowe
 |---|---|---|
 | Harmonics | **Every one from the 1st to the 16th** | `sine-wave` has one; `organ` has no 2nd and no 7th; `triangle-wave` and `square-wave` have only the odd ones |
 | Steadiness | One oscillator. No unison, no detune, no vibrato | `square-wave` and `sawtooth-wave` detune three oscillators by ±4 cents, which makes even a single note waver |
-| Attack and release | **Fixed times**: 30 ms and 80 ms (`harmonium`), 60 ms and 120 ms (`harmonium-soft`), unless a note sets its own [attack and release](#attack-and-release) | Fractions of the note's length: a long chord swells slowly and fades through its last tenth or more |
-| Between them | Full level, held | A decay to a lower sustain level |
+| Attack and release | **Fixed times**: 30 ms and 80 ms (`harmonium`), 60 ms and 120 ms (`harmonium-soft`), unless a note sets its own [attack and release](#attack-and-release) | Times in seconds too, each its own (see the table above); the release rings after the note's end |
+| Between them | Full level, held | Some hold full level; `square-wave` and `sawtooth-wave` fall to a lower level, `vibraphone` and `fm-epiano` decay on their own |
 
 So a `7/4` has the 7th harmonic to meet on, an `11/8` the 11th, a `13/8` the 13th.
 

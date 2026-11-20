@@ -421,19 +421,22 @@ export class RendererAdapter {
   _noteCenterY(freq) { return this._frequencyToY(freq) + this._cfgCenterAnchor(); }
   // The envelope of one note as shares of its duration, from the same function the
   // audio engine uses (envelopeShares in instrument-manager.js): the note's own
-  // attack and release, the instrument's ratios for what it leaves unset, the
-  // anti-click floors. Returns [attack, decay, sustainLevel, release] or null.
-  _envelopeSharesFor(module, note, durSec, attack, release) {
+  // attack and release, the instrument's envelope (in seconds, some following the
+  // pitch) for what it leaves unset, the anti-click floors. Returns [attack, decay,
+  // level, release] or null. The release sounds AFTER the note's end, so inside
+  // the note there is none to draw: the band holds the level the body reaches
+  // until the end (release share 0).
+  _envelopeSharesFor(module, note, durSec, attack, release, freq) {
     try {
       const shape = { attack: attack ? toNumber(attack, null) : null, release: release ? toNumber(release, null) : null };
       let env = {};
       const im = getInstrumentManager();
       if (im && typeof im.getInstrument === 'function') {
         const inst = im.getInstrument(String(module.findInstrument(note) || '').toLowerCase());
-        if (inst && typeof inst.getEnvelopeSettings === 'function') env = inst.getEnvelopeSettings(durSec) || {};
+        if (inst && typeof inst.getEnvelopeSettings === 'function') env = inst.getEnvelopeSettings(durSec, Number(freq)) || {};
       }
       const s = envelopeShares(env, durSec, shape);
-      return [s.attack, s.decay, s.sustain, s.release];
+      return [s.attack, s.decay, s.sustain, 0];
     } catch { return null; }
   }
 
@@ -853,7 +856,7 @@ export class RendererAdapter {
         if (!isSilence) {
           const atk = (ev && ev.attack) || baseAttack;
           const rel = (ev && ev.release) || baseRelease;
-          if (atk || rel || showAllEnvelopes) env = this._envelopeSharesFor(module, note, durSec, atk, rel);
+          if (atk || rel || showAllEnvelopes) env = this._envelopeSharesFor(module, note, durSec, atk, rel, freqVal);
         }
 
         // Carry freqVal so the fraction-label pass below does not have to look the note up in

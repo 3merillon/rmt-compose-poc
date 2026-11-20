@@ -1,4 +1,10 @@
 import { MultisampleInstrument } from './multisample-instrument.js';
+import { byPitch } from './instrument-manager.js';
+
+/** F#6: the highest strings of a piano have no damper. */
+const PIANO_UNDAMPED_HZ = 1480;
+/** How long an undamped top string rings on after its key is up (its own decay is in the recording). */
+const PIANO_UNDAMPED_RING = 1.5;
 
 /**
  * Built-in sampled instruments (ROADMAP.md Phase 5a). Both are multisampled
@@ -11,6 +17,19 @@ import { MultisampleInstrument } from './multisample-instrument.js';
 export class PianoInstrument extends MultisampleInstrument {
   constructor(audioContext) {
     super(audioContext, 'piano', '/samples/piano/manifest.json');
+  }
+
+  /**
+   * The hammer's attack is in the recording (2 ms keeps it unclicked). At the
+   * note-off the damper falls on the string: slower on the long bass strings
+   * (0.30 s at C1) than in the treble (0.10 s at C6). A piano's top strings have
+   * no damper, so above F#6 a note rings its natural decay after the key is up.
+   */
+  getEnvelopeSettings(duration, frequency) {
+    const release = frequency > PIANO_UNDAMPED_HZ
+      ? PIANO_UNDAMPED_RING
+      : byPitch(frequency, [32.703, 0.3], [1046.5, 0.1]);
+    return { attack: 0.002, release };
   }
 }
 

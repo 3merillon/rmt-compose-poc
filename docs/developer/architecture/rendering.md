@@ -133,13 +133,13 @@ one value.
 
 ## `sync()` — the per-edit rebuild
 
-`sync()` (`renderer.js:634`) rebuilds every instance array, rebuilds `_noteIdToIndex`, computes the
+`sync()` (`renderer.js:637`) rebuilds every instance array, rebuilds `_noteIdToIndex`, computes the
 corruption types, and uploads.
 
 The corruption scan inside `sync()` used to be the dominant cost of a commit — a transitive BFS per
 note, O(N²) on deep chains. It is now one multi-source BFS over the *dependents* graph, seeded by
 the corrupt set: O(N+E), and a complete no-op when nothing is corrupt, which is the common case
-(`renderer.js:941-988`). [Performance](/developer/performance) tells the full before/after story.
+(`renderer.js:944-991`). [Performance](/developer/performance) tells the full before/after story.
 
 ::: warning `sync()` has no per-note dirty tracking
 It reallocates the CPU-side `Float32Array`s for **all N notes** and re-uploads them wholesale with
@@ -157,16 +157,16 @@ if (!this.needsRedraw) return;
 this.needsRedraw = false;
 ```
 
-The rAF loop always ticks (`renderer.js:546-550`), and so does `player.js`'s own loop. What is gated
+The rAF loop always ticks (`renderer.js:549-553`), and so does `player.js`'s own loop. What is gated
 is the **body** of `_render()`. On an idle canvas, that gate holds and the frame costs **zero draw
 calls** — verified at 5k, 20k and 100k notes (0 of 100 frames redrawn).
 
 Two guards make the gate real, and both are load-bearing:
 
-- **`setPlayhead()`** (`renderer.js:1414`) returns early when the time did not change. `player.js`
+- **`setPlayhead()`** (`renderer.js:1417`) returns early when the time did not change. `player.js`
   calls it every frame whether playing or not; dirtying unconditionally kept `needsRedraw`
   permanently true.
-- **`updateViewportBasis()`** (`renderer.js:596-600`) returns early on an unchanged basis.
+- **`updateViewportBasis()`** (`renderer.js:599-603`) returns early on an unchanged basis.
   `player.js`'s rAF pushed a camera update every frame (to release the tracking X-lock), which bumped
   `_viewEpoch` 60×/s on a perfectly still canvas and invalidated every view-keyed cache.
 
@@ -190,7 +190,7 @@ signal.
 ### Viewport culling
 
 The per-note overlay loop — pull tab, interval arrows, fraction divider, silence band, and all of a
-note's text runs — is culled against the viewport (`renderer.js:7028-7059`). Every overlay is
+note's text runs — is culled against the viewport (`renderer.js:7031-7062`). Every overlay is
 scissored to that note's own rect, so a note entirely off-canvas cannot produce a single pixel; the
 cull is *exact*, not an approximation, which is why the picture stays pixel-identical.
 
@@ -206,7 +206,7 @@ only shift x and width, so the vertical bound needs no slack.
 
 ### Batched rings
 
-`_drawRingIdxList()` (`renderer.js:2737`) is the one remaining per-instance loop that could approach
+`_drawRingIdxList()` (`renderer.js:2740`) is the one remaining per-instance loop that could approach
 O(N): it fires when a hub note with ~1000 dependents is selected.
 
 - **No drag active:** `u_dragOffset` is `(0,0)` for every ring, so the whole bucket shares identical
@@ -220,7 +220,7 @@ O(N): it fires when a hub note with ~1000 dependents is selected.
 ![Dependency lines radiating from a selected note, colour-coded by property](/img/dependency-lines.png)
 
 Selecting a note lights up its relatives, colour-coded by **which property** of the selected note
-would move them (`renderer.js:2949-3013`):
+would move them (`renderer.js:2952-3016`):
 
 | Property | Colour | RGBA (dependency / dependent) |
 |---|---|---|
@@ -239,7 +239,7 @@ During a drag the property being edited stays at full brightness and the other t
 Every theme preset defines `depFrequency` / `depStartTime` / `depDuration`, `themeManager` passes them
 to `renderer.setThemeColors()`, and the renderer stores them on `this._themeColors`
 (`renderer.js:370-372`) — but **nothing reads them back**. Every draw path uses the hard-coded
-literals above (`renderer.js:2969-2987`, `5396-5404`). Switching theme does not change a dependency
+literals above (`renderer.js:2972-2990`, `5396-5404`). Switching theme does not change a dependency
 ring or link-line colour. Do not document these tokens as working.
 :::
 
@@ -274,12 +274,12 @@ document or build on it.
 
 The live path:
 
-- `RendererAdapter.pickAllAt()` (`renderer.js:9315`) — measure triangles (top) → base circle → the
+- `RendererAdapter.pickAllAt()` (`renderer.js:9318`) — measure triangles (top) → base circle → the
   note stack. Returns hits top-most first.
-- `RendererAdapter.pickAt()` (`renderer.js:3531`) — a **reverse linear scan** over `_instanceNoteIds`
+- `RendererAdapter.pickAt()` (`renderer.js:3534`) — a **reverse linear scan** over `_instanceNoteIds`
   (last-drawn is top-most), a fast world-space AABB reject, then a precise **rounded-rect** test so
   the corners of a note are not selectable.
-- `hitTestSubRegion()` (`renderer.js:3594`) — which *sub-region* was hit (pull tab, arrow column).
+- `hitTestSubRegion()` (`renderer.js:3597`) — which *sub-region* was hit (pull tab, arrow column).
   Only runs once a note body is hit, and respects the rounded interior.
 
 There is **no spatial index**, and measurement says none is warranted: `pickAt` is **0.017 ms at 5,000

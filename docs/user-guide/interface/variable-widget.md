@@ -218,15 +218,15 @@ Playback clamps the value to 0–4. Silences only show the row if they already c
 
 ## Attack and Release
 
-The `ATTACK` and `RELEASE` rows work like `AMPLITUDE`, and they are interpretation variables too: they say how a note is played, not where it sits. Each is a **share of the note's own duration**, for example `1/8`, clamped to 0–1. Under the value the widget prints the hint "A share of the note's duration, e.g. 1/8".
+The `ATTACK` and `RELEASE` rows work like `AMPLITUDE`, and they are interpretation variables too: they say how a note is played, not where it sits. Each is a **share of the note's own duration**, for example `1/8`. The attack runs from the note's start (clamped to 0–1); the release runs from the note's end, so it rings after the note (clamped to 0–4). Under the value the widget prints the hint "A share of the note's duration, e.g. 1/8".
 
 The row reads one of three ways:
 
-- **`Default: instrument envelope`** — neither the note nor the BaseNote sets it, so the instrument's own envelope ratio applies.
+- **`Default: instrument envelope`** — neither the note nor the BaseNote sets it, so the instrument's own envelope applies.
 - **`Inherited: <value>`** (in grey), with an empty `Raw:` field — the BaseNote sets one and the note does not.
 - **`Evaluated: <value>`** — the note has its own expression.
 
-Type an expression and press `Save` to set it. Clear the field and press `Save` to remove it again. On the BaseNote the rows set the shape of every note that does not define its own. Silences show them only if they already carry one; bars never do. The full rules, including how a note's own attack and release are scaled down when they exceed its duration, are in [attack and release](/reference/properties/attack-release).
+Type an expression and press `Save` to set it. Clear the field and press `Save` to remove it again. On the BaseNote the rows set the shape of every note that does not define its own. Silences show them only if they already carry one; bars never do. The full rules, including what fits inside the note and what rings after it, are in [attack and release](/reference/properties/attack-release).
 
 ## Instrument
 

@@ -1,6 +1,6 @@
 ---
 title: Instruments
-description: The voice contract, the shared click-free envelope, the nine synth instruments, the two multisampled ones, and how to add your own.
+description: The voice contract, the shared note-off envelope in seconds, the nine synth instruments, the two multisampled ones, and how to add your own.
 ---
 
 # Instruments
@@ -18,7 +18,7 @@ of this page is detail.
 | `organ` | synth | single oscillator with a **10-harmonic `PeriodicWave`** |
 | `vibraphone` | synth | single oscillator with a **16-harmonic `PeriodicWave`** |
 | `fm-epiano` | synth | **2-operator FM** — sine carrier, sine modulator, decaying index |
-| `harmonium` | synth | single oscillator, `PeriodicWave` with **every partial 1–16**, fixed-time envelope |
+| `harmonium` | synth | single oscillator, `PeriodicWave` with **every partial 1–16**, full level to the note-off |
 | `harmonium-soft` | synth | the same class with a lower knee, a lower level and a slower envelope |
 | `piano` | sampled | `MultisampleInstrument`, 14 zones |
 | `violin` | sampled | `MultisampleInstrument`, 15 zones |
@@ -49,7 +49,7 @@ oscillators (a unison stack, an FM carrier + modulator) plus a filter, and the e
 identically. A bare `OscillatorNode` also satisfies this shape natively, which is why the
 multisample fallback can just return one.
 
-Build one with `makeVoice()` (`instrument-manager.js:126`):
+Build one with `makeVoice()` (`instrument-manager.js:169`):
 
 ```javascript
 export function makeVoice(sources, output, frequency, onStart)
@@ -67,24 +67,36 @@ take the pump down with it.
 
 ## The envelope core
 
-One function shapes every note, synth and sample alike:
+One function shapes every note, synth and sample alike. A note's end is a **note-off**, not the end of
+its sound: the attack and the decay start at the note's start, the sustain (or a natural decay) lasts
+until the note's end, and the release starts there and **rings after it**, as when a key is lifted or
+a bow leaves the string.
 
 ```javascript
 applyVoiceEnvelope(gainNode, startTime, duration, peak, env, shape)
 ```
 
-`instrument-manager.js:31`. `env` comes from the instrument's `getEnvelopeSettings()`, and the keys
-are:
+`instrument-manager.js:63`. `env` comes from the instrument's `getEnvelopeSettings(duration, frequency)`
+and is in **seconds**:
 
 ```javascript
-{ attackTimeRatio, decayTimeRatio, sustainLevel, releaseTimeRatio }
+{ attack, decay, sustain, t60, release }
 ```
 
-::: danger Not `{ attack, decay, sustain, release }`
-Every old example on this page used the short names. They do not exist. Attack, decay and release
-are **ratios of the note's duration**; sustain is a **fraction of peak**. Defaults if an instrument
-omits them: `0.01 / 0.05 / 0.7 / 0.05`.
-:::
+| Key | Meaning |
+|---|---|
+| `attack` | Linear rise from silence to the peak, from the note's start. Default `0.01`. |
+| `decay` | Exponential fall to `sustain`, in seconds. Used only when `sustain < 1`. |
+| `sustain` | The level held until the note's end, as a fraction of the peak. Default `1`. |
+| `t60` | Instead of `decay` and `sustain`: a natural decay, −60 dB every `t60` seconds, until the note's end. |
+| `release` | After the note's end: exponential fall to silence (−80 dB). Default `0.05`. |
+
+Because the times are seconds, a short note keeps the shape of a long one: a 0.1 s piano note is a
+0.1 s strike followed by its damper.
+
+`byPitch(freq, [f1, v1], [f2, v2])` (`instrument-manager.js:45`) is the helper for a value that
+follows pitch: `v1` at `f1`, `v2` at `f2`, geometric in between, held beyond either end. The
+vibraphone's `t60`, the electric piano's `t60` and the piano's release use it.
 
 ### The shape
 
@@ -94,72 +106,81 @@ gain
   │     ╱   ╲___________
   │    ╱                ╲
   │   ╱                  ╲
-  └──┴────┴──────────────┴─┴──── time
-     A    D              R  └ hard zero at end + 4 ms
+  └──┴────┴──────────────┴────┴─── time
+     A    D          note's end  R  └ hard zero at R end + 4 ms
      └──────── duration ────┘
 ```
 
-1. `setValueAtTime(EPS, t0)` — start at ~0, not at 0, because exponential ramps cannot touch zero.
+1. `setValueAtTime(EPS, t0)`: start at ~0, not at 0, because exponential ramps cannot touch zero.
 2. **Linear** attack to `peak`.
-3. **Exponential** decay to `sustain` (skipped if `decay` is negligible or `sustain >= peak`).
-4. Hold sustain.
-5. **Exponential** release to `EPS` at the note end.
-6. `linearRampToValueAtTime(0, end + 0.004)` — a hard zero 4 ms past the end, so the source can be
-   stopped cleanly.
+3. Either an **exponential** decay to `sustain` (when `decay` is set and `sustain < 1`), or a natural
+   decay with `t60`, or nothing (full level). A note that ends during its decay leaves it there, at
+   whatever level it has reached.
+4. Hold to the note's end.
+5. **Exponential** release to `EPS`, ending `release` seconds **after** the note's end.
+6. `linearRampToValueAtTime(0, end + 0.004)`: a hard zero 4 ms later, so the source can be stopped
+   cleanly.
 
-### The floors — this is what kills clicks
+### The floors: this is what kills clicks
 
 | Constant | Value | Why |
 |---|---|---|
 | `ATTACK_FLOOR` | **0.003 s** | An attack shorter than 3 ms is a step, and a step is a click. |
 | `RELEASE_FLOOR` | **0.015 s** | Same at the other end. |
 | `EPS` | `0.0001` | Exponential ramps cannot reach 0. |
+| `ZERO_RAMP` | `0.004 s` | The linear step from `EPS` to 0 after the release. |
+| `STOP_MARGIN` | `0.02 s` | The voice is stopped this long after its gain reached 0. |
 | duration floor | `0.001 s` | `dur = Math.max(0.001, duration)`. |
 
-Attack and release are **scaled down together** if they would exceed **90% of the note**, leaving at
-least 10% of body. So a 5 ms note still gets a real attack and a real release, proportionally
-squeezed, rather than a rectangle.
+The attack must fit **inside the note**: a note shorter than its attack is attacked over its whole
+length. Nothing else has to fit. The release is not squeezed into the note, because it comes after it.
 
 ### The note's own attack and release
 
 `shape` is `{ attack, release }`, the note's `attack` and `release` variables (its own, else the
 BaseNote's), each a **share of the note's own duration** (`1/8` is an eighth of it) or `null`. A given
-value replaces the instrument's `attackTimeRatio` or `releaseTimeRatio` for that note; a `null` leaves
-the instrument's ratio (defaults `0.01` and `0.05`). The values are clamped to 0 to 1 (`noteShape()` in
-`src/instruments/instrument-manager.js`). `envelopeTimes()` turns the ratios into seconds:
+value replaces the instrument's `attack` or `release` for that note; a `null` leaves the instrument's
+time. `noteShape()` (`instrument-manager.js:157`) clamps the attack to 0 to 1 and the release to 0 to
+`MAX_RELEASE_SHARE` (4, `instrument-manager.js:26`); a value that is not a finite number is `null`.
+`envelopeTimes()` (`instrument-manager.js:105`) turns the shares into seconds:
 
-- The anti-click floors stay: `ATTACK_FLOOR` 3 ms and `RELEASE_FLOOR` 15 ms still apply to a note's own
-  values.
-- When the note's own attack plus release exceed its duration, they are scaled down together to fit.
-  A note that sets either one may use the whole duration (attack `1` is a swell to the end); instrument
-  defaults still leave at least 10% as the body.
-- `envelopeShares()` returns the same envelope as fractions of the duration. The renderer draws it
-  inside the note, so what is seen is what is heard.
+- The attack is the share times the duration, counted from the note's start.
+- The release is the share times the duration, counted **from the note's end**: `release = 1` rings
+  for as long again as the note lasted, `4` for four times as long.
+- The anti-click floors stay: `ATTACK_FLOOR` 3 ms and `RELEASE_FLOOR` 15 ms still apply to a note's
+  own values.
+- `envelopeShares()` (`instrument-manager.js:141`) returns the same envelope as fractions of the
+  duration. The renderer draws the part inside the note, so what is seen is what is heard. It does not
+  yet draw the release, which lies after the note's end.
 
-Every `applyEnvelope()` in the instrument classes takes the `shape` as its last argument and passes it
-to `applyVoiceEnvelope()`.
+Every `applyEnvelope()` in the instrument classes takes the `shape` and the sounding `frequency` as its
+last arguments and passes them on.
 
-The envelope always reaches zero **inside** `[start, start + duration]`. Note lengths are unchanged
-by it. The engine stops the source `RELEASE_TAIL = 0.15 s` later, while it is already silent.
+### How long a voice lives
+
+`envelopeLength()` (`instrument-manager.js:129`) is the end of the release plus `ZERO_RAMP` plus
+`STOP_MARGIN`. `SynthInstrument.voiceLength()` and `InstrumentManager.voiceLength()` return it, and
+`_scheduleNote` stops the source at `start + voiceLength(...)`. Note lengths are unchanged; only the
+sound outlasts them. If the envelope cannot be computed the engine falls back to the duration plus
+`FALLBACK_TAIL = 0.15 s`.
 
 ### Per-instrument settings
 
-Attack / decay / release are ratios of duration; sustain is a fraction of peak.
+All times are in seconds; sustain is a fraction of the peak.
 
-| Instrument | Wave | Unison | Detune | Filter (mul / Q) | A | D | S | R |
-|---|---|---|---|---|---|---|---|---|
-| `sine-wave` | sine | 1 | — | — | 0.1 | 0.1 | 0.7 | 0.2 |
-| `square-wave` | square | 3 | ±4 ¢ | 12× / 0.7 | 0.05 | 0.1 | 0.6 | 0.2 |
-| `sawtooth-wave` | sawtooth | 3 | ±4 ¢ | 10× / 0.7 | 0.05 | 0.15 | 0.6 | 0.2 |
-| `triangle-wave` | triangle | 1 | — | — | 0.15 | 0.1 | 0.8 | 0.25 |
-| `organ` | periodic (10 harm.) | 1 | — | — | 0.05 | 0.05 | 0.9 | 0.1 |
-| `vibraphone` | periodic (16 harm.) | 1 | — | — | 0.02 | 0.3 | 0.3 | 0.5 |
-| `fm-epiano` | 2-op FM | — | — | — | 0.005 | 0.4 | 0.5 | 0.3 |
-| `harmonium` | periodic (16 harm.) | 1 | — | — | **30 ms** | **0** | **1** | **80 ms** |
-| `harmonium-soft` | periodic (16 harm.) | 1 | — | — | **60 ms** | **0** | **1** | **120 ms** |
-| `piano` / `violin` | sampled | — | — | — | 0.02 | **0** | **1** | 0.12 |
-
-The two `harmonium` rows are **seconds, not ratios** — see [The harmonic voices](#the-harmonic-voices).
+| Instrument | Wave | Unison | Detune | Filter (mul / Q) | Attack | Decay / sustain | Release |
+|---|---|---|---|---|---|---|---|
+| `sine-wave` | sine | 1 | — | — | 0.015 | none (full level) | 0.1 |
+| `square-wave` | square | 3 | ±4 ¢ | 12× / 0.7 | 0.008 | 0.25 s to 0.7 | 0.1 |
+| `sawtooth-wave` | sawtooth | 3 | ±4 ¢ | 10× / 0.7 | 0.008 | 0.25 s to 0.7 | 0.1 |
+| `triangle-wave` | triangle | 1 | — | — | 0.015 | none (full level) | 0.12 |
+| `organ` | periodic (10 harm.) | 1 | — | — | 0.03 | none (full level) | 0.06 |
+| `vibraphone` | periodic (16 harm.) | 1 | — | — | 0.002 | `t60` from 6 s at 65 Hz to 2 s at 2000 Hz | 0.4 |
+| `fm-epiano` | 2-op FM | — | — | — | 0.002 | `t60` from 5 s at 65 Hz to 1.5 s at 2000 Hz | 0.25 |
+| `harmonium` | periodic (16 harm.) | 1 | — | — | 0.03 | none (full level) | 0.08 |
+| `harmonium-soft` | periodic (16 harm.) | 1 | — | — | 0.06 | none (full level) | 0.12 |
+| `piano` | sampled | — | — | — | 0.002 | none (the recording decays) | from the pitch: 0.30 at C1 to 0.10 at C6, 1.5 above F#6 |
+| `violin` | sampled | — | — | — | 0.005 | none (the recording decays) | 0.12 |
 
 The per-note `peak` is `initialVolume` — **0.2** (`player.js:63`, and the `AudioEngine` constructor
 default). That is not master volume; master volume lives on the
@@ -168,7 +189,7 @@ manifest's `gainDb`, `harmonium` by a `level` of 0.6 and `harmonium-soft` by 0.4
 
 ## SynthInstrument
 
-`instrument-manager.js:148`. Subclasses set fields; the base class builds the voice.
+`instrument-manager.js:191`. Subclasses set fields; the base class builds the voice.
 
 ```javascript
 export class SquareInstrument extends SynthInstrument {
@@ -183,7 +204,7 @@ export class SquareInstrument extends SynthInstrument {
   }
 
   getEnvelopeSettings() {
-    return { attackTimeRatio: 0.05, decayTimeRatio: 0.1, sustainLevel: 0.6, releaseTimeRatio: 0.2 };
+    return { attack: 0.008, decay: 0.25, sustain: 0.7, release: 0.1 };   // seconds
   }
 }
 ```
@@ -198,7 +219,7 @@ export class SquareInstrument extends SynthInstrument {
 | `filterQ` | `0.7` | Q of that filter. |
 
 `fm-epiano` is the one synth that overrides `createOscillator()` outright
-(`synth-instruments.js:192`): a sine carrier, a sine modulator at a 1:1 ratio, and a `modGain` whose
+(`synth-instruments.js:165`): a sine carrier, a sine modulator at a 1:1 ratio, and a `modGain` whose
 value is `index × modFreq` feeding `carrier.frequency`. The index decays exponentially from **4** to
 **0.6** over **0.28 s**, scheduled inside the voice's `start()` so it locks to the note's absolute
 start.
@@ -206,7 +227,7 @@ start.
 ### The harmonic voices
 
 `harmonium` and `harmonium-soft` are two three-line subclasses of `HarmonicVoice`
-(`synth-instruments.js:265`), a `SynthInstrument` that is deliberately **not** exported in the
+(`synth-instruments.js:240`), a `SynthInstrument` that is deliberately **not** exported in the
 `SynthInstruments` map, so it is never registered itself. They exist to make the difference between
 a pure and a tempered interval as salient as it can be: two notes a ratio `p/q` apart share a
 partial (the `p`-th of the lower is the `q`-th of the upper), which stands still when the interval
@@ -249,17 +270,17 @@ needs twice the headroom for the same loudness.
 re full scale, measured by `scripts/perf/check-purity.mjs`); `0.42` puts `harmonium-soft` about 3 dB
 under that.
 
-**The envelope is in seconds.** `getEnvelopeSettings(duration)` converts the two times into the
-ratios `applyVoiceEnvelope` takes — the same move `MultisampleInstrument` makes for its manifest —
-with no decay stage and a sustain of 1:
+**The envelope is in seconds.** Like every instrument now, the harmonic voices give their two times
+directly, with no decay stage and the full level held to the note's end:
 
 ```javascript
-{ attackTimeRatio: attackSec / duration, decayTimeRatio: 0, sustainLevel: 1, releaseTimeRatio: releaseSec / duration }
+{ attack: attackSec, release: releaseSec }
 ```
 
-`applyEnvelope()` is overridden to pass `duration` through and to apply `level`. The shared floors
-and the 90% clamp still hold: on a note shorter than `(attackSec + releaseSec) / 0.9` the two are
-squeezed proportionally.
+`applyEnvelope()` is overridden only to apply `level`. The shared floors hold, the release rings after
+the note's end, and a note shorter than `attackSec` is attacked over its whole length. (When these
+voices were written the other synths used fractions of the note; since Phase I all of them use
+seconds.)
 
 Everything else is inherited: `createOscillator()` is the base class's, with `unisonCount` 1 and no
 filter, so the voice is **one oscillator**. There is no detune and no vibrato to add.
@@ -315,8 +336,8 @@ into a biquad — **lowpass** at `min(0.48 × sampleRate, 16000 / √ratio)` whe
 at `max(20, 60 × √ratio)` when shifting down, `Q = 0.5` either way.
 
 `applyEnvelope()` multiplies the peak by `this.gain` (from the manifest's `gainDb`) and then calls the
-shared `applyVoiceEnvelope` with `getEnvelopeSettings(duration)` and the note's `shape` — the note's duration is what lets
-the manifest's absolute `attack`/`release` seconds be converted to per-note ratios.
+shared `applyVoiceEnvelope` with `getEnvelopeSettings(duration, frequency)` and the note's `shape`.
+`voiceLength()` is the shared `envelopeLength()` of the same envelope.
 
 ### The manifest (schema 1)
 
@@ -327,7 +348,7 @@ the manifest's absolute `attack`/`release` seconds be converted to per-note rati
   "displayName": "Upright Piano",
   "license": { "id": "CC0-1.0", "source": "VSCO-2 Community Edition", "author": "…", "url": "…" },
   "gainDb": 2,
-  "envelope": { "attack": 0.004, "release": 0.25 },
+  "envelope": { "attack": 0.002, "release": 0.1 },
   "zones": [
     { "root": "C1", "rootHz": 32.703, "lowHz": 0, "highHz": 40.03, "url": "C1.m4a" }
   ]
@@ -337,17 +358,21 @@ the manifest's absolute `attack`/`release` seconds be converted to per-note rati
 Two of those fields reach the sound: `gainDb`, applied as `peak × 10^(gainDb/20)`, and `envelope`.
 
 **How `envelope` is honored.** `_loadManifest()` merges `m.envelope` over the defaults
-(`{ attack: 0.006, release: 0.18 }`), and `getEnvelopeSettings(duration)` builds the per-note
-envelope from it:
+(`{ attack: 0.005, release: 0.12 }`), and `getEnvelopeSettings(duration, frequency)` returns
+`{ attack, release }` from it, both in **seconds**:
 
-- The base is the default ratio set `attackTimeRatio 0.02 / decayTimeRatio 0 / sustainLevel 1 /
-  releaseTimeRatio 0.12`. A manifest may declare any of those **ratio keys directly** and they are
-  taken as-is.
-- `attack` and `release` are **absolute seconds**: when the note's duration is known they override
-  the ratios as `attack / duration` and `release / duration`, so a 4 ms attack is 4 ms whether the
-  note lasts 0.2 s or 4 s.
-- The result still passes through `applyVoiceEnvelope`'s guards — the 3 ms attack / 15 ms release
-  floors, and the clamp that keeps attack+release inside ~90% of the note.
+- The attack runs from the note's start; the recording carries its own onset, so it is short (piano
+  0.002, violin 0.005).
+- There is no decay stage: the voice holds full gain until the note's end, because the recording
+  carries its own decay.
+- The release runs **after** the note's end (piano 0.1, violin 0.12 in the manifests).
+- The ratio keys of the old format (`attackTimeRatio` and the like) are not read anywhere.
+- The result passes through the shared floors, 3 ms for the attack and 15 ms for the release.
+
+`PianoInstrument` overrides `getEnvelopeSettings()` (`sample-instruments.js:28`): its release is a
+damper that follows pitch, `byPitch(f, [32.703 Hz, 0.30 s], [1046.5 Hz, 0.10 s])`, and above 1480 Hz
+(F#6, where a piano has no dampers) it is 1.5 s. The `release` in the piano's manifest is
+therefore never used; its `attack` is.
 
 `displayName` and `license` are parsed and never rendered anywhere in the app. `zones[].loop` and
 `zones[].velLayers[]` are reserved and not even parsed.
@@ -393,8 +418,8 @@ audioEngine.registerInstruments(SynthInstruments, SampleInstruments);
 ```
 
 which calls `instrumentManager.registerBuiltInInstruments(SynthInstruments, SampleInstruments)`
-(`instrument-manager.js:343`). It instantiates every class value in both maps, passing the
-`AudioContext` to the constructor, and skips any class literally named `SampleInstrument`.
+(`instrument-manager.js:267`). It instantiates every class value in both maps, passing the
+`AudioContext` to the constructor.
 
 The single-instrument entry point is **`registerInstrument(instrument)`** — not `register()` — and it
 keys the registry on `instrument.name.toLowerCase()`.
@@ -405,7 +430,7 @@ instrumentManager.getAvailableInstruments();  // registered keys, in registratio
 ```
 
 ::: warning Two different defaults, both spelled `sine-wave`
-`InstrumentManager.defaultInstrument` (`instrument-manager.js:340`) is a **hardcoded** unknown-name fallback. It never
+`InstrumentManager.defaultInstrument` (`instrument-manager.js:264`) is a **hardcoded** unknown-name fallback. It never
 follows the settings system. `module.js`'s `_defaultInstrumentName` is the **inheritance** fallback,
 and it *does* follow `audio.defaultInstrument`.
 
@@ -458,12 +483,13 @@ export class MyInstrument extends SynthInstrument {
     this.filterTrackMul = 8;
   }
 
-  getEnvelopeSettings() {
+  // Seconds. `frequency` is the pitch that sounds, for envelopes that follow it.
+  getEnvelopeSettings(duration, frequency) {
     return {
-      attackTimeRatio: 0.05,   // fraction of the note's duration
-      decayTimeRatio: 0.2,
-      sustainLevel: 0.6,       // fraction of peak
-      releaseTimeRatio: 0.15
+      attack: 0.01,    // from the note's start
+      decay: 0.2,      // then a fall to `sustain`
+      sustain: 0.6,    // fraction of the peak, held to the note's end
+      release: 0.15    // rings after the note's end
     };
   }
 }

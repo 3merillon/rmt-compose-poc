@@ -191,8 +191,8 @@ Each cache entry is:
   duration: Fraction,
   frequency: Fraction,
   amplitude: Fraction,       // null unless the note defines one — see findAmplitude()
-  attack: Fraction,          // null unless the note defines one; a share of the note's duration
-  release: Fraction,         // null unless the note defines one; a share of the note's duration
+  attack: Fraction,          // null unless the note defines one; a share of the note's duration, from its start
+  release: Fraction,         // null unless the note defines one; a share of the note's duration, from its end (it rings after the note)
   corruptionFlags: number    // CORRUPT bitmask; 0 when clean
 }
 ```

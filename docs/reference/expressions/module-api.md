@@ -31,7 +31,7 @@ base.t                 # start time, in seconds
 base.d                 # duration, in seconds: the time unit
 base.a                 # amplitude, a relative gain
 base.attack            # attack, a share of each note's duration
-base.release           # release, a share of each note's duration
+base.release           # release, a share of each note's duration, counted from the note's end
 ```
 
 `[0].p` means exactly the same thing as `base.p`. Saving rewrites `[0]` to `base`.

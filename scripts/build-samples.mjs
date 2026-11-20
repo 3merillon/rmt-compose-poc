@@ -47,7 +47,9 @@ const INSTRUMENTS = [
     name: 'piano',
     displayName: 'Upright Piano',
     gainDb: 2,
-    envelope: { attack: 0.004, release: 0.25 },
+    // Seconds; the release follows the note's end. The piano's damper release
+    // follows pitch in PianoInstrument (sample-instruments.js); this is its default.
+    envelope: { attack: 0.002, release: 0.1 },
     // Upright Nr1: roots at C and G per octave (C1..G7). Pick one velocity
     // layer per note, preferring mf → f → pp, any round-robin.
     dir: 'Keys/Upright Nr1/',
@@ -65,7 +67,7 @@ const INSTRUMENTS = [
     name: 'violin',
     displayName: 'Solo Violin',
     gainDb: 0,
-    envelope: { attack: 0.03, release: 0.18 },
+    envelope: { attack: 0.005, release: 0.12 },
     // Solo Violin, sustained "Arco Vib": roots G/A/C/E per octave, forte layer.
     dir: 'Strings/Solo Violin/Arco Vib/',
     roots: ['G3', 'A3', 'C4', 'E4', 'G4', 'A4', 'C5', 'E5', 'G5', 'A5', 'C6', 'E6', 'G6', 'A6', 'C7'],

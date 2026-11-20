@@ -26,7 +26,7 @@ The ratio the ▲ / ▼ [note arrows](#note-arrows) apply. Configurable in **Set
 :::
 
 ### Attack
-The share of a note's own duration it takes to rise to full level, written `attack` (alias `atk`), between 0 and 1. An [interpretation variable](#interpretation-variable). With none set on the note or the BaseNote, the instrument's own envelope applies; a 3 ms floor always stays. See [attack and release](/reference/properties/attack-release).
+The share of a note's own duration it takes to rise to full level from the note's start, written `attack` (alias `atk`), between 0 and 1. An [interpretation variable](#interpretation-variable). With none set on the note or the BaseNote, the instrument's own envelope, in seconds, applies; a 3 ms floor always stays. See [attack and release](/reference/properties/attack-release).
 
 ## B
 
@@ -210,7 +210,7 @@ A fraction naming a frequency relationship. `3/2` means "1.5 × the reference fr
 The text of an expression, before compilation. It is what the `Raw:` field of the note widget shows and what a module file stores.
 
 ### Release
-The share of a note's own duration it takes to fall to silence at its end, written `release` (alias `rel`), between 0 and 1. An [interpretation variable](#interpretation-variable). The floor is 15 ms. See [attack and release](/reference/properties/attack-release).
+The share of a note's own duration it takes to fall to silence once the note has ended, written `release` (alias `rel`), between 0 and 4. The note's end is a note-off, so the release is counted from the end and rings after the note. An [interpretation variable](#interpretation-variable). The floor is 15 ms. See [attack and release](/reference/properties/attack-release).
 
 ## S
 

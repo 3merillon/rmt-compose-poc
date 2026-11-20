@@ -10,8 +10,8 @@
   },
   "gainDb": 2,
   "envelope": {
-    "attack": 0.004,
-    "release": 0.25
+    "attack": 0.002,
+    "release": 0.1
   },
   "zones": [
     {

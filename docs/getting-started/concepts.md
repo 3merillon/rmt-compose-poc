@@ -209,7 +209,7 @@ A meter change is one bar's duration; the bars after it follow. Notes attach to 
 `amplitude` (`a`), `attack` (`atk`) and `release` (`rel`) are not part of the notation. They say how a note is played, not where it sits in pitch or time. They are the only variables that fall back to the BaseNote when a note does not set them.
 
 - `amplitude` is a relative gain, default 1.
-- `attack` and `release` are **shares of the note's own duration**, such as `1/8`, clamped to 0–1. When neither the note nor the BaseNote sets one, the instrument's own envelope applies.
+- `attack` and `release` are **shares of the note's own duration**, such as `1/8`. The attack counts from the note's start (clamped to 0–1); the release counts from the note's end, because the end of a note is a lifted key and the sound rings after it (clamped to 0–4). When neither the note nor the BaseNote sets one, the instrument's own envelope applies.
 
 See [attack and release](/reference/properties/attack-release).
 

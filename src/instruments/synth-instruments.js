@@ -1,4 +1,7 @@
-import { SynthInstrument, makeVoice, applyVoiceEnvelope } from './instrument-manager.js';
+import { SynthInstrument, makeVoice, applyVoiceEnvelope, byPitch } from './instrument-manager.js';
+
+// Envelopes are in seconds (design/phase-i-instruments.md §3): the attack from the
+// note's start, the release after its end.
 
 export class SineInstrument extends SynthInstrument {
     constructor(audioContext) {
@@ -7,13 +10,9 @@ export class SineInstrument extends SynthInstrument {
         this.waveType = 'sine';
     }
 
+    // The reference tone: it speaks quickly and holds its level to the note-off.
     getEnvelopeSettings() {
-        return {
-            attackTimeRatio: 0.1,
-            decayTimeRatio: 0.1,
-            sustainLevel: 0.7,
-            releaseTimeRatio: 0.2
-        };
+        return { attack: 0.015, release: 0.1 };
     }
 }
 
@@ -30,12 +29,7 @@ export class SquareInstrument extends SynthInstrument {
     }
 
     getEnvelopeSettings() {
-        return {
-            attackTimeRatio: 0.05,
-            decayTimeRatio: 0.1,
-            sustainLevel: 0.6,
-            releaseTimeRatio: 0.2
-        };
+        return { attack: 0.008, decay: 0.25, sustain: 0.7, release: 0.1 };
     }
 }
 
@@ -51,12 +45,7 @@ export class SawtoothInstrument extends SynthInstrument {
     }
 
     getEnvelopeSettings() {
-        return {
-            attackTimeRatio: 0.05,
-            decayTimeRatio: 0.15,
-            sustainLevel: 0.6,
-            releaseTimeRatio: 0.2
-        };
+        return { attack: 0.008, decay: 0.25, sustain: 0.7, release: 0.1 };
     }
 }
 
@@ -68,12 +57,7 @@ export class TriangleInstrument extends SynthInstrument {
     }
 
     getEnvelopeSettings() {
-        return {
-            attackTimeRatio: 0.15,
-            decayTimeRatio: 0.1,
-            sustainLevel: 0.8,
-            releaseTimeRatio: 0.25
-        };
+        return { attack: 0.015, release: 0.12 };
     }
 }
 
@@ -107,13 +91,9 @@ export class OrganInstrument extends SynthInstrument {
         return this.audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
     }
 
+    // A pipe speaks in about 30 ms and holds as long as the key is down.
     getEnvelopeSettings() {
-        return {
-            attackTimeRatio: 0.05,
-            decayTimeRatio: 0.05,
-            sustainLevel: 0.9,
-            releaseTimeRatio: 0.1
-        };
+        return { attack: 0.03, release: 0.06 };
     }
 }
 
@@ -153,13 +133,10 @@ export class VibraphoneInstrument extends SynthInstrument {
         return this.audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
     }
 
-    getEnvelopeSettings() {
-        return {
-            attackTimeRatio: 0.02,
-            decayTimeRatio: 0.3,
-            sustainLevel: 0.3,
-            releaseTimeRatio: 0.5
-        };
+    // A struck bar: no sustain, a natural decay (longer for the low bars) until
+    // the note-off, then a soft damper.
+    getEnvelopeSettings(duration, frequency) {
+        return { attack: 0.002, t60: byPitch(frequency, [65, 6], [2000, 2]), release: 0.4 };
     }
 }
 
@@ -180,13 +157,9 @@ export class FMEPianoInstrument extends SynthInstrument {
         this.indexDecay = 0.28;  // seconds
     }
 
-    getEnvelopeSettings() {
-        return {
-            attackTimeRatio: 0.005,
-            decayTimeRatio: 0.4,
-            sustainLevel: 0.5,
-            releaseTimeRatio: 0.3
-        };
+    // A struck tine: natural decay until the note-off, then its damper.
+    getEnvelopeSettings(duration, frequency) {
+        return { attack: 0.002, t60: byPitch(frequency, [65, 5], [2000, 1.5]), release: 0.25 };
     }
 
     createOscillator(frequency) {
@@ -246,8 +219,10 @@ export class FMEPianoInstrument extends SynthInstrument {
  *     11/8 on the 11th, 13/8 on the 13th, 16/15 on the 16th;
  *   - one oscillator through one PeriodicWave: no unison, no detune, no vibrato;
  *   - attack and release are fixed times in seconds, with the full level held
- *     between them. The other synths use fractions of the note, so a long chord
- *     on them swells slowly and fades through its last tenth or more.
+ *     from the attack to the note's end; the release follows the end. (When
+ *     these voices were made the other synths used fractions of the note, so a
+ *     long chord on them swelled slowly and faded through its last tenth or
+ *     more; since Phase I every instrument's envelope is in seconds.)
  *
  * The spectrum is a sawtooth's with the top rolled off:
  *
@@ -291,20 +266,13 @@ class HarmonicVoice extends SynthInstrument {
         return this.audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
     }
 
-    // Seconds become the ratios the shared envelope takes, as the multisampled
-    // instruments do it: no decay stage, full level until the release.
-    getEnvelopeSettings(duration) {
-        const dur = duration > 0 ? duration : 1;
-        return {
-            attackTimeRatio: this.attackSec / dur,
-            decayTimeRatio: 0,
-            sustainLevel: 1,
-            releaseTimeRatio: this.releaseSec / dur
-        };
+    // No decay stage: full level from the attack to the note-off, then the release.
+    getEnvelopeSettings() {
+        return { attack: this.attackSec, release: this.releaseSec };
     }
 
     applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null) {
-        applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.level, this.getEnvelopeSettings(duration), shape);
+        applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.level, this.getEnvelopeSettings(), shape);
     }
 }
 
