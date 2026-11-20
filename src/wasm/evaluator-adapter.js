@@ -11,6 +11,7 @@ import { WASM_CONFIG, shouldUseWasm } from './config.js';
 import { VAR_NAMES } from '../binary-note.js';
 import { getVariableExpression } from '../variable-deps.js';
 import { BinaryEvaluator as JSBinaryEvaluator, IncrementalEvaluator as JSIncrementalEvaluator } from '../binary-evaluator.js';
+import * as X from '../value/exact.js';
 
 // Dev/A-B override: ?evaluator=js forces the JS path (and disables the
 // WASM hot-swap in module.js, since createEvaluator keeps returning JS).
@@ -18,29 +19,40 @@ import { BinaryEvaluator as JSBinaryEvaluator, IncrementalEvaluator as JSIncreme
 // opt-in until the WASM wrapper's in-browser behavior is fully verified,
 // because the wrapper had never actually run in production before the
 // hot-swap existed (module creation always won the race against WASM init).
+// In Node (tests, benches) the same choice is the RMT_EVALUATOR environment
+// variable.
+const IN_BROWSER = typeof window !== 'undefined';
 const EVALUATOR_PARAM = (() => {
   try {
-    return typeof location !== 'undefined'
-      ? new URLSearchParams(location.search).get('evaluator')
-      : null;
+    if (typeof location !== 'undefined') {
+      return new URLSearchParams(location.search).get('evaluator');
+    }
+    if (typeof process !== 'undefined' && process.env) {
+      return process.env.RMT_EVALUATOR || null;
+    }
   } catch {
-    return null;
+    // no location, no environment: the default
   }
+  return null;
 })();
 
-// The Rust core still has the old variable layout (tempo, beatsPerMeasure,
-// measureLength at indices 3-5, no attack or release) and the FIND_TEMPO /
-// FIND_MEASURE opcodes. The JavaScript evaluator moved to relational time
-// (startTime, duration, frequency, amplitude, attack, release), so the two
-// read the same bytecode differently. Until the Rust core is ported (planned
-// together with its per-variable evaluation port), the JavaScript evaluator
-// is the only one used, even when ?evaluator=wasm asks for the other.
-const WASM_MATCHES_VARIABLE_LAYOUT = false;
+// Whether the Rust core reads the bytecode as the JavaScript evaluator does:
+// the same variables (startTime, duration, frequency, amplitude, attack,
+// release), the same opcodes, the same exact values (src/value/exact.js).
+// scripts/test-wasm-parity.mjs (in npm test) compares the two exactly; set
+// this to false to keep the WASM evaluator off everywhere, even when
+// ?evaluator=wasm asks for it, should a change to one engine leave the other behind.
+const WASM_MATCHES_VARIABLE_LAYOUT = true;
 
-const FORCE_JS_EVALUATOR = EVALUATOR_PARAM === 'js' || !WASM_MATCHES_VARIABLE_LAYOUT;
+// RMT_EVALUATOR=wasm in Node runs the Rust core even while the flag is false,
+// so that the parity test can hold it to the JavaScript evaluator's results
+// before the flag is set. The browser always obeys the flag.
+const NODE_OPT_IN = !IN_BROWSER && EVALUATOR_PARAM === 'wasm';
 
-if (EVALUATOR_PARAM === 'wasm' && !WASM_MATCHES_VARIABLE_LAYOUT) {
-  console.warn('[RMT] ?evaluator=wasm ignored: the WASM evaluator has not been ported to relational time yet; using the JavaScript evaluator.');
+const FORCE_JS_EVALUATOR = EVALUATOR_PARAM === 'js' || (!WASM_MATCHES_VARIABLE_LAYOUT && !NODE_OPT_IN);
+
+if (IN_BROWSER && EVALUATOR_PARAM === 'wasm' && !WASM_MATCHES_VARIABLE_LAYOUT) {
+  console.warn('[RMT] ?evaluator=wasm ignored: WASM_MATCHES_VARIABLE_LAYOUT is false (src/wasm/evaluator-adapter.js); using the JavaScript evaluator.');
 }
 
 // The evaluated variables in bytecode index order. Taken from VAR_NAMES so
@@ -52,16 +64,18 @@ for (let index = 0; VAR_NAMES[index] !== undefined; index++) {
 }
 
 // What PersistentEvaluator.readNote() says about one value (rust/src/evaluator.rs)
-const KIND_SMALL = 1;      // exact: signed numerator, denominator
-const KIND_BIG = 2;        // exact, too large for a number: readBigValue()
-const KIND_IRRATIONAL = 3; // the float, then its magnitude times 1,000,000
+const KIND_SMALL = 1;        // rational: signed numerator, denominator
+const KIND_BIG = 2;          // rational too large for numbers: readValueText()
+const KIND_IRRATIONAL = 3;   // irrational, exact: readValueText() gives its terms
+const KIND_APPROX_SMALL = 4; // approximate: signed numerator, denominator
+const KIND_APPROX_BIG = 5;   // approximate, too large for numbers: readValueText()
 
 // What this adapter calls on the Rust core. A binary built before one of
 // these existed must not be used: it would order whole notes.
 const REQUIRED_CORE_METHODS = [
   'registerNotes', 'removeNote', 'invalidateAll', 'evaluateDirty',
   'takeCycles', 'takeUnresolved', 'takeFailures', 'takeDivisionsByZero',
-  'hasCachedNote', 'readNote', 'readBigValue',
+  'hasCachedNote', 'readNote', 'readValueText',
 ];
 
 /**
@@ -612,51 +626,58 @@ class WasmPersistentEvaluatorWrapper {
   }
 
   /**
-   * Convert what readNote() returned into the record shape the JS evaluator
-   * produces: one fraction.js value (or null) per variable, and the flags.
+   * Convert what readNote() returned into the record the JS evaluator makes
+   * (createEvaluationRecord in src/binary-evaluator.js): a fraction.js value
+   * (or null) per variable, the flags, and `exact` holding the value of each
+   * variable that is not rational, whose field then holds its shadow.
    *
    * @param {number} noteId
-   * @param {Float64Array} packed - The flags, then (kind, a, b) per variable
+   * @param {Float64Array} packed - The two flag sets, then (kind, a, b) per variable
    * @returns {Object}
    */
   _toRecord(noteId, packed) {
-    const record = {};
-    for (const name of VARIABLE_NAMES) {
-      record[name] = null;
-    }
-    record.corruptionFlags = packed[0];
+    const record = {
+      startTime: null,
+      duration: null,
+      frequency: null,
+      amplitude: null,
+      attack: null,
+      release: null,
+      corruptionFlags: packed[0],
+      approxFlags: packed[1],
+      exact: null,
+    };
 
     // A core built with fewer variables than this side knows simply leaves the rest null
-    const count = Math.min(VARIABLE_NAMES.length, (packed.length - 1) / 3);
+    const count = Math.min(VARIABLE_NAMES.length, (packed.length - 2) / 3);
     for (let varIndex = 0; varIndex < count; varIndex++) {
-      const at = 1 + 3 * varIndex;
+      const at = 2 + 3 * varIndex;
+      const name = VARIABLE_NAMES[varIndex];
       switch (packed[at]) {
         case KIND_SMALL:
-          record[VARIABLE_NAMES[varIndex]] = reducedFraction(BigInt(packed[at + 1]), BigInt(packed[at + 2]));
+          record[name] = reducedFraction(BigInt(packed[at + 1]), BigInt(packed[at + 2]));
           break;
 
-        case KIND_BIG: {
-          // Exact at any size: the digits cross the boundary as text,
-          // `-1f/a0`, hexadecimal with the sign on the numerator
-          const text = this.evaluator.readBigValue(noteId, varIndex);
-          const negative = text.charCodeAt(0) === 45;
-          const slash = text.indexOf('/');
-          const magnitude = BigInt('0x' + text.slice(negative ? 1 : 0, slash));
-          record[VARIABLE_NAMES[varIndex]] = reducedFraction(
-            negative ? -magnitude : magnitude,
-            BigInt('0x' + text.slice(slash + 1))
-          );
+        case KIND_BIG:
+          record[name] = fractionFromText(this.evaluator.readValueText(noteId, varIndex));
+          break;
+
+        case KIND_IRRATIONAL: {
+          const value = irrationalFromText(this.evaluator.readValueText(noteId, varIndex));
+          if (record.exact === null) record.exact = {};
+          record.exact[name] = value;
+          record[name] = X.shadow(value);
           break;
         }
 
-        case KIND_IRRATIONAL: {
-          // A fraction to six decimals for whatever reads valueOf(); the
-          // float itself rides along for playback and display
-          const float = packed[at + 1];
-          const value = new Fraction(BigInt(packed[at + 2]) * (float < 0 ? -1n : 1n), 1000000n);
-          value._irrational = true;
-          value._floatValue = float;
-          record[VARIABLE_NAMES[varIndex]] = value;
+        case KIND_APPROX_SMALL:
+        case KIND_APPROX_BIG: {
+          const frac = packed[at] === KIND_APPROX_SMALL
+            ? reducedFraction(BigInt(packed[at + 1]), BigInt(packed[at + 2]))
+            : fractionFromText(this.evaluator.readValueText(noteId, varIndex));
+          if (record.exact === null) record.exact = {};
+          record.exact[name] = new X.Approx(frac);
+          record[name] = reducedFraction(frac.s * frac.n, frac.d);
           break;
         }
       }
@@ -664,6 +685,40 @@ class WasmPersistentEvaluatorWrapper {
 
     return record;
   }
+}
+
+/**
+ * A fraction from the core's text: `-1f/a0`, hexadecimal, the sign on the
+ * numerator, already in lowest terms.
+ * @param {string} text
+ * @returns {Fraction}
+ */
+function fractionFromText(text) {
+  const negative = text.charCodeAt(0) === 45; // '-'
+  const slash = text.indexOf('/');
+  const magnitude = BigInt('0x' + text.slice(negative ? 1 : 0, slash));
+  return reducedFraction(negative ? -magnitude : magnitude, BigInt('0x' + text.slice(slash + 1)));
+}
+
+/**
+ * An irrational value from the core's text (exact::irrational_text): terms
+ * separated by `;`, each its coefficient then `*base^exponent` per radical,
+ * all hexadecimal. The terms are canonical already, in exact.js's order.
+ * @param {string} text
+ * @returns {X.Irrational}
+ */
+function irrationalFromText(text) {
+  const terms = [];
+  for (const termText of text.split(';')) {
+    const parts = termText.split('*');
+    const rad = [];
+    for (let i = 1; i < parts.length; i++) {
+      const caret = parts[i].indexOf('^');
+      rad.push([BigInt('0x' + parts[i].slice(0, caret)), fractionFromText(parts[i].slice(caret + 1))]);
+    }
+    terms.push([fractionFromText(parts[0]), rad]);
+  }
+  return X.irrationalFromCanonicalTerms(terms);
 }
 
 // Re-export JS implementations for direct use

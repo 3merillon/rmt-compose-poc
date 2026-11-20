@@ -171,318 +171,7 @@ export class DependencyGraph {
 if (Symbol.dispose) DependencyGraph.prototype[Symbol.dispose] = DependencyGraph.prototype.free;
 
 /**
- * Expression compiler
- */
-export class ExpressionCompiler {
-    __destroy_into_raw() {
-        const ptr = this.__wbg_ptr;
-        this.__wbg_ptr = 0;
-        ExpressionCompilerFinalization.unregister(this);
-        return ptr;
-    }
-    free() {
-        const ptr = this.__destroy_into_raw();
-        wasm.__wbg_expressioncompiler_free(ptr, 0);
-    }
-    /**
-     * Compile a text expression to binary bytecode from JavaScript
-     * @param {string} text_expr
-     * @returns {any}
-     */
-    compile(text_expr) {
-        const ptr0 = passStringToWasm0(text_expr, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.expressioncompiler_compile(this.__wbg_ptr, ptr0, len0);
-        return ret;
-    }
-    /**
-     * Create a new compiler
-     */
-    constructor() {
-        const ret = wasm.expressioncompiler_new();
-        this.__wbg_ptr = ret >>> 0;
-        ExpressionCompilerFinalization.register(this, this.__wbg_ptr, this);
-        return this;
-    }
-}
-if (Symbol.dispose) ExpressionCompiler.prototype[Symbol.dispose] = ExpressionCompiler.prototype.free;
-
-/**
- * Arbitrary-precision rational number
- *
- * Wraps num-rational's BigRational to provide a JavaScript-compatible API.
- */
-export class Fraction {
-    static __wrap(ptr) {
-        ptr = ptr >>> 0;
-        const obj = Object.create(Fraction.prototype);
-        obj.__wbg_ptr = ptr;
-        FractionFinalization.register(obj, obj.__wbg_ptr, obj);
-        return obj;
-    }
-    __destroy_into_raw() {
-        const ptr = this.__wbg_ptr;
-        this.__wbg_ptr = 0;
-        FractionFinalization.unregister(this);
-        return ptr;
-    }
-    free() {
-        const ptr = this.__destroy_into_raw();
-        wasm.__wbg_fraction_free(ptr, 0);
-    }
-    /**
-     * Get the absolute value
-     * @returns {Fraction}
-     */
-    abs() {
-        const ret = wasm.fraction_abs(this.__wbg_ptr);
-        return Fraction.__wrap(ret);
-    }
-    /**
-     * Add two fractions
-     * @param {Fraction} other
-     * @returns {Fraction}
-     */
-    add(other) {
-        _assertClass(other, Fraction);
-        const ret = wasm.fraction_add(this.__wbg_ptr, other.__wbg_ptr);
-        return Fraction.__wrap(ret);
-    }
-    /**
-     * Clone this fraction
-     * @returns {Fraction}
-     */
-    clone() {
-        const ret = wasm.fraction_clone(this.__wbg_ptr);
-        return Fraction.__wrap(ret);
-    }
-    /**
-     * Compare this fraction to another
-     * Returns -1 if self < other, 0 if equal, 1 if self > other
-     * @param {Fraction} other
-     * @returns {number}
-     */
-    compare(other) {
-        _assertClass(other, Fraction);
-        const ret = wasm.fraction_compare(this.__wbg_ptr, other.__wbg_ptr);
-        return ret;
-    }
-    /**
-     * Get the denominator
-     * @returns {number}
-     */
-    get d() {
-        const ret = wasm.fraction_d(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-    /**
-     * Get the denominator as a string (for large values)
-     * @returns {string}
-     */
-    denominatorStr() {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.fraction_denominatorStr(this.__wbg_ptr);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
-    }
-    /**
-     * Divide two fractions
-     * @param {Fraction} other
-     * @returns {Fraction}
-     */
-    div(other) {
-        _assertClass(other, Fraction);
-        const ret = wasm.fraction_div(this.__wbg_ptr, other.__wbg_ptr);
-        return Fraction.__wrap(ret);
-    }
-    /**
-     * Check if this fraction equals another
-     * @param {Fraction} other
-     * @returns {boolean}
-     */
-    equals(other) {
-        _assertClass(other, Fraction);
-        const ret = wasm.fraction_equals(this.__wbg_ptr, other.__wbg_ptr);
-        return ret !== 0;
-    }
-    /**
-     * Create a Fraction from a floating-point number
-     * @param {number} value
-     * @returns {Fraction}
-     */
-    static fromF64(value) {
-        const ret = wasm.fraction_fromF64(value);
-        return Fraction.__wrap(ret);
-    }
-    /**
-     * Create a Fraction from a single integer
-     * @param {number} n
-     * @returns {Fraction}
-     */
-    static fromInt(n) {
-        const ret = wasm.fraction_fromInt(n);
-        return Fraction.__wrap(ret);
-    }
-    /**
-     * Create a Fraction from a string like "3/4" or "1.5"
-     * @param {string} s
-     * @returns {Fraction}
-     */
-    static fromString(s) {
-        const ptr0 = passStringToWasm0(s, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.fraction_fromString(ptr0, len0);
-        if (ret[2]) {
-            throw takeFromExternrefTable0(ret[1]);
-        }
-        return Fraction.__wrap(ret[0]);
-    }
-    /**
-     * Get the reciprocal (1/x)
-     * @returns {Fraction}
-     */
-    inverse() {
-        const ret = wasm.fraction_inverse(this.__wbg_ptr);
-        return Fraction.__wrap(ret);
-    }
-    /**
-     * Check if this is negative
-     * @returns {boolean}
-     */
-    isNegative() {
-        const ret = wasm.fraction_isNegative(this.__wbg_ptr);
-        return ret !== 0;
-    }
-    /**
-     * Check if this is one
-     * @returns {boolean}
-     */
-    isOne() {
-        const ret = wasm.fraction_isOne(this.__wbg_ptr);
-        return ret !== 0;
-    }
-    /**
-     * Check if this is positive
-     * @returns {boolean}
-     */
-    isPositive() {
-        const ret = wasm.fraction_isPositive(this.__wbg_ptr);
-        return ret !== 0;
-    }
-    /**
-     * Check if this is zero
-     * @returns {boolean}
-     */
-    isZero() {
-        const ret = wasm.fraction_isZero(this.__wbg_ptr);
-        return ret !== 0;
-    }
-    /**
-     * Multiply two fractions
-     * @param {Fraction} other
-     * @returns {Fraction}
-     */
-    mul(other) {
-        _assertClass(other, Fraction);
-        const ret = wasm.fraction_mul(this.__wbg_ptr, other.__wbg_ptr);
-        return Fraction.__wrap(ret);
-    }
-    /**
-     * Get the absolute numerator
-     * @returns {number}
-     */
-    get n() {
-        const ret = wasm.fraction_n(this.__wbg_ptr);
-        return ret >>> 0;
-    }
-    /**
-     * Negate the fraction
-     * @returns {Fraction}
-     */
-    neg() {
-        const ret = wasm.fraction_neg(this.__wbg_ptr);
-        return Fraction.__wrap(ret);
-    }
-    /**
-     * Create a new Fraction from numerator and denominator
-     * @param {number} num
-     * @param {number} den
-     */
-    constructor(num, den) {
-        const ret = wasm.fraction_new(num, den);
-        this.__wbg_ptr = ret >>> 0;
-        FractionFinalization.register(this, this.__wbg_ptr, this);
-        return this;
-    }
-    /**
-     * Get the numerator as a string (for large values)
-     * @returns {string}
-     */
-    numeratorStr() {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.fraction_numeratorStr(this.__wbg_ptr);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
-    }
-    /**
-     * Get the sign (-1, 0, or 1)
-     * @returns {number}
-     */
-    get s() {
-        const ret = wasm.fraction_s(this.__wbg_ptr);
-        return ret;
-    }
-    /**
-     * Subtract two fractions
-     * @param {Fraction} other
-     * @returns {Fraction}
-     */
-    sub(other) {
-        _assertClass(other, Fraction);
-        const ret = wasm.fraction_sub(this.__wbg_ptr, other.__wbg_ptr);
-        return Fraction.__wrap(ret);
-    }
-    /**
-     * Convert to f64
-     * @returns {number}
-     */
-    toF64() {
-        const ret = wasm.fraction_toF64(this.__wbg_ptr);
-        return ret;
-    }
-    /**
-     * Convert to string representation "n/d" or "n" if d=1
-     * @returns {string}
-     */
-    toString() {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.fraction_toString(this.__wbg_ptr);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
-    }
-}
-if (Symbol.dispose) Fraction.prototype[Symbol.dispose] = Fraction.prototype.free;
-
-/**
- * Evaluator whose notes and values live in WASM memory across calls
+ * Notes and their evaluated values, kept in WASM memory between calls.
  */
 export class PersistentEvaluator {
     __destroy_into_raw() {
@@ -496,7 +185,6 @@ export class PersistentEvaluator {
         wasm.__wbg_persistentevaluator_free(ptr, 0);
     }
     /**
-     * Number of evaluated notes
      * @returns {number}
      */
     get cacheSize() {
@@ -504,14 +192,8 @@ export class PersistentEvaluator {
         return ret >>> 0;
     }
     /**
-     * Evaluate a batch of notes, one variable at a time in dependency order.
-     *
-     * Every note of the batch is evaluated from scratch; a note outside it
-     * keeps its values and is read as it is. An id that is not registered
-     * names a note that no longer exists, and its values are dropped.
-     *
-     * Returns the number of notes evaluated. Afterwards `hasProblems` tells
-     * whether there is anything to report.
+     * Evaluate the given notes, each variable after what it reads. Returns
+     * how many notes were evaluated; what went wrong is in the take* calls.
      * @param {Uint32Array} note_ids
      * @returns {number}
      */
@@ -522,7 +204,6 @@ export class PersistentEvaluator {
         return ret >>> 0;
     }
     /**
-     * Bumped whenever cached values may have changed
      * @returns {bigint}
      */
     get generation() {
@@ -530,7 +211,6 @@ export class PersistentEvaluator {
         return BigInt.asUintN(64, ret);
     }
     /**
-     * Whether a note has evaluated values
      * @param {number} note_id
      * @returns {boolean}
      */
@@ -539,7 +219,7 @@ export class PersistentEvaluator {
         return ret !== 0;
     }
     /**
-     * Whether the last `evaluateDirty` left anything to report
+     * Whether the last evaluation has anything to report
      * @returns {boolean}
      */
     get hasProblems() {
@@ -547,16 +227,11 @@ export class PersistentEvaluator {
         return ret !== 0;
     }
     /**
-     * Forget every note and every value.
-     * Expressions go too: after a module is replaced the same ids may carry
-     * different expressions.
+     * Forget every note and every value
      */
     invalidateAll() {
         wasm.persistentevaluator_invalidateAll(this.__wbg_ptr);
     }
-    /**
-     * Create an evaluator with no notes
-     */
     constructor() {
         const ret = wasm.persistentevaluator_new();
         this.__wbg_ptr = ret >>> 0;
@@ -564,7 +239,6 @@ export class PersistentEvaluator {
         return this;
     }
     /**
-     * Number of registered notes
      * @returns {number}
      */
     get noteCount() {
@@ -572,39 +246,8 @@ export class PersistentEvaluator {
         return ret >>> 0;
     }
     /**
-     * One exact value as text, `numerator/denominator` in hexadecimal with
-     * the sign on the numerator (`-1f/a0`); empty when the note has no exact
-     * value for the variable. For the values `readNote` marks as too large
-     * for a number. Hexadecimal because both ends convert it in time
-     * proportional to its length, which decimal digits do not allow.
-     * @param {number} note_id
-     * @param {number} var_index
-     * @returns {string}
-     */
-    readBigValue(note_id, var_index) {
-        let deferred1_0;
-        let deferred1_1;
-        try {
-            const ret = wasm.persistentevaluator_readBigValue(this.__wbg_ptr, note_id, var_index);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
-        } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
-        }
-    }
-    /**
-     * The evaluated values of one note; empty when it has none.
-     *
-     * The corruption flags come first, then three numbers per variable in
-     * bytecode index order: a kind and two operands.
-     *
-     * | kind | meaning | operands |
-     * |---|---|---|
-     * | 0 | no value | |
-     * | 1 | exact fraction | signed numerator, denominator |
-     * | 2 | exact fraction too large for a number | none: call `readBigValue` |
-     * | 3 | irrational | the float, its magnitude times 1,000,000 rounded |
+     * One note's record: its corruption flags, its approximation flags, then
+     * per variable (kind, a, b). An empty array when the note has no record.
      * @param {number} note_id
      * @returns {Float64Array}
      */
@@ -615,20 +258,28 @@ export class PersistentEvaluator {
         return v1;
     }
     /**
-     * Register notes, replacing all expressions of each.
-     *
-     * `packed` is a sequence of notes, integers little-endian:
-     *
-     * ```text
-     * u32  note id
-     * u8   number of expressions that follow
-     *        u8   variable index
-     *        u32  bytecode length
-     *        ...  bytecode
-     * ```
-     *
-     * Returns the number of notes registered. Evaluated values are left
-     * alone: pass the ids to `evaluateDirty` to bring them up to date.
+     * One value as text, for what readNote() cannot carry in doubles. A
+     * rational or approximate value is `n/d` in hexadecimal, the sign on the
+     * numerator (`-1f/a0`); an irrational one is its terms (exact::irrational_text).
+     * @param {number} note_id
+     * @param {number} var_index
+     * @returns {string}
+     */
+    readValueText(note_id, var_index) {
+        let deferred1_0;
+        let deferred1_1;
+        try {
+            const ret = wasm.persistentevaluator_readValueText(this.__wbg_ptr, note_id, var_index);
+            deferred1_0 = ret[0];
+            deferred1_1 = ret[1];
+            return getStringFromWasm0(ret[0], ret[1]);
+        } finally {
+            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        }
+    }
+    /**
+     * Register (or replace) the compiled expressions of notes, packed as
+     * `register_packed` reads them. Returns how many notes it registered.
      * @param {Uint8Array} packed
      * @returns {number}
      */
@@ -649,9 +300,7 @@ export class PersistentEvaluator {
         wasm.persistentevaluator_removeNote(this.__wbg_ptr, note_id);
     }
     /**
-     * The true cycles of the last evaluation, and forget them. Each loop is
-     * its length followed by its variables, packed `(noteId << 3) | varIndex`,
-     * each reading the next and the last reading the first.
+     * The cycles of the last evaluation: per loop its length, then its variables
      * @returns {Uint32Array}
      */
     takeCycles() {
@@ -661,7 +310,6 @@ export class PersistentEvaluator {
         return v1;
     }
     /**
-     * How many divisions by zero the last evaluation replaced by 1, and forget them
      * @returns {number}
      */
     takeDivisionsByZero() {
@@ -669,8 +317,7 @@ export class PersistentEvaluator {
         return ret >>> 0;
     }
     /**
-     * The expressions the last evaluation could not run, and forget them:
-     * one line each, the packed variable, a tab, the reason.
+     * The failed expressions of the last evaluation, one `reader\treason` per line
      * @returns {string}
      */
     takeFailures() {
@@ -686,8 +333,7 @@ export class PersistentEvaluator {
         }
     }
     /**
-     * The unresolved references of the last evaluation, and forget them:
-     * pairs of packed variables, the reader and what it tried to read.
+     * The unresolved references of the last evaluation, as (reader, reference) pairs
      * @returns {Uint32Array}
      */
     takeUnresolved() {
@@ -887,6 +533,10 @@ function __wbg_get_imports() {
             const ret = arg0.next;
             return ret;
         },
+        __wbg_pow_a83422e09ac5b976: function(arg0, arg1) {
+            const ret = Math.pow(arg0, arg1);
+            return ret;
+        },
         __wbg_prototypesetcall_bdcdcc5842e4d77d: function(arg0, arg1, arg2) {
             Uint8Array.prototype.set.call(getArrayU8FromWasm0(arg0, arg1), arg2);
         },
@@ -941,12 +591,6 @@ function __wbg_get_imports() {
 const DependencyGraphFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_dependencygraph_free(ptr >>> 0, 1));
-const ExpressionCompilerFinalization = (typeof FinalizationRegistry === 'undefined')
-    ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_expressioncompiler_free(ptr >>> 0, 1));
-const FractionFinalization = (typeof FinalizationRegistry === 'undefined')
-    ? { register: () => {}, unregister: () => {} }
-    : new FinalizationRegistry(ptr => wasm.__wbg_fraction_free(ptr >>> 0, 1));
 const PersistentEvaluatorFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_persistentevaluator_free(ptr >>> 0, 1));
@@ -955,12 +599,6 @@ function addToExternrefTable0(obj) {
     const idx = wasm.__externref_table_alloc();
     wasm.__wbindgen_externrefs.set(idx, obj);
     return idx;
-}
-
-function _assertClass(instance, klass) {
-    if (!(instance instanceof klass)) {
-        throw new Error(`expected instance of ${klass.name}`);
-    }
 }
 
 function debugString(val) {

@@ -5,7 +5,7 @@
 
 use num_bigint::{BigInt, Sign};
 
-/// Bytecode opcodes matching JavaScript OP constants
+/// Bytecode opcodes matching JavaScript OP constants (src/binary-note.js)
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Op {
@@ -21,12 +21,12 @@ pub enum Op {
     Mul = 0x12,            // Pop 2, push product
     Div = 0x13,            // Pop 2, push quotient
     Neg = 0x14,            // Pop 1, push negation
-    Pow = 0x15,            // Pop 2 (base, exponent), push base^exponent (may corrupt to irrational)
+    Pow = 0x15,            // Pop 2 (base, exponent), push base^exponent (may be irrational)
+    Approx = 0x16,         // Pop 1, push it as an approximate value (`~261.63`)
 
-    // Module lookup operations
-    FindTempo = 0x20,      // Pop noteRef, push tempo lookup result
-    FindMeasure = 0x21,    // Pop noteRef, push measureLength lookup result
-    FindInstrument = 0x22, // Pop noteRef, push instrument lookup result
+    // 0x20 and 0x21 (FIND_TEMPO, FIND_MEASURE) were retired with the tempo and
+    // measure-length variables; 0x22 (FIND_INSTRUMENT) is not evaluated. The
+    // JavaScript evaluator fails on all three as unknown opcodes, and so does this one.
 
     // Stack operations
     Dup = 0x30,            // Duplicate top of stack
@@ -47,9 +47,7 @@ impl Op {
             0x13 => Some(Op::Div),
             0x14 => Some(Op::Neg),
             0x15 => Some(Op::Pow),
-            0x20 => Some(Op::FindTempo),
-            0x21 => Some(Op::FindMeasure),
-            0x22 => Some(Op::FindInstrument),
+            0x16 => Some(Op::Approx),
             0x30 => Some(Op::Dup),
             0x31 => Some(Op::Swap),
             _ => None,
@@ -57,16 +55,21 @@ impl Op {
     }
 }
 
-/// Variable indices matching JavaScript VAR constants
+/// Variable indices matching JavaScript VAR constants (src/binary-note.js)
+///
+/// 0-2 are the language: a note's start, duration and frequency, each a
+/// relation to other notes. 3-5 interpret a note when it sounds: amplitude,
+/// attack and release. Only the interpretation variables fall back to the
+/// BaseNote when a note has none.
 #[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Var {
     StartTime = 0,
     Duration = 1,
     Frequency = 2,
-    Tempo = 3,
-    BeatsPerMeasure = 4,
-    MeasureLength = 5,
+    Amplitude = 3,
+    Attack = 4,
+    Release = 5,
 }
 
 /// How many variables a note evaluates.
@@ -76,6 +79,9 @@ pub enum Var {
 /// crate lists the variables. A packed variable reference has room for eight
 /// (see variable_deps.rs).
 pub const VAR_COUNT: usize = 6;
+
+/// First variable index that interprets rather than relates (FIRST_INTERPRETATION_VAR)
+pub const FIRST_INTERPRETATION_VAR: usize = 3;
 
 /// What the evaluator needs to know about one variable
 pub struct VarInfo {
@@ -94,21 +100,21 @@ pub const VARIABLES: [VarInfo; VAR_COUNT] = [
     VarInfo { var: Var::StartTime, name: "startTime", default: 0, inherits: false },
     VarInfo { var: Var::Duration, name: "duration", default: 1, inherits: false },
     VarInfo { var: Var::Frequency, name: "frequency", default: 440, inherits: false },
-    VarInfo { var: Var::Tempo, name: "tempo", default: 60, inherits: true },
-    VarInfo { var: Var::BeatsPerMeasure, name: "beatsPerMeasure", default: 4, inherits: true },
-    VarInfo { var: Var::MeasureLength, name: "measureLength", default: 4, inherits: true },
+    VarInfo { var: Var::Amplitude, name: "amplitude", default: 1, inherits: true },
+    VarInfo { var: Var::Attack, name: "attack", default: 0, inherits: true },
+    VarInfo { var: Var::Release, name: "release", default: 0, inherits: true },
 ];
 
 /// Order in which a note's variables are visited when nothing forces another
 /// one (`VAR_ORDER` in src/binary-evaluator.js). Dependencies are pulled in
 /// ahead on demand, so this only breaks ties.
 pub const VAR_ORDER: [Var; VAR_COUNT] = [
-    Var::Tempo,
-    Var::BeatsPerMeasure,
     Var::Frequency,
-    Var::MeasureLength,
     Var::StartTime,
     Var::Duration,
+    Var::Amplitude,
+    Var::Attack,
+    Var::Release,
 ];
 
 impl Var {
@@ -259,7 +265,7 @@ mod tests {
     #[test]
     fn test_var_from_byte() {
         assert_eq!(Var::from_byte(0), Some(Var::StartTime));
-        assert_eq!(Var::from_byte(5), Some(Var::MeasureLength));
+        assert_eq!(Var::from_byte(5), Some(Var::Release));
         assert_eq!(Var::from_byte(VAR_COUNT as u8), None);
     }
 
@@ -286,9 +292,18 @@ mod tests {
     fn test_variable_defaults_and_inheritance() {
         assert_eq!(Var::Frequency.unresolved_default(), 440);
         assert_eq!(Var::Duration.unresolved_default(), 1);
-        assert!(Var::Tempo.inherits_from_base());
-        assert!(Var::MeasureLength.inherits_from_base());
-        assert!(!Var::Frequency.inherits_from_base());
+        assert_eq!(Var::Amplitude.unresolved_default(), 1);
+        for var in [Var::Amplitude, Var::Attack, Var::Release] {
+            assert!(var.inherits_from_base());
+            assert!(var.index() >= FIRST_INTERPRETATION_VAR);
+        }
+        for var in [Var::StartTime, Var::Duration, Var::Frequency] {
+            assert!(!var.inherits_from_base());
+            assert!(var.index() < FIRST_INTERPRETATION_VAR);
+        }
+        assert_eq!(Op::from_byte(0x16), Some(Op::Approx));
+        assert_eq!(Op::from_byte(0x20), None);
+        assert_eq!(Op::from_byte(0x22), None);
     }
 
     #[test]

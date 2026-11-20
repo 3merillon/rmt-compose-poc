@@ -54,6 +54,17 @@ export class Irrational {
   }
 }
 
+/**
+ * An irrational value from terms that are canonical already, in canonical
+ * order: what the Rust core computed (rust/src/exact.rs, the twin of this
+ * module). Nothing is checked or reordered; each term gets its key.
+ * @param {Array<[Fraction, Array<[bigint, Fraction]>]>} list coefficient, radical part
+ * @returns {Irrational}
+ */
+export function irrationalFromCanonicalTerms(list) {
+  return new Irrational(list.map(([c, rad]) => makeTerm(c, rad)));
+}
+
 export class Approx {
   /** @param {Fraction} frac the best known value */
   constructor(frac) {

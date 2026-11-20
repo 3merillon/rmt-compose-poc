@@ -242,7 +242,7 @@ evaluator. You do not need it to develop:
 - `src/wasm/rmt_core.js` and `src/wasm/rmt_core_bg.wasm` are **committed build artifacts**. They are
   what the app imports and what the deploy ships. `rust/pkg/` is gitignored.
 - The WASM binary is **not fetched at all**: `initWasm()` returns `false` early because
-  `isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:50-54`), in a browser and
+  `isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:109-113`), in a browser and
   in headless Node alike.
 
 ::: danger The WASM evaluator is disabled

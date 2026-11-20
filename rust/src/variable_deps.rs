@@ -1,48 +1,41 @@
-//! Variable-level dependencies
+//! Which variables a variable reads.
 //!
-//! The Rust twin of src/variable-deps.js. A note has several variables, and
-//! an expression reads specific variables of specific notes: `[2].f`,
-//! `base.tempo`, `beat([5])`. Evaluation order and cycle checks work at that
-//! granularity. Note 1's frequency may read note 2's frequency while note 2's
-//! start reads note 1's start and duration: between whole notes that is a
-//! loop, between variables it is a tree.
+//! The twin of src/variable-deps.js. Evaluation is ordered, and cycles are
+//! checked, per (note, variable): a note's start may read another note's
+//! duration while that note's frequency reads the first note's, and that is no
+//! cycle. Only a variable that ends up reading itself is one.
 //!
-//! This module is the single statement, on the Rust side, of "which variables
-//! does (note, variable) read". The evaluator orders by it and names cycles by
-//! it. Keep it in step with the JavaScript file: scripts/test-wasm-parity.mjs
-//! runs both and fails on any difference.
+//! A variable is addressed as one packed integer, `(noteId << 3) | varIndex`,
+//! as on the JavaScript side.
 
 use crate::bytecode::{read_u16, Op, Var, VAR_COUNT};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-/// One variable of one note, packed as `(note_id << VAR_BITS) | var_index`.
-/// The BaseNote is note 0, so `base.tempo` is simply `Var::Tempo as u32`.
+/// `(noteId << 3) | varIndex`
 pub type VarRef = u32;
 
-/// Bits of a `VarRef` that hold the variable index
 pub const VAR_BITS: u32 = 3;
 const VAR_MASK: u32 = (1 << VAR_BITS) - 1;
 
-/// Pack a note id and a variable into one reference
 #[inline]
 pub fn pack(note_id: u32, var: Var) -> VarRef {
     (note_id << VAR_BITS) | var as u32
 }
 
-/// The note a reference names
 #[inline]
 pub fn note_of(reference: VarRef) -> u32 {
     reference >> VAR_BITS
 }
 
-/// The variable a reference names; `None` for an index this build does not know
 #[inline]
 pub fn var_of(reference: VarRef) -> Option<Var> {
     Var::from_byte((reference & VAR_MASK) as u8)
 }
 
-/// Every (note, variable) a compiled expression reads, in order of first
-/// appearance (`BinaryExpression.getVariableRefs()` in src/binary-note.js).
+/// The variables an expression reads, in order of first appearance, each once
+/// (BinaryExpression.getVariableRefs() in src/binary-note.js). A reference to
+/// a variable index this build does not know is left out: nothing can define
+/// it, so it never orders anything (the JavaScript walk skips it as well).
 pub fn expression_refs(bytecode: &[u8]) -> Vec<VarRef> {
     let mut refs: Vec<VarRef> = Vec::new();
     let mut add = |reference: VarRef| {
@@ -92,14 +85,6 @@ pub fn expression_refs(bytecode: &[u8]) -> Vec<VarRef> {
                 pc += 1;
             }
 
-            // No compiler emits these two, but the evaluator still runs them:
-            // both read the BaseNote's tempo, FIND_MEASURE also its beatsPerMeasure.
-            Some(Op::FindMeasure) => {
-                add(pack(0, Var::BeatsPerMeasure));
-                add(pack(0, Var::Tempo));
-            }
-            Some(Op::FindTempo) => add(pack(0, Var::Tempo)),
-
             // All other ops have no operands
             _ => {}
         }
@@ -108,110 +93,147 @@ pub fn expression_refs(bytecode: &[u8]) -> Vec<VarRef> {
     refs
 }
 
-/// One compiled expression and the variables it reads
+/// One variable's compiled expression and what it reads
 #[derive(Clone)]
 pub struct Expression {
-    pub bytecode: Vec<u8>,
-    /// Decoded once: bytecode does not change after registration
-    pub refs: Vec<VarRef>,
+    pub bytecode: Box<[u8]>,
+    pub refs: Box<[VarRef]>,
 }
 
-/// The compiled expressions of one note, one slot per variable
+/// The expressions of one note, one per variable it defines
 #[derive(Clone)]
 pub struct NoteExpressions {
     id: u32,
     expressions: [Option<Expression>; VAR_COUNT],
-    /// What a computed measureLength reads: this note's beatsPerMeasure and tempo
-    computed_measure_length_refs: [VarRef; 2],
 }
 
 impl NoteExpressions {
-    /// A note with no expressions yet
     pub fn new(id: u32) -> Self {
-        NoteExpressions {
-            id,
-            expressions: Default::default(),
-            computed_measure_length_refs: [pack(id, Var::BeatsPerMeasure), pack(id, Var::Tempo)],
-        }
+        NoteExpressions { id, expressions: Default::default() }
     }
 
     pub fn id(&self) -> u32 {
         self.id
     }
 
-    /// Give one variable its expression. Empty bytecode means "no expression".
+    /// Set one variable's expression; empty bytecode means none
     pub fn set(&mut self, var: Var, bytecode: &[u8]) {
         self.expressions[var.index()] = if bytecode.is_empty() {
             None
         } else {
-            Some(Expression { bytecode: bytecode.to_vec(), refs: expression_refs(bytecode) })
+            Some(Expression { bytecode: bytecode.into(), refs: expression_refs(bytecode).into() })
         };
     }
 
-    /// The compiled expression behind one variable, if the note has one
     #[inline]
     pub fn expression(&self, var: Var) -> Option<&Expression> {
         self.expressions[var.index()].as_ref()
     }
 
-    /// A measure bar or the BaseNote: when it has no measureLength expression
-    /// the evaluator computes one from beatsPerMeasure and tempo.
-    pub fn has_computed_measure_length(&self) -> bool {
-        self.id == 0
-            || (self.expression(Var::StartTime).is_some()
-                && self.expression(Var::Duration).is_none()
-                && self.expression(Var::Frequency).is_none())
-    }
-
-    /// Whether evaluating this note produces a value for the variable
+    /// Whether the note has its own expression for the variable (definesVariable)
     #[inline]
     pub fn defines(&self, var: Var) -> bool {
-        self.expression(var).is_some()
-            || (var == Var::MeasureLength && self.has_computed_measure_length())
+        self.expressions[var.index()].is_some()
     }
 
-    /// What one variable reads, as written, before inheritance is applied.
-    /// Empty when the note does not define the variable.
+    /// What the variable reads (getVariableRefs); nothing when it is not defined
+    #[inline]
     pub fn refs(&self, var: Var) -> &[VarRef] {
-        if let Some(expression) = self.expression(var) {
-            return &expression.refs;
+        match &self.expressions[var.index()] {
+            Some(expression) => &expression.refs,
+            None => &[],
         }
-        if var == Var::MeasureLength && self.has_computed_measure_length() {
-            // Computed as beatsPerMeasure * 60 / tempo, each its own or the BaseNote's
-            return &self.computed_measure_length_refs;
-        }
-        &[]
     }
 }
 
-/// Every registered note by id. A note that is not in here does not exist.
-pub type NoteStore = HashMap<u32, NoteExpressions>;
+/// Every registered note, by id
+#[derive(Default)]
+pub struct NoteStore {
+    notes: Vec<Option<NoteExpressions>>,
+    count: usize,
+}
 
-/// The variable a reference actually reads, or `None` when nothing defines it.
-///
-/// Inheriting variables (tempo, beatsPerMeasure, measureLength) fall back to
-/// the BaseNote: `[5].tempo` on a note with no tempo of its own reads the
-/// BaseNote's. The others do not, so a reference to one that is missing
-/// resolves to nothing and the evaluator substitutes a hard-coded default.
+impl NoteStore {
+    #[inline]
+    pub fn get(&self, note_id: u32) -> Option<&NoteExpressions> {
+        self.notes.get(note_id as usize).and_then(|note| note.as_ref())
+    }
+
+    #[inline]
+    pub fn contains(&self, note_id: u32) -> bool {
+        self.get(note_id).is_some()
+    }
+
+    pub fn insert(&mut self, note: NoteExpressions) {
+        let at = note.id() as usize;
+        if at >= self.notes.len() {
+            self.notes.resize_with(at + 1, || None);
+        }
+        if self.notes[at].is_none() {
+            self.count += 1;
+        }
+        self.notes[at] = Some(note);
+    }
+
+    pub fn remove(&mut self, note_id: u32) {
+        if let Some(slot) = self.notes.get_mut(note_id as usize) {
+            if slot.take().is_some() {
+                self.count -= 1;
+            }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.notes.clear();
+        self.count = 0;
+    }
+
+    pub fn len(&self) -> usize {
+        self.count
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.count == 0
+    }
+
+    /// One past the largest id the store has room for
+    pub fn capacity(&self) -> usize {
+        self.notes.len()
+    }
+}
+
+impl FromIterator<NoteExpressions> for NoteStore {
+    fn from_iter<I: IntoIterator<Item = NoteExpressions>>(iter: I) -> Self {
+        let mut store = NoteStore::default();
+        for note in iter {
+            store.insert(note);
+        }
+        store
+    }
+}
+
+/// Which variable a reference actually reads (resolveVariableRef): the
+/// referenced note's own, or for an interpretation variable the BaseNote's
+/// when the note has none. `None` when nothing defines it.
 pub fn resolve(store: &NoteStore, reference: VarRef) -> Option<VarRef> {
     let var = var_of(reference)?;
     let note_id = note_of(reference);
-    if store.get(&note_id).is_some_and(|note| note.defines(var)) {
+    if store.get(note_id).is_some_and(|note| note.defines(var)) {
         return Some(reference);
     }
-    if var.inherits_from_base() && note_id != 0 && store.get(&0).is_some_and(|base| base.defines(var)) {
+    if var.inherits_from_base() && note_id != 0 && store.get(0).is_some_and(|base| base.defines(var)) {
         return Some(pack(0, var));
     }
     None
 }
 
-/// Find a dependency cycle through one variable.
+/// Find a dependency cycle through one variable (findVariableCycle).
 ///
 /// Returns the loop as packed variables, each reading the next and the last
 /// reading the first; `None` when `start` does not depend on itself. A direct
 /// self-reference returns `[start]`.
 pub fn find_cycle(store: &NoteStore, start: VarRef) -> Option<Vec<VarRef>> {
-    let start_note = store.get(&note_of(start))?;
+    let start_note = store.get(note_of(start))?;
     let start_var = var_of(start)?;
 
     // Depth-first over what `start` reads, keeping the path so the loop can be named
@@ -243,7 +265,7 @@ pub fn find_cycle(store: &NoteStore, start: VarRef) -> Option<Vec<VarRef>> {
         }
 
         // resolve() only returns variables of registered notes
-        let (Some(note), Some(var)) = (store.get(&note_of(target)), var_of(target)) else { continue };
+        let (Some(note), Some(var)) = (store.get(note_of(target)), var_of(target)) else { continue };
         path.push(target);
         path_refs.push(note.refs(var));
         path_next.push(0);
@@ -266,15 +288,16 @@ mod tests {
     }
 
     fn store(notes: Vec<NoteExpressions>) -> NoteStore {
-        notes.into_iter().map(|n| (n.id(), n)).collect()
+        notes.into_iter().collect()
     }
 
     #[test]
     fn test_pack_and_unpack() {
-        let reference = pack(513, Var::Tempo);
+        let reference = pack(513, Var::Attack);
         assert_eq!(note_of(reference), 513);
-        assert_eq!(var_of(reference), Some(Var::Tempo));
+        assert_eq!(var_of(reference), Some(Var::Attack));
         assert_eq!(pack(0, Var::Frequency), Var::Frequency as u32);
+        assert_eq!(var_of(6), None);
     }
 
     #[test]
@@ -284,10 +307,7 @@ mod tests {
         let sum = then(&[product, load_ref(2, Var::Frequency)], Op::Add);
         let bytecode = then(&[sum, constant(3, 2)], Op::Add);
 
-        assert_eq!(
-            expression_refs(&bytecode),
-            vec![pack(2, Var::Frequency), pack(0, Var::Frequency)]
-        );
+        assert_eq!(expression_refs(&bytecode), vec![pack(2, Var::Frequency), pack(0, Var::Frequency)]);
     }
 
     #[test]
@@ -306,47 +326,31 @@ mod tests {
     }
 
     #[test]
-    fn test_find_ops_read_the_base_note() {
-        assert_eq!(
-            expression_refs(&[Op::FindMeasure as u8]),
-            vec![pack(0, Var::BeatsPerMeasure), pack(0, Var::Tempo)]
-        );
-        assert_eq!(expression_refs(&[Op::FindTempo as u8]), vec![pack(0, Var::Tempo)]);
-    }
-
-    #[test]
-    fn test_measure_bars_compute_their_measure_length() {
-        let bar = note(4, &[(Var::StartTime, load_base(Var::StartTime))]);
-        assert!(bar.has_computed_measure_length());
-        assert!(bar.defines(Var::MeasureLength));
-        assert_eq!(bar.refs(Var::MeasureLength), &[pack(4, Var::BeatsPerMeasure), pack(4, Var::Tempo)]);
-
-        let sounding = note(
-            5,
-            &[(Var::StartTime, load_base(Var::StartTime)), (Var::Frequency, load_base(Var::Frequency))],
-        );
-        assert!(!sounding.has_computed_measure_length());
-        assert!(!sounding.defines(Var::MeasureLength));
-        assert!(sounding.refs(Var::MeasureLength).is_empty());
-
-        // The BaseNote always has one
-        assert!(note(0, &[]).defines(Var::MeasureLength));
+    fn test_a_reference_defines_only_its_frequency() {
+        // A reference note (f only): no start, no duration
+        let reference = note(4, &[(Var::Frequency, load_base(Var::Frequency))]);
+        assert!(reference.defines(Var::Frequency));
+        assert!(!reference.defines(Var::StartTime));
+        assert!(!reference.defines(Var::Duration));
+        assert!(reference.refs(Var::Duration).is_empty());
     }
 
     #[test]
     fn test_resolve_inherits_only_what_inherits() {
         let notes = store(vec![
-            note(0, &[(Var::Tempo, constant(60, 1)), (Var::Frequency, constant(440, 1))]),
+            note(0, &[(Var::Attack, constant(1, 10)), (Var::Frequency, constant(440, 1))]),
             note(5, &[(Var::StartTime, constant(0, 1)), (Var::Frequency, constant(1, 1))]),
         ]);
 
-        // note 5 has no tempo of its own: the BaseNote's
-        assert_eq!(resolve(&notes, pack(5, Var::Tempo)), Some(pack(0, Var::Tempo)));
+        // note 5 has no attack of its own: the BaseNote's
+        assert_eq!(resolve(&notes, pack(5, Var::Attack)), Some(pack(0, Var::Attack)));
+        // nothing defines a release
+        assert_eq!(resolve(&notes, pack(5, Var::Release)), None);
         // a duration does not inherit
         assert_eq!(resolve(&notes, pack(5, Var::Duration)), None);
         // neither does anything of a note that does not exist, except what inherits
         assert_eq!(resolve(&notes, pack(9, Var::Frequency)), None);
-        assert_eq!(resolve(&notes, pack(9, Var::Tempo)), Some(pack(0, Var::Tempo)));
+        assert_eq!(resolve(&notes, pack(9, Var::Attack)), Some(pack(0, Var::Attack)));
         // its own frequency is its own
         assert_eq!(resolve(&notes, pack(5, Var::Frequency)), Some(pack(5, Var::Frequency)));
     }
@@ -399,18 +403,28 @@ mod tests {
     }
 
     #[test]
-    fn test_cycle_through_an_inherited_tempo() {
-        // base.tempo reads [5].d, and [5].d is beat([4]) = 60 / [4].tempo,
-        // a tempo note 4 inherits from the BaseNote
-        let beat_4 = then(&[constant(60, 1), load_ref(4, Var::Tempo)], Op::Div);
+    fn test_cycle_through_an_inherited_release() {
+        // base.release reads [5].attack, which note 5 has not: it inherits
+        // base.attack, and base.attack reads base.release
         let notes = store(vec![
-            note(0, &[(Var::Tempo, load_ref(5, Var::Duration))]),
-            note(4, &[(Var::StartTime, constant(0, 1))]),
-            note(5, &[(Var::StartTime, constant(0, 1)), (Var::Duration, beat_4)]),
+            note(0, &[(Var::Release, load_ref(5, Var::Attack)), (Var::Attack, load_base(Var::Release))]),
+            note(5, &[(Var::StartTime, constant(0, 1))]),
         ]);
         assert_eq!(
-            find_cycle(&notes, pack(0, Var::Tempo)),
-            Some(vec![pack(0, Var::Tempo), pack(5, Var::Duration)])
+            find_cycle(&notes, pack(0, Var::Release)),
+            Some(vec![pack(0, Var::Release), pack(0, Var::Attack)])
         );
+    }
+
+    #[test]
+    fn test_store_by_id() {
+        let mut notes = store(vec![note(3, &[]), note(0, &[])]);
+        assert_eq!(notes.len(), 2);
+        assert!(notes.contains(3) && notes.contains(0) && !notes.contains(1) && !notes.contains(99));
+        notes.remove(3);
+        notes.remove(3);
+        assert_eq!(notes.len(), 1);
+        notes.insert(note(0, &[]));
+        assert_eq!(notes.len(), 1);
     }
 }

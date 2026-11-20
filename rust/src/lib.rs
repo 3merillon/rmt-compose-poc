@@ -1,27 +1,26 @@
 //! RMT Core - Rust/WASM performance-critical modules for RMT Compose
 //!
-//! This crate provides high-performance implementations of:
-//! - Fraction arithmetic (arbitrary-precision rationals)
-//! - Binary expression evaluation (stack-based bytecode interpreter)
-//! - Dependency graph algorithms (BFS, topological sort)
-//! - Expression compilation (text to bytecode)
+//! This crate provides:
+//! - exact values: rationals with a small fast path, irrationals kept
+//!   symbolic, approximations marked (`rational`, `exact`, twins of
+//!   src/value/exact.js)
+//! - binary expression evaluation per (note, variable) (`evaluator`, the twin
+//!   of src/binary-evaluator.js)
+//! - dependency graph algorithms (`graph`)
 
 use wasm_bindgen::prelude::*;
 
-pub mod fraction;
+pub mod rational;
+pub mod exact;
 pub mod bytecode;
 pub mod variable_deps;
 pub mod evaluator;
 pub mod graph;
-pub mod compiler;
-pub mod value;
 
 // Re-export main types for convenience
-pub use fraction::Fraction;
 pub use evaluator::PersistentEvaluator;
+pub use exact::Value;
 pub use graph::DependencyGraph;
-pub use compiler::ExpressionCompiler;
-pub use value::{Value, ValueData};
 
 /// Initialize the WASM module
 /// Call this once when loading the module to set up panic hooks

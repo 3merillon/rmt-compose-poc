@@ -107,19 +107,19 @@ Delete a note and its dependents evaluate against these defaults — a dependent
 
 ## `POW` and corruption
 
-`OP.POW` (`src/binary-evaluator.js:550`) is the only place a value can leave the rationals, and it does so **exactly**. It calls `pow()` in `src/value/exact.js` (`src/value/exact.js:345`), which returns one of three kinds of value:
+`OP.POW` (`src/binary-evaluator.js:550`) is the only place a value can leave the rationals, and it does so **exactly**. It calls `pow()` in `src/value/exact.js` (`src/value/exact.js:356`), which returns one of three kinds of value:
 
 | Kind | What it is | Example |
 |---|---|---|
 | rational | a `Fraction`, the fast path; never wrapped | `4^(1/2)` → `2` |
 | irrational | an `Irrational` (`src/value/exact.js:49`): a sum of terms `c × Π b^e`, canonical | `2^(1/12)`, `263 * 2^(7/12)` |
-| approximate | an `Approx` (`src/value/exact.js:57`): a Fraction that stands for a number it is not exactly | a division by a sum, a value past the caps |
+| approximate | an `Approx` (`src/value/exact.js:68`): a Fraction that stands for a number it is not exactly | a division by a sum, a value past the caps |
 
-The stack holds pooled `Fraction`s for rational values and these immutable objects otherwise. `ADD`, `SUB`, `MUL`, `DIV` and `NEG` take the old fraction path when both operands are rational and the exact module otherwise, so twelve steps of `2^(1/12)` multiply to exactly 2. A rational power is exact as before (integer powers, perfect roots, the DoS caps `MAX_POW_EXPONENT` and `MAX_POW_RESULT_BITS`); an irrational one is factored into primes and kept symbolic (`rationalPow`, `src/value/exact.js:306`). `MusicValue` and `SymbolicPower` below are no longer used by `POW`.
+The stack holds pooled `Fraction`s for rational values and these immutable objects otherwise. `ADD`, `SUB`, `MUL`, `DIV` and `NEG` take the old fraction path when both operands are rational and the exact module otherwise, so twelve steps of `2^(1/12)` multiply to exactly 2. A rational power is exact as before (integer powers, perfect roots, the DoS caps `MAX_POW_EXPONENT` and `MAX_POW_RESULT_BITS`); an irrational one is factored into primes and kept symbolic (`rationalPow`, `src/value/exact.js:317`). `MusicValue` and `SymbolicPower` below are no longer used by `POW`.
 
 `_lastEvalWasCorrupted` is set when the power is irrational (the note's own expression makes a tempered value) and when the evaluation makes an approximation itself (a division by zero, which also evaluates to 1 as before). It becomes the variable's `corruptionFlags` bit, as before, so the hatching is unchanged. A note that only *reads* a tempered value gets no bit of its own; the dependency graph reports it transitively, as before.
 
-`evaluate()` still returns a `Fraction`: for a value that is not rational, the **shadow**, its nearest double as an exact Fraction (`shadow()`, `src/value/exact.js:218`), with the exact value in `_lastExact` (`src/binary-evaluator.js:600`). `evaluateVariable()` stores both: the shadow in the record's field (`record.frequency`), the exact value in `record.exact.frequency` (`src/binary-evaluator.js:815`), and a bit in `record.approxFlags` when it is approximate. References read the exact value first (`recordValue()`, `src/binary-evaluator.js:63`), so dependents compute from exact values, never from shadows. Drawing, sound and MIDI read the shadow through `toNumber()`, which gives the same double as `toNumber(exact)`.
+`evaluate()` still returns a `Fraction`: for a value that is not rational, the **shadow**, its nearest double as an exact Fraction (`shadow()`, `src/value/exact.js:229`), with the exact value in `_lastExact` (`src/binary-evaluator.js:600`). `evaluateVariable()` stores both: the shadow in the record's field (`record.frequency`), the exact value in `record.exact.frequency` (`src/binary-evaluator.js:815`), and a bit in `record.approxFlags` when it is approximate. References read the exact value first (`recordValue()`, `src/binary-evaluator.js:63`), so dependents compute from exact values, never from shadows. Drawing, sound and MIDI read the shadow through `toNumber()`, which gives the same double as `toNumber(exact)`.
 
 Verified against the running VM:
 
@@ -243,7 +243,7 @@ It does **not** throw, and the loop still gets values. Because the order inside 
 Cycles are meant to be prevented upstream, by `validateExpression()` in `src/modals/validation.js`, which uses the same per-variable rule — see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable).
 
 ::: info The WASM path still orders whole notes
-The Rust evaluator evaluates a note's expressions in the old fixed order and with the old variable layout, and both WASM incremental evaluators sort **notes** with the Kahn algorithm this page used to describe (`WasmIncrementalEvaluator.topoSort()`, `src/wasm/evaluator-adapter.js:589`). Nothing of this section has been ported, which is one reason the WASM evaluator is disabled.
+The Rust evaluator evaluates a note's expressions in the old fixed order and with the old variable layout, and both WASM incremental evaluators sort **notes** with the Kahn algorithm this page used to describe (`WasmIncrementalEvaluator.topoSort()`, `src/wasm/evaluator-adapter.js:248`). Nothing of this section has been ported, which is one reason the WASM evaluator is disabled.
 :::
 
 ## From corruption flag to pixels

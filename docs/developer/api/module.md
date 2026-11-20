@@ -541,7 +541,7 @@ an idle callback.
 
 ::: danger WASM evaluation is disabled
 The Rust core still has the old variable layout (`tempo`, `beatsPerMeasure`, `measureLength`), so
-`WASM_MATCHES_VARIABLE_LAYOUT` is `false` (`src/wasm/evaluator-adapter.js:37`). While it is
+`WASM_MATCHES_VARIABLE_LAYOUT` is `false` (`src/wasm/evaluator-adapter.js:45`). While it is
 false, `isEvaluatorHotSwapEnabled()` never arms the hot-swap, `?evaluator=wasm` is ignored with a
 console warning, and **every session runs on the JS evaluator**. Porting the Rust core to the new
 layout is planned. See [WASM Adapters](/developer/wasm/adapters).
