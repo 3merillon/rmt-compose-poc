@@ -1354,6 +1354,13 @@ input[type="number"] {
     border-radius: 4px;
 }
 
+/* The note widget's ADD NOTE / SILENCE / REFERENCE section: the whole section in
+   the teal of its border and title, so the rows inside it (frequency, duration,
+   start time) read as part of it when its title has scrolled out of view. */
+.variable-row.add-note-section {
+    background: rgba(0, 255, 204, 0.09);
+}
+
 .variable-name {
     font-weight: bold;
     color: var(--rmt-accent, #ffa800);

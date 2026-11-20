@@ -251,7 +251,7 @@ The BaseNote's row follows the same rules: with nothing pinned it reads **`Inher
 
 This is how notes are created. There is no double-click-to-create in the workspace.
 
-The **`ADD NOTE / SILENCE / REFERENCE`** section is at the bottom of the widget for the BaseNote, any note and any silence. It creates a new note *relative to the one you have open*.
+The **`ADD NOTE / SILENCE / REFERENCE`** section is at the bottom of the widget for the BaseNote, any note and any silence. It creates a new note *relative to the one you have open*. The whole section is tinted teal, the colour of its title and top border, so its Frequency, Duration and Start Time fields are not mistaken for the open note's own when the title has scrolled out of view.
 
 | Control | Options | Default |
 |---|---|---|
