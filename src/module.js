@@ -66,7 +66,7 @@ export class Module {
     // WASM init is async and usually loses the race against module creation,
     // which used to strand every module on the JS fallback for the whole
     // session. Hot-swap to the WASM evaluator once it becomes available.
-    // Opt-in via ?evaluator=wasm while in-browser verification is pending.
+    // The default in a browser; ?evaluator=js turns it off (evaluator-adapter.js).
     // WeakRef so replaced/discarded modules don't leak via the callback.
     if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)) {
       const ref = new WeakRef(this);

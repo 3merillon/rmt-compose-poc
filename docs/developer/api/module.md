@@ -543,11 +543,13 @@ is enabled it registers an `onWasmReady` callback that replaces both evaluators 
 (`_upgradeEvaluators()`, `src/module.js:146`), marks everything dirty, and warms the new engine on
 an idle callback.
 
-::: info WASM is opt-in
-In a browser the default is the JS evaluator, and the hot-swap arms only with `?evaluator=wasm`
-(`isEvaluatorHotSwapEnabled()`, `src/wasm/evaluator-adapter.js:111-115`). `?evaluator=js` forces
-JavaScript. `WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:45`) is `true`; set to
-`false`, it turns the WASM evaluator off everywhere, even with `?evaluator=wasm`. See
+::: info WASM is the default
+In a browser the hot-swap is armed unless the URL has `?evaluator=js`
+(`isEvaluatorHotSwapEnabled()`, `src/wasm/evaluator-adapter.js:114-116`). A `Module` usually exists
+before the core is ready, so it starts on the JS evaluator and swaps to WASM when the core loads.
+If the core fails to load, the JS evaluator stays. `WASM_MATCHES_VARIABLE_LAYOUT`
+(`src/wasm/evaluator-adapter.js:46`) is `true`; set to `false`, it turns the WASM evaluator off
+everywhere, and `?evaluator=wasm` is ignored with a console warning. See
 [WASM Adapters](/developer/wasm/adapters).
 :::
 

@@ -156,8 +156,8 @@ opt-level = 1
 ::: warning Do not "optimize for size"
 The project deliberately builds for **speed** (`opt-level = 3`), not size (`opt-level = "z"`). The
 crate exists to make evaluation fast; a smaller, slower binary defeats its only purpose. The binary
-ships in the bundle, but it is fetched only when a page opts in with
-[`?evaluator=wasm`](/developer/wasm/overview#which-evaluator-runs).
+ships in the bundle, but it is fetched at boot unless the URL has
+[`?evaluator=js`](/developer/wasm/overview#which-evaluator-runs).
 :::
 
 ## Debug builds
@@ -221,7 +221,7 @@ last person who ran `npm run wasm:build` and committed the result.
 
 ## See also
 
-- [WASM Overview](/developer/wasm/overview) — what the crate contains, how to opt in, parity and speed
+- [WASM Overview](/developer/wasm/overview) — what the crate contains, which evaluator runs, parity and speed
 - [JS/WASM Adapters](/developer/wasm/adapters) — the JS layer that loads and wraps it
 - [Build & Deploy](/developer/contributing/build-and-deploy) — the full script inventory and the two Vercel projects
 - [wasm-pack documentation](https://rustwasm.github.io/wasm-pack/)

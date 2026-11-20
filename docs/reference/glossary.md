@@ -280,7 +280,7 @@ Any of the six expression variables of a note: the language (`frequency`, `start
 ## W
 
 ### WASM (WebAssembly)
-An alternative Rust evaluator that ships in the bundle. The default is the JavaScript evaluator; `?evaluator=wasm` in the URL opts in to the Rust one, which gives the same values as the JavaScript evaluator and is checked against it by a parity test.
+An alternative Rust evaluator that ships in the bundle. In a browser it is the default; `?evaluator=js` in the URL keeps the JavaScript evaluator. The Rust one gives the same values as the JavaScript evaluator and is checked against it by a parity test.
 
 ### WebGL2
 The graphics API the workspace is rendered with. Required — there is no 2D fallback.

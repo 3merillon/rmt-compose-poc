@@ -130,8 +130,8 @@ If you built the crate by hand, run the sync step alone:
 npm run wasm:sync
 ```
 
-::: info The WASM evaluator is opt-in
-The default evaluator is JavaScript. On a normal page load the Rust core is **not fetched at all**: `initWasm()` returns early unless `?evaluator=wasm` is in the URL. With that parameter the binary is fetched and the evaluator hot-swaps to Rust when it is ready. `?evaluator=js` forces JavaScript. After changing the Rust or the JavaScript evaluator, run `npm test`: the parity test must pass. See [WASM Overview](/developer/wasm/overview).
+::: info The WASM evaluator is the default
+On a page load the Rust core is fetched (294 KB, about 115 KB gzipped) and each module hot-swaps from the JavaScript evaluator to Rust when the core is ready. `?evaluator=js` keeps JavaScript and skips the fetch. If the core fails to load, JavaScript stays. After changing the Rust or the JavaScript evaluator, run `npm test`: the parity test must pass. See [WASM Overview](/developer/wasm/overview).
 :::
 
 ## All npm scripts

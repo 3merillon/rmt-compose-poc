@@ -21,13 +21,14 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 | **WebGL2** | The workspace. A hard requirement — `player.js` probes for a context and, without one, never constructs the `Workspace`. There is no DOM fallback renderer. |
 | **Web Audio API** | Synthesis, sample playback, the reverb/limiter signal graph. |
 | **fraction.js 5.3.4** | Exact rational arithmetic. BigInt-backed — arbitrary precision, at any magnitude and depth. |
-| **Rust → WASM** | An alternative evaluator core that ships in the bundle. Opt-in with `?evaluator=wasm`; the default is JavaScript. |
+| **Rust → WASM** | An alternative evaluator core that ships in the bundle. The default in a browser; `?evaluator=js` keeps JavaScript. |
 | **VitePress** | This documentation site (`docs/`, deployed separately). |
 
-::: info The WASM evaluator is opt-in
-The `rmt-core` WASM binary is **not fetched** on a normal page load: `initWasm()` returns early
-unless `?evaluator=wasm` is in the URL (`isEvaluatorHotSwapEnabled()`,
-`src/wasm/evaluator-adapter.js:111-115`). The default evaluator is **JavaScript**. See
+::: info The WASM evaluator is the default
+The `rmt-core` WASM binary is fetched at boot (294 KB, about 115 KB gzipped) and each `Module`
+hot-swaps to it when it is ready, unless the URL has `?evaluator=js`
+(`isEvaluatorHotSwapEnabled()`, `src/wasm/evaluator-adapter.js:114-116`). Until then, and if the
+core fails to load, the **JavaScript** evaluator runs. See
 [WASM Overview](/developer/wasm/overview).
 :::
 
@@ -58,7 +59,7 @@ unless `?evaluator=wasm` is in the URL (`isEvaluatorHotSwapEnabled()`,
 │ State                                                                │
 │  store/app-state.js · store/history.js · utils/event-bus.js          │
 ├──────────────────────────────────────────────────────────────────────┤
-│ wasm/  (alternative evaluator core — opt-in, JavaScript is default)  │
+│ wasm/  (Rust evaluator core — the default; JavaScript until it loads)      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -99,7 +100,7 @@ unless `?evaluator=wasm` is in the URL (`isEvaluatorHotSwapEnabled()`,
 
 ### WASM
 
-- **[WASM Overview](/developer/wasm/overview)** — what ships, how to opt in, how it is checked, how fast
+- **[WASM Overview](/developer/wasm/overview)** — what ships, which evaluator runs, how it is checked, how fast
 - **[Building WASM](/developer/wasm/building)** — `wasm-pack`, `sync-wasm.mjs`, committed artifacts
 - **[JS/WASM Adapters](/developer/wasm/adapters)** — the evaluator bridge
 

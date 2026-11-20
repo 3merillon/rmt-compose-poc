@@ -1,6 +1,6 @@
 ---
 title: WASM Overview
-description: What the rmt-core Rust/WASM crate contains, how to opt in to it, how it is held to the JavaScript evaluator, and what it measures.
+description: What the rmt-core Rust/WASM crate contains, which evaluator runs, how it is held to the JavaScript evaluator, and what it measures.
 ---
 
 # WASM Overview
@@ -9,29 +9,31 @@ RMT Compose contains a Rust crate, `rmt-core`, that compiles to WebAssembly and 
 bytecode evaluator a second time: exact values, per-variable evaluation order, the same records.
 The compiled artifacts are committed to the repo and shipped with every deploy.
 
-::: info JavaScript is the default; WASM is opt-in
-In a browser the app evaluates with the **JavaScript** `BinaryEvaluator` (`src/binary-evaluator.js`).
-`?evaluator=wasm` in the URL opts in to the Rust core. `?evaluator=js` forces JavaScript. Making
-WASM the default is a decision that has not been made. In Node, the environment variable
-`RMT_EVALUATOR=js|wasm` is the same choice (see [Running Node scripts on WASM](#running-node-scripts-on-wasm)).
+::: info WASM is the default in a browser
+In a browser the app evaluates with the Rust core. A `Module` usually exists before the core is
+ready, so it starts on the JavaScript `BinaryEvaluator` (`src/binary-evaluator.js`) and hot-swaps
+to WASM when the core is ready. Both give the same records, so nothing changes on screen.
+`?evaluator=js` in the URL keeps JavaScript and skips the fetch. In Node the JavaScript evaluator
+runs unless a script opts in (see [Running Node scripts on WASM](#running-node-scripts-on-wasm)).
 :::
 
 ## Which evaluator runs
 
 | Where | How | Evaluator |
 |---|---|---|
-| Browser, no parameter | the default | JavaScript |
-| Browser, `?evaluator=js` | forced | JavaScript |
-| Browser, `?evaluator=wasm` | opt-in | WASM, after it loads (each `Module` starts on JavaScript and hot-swaps) |
+| Browser, no parameter | the default | WASM, after it loads (each `Module` starts on JavaScript and hot-swaps); JavaScript if the core fails to load |
+| Browser, `?evaluator=js` | forced | JavaScript; the binary is not fetched |
+| Browser, `?evaluator=wasm` | explicit default | Same as no parameter |
+| Node, no variable | the default | JavaScript, unless the script has called `initWasm()` |
 | Node, `RMT_EVALUATOR=js` | forced | JavaScript |
 | Node, `RMT_EVALUATOR=wasm` | opt-in | WASM, once the script has called `initWasm()` |
 
-The gate is `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:111-115`). It also
-checks `WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:45`), which is `true`. That
+The gate is `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:114-116`). It also
+checks `WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:46`), which is `true`. That
 constant is a kill switch: set it to `false` and the WASM evaluator is off everywhere, even with
 `?evaluator=wasm` (the browser prints a console warning saying so). Use it if a change to one
 engine leaves the other behind. `RMT_EVALUATOR=wasm` in Node still runs the Rust core with the flag
-`false`, so that the parity test can check it first (`src/wasm/evaluator-adapter.js:50`).
+`false`, so that the parity test can check it first (`src/wasm/evaluator-adapter.js:51`).
 
 ## What happens on page load
 
@@ -46,10 +48,10 @@ engine leaves the other behind. `RMT_EVALUATOR=wasm` in Node still runs the Rust
 `initWasm()` (`src/wasm/index.js:53`) is called three times at boot, and every call now shares one
 initialization promise (`src/wasm/index.js:47`). Before that, each call fetched and instantiated
 the module again, and the last to finish replaced the instance under objects made on an earlier
-one: `recursive use of an object` errors, or a hang. Without the opt-in, `initWasm()` returns
+one: `recursive use of an object` errors, or a hang. With `?evaluator=js`, `initWasm()` returns
 `false` before it fetches anything, so the 294 KB `rmt_core_bg.wasm` is never downloaded.
 
-With the opt-in, `Module._upgradeEvaluators()` (`src/module.js:146`) swaps each module to the WASM
+Otherwise `Module._upgradeEvaluators()` (`src/module.js:146`) swaps each module to the WASM
 evaluator once the binary is ready. See [the hot-swap](/developer/wasm/adapters#the-hot-swap).
 
 ## The crate

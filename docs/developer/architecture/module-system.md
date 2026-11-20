@@ -395,11 +395,12 @@ every module on the JS evaluator for the whole session. The constructor therefor
 atomically swaps `_binaryEvaluator` and `_incrementalEvaluator` for the WASM versions, clears the
 evaluation cache, and marks everything dirty so the next evaluation runs on the new engine.
 
-::: info It runs only with the opt-in
-The registration is gated on `isEvaluatorHotSwapEnabled()`, which is `true` in a browser only with
-`?evaluator=wasm` (`src/wasm/evaluator-adapter.js:111-115`). Without it `_upgradeEvaluators()` is
-never called and the module stays on the JavaScript evaluator. `WASM_MATCHES_VARIABLE_LAYOUT`
-(`src/wasm/evaluator-adapter.js:45`) is `true`; set to `false`, it turns the swap off everywhere.
+::: info It runs unless `?evaluator=js`
+The registration is gated on `isEvaluatorHotSwapEnabled()`, which is `true` in a browser unless the
+URL has `?evaluator=js` (`src/wasm/evaluator-adapter.js:114-116`). With `?evaluator=js`,
+`_upgradeEvaluators()` is never called and the module stays on the JavaScript evaluator, as it does
+if the core fails to load. `WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:46`) is
+`true`; set to `false`, it turns the swap off everywhere.
 :::
 
 The practical consequence for anyone holding an evaluator reference: it can be **replaced between

@@ -16,7 +16,7 @@ description: The stack VM that executes note bytecode — exact values on the st
 The values themselves (rational, irrational, approximate) come from `src/value/exact.js`; see [Exact Values](/developer/core/symbolic-power).
 
 ::: info This is the default path
-In a browser the default is the **JavaScript** evaluator described on this page. `?evaluator=wasm` opts in to the Rust core, which implements the same evaluator a second time (`rust/src/evaluator.rs`) and is held to this one by a parity test. `WASM_MATCHES_VARIABLE_LAYOUT` in `src/wasm/evaluator-adapter.js` is `true`; set to `false` it turns WASM off everywhere. See [WASM Overview](/developer/wasm/overview).
+In a browser the Rust core is the default evaluator. It implements the evaluator described on this page a second time (`rust/src/evaluator.rs`) and is held to this one by a parity test. A `Module` starts on the JavaScript evaluator on this page and hot-swaps to Rust when the core is ready; `?evaluator=js` keeps JavaScript. `WASM_MATCHES_VARIABLE_LAYOUT` in `src/wasm/evaluator-adapter.js` is `true`; set to `false` it turns WASM off everywhere. See [WASM Overview](/developer/wasm/overview).
 :::
 
 ## The six variables
@@ -310,4 +310,4 @@ Note ids above 65 535 used to silently truncate to a different note in the compi
 - [Expression Compiler](/developer/core/expression-compiler) — where the bytecode comes from
 - [Dependency Graph](/developer/core/dependency-graph) — where `getEvaluationDependents()` and the corruption flags live
 - [Exact Values](/developer/core/symbolic-power) — the three kinds of value, and what `POW` returns
-- [WASM Overview](/developer/wasm/overview) — the Rust evaluator, how to opt in, and how it is checked against this one
+- [WASM Overview](/developer/wasm/overview) — the Rust evaluator, how it is chosen, and how it is checked against this one

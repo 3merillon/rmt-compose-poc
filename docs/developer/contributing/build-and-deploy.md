@@ -155,8 +155,9 @@ Rust toolchain. **The committed `src/wasm/` files are what gets bundled and ship
 change under `rust/`, run `npm run wasm:build` and commit the two synced files, or the deploy keeps
 serving the old binary with no warning.
 
-The binary ships in the bundle but is **not fetched on a normal page load**: `initWasm()` returns early
-unless `?evaluator=wasm` is in the URL. The default evaluator is JavaScript; WASM is opt-in (see
+The binary ships in the bundle and is **loaded on every page load** (294 KB, about 115 KB gzipped; from the browser cache after the first visit),
+unless the URL has `?evaluator=js`. The default evaluator is WASM; JavaScript runs until the core is
+ready and stays if it fails to load (see
 [Which evaluator runs](/developer/wasm/overview#which-evaluator-runs)).
 
 ## Deploys
@@ -217,7 +218,7 @@ components, per `THIRD_PARTY_NOTICES.md`: fraction.js (MIT), the VSCO-2 Communit
 
 - [Development Setup](/developer/contributing/setup) — clone, install, run
 - [Building WASM](/developer/wasm/building) — the Rust crate and the sync step
-- [WASM Overview](/developer/wasm/overview) — the opt-in WASM evaluator, how it is checked, how fast it is
+- [WASM Overview](/developer/wasm/overview) — the WASM evaluator, how it is checked, how fast it is
 - [Performance](/developer/performance) — the benchmark and pixel-diff harness
 - [Code Style](/developer/contributing/code-style)
 - [Pull Requests](/developer/contributing/pull-requests)

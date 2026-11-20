@@ -356,8 +356,8 @@ chunk and are never duplicated.
 
 The chunk-by-chunk byte sizes of a production build are in
 [Build & Deploy](/developer/contributing/build-and-deploy#what-the-vite-build-produces). The
-headline: the entry chunk is ~111 kB gzipped, the renderer ~54 kB, and the (opt-in)
-WASM binary 115 kB.
+headline: the entry chunk is ~111 kB gzipped, the renderer ~54 kB, and the WASM
+binary 115 kB.
 
 ## The benchmark harness
 
@@ -476,7 +476,7 @@ node scripts/perf/converge.mjs
 | **GPU picking** | **Not shipped.** `picking.js` is a self-described scaffold: no ID pass is ever drawn, `begin()`/`end()` have zero call sites, and `Workspace.pickAt` tries `pickAllAt()` first (which always exists), so the GPU branch is unreachable. All picking is CPU-side. |
 | **Measure-triangle outline batching** | Intentionally skipped — bounded by measure count M ≪ N. |
 | **Spatial index for picking** | Not warranted by measurement. |
-| **WASM evaluator** | **Opt-in** with `?evaluator=wasm`; the default is JavaScript. It is faster at evaluation (1.15x to 6.4x in Node, more on fractions of hundreds of digits), but an end-to-end commit costs the same on both engines. Every number on this page is the JS evaluator unless it says otherwise. See [WASM overview](/developer/wasm/overview#speed). |
+| **WASM evaluator** | The **default** in a browser; `?evaluator=js` keeps JavaScript. It is faster at evaluation (1.15x to 6.4x in Node, more on fractions of hundreds of digits), but an end-to-end commit costs the same on both engines. Every number on this page is the JS evaluator unless it says otherwise. See [WASM overview](/developer/wasm/overview#speed). |
 
 ## See also
 

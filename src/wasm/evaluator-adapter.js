@@ -13,14 +13,15 @@ import { getVariableExpression } from '../variable-deps.js';
 import { BinaryEvaluator as JSBinaryEvaluator, IncrementalEvaluator as JSIncrementalEvaluator } from '../binary-evaluator.js';
 import * as X from '../value/exact.js';
 
-// Dev/A-B override: ?evaluator=js forces the JS path (and disables the
-// WASM hot-swap in module.js, since createEvaluator keeps returning JS).
-// ?evaluator=wasm opts in to the async evaluator hot-swap (P1) — kept
-// opt-in until the WASM wrapper's in-browser behavior is fully verified,
-// because the wrapper had never actually run in production before the
-// hot-swap existed (module creation always won the race against WASM init).
-// In Node (tests, benches) the same choice is the RMT_EVALUATOR environment
-// variable.
+// Which evaluator runs. In a browser the WASM evaluator is the default:
+// initWasm() loads the Rust core at boot, and every Module, which usually
+// exists before the core is ready, hot-swaps to it (Module._upgradeEvaluators).
+// ?evaluator=js keeps the JavaScript evaluator (and disables the hot-swap,
+// since createEvaluator keeps returning JS); ?evaluator=wasm asks for the
+// default explicitly. Should the core fail to load, the JavaScript evaluator
+// stays (WASM_CONFIG.fallbackOnError).
+// In Node (tests, benches) the choice is the RMT_EVALUATOR environment
+// variable, and the JavaScript evaluator runs unless a script loads the core.
 const IN_BROWSER = typeof window !== 'undefined';
 const EVALUATOR_PARAM = (() => {
   try {
@@ -104,14 +105,14 @@ function reducedFraction(numerator, denominator) {
 }
 
 /**
- * Whether module.js should hot-swap to the WASM evaluator when WASM
- * finishes initializing. Currently opt-in (?evaluator=wasm); headless
- * (Node) environments allow it so tests can exercise the swap.
+ * Whether module.js should hot-swap to the WASM evaluator when WASM finishes
+ * initializing, and whether initWasm() loads it at all: yes, unless the
+ * JavaScript evaluator is forced (?evaluator=js, RMT_EVALUATOR=js, or
+ * WASM_MATCHES_VARIABLE_LAYOUT false). Headless Node passes too, so tests can
+ * exercise the swap; nothing there loads the core unless a script asks.
  */
 export function isEvaluatorHotSwapEnabled() {
-  if (FORCE_JS_EVALUATOR) return false;
-  if (typeof window === 'undefined') return true; // headless tests/benches
-  return EVALUATOR_PARAM === 'wasm';
+  return !FORCE_JS_EVALUATOR;
 }
 
 /**

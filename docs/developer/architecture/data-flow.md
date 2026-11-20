@@ -129,10 +129,10 @@ Finally, `Module._updateCorruptionFlags(cache, dirtyIds)` pushes each result's `
 into `DependencyGraph.setCorruptionFlags()` — scoped to the dirty set, not all notes.
 
 ::: info Which evaluator runs
-In a browser the default is the JS `BinaryEvaluator` / `IncrementalEvaluator`. `?evaluator=wasm`
-opts in to the Rust core: `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:111-115`)
-opens the gate and each `Module` hot-swaps when the binary is ready. `?evaluator=js` forces
-JavaScript. Both evaluators produce the same records. See [WASM Overview](/developer/wasm/overview).
+In a browser the Rust core is the default. A `Module` usually exists before the core is ready, so it
+starts on the JS `BinaryEvaluator` / `IncrementalEvaluator` and hot-swaps to Rust when the binary
+is ready: `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:114-116`) is the gate.
+`?evaluator=js` keeps JavaScript and skips the fetch. Both evaluators produce the same records. See [WASM Overview](/developer/wasm/overview).
 :::
 
 ## 4. Rendering

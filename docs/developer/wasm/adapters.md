@@ -1,6 +1,6 @@
 ---
 title: JS/WASM Adapters
-description: The src/wasm layer — the loader, WASM_CONFIG, the evaluator wrapper, the PersistentEvaluator interface, the opt-in hot-swap, and the one adapter nothing imports.
+description: The src/wasm layer — the loader, WASM_CONFIG, the evaluator wrapper, the PersistentEvaluator interface, the hot-swap, and the one adapter nothing imports.
 ---
 
 # JS/WASM Adapters
@@ -14,12 +14,13 @@ description: The src/wasm layer — the loader, WASM_CONFIG, the evaluator wrapp
 | `evaluator-adapter.js` | **Live**: the only adapter the app imports |
 | `graph-adapter.js` | Dead code: imported by nothing |
 
-::: info The live adapter is opt-in
-In a browser the default is the JavaScript `BinaryEvaluator`. `?evaluator=wasm` opts in to the Rust
-core; `?evaluator=js` forces JavaScript. `WASM_MATCHES_VARIABLE_LAYOUT`
-(`src/wasm/evaluator-adapter.js:45`) is `true`. It is a kill switch: set to `false`, the WASM
-evaluator is off everywhere, even with `?evaluator=wasm`, and a console warning says so. Making WASM
-the default is the owner's decision and has not been made. See [WASM Overview](/developer/wasm/overview).
+::: info The live adapter is the default
+In a browser the Rust core is the default. A `Module` starts on the JavaScript `BinaryEvaluator` and
+hot-swaps to the adapter when the core is ready. `?evaluator=js` keeps JavaScript and skips the
+fetch. If the core fails to load, JavaScript stays (`WASM_CONFIG.fallbackOnError`).
+`WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:46`) is `true`. It is a kill switch:
+set to `false`, the JavaScript evaluator runs everywhere, and `?evaluator=wasm` is ignored with a
+console warning. See [WASM Overview](/developer/wasm/overview).
 :::
 
 ## Dead code: the graph adapter
@@ -54,34 +55,33 @@ It only *permits* the WASM evaluator; the actual gate is `isEvaluatorHotSwapEnab
 
 ## The `?evaluator` gate
 
-`src/wasm/evaluator-adapter.js` reads the choice once (`src/wasm/evaluator-adapter.js:25-37`): the
+`src/wasm/evaluator-adapter.js` reads the choice once (`src/wasm/evaluator-adapter.js:26-38`): the
 `?evaluator` URL parameter in a browser, the `RMT_EVALUATOR` environment variable in Node.
 
 | Where | Value | `isEvaluatorHotSwapEnabled()` | What runs |
 |---|---|---|---|
-| Browser | *(none)*, the default | `false` | JS `BinaryEvaluator` |
-| Browser | `js` | `false` | JS `BinaryEvaluator` (explicit) |
-| Browser | `wasm` | `true` | JS at first, then WASM once the binary is ready |
+| Browser | *(none)*, the default | `true` | JS at first, then WASM once the binary is ready |
+| Browser | `js` | `false` | JS `BinaryEvaluator`; the binary is not fetched |
+| Browser | `wasm` | `true` | Same as the default |
+| Node | *(none)* | `true` | JS `BinaryEvaluator`, unless the script calls `initWasm()` |
 | Node | `js` | `false` | JS `BinaryEvaluator` |
 | Node | `wasm` | `true` | WASM, once the script has called `initWasm()` |
 
 ```javascript
-// src/wasm/evaluator-adapter.js:111-115
+// src/wasm/evaluator-adapter.js:114-116
 export function isEvaluatorHotSwapEnabled() {
-  if (FORCE_JS_EVALUATOR) return false;
-  if (typeof window === 'undefined') return true; // headless tests/benches
-  return EVALUATOR_PARAM === 'wasm';
+  return !FORCE_JS_EVALUATOR;
 }
 ```
 
 `FORCE_JS_EVALUATOR` is `EVALUATOR_PARAM === 'js' || (!WASM_MATCHES_VARIABLE_LAYOUT && !NODE_OPT_IN)`
-(`src/wasm/evaluator-adapter.js:52`). With the kill switch `false`, a browser with `?evaluator=wasm`
-stays on JavaScript and warns (`src/wasm/evaluator-adapter.js:54-56`). In Node,
+(`src/wasm/evaluator-adapter.js:53`). With the kill switch `false`, a browser with `?evaluator=wasm`
+stays on JavaScript and warns (`src/wasm/evaluator-adapter.js:55-57`). In Node,
 `RMT_EVALUATOR=wasm` runs the Rust core even with the switch `false`, so the parity test can check
-it first (`src/wasm/evaluator-adapter.js:50`).
+it first (`src/wasm/evaluator-adapter.js:51`).
 
-Without `RMT_EVALUATOR`, headless Node passes the gate (the `typeof window` line above), but nothing
-evaluates on WASM unless the script calls `initWasm()`. To run a script on Rust, use the preload
+Without `RMT_EVALUATOR`, headless Node passes the gate, but nothing evaluates on WASM unless the
+script calls `initWasm()`. To run a script on Rust, use the preload
 described in [WASM Overview](/developer/wasm/overview#running-node-scripts-on-wasm).
 
 ## Factories
@@ -95,7 +95,7 @@ const evaluator   = createEvaluator(module);
 const incremental = createIncrementalEvaluator(module, dependencyGraph, evaluator);
 ```
 
-`createEvaluator(module)` (`src/wasm/evaluator-adapter.js:131`) resolves in this order:
+`createEvaluator(module)` (`src/wasm/evaluator-adapter.js:132`) resolves in this order:
 
 1. the gate is closed, or `useEvaluator: false`, or WASM not loaded: `JSBinaryEvaluator`
 2. otherwise `WasmPersistentEvaluatorWrapper`
@@ -103,7 +103,7 @@ const incremental = createIncrementalEvaluator(module, dependencyGraph, evaluato
 
 The wrapper's constructor refuses a binary older than its adapter: it checks that
 `PersistentEvaluator` has every method in `REQUIRED_CORE_METHODS`
-(`src/wasm/evaluator-adapter.js:75-79`) and throws, naming `npm run wasm:build`, if not.
+(`src/wasm/evaluator-adapter.js:76-80`) and throws, naming `npm run wasm:build`, if not.
 
 `createIncrementalEvaluator(module, graph, evaluator)` returns a `WasmIncrementalEvaluator` when the
 base evaluator is a `WasmPersistentEvaluatorWrapper`, and `JSIncrementalEvaluator` otherwise.
@@ -126,7 +126,7 @@ What the adapter calls on the Rust class (`rust/src/evaluator.rs:675`):
 | `readNotes(ids)` | The same for several notes, one after another. A missing note is `-1` then zeros |
 | `readValueText(id, var)` | Hexadecimal text `n/d` with the sign on `n`. For an irrational, its terms `c*b^p/q*...;c*...` |
 
-The kinds (`src/wasm/evaluator-adapter.js:67-71`):
+The kinds (`src/wasm/evaluator-adapter.js:68-72`):
 
 | Kind | Meaning | `a`, `b` |
 |---|---|---|
@@ -141,7 +141,7 @@ The kinds (`src/wasm/evaluator-adapter.js:67-71`):
 
 ### WasmPersistentEvaluatorWrapper
 
-`src/wasm/evaluator-adapter.js:342`. Wraps `wasm.PersistentEvaluator`. Compiled expressions go to
+`src/wasm/evaluator-adapter.js:343`. Wraps `wasm.PersistentEvaluator`. Compiled expressions go to
 WASM once per note; evaluated values live there; each batch's records come back as `fraction.js`
 values in one call.
 
@@ -161,9 +161,9 @@ values in one call.
 Problems are not printed by Rust. After each batch the wrapper reads the cycles, unresolved
 references, failures and divisions by zero from the core, and reports them through a JavaScript
 `BinaryEvaluator`'s `reportProblems`, so the messages are word for word the JavaScript ones
-(`src/wasm/evaluator-adapter.js:485-517`).
+(`src/wasm/evaluator-adapter.js:486-518`).
 
-`_toRecord()` (`src/wasm/evaluator-adapter.js:601`) turns the numbers into a record of the same shape
+`_toRecord()` (`src/wasm/evaluator-adapter.js:602`) turns the numbers into a record of the same shape
 as the JavaScript evaluator's (`createEvaluationRecord`): a `fraction.js` value per variable,
 `corruptionFlags`, `approxFlags`, and `exact`, which holds the exact value of each variable that is
 not rational. For an irrational, it is an `Irrational` built with `irrationalFromCanonicalTerms`
@@ -172,7 +172,7 @@ it is an `Approx`.
 
 ### WasmIncrementalEvaluator
 
-`src/wasm/evaluator-adapter.js:210`. Dirty tracking in JavaScript, one WASM call per batch, then one
+`src/wasm/evaluator-adapter.js:211`. Dirty tracking in JavaScript, one WASM call per batch, then one
 call reading the batch's records.
 
 `evaluateDirty()` (no arguments; it reads its own dirty set):
@@ -190,7 +190,7 @@ dirty-without-unregister form.
 
 ### WasmEvaluationCache
 
-`src/wasm/evaluator-adapter.js:173`. A `Map` subclass holding `noteId` to record, filled right after
+`src/wasm/evaluator-adapter.js:174`. A `Map` subclass holding `noteId` to record, filled right after
 each batch. `get`, `has`, `size` and iteration are a plain `Map`'s, identical to the JavaScript
 evaluator's cache, including order. Only `delete()` and `clear()` also reach the core, because the
 core holds the values that evaluation reads.

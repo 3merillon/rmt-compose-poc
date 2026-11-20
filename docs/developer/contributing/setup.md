@@ -227,8 +227,8 @@ None of these has UI. They are read from the URL query string or `localStorage`.
 |---|---|
 | `?perf` (any value, e.g. `?perf=1`) | Loads `src/dev/perf-harness.js` and exposes `window.__rmtPerf`, `window.__rmtRenderer`, `window.__rmtWorkspace`. The harness is a separate lazily-fetched chunk — it never downloads without this flag. |
 | `?atlas=0` / `?atlas=1` | Force the glyph atlas off/on. Default on. Also settable via the `rmt:atlas` localStorage key. |
-| `?evaluator=js` | Force the JavaScript evaluator. Same as the default, but explicit. |
-| `?evaluator=wasm` | Opt in to the Rust/WASM evaluator: the binary is fetched and each `Module` hot-swaps to it when it is ready. JavaScript is still the default. See below. |
+| `?evaluator=js` | Keep the JavaScript evaluator and skip the WASM fetch entirely. See below. |
+| `?evaluator=wasm` | Ask for the default (the Rust/WASM evaluator) explicitly. Ignored with a console warning if `WASM_MATCHES_VARIABLE_LAYOUT` is `false`. See below. |
 
 localStorage keys the app uses: `rmt:moduleSnapshot:v1` (the autosaved composition),
 `rmt:moduleSnapshot:v1:unloadable` (a saved session that could not be loaded; the default module opens
@@ -241,18 +241,21 @@ evaluator, held to the JavaScript one by a parity test. You do not need it to de
 
 - `src/wasm/rmt_core.js` and `src/wasm/rmt_core_bg.wasm` (about 294 KB) are **committed build
   artifacts**. They are what the app imports and what the deploy ships. `rust/pkg/` is gitignored.
-- In a browser the default is the **JavaScript** evaluator, and without the opt-in the binary is
-  **not fetched at all**: `initWasm()` returns `false` before fetching. `?evaluator=wasm` opts in:
-  `initWasm()` fetches the binary and each `Module` hot-swaps to WASM when it is ready
-  (`Module._upgradeEvaluators`, `src/module.js:146`).
-- In Node (tests, benches) the same choice is the environment variable `RMT_EVALUATOR=js|wasm`.
-  `node --import ./scripts/wasm-node.mjs <script>` runs a script on Rust.
+- In a browser the default is the **WASM** evaluator. At boot `initWasm()` fetches and instantiates
+  the binary (about 115 KB gzipped). Each `Module` usually exists before the core is ready, so it
+  starts on JavaScript and hot-swaps to WASM when the core is ready
+  (`Module._upgradeEvaluators`, `src/module.js:146`). Both give the same records.
+- `?evaluator=js` keeps the JavaScript evaluator and skips the fetch. If the core fails to load,
+  JavaScript stays (`WASM_CONFIG.fallbackOnError`).
+- In Node (tests, benches) the JavaScript evaluator runs unless a script calls `initWasm()`, sets
+  `RMT_EVALUATOR=wasm`, or runs with `node --import ./scripts/wasm-node.mjs <script>`.
+  `RMT_EVALUATOR=js` forces JavaScript. `npm test` runs its suites on JavaScript, and
+  `scripts/test-wasm-parity.mjs` (part of `npm test`) runs both engines and compares them exactly.
 
-::: info WASM is opt-in
-The default is JavaScript and WASM is opt-in; making WASM the default has not been decided.
-`WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:45`) is
-`true`; it is a kill switch. Set to `false`, the WASM evaluator is off everywhere, even with
-`?evaluator=wasm`. See [WASM Overview](/developer/wasm/overview).
+::: info WASM is the default
+`WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:46`) is
+`true`; it is a kill switch. Set to `false`, the JavaScript evaluator runs everywhere, and
+`?evaluator=wasm` is ignored with a console warning. See [WASM Overview](/developer/wasm/overview).
 :::
 
 After changing either engine, run `npm test`: `scripts/test-wasm-parity.mjs` compares them exactly

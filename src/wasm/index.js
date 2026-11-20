@@ -52,8 +52,8 @@ let initPromise = null;
  */
 export function initWasm() {
   if (initPromise === null) {
-    // The WASM evaluator is opt-in (?evaluator=wasm — see evaluator-adapter.js).
-    // Without the opt-in nothing consumes the module, so skip the 384 KB
+    // With the JavaScript evaluator forced (?evaluator=js — see
+    // evaluator-adapter.js) nothing consumes the module, so skip the 294 KB
     // fetch+instantiate entirely. Headless Node (benches/tests) has no window
     // and passes the gate.
     if (!isEvaluatorHotSwapEnabled()) {
@@ -140,8 +140,8 @@ export function getWasmVersion() {
   return wasmModule?.version?.() ?? null;
 }
 
-// Auto-initialize if not in a test environment. No-op unless the
-// ?evaluator=wasm opt-in is present — initWasm() gates the fetch.
+// Auto-initialize if not in a test environment. No-op when the JavaScript
+// evaluator is forced (?evaluator=js) — initWasm() gates the fetch.
 if (typeof window !== 'undefined') {
   // Defer initialization to avoid blocking
   setTimeout(() => {
