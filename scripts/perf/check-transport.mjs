@@ -181,6 +181,47 @@ check('the note widget shows the pass being heard', /repeat [12]/.test(widget), 
 check('Pause keeps the pass on screen; Stop returns to the module as written', paused === pass2 && stopped === '263/1', `paused ${paused}, stopped ${stopped}`);
 await page.evaluate(async () => { const DT = await import('/src/player/display-transpose.js'); DT.setModuleRepeat(window.__rmtPerf.getModuleRef(), null); });
 
+// 11. Lines: a violin line slurred (a repeated pitch re-bowed, a rest starts a new bow);
+// a piano pitch struck again damps the voice still ringing on it; another pitch does not.
+const lines = await page.evaluate(async () => {
+  const ae = window.__ae, cur = window.__rmtPerf.getModuleRef();
+  const { Module } = await import('/src/module.js');
+  const m = await Module.loadFromJSON({ instrumentRule: 'start-time', baseNote: { frequency: '263', startTime: '0', duration: '1' }, notes: [
+    { id: 1, startTime: 'base.t', duration: 'base.d * (1/2)', frequency: 'base.f', instrument: 'violin' },
+    { id: 2, startTime: '[1].t + [1].d', duration: 'base.d * (1/2)', frequency: '(9/8) * base.f' },
+    { id: 3, startTime: '[2].t + [2].d', duration: 'base.d * (1/2)', frequency: '(9/8) * base.f' },           // the same pitch again
+    { id: 4, startTime: '[3].t + [3].d + base.d * (1/4)', duration: 'base.d * (1/2)', frequency: '(5/4) * base.f' }, // after a rest
+    { id: 5, startTime: 'base.t', duration: 'base.d * (1/4)', frequency: '2 * base.f', instrument: 'piano' },
+    { id: 6, startTime: '[5].t + [5].d', duration: 'base.d * (1/4)', frequency: '2 * base.f' },             // struck again
+    { id: 7, startTime: '[6].t + [6].d', duration: 'base.d * (1/4)', frequency: '(5/2) * base.f' },          // another pitch
+  ] });
+  m.evaluateModule();
+  const list = await ae.preparePlayback(m, 0);
+  const slurFlags = Object.fromEntries(list.map((n) => [n.id, !!n.slur]));
+  ae.play(list, { initialVolume: 0.05 });
+  await new Promise((r) => setTimeout(r, 300));
+  const E = (id) => Array.from(ae.activeOscillators).find((e) => e.noteId === id);
+  const r = (x) => +x.toFixed(4);
+  const out = {
+    slurFlags,
+    v1: E(1) && E(1).fade ? r(E(1).fade.at - E(2).startTime) : null,  // faded at 2's start
+    v1len: E(1) && E(2) ? r(E(1).endTime - E(2).startTime) : null,     // 0.04 + 0.01
+    v2slur: E(2)?.slur, v2len: E(2) && E(3) ? r(E(2).endTime - E(3).startTime) : null, v3slur: E(3)?.slur,  // re-bow 0.03 + 0.01
+    v3fade: !!E(3)?.fade, v4slur: E(4)?.slur,
+    p5len: E(5) && E(6) ? r(E(5).endTime - E(6).startTime) : null, p6fade: !!E(6)?.fade,
+  };
+  ae.stopAll();
+  return out;
+});
+check('lines: a note that starts where its line\'s previous note ends is marked slurred; after a rest it is not',
+  lines.slurFlags[2] && lines.slurFlags[3] && !lines.slurFlags[4] && !lines.slurFlags[1], JSON.stringify(lines.slurFlags));
+check('violin: the previous note fades over 40 ms from the next one\'s start, which enters slurred',
+  lines.v1 === 0 && Math.abs(lines.v1len - 0.05) < 1e-3 && lines.v2slur === true, `fade at +${lines.v1} s, ends +${lines.v1len} s`);
+check('violin: the same pitch again is a new bow stroke (30 ms), not a slur; after a rest, a new bow',
+  Math.abs(lines.v2len - 0.04) < 1e-3 && lines.v3slur === false && lines.v4slur === false && lines.v3fade === false, `ends +${lines.v2len} s`);
+check('piano: a pitch struck again damps the voice still ringing on it (20 ms); another pitch rings on',
+  Math.abs(lines.p5len - 0.03) < 1e-3 && lines.p6fade === false, `ends +${lines.p5len} s`);
+
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 await page.evaluate(() => { localStorage.removeItem('rmt:moduleSnapshot:v1'); });
 await browser.close();

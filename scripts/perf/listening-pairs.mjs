@@ -75,11 +75,38 @@ const SHEETS = {
     ],
   },
 };
+const ODE = [[5, 4], [5, 4], [4, 3], [3, 2], [3, 2], [4, 3], [5, 4], [9, 8], [1, 1], [1, 1], [9, 8], [5, 4], [5, 4], [9, 8], [9, 8]];
+SHEETS['phase-i-5'] = {
+  title: 'Phase I, step 5: lines played as lines',
+  intro: 'Each file plays a passage twice: first as before this step, a second of silence, then as now. Same notes, same pure ratios of 263 Hz, reverb and limiter on. ' +
+    'Each passage is one line (every note starts where the previous one ends), so one player plays it. What changes: a violin slurs from one note to the next ' +
+    'within a line (no new bow attack; a repeated pitch is a new stroke); a piano, vibraphone or fm-epiano struck again on the same pitch first damps the voice still ringing on it.',
+  passages: [
+    { name: 'Violin, a scale up and down, slurred (0.3 s notes)', instrument: 'violin', line: true, notes: [...seq(SCALE, 0.3), ...seq([...SCALE].reverse().slice(1), 0.3, 0, 2.4)],
+      change: 'Before: every note bowed anew, the previous one releasing under it. Now: one bow, each pitch entering over 40 ms from the last.',
+      predict: 'Now: one continuous line, no breath between notes; before: each note articulated with its own bow.' },
+    { name: 'Violin, the opening of Ode to Joy (0.35 s notes)', instrument: 'violin', line: true, notes: seq(ODE, 0.35),
+      change: 'Slurred where the pitch changes; each repeated pitch (E E, G G, C C, E E, D D) is a new bow stroke.',
+      predict: 'Now: phrased, the repeated notes still clearly two; before: every note separate.' },
+    { name: 'Piano, one pitch struck eight times (0.2 s notes)', instrument: 'piano', line: true, notes: seq(Array(8).fill([2, 1]), 0.2),
+      change: 'Before: each note\'s damper (0.13 s after its end) still sounded under the next strike, so two copies of the string overlapped. Now: the new strike damps the old one in 20 ms.',
+      predict: 'Now: cleaner repeated notes, each strike clear; before: slightly blurred and louder between strikes.' },
+    { name: 'Piano, a high pitch with no damper (2104 Hz), struck six times (0.3 s)', instrument: 'piano', line: true, notes: seq(Array(6).fill([8, 1]), 0.3),
+      change: 'Above F#6 a piano has no dampers: before, each strike kept ringing for 1.5 s and they piled up. Now: each strike takes over the string.',
+      predict: 'Now: six separate bright strikes at an even level; before: a growing shimmer.' },
+    { name: 'Vibraphone, one bar struck six times (0.4 s)', instrument: 'vibraphone', line: true, notes: seq(Array(6).fill([2, 1]), 0.4),
+      change: 'Before: each bar\'s 0.4 s tail rang under the next strike of the same bar. Now: the bar is damped as it is struck again.',
+      predict: 'Now: each stroke distinct; before: a slight wash.' },
+    { name: 'Organ, a legato line (control)', instrument: 'organ', line: true, notes: seq([[1, 1], [9, 8], [5, 4], [4, 3], [3, 2], [4, 3], [5, 4], [1, 1]], 0.4),
+      change: 'Nothing: sustained voices already join by their releases overlapping the next note.',
+      predict: 'The same twice.' },
+  ],
+};
 const sheet = SHEETS[SHEET];
 if (!sheet) { console.error(`unknown sheet ${SHEET}`); process.exit(2); }
 
 // ── where the page's files come from ──
-const MIME = { '.js': 'text/javascript', '.json': 'application/json', '.m4a': 'audio/mp4' };
+const MIME = { '.js': 'text/javascript', '.mjs': 'text/javascript', '.json': 'application/json', '.m4a': 'audio/mp4' };
 const fromDisk = { label: 'working tree', read: (rel) => { const f = resolve(ROOT, rel); return f.startsWith(ROOT + sep) && existsSync(f) ? readFileSync(f) : null; } };
 const fromGit = (ref) => {
   const sha = execFileSync('git', ['rev-parse', '--short', ref], { encoding: 'utf8' }).trim();
@@ -96,7 +123,9 @@ async function openPage(browser, source) {
   page.on('pageerror', (e) => console.log('  !! pageerror:', e.message));
   await page.route('**/*', (route) => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname).replace(/^\/+/, '');
-    if (path === '') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><meta charset="utf-8"><title>listen</title>' });
+    // The source imports the bare package `fraction.js`: an import map resolves it to node_modules.
+    if (path === '') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><meta charset="utf-8"><title>listen</title><script type="importmap">{"imports":{"fraction.js":"/node_modules/fraction.js/dist/fraction.mjs"}}</script>' });
+    if (path.startsWith('node_modules/')) { const f = resolve(ROOT, path); return existsSync(f) ? route.fulfill({ contentType: 'text/javascript', body: readFileSync(f) }) : route.fulfill({ status: 404, body: '' }); }
     const body = source.read(path.startsWith('src/') ? path : `public/${path}`);
     if (!body) return route.fulfill({ status: 404, body: '' });
     return route.fulfill({ contentType: MIME[extname(path)] || 'application/octet-stream', body });
@@ -113,8 +142,10 @@ async function renderInPage({ notes, base, seconds, sampleRate }) {
     import('/src/player/audio-engine.js'), import('/src/instruments/synth-instruments.js'),
     import('/src/instruments/sample-instruments.js'), import('/src/settings/settings-store.js')]);
   settingsStore.resetAll();
-  const frac = ([n, d]) => ({ s: 1n, n: BigInt(n), d: BigInt(d) });
+  const { default: Fraction } = await import('fraction.js');
+  const frac = ([n, d]) => new Fraction(n, d);
   const ctx = new OfflineAudioContext(2, Math.ceil(seconds * sampleRate), sampleRate);
+  const realResume = ctx.resume.bind(ctx);
   ctx.resume = () => Promise.resolve();
   const Real = window.AudioContext;
   window.AudioContext = function () { return ctx; };
@@ -127,13 +158,26 @@ async function renderInPage({ notes, base, seconds, sampleRate }) {
   notes.forEach((n, i) => {
     const id = i + 1;
     cache.set(id, { startTime: frac(n.start), duration: frac(n.dur), frequency: frac(n.freq) });
-    moduleNotes[id] = { id, instrument: n.instrument };
+    moduleNotes[id] = { id, instrument: n.instrument, prev: n.prev ?? null };
     end = Math.max(end, n.start[0] / n.start[1] + n.dur[0] / n.dur[1]);
   });
-  const module = { notes: moduleNotes, baseNote: moduleNotes[0], getModuleEndTime: () => end, getEvaluationCache: () => cache, findInstrument: (note) => note.instrument };
+  const module = { notes: moduleNotes, baseNote: moduleNotes[0], getModuleEndTime: () => end, getEvaluationCache: () => cache, findInstrument: (note) => note.instrument,
+    // A line passage: each note follows the one before it (src/players.js), one player
+    findPlayer: (note) => ({ head: 1, prev: note.prev ?? null }) };
   const list = await engine.preparePlayback(module, 0);
   if (settingsStore.get('audio.reverb.enabled')) { state = 0x5eed; await engine.graph._regenIR(settingsStore.get('audio.reverb')); }
   const t0 = engine.play(list, { initialVolume: 0.2 });
+  // The engine schedules 2 s ahead from a timer against the clock; an offline render
+  // runs far faster than real time, so without help every note after the first 2 s
+  // would be missed. Suspend the render every quarter second, let the pump schedule
+  // as it would in real time, and resume. (Before 20 November 2026 this was missing:
+  // passages longer than about 2 s lost their later notes.)
+  for (let t = 0.25; t < seconds; t += 0.25) {
+    ctx.suspend(t).then(() => {
+      try { const s = engine._streamingState; if (s && s.pump) { if (s.timerId) clearTimeout(s.timerId); s.timerId = null; s.pump(); } } catch {}
+      realResume();
+    });
+  }
   const buf = await ctx.startRendering();
   const b64 = (f32) => { const u8 = new Uint8Array(f32.buffer); let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
   return { t0, pcm: [b64(buf.getChannelData(0)), b64(buf.getChannelData(1))] };
@@ -143,7 +187,23 @@ const f32 = (s) => { const b = Buffer.from(s, 'base64'); return new Float32Array
 // Exact seconds as fractions with denominator 1000 (every time above is a multiple of 1 ms).
 const ms = (x) => [Math.round(x * 1000), 1000];
 function toEngineNotes(p) {
-  return p.notes.map(([[a, b], t, d]) => ({ instrument: p.instrument, freq: [B * a, b], start: ms(t), dur: ms(d) }));
+  return p.notes.map(([[a, b], t, d], i) => ({ instrument: p.instrument, freq: [B * a, b], start: ms(t), dur: ms(d), prev: p.line && i > 0 ? i : null }));
+}
+
+// What changed, as numbers: at each note change of a line, the dip of the level (the
+// least RMS within 30 ms of the boundary against the median RMS of the take); for a
+// pitch struck again, how far the level piles up above the first strike.
+function measure(take, p) {
+  const x = take[0], W = Math.round(0.005 * SR), rms = [];
+  for (let i = 0; i + W <= x.length; i += W) { let s = 0; for (let j = 0; j < W; j++) s += x[i + j] ** 2; rms.push(Math.sqrt(s / W)); }
+  const at = (t) => rms[Math.max(0, Math.min(rms.length - 1, Math.round(t / 0.005)))] || 0;
+  const sorted = rms.filter((v) => v > 1e-5).sort((a, b) => a - b), median = sorted[Math.floor(sorted.length / 2)] || 1e-9;
+  const db = (v) => 20 * Math.log10(Math.max(v, 1e-9));
+  const starts = p.notes.map(([, t]) => t);
+  const dips = starts.slice(1).map((b) => { let m = Infinity; for (let t = b - 0.03; t <= b + 0.03; t += 0.005) m = Math.min(m, at(t)); return db(m / median); });
+  const peakOf = (t0, t1) => { let m = 0; for (let t = t0; t < t1; t += 0.005) m = Math.max(m, at(t)); return m; };
+  const first = peakOf(starts[0], starts[1] ?? starts[0] + 0.3), rest = peakOf(starts[2] ?? starts[0], (starts[starts.length - 1] || 0) + 0.3);
+  return { dipDb: dips.length ? +(dips.reduce((a, b) => a + b, 0) / dips.length).toFixed(1) : null, pileDb: +db(rest / first).toFixed(1) };
 }
 function wav(channels, sr) {
   const n = channels[0].length, data = Buffer.alloc(n * 4);
@@ -181,8 +241,12 @@ for (const p of sheet.passages) {
   const out = [0, 1].map((c) => { const a = takes[0][c], b = takes[1][c]; const x = new Float32Array(a.length + gap.length + b.length); x.set(a, 0); x.set(b, a.length + gap.length); return x; });
   const file = `${String(k).padStart(2, '0')}.wav`;
   writeFileSync(join(OUT, file), wav(out, SR));
-  rows.push({ k, file, ...p, split: takes[0][0].length / SR });
-  console.log(`  ${file}  ${p.name}`);
+  // Only for a single line (no two notes starting together): chords have no note changes to measure
+  const single = new Set(p.notes.map(([, t]) => t)).size === p.notes.length && p.notes.length > 2;
+  const mBefore = single ? measure(takes[0], p) : null, mNow = single ? measure(takes[1], p) : null;
+  const measured = single ? `dip at note changes ${mBefore.dipDb} → ${mNow.dipDb} dB; later strikes against the first ${mBefore.pileDb} → ${mNow.pileDb} dB` : '';
+  rows.push({ k, file, ...p, split: takes[0][0].length / SR, measured });
+  console.log(`  ${file}  ${p.name}${measured ? `  (${measured})` : ''}`);
 }
 await before.close(); await now.close(); await browser.close();
 
@@ -201,7 +265,7 @@ const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content
 <p>${esc(sheet.intro)}</p>
 <p>Before = <code>${esc(BEFORE)}</code>; now = this branch. Answer per number: <b>first</b>, <b>second</b> or <b>same</b>, and a word if you like.</p>
 <table><tr><th>#</th><th>Passage, and what changes the second time</th></tr>
-${rows.map((r) => `<tr><td class="n">${r.k}</td><td><b>${esc(r.name)}</b><br>${esc(r.change)}<br><span class="pred">My prediction: ${esc(r.predict)}</span>
+${rows.map((r) => `<tr><td class="n">${r.k}</td><td><b>${esc(r.name)}</b><br>${esc(r.change)}<br><span class="pred">My prediction: ${esc(r.predict)}</span>${r.measured ? `<br><span class="pred">Measured (before → now): ${esc(r.measured)}</span>` : ''}
 <br>The second take starts at ${(r.split + 1).toFixed(1)} s.<audio controls preload="none" src="${r.file}"></audio></td></tr>`).join('\n')}
 </table>`;
 writeFileSync(join(OUT, 'index.html'), html);

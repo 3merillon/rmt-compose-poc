@@ -133,6 +133,14 @@ for (const name of names) {
     check(near(sh.release * T.dur, T.release), `${tag}: drawn release ${sh.release * T.dur} is not ${T.release}`);
     const bodyEnd = t0 + T.attack + sh.decay * T.dur;
     check(near(P.at(bodyEnd), Math.max(EPS, p * sh.sustain), 1e-6), `${tag}: drawn level ${sh.sustain} is not the scheduled ${P.at(bodyEnd) / p}`);
+    // G2: envelopeGainAt (what a damper, a slur or a stolen voice fades from) is the scheduled gain
+    let worst = 0;
+    for (let i = 1; i <= 60; i++) {
+      const tau = (T.end * i) / 61;
+      const a = P.at(t0 + tau), b = IM.envelopeGainAt(T, p, tau);
+      worst = Math.max(worst, Math.abs(a - b) / Math.max(a, b, 1e-12));
+    }
+    check(worst < 1e-6, `${tag}: envelopeGainAt differs from the scheduled gain by ${worst}`);
   }
   if (failures === before) ok(`${name}: starts and ends at silence, peaks at its level, releases after the end, stops after its tail, drawn = scheduled`);
 }

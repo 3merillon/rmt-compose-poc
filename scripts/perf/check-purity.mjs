@@ -126,7 +126,9 @@ async function openHarness(browser, source) {
   });
   await page.route('**/*', (route) => {
     const path = decodeURIComponent(new URL(route.request().url()).pathname).replace(/^\/+/, '');
-    if (path === '') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><meta charset="utf-8"><title>rmt audio harness</title>' });
+    // The source imports the bare package `fraction.js`: an import map resolves it to node_modules.
+    if (path === '') return route.fulfill({ contentType: 'text/html', body: '<!doctype html><meta charset="utf-8"><title>rmt audio harness</title><script type="importmap">{"imports":{"fraction.js":"/node_modules/fraction.js/dist/fraction.mjs"}}</script>' });
+    if (path.startsWith('node_modules/')) { const f = resolve(ROOT, path); return existsSync(f) ? route.fulfill({ contentType: 'text/javascript', body: readFileSync(f) }) : route.fulfill({ status: 404, body: '' }); }
     if (path === 'favicon.ico') return route.fulfill({ contentType: 'image/x-icon', body: '' });
     // /src/** is the source tree; everything else is served from public/, as Vite does.
     const body = source.read(path.startsWith('src/') ? path : `public/${path}`);

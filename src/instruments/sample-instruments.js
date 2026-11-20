@@ -17,6 +17,7 @@ const PIANO_UNDAMPED_RING = 1.5;
 export class PianoInstrument extends MultisampleInstrument {
   constructor(audioContext) {
     super(audioContext, 'piano', '/samples/piano/manifest.json');
+    this.articulation = 'struck';   // one string (set of strings) per pitch
   }
 
   /**
@@ -36,6 +37,7 @@ export class PianoInstrument extends MultisampleInstrument {
 export class ViolinInstrument extends MultisampleInstrument {
   constructor(audioContext) {
     super(audioContext, 'violin', '/samples/violin/manifest.json');
+    this.articulation = 'bowed';    // slurred within a line
   }
 }
 

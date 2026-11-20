@@ -123,6 +123,37 @@ export function envelopeTimes(env = {}, duration, shape = null) {
 }
 
 /**
+ * The gain applyVoiceEnvelope schedules, `t` seconds after the note's start: the
+ * attack, the decay or natural decay, the hold, the release, silence after it.
+ * What a fade that interrupts a voice (a damper, a slur, a stolen voice) starts from.
+ * @param {ReturnType<typeof envelopeTimes>} T
+ * @param {number} peak
+ * @param {number} t seconds from the note's start
+ */
+export function envelopeGainAt(T, peak, t) {
+  const p = Math.max(EPS, peak);
+  if (!T || !(t > 0)) return EPS;
+  if (t < T.attack) return EPS + (p - EPS) * (t / T.attack);
+  if (t <= T.off) {
+    // The exponential ramps applyVoiceEnvelope schedules, between the same points
+    // (their targets floored at EPS, as there)
+    const u = t - T.attack;
+    const ramp = (to, over) => (over > 0 ? p * Math.pow(Math.max(EPS, to) / p, Math.min(1, u / over)) : p);
+    if (T.t60 > 0) return ramp(p * T.levelAtEnd, T.off - T.attack);
+    if (T.decay > 0) {
+      if (T.attack + T.decay < T.off) return u >= T.decay ? Math.max(EPS, p * T.sustain) : ramp(p * T.sustain, T.decay);
+      return ramp(p * T.levelAtEnd, T.off - T.attack);
+    }
+    return p;
+  }
+  if (t <= T.end) {
+    const atOff = Math.max(EPS, p * T.levelAtEnd);
+    return atOff * Math.pow(EPS / atOff, (t - T.off) / T.release);
+  }
+  return 0;
+}
+
+/**
  * How long after its start a voice must sound: to the end of its release, plus
  * the step to zero and a margin. The AudioEngine stops the voice there.
  */
@@ -200,6 +231,10 @@ export class SynthInstrument {
         this.detuneCents = 0;            // full spread for the unison edges
         this.filterTrackMul = 0;         // >0 → per-voice lowpass at freq*mul
         this.filterQ = 0.7;
+        // How a line is played (Phase I, design §5): 'sustained' notes join by their
+        // releases overlapping; 'struck' ones damp a voice still ringing on the same
+        // pitch when they strike it again; 'bowed' ones are slurred within a line.
+        this.articulation = 'sustained';
     }
 
     /**

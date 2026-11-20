@@ -101,6 +101,7 @@ export class VibraphoneInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'vibraphone';
+        this.articulation = 'struck';   // one bar per pitch: struck again, it is damped first
         this.periodicWave = this.createVibraphoneWave();
     }
 
@@ -151,6 +152,7 @@ export class FMEPianoInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'fm-epiano';
+        this.articulation = 'struck';   // one tine per pitch
         this.modRatio = 1;       // modulator : carrier frequency ratio
         this.indexStart = 4;     // deviation = index * modFreq (bright attack)
         this.indexEnd = 0.6;     // settles to a mellow tone

@@ -95,6 +95,18 @@ Five of the shipped modules pin `"instrument": "sine-wave"` on their BaseNote â€
 
 The BaseNote's widget row agrees with playback: with no instrument of its own it reads `Inherited: <name>`, where the name is your "Default instrument" setting.
 
+### How a line is played
+
+A line is one player, and the instrument plays it as a line:
+
+| Instrument | Within a line |
+|---|---|
+| `violin` | **Slurred.** A note that starts exactly where the previous note of its line ends has no bow attack of its own: the previous note fades out over 40 ms while the new pitch enters already past its bow onset. A repeated pitch is a new bow stroke (the previous note stops in 30 ms, the next one is bowed). A rest or a silence between them ends the bow, so the note after it is bowed anew. |
+| `piano`, `vibraphone`, `fm-epiano` | **Struck.** Each note is struck. The same pitch struck again (by any player) first damps the voice still ringing on it, in 20 ms, as a string, a bar or a tine cannot ring twice. Other pitches ring on under the next notes. |
+| every other instrument | **Joined by overlap.** The release of a note (after its end) runs under the next note's attack, so the notes of a line touch without a gap. |
+
+No instrument glides between pitches: a glide would pass through every pitch on the way, pure or not.
+
 ### Several notes at once
 
 The [group widget](/user-guide/notes/selection) has an INSTRUMENT section with the list of instruments and two buttons:

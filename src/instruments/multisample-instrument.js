@@ -48,6 +48,7 @@ export class MultisampleInstrument {
     this.gain = 1;
     this.envelope = { attack: 0.005, release: 0.12 };
     this.manifestLoaded = false;
+    this.articulation = 'sustained';   // subclasses: 'struck' (piano), 'bowed' (violin)
     this.manifestPromise = this._loadManifest();
   }
 
@@ -173,7 +174,10 @@ export class MultisampleInstrument {
 
     return {
       frequency: { value: frequency },
-      start: (when) => { try { source.start(when); } catch {} },
+      // `offset` (seconds into the recording) lets a slurred note enter past its onset
+      start: (when, offset = 0) => { try { source.start(when, Math.max(0, Math.min(offset, zone.buffer.duration * 0.5))); } catch {} },
+      // Where a slur enters this recording: past the bow's onset (its own peak, at most 0.25 s)
+      bowOffset: zone.bowOffset != null ? zone.bowOffset : 0.15,
       stop: (when) => { try { source.stop(when); } catch {} },
       connect: (dest) => { try { filter.connect(dest); } catch {} return dest; },
       disconnect: () => { try { filter.disconnect(); } catch {} try { source.disconnect(); } catch {} },

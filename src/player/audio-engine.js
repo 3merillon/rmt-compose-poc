@@ -1,5 +1,5 @@
 import { toNumber } from '../utils/fraction-num.js';
-import { InstrumentManager } from '../instruments/instrument-manager.js';
+import { InstrumentManager, envelopeGainAt } from '../instruments/instrument-manager.js';
 import { AudioGraph } from './audio-graph.js';
 import { amplitudeToGain } from './amplitude.js';
 import { TimeMap, clampRate } from './time-map.js';
@@ -26,6 +26,11 @@ const FALLBACK_TAIL = 0.15;
 // voice before its note-off is never stolen (design/phase-i-instruments.md §9).
 export const MAX_VOICES = 256;
 const STEAL_FADE = 0.015;
+// Lines (Phase I, design §5): a slur's crossfade (violin), a new bow stroke on the
+// same pitch, a damper on a re-struck pitch (piano, vibraphone, fm-epiano).
+const SLUR_XFADE = 0.04;
+const REBOW_FADE = 0.03;
+const DAMP_FADE = 0.02;
 const EPS_GAIN = 0.0001; // the envelope's floor (instrument-manager.js EPS)
 // A live tempo change takes effect this far ahead of the audio clock, so no voice
 // is ever rescheduled into the past (the pump runs on a 100 ms timer).
@@ -237,7 +242,18 @@ export class AudioEngine {
               instrument: freq != null ? getInstrument(note) : null,
               // Its player (src/players.js): the first note of its line, and the note
               // it follows in the line (null for a first note).
-              ...(freq != null ? (() => { const pl = module.findPlayer ? module.findPlayer(note, instrumentMemo) : null; return pl ? { player: pl.head, prev: pl.prev } : {}; })() : {}),
+              ...(freq != null ? (() => {
+                const pl = module.findPlayer ? module.findPlayer(note, instrumentMemo) : null;
+                if (!pl) return {};
+                // Slurred (bowed instruments) when it starts exactly where the note it
+                // follows in its line ends: no rest between them, compared exactly.
+                let slur = false;
+                if (pl.prev != null) {
+                  const pc = evalCache.get(pl.prev);
+                  try { slur = !!(pc && pc.startTime && pc.duration && pc.frequency && pc.startTime.add(pc.duration).equals(cached.startTime)); } catch {}
+                }
+                return { player: pl.head, prev: pl.prev, slur };
+              })() : {}),
               // Relative gain on the per-note peak, clamped to [0, 4] (see
               // amplitude.js); exactly 1 when neither the note nor the
               // BaseNote defines an amplitude.
@@ -623,6 +639,7 @@ export class AudioEngine {
     for (const entry of Array.from(this.activeOscillators)) {
       if (entry.scoreStart == null || entry.scoreStart < cutScore) continue;
       this.activeOscillators.delete(entry);
+      this._restoreFaded(entry);
       try { entry.voice.stop(entry.startTime); } catch {}
       try { entry.voice.disconnect(); } catch {}
       try { entry.gainNode.disconnect(); } catch {}
@@ -673,6 +690,7 @@ export class AudioEngine {
       // Drop it from tracking first: the entry's own cleanup() timer checks
       // membership and will now bail, leaving this the only teardown.
       this.activeOscillators.delete(entry);
+      this._restoreFaded(entry);
       try { entry.voice.stop(entry.startTime); } catch {}
       try { entry.voice.disconnect(); } catch {}
       try { entry.gainNode.disconnect(); } catch {}
@@ -723,9 +741,22 @@ export class AudioEngine {
     // at exactly the old peak: x * 1 === x.
     const peak = initialVolume * (noteData.amplitude ?? 1);
 
+    // A line (src/players.js): a bowed note that starts exactly where the previous
+    // note of its line ends is slurred from it, unless it repeats its pitch (a new
+    // stroke). preparePlayback marks the notes that touch their predecessor.
+    let articulation = 'sustained';
+    try { articulation = this.instrumentManager.getInstrument(noteData.instrument)?.articulation || 'sustained'; } catch {}
+    const prevVoice = articulation === 'bowed' && noteData.slur && noteData.prev != null ? this._voiceOf(noteData.prev, start) : null;
+    const repeatsPitch = !!prevVoice && Math.abs(prevVoice.frequency - frequency) <= 1e-9 * frequency;
+    const slur = !!prevVoice && !repeatsPitch;
+
     // The note's end is a note-off: its release rings after it, so the voice
-    // lives for `length` seconds, the note and its tail.
-    const shape = { attack: noteData.attack ?? null, release: noteData.release ?? null };
+    // lives for `length` seconds, the note and its tail. A slurred note has no bow
+    // attack of its own: it enters over the crossfade.
+    const shape = {
+      attack: noteData.attack ?? (slur ? Math.min(1, SLUR_XFADE / Math.max(duration, 1e-3)) : null),
+      release: noteData.release ?? null,
+    };
     let length = duration + FALLBACK_TAIL;
     let times = null;
     try {
@@ -736,6 +767,17 @@ export class AudioEngine {
       console.warn('applyEnvelope failed', e);
     }
     this._makeRoomAt(start);
+    // The voice this one takes over from (a slur, a new stroke, a re-struck pitch)
+    // fades from the level it has at this note's start.
+    const faded = [];
+    if (slur) faded.push(this._fadeVoice(prevVoice, start, SLUR_XFADE, true));
+    else if (repeatsPitch) faded.push(this._fadeVoice(prevVoice, start, REBOW_FADE, false));
+    if (articulation === 'struck') {
+      for (const e of this.activeOscillators) {
+        if (e.instrument !== noteData.instrument || e.fade || !(e.startTime < start && e.endTime > start)) continue;
+        if (Math.abs(e.frequency - frequency) <= 1e-9 * frequency) faded.push(this._fadeVoice(e, start, DAMP_FADE, false));
+      }
+    }
 
     // Pitch-driven stereo pan (only when enabled and supported).
     let panner = null;
@@ -761,7 +803,7 @@ export class AudioEngine {
 
     // Stop once the release has reached zero (no click).
     try {
-      voice.start(start);
+      voice.start(start, slur ? (voice.bowOffset || 0) : 0);
       voice.stop(start + length);
     } catch {}
 
@@ -771,14 +813,14 @@ export class AudioEngine {
     // answered from its own scheduled time.
     const entry = {
       voice, gainNode, panner, startTime: start, scoreStart: timing ? timing.scoreStart : null, noteId: noteData.id, frequency,
-      // The note-off and the end of the tail (absolute ctx time), and the gain at a
-      // time in the release: what _makeRoomAt needs to steal it without a step.
+      instrument: noteData.instrument, slur,
+      // The note-off and the end of the tail (absolute ctx time), and the gain at
+      // any time: what a fade (_makeRoomAt, _fadeVoice) starts from, without a step.
       offTime: start + (times ? times.off : duration), endTime: start + length,
-      levelAt: times ? (x) => {
-        const p = Math.max(EPS_GAIN, peak), atOff = Math.max(EPS_GAIN, p * times.levelAtEnd);
-        const k = Math.min(1, Math.max(0, (x - start - times.off) / times.release));
-        return atOff * Math.pow(EPS_GAIN / atOff, k);
-      } : null,
+      levelAt: times ? (x) => envelopeGainAt(times, peak, x - start) : null,
+      times, peak,
+      // The voices this one faded (restored if it is cancelled before it sounds)
+      faded: faded.filter(Boolean),
     };
     this.activeOscillators.add(entry);
     if (this.activeOscillators.size > this.voiceStats.peak) this.voiceStats.peak = this.activeOscillators.size;
@@ -820,6 +862,7 @@ export class AudioEngine {
       }
       if (!victim) return;
       victim.stolen = true;
+      victim.fade = victim.fade || { at, origEnd: victim.endTime };
       try {
         const g = victim.gainNode.gain;
         g.cancelScheduledValues(at);
@@ -830,6 +873,66 @@ export class AudioEngine {
       } catch {}
       this.voiceStats.stolen++;
       sounding--;
+    }
+  }
+
+  /** The voice of note `noteId` sounding at `at` (the latest that began before it), or null. */
+  _voiceOf(noteId, at) {
+    let best = null;
+    for (const e of this.activeOscillators) {
+      if (e.noteId !== noteId || !(e.startTime < at) || !(e.endTime > at - 1e-3) || e.fade) continue;
+      if (!best || e.startTime > best.startTime) best = e;
+    }
+    return best;
+  }
+
+  /**
+   * Fade a voice out from `at` over `dur`, starting from the gain its envelope has
+   * there (the exponential is rebuilt up to that point, so there is no step);
+   * equal-power (a quarter cosine) for a slur's crossfade, linear otherwise.
+   * @returns {object|null} the entry, marked with its fade
+   */
+  _fadeVoice(e, at, dur, equalPower) {
+    if (!e || e.fade || !e.levelAt) return null;
+    try {
+      const g = e.gainNode.gain;
+      const L = Math.max(EPS_GAIN, e.levelAt(at));
+      g.cancelScheduledValues(at);
+      g.exponentialRampToValueAtTime(L, at);
+      if (equalPower) {
+        const N = 16, curve = new Float32Array(N);
+        for (let i = 0; i < N; i++) curve[i] = L * Math.cos((Math.PI / 2) * (i / (N - 1)));
+        g.setValueCurveAtTime(curve, at + 1e-4, dur);
+      } else {
+        g.linearRampToValueAtTime(0, at + dur);
+      }
+      e.voice.stop(at + dur + 0.01);
+      e.fade = { at, origEnd: e.endTime };
+      e.endTime = at + dur + 0.01;
+    } catch { return null; }
+    return e;
+  }
+
+  /**
+   * Undo a fade whose cause never sounds (the voice that faded it was cancelled:
+   * a live tempo change, a loop switched off): when the fade began in the faded
+   * voice's release, that release is rebuilt as it was.
+   */
+  _restoreFaded(entry) {
+    for (const e of entry.faded || []) {
+      if (!e.fade || !this.activeOscillators.has(e) || !e.times) continue;
+      const at = e.fade.at;
+      if (at < e.offTime - 1e-9) continue;   // faded in its body: left faded (rare)
+      try {
+        const g = e.gainNode.gain;
+        g.cancelScheduledValues(at);
+        g.exponentialRampToValueAtTime(Math.max(EPS_GAIN, e.levelAt(at)), at);
+        g.exponentialRampToValueAtTime(EPS_GAIN, e.startTime + e.times.end);
+        g.linearRampToValueAtTime(0, e.startTime + e.times.end + 0.004);
+        e.voice.stop(e.fade.origEnd);
+        e.endTime = e.fade.origEnd;
+        e.fade = null;
+      } catch {}
     }
   }
 

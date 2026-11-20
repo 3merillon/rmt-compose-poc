@@ -11,7 +11,7 @@ ten-second one.
 
 ::: warning There is no `StreamingScheduler` class
 Do not go looking for one. The scheduler is a **closure** — `const pump = () => {…}` — over a mutable
-state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:343-457`). There is no
+state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:359-473`). There is no
 scheduler file, no scheduler object, and no `scheduler.debug` flag.
 :::
 
@@ -129,14 +129,14 @@ and quits (and for a module shorter than the lookahead, it quits immediately).
 
 | Constant | Value | Scope |
 |---|---|---|
-| `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:351`) |
-| `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:352`) — not `SCHEDULE_INTERVAL` |
+| `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:367`) |
+| `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:368`) — not `SCHEDULE_INTERVAL` |
 | `FALLBACK_TAIL` | **0.15 s** | module-level (`:22`); the voice's tail past the note only if its envelope cannot be computed |
 | `MIN_LOOP_PERIOD` | **0.05 s** | module-level (`:13`) |
 | `MAX_CYCLES_PER_BATCH` | **64** | module-level (`:17`) |
 | `SEAM_EPS` | **1e-6** | module-level (`:19`) |
 | `DECLICK_FADE` | **0.02 s** | module-level (`:9`) |
-| `RATE_CHANGE_LEAD` | **0.05 s** | module-level (`:32`): how far ahead of the clock a tempo change takes effect |
+| `RATE_CHANGE_LEAD` | **0.05 s** | module-level (`:37`): how far ahead of the clock a tempo change takes effect |
 
 There is no `MIN_NOTE_DURATION`. Short notes are handled by the envelope's attack/release floors and
 its 1 ms duration floor — see
@@ -194,8 +194,8 @@ A module may transpose each repeat: its BaseNote's `repeat`, the ratio from one 
 which refuses anything outside 1/16 to 16) and hands
 `play()` a `transpose` option, `{ ratio, fold, offset }`: the ratio, the fold preference (Settings → Audio → Loop →
 Keep within an octave) and the pass the playback starts in (kept across Pause and seeks, 0 after Stop). Without it
-nothing is transposed (`_transposeState`, `audio-engine.js:495`). The pump hands each voice the factor of
-its pass, `_passFactor(s, s.cycle)` (`audio-engine.js:505`): `passTransposition(ratio, offset + cycle, fold)`, exact, folded into one
+nothing is transposed (`_transposeState`, `audio-engine.js:511`). The pump hands each voice the factor of
+its pass, `_passFactor(s, s.cycle)` (`audio-engine.js:521`): `passTransposition(ratio, offset + cycle, fold)`, exact, folded into one
 octave (`[1, 2)` rising, `(1/2, 1]` falling) by exact comparison, then made a float once per pass. `_scheduleNote()`
 multiplies the written frequency by it and takes the tempered twin and the stereo place from the transposed pitch.
 `_prepareTransposed()` decodes every zone of the sampled instruments the notes use, so a later pass never falls back
@@ -257,7 +257,7 @@ rate from a clock instant on. `scoreAt(c)` and `clockAt(s)` are the only things 
 playhead ask of it, so a tempo curve (an accelerando drawn over time) can later replace a segment's
 linear law by its integral without touching either.
 
-`setRate(rate)` (`src/player/audio-engine.js:611`) does four things:
+`setRate(rate)` (`src/player/audio-engine.js:627`) does four things:
 
 1. **Splits the map** `RATE_CHANGE_LEAD` (50 ms) ahead of the clock (`TimeMap.setRate`,
    `time-map.js:61`). Everything before that instant keeps the times it had, so the playhead does not
@@ -274,7 +274,7 @@ pair of notes one score interval apart; the clock gap across it is the same as i
 `getLoopEndTime()` recomputes the final seam's clock time from the map, so a tempo change after a
 disarm moves it too, and the playhead stops where the sound does.
 
-**The playhead** follows `scoreElapsed()` (`:594`), the score time through the same map, plus the
+**The playhead** follows `scoreElapsed()` (`:610`), the score time through the same map, plus the
 time the playback started from. It no longer derives its position from `ctx.currentTime` directly.
 
 **Commit tempo** (`commitLiveTempo()`, `src/player.js:3882`) writes the rate into the piece. The live
