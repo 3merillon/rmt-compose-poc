@@ -65,7 +65,7 @@ Every field is optional. An omitted field falls back to the **class default** be
 | `release` | expression string | none | The same, for the fall after the end of a note: a share of the duration counted from the note's end, `0`–`4`. |
 | `color` | CSS color string | none | Accepted by the loader and the exporter. No shipped module uses it. |
 | `instrument` | instrument name | none → the `audio.defaultInstrument` setting | See [Instruments](#instruments). |
-| `repeat` | expression string | none | The frequency the BaseNote takes on the next repeat of a loop, e.g. `(9/8) * base.f`: each repeat sounds the ratio `repeat / base.f` higher than the last. Playback and display only; see [loop playback](/user-guide/playback/transport#rising-or-falling-each-time-round). |
+| `repeat` | expression string | none | The ratio from one repeat of a loop to the next, e.g. `9/8`, `2^(1/6)` or `[24].f / base.f`, between 1/16 and 16: each repeat sounds that much higher than the last. Playback and display only; see [loop playback](/user-guide/playback/transport#rising-or-falling-each-time-round). |
 
 The first three rows are the **language**: the BaseNote's frequency, start and duration are the only absolute values in a module, and every other note relates to them. `amplitude`, `attack` and `release` are **interpretation variables**: how the notes sound, not what they relate to.
 

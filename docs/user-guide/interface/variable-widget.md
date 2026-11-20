@@ -249,7 +249,7 @@ The BaseNote's row follows the same rules: with nothing pinned it reads **`Inher
 
 ## Repeat
 
-The BaseNote's widget has a **`REPEAT`** row: the frequency the BaseNote takes on the next repeat of a loop (long-press Play), written as a relation, for example `(9/8) * base.f`. `Evaluated:` shows the ratio from one repeat to the next, `(9/8) each repeat (203.9¢)`, or `none: repeats as written`. Save an empty `Raw:` to remove it. A value that does not evaluate is refused with an error and the old one is kept. The same value appears as **Transpose each repeat by** in Settings → Audio → Loop. While such a loop plays, every frequency the widget shows is that of the pass being heard, marked `(repeat k)`. See [loop playback](/user-guide/playback/transport#rising-or-falling-each-time-round).
+The BaseNote's widget has a **`REPEAT`** row: the ratio from one repeat of a loop (long-press Play) to the next, for example `9/8` (a whole tone up), `3/2`, `2^(1/6)` or `[24].f / base.f`. `Evaluated:` shows it, `(9/8) each repeat (203.9¢)`, or `none: repeats as written`. Save an empty `Raw:` to remove it. A value that does not evaluate, or lies outside 1/16 to 16, is refused with an error and the old one is kept. The same value appears as **Transpose each repeat by** in Settings → Audio → Loop. While such a loop plays, every frequency the widget shows is that of the pass being heard, marked `(repeat k)`. See [loop playback](/user-guide/playback/transport#rising-or-falling-each-time-round).
 
 ## Add Note / Silence
 

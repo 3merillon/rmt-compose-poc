@@ -144,7 +144,7 @@ In **Independent up/down** mode a **Down interval (ratio)** row renders below th
 |---|---|---|---|---|
 | **Master volume** | slider, `%` | 0 – 1, step 0.01 | 100% | — |
 | **Default instrument** | dropdown | eleven names | `sine-wave` | — |
-| **Transpose each repeat by** | ratio editor (n / d, with cents) | 1/16 – 16 | the module's | Not a setting: the current module's own repeat (its BaseNote's `repeat`), saved with the module, written as `(n/d) * base.f` (1/1 removes it). Clean Slate and a new composition start at 1/1. A tempered repeat is shown here and edited in the BaseNote's REPEAT row. |
+| **Transpose each repeat by** | ratio editor (n / d, with cents) | 1/16 – 16 | the module's | Not a setting: the current module's own repeat (its BaseNote's `repeat`), saved with the module, written as `n/d` (1/1 removes it). Clean Slate and a new composition start at 1/1. A tempered repeat is shown here and edited in the BaseNote's REPEAT row. |
 | **Keep within an octave** | toggle | on / off | on | "Six pure whole tones are an octave and a comma, so a rise never comes home: on, the repeats drop an octave each time they pass one, and the loop can go on for ever; off, they keep climbing." |
 | **Most voices at once** | dropdown | 128 / 256 / 512 / 1024 / 2048 / 4096 | 256 | "Above it, the quietest note already ringing after its end fades out first; a note is never cut before its end. Each voice costs processor time: one core plays about 2,000 sine, organ or harmonium voices, 1,700 piano or violin, 600–700 square, sawtooth or fm-epiano (measured on one computer)." |
 | *Pure / Tempered* | | | | |

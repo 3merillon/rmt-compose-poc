@@ -8,9 +8,11 @@
  *      are exactly 531441/524288 and a tempered whole tone 2^(1/6) comes home to 1
  *      after six passes.
  *   B. The BaseNote's `repeat` is kept as written and survives save and load.
- *   C. moduleRepeatRatio: `(9/8) * base.f` is exactly 9/8; `[N].f` is that note's
- *      ratio to the BaseNote; `2^(1/6) * base.f` stays irrational (exact); a
- *      module without one, or with one that does not evaluate, has none.
+ *   C. moduleRepeatRatio: the repeat is the ratio itself: `9/8` is exactly 9/8 (and
+ *      `3/2` rises a fifth: the owner's case, which first fell as 3/2 Hz against
+ *      263); `[N].f / base.f` is that note's ratio; `2^(1/6)` stays irrational
+ *      (exact); a module without one, one that does not evaluate, or one outside
+ *      1/16 to 16 has none.
  *   D. The display: shownFrequency multiplies a written frequency by the pass on
  *      screen, exactly; clearing it shows the written value again.
  *
@@ -53,32 +55,39 @@ console.log('\nPass factors\n');
 console.log('\nThe module\'s own repeat\n');
 const canon = JSON.parse(readFileSync(join(here, '..', 'public', 'modules', 'defaultModule.json'), 'utf8'));
 {
-  const m = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '(9/8) * base.f' } });
-  check(m.baseNote.getVariable('repeat') === '(9/8) * base.f', 'B1 the BaseNote keeps its repeat as written');
+  const m = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '9/8' } });
+  check(m.baseNote.getVariable('repeat') === '9/8', 'B1 the BaseNote keeps its repeat as written');
   const saved = m.createModuleJSON();
   const again = await Module.loadFromJSON(saved);
-  check(saved.baseNote.repeat === '(9/8) * base.f' && again.baseNote.getVariable('repeat') === '(9/8) * base.f', 'B2 it survives save and load');
-  check(eq(DT.moduleRepeatRatio(m), F(9, 8)), 'C1 (9/8) * base.f: exactly 9/8');
-  const n24 = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '[24].f' } });
+  check(saved.baseNote.repeat === '9/8' && again.baseNote.getVariable('repeat') === '9/8', 'B2 it survives save and load');
+  check(eq(DT.moduleRepeatRatio(m), F(9, 8)), 'C1 9/8: exactly 9/8');
+  const fifth = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '3/2' } });
+  check(eq(DT.moduleRepeatRatio(fifth), F(3, 2)), 'C1b 3/2: a fifth up each repeat (not 3/2 Hz)');
+  const n24 = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '[24].f / base.f' } });
   const want24 = X.div(n24.getNoteById(24).getExactVariable('frequency'), n24.baseNote.getExactVariable('frequency'));
-  check(eq(DT.moduleRepeatRatio(n24), want24), `C2 [24].f: note 24's ratio to the BaseNote (${X.toText ? X.toText(want24) : want24})`);
-  const t = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '2^(1/6) * base.f' } });
+  check(eq(DT.moduleRepeatRatio(n24), want24), `C2 [24].f / base.f: note 24's ratio to the BaseNote (${X.toText ? X.toText(want24) : want24})`);
+  const t = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '2^(1/6)' } });
   const rt = DT.moduleRepeatRatio(t);
-  check(rt && X.isIrrational(rt) && eq(rt, X.pow(F(2), F(1, 6))), 'C3 2^(1/6) * base.f: exactly 2^(1/6), irrational');
+  check(rt && X.isIrrational(rt) && eq(rt, X.pow(F(2), F(1, 6))), 'C3 2^(1/6): exactly 2^(1/6), irrational');
   { const { repeat: _r, ...plainBase } = canon.baseNote; check(DT.moduleRepeatRatio(await Module.loadFromJSON({ ...canon, baseNote: plainBase })) === null, 'C4 a module that sets none has none'); }
   const bad = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '(9/8) * ' } });
   const warn = console.warn; console.warn = () => {};
   const rb = DT.moduleRepeatRatio(bad);
   console.warn = warn;
   check(rb === null, 'C5 one that does not evaluate gives none (and a warning), never a wrong key');
+  const far = await Module.loadFromJSON({ ...canon, baseNote: { ...canon.baseNote, repeat: '(9/8) * base.f' } });
+  console.warn = () => {};
+  const rf = DT.moduleRepeatRatio(far);
+  console.warn = warn;
+  check(rf === null, 'C5b a frequency instead of a ratio (263 · 9/8) is outside 1/16 to 16: refused, never played');
 }
 
 {
   const { repeatExprForRatio, setModuleRepeat } = DT;
-  check(repeatExprForRatio(9, 8) === '(9/8) * base.f' && repeatExprForRatio(1, 1) === null, 'C6 the ratio editor writes (9/8) * base.f, and nothing for 1/1');
+  check(repeatExprForRatio(9, 8) === '9/8' && repeatExprForRatio(1, 1) === null, 'C6 the ratio editor writes 9/8, and nothing for 1/1');
   const m = await Module.loadFromJSON(canon);
   setModuleRepeat(m, repeatExprForRatio(9, 8));
-  check(eq(DT.moduleRepeatRatio(m), F(9, 8)) && m.createModuleJSON().baseNote.repeat === '(9/8) * base.f', 'C7 set from the ratio editor: the module repeats 9/8, and saves it');
+  check(eq(DT.moduleRepeatRatio(m), F(9, 8)) && m.createModuleJSON().baseNote.repeat === '9/8', 'C7 set from the ratio editor: the module repeats 9/8, and saves it');
   m.clearAllNotes(); setModuleRepeat(m, null);
   check(DT.moduleRepeatRatio(m) === null && m.createModuleJSON().baseNote.repeat === undefined, 'C8 Clean Slate: no repeat, nothing saved');
   const shipped = await Module.loadFromJSON(canon);

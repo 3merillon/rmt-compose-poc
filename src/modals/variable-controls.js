@@ -849,7 +849,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
       } else if (key === 'attack' || key === 'release') {
         variableValueDiv.appendChild(makeHint("A share of the note's duration, e.g. 1/8", true));
       } else if (key === 'repeat') {
-        variableValueDiv.appendChild(makeHint('The frequency the BaseNote takes on the next repeat of a loop, e.g. (9/8) * base.f. Empty: none.', true));
+        variableValueDiv.appendChild(makeHint('The ratio from one repeat of a loop to the next, e.g. 9/8 (a whole tone up) or [24].f / base.f. Empty: none.', true));
       }
     } catch {}
 
@@ -868,7 +868,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           setModuleRepeat(moduleInstance, text || null);
           if (text && !moduleRepeatRatio(moduleInstance)) {
             setModuleRepeat(moduleInstance, prev);
-            showError('Not a repeat: write the frequency the BaseNote takes on the next repeat, for example (9/8) * base.f');
+            showError('Not a repeat: write the ratio from one repeat to the next, between 1/16 and 16, for example 9/8');
             return;
           }
           try {

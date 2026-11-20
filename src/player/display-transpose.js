@@ -7,13 +7,14 @@
  * pass's factor, exact. Ratios between notes do not change. The module is never
  * touched: Stop (or the end of playback) clears it.
  *
- * Also the module's own repeat: the BaseNote's `repeat`, an expression giving the
- * frequency the BaseNote takes on the next repeat (`(9/8) * base.f`, `[24].f`,
- * `2^(1/6) * base.f`). Its ratio to base.f is the transposition from one pass to
- * the next. It belongs to the module and nothing else (the owner: "shouldn't be
- * imposed on the composer"): saved with it, cleared by Clean Slate, absent from a
- * new composition; Settings → Audio → Loop and the BaseNote's REPEAT row both edit
- * this one value.
+ * Also the module's own repeat: the BaseNote's `repeat`, the RATIO from one
+ * repeat to the next, as an expression of the module (`9/8`, `3/2`, `2^(1/6)`,
+ * `[24].f / base.f`). It belongs to the module and nothing else (the owner:
+ * "shouldn't be imposed on the composer"): saved with it, cleared by Clean Slate,
+ * absent from a new composition; Settings → Audio → Loop and the BaseNote's REPEAT
+ * row both edit this one value. (A first version read it as the frequency of the
+ * next repeat's BaseNote; the owner typed 3/2 and heard it fall: 3/2 Hz against
+ * 263 Hz. A ratio is what one writes.)
  */
 import Fraction from 'fraction.js';
 import * as X from '../value/exact.js';
@@ -73,11 +74,10 @@ export function passTransposition(ratio, pass, fold) {
   return v;
 }
 
-/**
- * The module's own repeat ratio: its BaseNote's `repeat` expression evaluated in
- * the module, divided by base.f; exact (rational, or irrational for a tempered
- * repeat). null when the module sets none or it does not evaluate.
- */
+/** The ratios a repeat may have: between 1/16 and 16, as the ratio editors allow. */
+export const REPEAT_MIN = 1 / 16, REPEAT_MAX = 16;
+
+/** Set (or, with null or '', remove) the module's repeat; emits `module:repeatChanged`. */
 export function setModuleRepeat(module, expr) {
   if (!module || !module.baseNote) return false;
   const text = expr == null ? '' : String(expr).trim();
@@ -86,11 +86,16 @@ export function setModuleRepeat(module, expr) {
   return true;
 }
 
-/** The repeat written as a plain ratio of base.f: `(n/d) * base.f` (or none, for 1/1). */
+/** The repeat written as a plain ratio: `n/d` (or none, for 1/1). */
 export function repeatExprForRatio(n, d) {
-  return n === d ? null : `(${n}/${d}) * base.f`;
+  return n === d ? null : `${n}/${d}`;
 }
 
+/**
+ * The module's own repeat ratio: its BaseNote's `repeat` expression evaluated in
+ * the module; exact (rational, or irrational for a tempered repeat). null when
+ * the module sets none, or when it does not evaluate to a ratio between 1/16 and 16.
+ */
 export function moduleRepeatRatio(module) {
   const src = module && module.baseNote && module.baseNote.properties && module.baseNote.properties.repeat;
   if (!src || typeof src !== 'string') return null;
@@ -99,11 +104,14 @@ export function moduleRepeatRatio(module) {
     const cache = module.getEvaluationCache();
     const ev = new BinaryEvaluator(module);
     const r = ev.evaluate(binary, cache);
-    const value = ev._lastExact || (r && typeof r.n === 'bigint' ? new Fraction(r.s * r.n, r.d) : null);
-    const base = module.baseNote.getExactVariable ? module.baseNote.getExactVariable('frequency') : module.baseNote.getVariable('frequency');
-    if (!value || !base || X.isZero(base)) return null;
-    const ratio = X.div(value, base);
-    return X.toNumber(ratio, NaN) > 0 ? ratio : null;
+    const ratio = ev._lastExact || (r && typeof r.n === 'bigint' ? new Fraction(r.s * r.n, r.d) : null);
+    if (!ratio) return null;
+    const x = X.toNumber(ratio, NaN);
+    if (!(x >= REPEAT_MIN && x <= REPEAT_MAX)) {
+      console.warn(`[RMT] repeat ${src} is ${x}: a repeat is a ratio between 1/16 and 16 (for example 9/8)`);
+      return null;
+    }
+    return ratio;
   } catch (e) {
     console.warn('[RMT] repeat: could not evaluate', src, e && e.message);
     return null;

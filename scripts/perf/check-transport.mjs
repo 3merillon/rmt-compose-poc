@@ -137,7 +137,7 @@ check(`the voice limit holds (${lim.max})`, lim.worst <= lim.max && lim.stolen >
 const lt = await page.evaluate(async () => {
   const ae = window.__ae, mod = window.__rmtPerf.getModuleRef();
   const DT = await import('/src/player/display-transpose.js');
-  DT.setModuleRepeat(mod, '(9/8) * base.f');
+  DT.setModuleRepeat(mod, '9/8');
   const ratio = DT.moduleRepeatRatio(mod);
   const list = await ae.preparePlayback(mod, 0);
   const end = mod.getModuleEndTime();
@@ -160,7 +160,7 @@ check('loop transposition 9/8: each pass a whole tone above the last, folded int
   `${lt.length} voices over passes ${[...passes].sort((a, b) => a - b).join(',')}; pass 6 at ${(lt.find(([, p]) => p === 6) || [0, 0, NaN])[2].toFixed?.(6)} (531441/524288 = ${(531441 / 524288).toFixed(6)})${bad.length ? '; wrong: ' + JSON.stringify(bad.slice(0, 3)) : ''}`);
 
 // 10. The same through the player and on screen: a module that repeats 9/8, looped with Shift+click on Play.
-await page.evaluate(async () => { const DT = await import('/src/player/display-transpose.js'); DT.setModuleRepeat(window.__rmtPerf.getModuleRef(), '(9/8) * base.f'); });
+await page.evaluate(async () => { const DT = await import('/src/player/display-transpose.js'); DT.setModuleRepeat(window.__rmtPerf.getModuleRef(), '9/8'); });
 const label = () => page.evaluate(() => `${window.__rmtRenderer._baseFracNum}/${window.__rmtRenderer._baseFracDen}`);
 const written = await label();
 await page.click('#playPauseBtn', { modifiers: ['Shift'] });

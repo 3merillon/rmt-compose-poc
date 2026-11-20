@@ -189,8 +189,9 @@ When `fromTime === 0` the promise is shared rather than evaluated twice.
 
 ### Transposed passes
 
-A module may transpose each repeat: its BaseNote's `repeat` (an expression, e.g. `(9/8) * base.f`; see
-`src/player/display-transpose.js`). `player.js` reads its ratio to `base.f` exactly (`moduleRepeatRatio`) and hands
+A module may transpose each repeat: its BaseNote's `repeat`, the ratio from one repeat to the next (an expression, e.g.
+`9/8` or `[24].f / base.f`; see `src/player/display-transpose.js`). `player.js` evaluates it exactly (`moduleRepeatRatio`,
+which refuses anything outside 1/16 to 16) and hands
 `play()` a `transpose` option, `{ ratio, fold, offset }`: the ratio, the fold preference (Settings → Audio → Loop →
 Keep within an octave) and the pass the playback starts in (kept across Pause and seeks, 0 after Stop). Without it
 nothing is transposed (`_transposeState`, `audio-engine.js:495`). The pump hands each voice the factor of
