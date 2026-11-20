@@ -8,6 +8,7 @@ import { updateStackClickSelectedNote } from './stack-click.js';
 import { eventBus } from './utils/event-bus.js';
 import { audioEngine } from './player/audio-engine.js';
 import { setModule, setEvaluatedNotes } from './store/app-state.js';
+import { moduleSnapshot } from './store/history.js';
 import { multiplyExpressionByFraction } from './utils/simplify.js';
 import { Workspace, startParentIdFromRaw, measureChainLinkParentId } from './renderer/webgl2/workspace.js';
 import { isMeasureNote, EXPRESSION_VARS } from './note.js';
@@ -923,13 +924,14 @@ document.addEventListener('DOMContentLoaded', async function() {
     let evaluatedNotes = myModule.evaluateModule();
     setEvaluatedNotes(evaluatedNotes);
     // Ensure a true baseline exists before any first user action (color edit, drag, etc.)
+    // (as the text, which also leaves each note's text kept for the first edit)
     try {
       const snap =
         (myModule && typeof myModule.createModuleJSON === 'function')
-          ? myModule.createModuleJSON()
-          : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+          ? moduleSnapshot(myModule)
+          : (typeof createModuleJSON === 'function' ? { snapshot: createModuleJSON() } : null);
       if (snap) {
-        eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap });
+        eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap });
       }
     } catch {}
     let newNotes = Object.keys(evaluatedNotes).filter(id => Number(id) !== 0).map(id => evaluatedNotes[id]).filter(note =>
@@ -5629,6 +5631,23 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 /* ===== History Integration (Undo/Redo) ===== */
 
 function captureSnapshot(label = 'Change') {
+  // The module's JSON text, made without serializing every note again
+  // (Module.createModuleJSONString: the same text as JSON.stringify of
+  // createModuleJSON()). Undo history and the autosave both take the string.
+  let text = null;
+  try {
+    if (myModule && typeof myModule.createModuleJSONString === 'function') text = myModule.createModuleJSONString();
+  } catch (e) {
+    text = null; // serialized below as before, which reports what failed
+  }
+  if (text != null) {
+    try {
+      // Ensure a baseline exists so the very first user action (color edit, drag) can be undone independently
+      try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshotStr: text }); } catch {}
+      eventBus.emit('history:capture', { label, snapshotStr: text });
+    } catch (e) {}
+    return;
+  }
   try {
     const snap = myModule && typeof myModule.createModuleJSON === 'function'
       ? myModule.createModuleJSON()

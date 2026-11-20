@@ -4,6 +4,7 @@
 import { setModuleRepeat, moduleRepeatRatio } from '../player/display-transpose.js';
 import { validateExpression } from './validation.js';
 import { eventBus } from '../utils/event-bus.js';
+import { moduleSnapshot } from '../store/history.js';
 import Fraction from 'fraction.js';
 import { getModule, setEvaluatedNotes, getInstrumentManager } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
@@ -684,10 +685,10 @@ function buildInstrumentControl(value, note, externalFunctions) {
       refreshModals(note, null);
       // History snapshot: instrument change
       try {
-        const snap = getModule().createModuleJSON();
+        const snap = moduleSnapshot(getModule());
         // Ensure baseline exists so first action can be undone independently
-        try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
-        eventBus.emit('history:capture', { label: `Edit instrument Note ${note.id}`, snapshot: snap });
+        try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
+        eventBus.emit('history:capture', { label: `Edit instrument Note ${note.id}`, ...snap });
       } catch {}
     } catch (err) {
       console.error('Error updating instrument:', err);
@@ -714,10 +715,10 @@ function buildInstrumentControl(value, note, externalFunctions) {
         refreshModals(note, null);
         // History snapshot: instrument reset to inherited
         try {
-          const snap = getModule().createModuleJSON();
+          const snap = moduleSnapshot(getModule());
           // Ensure baseline exists so first action can be undone independently
-          try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
-          eventBus.emit('history:capture', { label: `Reset instrument Note ${note.id}`, snapshot: snap });
+          try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
+          eventBus.emit('history:capture', { label: `Reset instrument Note ${note.id}`, ...snap });
         } catch {}
       } catch (err) {
         console.error('Error resetting instrument:', err);
@@ -872,9 +873,9 @@ export function createVariableControls(key, value, note, measureId, externalFunc
             return;
           }
           try {
-            const snap = getModule().createModuleJSON();
-            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
-            eventBus.emit('history:capture', { label: text ? `Repeat ${text}` : 'Repeat as written', snapshot: snap });
+            const snap = moduleSnapshot(getModule());
+            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
+            eventBus.emit('history:capture', { label: text ? `Repeat ${text}` : 'Repeat as written', ...snap });
           } catch {}
           refreshModals(note, null);
           return;
@@ -893,10 +894,10 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           }
           // History snapshot: color edit
           try {
-            const snap = getModule().createModuleJSON();
+            const snap = moduleSnapshot(getModule());
             // Ensure baseline exists so first color change (first action) can be undone
-            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
-            eventBus.emit('history:capture', { label: `Edit color Note ${note.id}`, snapshot: snap });
+            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
+            eventBus.emit('history:capture', { label: `Edit color Note ${note.id}`, ...snap });
           } catch {}
           refreshModals(note, null);
           return;
@@ -914,9 +915,9 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           }
           refreshModals(note, measureId);
           try {
-            const snap = getModule().createModuleJSON();
-            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
-            eventBus.emit('history:capture', { label: `Reset ${key} Note ${note?.id}`, snapshot: snap });
+            const snap = moduleSnapshot(getModule());
+            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
+            eventBus.emit('history:capture', { label: `Reset ${key} Note ${note?.id}`, ...snap });
           } catch {}
           return;
         }
@@ -980,10 +981,10 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         // History snapshot: generic variable edit
         try {
           const idLabel = (measureId !== null && measureId !== undefined) ? `Measure ${measureId}` : `Note ${note?.id}`;
-          const snap = getModule().createModuleJSON();
+          const snap = moduleSnapshot(getModule());
           // Ensure baseline exists so first action can be undone independently
-          try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
-          eventBus.emit('history:capture', { label: `Edit ${key} ${idLabel}`, snapshot: snap });
+          try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap }); } catch {}
+          eventBus.emit('history:capture', { label: `Edit ${key} ${idLabel}`, ...snap });
         } catch {}
       } catch (err) {
         console.error('Error saving variable', key, 'for note', note?.id, ':', err);

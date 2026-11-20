@@ -3,6 +3,7 @@
 //   - createAddNoteSection(note, isBase, externalFunctions) => HTMLElement
 //   - createAddMeasureSection(note, measureId, externalFunctions) => HTMLElement
 import { eventBus } from '../utils/event-bus.js';
+import { moduleSnapshot } from '../store/history.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { compileDSL, decompileToDSL } from '../dsl/index.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
@@ -164,8 +165,8 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
 
       // History snapshot
       try {
-        const snap = module.createModuleJSON ? module.createModuleJSON() : null;
-        if (snap) eventBus.emit('history:capture', { label: 'Add Measure', snapshot: snap });
+        const snap = module.createModuleJSON ? moduleSnapshot(module) : null;
+        if (snap) eventBus.emit('history:capture', { label: 'Add Measure', ...snap });
       } catch {}
     } catch (e) {
       console.error('Error adding measure:', e);
@@ -558,10 +559,10 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
 
       // History snapshot
       try {
-        const snap = module.createModuleJSON ? module.createModuleJSON() : null;
+        const snap = module.createModuleJSON ? moduleSnapshot(module) : null;
         if (snap) {
           const lbl = `Add ${isSilence ? 'Silence' : isReference ? 'Reference' : isKeyChange ? 'Key change' : 'Note'} ${newNote.id}`;
-          eventBus.emit('history:capture', { label: lbl, snapshot: snap });
+          eventBus.emit('history:capture', { label: lbl, ...snap });
         }
       } catch {}
     } catch (err) {

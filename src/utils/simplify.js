@@ -94,6 +94,55 @@ function safeEquivalent(oldExpr, newExpr, moduleInstance) {
   }
 }
 
+/** A note's exact values as the evaluator reads them from a record (recordValue). */
+function noteRecord(note) {
+  return {
+    startTime: note.getExactVariable?.('startTime'),
+    duration: note.getExactVariable?.('duration'),
+    frequency: note.getExactVariable?.('frequency'),
+    amplitude: note.getExactVariable?.('amplitude'),
+    attack: note.getExactVariable?.('attack'),
+    release: note.getExactVariable?.('release')
+  };
+}
+
+/**
+ * The module's evaluated values as BinaryEvaluator.evaluate() reads them:
+ * `get(id)` gives the record of note `id`. The evaluator asks only for the notes
+ * the expression references (and the BaseNote), so each record is built when
+ * first asked for. Building one for every note of the module, as this used to,
+ * made each check cost the module's size (twice per octave step on a
+ * 20,000-note module: most of the step). What a record holds, and which ids
+ * have one, are unchanged.
+ */
+function noteRecords(moduleInstance) {
+  const records = new Map();
+  if (moduleInstance) {
+    // Bring the evaluation up to date first, as building every record did
+    try { moduleInstance.getEvaluationCache?.(); } catch {}
+  }
+  const build = (id) => {
+    if (!moduleInstance) return undefined;
+    const noteObj = (moduleInstance.notes || {})[id];
+    if (noteObj) {
+      try { return noteRecord(noteObj); } catch {}
+    }
+    // The BaseNote, also when the module's own entry for it is missing or failed
+    if (id === 0 && moduleInstance.baseNote) {
+      try { return noteRecord(moduleInstance.baseNote); } catch {}
+    }
+    return undefined;
+  };
+  return {
+    get(id) {
+      if (records.has(id)) return records.get(id);
+      const rec = build(id);
+      records.set(id, rec);
+      return rec;
+    }
+  };
+}
+
 /**
  * Safely evaluate an expression using binary compilation.
  * SECURITY: This function DOES NOT use eval() or new Function().
@@ -118,43 +167,10 @@ function evaluateExpr(expr, moduleInstance) {
     }
   }
 
-  // Build eval cache
-  const evalCache = new Map();
-  if (moduleInstance) {
-    const baseNote = moduleInstance.baseNote;
-    if (baseNote) {
-      try {
-        evalCache.set(0, {
-          startTime: baseNote.getExactVariable('startTime'),
-          duration: baseNote.getExactVariable('duration'),
-          frequency: baseNote.getExactVariable('frequency'),
-          amplitude: baseNote.getExactVariable('amplitude'),
-          attack: baseNote.getExactVariable('attack'),
-          release: baseNote.getExactVariable('release')
-        });
-      } catch {}
-    }
-    for (const id in moduleInstance.notes || {}) {
-      const noteObj = moduleInstance.notes[id];
-      if (noteObj) {
-        try {
-          evalCache.set(parseInt(id, 10), {
-            startTime: noteObj.getExactVariable?.('startTime'),
-            duration: noteObj.getExactVariable?.('duration'),
-            frequency: noteObj.getExactVariable?.('frequency'),
-            amplitude: noteObj.getExactVariable?.('amplitude'),
-            attack: noteObj.getExactVariable?.('attack'),
-            release: noteObj.getExactVariable?.('release')
-          });
-        } catch {}
-      }
-    }
-  }
-
   // Evaluate using safe binary evaluator
   try {
     const evaluator = new BinaryEvaluator(moduleInstance);
-    const shadowValue = evaluator.evaluate(binary, evalCache);
+    const shadowValue = evaluator.evaluate(binary, noteRecords(moduleInstance));
     if (shadowValue == null) return null;
     const value = evaluator._lastExact ?? new Fraction(shadowValue.s * shadowValue.n, shadowValue.d);
     return { value, corrupted: !!evaluator._lastEvalWasCorrupted };

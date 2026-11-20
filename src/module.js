@@ -45,6 +45,74 @@ export function getDefaultInstrument() {
 // dependents are already dirty
 const NO_DEPENDENTS = [];
 
+/** A note (not the BaseNote) as saved in the module JSON. */
+function noteJSON(note) {
+  const noteObj = { id: note.id };
+  for (const name of EXPRESSION_VARS) {
+    const source = note.getExpressionSource(name);
+    if (source) {
+      noteObj[name] = source;
+    }
+  }
+  if (note.properties.color) noteObj.color = note.properties.color;
+  if (note.properties.instrument) noteObj.instrument = note.properties.instrument;
+  if (note.properties.measure) noteObj.measure = true;
+  return noteObj;
+}
+
+// noteJSONText() reads the six variables by name, in this order; with any
+// other list it keeps nothing and every note is serialized each time.
+const KEEPS_NOTE_TEXT = EXPRESSION_VARS.join() === 'startTime,duration,frequency,amplitude,attack,release';
+
+const isPrimitive = (v) => v === null || (typeof v !== 'object' && typeof v !== 'function');
+
+/**
+ * What getExpressionSource() returns for this expression when that is decided by
+ * fields alone: null when it is empty, else its source text. An expression with
+ * bytecode and no source text is decompiled instead: '' says so.
+ */
+const keptSource = (e) => (e && e.length !== 0 ? e.sourceText : null);
+/** Whether keptSource() gave what getExpressionSource() gives. */
+const byFields = (s) => s === null || (typeof s === 'string' && s !== '');
+
+/**
+ * { id, text }: JSON.stringify(noteJSON(note)). The note keeps it (note._savedJSON)
+ * with every input of noteJSON() it was made from, and it is used again while
+ * those all read the same: the id, the colour, the instrument, the measure flag
+ * and, for each variable, whether it is empty and its source text. Those are
+ * read straight from the fields (getExpressionSource for every variable of
+ * every note costs several times more). Nothing is kept for a note whose
+ * colour or instrument is an object (it could change in place) or with an
+ * expression that has no source text (decompiled each time).
+ */
+function noteJSONText(note) {
+  const props = note.properties;
+  const ex = note.expressions;
+  const kept = note._savedJSON;
+  if (kept && kept.id === note.id && kept.color === props.color &&
+      kept.instrument === props.instrument && kept.measure === props.measure &&
+      keptSource(ex.startTime) === kept.s0 && keptSource(ex.duration) === kept.s1 &&
+      keptSource(ex.frequency) === kept.s2 && keptSource(ex.amplitude) === kept.s3 &&
+      keptSource(ex.attack) === kept.s4 && keptSource(ex.release) === kept.s5) {
+    return kept;
+  }
+  const entry = {
+    id: note.id,
+    text: JSON.stringify(noteJSON(note)),
+    color: props.color,
+    instrument: props.instrument,
+    measure: props.measure,
+    s0: keptSource(ex.startTime), s1: keptSource(ex.duration), s2: keptSource(ex.frequency),
+    s3: keptSource(ex.amplitude), s4: keptSource(ex.attack), s5: keptSource(ex.release)
+  };
+  const keep = KEEPS_NOTE_TEXT &&
+    isPrimitive(props.color) && isPrimitive(props.instrument) && isPrimitive(props.measure) &&
+    byFields(entry.s0) && byFields(entry.s1) && byFields(entry.s2) &&
+    byFields(entry.s3) && byFields(entry.s4) && byFields(entry.s5);
+  note._savedJSON = keep ? entry : null;
+  return entry;
+}
+
 export class Module {
   constructor(baseNoteVariables = {}) {
     this.notes = {};
@@ -944,36 +1012,13 @@ export class Module {
     const moduleObj = {};
 
     // Export base note
-    const baseObj = {};
-    const baseExprs = EXPRESSION_VARS;
-    for (const name of baseExprs) {
-      const source = this.baseNote.getExpressionSource(name);
-      if (source) {
-        baseObj[name] = source;
-      }
-    }
-    if (this.baseNote.properties.color) baseObj.color = this.baseNote.properties.color;
-    if (this.baseNote.properties.instrument) baseObj.instrument = this.baseNote.properties.instrument;
-    if (this.baseNote.properties.repeat) baseObj.repeat = this.baseNote.properties.repeat;
-    moduleObj.baseNote = baseObj;
+    moduleObj.baseNote = this._baseNoteJSON();
 
     // Export notes
     const notesArray = [];
     for (const note of Object.values(this.notes)) {
       if (note.id === 0) continue;
-
-      const noteObj = { id: note.id };
-      for (const name of baseExprs) {
-        const source = note.getExpressionSource(name);
-        if (source) {
-          noteObj[name] = source;
-        }
-      }
-      if (note.properties.color) noteObj.color = note.properties.color;
-      if (note.properties.instrument) noteObj.instrument = note.properties.instrument;
-      if (note.properties.measure) noteObj.measure = true;
-
-      notesArray.push(noteObj);
+      notesArray.push(noteJSON(note));
     }
 
     notesArray.sort((a, b) => a.id - b.id);
@@ -982,6 +1027,51 @@ export class Module {
     moduleObj.instrumentRule = INSTRUMENT_RULE;
 
     return moduleObj;
+  }
+
+  /**
+   * The module as JSON text: exactly JSON.stringify(this.createModuleJSON()),
+   * which is what undo history and the autosave store on every edit.
+   *
+   * Each note's text is kept from the last call and used again while what it
+   * is made of (the note's id, its six expression sources, its colour,
+   * instrument and measure flag) reads the same; only the notes an edit
+   * changed are serialized again. Every note is still read on each call, so
+   * an edit made by any route (the expressions or properties written
+   * directly) is picked up. scripts/test-edit-cost.mjs holds the two to
+   * the same text.
+   */
+  createModuleJSONString() {
+    const entries = [];
+    for (const note of Object.values(this.notes)) {
+      if (note.id === 0) continue;
+      entries.push(noteJSONText(note));
+    }
+    entries.sort((a, b) => a.id - b.id);
+    const texts = new Array(entries.length);
+    for (let i = 0; i < entries.length; i++) texts[i] = entries[i].text;
+
+    // The frame around the notes, with the same keys in the same order as
+    // createModuleJSON(): baseNote, notes, instrumentRule
+    const head = JSON.stringify({ baseNote: this._baseNoteJSON() });
+    const tail = JSON.stringify({ instrumentRule: INSTRUMENT_RULE });
+    return head.slice(0, -1) + ',"notes":[' + texts.join(',') + ']' +
+      (tail === '{}' ? '' : ',' + tail.slice(1, -1)) + '}';
+  }
+
+  /** The BaseNote as saved in the module JSON. */
+  _baseNoteJSON() {
+    const baseObj = {};
+    for (const name of EXPRESSION_VARS) {
+      const source = this.baseNote.getExpressionSource(name);
+      if (source) {
+        baseObj[name] = source;
+      }
+    }
+    if (this.baseNote.properties.color) baseObj.color = this.baseNote.properties.color;
+    if (this.baseNote.properties.instrument) baseObj.instrument = this.baseNote.properties.instrument;
+    if (this.baseNote.properties.repeat) baseObj.repeat = this.baseNote.properties.repeat;
+    return baseObj;
   }
 
   /**

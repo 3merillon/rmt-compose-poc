@@ -107,6 +107,9 @@ export class Note {
     // collides across modules when ids are reused (e.g. a drop after Clean
     // Slate), silently skipping registration in the destination module.
     this._depsRegModule = null;
+    // This note's text in the module JSON, kept by Module.createModuleJSONString()
+    // with what it was made from (checked on every use, never trusted)
+    this._savedJSON = null;
 
     // Initialize from variables (supports both legacy and new formats)
     this._initFromVariables(variables);

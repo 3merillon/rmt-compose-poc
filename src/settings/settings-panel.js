@@ -26,6 +26,7 @@ import { settingsStore } from './settings-store.js';
 import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep, TEMPO_HARD_MIN, TEMPO_HARD_MAX, VOICE_LIMITS } from './settings-schema.js';
 import { THEME_PRESETS, getPreset } from '../theme/presets.js';
 import { eventBus } from '../utils/event-bus.js';
+import { moduleSnapshot } from '../store/history.js';
 import { showConfirmation } from '../utils/confirm-dialog.js';
 import {
   makeDraggableWidget,
@@ -467,9 +468,9 @@ function buildAudioTab(container) {
       const v = validateLoopRatio({ n: parseInt(nIn.value, 10), d: parseInt(dIn.value, 10) }, { n: 1, d: 1 });
       setModuleRepeat(m, repeatExprForRatio(v.n, v.d));
       try {
-        const snap = m.createModuleJSON();
-        eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap });
-        eventBus.emit('history:capture', { label: v.n === v.d ? 'Repeat as written' : `Repeat ${v.n}/${v.d}`, snapshot: snap });
+        const snap = moduleSnapshot(m);
+        eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap });
+        eventBus.emit('history:capture', { label: v.n === v.d ? 'Repeat as written' : `Repeat ${v.n}/${v.d}`, ...snap });
       } catch {}
       show();
     };

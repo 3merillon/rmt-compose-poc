@@ -10,6 +10,7 @@ import {
     invalidateDependencyGraphCache
 } from './validation.js';
 import { eventBus } from '../utils/event-bus.js';
+import { moduleSnapshot } from '../store/history.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
 import { escapeHtml } from '../utils/html-escape.js';
 import { startTimeExpr, timeUnitsExpr, frequencyExpr, amplitudeExpr, valueFactor } from '../utils/value-expr.js';
@@ -798,8 +799,8 @@ export function evaluateNoteToBaseNote(noteId) {
     showNoteVariables(note, newElem);
 
     try {
-        const snap = moduleInstance.createModuleJSON();
-        eventBus.emit('history:capture', { label: `Evaluate Note ${noteId} to BaseNote`, snapshot: snap });
+        const snap = moduleSnapshot(moduleInstance);
+        eventBus.emit('history:capture', { label: `Evaluate Note ${noteId} to BaseNote`, ...snap });
     } catch {}
 
     if (success) showNotification('Note evaluated successfully!', 'success');
@@ -842,8 +843,8 @@ export function evaluateEntireModule() {
     }
 
     try {
-        const snap = moduleInstance.createModuleJSON();
-        eventBus.emit('history:capture', { label: 'Evaluate Module', snapshot: snap });
+        const snap = moduleSnapshot(moduleInstance);
+        eventBus.emit('history:capture', { label: 'Evaluate Module', ...snap });
     } catch {}
 
     // Refresh the variable editor if a note is currently selected
@@ -910,8 +911,8 @@ export function liberateDependencies(noteId) {
     }
     showNoteVariables(currentSelected, newElem);
     try {
-        const snap = getModule().createModuleJSON();
-        eventBus.emit('history:capture', { label: `Liberate Dependencies ${noteId}`, snapshot: snap });
+        const snap = moduleSnapshot(getModule());
+        eventBus.emit('history:capture', { label: `Liberate Dependencies ${noteId}`, ...snap });
     } catch {}
     showNotification('Dependencies liberated successfully!', 'success');
 }

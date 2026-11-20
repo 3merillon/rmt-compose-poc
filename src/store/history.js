@@ -167,6 +167,22 @@ class HistoryManager {
 // Shared singleton
 export const history = new HistoryManager();
 
+/**
+ * The module for a history:capture / history:seedIfEmpty payload: its JSON text
+ * as { snapshotStr } (Module.createModuleJSONString, the same text the history
+ * and the autosave would make from the object, without serializing every note
+ * again). Should that fail, the object as { snapshot }, so that the history and
+ * the autosave report the failure as they always have.
+ */
+export function moduleSnapshot(module) {
+  try {
+    if (module && typeof module.createModuleJSONString === 'function') {
+      return { snapshotStr: module.createModuleJSONString() };
+    }
+  } catch {}
+  return { snapshot: module.createModuleJSON() };
+}
+
 // EventBus wiring for decoupled integration
 try {
   eventBus.on('history:capture', (payload) => {
