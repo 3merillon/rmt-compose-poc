@@ -17,7 +17,7 @@
  *        [--iter 10] [--no-profile] [--json]
  */
 import { chromium } from 'playwright';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,7 +31,7 @@ const PROFILE = !argv.includes('--no-profile');
 const JSON_OUT = argv.includes('--json');
 const log = JSON_OUT ? () => {} : (...a) => console.log(...a);
 
-const body = readFileSync(join(here, '..', '..', 'public', 'modules', 'perf', `${MODULE}.json`), 'utf8');
+const file = join(here, '..', '..', 'public', 'modules', 'perf', `${MODULE}.json`);
 
 const browser = await chromium.launch({ headless: true, channel: process.env.PW_CHANNEL || 'msedge' });
 const ctx = await browser.newContext({ viewport: { width: 1600, height: 900 } });
@@ -39,7 +39,15 @@ const page = await ctx.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.addInitScript(() => { try { localStorage.clear(); } catch {} });
-await page.route('**/modules/defaultModule.json', (r) => r.fulfill({ status: 200, contentType: 'application/json', body }));
+if (statSync(file).size > 48 * 1024 * 1024) {
+  // Large response bodies exceed the DevTools message limit. Serve these from Vite.
+  await page.route('**/modules/defaultModule.json', r =>
+    r.fulfill({ status: 302, headers: { location: `/modules/perf/${MODULE}.json` } }));
+} else {
+  const body = readFileSync(file, 'utf8');
+  await page.route('**/modules/defaultModule.json', r =>
+    r.fulfill({ status: 200, contentType: 'application/json', body }));
+}
 
 await page.goto(`${URL_BASE}/?perf=1`, { waitUntil: 'load' });
 await page.waitForFunction(() => !!(window.__rmtPerf && window.__rmtRenderer?.instanceCount > 0), null, { timeout: 300_000 });

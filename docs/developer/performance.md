@@ -22,6 +22,34 @@ matters.
 
 ### Render scaling — `bench-render.mjs`
 
+The following small-module results are historical. At `c14d112` the same camera
+movement exceeded the frame budget. In a fresh headless Edge context at 1600×900,
+with compact `voices-*` fixtures served by Vite, CDP CPU sampling gave these times:
+
+| Workload | 100,000 | 250,000 | 500,000 |
+|---|---:|---:|---:|
+| Fetch to first drawn frame | 2.57 s | 6.41 s | 12.67 s |
+| JS heap after autosave and GC (decimal MB) | 237 | 540 | 1,064 |
+| Octave edit, warm p50 | 84 ms | 209 ms | 407 ms |
+| Undo / redo through draw | 2.17 / 2.25 s | 6.23 / 6.25 s | 13.44 / 14.13 s |
+| Redraw / pan frame, p50 | 13 / 64 ms | 35 / 167 ms | 72 / 341 ms |
+| Hover frame, p50 | 17 ms | 43 ms | 91 ms |
+| Point pick (mean) | 0.22 ms | 0.55 ms | 1.16 ms |
+
+At 250k / 500k, a 12-note marquee took 63 / 109 ms per mouse move (median).
+Moving a chain note took 57 / 107 ms per move and 1.90 / 3.83 s to drop.
+Replacing the first 5,000 notes in each fixture with a 4,999-dependent hub
+took 1.77 / 3.94 s to select its anchor, 76 / 122 ms per move and 1.74 / 3.76 s
+to drop it. Selection and drop include two animation callbacks. These are
+elapsed times in one browser run, including the cost of profiling.
+
+The load profile at 500k attributed 29% of non-idle time to compilation
+(including its callees), 20% to dependency registration and 8% to evaluation.
+Undo and redo repeated compilation and registration. The largest costs during
+panning were in the note overlays, including rebuilding and uploading the
+tab and arrow regions. The add-note form's `refreshEvaluations` also appeared
+on selection and drop. Each field built a new cache of every variable of every note.
+
 | Module | Notes | Idle | Pan | `sync()` p50 | Redraw, no selection | Redraw, hub selected |
 |---|---|---|---|---|---|---|
 | `voices-5000` | 5,001 | 60.2 fps, **0/100 frames redrawn** | 60.2 fps | 2.0 ms (p95 5.2) | 0.77 ms | 1.20 ms |
@@ -35,7 +63,7 @@ Per-pass breakdown of a full redraw at 100k notes with nothing selected: `_rende
 to 5.44 ms, total 7.97 ms — still half the budget.
 
 ::: warning The 100k headline is about rendering, not editing.
-A 100,000-note module **pans and idles at 60 fps**. It does not *edit* at 60 fps: `sync()` — the
+A 100,000-note module **panned and idled at 60 fps in the earlier renderer benchmark**. In that build `sync()` — the
 CPU rebuild that runs after every commit — costs **63 ms p50** at that size. Incremental `sync()`
 (stable slots + `bufferSubData`) is the real remaining bottleneck and is still deferred. See
 [Deferred](#deferred-and-not-shipped).

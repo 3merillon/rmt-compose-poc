@@ -205,7 +205,9 @@ const targets = {
   // Render-scaling ladder (bounded dep depth; see voicesShape).
   'voices-5000': voicesShape(5000),
   'voices-20000': voicesShape(20000),
-  'voices-100000': voicesShape(100000)
+  'voices-100000': voicesShape(100000),
+  'voices-250000': voicesShape(250000),
+  'voices-500000': voicesShape(500000)
 };
 
 mkdirSync(outDir, { recursive: true });

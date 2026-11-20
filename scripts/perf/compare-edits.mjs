@@ -6,6 +6,7 @@
  * Runs one sequence of edits (octave steps, a move, a resize, a group move,
  * undo, redo) through the app's own event bus on each server, in headless
  * Edge, and after every step records SHA-256 digests of:
+ *   - evaluated values, including exact irrational terms and approximation flags,
  *   - the autosave (src/store/autosave.js where the server has it, after its
  *     write has landed; else localStorage rmt:moduleSnapshot:v1),
  *   - the undo and redo stacks (each entry's label and snapshot text),
@@ -93,8 +94,12 @@ async function run(browser, base) {
       const fresh = JSON.stringify(mod().createModuleJSON());
       const R = window.__rmtRenderer;
       const labels = [(R._noteFracNumStrs || []).join('|'), (R._noteFracDenStrs || []).join('|')].join('#');
+      // Cache insertion order can differ after an incremental evaluation.
+      const records = [...P.getEvaluatedNotesRef()].sort(([a], [b]) => a - b);
+      const values = JSON.stringify(records, (_, v) => typeof v === 'bigint' ? String(v) : v);
       out.push({
         label,
+        values: await digest(values),
         autosave: await digest(saved),
         autosaveIsModule: saved === fresh,
         autosaveBytes: saved.length,
@@ -125,7 +130,7 @@ console.log(`${MODULE}: ${BEFORE} (before) vs ${AFTER} (after)`);
 for (let i = 0; i < Math.max(before.steps.length, after.steps.length); i++) {
   const x = before.steps[i], y = after.steps[i];
   const diffs = [];
-  for (const k of ['autosave', 'undo', 'redo', 'render', 'undoCount']) if (!x || !y || x[k] !== y[k]) diffs.push(k);
+  for (const k of ['values', 'autosave', 'undo', 'redo', 'render', 'undoCount']) if (!x || !y || x[k] !== y[k]) diffs.push(k);
   if (!x?.autosaveIsModule) diffs.push('before: autosave is not the module');
   if (!y?.autosaveIsModule) diffs.push('after: autosave is not the module');
   if (diffs.length) failures++;
