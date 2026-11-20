@@ -179,7 +179,7 @@ The drag path uses the narrower startTime traversals directly: `getAllStartTimeO
 | `debug()` | console dump | `:1997` |
 
 ::: warning `getEvaluationOrder`, `detectCycles` and `hasDependencyPath` have no callers in the app
-They are API surface, mirrored by the WASM graph adapter, and they work on **whole notes**. **Evaluation does not use them**, and neither does the cycle guard — both work per variable, below.
+They are API surface, mirrored by the Rust graph (`src/wasm/graph-adapter.js` is imported by nothing), and they work on **whole notes**. **Evaluation does not use them**, and neither does the cycle guard — both work per variable, below.
 :::
 
 ## Cycles are checked per variable

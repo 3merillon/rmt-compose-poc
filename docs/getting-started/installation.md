@@ -105,7 +105,7 @@ VitePress serves the site in `docs/`. `npm run docs:build` and `npm run docs:pre
 
 ## Rebuilding the WASM core
 
-The repository contains a Rust crate (`rust/`, package `rmt-core` v0.1.0) that compiles to WebAssembly. **Its build artifacts are committed** to `src/wasm/` — that committed copy is what the app imports and what the production deploy ships. `rust/pkg/` (the raw `wasm-pack` output) is gitignored.
+The repository contains a Rust crate (`rust/`, package `rmt-core` v0.1.0) that compiles to WebAssembly and implements the expression evaluator a second time. **Its build artifacts are committed** to `src/wasm/` — that committed copy is what the app imports and what the production deploy ships. `rust/pkg/` (the raw `wasm-pack` output) is gitignored.
 
 You only need this if you change the Rust source.
 
@@ -130,8 +130,8 @@ If you built the crate by hand, run the sync step alone:
 npm run wasm:sync
 ```
 
-::: warning The WASM evaluator is not active
-On a normal page load the Rust core is **not fetched at all** — `initWasm()` returns early unless `?evaluator=wasm` is in the URL — and **all expression evaluation runs on the JavaScript engine.** Enabling the WebAssembly evaluator is opt-in and is currently blocked by a hang inside the Rust `PersistentEvaluator`. Do not expect a speed-up from it, and do not enable it. The JavaScript path is the shipped path and is what the app is tuned against.
+::: info The WASM evaluator is opt-in
+The default evaluator is JavaScript. On a normal page load the Rust core is **not fetched at all**: `initWasm()` returns early unless `?evaluator=wasm` is in the URL. With that parameter the binary is fetched and the evaluator hot-swaps to Rust when it is ready. `?evaluator=js` forces JavaScript. After changing the Rust or the JavaScript evaluator, run `npm test`: the parity test must pass. See [WASM Overview](/developer/wasm/overview).
 :::
 
 ## All npm scripts

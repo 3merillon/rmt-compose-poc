@@ -69,6 +69,11 @@ once. A group move does the same per mover.
 5. Every one of those dependents is added to the dirty set with `markDirtyOnly(depId)` — they need
    re-evaluating, but their bytecode did not change, so they must not be re-registered.
 
+Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a
+walk of the same dirty cycle now only re-registers its own bytecode (`Module._dirtyClosed`,
+`src/module.js:236`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
+in the middle of `chain-1000` ran 501 walks over 125,000 notes. Both engines do this.
+
 ## 3. Evaluation
 
 `Module.evaluateModule()` (`src/module.js:659`) delegates to
@@ -123,11 +128,11 @@ variable's value, not a stand-in, and reading it is reported only when the note 
 Finally, `Module._updateCorruptionFlags(cache, dirtyIds)` pushes each result's `corruptionFlags`
 into `DependencyGraph.setCorruptionFlags()` — scoped to the dirty set, not all notes.
 
-::: warning Which evaluator actually runs
-Always the JS `BinaryEvaluator` / `IncrementalEvaluator`. The WASM evaluator is disabled until the
-Rust core is ported to the new variable layout: `WASM_MATCHES_VARIABLE_LAYOUT` is `false`, so
-`isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:111-115`) and `?evaluator=wasm`
-is ignored with a console warning.
+::: info Which evaluator runs
+In a browser the default is the JS `BinaryEvaluator` / `IncrementalEvaluator`. `?evaluator=wasm`
+opts in to the Rust core: `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:111-115`)
+opens the gate and each `Module` hot-swaps when the binary is ready. `?evaluator=js` forces
+JavaScript. Both evaluators produce the same records. See [WASM Overview](/developer/wasm/overview).
 :::
 
 ## 4. Rendering

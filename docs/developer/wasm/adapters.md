@@ -1,64 +1,52 @@
 ---
 title: JS/WASM Adapters
-description: The src/wasm layer — the loader, WASM_CONFIG, the evaluator wrappers, the opt-in hot-swap, and which three adapters are dead code.
+description: The src/wasm layer — the loader, WASM_CONFIG, the evaluator wrapper, the PersistentEvaluator interface, the opt-in hot-swap, and the one adapter nothing imports.
 ---
 
 # JS/WASM Adapters
 
-`src/wasm/` is the boundary between the app and the Rust crate. One adapter in it is live. Three are
-not.
+`src/wasm/` is the boundary between the app and the Rust crate.
 
 | File | Status |
 |---|---|
-| `index.js` | **Live** — the loader (`initWasm`, `onWasmReady`, …) |
-| `config.js` | **Live** — `WASM_CONFIG`, `shouldUseWasm()` |
-| `evaluator-adapter.js` | **Live** — the only adapter the app imports |
-| `compiler-adapter.js` | Dead code — imported by nothing |
-| `graph-adapter.js` | Dead code — imported by nothing |
-| `fraction-adapter.js` | Dead code — imported by nothing |
+| `index.js` | **Live**: the loader (`initWasm`, `onWasmReady`, …) |
+| `config.js` | **Live**: `WASM_CONFIG`, `shouldUseWasm()` |
+| `evaluator-adapter.js` | **Live**: the only adapter the app imports |
+| `graph-adapter.js` | Dead code: imported by nothing |
 
-::: danger The live adapter is disabled
-`WASM_MATCHES_VARIABLE_LAYOUT` is `false` (`src/wasm/evaluator-adapter.js:45`): the Rust core still
-has the old variable layout (`tempo`, `beatsPerMeasure`, `measureLength`, no `attack` or `release`),
-and the JavaScript evaluator moved to the six relational variables, so the two cannot read the same
-bytecode. With the flag false, `createEvaluator()` returns the JS evaluator, `isEvaluatorHotSwapEnabled()`
-is `false` everywhere, and `?evaluator=wasm` is ignored with a console warning. In every session the app
-runs the JS `BinaryEvaluator`. Porting the Rust core is planned. Before that change, opting in also hung
-the tab in a browser; see
-[the hang dossier](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked).
+::: info The live adapter is opt-in
+In a browser the default is the JavaScript `BinaryEvaluator`. `?evaluator=wasm` opts in to the Rust
+core; `?evaluator=js` forces JavaScript. `WASM_MATCHES_VARIABLE_LAYOUT`
+(`src/wasm/evaluator-adapter.js:45`) is `true`. It is a kill switch: set to `false`, the WASM
+evaluator is off everywhere, even with `?evaluator=wasm`, and a console warning says so. Making WASM
+the default is the owner's decision and has not been made. See [WASM Overview](/developer/wasm/overview).
 :::
 
-## Dead code: three of the four adapters
+## Dead code: the graph adapter
 
-`compiler-adapter.js`, `graph-adapter.js` and `fraction-adapter.js` export working factories
-(`createCompiler()`, `createDependencyGraph()`, `createFraction()` and friends), and nothing in
-`src/` or `scripts/` imports any of them. A repo-wide grep for their filenames returns zero hits
-outside the docs.
+`graph-adapter.js` exports a working factory for the Rust `DependencyGraph`, and nothing in `src/`
+or `scripts/` imports it. The app never constructs a WASM dependency graph. The dependency graph
+that runs is [`src/dependency-graph.js`](/developer/core/dependency-graph).
 
-That means the WASM `ExpressionCompiler`, `DependencyGraph` and `Fraction` are **never constructed by
-the app**. Any description of a "WASM compile path" is a description of code that does not run. If
-you are looking for the compiler that actually runs, it is
-[`src/expression-compiler.js`](/developer/core/expression-compiler) and `src/dsl/compiler.js`.
+The compiler and fraction adapters, and the Rust `ExpressionCompiler` and `Fraction` behind them,
+are gone. The DSL is compiled by [`src/expression-compiler.js`](/developer/core/expression-compiler)
+and `src/dsl/compiler.js`; exact values are `fraction.js` and `src/value/exact.js` in JavaScript,
+`rust/src/rational.rs` and `rust/src/exact.rs` in Rust.
 
 ## Configuration
 
 ```javascript
 // src/wasm/config.js
 export const WASM_CONFIG = {
-  useEvaluator: true,       // live, but see below
-  usePersistentCache: true, // live: pick PersistentEvaluator over Evaluator
-
-  fallbackOnError: true,    // fall back to JS instead of throwing
+  useEvaluator: true,      // permits the WASM evaluator
+  fallbackOnError: true,   // fall back to JS instead of throwing
   logPerformance: false,
-  debug: false,             // console logging in the loader and adapters
+  debug: false,            // console logging in the loader and adapters
 };
 ```
 
-There is **no `enabled` key**, and there are no flags for the dead adapters — the old
-`useFractions` / `useGraph` / `useCompiler` switches have been removed. `shouldUseWasm(component)`
-recognises `'evaluator'` and `'persistentCache'`; any other name (including `'fractions'`,
-`'graph'`, `'compiler'`) falls to the `default` branch and returns `false`. `disableWasm()` and
-`enableWasm()` flip the two feature flags together.
+There is **no `enabled` key**. `shouldUseWasm(component)` recognises only `'evaluator'`; any other
+name returns `false`. `disableWasm()` and `enableWasm()` flip `useEvaluator`.
 
 ::: warning `useEvaluator: true` is a permission, not a switch
 It only *permits* the WASM evaluator; the actual gate is `isEvaluatorHotSwapEnabled()`.
@@ -66,18 +54,16 @@ It only *permits* the WASM evaluator; the actual gate is `isEvaluatorHotSwapEnab
 
 ## The `?evaluator` gate
 
-`src/wasm/evaluator-adapter.js` reads `?evaluator` once from `location.search`:
+`src/wasm/evaluator-adapter.js` reads the choice once (`src/wasm/evaluator-adapter.js:25-37`): the
+`?evaluator` URL parameter in a browser, the `RMT_EVALUATOR` environment variable in Node.
 
-| URL | `isEvaluatorHotSwapEnabled()` | What runs |
-|---|---|---|
-| *(no param)* — the default | `false` | JS `BinaryEvaluator` |
-| `?evaluator=js` | `false` | JS `BinaryEvaluator` (explicit) |
-| `?evaluator=wasm` | `false` | JS `BinaryEvaluator`, with a console warning that the param was ignored |
-| *(headless Node — no `window`)* | `false` | JS `BinaryEvaluator` |
-
-All four rows are `false` because `FORCE_JS_EVALUATOR` is `EVALUATOR_PARAM === 'js' || !WASM_MATCHES_VARIABLE_LAYOUT`,
-and the layout flag is `false`. The two branches under it are what the table would be with the flag
-`true`: a browser then needs `?evaluator=wasm`, and headless Node always passes.
+| Where | Value | `isEvaluatorHotSwapEnabled()` | What runs |
+|---|---|---|---|
+| Browser | *(none)*, the default | `false` | JS `BinaryEvaluator` |
+| Browser | `js` | `false` | JS `BinaryEvaluator` (explicit) |
+| Browser | `wasm` | `true` | JS at first, then WASM once the binary is ready |
+| Node | `js` | `false` | JS `BinaryEvaluator` |
+| Node | `wasm` | `true` | WASM, once the script has called `initWasm()` |
 
 ```javascript
 // src/wasm/evaluator-adapter.js:111-115
@@ -88,8 +74,15 @@ export function isEvaluatorHotSwapEnabled() {
 }
 ```
 
-The `typeof window === 'undefined'` branch is why the Node scripts ran the WASM path and the browser
-did not, before the flag. With `FORCE_JS_EVALUATOR` true it is unreachable.
+`FORCE_JS_EVALUATOR` is `EVALUATOR_PARAM === 'js' || (!WASM_MATCHES_VARIABLE_LAYOUT && !NODE_OPT_IN)`
+(`src/wasm/evaluator-adapter.js:52`). With the kill switch `false`, a browser with `?evaluator=wasm`
+stays on JavaScript and warns (`src/wasm/evaluator-adapter.js:54-56`). In Node,
+`RMT_EVALUATOR=wasm` runs the Rust core even with the switch `false`, so the parity test can check
+it first (`src/wasm/evaluator-adapter.js:50`).
+
+Without `RMT_EVALUATOR`, headless Node passes the gate (the `typeof window` line above), but nothing
+evaluates on WASM unless the script calls `initWasm()`. To run a script on Rust, use the preload
+described in [WASM Overview](/developer/wasm/overview#running-node-scripts-on-wasm).
 
 ## Factories
 
@@ -102,101 +95,109 @@ const evaluator   = createEvaluator(module);
 const incremental = createIncrementalEvaluator(module, dependencyGraph, evaluator);
 ```
 
-`createEvaluator(module)` resolves in this order:
+`createEvaluator(module)` (`src/wasm/evaluator-adapter.js:131`) resolves in this order:
 
-1. `?evaluator=js`, or `useEvaluator: false`, or WASM not loaded → `JSBinaryEvaluator`
-2. `usePersistentCache` and `wasm.PersistentEvaluator` exists → `WasmPersistentEvaluatorWrapper`
-3. otherwise → `WasmEvaluatorWrapper`
-4. construction throws and `fallbackOnError` → `JSBinaryEvaluator`
+1. the gate is closed, or `useEvaluator: false`, or WASM not loaded: `JSBinaryEvaluator`
+2. otherwise `WasmPersistentEvaluatorWrapper`
+3. construction throws and `fallbackOnError`: `JSBinaryEvaluator`, with a console warning
 
-`createIncrementalEvaluator(module, graph, evaluator)` returns a `WasmIncrementalEvaluator` when
-the base evaluator is a `WasmPersistentEvaluatorWrapper`, a `WasmNoteOrderIncrementalEvaluator` when
-it is the non-persistent `WasmEvaluatorWrapper`, and otherwise `JSIncrementalEvaluator`.
+The wrapper's constructor refuses a binary older than its adapter: it checks that
+`PersistentEvaluator` has every method in `REQUIRED_CORE_METHODS`
+(`src/wasm/evaluator-adapter.js:75-79`) and throws, naming `npm run wasm:build`, if not.
 
+`createIncrementalEvaluator(module, graph, evaluator)` returns a `WasmIncrementalEvaluator` when the
+base evaluator is a `WasmPersistentEvaluatorWrapper`, and `JSIncrementalEvaluator` otherwise.
 `isWasmBackedEvaluator(evaluator)` tells you which one you got.
+
+## The interface of PersistentEvaluator
+
+What the adapter calls on the Rust class (`rust/src/evaluator.rs:675`):
+
+| Method | Purpose |
+|---|---|
+| `registerNotes(packed)` | Register notes. Per note: `u32` id, `u8` expression count, then per expression `u8` variable, `u32` length, bytecode. Little-endian |
+| `removeNote(id)` | Forget a note: its expressions and its values |
+| `invalidateAll()` | Forget everything |
+| `clearValues()` | Drop the values, keep the notes |
+| `evaluateDirty(ids)` | Order and evaluate a batch, one call |
+| `hasProblems` | True when the last batch reported something |
+| `takeCycles()`, `takeUnresolved()`, `takeFailures()`, `takeDivisionsByZero()` | What went wrong, for the JS side to print |
+| `readNote(id)` | `Float64Array`: `[corruptionFlags, approxFlags, then per variable (kind, a, b)]` |
+| `readNotes(ids)` | The same for several notes, one after another. A missing note is `-1` then zeros |
+| `readValueText(id, var)` | Hexadecimal text `n/d` with the sign on `n`. For an irrational, its terms `c*b^p/q*...;c*...` |
+
+The kinds (`src/wasm/evaluator-adapter.js:67-71`):
+
+| Kind | Meaning | `a`, `b` |
+|---|---|---|
+| 0 | none | |
+| 1 | rational | numerator and denominator, exact as doubles |
+| 2 | rational too large | read `readValueText()` |
+| 3 | irrational | read `readValueText()` |
+| 4 | approximate | numerator and denominator |
+| 5 | approximate, too large | read `readValueText()` |
 
 ## The wrappers
 
 ### WasmPersistentEvaluatorWrapper
 
-Wraps `wasm.PersistentEvaluator`. The cache lives in WASM memory; JS pulls values across the
-boundary on demand instead of serializing the whole cache per note.
+`src/wasm/evaluator-adapter.js:342`. Wraps `wasm.PersistentEvaluator`. Compiled expressions go to
+WASM once per note; evaluated values live there; each batch's records come back as `fraction.js`
+values in one call.
 
 | Method | Purpose |
 |---|---|
 | `setModule(module)` | Rebind and invalidate everything |
-| `invalidateAll()` / `invalidate(noteId)` | Drop cached values |
-| `beginBatch()` | Clear the JS-side Fraction cache before a batch |
-| `registerNote(note)` | Push a note's six bytecode slots into WASM |
-| `isRegistered(id)` / `unregisterNote(id)` | Registration bookkeeping |
-| `markDirty(id)` / `markDirtyBatch(ids)` | Mark for re-evaluation |
-| `evaluateDirty(sortedIds)` | **One** WASM call for the whole topologically sorted batch |
-| `hasCachedNote(id)` / `getEvaluatedNote(id)` | Read back, converting to `fraction.js` values lazily |
-| `evaluateNote(note, evalCache)` | Evaluate one note |
-| `evaluate(expr, evalCache)` | Evaluate a single **expression** (not a note id) |
-| `getCachedValue(noteId, varIndex)` | Read one cached variable |
-| `getPoolStats()` | Diagnostics |
-| `exportCache()` / `importCache(json)` | Cache round-trip |
+| `invalidateAll()` | Drop all values and registrations |
+| `registerNotes(notes)` / `registerNote(note)` | Pack the notes' bytecode and register it, one call |
+| `isRegistered(id)` / `unregisterNote(id)` | Registration bookkeeping (JS side) |
+| `removeNote(id)` / `clearValues()` | Forward to the core |
+| `evaluateDirty(ids)` | **One** WASM call for the whole batch; then reports problems |
+| `readRecords(ids, put)` | **One** WASM call that reads the batch's records |
+| `getEvaluatedNote(id)` / `getCachedValue(id, varIndex)` | Read one note or one value |
+| `evaluateNote(note)` | Register and evaluate one note |
+| `evaluate(expr)` | Not available: warns and returns 0. Single expressions are not evaluated on the WASM path |
 
-`registerNote` collects `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure` and
-`measureLength` from `note.expressions` (the old layout; there is no `amplitude`, `attack` or
-`release`, which is part of why the adapter is disabled), converts each `BinaryExpression`'s bytecode to a plain array
-and hands the object to `PersistentEvaluator.registerNote(id, expressions)`, where
-`serde-wasm-bindgen` deserializes it.
+Problems are not printed by Rust. After each batch the wrapper reads the cycles, unresolved
+references, failures and divisions by zero from the core, and reports them through a JavaScript
+`BinaryEvaluator`'s `reportProblems`, so the messages are word for word the JavaScript ones
+(`src/wasm/evaluator-adapter.js:485-517`).
 
-::: danger This is the hang site
-`WasmPersistentEvaluatorWrapper.registerNote` (`evaluator-adapter.js:426`), called from
-`WasmIncrementalEvaluator.evaluateDirty` (`evaluator-adapter.js:283`), is where the browser locks up
-after an `invalidateAll()`. The JS side of that call is straightforward; the loop is inside the Rust
-binary.
-:::
+`_toRecord()` (`src/wasm/evaluator-adapter.js:601`) turns the numbers into a record of the same shape
+as the JavaScript evaluator's (`createEvaluationRecord`): a `fraction.js` value per variable,
+`corruptionFlags`, `approxFlags`, and `exact`, which holds the exact value of each variable that is
+not rational. For an irrational, it is an `Irrational` built with `irrationalFromCanonicalTerms`
+(`src/value/exact.js:64`), and the variable's own field holds its shadow. For an approximate value
+it is an `Approx`.
 
 ### WasmIncrementalEvaluator
 
-Dirty tracking, topological sort, and one batched WASM call.
+`src/wasm/evaluator-adapter.js:210`. Dirty tracking in JavaScript, one WASM call per batch, then one
+call reading the batch's records.
 
-`evaluateDirty()` (no arguments — it reads its own dirty set):
+`evaluateDirty()` (no arguments; it reads its own dirty set):
 
-1. `registerNote()` any dirty note that is not yet registered
-2. topologically sort the dirty set — Kahn's algorithm over **whole notes**. The JS incremental
-   evaluator no longer works this way: it orders per (note, variable), see
-   [Binary Evaluator](/developer/core/binary-evaluator#evaluation-order-per-variable)
-3. clear the local cache
-4. call `evaluator.evaluateDirty(sorted)` — a single WASM call
+1. sort the dirty ids ascending, as the JavaScript evaluator walks them
+2. for an id with no note, tell the core to remove it; register every note whose bytecode is new
+3. call `evaluator.evaluateDirty(batch)`: the core orders the batch per (note, variable) and
+   evaluates it
+4. call `evaluator.readRecords(batch, …)` to put the batch's records into the cache
 5. clear the dirty set and return the cache
 
-`invalidate(id)` unregisters the note (its bytecode changed) and marks all its transitive dependents
-dirty **without** unregistering them (their bytecode did not change). `markDirtyOnly(id)` is the
+`invalidate(id, dependents)` marks the note dirty and unregisters it (its bytecode may have
+changed), and marks its dependents dirty without unregistering them. `markDirtyOnly(id)` is the
 dirty-without-unregister form.
 
-It returns a `LazyWasmCacheProxy`, not a `Map`.
+### WasmEvaluationCache
 
-### LazyWasmCacheProxy
+`src/wasm/evaluator-adapter.js:173`. A `Map` subclass holding `noteId` to record, filled right after
+each batch. `get`, `has`, `size` and iteration are a plain `Map`'s, identical to the JavaScript
+evaluator's cache, including order. Only `delete()` and `clear()` also reach the core, because the
+core holds the values that evaluation reads.
 
-A `Map`-shaped view over the WASM-resident cache. `get(noteId)` checks a local `Map` first, then
-calls `getEvaluatedNote(noteId)` on the wrapper, converting `FractionData` into `fraction.js` values
-only for the notes someone actually reads. Iteration (`entries()`, `keys()`, `values()`) only yields
-what has already been fetched this cycle — it is not a full enumeration of the WASM cache.
+### Expression previews, validation and simplify
 
-### WasmEvaluatorWrapper
-
-The non-persistent fallback around `wasm.Evaluator`, used when `usePersistentCache` is off. It keeps
-its cache in JS. Same interface where it matters: `evaluate(expr, evalCache)`,
-`evaluateNote(note, evalCache)`, `invalidate`, `invalidateAll`, `getCachedValue`, `getPoolStats`.
-
-It can only evaluate a whole note at a time, so it cannot be driven by the JS evaluator's
-per-variable order. `WasmNoteOrderIncrementalEvaluator` (`evaluator-adapter.js:210`) pairs it with
-the per-note Kahn sort instead: the JS incremental evaluator's dirty tracking, `WasmIncrementalEvaluator`'s
-`topoSort()`, then one `evaluateNote()` per note.
-
-::: warning The WASM path orders whole notes
-Per-variable ordering and cycle detection exist only in the JS evaluator. The Rust
-`evaluate_note_internal` (`rust/src/evaluator.rs:957`) evaluates a note's six expressions in the
-fixed order tempo → beatsPerMeasure → frequency → measureLength → startTime → duration, and both
-WASM incremental evaluators sort notes. When the WASM path is switched back on, a module in which two
-notes read each other through different variables would still log `Dependency cycle detected!` and
-evaluate the affected variables against defaults; the JS path evaluates it exactly.
-:::
+These still create JavaScript `BinaryEvaluator`s. They read the same records.
 
 ## The hot-swap
 
@@ -219,8 +220,8 @@ atomically, clears the evaluation cache, and marks every note dirty so the next 
 re-evaluates on the new engine. Values are identical across engines, so nothing goes stale in
 between. The `WeakRef` keeps a discarded module from leaking through the callback list.
 
-Because `isEvaluatorHotSwapEnabled()` is `false` everywhere while `WASM_MATCHES_VARIABLE_LAYOUT` is
-`false`, **`_upgradeEvaluators()` never runs.**
+The gate is closed by default in a browser, so without `?evaluator=wasm` `_upgradeEvaluators()`
+never runs.
 
 ## Error handling
 
@@ -228,31 +229,28 @@ With `fallbackOnError: true` (the default), every WASM failure degrades to JS in
 
 - `initWasm()` resolves `false` and the app runs on JS.
 - `createEvaluator()` catches a construction failure and returns `JSBinaryEvaluator`.
-- `onWasmReady(cb)` callbacks registered before a failed init **never fire** — by design, WASM will
-  never arrive.
+- `onWasmReady(cb)` callbacks registered before a failed init **never fire**: WASM will never arrive.
 
 Set `WASM_CONFIG.debug = true` to see the loader's `WASM initialized: rmt-core v0.1.0` line and the
-adapters' fallback warnings. There is no bytecode-level trace logging.
+adapters' fallback warnings.
 
 ## Testing
 
-There is **no unit-test framework** in this repo — no Jest, no Vitest. `npm test` runs six plain Node
-suites (`validate-modules`, `test-exactness`, `test-variable-deps`, `test-amplitude`,
-`test-midi-export`, `test-relational-time`), none of which touches WASM. The two WASM checks are
+`npm test` runs `scripts/test-wasm-parity.mjs`, which compares both engines exactly, and
+`scripts/perf/test-wasm-swap.mjs`, which tests the hot-swap and that three concurrent `initWasm()`
+calls fetch the module once. The parity test also runs ten evaluation suites whole on WASM. See
+[WASM Overview](/developer/wasm/overview#how-the-two-engines-are-held-together).
 
 ```bash
-node scripts/perf/test-wasm-swap.mjs           # hot-swap + identical results, in Node
+node scripts/test-wasm-parity.mjs
+node scripts/perf/test-wasm-swap.mjs
+node --import ./scripts/wasm-node.mjs scripts/test-variable-deps.mjs   # one suite on WASM
 node scripts/perf/bench-node.mjs chain-1000 --wasm
 ```
 
-Both predate the relational-time change and depend on `initWasm()` succeeding. With the layout flag
-`false` it returns `false` and no swap happens, so neither is a check of anything until the Rust core
-is ported and the flag flipped. Even when they passed, a Node pass was not evidence that the browser
-path worked.
-
 ## See also
 
-- [WASM Overview](/developer/wasm/overview) — the crate, the value model, and the blocked-evaluator dossier
-- [Building WASM](/developer/wasm/building) — rebuild and sync the artifacts
-- [Binary Evaluator](/developer/core/binary-evaluator) — the JS evaluator that actually runs
-- [Build & Deploy](/developer/contributing/build-and-deploy) — scripts, chunks, and the two deploys
+- [WASM Overview](/developer/wasm/overview): the crate, the exact values, parity and speed
+- [Building WASM](/developer/wasm/building): rebuild and sync the artifacts
+- [Binary Evaluator](/developer/core/binary-evaluator): the JavaScript evaluator
+- [Build & Deploy](/developer/contributing/build-and-deploy): scripts, chunks, and the two deploys

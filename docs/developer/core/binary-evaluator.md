@@ -15,8 +15,8 @@ description: The stack VM that executes note bytecode — exact values on the st
 
 The values themselves (rational, irrational, approximate) come from `src/value/exact.js`; see [Exact Values](/developer/core/symbolic-power).
 
-::: info This is the path that actually runs
-Every browser session runs the **JavaScript** evaluator. The WASM evaluator is disabled: the Rust core still has the old variable layout (`tempo`, `beatsPerMeasure`, `measureLength` at indices 3 to 5, no attack or release), so `WASM_MATCHES_VARIABLE_LAYOUT` is `false` in `src/wasm/evaluator-adapter.js`, `?evaluator=wasm` is ignored with a console warning, and the hot-swap in `Module` never arms. Porting the Rust core is planned. See [WASM Overview](/developer/wasm/overview).
+::: info This is the default path
+In a browser the default is the **JavaScript** evaluator described on this page. `?evaluator=wasm` opts in to the Rust core, which implements the same evaluator a second time (`rust/src/evaluator.rs`) and is held to this one by a parity test. `WASM_MATCHES_VARIABLE_LAYOUT` in `src/wasm/evaluator-adapter.js` is `true`; set to `false` it turns WASM off everywhere. See [WASM Overview](/developer/wasm/overview).
 :::
 
 ## The six variables
@@ -143,7 +143,7 @@ alloc(n = 0n, d = 1n) {
 reset() { this.index = 0; }            // rewind — called once per batch
 ```
 
-`allocFrom()` (`:133`) copies BigInt fields directly and coerces duck-typed `{s, n, d}` values with Number fields (the WASM adapter can produce those) so they cannot poison downstream arithmetic.
+`allocFrom()` (`:133`) copies BigInt fields directly and coerces duck-typed `{s, n, d}` values with Number fields so they cannot poison downstream arithmetic.
 
 `IncrementalEvaluator.evaluateDirty()` calls `evaluator.beginBatch()` (`:1028`, defined at `:227`), which calls `pool.reset()`. Everything allocated during the previous batch is recycled at that instant.
 
@@ -196,7 +196,9 @@ Fields: `graph`, `evaluator`, `dirty` (a `Set`), `cache` (`Map<noteId, result>`)
 | `evaluateDirty()` (`:1022`) | `beginBatch()` → a blank record for every dirty note → `evaluateVariables()` → `reportProblems()` → clear dirty → return the cache |
 | `getEvaluatedNote(id)`, `isCacheValid()` | accessors |
 
-`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` (`src/module.js:258-260`) uses it for dependents whose *values* changed but whose *bytecode* did not, and so does the batch path (`src/module.js:333-336`). It was added to reach parity with the WASM evaluator; before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
+`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` (`src/module.js:258-260`) uses it for dependents whose *values* changed but whose *bytecode* did not, and so does the batch path (`src/module.js:333-336`). Both the JavaScript and the WASM incremental evaluators have it. Before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
+
+**One walk per dirty cycle.** `Module.markNoteDirty()` marks a note and every transitive dependent. Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a walk of the same dirty cycle now only re-registers its own bytecode: `Module._dirtyClosed` (`src/module.js:84`, checked at `src/module.js:236`) remembers them, and is cleared whenever the dirty set is. Before, a commit in the middle of `chain-1000` ran 501 walks over 125,000 notes. `scripts/test-dirty-marking.mjs` checks one walk per cycle and values equal to a reload's. Both engines behave this way.
 
 Dirty tracking stays **per note**: a change to any expression of a note re-evaluates all of that note and of every note downstream. That is a superset of what strictly has to change, and it is what keeps the dirty set one cheap graph walk. Only the *order* is per variable.
 
@@ -242,8 +244,8 @@ It does **not** throw, and the loop still gets values. Because the order inside 
 
 Cycles are meant to be prevented upstream, by `validateExpression()` in `src/modals/validation.js`, which uses the same per-variable rule — see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable).
 
-::: info The WASM path still orders whole notes
-The Rust evaluator evaluates a note's expressions in the old fixed order and with the old variable layout, and both WASM incremental evaluators sort **notes** with the Kahn algorithm this page used to describe (`WasmIncrementalEvaluator.topoSort()`, `src/wasm/evaluator-adapter.js:210`). Nothing of this section has been ported, which is one reason the WASM evaluator is disabled.
+::: info The WASM path orders the same way
+The Rust `PersistentEvaluator` evaluates a batch per (note, variable) with Tarjan's strongly connected components, exactly as `evaluateVariables()` does here (`rust/src/evaluator.rs:498`). It does not print: it hands cycles and unresolved references to the JavaScript side, which reports them through this evaluator's `reportProblems()`, so the messages are the same. `scripts/test-wasm-parity.mjs` compares the two engines' records exactly.
 :::
 
 ## From corruption flag to pixels
@@ -267,7 +269,7 @@ POW produces an irrational, or ~ / a fallback an approximation
 
 Do not quote numbers that are not measured. Two harnesses exist:
 
-- `npm run perf:bench` → `scripts/perf/bench-node.mjs`. Headless Node, **JS evaluator only** — no renderer, no WASM.
+- `npm run perf:bench` → `scripts/perf/bench-node.mjs`. Headless Node, no renderer. It runs the JS evaluator; `--wasm` runs the Rust core instead (also `--runs N`, `--json`), and `scripts/perf/bench-pairs.mjs` runs both back to back.
 - `?perf=1` in the browser → `window.__rmtPerf` (`src/dev/perf-harness.js`), with `measureEval()`, `measureCommit()`, `report()`.
 
 One run of `npm run perf:bench` on the generated stress modules (`npm run perf:gen`), measured on the BigInt-backed evaluator:
@@ -308,4 +310,4 @@ Note ids above 65 535 used to silently truncate to a different note in the compi
 - [Expression Compiler](/developer/core/expression-compiler) — where the bytecode comes from
 - [Dependency Graph](/developer/core/dependency-graph) — where `getEvaluationDependents()` and the corruption flags live
 - [Exact Values](/developer/core/symbolic-power) — the three kinds of value, and what `POW` returns
-- [WASM Overview](/developer/wasm/overview) — the other evaluator, and why it is off
+- [WASM Overview](/developer/wasm/overview) — the Rust evaluator, how to opt in, and how it is checked against this one

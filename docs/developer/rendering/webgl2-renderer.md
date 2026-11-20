@@ -145,8 +145,8 @@ note as its power on one line (`2^(7/12)`, `3/2·2^(1/2)`; drawn like the "silen
 arrows), and `≈` with a rounded fraction (`_approximateFraction()`, denominator ≤ 8192) only for an
 approximate value or an exact fraction with more than four digits in a part. `_noteLabelApprox`
 holds the ≈ flag per note and is part of the text change test. The labels are memoised per value
-object in a `WeakMap`, so a steady sync costs one lookup per note. Without an exact value (the WASM
-path) the label falls back to the float ratio, as before.
+object in a `WeakMap`, so a steady sync costs one lookup per note. Without an exact value the label falls back to the float ratio, as before. The WASM evaluator fills
+`exact` too, so its records label the same way.
 
 `sync()` runs on every re-evaluation of the module — a commit, an import, a module load — and on a
 selection change (the selected note moves to the end of the instance arrays so it draws on top). A

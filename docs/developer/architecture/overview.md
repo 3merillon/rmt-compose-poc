@@ -261,7 +261,8 @@ An opcode is only real once **all four** of these know about it:
 3. `src/dsl/` — give it a surface. `lexer.js` / `parser.js` if it needs new syntax,
    `compiler.js` to emit it, `decompiler.js` to read it back.
 4. `rust/src/bytecode.rs` and `rust/src/evaluator.rs` — the WASM evaluator has its own opcode
-   switch. Skip this and the opcode breaks under `?evaluator=wasm`.
+   switch. Skip this and the opcode breaks under `?evaluator=wasm`; the parity test
+   (`scripts/test-wasm-parity.mjs`) will fail.
 
 ::: info Three opcodes exist but are dead
 `FIND_INSTRUMENT` (0x22), `DUP` (0x30) and `SWAP` (0x31) are defined in `OP`. `DUP` and `SWAP` are

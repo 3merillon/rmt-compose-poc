@@ -137,6 +137,10 @@ transitively, and across the BaseNote: when the cascade reaches note `0` it cont
 note that reads the BaseNote (by writing `base`, or by inheriting an amplitude, attack or release)
 and on through whatever reads those.
 
+Callers often mark a note and then each of its dependents. A note already reached by a walk of the
+same dirty cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js:236`),
+so the cycle costs one walk. The set is cleared whenever the dirty set is.
+
 ### markNotesDirtyBatch()
 
 ```javascript
@@ -539,12 +543,12 @@ is enabled it registers an `onWasmReady` callback that replaces both evaluators 
 (`_upgradeEvaluators()`, `src/module.js:146`), marks everything dirty, and warms the new engine on
 an idle callback.
 
-::: danger WASM evaluation is disabled
-The Rust core still has the old variable layout (`tempo`, `beatsPerMeasure`, `measureLength`), so
-`WASM_MATCHES_VARIABLE_LAYOUT` is `false` (`src/wasm/evaluator-adapter.js:45`). While it is
-false, `isEvaluatorHotSwapEnabled()` never arms the hot-swap, `?evaluator=wasm` is ignored with a
-console warning, and **every session runs on the JS evaluator**. Porting the Rust core to the new
-layout is planned. See [WASM Adapters](/developer/wasm/adapters).
+::: info WASM is opt-in
+In a browser the default is the JS evaluator, and the hot-swap arms only with `?evaluator=wasm`
+(`isEvaluatorHotSwapEnabled()`, `src/wasm/evaluator-adapter.js:111-115`). `?evaluator=js` forces
+JavaScript. `WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:45`) is `true`; set to
+`false`, it turns the WASM evaluator off everywhere, even with `?evaluator=wasm`. See
+[WASM Adapters](/developer/wasm/adapters).
 :::
 
 ## Example

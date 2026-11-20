@@ -179,10 +179,10 @@ holds its labels. The note stays centred on its pitch line.
 Amplitude `1` — and so every note of a module that sets none — draws exactly as before. Silences
 are never scaled. The exact value is in the widget row.
 
-::: info The WASM evaluator is off
-The Rust core still has the old variable layout, so the WASM evaluator is disabled
-(`WASM_MATCHES_VARIABLE_LAYOUT = false` in `src/wasm/evaluator-adapter.js`). `?evaluator=wasm` is
-ignored with a console warning, and the JavaScript evaluator always runs.:::
+::: info The WASM evaluator is opt-in
+The default is the JavaScript evaluator. The Rust evaluator (`?evaluator=wasm`) has the same six
+variables, and `amplitude` inherits from the BaseNote there too.
+:::
 
 ## See also
 

@@ -79,7 +79,7 @@ Run these with `node` directly.
 | `scripts/migrate-modules.mjs` | Converts module JSON files (a file or a folder) to relational time in place, with the same conversion the app applies on load; `--dry-run` reports without writing |
 | `scripts/check-doc-citations.mjs` | Prints every source line citation in the docs beside the line it names now, so stale `file.js:N` citations can be found after a `src/` edit |
 | `scripts/shift-doc-citations.py` | Re-points the docs' `file.js:N` citations (and bare `` `:N` `` ones after a cited file on the same line) after a `src/` edit, by mapping each cited line of the file at a given commit to the same line now: `python scripts/shift-doc-citations.py . v2 src/player.js` |
-| `scripts/perf/test-wasm-swap.mjs` | Headless end-to-end test of the WASM evaluator hot-swap. Cannot swap while `WASM_MATCHES_VARIABLE_LAYOUT` is `false` |
+| `scripts/perf/test-wasm-swap.mjs` | Headless end-to-end test of the WASM evaluator hot-swap, and that three concurrent `initWasm()` calls fetch the module once. Part of `npm test` |
 | `scripts/perf/bench-render.mjs`, `bench-drag.mjs`, `bench-hover.mjs`, `bench-pick.mjs`, `bench-marquee.mjs`, `profile-sync.mjs`, `converge.mjs`, `who-dirties.mjs` | Playwright render/interaction benchmarks. They drive a **running** dev server |
 | `scripts/perf/visual-regress.mjs` | Playwright pixel-diff regression harness (`--capture` / `--compare`) |
 
@@ -96,16 +96,16 @@ See [Performance](/developer/performance) for how to use them.
 
 | Chunk | Raw | Gzip |
 |---|---|---|
-| `index-*.js` (entry) | 422.70 kB | 110.97 kB |
-| `renderer-*.js` | 264.21 kB | 54.14 kB |
-| `dsl-*.js` | 25.70 kB | 7.86 kB |
-| `settings-panel-*.js` (async) | 24.80 kB | 8.46 kB |
-| `rmt_core-*.js` (WASM glue) | 16.72 kB | 4.69 kB |
-| `instruments-*.js` | 9.46 kB | 3.03 kB |
-| `perf-harness-*.js` (async, `?perf` only) | 6.00 kB | 2.34 kB |
+| `index-*.js` (entry) | 357.15 kB | 97.69 kB |
+| `renderer-*.js` | 346.71 kB | 80.87 kB |
+| `dsl-*.js` | 25.87 kB | 8.20 kB |
+| `settings-panel-*.js` (async) | 29.40 kB | 10.13 kB |
+| `rmt_core-*.js` (WASM glue) | 12.73 kB | 3.99 kB |
+| `instruments-*.js` | 14.20 kB | 4.73 kB |
+| `perf-harness-*.js` (async, `?perf` only) | 5.97 kB | 2.33 kB |
 | `vendor-*.js` (fraction.js) | 6.81 kB | 2.48 kB |
-| `rmt_core_bg-*.wasm` | 384.01 kB | 146.96 kB |
-| `index.html` | 8.80 kB | 2.97 kB |
+| `rmt_core_bg-*.wasm` | 294.19 kB | 114.80 kB |
+| `index.html` | 8.91 kB | 3.00 kB |
 
 Output goes to `dist/` (gitignored). `publicDir: 'public'` is copied verbatim, so `modules/`,
 `samples/`, `images/`, `styles.css`, `favicon.ico`, `robots.txt`, `sitemap.xml` and `license.html`
@@ -146,8 +146,8 @@ This is the one non-obvious thing about the build.
 rust/pkg/                    ← wasm-pack output. GITIGNORED.
   └── (copied by scripts/sync-wasm.mjs)
        ↓
-src/wasm/rmt_core.js         ← COMMITTED. 42,725 bytes.
-src/wasm/rmt_core_bg.wasm    ← COMMITTED. 384,008 bytes.
+src/wasm/rmt_core.js         ← COMMITTED. 31,204 bytes.
+src/wasm/rmt_core_bg.wasm    ← COMMITTED. 294,191 bytes.
 ```
 
 Vercel's build command is plain `vite build`. It never runs `wasm-pack`, and the build image has no
@@ -155,10 +155,9 @@ Rust toolchain. **The committed `src/wasm/` files are what gets bundled and ship
 change under `rust/`, run `npm run wasm:build` and commit the two synced files, or the deploy keeps
 serving the old binary with no warning.
 
-The binary ships in the bundle but is **not fetched on any page load**: `initWasm()` returns early
-because the WASM evaluator is disabled until the Rust core is ported to the new variable layout
-(`WASM_MATCHES_VARIABLE_LAYOUT` is `false`; see the
-[status dossier](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked)).
+The binary ships in the bundle but is **not fetched on a normal page load**: `initWasm()` returns early
+unless `?evaluator=wasm` is in the URL. The default evaluator is JavaScript; WASM is opt-in (see
+[Which evaluator runs](/developer/wasm/overview#which-evaluator-runs)).
 
 ## Deploys
 
@@ -218,7 +217,7 @@ components, per `THIRD_PARTY_NOTICES.md`: fraction.js (MIT), the VSCO-2 Communit
 
 - [Development Setup](/developer/contributing/setup) — clone, install, run
 - [Building WASM](/developer/wasm/building) — the Rust crate and the sync step
-- [WASM Overview](/developer/wasm/overview) — why the WASM evaluator is off by default
+- [WASM Overview](/developer/wasm/overview) — the opt-in WASM evaluator, how it is checked, how fast it is
 - [Performance](/developer/performance) — the benchmark and pixel-diff harness
 - [Code Style](/developer/contributing/code-style)
 - [Pull Requests](/developer/contributing/pull-requests)

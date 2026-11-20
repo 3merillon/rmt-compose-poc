@@ -717,7 +717,7 @@ export class Module {
 
     try {
       // Fetch per-id from cache (rather than iterating cache.entries()) so
-      // both regular Maps and lazy WASM cache proxies are handled correctly.
+      // a cache that is not a Map would be handled as well.
       const ids = noteIds !== null ? noteIds : Object.keys(this.notes);
       for (const id of ids) {
         const noteId = Number(id);

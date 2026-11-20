@@ -218,7 +218,7 @@ Docs live in `docs/` (VitePress). Two rules a reviewer will hold you to:
 
 - **DSL only.** Every expression example is DSL. The retired method-chain syntax appears only where
   the docs explain its conversion (the syntax reference and the expression-compiler page).
-- **Document what ships.** If a control does nothing, or a path is blocked (like the WASM evaluator),
+- **Document what ships.** If a control does nothing, or a path is opt-in (like the WASM evaluator),
   say so plainly rather than describing the intent.
 
 ## See also

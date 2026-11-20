@@ -136,11 +136,11 @@ Other scripts:
 | `npm run docs:dev` / `docs:build` / `docs:preview` | The VitePress docs site in `docs/` |
 | `npm run wasm:build` / `wasm:sync` | See below |
 
-### WASM (optional, and not currently usable)
+### WASM (optional, opt-in)
 
-A Rust core (`rust/`, crate `rmt-core`) compiles to WebAssembly and implements an alternative evaluator. **It is not active.** Activation is opt-in via `?evaluator=wasm` — without that flag the 384 KB binary is not even fetched (`initWasm()` returns early; headless Node still initializes for benches). Opting in currently **hangs the main thread** on a full re-evaluation cycle — a non-deterministic bug in the Rust `PersistentEvaluator`. Everything you see in the app runs on the JavaScript evaluator, which after the Phase 1/8 work is fast enough on its own (sub-2 ms evaluation at 1000 notes). The WASM path passes in Node; the hang is browser-only.
+A Rust core (`rust/`, crate `rmt-core`) compiles to WebAssembly and implements the evaluator a second time, with the same exact values and the same per-variable order. **The default is the JavaScript evaluator.** `?evaluator=wasm` opts in: the 294 KB binary is fetched and each module hot-swaps to Rust when it is ready. `?evaluator=js` forces JavaScript. Without the opt-in the binary is not fetched (`initWasm()` returns early). In Node the same choice is `RMT_EVALUATOR=js|wasm`, and `node --import ./scripts/wasm-node.mjs <script>` runs a script on Rust.
 
-Do not enable it. The infrastructure is here for when the hang is fixed.
+`scripts/test-wasm-parity.mjs` (part of `npm test`) compares the two engines exactly on every library module and 400 fuzz modules, and runs ten evaluation suites whole on WASM. After changing either engine, run `npm test`. `WASM_MATCHES_VARIABLE_LAYOUT` in `src/wasm/evaluator-adapter.js` is a kill switch: set to `false`, WASM is off everywhere. Making WASM the default has not been decided. Speed and limits: [WASM Overview](docs/developer/wasm/overview.md).
 
 To rebuild the artifacts (they are **committed** to `src/wasm/`, which is what the app and the Vercel deploy actually use):
 
@@ -391,7 +391,7 @@ Example — chain notes up the 12-TET scale:
 - `src/midi/midi-export.js` — module → Standard MIDI File (pure function; also runs in Node)
 - `src/instruments/` — synth + multisample instruments
 
-### WASM core (optional, inert by default)
+### WASM core (optional, opt-in)
 - `rust/` — the `rmt-core` Rust crate
 - `src/wasm/` — committed build artifacts + the evaluator adapter
 
@@ -404,7 +404,7 @@ Example — chain notes up the 12-TET scale:
 ## Browser Support and Fallbacks
 
 - **WebGL2 is required.** If a WebGL2 context cannot be created, the workspace will not initialize.
-- WASM support is *not* required — the app runs entirely on the JS evaluator.
+- WASM support is *not* required — the default is the JS evaluator, and WASM is opt-in with `?evaluator=wasm`.
 
 ## Learn More
 

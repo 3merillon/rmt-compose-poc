@@ -30,7 +30,8 @@ rustup target add wasm32-unknown-unknown
 
 The repo pins no toolchain: there is no `rust-toolchain.toml` and no `rust-version` in
 `Cargo.toml`, so there is no declared MSRV. The last combination recorded as working (during the
-July 2026 WASM investigation) is **cargo 1.87 / wasm-pack 0.13.1**.
+last build, which produced the committed artifacts) is **cargo 1.93 / wasm-pack 0.14.0**, target
+`wasm32-unknown-unknown`.
 
 ## Build
 
@@ -52,8 +53,8 @@ Two things happen, and the second one is the one people forget:
    `src/wasm/`, printing one line per file:
 
    ```
-   synced rmt_core.js (42725 bytes) -> src/wasm/
-   synced rmt_core_bg.wasm (384008 bytes) -> src/wasm/
+   synced rmt_core.js (31204 bytes) -> src/wasm/
+   synced rmt_core_bg.wasm (294191 bytes) -> src/wasm/
    ```
 
 Then:
@@ -84,8 +85,8 @@ that is precisely what Vercel does. See [Build & Deploy](/developer/contributing
 
 | File | Size | Copied to `src/wasm/`? |
 |---|---|---|
-| `rmt_core_bg.wasm` | 384,008 bytes | Yes — this is the binary the app loads |
-| `rmt_core.js` | 42,725 bytes | Yes — the wasm-bindgen glue the app imports |
+| `rmt_core_bg.wasm` | 294,191 bytes (about 294 KB) | Yes — this is the binary the app loads |
+| `rmt_core.js` | 31,204 bytes | Yes — the wasm-bindgen glue the app imports |
 | `rmt_core.d.ts` | ~15 KB | **No** — `src/` is plain JS; the typings stay in `rust/pkg/` |
 | `rmt_core_bg.wasm.d.ts`, `package.json`, `LICENSE.md` | — | **No** |
 
@@ -105,12 +106,12 @@ rust/
 ├── LICENSE.md
 ├── src/
 │   ├── lib.rs        # re-exports, #[wasm_bindgen(start)] init(), version()
-│   ├── fraction.rs   # Fraction (num-rational BigRational)
-│   ├── value.rs      # Value, SymbolicPower, PowerTerm, corruption flags
-│   ├── bytecode.rs   # opcodes
-│   ├── evaluator.rs  # Evaluator, PersistentEvaluator, EvaluatedNote
-│   ├── graph.rs      # DependencyGraph
-│   └── compiler.rs   # ExpressionCompiler (retired method-chain grammar only)
+│   ├── rational.rs   # Q: exact rational, two words or a BigRational
+│   ├── exact.rs      # Value: rational, irrational, approximate (twin of src/value/exact.js)
+│   ├── bytecode.rs   # opcodes, the six variables
+│   ├── variable_deps.rs  # twin of src/variable-deps.js
+│   ├── evaluator.rs  # PersistentEvaluator
+│   └── graph.rs      # DependencyGraph (not used by the app)
 └── pkg/              # wasm-pack output — GITIGNORED
 ```
 
@@ -154,10 +155,9 @@ opt-level = 1
 
 ::: warning Do not "optimize for size"
 The project deliberately builds for **speed** (`opt-level = 3`), not size (`opt-level = "z"`). The
-crate exists to make evaluation fast; a smaller, slower binary defeats its only purpose. If you need
-to shrink the payload, the honest lever is to stop shipping the binary at all — today it ships in
-the bundle and, with the evaluator [disabled](/developer/wasm/overview) until the Rust core is ported
-to the new variable layout, is never fetched or used.
+crate exists to make evaluation fast; a smaller, slower binary defeats its only purpose. The binary
+ships in the bundle, but it is fetched only when a page opts in with
+[`?evaluator=wasm`](/developer/wasm/overview#which-evaluator-runs).
 :::
 
 ## Debug builds
@@ -181,27 +181,26 @@ Remember to re-sync and (if you want it in the browser) commit — the dev serve
 
 ## Verifying a build
 
-There is no unit-test runner in this repo (`npm test` validates the module library, not Rust). The
-WASM checks are these two Node scripts:
+The crate has 64 Rust tests, and the JavaScript side has the parity test:
 
 ```bash
-# hot-swap end to end: build a Module before WASM init finishes,
-# then verify the upgrade and identical evaluation results
+# the crate's own tests
+cd rust && cargo test
+
+# both engines, exactly, on every library module, 400 fuzz modules and ten suites (part of npm test)
+node scripts/test-wasm-parity.mjs
+
+# hot-swap end to end, and three concurrent initWasm() calls fetch once (part of npm test)
 node scripts/perf/test-wasm-swap.mjs
 
-# run the WASM evaluator against a stress module
+# the WASM evaluator against a stress module
 npm run perf:gen                                     # generate the stress modules first
 node scripts/perf/bench-node.mjs chain-1000 --wasm
 ```
 
-Both shim `fetch` for `file://` `.wasm` URLs, because Node's `fetch` cannot load the URL that
-wasm-bindgen's init produces.
-
-Neither checks anything while `WASM_MATCHES_VARIABLE_LAYOUT` is `false` in
-`src/wasm/evaluator-adapter.js`: `initWasm()` then returns `false` and the swap never happens. They
-become meaningful again once the Rust core is ported to the six-variable layout and the flag is flipped.
-Before the flag, they passed while the browser hung — see
-[the hang dossier](/developer/wasm/overview#status-the-evaluator-hot-swap-is-blocked).
+After changing either engine, run `npm test`: the parity test must pass. The scripts shim `fetch`
+for `file://` `.wasm` URLs, because Node's `fetch` cannot load the URL that wasm-bindgen's init
+produces. See [WASM Overview](/developer/wasm/overview#how-the-two-engines-are-held-together).
 
 ## There is no WASM CI
 
@@ -222,7 +221,7 @@ last person who ran `npm run wasm:build` and committed the result.
 
 ## See also
 
-- [WASM Overview](/developer/wasm/overview) — what the crate contains and why the evaluator is off
+- [WASM Overview](/developer/wasm/overview) — what the crate contains, how to opt in, parity and speed
 - [JS/WASM Adapters](/developer/wasm/adapters) — the JS layer that loads and wraps it
 - [Build & Deploy](/developer/contributing/build-and-deploy) — the full script inventory and the two Vercel projects
 - [wasm-pack documentation](https://rustwasm.github.io/wasm-pack/)

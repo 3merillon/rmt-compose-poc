@@ -21,15 +21,14 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 | **WebGL2** | The workspace. A hard requirement — `player.js` probes for a context and, without one, never constructs the `Workspace`. There is no DOM fallback renderer. |
 | **Web Audio API** | Synthesis, sample playback, the reverb/limiter signal graph. |
 | **fraction.js 5.3.4** | Exact rational arithmetic. BigInt-backed — arbitrary precision, at any magnitude and depth. |
-| **Rust → WASM** | An alternative evaluator core that ships in the bundle but is **disabled** until it is ported to the new variable layout. |
+| **Rust → WASM** | An alternative evaluator core that ships in the bundle. Opt-in with `?evaluator=wasm`; the default is JavaScript. |
 | **VitePress** | This documentation site (`docs/`, deployed separately). |
 
-::: warning The WASM evaluator is disabled
-The `rmt-core` WASM binary is **not fetched** on any page load — `initWasm()` returns early because
-`isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:111-115`): the Rust core still
-has the old variable layout, so `WASM_MATCHES_VARIABLE_LAYOUT` is `false` and `?evaluator=wasm` is
-ignored with a console warning. Everything you experience in the app runs on the **JavaScript**
-evaluator. See [WASM Overview](/developer/wasm/overview).
+::: info The WASM evaluator is opt-in
+The `rmt-core` WASM binary is **not fetched** on a normal page load: `initWasm()` returns early
+unless `?evaluator=wasm` is in the URL (`isEvaluatorHotSwapEnabled()`,
+`src/wasm/evaluator-adapter.js:111-115`). The default evaluator is **JavaScript**. See
+[WASM Overview](/developer/wasm/overview).
 :::
 
 ## The layers
@@ -59,7 +58,7 @@ evaluator. See [WASM Overview](/developer/wasm/overview).
 │ State                                                                │
 │  store/app-state.js · store/history.js · utils/event-bus.js          │
 ├──────────────────────────────────────────────────────────────────────┤
-│ wasm/  (alternative evaluator core — disabled until ported)          │
+│ wasm/  (alternative evaluator core — opt-in, JavaScript is default)  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -100,7 +99,7 @@ evaluator. See [WASM Overview](/developer/wasm/overview).
 
 ### WASM
 
-- **[WASM Overview](/developer/wasm/overview)** — what ships, what runs, what is blocked
+- **[WASM Overview](/developer/wasm/overview)** — what ships, how to opt in, how it is checked, how fast
 - **[Building WASM](/developer/wasm/building)** — `wasm-pack`, `sync-wasm.mjs`, committed artifacts
 - **[JS/WASM Adapters](/developer/wasm/adapters)** — the evaluator bridge
 

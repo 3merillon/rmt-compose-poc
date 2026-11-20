@@ -168,7 +168,9 @@ module.markNotesDirtyBatch(noteIds) // many notes, one pass
 
 `markNoteDirty()` re-registers the note, calls `invalidate()` on the incremental evaluator (its
 bytecode may have changed), then marks every transitive dependent with **`markDirtyOnly()`** — they
-need re-evaluating but must not be re-registered. If the note *is* the BaseNote, every
+need re-evaluating but must not be re-registered. A note already reached by a walk of the same dirty
+cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js:236`), so callers
+that mark a note and then each dependent cost one walk. If the note *is* the BaseNote, every
 `baseNoteDependents` entry is marked too.
 
 `markNotesDirtyBatch()` additionally pulls in the transitive **dependencies** of the dirty notes, not
@@ -393,11 +395,11 @@ every module on the JS evaluator for the whole session. The constructor therefor
 atomically swaps `_binaryEvaluator` and `_incrementalEvaluator` for the WASM versions, clears the
 evaluation cache, and marks everything dirty so the next evaluation runs on the new engine.
 
-::: warning It never runs
-The registration is gated on `isEvaluatorHotSwapEnabled()`, which returns `false` everywhere while
-`WASM_MATCHES_VARIABLE_LAYOUT` is `false` (`src/wasm/evaluator-adapter.js`): the Rust core still has
-the old variable layout, so the WASM evaluator is disabled until it is ported. `_upgradeEvaluators()` is
-never called, and `?evaluator=wasm` is ignored with a console warning.
+::: info It runs only with the opt-in
+The registration is gated on `isEvaluatorHotSwapEnabled()`, which is `true` in a browser only with
+`?evaluator=wasm` (`src/wasm/evaluator-adapter.js:111-115`). Without it `_upgradeEvaluators()` is
+never called and the module stays on the JavaScript evaluator. `WASM_MATCHES_VARIABLE_LAYOUT`
+(`src/wasm/evaluator-adapter.js:45`) is `true`; set to `false`, it turns the swap off everywhere.
 :::
 
 The practical consequence for anyone holding an evaluator reference: it can be **replaced between

@@ -228,7 +228,7 @@ None of these has UI. They are read from the URL query string or `localStorage`.
 | `?perf` (any value, e.g. `?perf=1`) | Loads `src/dev/perf-harness.js` and exposes `window.__rmtPerf`, `window.__rmtRenderer`, `window.__rmtWorkspace`. The harness is a separate lazily-fetched chunk — it never downloads without this flag. |
 | `?atlas=0` / `?atlas=1` | Force the glyph atlas off/on. Default on. Also settable via the `rmt:atlas` localStorage key. |
 | `?evaluator=js` | Force the JavaScript evaluator. Same as the default, but explicit. |
-| `?evaluator=wasm` | Ignored with a console warning: the WASM evaluator is disabled until the Rust core is ported — see below. |
+| `?evaluator=wasm` | Opt in to the Rust/WASM evaluator: the binary is fetched and each `Module` hot-swaps to it when it is ready. JavaScript is still the default. See below. |
 
 localStorage keys the app uses: `rmt:moduleSnapshot:v1` (the autosaved composition),
 `rmt:moduleSnapshot:v1:unloadable` (a saved session that could not be loaded; the default module opens
@@ -237,20 +237,26 @@ instead), `rmt:settings:v1` (the settings store), `ui-state` (the module-library
 ## WebAssembly
 
 The Rust crate in `rust/` (`rmt-core` 0.1.0, MIT) compiles to WASM and provides an *alternative*
-evaluator. You do not need it to develop:
+evaluator, held to the JavaScript one by a parity test. You do not need it to develop:
 
-- `src/wasm/rmt_core.js` and `src/wasm/rmt_core_bg.wasm` are **committed build artifacts**. They are
-  what the app imports and what the deploy ships. `rust/pkg/` is gitignored.
-- The WASM binary is **not fetched at all**: `initWasm()` returns `false` early because
-  `isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:111-115`), in a browser and
-  in headless Node alike.
+- `src/wasm/rmt_core.js` and `src/wasm/rmt_core_bg.wasm` (about 294 KB) are **committed build
+  artifacts**. They are what the app imports and what the deploy ships. `rust/pkg/` is gitignored.
+- In a browser the default is the **JavaScript** evaluator, and without the opt-in the binary is
+  **not fetched at all**: `initWasm()` returns `false` before fetching. `?evaluator=wasm` opts in:
+  `initWasm()` fetches the binary and each `Module` hot-swaps to WASM when it is ready
+  (`Module._upgradeEvaluators`, `src/module.js:146`).
+- In Node (tests, benches) the same choice is the environment variable `RMT_EVALUATOR=js|wasm`.
+  `node --import ./scripts/wasm-node.mjs <script>` runs a script on Rust.
 
-::: danger The WASM evaluator is disabled
-The Rust core still has the old variable layout (`tempo`, `beatsPerMeasure`, `measureLength`), so
-`WASM_MATCHES_VARIABLE_LAYOUT` is `false` in `src/wasm/evaluator-adapter.js`, `?evaluator=wasm` is
-ignored with a console warning, and every code path runs on the JavaScript evaluator. Porting the
-Rust core is planned. Do not tell a user to pass the flag, and do not build a feature on it.
+::: info WASM is opt-in
+The default is JavaScript and WASM is opt-in; making WASM the default has not been decided.
+`WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:45`) is
+`true`; it is a kill switch. Set to `false`, the WASM evaluator is off everywhere, even with
+`?evaluator=wasm`. See [WASM Overview](/developer/wasm/overview).
 :::
+
+After changing either engine, run `npm test`: `scripts/test-wasm-parity.mjs` compares them exactly
+and must pass.
 
 Rebuilding the core, if you touched `rust/src/`:
 
@@ -263,9 +269,7 @@ npm run wasm:build   # wasm-pack build --target web --out-dir pkg, then sync-was
 previous binary and your Rust change silently does nothing.
 
 The `WASM_CONFIG` flags in `src/wasm/config.js` are the JS-side switches: `useEvaluator`,
-`usePersistentCache`, `fallbackOnError`, `logPerformance` and `debug`. Every flag reaches live
-code — the old dead switches for the unimported adapters (`useFractions`, `useGraph`,
-`useCompiler`) no longer exist.
+`fallbackOnError`, `logPerformance` and `debug`.
 
 ## Performance and visual-regression harness
 

@@ -1,193 +1,124 @@
 ---
 title: WASM Overview
-description: What the rmt-core Rust/WASM crate contains, why the WASM evaluator is disabled by default, and the open bug that blocks it.
+description: What the rmt-core Rust/WASM crate contains, how to opt in to it, how it is held to the JavaScript evaluator, and what it measures.
 ---
 
 # WASM Overview
 
-RMT Compose contains a Rust crate, `rmt-core`, that compiles to WebAssembly and implements a
-bytecode evaluator, a dependency graph, an expression compiler and an arbitrary-precision
-`Fraction`. The compiled artifacts are committed to the repo and shipped with every deploy.
+RMT Compose contains a Rust crate, `rmt-core`, that compiles to WebAssembly and implements the
+bytecode evaluator a second time: exact values, per-variable evaluation order, the same records.
+The compiled artifacts are committed to the repo and shipped with every deploy.
 
-::: danger The WASM evaluator is disabled
-All evaluation runs on the **JavaScript** `BinaryEvaluator` (`src/binary-evaluator.js`). The Rust core
-still has the old variable layout (`tempo`, `beatsPerMeasure` and `measureLength` at indices 3 to 5, no
-`attack` or `release`) and the retired `FIND_TEMPO` / `FIND_MEASURE` opcodes, while the JavaScript
-evaluator moved to relational time (`startTime`, `duration`, `frequency`, `amplitude`, `attack`,
-`release`). The two would read the same bytecode differently, so
-`WASM_MATCHES_VARIABLE_LAYOUT` is `false` in `src/wasm/evaluator-adapter.js`: the JavaScript evaluator
-is always used, `?evaluator=wasm` is ignored with a console warning, and the hot-swap never arms.
-Porting the Rust core to the new layout is planned, together with its per-variable evaluation.
-
-Before this, the opt-in path also hung the tab in a browser (see
-[Status](#status-the-evaluator-hot-swap-is-blocked)). Do not tell a user to pass `?evaluator=wasm`, and do not describe WASM as an app performance
-feature. The JS path carries the app on its own: a full re-evaluation of the 1000-note
-`chain-1000` stress module is ~3 ms, and an incremental commit is under 1 ms
-(`node scripts/perf/bench-node.mjs chain-1000`). See [Performance](/developer/performance).
+::: info JavaScript is the default; WASM is opt-in
+In a browser the app evaluates with the **JavaScript** `BinaryEvaluator` (`src/binary-evaluator.js`).
+`?evaluator=wasm` in the URL opts in to the Rust core. `?evaluator=js` forces JavaScript. Making
+WASM the default is a decision that has not been made. In Node, the environment variable
+`RMT_EVALUATOR=js|wasm` is the same choice (see [Running Node scripts on WASM](#running-node-scripts-on-wasm)).
 :::
 
-## What actually happens on page load
+## Which evaluator runs
+
+| Where | How | Evaluator |
+|---|---|---|
+| Browser, no parameter | the default | JavaScript |
+| Browser, `?evaluator=js` | forced | JavaScript |
+| Browser, `?evaluator=wasm` | opt-in | WASM, after it loads (each `Module` starts on JavaScript and hot-swaps) |
+| Node, `RMT_EVALUATOR=js` | forced | JavaScript |
+| Node, `RMT_EVALUATOR=wasm` | opt-in | WASM, once the script has called `initWasm()` |
+
+The gate is `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:111-115`). It also
+checks `WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:45`), which is `true`. That
+constant is a kill switch: set it to `false` and the WASM evaluator is off everywhere, even with
+`?evaluator=wasm` (the browser prints a console warning saying so). Use it if a change to one
+engine leaves the other behind. `RMT_EVALUATOR=wasm` in Node still runs the Rust core with the flag
+`false`, so that the parity test can check it first (`src/wasm/evaluator-adapter.js:50`).
+
+## What happens on page load
 
 | Step | Where | Effect |
 |---|---|---|
-| `initWasm()` is called eagerly at import time | `src/store/app-state.js:7` | **Returns `false` early**: `isEvaluatorHotSwapEnabled()` is false while the layout flag is false — no fetch |
-| `initWasm()` is `await`ed during `initApp()` | `src/main.js:82` | Same early-out |
-| `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:145-154` | Same call, same gate. Once the gate is open, all three callers share one initialization (`initPromise`), so the module is fetched and instantiated once |
-| `Module` constructor registers a hot-swap callback | `src/module.js:71-77` | **Never**: `isEvaluatorHotSwapEnabled()` is false everywhere |
-| Evaluation | `src/binary-evaluator.js` | JS |
+| `initWasm()` is called at import time | `src/store/app-state.js:7` | Shares the one initialization |
+| `initWasm()` is `await`ed during `initApp()` | `src/main.js:82` | Shares it |
+| `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:147` | Shares it |
+| `Module` constructor registers a hot-swap callback | `src/module.js:71-77` | Only when the gate is open |
+| Evaluation | `src/binary-evaluator.js` until the swap, then `src/wasm/evaluator-adapter.js` | JavaScript, or WASM after the swap |
 
-So the 384 KB `rmt_core_bg.wasm` is **never downloaded or instantiated** — every boot-time caller
-funnels through `initWasm()`, which checks `isEvaluatorHotSwapEnabled()` before touching the network.
-That check is now false in a browser and in headless Node alike, so nothing loads the binary. The
-benches and test that exercised the WASM evaluator (`scripts/perf/bench-node.mjs --wasm`,
-`scripts/perf/test-wasm-swap.mjs`) depend on `initWasm()` succeeding; with the flag false it returns
-`false`, and the bench aborts at its init check. Neither has been updated for the flag.
+`initWasm()` (`src/wasm/index.js:53`) is called three times at boot, and every call now shares one
+initialization promise (`src/wasm/index.js:47`). Before that, each call fetched and instantiated
+the module again, and the last to finish replaced the instance under objects made on an earlier
+one: `recursive use of an object` errors, or a hang. Without the opt-in, `initWasm()` returns
+`false` before it fetches anything, so the 294 KB `rmt_core_bg.wasm` is never downloaded.
 
-Because `isWasmAvailable()` stays `false`, every evaluator `createEvaluator()` returns is JS, including
-modules constructed later in a session (a file load, an undo or redo restore).
+With the opt-in, `Module._upgradeEvaluators()` (`src/module.js:146`) swaps each module to the WASM
+evaluator once the binary is ready. See [the hot-swap](/developer/wasm/adapters#the-hot-swap).
 
 ## The crate
 
-`rust/src/` — crate name `rmt-core`, version `0.1.0`, `license = "MIT"`.
+`rust/src/` is crate `rmt-core`, version `0.1.0`, `license = "MIT"`.
 
 | File | Contains |
 |---|---|
 | `lib.rs` | Module declarations, re-exports, `#[wasm_bindgen(start)] init()` (installs `console_error_panic_hook`), `version()` |
-| `fraction.rs` | `Fraction` — a wrapper around `num-rational`'s `BigRational` |
-| `value.rs` | `Value`, `SymbolicPower`, `PowerTerm`, the corruption-flag constants |
-| `bytecode.rs` | Opcode definitions |
-| `evaluator.rs` | `Evaluator`, `PersistentEvaluator`, `EvaluatedNote`, `FractionData` |
-| `graph.rs` | `DependencyGraph` |
-| `compiler.rs` | `ExpressionCompiler` |
+| `rational.rs` | `Q`, the exact rational |
+| `exact.rs` | `Value`: rational, irrational, approximate. The twin of `src/value/exact.js` |
+| `bytecode.rs` | Opcodes and the six variables |
+| `variable_deps.rs` | The twin of `src/variable-deps.js` |
+| `evaluator.rs` | `PersistentEvaluator` |
+| `graph.rs` | `DependencyGraph` (not used by the app) |
 
-The JS-visible exports (`src/wasm/rmt_core.js`) are `DependencyGraph`, `Evaluator`,
-`ExpressionCompiler`, `Fraction`, `PersistentEvaluator`, `init()` and `version()`, plus
-wasm-bindgen's own init entry points — `initSync` and the default export `__wbg_init`, which
-`initWasm()` calls as `wasm.default()`.
+The JS-visible exports (`src/wasm/rmt_core.js`) are `DependencyGraph`, `PersistentEvaluator`,
+`init()` and `version()`, plus wasm-bindgen's own init entry points: `initSync` and the default
+export `__wbg_init`, which `initWasm()` calls as `wasm.default()`.
 
-::: warning There is no class called `Compiler`
-It is `ExpressionCompiler`. Older docs and snippets that `import { Compiler }` will fail.
+`src/wasm/graph-adapter.js` is imported by nothing, so the app never constructs a
+`DependencyGraph`. See [JS/WASM Adapters](/developer/wasm/adapters).
+
+### Rational
+
+`Q` (`rust/src/rational.rs:19`) is an exact fraction. While the numerator and denominator fit an
+`i64` it is two machine words; past that it is a `BigRational`. The form is canonical: a value that
+fits the small case is always held in it. Its `to_f64` is the twin of `toNumber()` in
+`src/utils/fraction-num.js:75`.
+
+### Exact values
+
+`rust/src/exact.rs` follows `src/value/exact.js` operation by operation, so both engines compute
+the same value, in the same canonical form, for every expression. There are three kinds:
+
+- rational: a `Q`.
+- irrational: a canonical sum of radical terms.
+- approximate: a `Q` marked as measured or rounded (the `~` prefix and the `APPROX` opcode, `0x16`).
+
+The caps are the same as in JavaScript: `MAX_TERMS` 64, `MAX_INT_POW` 8, `FACTOR_LIMIT` 65536
+(`rust/src/exact.rs:29-31`), and so are the fallbacks when a cap is hit. In WebAssembly the power
+function calls JavaScript's own `Math.pow`, so the doubles match to the bit. See
+[Exact Values](/developer/core/symbolic-power) for the model.
+
+### Variables and opcodes
+
+`rust/src/bytecode.rs` has six variables, as the JavaScript evaluator does: `startTime` 0,
+`duration` 1, `frequency` 2, `amplitude` 3, `attack` 4, `release` 5. Only 3 to 5 inherit from the
+BaseNote. The opcodes `0x20`, `0x21` and `0x22` fail as unknown opcodes, as in JavaScript.
+
+### PersistentEvaluator
+
+`rust/src/evaluator.rs:675`. It holds notes and their records in arrays indexed by note id.
+Evaluation is ordered per (note, variable) with Tarjan's strongly connected components, exactly
+as `BinaryEvaluator.evaluateVariables()` does it (`rust/src/evaluator.rs:498`). Cycles and
+unresolved references are not printed by Rust: it hands them to the JavaScript side, which prints
+them in the JavaScript evaluator's own words.
+
+Nothing is flattened to a float. Values cross to JavaScript whole: a rational as a numerator and
+denominator, a rational too large for a double as text, an irrational as the text of its terms.
+The records the adapter builds are the same as the JavaScript evaluator's. See
+[JS/WASM Adapters](/developer/wasm/adapters#the-interface-of-persistentevaluator).
+
+::: info Corruption flags never reach a shader
+The renderer's hatching comes from a separate 3-value enum computed in JavaScript during
+`RendererAdapter.sync()` (`0` clean, `1` transitive, `2` direct). The corruption bitmask says
+*which property* is irrational; the renderer's value says *how* the note became corrupt. They are
+different questions.
 :::
-
-### Fraction
-
-```rust
-// rust/src/fraction.rs
-#[wasm_bindgen]
-pub struct Fraction {
-    inner: BigRational,
-}
-```
-
-A string-based `FractionRepr { n: String, d: String, s: i8 }` is declared but not wired up:
-evaluated values actually cross the JS boundary as the u32-capped `FractionData`
-(`rust/src/evaluator.rs`), so numerators or denominators beyond u32 degrade to a float
-approximation. The bytecode channel is the exception — `LOAD_CONST_BIG` constants cross
-BigInt-exact in both directions.
-
-### Value
-
-Three variants, not two:
-
-```rust
-// rust/src/value.rs
-pub enum Value {
-    Rational(Fraction),        // exact: 3/2, 440/1
-    Irrational(f64),           // legacy f64 approximation
-    Symbolic(SymbolicPower),   // algebraic structure preserved
-}
-```
-
-### SymbolicPower
-
-A rational coefficient times a **product** of power terms — not a single `base^exponent`:
-
-```rust
-pub struct PowerTerm {
-    pub base: u32,          // positive integer base (2, 3, 5, …)
-    pub exponent: Fraction, // rational exponent
-}
-
-pub struct SymbolicPower {
-    pub coefficient: Fraction,
-    pub powers: Vec<PowerTerm>,
-}
-```
-
-This shape is what lets `2^(1/12) * 2^(1/12)` collapse to `2^(1/6)`, and what lets an arrow
-multiplier fold into the `coefficient` instead of stacking another term. The JS evaluator has
-since moved to a more general exact form (sums of terms, prime bases, approximate values,
-[Exact Values](/developer/core/symbolic-power)); porting it is part of Phase D.
-
-### EvaluatedNote
-
-A plain serde struct — the values, plus one byte of flags:
-
-```rust
-// rust/src/evaluator.rs
-pub struct EvaluatedNote {
-    #[serde(rename = "startTime")]
-    pub start_time: Option<FractionData>,
-    pub duration: Option<FractionData>,
-    pub frequency: Option<FractionData>,
-    pub tempo: Option<FractionData>,      // old layout, see below
-    #[serde(rename = "beatsPerMeasure")]
-    pub beats_per_measure: Option<FractionData>,
-    #[serde(rename = "measureLength")]
-    pub measure_length: Option<FractionData>,
-    #[serde(default, rename = "corruptionFlags")]
-    pub corruption_flags: u8,
-}
-```
-
-`FractionData` carries `s` (sign), `n`, `d` for rationals and `f` for an irrational approximation,
-plus a `corrupted` boolean and an optional `symbolic` payload.
-
-::: warning This is the old variable layout
-The record above is the Rust core's, and it is **not** the JavaScript record. The JavaScript
-`EvaluatedNote` is `{ startTime, duration, frequency, amplitude, attack, release, corruptionFlags }`
-(`createEvaluationRecord()` in `src/binary-evaluator.js`): `tempo`, `beatsPerMeasure` and
-`measureLength` are gone, and `attack` and `release` are new. Until the crate is ported
-(`WASM_MATCHES_VARIABLE_LAYOUT`), treat every Rust-side variable table below as out of date.
-:::
-
-### Corruption flags
-
-`u8`, one bit per property (`rust/src/value.rs`):
-
-| Constant | Value |
-|---|---|
-| `CORRUPT_START_TIME` | `0x01` |
-| `CORRUPT_DURATION` | `0x02` |
-| `CORRUPT_FREQUENCY` | `0x04` |
-| `CORRUPT_TEMPO` | `0x08` |
-| `CORRUPT_BEATS_PER_MEASURE` | `0x10` |
-| `CORRUPT_MEASURE_LENGTH` | `0x20` |
-
-`corruption_flag_for_var(var_index)` maps the bytecode variable index (0–5) to its bit. In the
-JavaScript layout, bits `0x08`, `0x10` and `0x20` mean `amplitude`, `attack` and `release`; here they
-still mean tempo, beats per measure and measure length.
-
-::: info These flags never reach a shader
-The renderer's hatching is driven by a separate 3-value enum computed in JS during
-`RendererAdapter.sync()` (`0` clean, `1` transitive, `2` direct — crosshatch for direct, single
-diagonal hatch for transitive). The Rust bitmask says *which property* is irrational; the renderer's
-value says *how* the note became corrupt. They are different questions and different code paths.
-:::
-
-## The compiler only understands the retired syntax
-
-`ExpressionCompiler` in `rust/src/compiler.rs` parses the **method-chain grammar** only —
-`module.baseNote.getVariable('frequency')`, `module.getNoteById(3).getVariable('startTime')`, and
-`.add()/.sub()/.mul()/.div()/.pow()` chains. It has no lexer for the DSL.
-
-That grammar is retired in the JavaScript app: the DSL is the only language, compiled by the
-**JavaScript** DSL compiler (`src/dsl/compiler.js`) through `src/expression-compiler.js`, and modules
-in the old syntax are converted to DSL on load (`src/migrate/legacy-syntax.js`). So the WASM compiler
-could compile nothing the app holds; it is left in the crate until the Rust core is ported.
-
-It is not wired in: `src/wasm/compiler-adapter.js` is imported by nothing. See
-[JS/WASM Adapters](/developer/wasm/adapters#dead-code-three-of-the-four-adapters).
 
 ## Loading
 
@@ -195,122 +126,80 @@ It is not wired in: `src/wasm/compiler-adapter.js` is imported by nothing. See
 
 | Export | Returns | Notes |
 |---|---|---|
-| `initWasm()` | `Promise<boolean>` | Dynamic-imports `./rmt_core.js`, calls `wasm.default()`. Resolves `false` (never throws) while `WASM_CONFIG.fallbackOnError` is true |
+| `initWasm()` | `Promise<boolean>` | Shares one initialization. Resolves `false` before fetching when the gate is closed. Otherwise dynamic-imports `./rmt_core.js` and calls `wasm.default()`. Resolves `false` (never throws) while `WASM_CONFIG.fallbackOnError` is true |
 | `getWasm()` | module or `null` | |
 | `isWasmAvailable()` | `boolean` | True once the module is loaded |
 | `isWasmInitialized()` | `boolean` | True after init **succeeds or fails** |
 | `getWasmError()` | `Error` or `null` | |
 | `getWasmVersion()` | `"0.1.0"` or `null` | The Rust crate version |
-| `onWasmReady(cb)` | — | Runs `cb` on a microtask if WASM is already up; **never** fires if init already failed |
+| `onWasmReady(cb)` | none | Runs `cb` on a microtask if WASM is already up; **never** fires if init already failed |
 
-`onWasmReady` is the real readiness hook. There is **no `wasm:ready` eventBus event** — earlier
-planning documents named one, but it never appears in the source.
+`onWasmReady` is the real readiness hook. There is **no `wasm:ready` eventBus event**.
 
-## Status: the evaluator hot-swap is blocked
+## Running Node scripts on WASM
 
-This section is the handover dossier. If you have a Rust toolchain and want to unblock the WASM
-path, start here. It describes the opt-in path as it was before the relational-time change disabled
-it (see the box at the top of the page); the browser hang below was never fixed, and the layout port
-comes first.
+`scripts/wasm-node.mjs` is a preload. `node --import ./scripts/wasm-node.mjs <script>` sets
+`RMT_EVALUATOR=wasm` and initializes WASM before the script runs, so every `Module` the script
+creates evaluates on Rust (`scripts/wasm-node.mjs:15`). `scripts/perf/bench-node.mjs` takes
+`--wasm`, `--runs N` and `--json` (`scripts/perf/bench-node.mjs:28-31`).
 
-### What works
+## How the two engines are held together
 
-- **The hot-swap.** WASM init is async and normally loses the race against `Module` construction, so
-  a module starts on the JS evaluator. `Module`'s constructor registers an `onWasmReady` callback
-  (holding a `WeakRef(this)` so discarded modules don't leak) that calls `_upgradeEvaluators()`
-  (`src/module.js:146`): it swaps `_binaryEvaluator` / `_incrementalEvaluator` atomically, clears the
-  evaluation cache and marks every note dirty, so the next `evaluateModule()` re-evaluates on the new
-  engine. Values are identical across engines, so nothing goes visually stale mid-swap.
-- **In Node.** `node scripts/perf/test-wasm-swap.mjs` builds a `Module` *before* init completes,
-  finishes init, and verifies the upgrade plus identical evaluation results and working BaseNote
-  propagation. It passes. `node scripts/perf/bench-node.mjs chain-1000 --wasm` also runs the WASM
-  evaluator to completion.
+`scripts/test-wasm-parity.mjs` is part of `npm test`. It compares both engines exactly:
 
-### What is broken
+- All 96 library and fixture modules (`public/modules` except the generated `voices-*.json`,
+  `scripts/fixtures/old-time`, `scripts/fixtures/legacy-syntax`), through a full evaluation, a
+  commit in the middle, a BaseNote edit and a removal.
+- 400 seeded fuzz modules over the exact algebra: tempered powers, sums of radicals, roots of
+  negatives, `~`, division by zero and by sums, big constants, inherited interpretation
+  variables, cycles. Each gets an edit.
+- Ten evaluation suites run whole on WASM: `test-variable-deps`, `test-dirty-marking`,
+  `test-relational-time` (which checks `scripts/fixtures/old-time-oracle.json`),
+  `test-exact-values`, `test-exactness`, `test-note-kinds`, `test-amplitude`, `test-envelopes`,
+  `test-library`, `test-legacy-syntax`.
 
-In a **browser**, with `?evaluator=wasm`, a full re-evaluation cycle (`invalidateAll()` →
-`evaluateDirty()`) hangs the main thread forever inside the WASM binary.
+It compares every record (fractions, exact values, flags), the console reports, and the cache's
+size, keys and order: about 47,600 records. `scripts/perf/test-wasm-swap.mjs` is in `npm test`
+too: the hot-swap, and three concurrent `initWasm()` calls fetch the module once. After changing
+either engine, run `npm test`; the parity test must pass.
 
-**Repro** (3/3 in fresh headless Chromium):
+## Speed
 
-```bash
-npm run dev
-# open http://localhost:3000/?perf=1&evaluator=wasm
-# in the console:
-__rmtPerf.measureEval(1)
-# → tab freezes
-```
+Measured on one Windows machine, Node 22 and headless Edge. Treat the numbers as an order of
+magnitude, not a promise.
 
-**Stack** at the CDP pause, outermost last:
+**Node.** `scripts/perf/bench-pairs.mjs`: five back-to-back pairs, medians of the p50, record
+read-back included. JS time divided by WASM time:
 
-```
-$func198
-  ← $persistentevaluator_registerNote          (WASM)
-  ← WasmPersistentEvaluatorWrapper.registerNote (src/wasm/evaluator-adapter.js:426)
-  ← WasmIncrementalEvaluator.evaluateDirty      (rust/src/evaluator.rs:905)
-```
+| Module | Full evaluation | Mid commit | Base edit |
+|---|---|---|---|
+| `chain-1000` | 1.4x | 1.7x | 1.8x |
+| `lattice-1000` | 1.6x | 1.9x | 2.1x |
+| `fan-1000` | 1.25x | 1x (one note is dirty: 0.03 ms on both) | 1.7x |
+| `chords-dense` (800 notes) | 1.15x | 1.3x | 1.4x |
+| `comma-chain-400` (fractions of hundreds of digits) | 5.2x | 6.4x | 6.3x |
 
-It hangs on the **first** registration (note 0) after `invalidateAll()`.
+On `comma-chain-400` JavaScript takes about 160 ms and WASM 25 to 31 ms.
 
-### What has been ruled out
+**Edge.** Full evaluation of `chain-1000`: JavaScript 2.3 to 3.2 ms, WASM 0.9 to 1.2 ms.
+`voices-20000`: JavaScript 50 ms, WASM 29 to 33 ms.
 
-| Hypothesis | Result |
-|---|---|
-| Stale committed artifact | Two separately-built binaries both hang |
-| Node vs browser runtime | The identical call sequence — including the exact construct-then-upgrade race, the default module, and repeated register/invalidate/register cycles — passes headlessly in Node |
-| A poisoned browser context | A fresh `PersistentEvaluator` in the same page, fed the same bytecodes (including the old default `measureLength` bytecode `[1,0,0,0,60,0,0,0,1,3,3,19,3,4,18]`, from before the layout change), evaluated, invalidated and re-registered: no hang |
-| serde input shape | Plain objects and arrays; `register_note` deserializes them fine everywhere else |
+**End to end.** A commit (an octave change: expression rewrite, dirty marking, evaluation,
+renderer sync, history snapshot) costs the same on both engines. `chain-1000` takes about 4.2 ms
+(11 ms before the dirty-marking change), `voices-20000` about 55 ms. Evaluation is now a small
+part of it. At 20,000 notes the commit is dominated by expression rewriting (`simplify.js`), the
+history snapshot (`createModuleJSON`, `localStorage`), `note.getVariable` and renderer sync. See
+[Performance](/developer/performance).
 
-### What is suspicious
+## Limits
 
-`PersistentEvaluator::register_note` (`rust/src/evaluator.rs:905`) is trivial: deserialize a
-`JsExpressions`, write six optional bytecode slots into a `HashMap` entry, insert the id into the
-dirty `HashSet`. There is no loop in it that can spin. So the hang is almost certainly *deeper
-state* — allocator/memory state, a hash-order-dependent loop elsewhere in the evaluator, a
-`serde-wasm-bindgen` interaction, or UB — surfacing at the registration call.
-
-Two properties matter:
-
-- It is **non-deterministic**. The same manual sequence against the app's own evaluator instance
-  passed once and hung on other attempts.
-- It needs **full app boot state** — roughly 170 notes registered and evaluated, plus the hot-swap
-  warm-up. Isolated reproductions do not trigger it.
-
-### What is not ported
-
-**The variable layout.** The JS evaluator has six variables (`startTime`, `duration`, `frequency`,
-`amplitude`, `attack`, `release`; indices 0 to 5) and no `FIND_TEMPO` / `FIND_MEASURE` opcodes. The
-Rust core still has `tempo`, `beatsPerMeasure` and `measureLength` at indices 3 to 5, the retired
-opcodes, and the old inheritance list (`tempo`, `beatsPerMeasure`, `measureLength`, `amplitude`
-inherit from the BaseNote; in JS only the interpretation variables from `FIRST_INTERPRETATION_VAR` up
-do). `rust/src/bytecode.rs`, `rust/src/value.rs` and `rust/src/evaluator.rs` all need the new table.
-
-**Per-variable evaluation.** The JS evaluator orders evaluation per (note, variable), detects only true cycles, and reports
-unresolved references by name (see
-[Binary Evaluator](/developer/core/binary-evaluator#evaluation-order-per-variable)). None of that is
-in the crate: `evaluate_note_internal` (`rust/src/evaluator.rs:957`) still evaluates a note's six
-expressions in a fixed order, and the WASM incremental evaluators still sort whole notes. The two
-engines agree on every module whose notes depend on each other one way only — which is every
-shipped module — and disagree on a module where two notes read each other through different
-variables, or where a note's variable reads one that comes later in the fixed order. Unblocking the
-swap means porting that as well.
-
-### Suggested next steps
-
-1. Build an instrumented crate: a registration counter plus an abort guard (panic instead of
-   spinning) so the hang becomes a stack trace. `init()` already installs
-   `console_error_panic_hook`, so a Rust panic surfaces in the browser console with a symbolicated
-   trace. Rebuild with [`npm run wasm:build`](/developer/wasm/building) and **commit the synced
-   artifacts** (or the browser will keep loading the old binary).
-2. Bisect the Rust history for the behaviour change.
-3. Port the Rust core to the six-variable layout, then flip `WASM_MATCHES_VARIABLE_LAYOUT` and keep the
-   swap opt-in until a browser run of `__rmtPerf.measureEval(50)` on the default module and
-   on `chain-1000` completes cleanly.
+Note ids are 16-bit in the bytecode. The loader refuses ids above 65535, so `voices-100000`
+loads 65,536 notes.
 
 ## See also
 
-- [JS/WASM Adapters](/developer/wasm/adapters) — the JS layer, `WASM_CONFIG`, and the `?evaluator` gate
-- [Building WASM](/developer/wasm/building) — rebuilding the crate and syncing the artifacts
-- [Build & Deploy](/developer/contributing/build-and-deploy) — why the committed artifacts are what ships
-- [Binary Evaluator](/developer/core/binary-evaluator) — the JS evaluator that actually runs
-- [Exact Values](/developer/core/symbolic-power) — the JS side of the value model
+- [JS/WASM Adapters](/developer/wasm/adapters): the JS layer, `WASM_CONFIG`, the `?evaluator` gate
+- [Building WASM](/developer/wasm/building): rebuilding the crate and syncing the artifacts
+- [Build & Deploy](/developer/contributing/build-and-deploy): why the committed artifacts are what ships
+- [Binary Evaluator](/developer/core/binary-evaluator): the JavaScript evaluator
+- [Exact Values](/developer/core/symbolic-power): the value model both engines share

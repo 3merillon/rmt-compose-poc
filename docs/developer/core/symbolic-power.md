@@ -114,7 +114,7 @@ scaleDSL('base.f * ~1.5', 2, 1)       → 2 * base.f * ~1.5
 
 ## The Rust core
 
-`rust/src/value.rs` has its own `SymbolicPower` (`PowerTerm { base: u32, exponent }`) and does not yet know the exact form above, `~` or the `APPROX` opcode. Porting this value type is part of Phase D; until then the WASM evaluator stays off (see [WASM Overview](/developer/wasm/overview)).
+`rust/src/exact.rs` is the twin of `src/value/exact.js`, operation by operation: rational, irrational as canonical sums of radical terms, approximate. It has the same caps (`MAX_TERMS` 64, `MAX_INT_POW` 8, `FACTOR_LIMIT` 65536; `rust/src/exact.rs:29-31`) and the same fallbacks. Rationals are `Q` (`rust/src/rational.rs:19`): two machine words while the numerator and denominator fit an `i64`, else a `BigRational`. In WebAssembly the power function calls the JavaScript `Math.pow`, so doubles match to the bit. Values cross to JavaScript whole, never as floats. `scripts/test-wasm-parity.mjs` compares the two engines exactly (see [WASM Overview](/developer/wasm/overview)).
 
 ## Scale systems
 
