@@ -170,7 +170,7 @@ The tab's footer reads: *"Tempered playback, reverb, stereo and the limiter appl
 
 `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`, `piano`, `violin`.
 
-`audio.defaultInstrument` is the **fallback**, not an override: a note uses it only when neither it nor anything up its frequency chain pins an `instrument`. See [instrument inheritance](/reference/module-schema#instruments).
+`audio.defaultInstrument` is the **fallback**, not an override: a note uses it only when neither the note, nor its player, nor the BaseNote sets an `instrument`. See [Instruments](/user-guide/playback/instruments#players).
 
 ### Behaviour worth knowing
 

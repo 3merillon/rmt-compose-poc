@@ -83,7 +83,7 @@ note.properties  // { color: string | null, instrument: string | null, measure: 
 ```
 
 `color` and `instrument` default to `null` — including on the BaseNote. A `null` instrument is what
-lets `module.findInstrument()` fall through to the configurable default instrument. `measure`
+lets `module.findInstrument()` resolve it from the note's player, and failing that the configurable default instrument. `measure`
 defaults to `false` and marks a measure bar; see [`isMeasureNote()`](#ismeasurenote).
 
 ### module
@@ -320,7 +320,7 @@ own envelope applies.
 | Non-expression property | Meaning |
 |---|---|
 | `color` | CSS colour string used by the renderer |
-| `instrument` | pins the timbre; `null` means "inherit down the frequency chain" |
+| `instrument` | pins the timbre; `null` means "take the instrument of the note's player" (see `Module.findInstrument`) |
 | `measure` | `true` marks a measure bar (saved in JSON as `"measure": true`) |
 
 ## Example

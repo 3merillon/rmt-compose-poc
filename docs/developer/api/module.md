@@ -29,14 +29,14 @@ Creates a module with a BaseNote (id `0`) and nothing else.
 
 ::: warning Numbers are silently ignored
 The constructor only honours values that are a `string`, a `function`, a `*String` key, or
-`color` / `instrument` (`src/module.js:95-115`). `new Module({ duration: 0.5 })` drops the `0.5`
+`color` / `instrument` (`src/module.js:96-116`). `new Module({ duration: 0.5 })` drops the `0.5`
 and leaves the time unit at 1 s. Write `new Module({ duration: '1/2' })`.
 :::
 
 ### BaseNote defaults
 
 Any key you do not override falls back to these. They are **expression strings** in the DSL
-(`src/module.js:79-92`):
+(`src/module.js:80-93`):
 
 | Property | Default expression | Value |
 |---|---|---|
@@ -60,7 +60,7 @@ module.notes  // { [id: number]: Note } — a plain object, not a Map
 
 Keyed by note id, and it **includes the BaseNote at key `0`**. `module.notes.get(1)` throws;
 use `module.getNoteById(1)`. Iterating with `Object.values(module.notes)` yields the BaseNote
-too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:951`).
+too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:937`).
 
 ### baseNote
 
@@ -147,7 +147,7 @@ The same thing for many notes in one pass: it registers dependencies once, colle
 **and** the transitive dependencies of the marked notes, then invalidates the incremental
 evaluator selectively rather than wholesale. Collecting the *dependencies* matters — without them
 an imported note's parent may not be in the cache when the child evaluates. The module-import path
-(`src/player.js:1817`) uses it after grafting a library module onto a target note.
+(`src/player.js:1821`) uses it after grafting a library module onto a target note.
 
 ### batchSetExpressions()
 
@@ -160,11 +160,11 @@ module.batchSetExpressions([
 
 Compiles all the expressions with per-note notifications suppressed, re-registers dependencies
 once, then calls `markNotesDirtyBatch()`. The widget's **Evaluate Module** action
-(`src/modals/index.js:774`) rewrites every note in the composition through this in one pass.
+(`src/modals/index.js:778`) rewrites every note in the composition through this in one pass.
 
 ::: danger The keys are `varName` and `expr`
 Not `property` and `expression`. The update objects are destructured as
-`{ noteId, varName, expr }` (`src/module.js:336`); passing the wrong keys throws
+`{ noteId, varName, expr }` (`src/module.js:337`); passing the wrong keys throws
 `TypeError: Cannot read properties of undefined (reading 'endsWith')`.
 :::
 
@@ -213,7 +213,7 @@ TET notes.
 const cache = module.getEvaluationCache()
 ```
 
-**Evaluates first if anything is dirty**, then returns the cache (`src/module.js:693-699`). This
+**Evaluates first if anything is dirty**, then returns the cache (`src/module.js:694-700`). This
 is the lazy entry point that `Note.getVariable()` goes through; it is not a peek.
 
 ### evaluateNoteVariable()
@@ -298,7 +298,7 @@ module.getParentChainByProperty(2, 'frequency')  // → [1, 0]
 ```
 
 The ancestor chain for one property, walking back to the BaseNote. **The starting note is not in
-the result** (`src/module.js:517`) — `chain[0]` is its parent. `property` is one of
+the result** (`src/module.js:518`) — `chain[0]` is its parent. `property` is one of
 `'frequency' | 'startTime' | 'duration'`.
 
 ### getChildrenTreeByProperty()
@@ -373,12 +373,24 @@ BaseNote's, otherwise `new Fraction(1)`. This is the same fallback the evaluator
 const name = module.findInstrument(note)  // string
 ```
 
-Returns `note.properties.instrument` when it is pinned. Otherwise it follows the note's
-**frequency expression** to its parent (`[N].f`) and asks that note, recursively. A note that bottoms out at `base.f` — or at nothing —
-resolves to the module-level default instrument.
+Returns `note.properties.instrument` when it is set. Otherwise the instrument follows the note's
+**start time**, not its frequency (the rule is in `src/players.js`; `findInstrument()` delegates to
+`instrumentOf()`):
+
+1. a note whose start is written from the end of a note or a silence *p* (`[p].t + [p].d`, with or
+   without a rest added) takes *p*'s instrument: the same player;
+2. a copy of a note *k* of a line (start `[k].t + X`, frequency `r * [k].f`) whose predecessor's copy
+   exists (written from it with the same `X`) takes that copy's instrument;
+3. otherwise the note starts a line and takes the instrument of the note its start time is written
+   from (`[k].t …`; a measure bar does not count), else the BaseNote's, else the module-level default
+   instrument.
+
+The optional second argument is a `Map` memo, shared by a caller that resolves many notes in one pass
+(the audio engine, the renderer and the MIDI export do), so each line is walked once rather than once
+per note on it.
 
 That default is a module-scoped value, not a constant: `player.js` calls `setDefaultInstrument()`
-whenever the `audio.defaultInstrument` setting changes (`src/player.js:1029-1044`). This is the
+whenever the `audio.defaultInstrument` setting changes (`src/player.js:1033-1048`). This is the
 bridge between the Settings panel and note timbre.
 
 ```javascript
@@ -387,6 +399,21 @@ import { setDefaultInstrument, getDefaultInstrument } from './module.js'
 setDefaultInstrument('piano')
 getDefaultInstrument()  // → 'piano'
 ```
+
+### findPlayer()
+
+```javascript
+const { head, prev } = module.findPlayer(note, memo)  // {head: number, prev: number|null}
+```
+
+A note's player: `head` is the id of the first note of its line (the note that decides the
+instrument), and `prev` the id of the note it follows in the line, `null` for a first note and for a
+note that sets its own instrument, which starts a new player. `preparePlayback()` puts both on each
+note's data as `player` and `prev`; nothing audible uses them yet. The note widget's
+`Inherited: <name> · plays with [N]` line shows `head`.
+
+A module file saved before this rule is migrated by `loadFromJSON()`, and `createModuleJSON()` writes
+`instrumentRule: "start-time"` at the top level; see [Module System](/developer/architecture/module-system).
 
 Initial value: `'sine-wave'`.
 
@@ -459,7 +486,7 @@ Before it builds any note, it runs the data through two conversions, in this ord
 Both are exact: every start, duration, frequency and interpretation value keeps the same fraction.
 See [Module System](/developer/architecture/module-system#loading-old-modules).
 
-Per-note id guards (`src/module.js:884-896`): ids that are not integers, are `< 0`, or are
+Per-note id guards (`src/module.js:860-872`): ids that are not integers, are `< 0`, or are
 `> 65535` (the `u16` ceiling of `LOAD_REF`) are skipped with a `[RMT Security]` warning; the
 literal ids `__proto__`, `constructor` and `prototype` are blocked outright. There is no `eval()`
 anywhere in this path — expressions are compiled to bytecode.
@@ -509,7 +536,7 @@ Fraction-pool occupancy from the evaluator. Used by the perf harness.
 
 The module builds its evaluators through `src/wasm/evaluator-adapter.js`. When the WASM hot-swap
 is enabled it registers an `onWasmReady` callback that replaces both evaluators mid-session
-(`_upgradeEvaluators()`, `src/module.js:138`), marks everything dirty, and warms the new engine on
+(`_upgradeEvaluators()`, `src/module.js:139`), marks everything dirty, and warms the new engine on
 an idle callback.
 
 ::: danger WASM evaluation is disabled

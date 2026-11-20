@@ -9,6 +9,7 @@ import { createEvaluator, createIncrementalEvaluator, isWasmBackedEvaluator, isE
 import { onWasmReady } from './wasm/index.js';
 import { compiler } from './expression-compiler.js';
 import { compare as compareExact } from './value/exact.js';
+import { instrumentOf, playerOf, migrateInstrumentRule, INSTRUMENT_RULE } from './players.js';
 
 let memoizedModuleEndTime = null;
 let moduleLastModifiedTime = 0;
@@ -763,50 +764,25 @@ export class Module {
    * Find instrument for a note
    */
   /**
+   * The instrument a note sounds with: its own, else along its START TIME (the
+   * line it is in, through rests and silences, or the copy of a line it is;
+   * else the note its start is written from), else the BaseNote's, else the
+   * default. See src/players.js for the rule and the owner's words.
    * @param {object} note
-   * @param {Map<number,string>} [memo] instruments already resolved in this pass,
-   *   by note id: a caller resolving many notes passes one Map, so a long chain is
-   *   walked once rather than once per note on it.
+   * @param {Map} [memo] resolved in this pass, by note id: a caller resolving many
+   *   notes passes one Map, so each line is walked once rather than once per note
    */
   findInstrument(note, memo = null) {
-    if (!note) return 'sine-wave';
-    if (memo) {
-      const hit = memo.get(note.id);
-      if (hit !== undefined) return hit;
-      const r = this._findInstrument(note, memo);
-      memo.set(note.id, r);
-      return r;
-    }
-    return this._findInstrument(note, null);
+    return instrumentOf(this, note, memo, _defaultInstrumentName);
   }
 
-  _findInstrument(note, memo) {
-    if (!note.hasExpression('frequency') && !note.getVariable('frequency')) {
-      return _defaultInstrumentName;
-    }
-
-    // Check direct instrument property
-    if (note.properties.instrument) {
-      return note.properties.instrument;
-    }
-
-    // Check frequency expression for parent reference
-    const freqSource = note.getExpressionSource('frequency');
-    if (freqSource) {
-      // [N].f names a parent note, base.f the BaseNote
-      const dslNoteRef = freqSource.match(/\[(\d+)\]\.f/);
-      if (dslNoteRef) {
-        const parentId = parseInt(dslNoteRef[1], 10);
-        const parentNote = this.getNoteById(parentId);
-        if (parentNote) return this.findInstrument(parentNote, memo);
-      }
-
-      if (freqSource.includes('base.f')) {
-        return this.findInstrument(this.baseNote, memo);
-      }
-    }
-
-    return _defaultInstrumentName;
+  /**
+   * The player of a note: the first note of its line (which decides the
+   * instrument) and the note it follows in the line (null for a first note).
+   * @returns {{head:number, prev:number|null}}
+   */
+  findPlayer(note, memo = null) {
+    return playerOf(this, note, memo);
   }
 
   /**
@@ -910,6 +886,16 @@ export class Module {
       }
     }
 
+    // A module saved before instruments followed the start time (Phase I) keeps the
+    // instruments it had: the notes the new rule would move to another instrument
+    // get their old one written onto them (src/players.js, migrateInstrumentRule).
+    if (data.instrumentRule !== INSTRUMENT_RULE) {
+      const pinned = migrateInstrumentRule(moduleInstance, _defaultInstrumentName);
+      if (pinned.length) {
+        console.info(`[RMT] Instruments now follow the start time; kept the instrument of ${pinned.length} note(s) as before: ${pinned.slice(0, 20).join(', ')}${pinned.length > 20 ? ', …' : ''}`);
+      }
+    }
+
     // Mark all notes dirty for initial evaluation using invalidateAll for clean slate
     moduleInstance.invalidateAll();
 
@@ -966,6 +952,8 @@ export class Module {
 
     notesArray.sort((a, b) => a.id - b.id);
     moduleObj.notes = notesArray;
+    // Saved under the start-time instrument rule: loading it again migrates nothing.
+    moduleObj.instrumentRule = INSTRUMENT_RULE;
 
     return moduleObj;
   }

@@ -623,7 +623,9 @@ function buildInstrumentControl(value, note, externalFunctions) {
   // SECURITY: Escape instrument name to prevent XSS
   const instrumentName = escapeHtml(value?.evaluated ?? 'sine-wave');
   if (value?.isInherited) {
-    evaluatedText.innerHTML = `<span class="value-label">Inherited:</span> <span style="color: #aaa;">${instrumentName}</span>`;
+    // Who it plays with: the first note of its line, whose instrument it inherits.
+    const withNote = Number.isInteger(value?.playerHead) ? ` <span style="color: #aaa;">· plays with [${value.playerHead}]</span>` : '';
+    evaluatedText.innerHTML = `<span class="value-label">Inherited:</span> <span style="color: #aaa;">${instrumentName}</span>${withNote}`;
   } else {
     evaluatedText.innerHTML = `<span class="value-label">Current:</span> ${instrumentName}`;
   }

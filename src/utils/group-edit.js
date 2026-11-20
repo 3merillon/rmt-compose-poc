@@ -23,6 +23,7 @@
  * Nothing here touches the DOM; the caller re-evaluates and records the undo step.
  */
 import Fraction from 'fraction.js';
+import { linePredecessor } from '../players.js';
 import { VAR, FIRST_INTERPRETATION_VAR } from '../binary-note.js';
 import { getVariableRefs } from '../variable-deps.js';
 import { isMeasureNote } from '../note.js';
@@ -243,6 +244,33 @@ export function inheritGroup(module, ids, varName) {
     else skipped.push({ id: Number(note.id), reason: 'already inherits' });
   }
   return { changed, followed: [], skipped };
+}
+
+/**
+ * One player for the selection (Phase I): set the instrument on the notes that
+ * start the selection's lines (a selected note whose line predecessor is not
+ * selected, src/players.js) and remove it from the other selected notes, which
+ * then inherit it along their lines. With null, every selected note inherits.
+ * @returns {{changed:number[], followed:number[], skipped:object[], players:number}}
+ */
+export function setGroupOnePlayer(module, ids, value) {
+  if (value == null) return { ...setGroupProperty(module, ids, 'instrument', null), players: 0 };
+  const notes = editable(module, ids);
+  const chosen = new Set(notes.map((n) => Number(n.id)));
+  const memo = new Map();
+  const heads = notes.filter((n) => {
+    const p = linePredecessor(module, n, memo);
+    return !p || !chosen.has(Number(p.id));
+  });
+  const headIds = new Set(heads.map((n) => Number(n.id)));
+  const changed = [];
+  for (const note of notes) {
+    if (headIds.has(Number(note.id))) note.setVariable('instrument', value);
+    else note.properties.instrument = null;
+    try { module.markNoteDirty?.(note.id); } catch {}
+    changed.push(Number(note.id));
+  }
+  return { changed, followed: [], skipped: [], players: heads.length };
 }
 
 /** Set (or, with null, remove) the instrument or the colour of every selected note. */

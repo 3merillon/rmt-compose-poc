@@ -104,7 +104,7 @@ See [Module Format](/user-guide/modules/module-format) for the full schema.
 | `startTime` | Yes | When the note begins, in seconds. |
 | `duration` | For notes and silences | How long the note lasts, in seconds; write it in time units, `base.d * 2`. |
 | `color` | No | Any CSS colour. Inherited from the parent when created in the widget. |
-| `instrument` | No | Overrides the inherited instrument. Left unset, the note inherits along its frequency reference; see [Editing Notes](/user-guide/notes/editing-notes#instrument). |
+| `instrument` | No | Sets the note's instrument and starts a new player. Left unset, the note takes the instrument of its player (the line of notes it belongs to); see [Editing Notes](/user-guide/notes/editing-notes#instrument). |
 
 The shapes a note can take are decided purely by which properties exist:
 

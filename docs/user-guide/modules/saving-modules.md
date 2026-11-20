@@ -30,7 +30,7 @@ If the export fails, a red `Error exporting module: <message>` banner appears fo
 
 ## What gets saved
 
-The file has exactly two top-level keys: `baseNote` and `notes`.
+The file has three top-level keys: `baseNote`, `notes` and `instrumentRule` (always `"start-time"`, which tells the loader that the file does not need its instruments migrated; see [Module Format](/user-guide/modules/module-format#instruments)).
 
 | Per note | |
 |---|---|

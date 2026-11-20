@@ -42,7 +42,8 @@ multisampled. A sine isolates the fundamentals; `organ` and `violin` add upper p
 roughness a sine will hide. `harmonium` has every partial up to the 16th and holds them still, so the
 overtones two notes share beat plainly when an interval is mistuned.
 The instrument is a **per-note** property — set it from the note widget — and a note without one
-inherits it up its frequency chain.
+takes the instrument of its player, the line of notes it belongs to (see
+[Instruments](/user-guide/playback/instruments#players)).
 
 ## The basic rig
 

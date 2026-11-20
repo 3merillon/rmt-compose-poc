@@ -119,7 +119,7 @@ Tempered playback, reverb, stereo and the limiter all apply live during playback
 
 **Spread notes by pitch** pans low notes left and high notes right, as if you were sitting at the instrument. It is applied when a note is *scheduled*, so it changes what you play next, not what is already sounding.
 
-**Default instrument** is what a note plays when neither it nor anything it inherits from names an instrument — including the BaseNote. See [Instruments](/user-guide/playback/instruments).
+**Default instrument** is what a note plays when neither the note, nor its player, nor the BaseNote names an instrument. See [Instruments](/user-guide/playback/instruments).
 
 ::: tip The master volume knob is shared.
 The volume slider in the top bar and **Master volume** here are the same number. Drag either and the other follows.

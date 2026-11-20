@@ -705,15 +705,19 @@ document.addEventListener('DOMContentLoaded', async function() {
             }
         }
 
-        const selectedNoteInstrument = myModule.findInstrument(selectedNote);
+        // A direct dependent without an instrument of its own keeps the one it plays
+        // now, written onto it: once this note is gone, its line or the note its start
+        // is written from may lead elsewhere. (A note's instrument is a property, not a
+        // variable: the check used to read `variables.instrument`, always empty, and
+        // overwrote every dependent's own instrument with this note's.)
         const directDependents = myModule.getDependentNotes(noteId);
-        
+        const instrumentMemo = new Map();
+        const keep = [];
         directDependents.forEach(depId => {
             const depNote = myModule.getNoteById(depId);
-            if (depNote && !depNote.variables.instrument) {
-                depNote.setVariable('instrument', selectedNoteInstrument);
-            }
+            if (depNote && !depNote.properties.instrument) keep.push([depNote, myModule.findInstrument(depNote, instrumentMemo)]);
         });
+        for (const [depNote, inst] of keep) depNote.setVariable('instrument', inst);
         
         updateDependentRawExpressions(noteId, selectedRaw);
         
@@ -3440,6 +3444,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             else if (op === 'scale') r = groupEdit.scaleGroup(myModule, ids, varName, text);
             else if (op === 'inherit') r = groupEdit.inheritGroup(myModule, ids, varName);
             else if (op === 'instrument') r = groupEdit.setGroupProperty(myModule, ids, 'instrument', text || null);
+            else if (op === 'instrumentOnePlayer') r = groupEdit.setGroupOnePlayer(myModule, ids, text || null);
             else if (op === 'color') {
                 const c = validateColorInput(text);
                 if (!c) throw new Error('Not a colour: use #rrggbb, rgb(), rgba(), hsl() or a colour name');
@@ -3463,12 +3468,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             try { glWorkspace?.renderer?.setMultiSelection?.(multiSelection); } catch {}
             try { glWorkspace?.requestRender?.(); } catch {}
             const what = op === 'instrument' ? `Instrument ${text || 'inherited'}`
+                : op === 'instrumentOnePlayer' ? `Instrument ${text || 'inherited'} (one player)`
                 : op === 'color' ? 'Colour'
                 : `${varName} ${GROUP_OP_WORD[op]}${op === 'inherit' ? '' : ' ' + String(text).trim()}`;
             try { captureSnapshot(`${what} on ${r.changed.length} Notes`); } catch {}
         }
 
         const parts = [`${r.changed.length} note${r.changed.length === 1 ? '' : 's'} changed`];
+        if (op === 'instrumentOnePlayer' && text && r.players) parts.push(`${r.players} player${r.players === 1 ? '' : 's'}`);
         if (r.followed.length) parts.push(`${r.followed.length} follow${r.followed.length === 1 ? 's' : ''} a selected note`);
         if (r.skipped.length) {
             const reasons = [...new Set(r.skipped.map((s) => s.reason))];

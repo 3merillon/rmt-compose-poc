@@ -90,11 +90,11 @@ duration:   [2].d
 
 Change the BaseNote's duration, or any one bar's duration, and the bars after it re-lay themselves, because every bar's start and length are expressed in terms of the one before it. A meter change is one bar's `duration`. See [Working with Measures](/tutorials/intermediate/measures).
 
-## Instruments ride the frequency edge
+## Instruments ride the start-time edge
 
-A surprising consequence of the graph: **instruments are inherited along the frequency reference**. A note with no instrument of its own plays with the instrument of the note its *frequency* points at, recursively up the chain, until something sets one or the chain reaches the BaseNote — at which point the global default from Settings → Audio applies.
+A consequence of the graph: **instruments are inherited along the start-time reference**, not the frequency one. A note whose start is written from the end of another note (`[1].t + [1].d`) is in that note's line, a *player*, and plays with its instrument; a silence in the line carries it on. A note that sets its own instrument starts a new player.
 
-Set note 1 to `violin`, and every note whose frequency reads `[1].f * …` becomes a violin. Repoint a note's frequency at a different parent and its instrument may change with it. See [Instruments](/user-guide/playback/instruments).
+Set note 1 to `violin`, and every note that follows note 1 along such starts becomes a violin, until one of them sets its own. A note whose frequency reads `[1].f * …` but whose start is written from elsewhere is not thereby in note 1's line. See [Instruments](/user-guide/playback/instruments#players).
 
 ## Reshaping the graph
 

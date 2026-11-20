@@ -171,15 +171,12 @@ depends on the selection.
 Referencing the BaseNote (`base.f`) is not recorded as a graph edge — it is a flag on the
 expression — but it behaves the same: edit the BaseNote and every note anchored to it moves.
 
-## Instrument inheritance follows frequency
+## Frequency does not decide the instrument
 
-If a note has no `instrument` of its own, the app resolves one by walking the **frequency
-expression**: a note whose frequency is `[7].f * (3/2)` inherits note 7's instrument; a note whose
-frequency is `base.f * (5/4)` inherits the BaseNote's. If nothing along that chain pins an
-instrument, the fallback is the **Settings → Audio → default instrument** (`sine-wave` out of the
-box).
-
-So retuning a note against a different parent can also change what it sounds like.
+A note's instrument no longer follows its frequency expression: a note tuned from note 7
+(`[7].f * (3/2)`) is not thereby in note 7's line. The instrument comes from the note's **player**,
+the line of notes each starting where the previous one ends, so retuning a note against a different
+parent does not change what it sounds like. See [Instruments](/user-guide/playback/instruments#players).
 
 ## In the workspace
 

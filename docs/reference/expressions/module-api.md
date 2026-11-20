@@ -175,18 +175,21 @@ See [Dependencies](/user-guide/notes/dependencies) and
 ## Which instrument a note plays
 
 There is no expression for this, but it is worth knowing here because it is the one property
-that is decided by *another* property's expression.
+that is decided by *other* properties' expressions.
 
 A note's instrument is resolved like this:
 
-1. If the note has an explicit `instrument` field, use it.
-2. Otherwise, look at the note's **frequency expression**. If it references another note
-   (`[N].f`) or the BaseNote (`base.f`), take that note's instrument — recursively.
-3. If nothing along that chain sets one, use the global default instrument
+1. If the note has an explicit `instrument` field, use it. The note starts a new player.
+2. Otherwise, if its start is written from the end of a note or a silence (`[p].t + [p].d`, with
+   or without a rest added), take that note's instrument: the note is in the same player.
+3. Otherwise, if it is a copy of a note of a line (start `[k].t + X`, frequency `r * [k].f`) and
+   the copy of that note's predecessor exists, take that copy's instrument.
+4. Otherwise it starts a line: take the instrument of the note its start time is written from
+   (`[k].t …`), else the BaseNote's, else the global default instrument
    (Settings → Audio → default instrument; `sine-wave` out of the box).
 
-So instrument follows the *frequency* chain. Retargeting a note's frequency to a different
-parent can change what it sounds like. See [Instruments](/user-guide/playback/instruments).
+So the instrument follows the *start time*, not the frequency. See
+[Instruments](/user-guide/playback/instruments#players).
 
 ## Worked patterns
 

@@ -9,14 +9,15 @@ A module is a composition stored as JSON. This page explains the format from an 
 
 For the exhaustive field-by-field reference, see [Module JSON Schema](/reference/module-schema).
 
-## Two keys, and only two
+## Three keys, and only three
 
-A module file has exactly two top-level keys.
+A saved module file has three top-level keys. Only the first two are required.
 
 ```json
 {
   "baseNote": { },
-  "notes": [ ]
+  "notes": [ ],
+  "instrumentRule": "start-time"
 }
 ```
 
@@ -24,6 +25,7 @@ A module file has exactly two top-level keys.
 |---|---|---|
 | `baseNote` | object | The root reference note. It is note id **0**. |
 | `notes` | array | A flat array of note objects. |
+| `instrumentRule` | string | `"start-time"`, written by every save. It says the file was saved when instruments followed the start time. A file without it is [migrated on load](#instruments). |
 
 That is the whole structure. There is **no** `measures` array (bars are ordinary notes flagged `"measure": true`), no `version`, no `name`, no `author`, no `parentId`. A module carries no metadata at all — the library gets a module's display name from the [library manifest](#shipping-a-module-in-the-repo) or from the uploaded file's name, never from inside the file.
 
@@ -64,7 +66,7 @@ Every field is optional. An omitted field falls back to the **class default** be
 | `amplitude` | `1` | A relative gain. Every note without its own inherits it. Saved only when set; no shipped module uses it. |
 | `attack`, `release` | none → the instrument's own envelope | Shares of a note's duration. Every note without its own inherits them. See [attack and release](/reference/properties/attack-release). |
 | `color` | none | Accepted, but no shipped module uses it. |
-| `instrument` | none → the `audio.defaultInstrument` setting | Pins the timbre for everything that inherits from the base. |
+| `instrument` | none → the `audio.defaultInstrument` setting | The instrument of every line that starts from the base and sets none of its own. |
 
 ::: info The BaseNote's duration is a length, not a tempo
 No tempo is stored anywhere. The note widget shows `60 / base.d` beside the BaseNote's duration, for example "= 100 BPM", as a read-only view. Older files that carry `tempo`, `beatsPerMeasure` or `measureLength` are converted when they load; see [Modules from earlier versions](#modules-from-earlier-versions).
@@ -82,7 +84,7 @@ No tempo is stored anywhere. The note widget shows `60 / base.d` beside the Base
 | `attack`, `release` | no | A share of the note's own duration, e.g. `"1/8"`. The attack counts from the note's start, clamped to 0–1; the release from its end, clamped to 0–4. Absent = the BaseNote's, then the instrument's. |
 | `measure` | no | `true` on a measure bar. Saved only when true. |
 | `color` | no | e.g. `"rgba(242,167,27,0.7)"`. |
-| `instrument` | no | Inherited along the frequency chain when absent. |
+| `instrument` | no | When absent, the note takes the instrument of its player. |
 
 The six **expression keys** are exactly `startTime`, `duration`, `frequency`, `amplitude`, `attack`, `release`. The first three are the notation: each relates the note to other notes. The last three are **interpretation variables**, kept apart from it. The **non-expression keys** are `id`, `color`, `instrument` and `measure`. Any other key in a note object is ignored — including the `_description` field that older versions of this page suggested. Nothing reads it, and it is dropped the first time you re-save.
 
@@ -193,7 +195,9 @@ Anything else is rejected with `invalid color value` when the module goes throug
 | `piano` | Multisampled (VSCO2 Community Edition, CC0) |
 | `violin` | Multisampled (VSCO2 Community Edition, CC0) |
 
-A note with no `instrument` inherits one **along its frequency chain**: the app follows the note the `frequency` expression references, then that note's reference, and so on. If nothing in the chain pins an instrument, the note falls back to the `audio.defaultInstrument` setting (default `sine-wave`). The full lookup order, and its edge cases, are in [Instruments](/user-guide/playback/instruments#how-inheritance-works).
+A note with no `instrument` takes the instrument of its **player**: the line of notes, each starting where the previous one ends (`[p].t + [p].d`), that it belongs to. A note that sets an `instrument` starts a new player. A note that starts a line takes the instrument of the note its start time is written from, else the BaseNote's, else the `audio.defaultInstrument` setting (default `sine-wave`). The frequency does not decide the instrument. The full rule, and its edge cases, are in [Instruments](/user-guide/playback/instruments#players).
+
+**Modules saved before this rule.** A module file without `"instrumentRule": "start-time"` is migrated on load: every sounding note whose instrument the rule would change gets its old instrument written onto it, so the module sounds as it did, and a console line says how many notes were pinned. Saving writes `instrumentRule`, so the file is not migrated again. No note of any shipped library module changes instrument.
 
 That is why most of the scale-system modules put `"instrument": "sine-wave"` on their BaseNote — it fixes the timbre for the whole module instead of letting it follow whatever the listener set. (`scale-systems/tesla.json` is the exception: it pins nothing, so it plays with whatever default is set.)
 

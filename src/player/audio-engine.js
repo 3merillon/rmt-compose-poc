@@ -232,6 +232,9 @@ export class AudioEngine {
               // switched while the module plays.
               temperedFrequency: freq != null ? temperedFrequency(freq, baseF) : null,
               instrument: freq != null ? getInstrument(note) : null,
+              // Its player (src/players.js): the first note of its line, and the note
+              // it follows in the line (null for a first note).
+              ...(freq != null ? (() => { const pl = module.findPlayer ? module.findPlayer(note, instrumentMemo) : null; return pl ? { player: pl.head, prev: pl.prev } : {}; })() : {}),
               // Relative gain on the per-note peak, clamped to [0, 4] (see
               // amplitude.js); exactly 1 when neither the note nor the
               // BaseNote defines an amplitude.

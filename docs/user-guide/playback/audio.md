@@ -38,7 +38,7 @@ Click the **gear** in the [top bar](/user-guide/interface/top-bar) and choose th
 | Control | Range | Default | What it does |
 |---|---|---|---|
 | **Master volume** | 0–100% | 100% | The same value as the transport slider |
-| **Default instrument** | the eleven names | `sine-wave` | What a note plays when nothing in its frequency chain pins an instrument — see [Instruments](/user-guide/playback/instruments) |
+| **Default instrument** | the eleven names | `sine-wave` | What a note plays when neither it, nor its player, nor the BaseNote sets an instrument — see [Instruments](/user-guide/playback/instruments) |
 | **Play tempered (12-TET)** | on/off | **off** | Plays each note on the nearest key of a keyboard tuned from the BaseNote — see [Pure / Tempered](#pure-tempered) |
 | **Enable reverb** | on/off | **on** | Adds spatial ambience to the output |
 | **Room size** | 0–1 | 0.5 | How big the space sounds |

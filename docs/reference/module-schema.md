@@ -5,7 +5,7 @@ description: The complete JSON format of a saved RMT Compose module — every ba
 
 # Module JSON Schema
 
-A **module** is a composition saved as JSON. It has exactly two top-level keys: a `baseNote` object and a `notes` array. Every musical value is stored as an **expression string**, never as a computed number.
+A **module** is a composition saved as JSON. It has two top-level keys, a `baseNote` object and a `notes` array, and a saved file carries a third, `instrumentRule`. Every musical value is stored as an **expression string**, never as a computed number.
 
 ```json
 {
@@ -18,6 +18,7 @@ A **module** is a composition saved as JSON. It has exactly two top-level keys: 
 |---|---|---|---|
 | `baseNote` | object | yes | The root reference note. It is note id **0**. |
 | `notes` | array | yes | Flat array of note objects. Order does not matter; the app sorts by `id` on export. |
+| `instrumentRule` | string | no | `"start-time"`, written by every save (`Module.createModuleJSON`). A file without it is older than the rule that instruments follow the start time and is [migrated on load](#instruments). |
 
 There is **no** `version`, `name`, `author`, `tempo`, `measures[]`, or `parentId` field. A module has no metadata at all: the library takes a module's display name from the [library manifest](#the-library-manifest) or from the uploaded file's name, never from the file's contents. Parentage is reconstructed from the expressions themselves.
 
@@ -83,7 +84,7 @@ These three keys were removed. A module that still has them is converted exactly
 | `attack` | expression string | no | A share of the note's duration, from its start, e.g. `"(1/8)"`, `0`–`1`. Absent = the BaseNote's, else the instrument's. |
 | `release` | expression string | no | The same, for the release after the note's end, `0`–`4`. |
 | `color` | CSS color string | no | e.g. `"rgba(242,167,27,0.7)"`. |
-| `instrument` | instrument name | no | Inherited along the frequency chain when absent. |
+| `instrument` | instrument name | no | When absent, the note takes the instrument of its player (see [Instruments](#instruments)). |
 | `measure` | `true` | no | Marks a silent note as a [measure bar](#measure-bars). Any other value is read as absent. Written only when `true`. |
 
 The six **expression keys** are exactly `startTime`, `duration`, `frequency`, `amplitude`, `attack`, `release`. The first three are the language; the last three are interpretation. The **non-expression keys** are `id`, `color`, `instrument` and `measure`. Anything else in a note object is ignored.
@@ -202,7 +203,9 @@ The library validator whitelists `#rgb`, `#rrggbb`, `#rrggbbaa`, `rgb()`, `rgba(
 | `piano` | Multisampled (VSCO2 Community Edition, CC0) |
 | `violin` | Multisampled (VSCO2 Community Edition, CC0) |
 
-**Instrument inheritance follows the frequency chain.** When a note has no `instrument` of its own, the app reads its `frequency` expression, finds the note it references (`[N].f`, or `base.f`), and asks *that* note for its instrument — recursively. If nothing along the chain pins an instrument, the note falls back to the global **`audio.defaultInstrument`** setting (default `sine-wave`).
+**A note without an `instrument` takes the instrument of its player.** A player is a line of notes, each starting where the previous one ends. A note's instrument is its own, if it sets one (it then starts a new player); else the instrument of the note or silence its start is written from the end of (`[p].t + [p].d`, optionally plus a rest); else that of its counterpart in a line it copies (start `[k].t + X`, frequency `r * [k].f`); else, as the first note of a line, that of the note its start time is written from, else the BaseNote's, else the global **`audio.defaultInstrument`** setting (default `sine-wave`). The frequency does not decide the instrument. The rule is in [Instruments](/user-guide/playback/instruments#players); the code is `src/players.js`.
+
+**Modules saved before this rule.** A file without `"instrumentRule": "start-time"` is migrated on load: every sounding note whose instrument the rule would change gets its old instrument written onto it, so the module keeps its sound. A save writes `"instrumentRule": "start-time"` at the top level, so the file is not migrated again. No note of any shipped library module changes instrument.
 
 This is why most scale-system modules pin `"instrument": "sine-wave"` on their BaseNote: it fixes the timbre for the whole module instead of letting it follow the listener's default.
 

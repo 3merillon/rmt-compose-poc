@@ -302,7 +302,10 @@ function renderChangeSection() {
   return sec;
 }
 
-// INSTRUMENT: one list, Apply; the first entry makes the notes inherit again
+// INSTRUMENT: one list and two ways to apply it (Phase I): every selected note
+// its own player (the instrument set on each), or one player (set on the notes
+// that start the selection's lines, the others inherit along them). The first
+// entry, "inherited", makes the notes inherit again either way.
 function renderInstrumentSection() {
   const sec = el('div', 'group-widget-section');
   sec.dataset.section = 'instrument';
@@ -311,8 +314,15 @@ function renderInstrumentSection() {
   instrumentSelect = el('select', 'group-widget-field group-widget-field-inline');
   instrumentSelect.setAttribute('aria-label', 'Instrument');
   fillInstruments(['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone']);
-  row.append(instrumentSelect, smallButton('Apply', 'group-instrument', () => edit('instrument', null, instrumentSelect.value)));
+  row.append(instrumentSelect);
   sec.appendChild(row);
+  const row2 = el('div', 'group-widget-row');
+  row2.append(
+    smallButton('Each note its own player', 'group-instrument', () => edit('instrument', null, instrumentSelect.value),
+      'Sets the instrument on every selected note: each becomes the first note of a player of its own.'),
+    smallButton('One player', 'group-instrument-one', () => edit('instrumentOnePlayer', null, instrumentSelect.value),
+      'Sets the instrument on the notes that start the selection\'s lines; the others inherit it along them.'));
+  sec.appendChild(row2);
   return sec;
 }
 

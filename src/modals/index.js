@@ -382,6 +382,9 @@ function collectVariables(note, measureId, moduleInstance) {
 
         const hasOwnInstrument = note.properties.instrument != null;
         const inheritedInstrument = module.findInstrument(note);
+        // The first note of its line: the one whose instrument it plays with.
+        let playerHead = null;
+        try { playerHead = module.findPlayer ? module.findPlayer(note).head : null; } catch {}
 
         // A reference never sounds: no instrument row unless it carries one anyway.
         if (!hasOwnInstrument && isReferenceNote(note)) return variables;
@@ -389,7 +392,8 @@ function collectVariables(note, measureId, moduleInstance) {
             evaluated: hasOwnInstrument ? note.getVariable('instrument') : inheritedInstrument,
             raw: hasOwnInstrument ? note.getVariable('instrument') : inheritedInstrument,
             isInherited: !hasOwnInstrument,
-            isCorrupted: false
+            isCorrupted: false,
+            playerHead: (playerHead != null && playerHead !== note.id) ? playerHead : null
         };
     }
 

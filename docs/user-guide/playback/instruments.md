@@ -1,13 +1,13 @@
 ---
 title: Instruments
-description: The eleven built-in instruments in RMT Compose — nine synth voices, two CC0 multisampled ones — and how a note inherits one from its frequency chain.
+description: The eleven built-in instruments in RMT Compose — nine synth voices, two CC0 multisampled ones — and how a note gets one from the player (the line of notes) it belongs to.
 ---
 
 # Instruments
 
 Every note plays through a named **instrument**. There are eleven: nine synthesized live from Web Audio oscillators, and two built from recorded samples.
 
-Most notes do not carry an instrument of their own. They **inherit** one by following their frequency dependency chain, and fall back to a global default if nothing in the chain pins one.
+Most notes do not carry an instrument of their own. A note takes the instrument of its **player**: the line of notes, each starting where the previous one ends, that it belongs to. Setting an instrument on a note starts a new player with that instrument. If nothing along the way sets one, the BaseNote's applies, and failing that a global default.
 
 ## The eleven instruments
 
@@ -37,7 +37,7 @@ Click a note to open the note widget. The `instrument` row is the last of the va
 
 Above the dropdown, one line tells you where the note's instrument comes from:
 
-- **`Inherited: piano`** — the note has no instrument of its own and is following its frequency chain.
+- **`Inherited: piano · plays with [9]`** — the note has no instrument of its own and takes the one of its player; `[9]` is the first note of that line. The `· plays with` part is left out when the note is itself the first note of its line.
 - **`Current: piano`** — the note pins that instrument itself.
 
 Choose a name from the dropdown and a **`Save`** button appears. Click it to pin the instrument on that note. If the note already pins one, a **`Use Inherited`** button sits above the dropdown; click it to remove the pin and go back to inheriting.
@@ -48,7 +48,7 @@ Measure bars have no instrument — they carry only a start time, so the row is 
 
 ### For everything else
 
-**Settings → Audio → Default instrument** (the gear in the [top bar](/user-guide/interface/top-bar)) sets what a note plays when nothing in its frequency chain pins an instrument. It defaults to `sine-wave` and is remembered across reloads.
+**Settings → Audio → Default instrument** (the gear in the [top bar](/user-guide/interface/top-bar)) sets what a note plays when neither it, nor its player, nor the BaseNote sets an instrument. It defaults to `sine-wave` and is remembered across reloads.
 
 The change applies to the **next** playback, not the one in progress — an instrument is resolved once per note when playback is prepared. Press Stop, then Play.
 
@@ -66,35 +66,51 @@ The change applies to the **next** playback, not the one in progress — an inst
 }
 ```
 
-Note 2 has no `instrument` of its own, and its frequency depends on note 1 — so note 2 plays as `piano` too.
+Note 2 has no `instrument` of its own, and its start is written from the end of note 1 (`[1].t + [1].d`) — so note 2 is in note 1's player and plays as `piano` too. Its frequency plays no part.
 
-## How inheritance works
+## Players
 
-For each note, in order:
+A **player** is a line: notes joined by the relation "starts where the previous one ends". A note's instrument is decided as follows:
 
-1. If the note pins an `instrument`, use it. An explicit pin always wins.
-2. Otherwise read the note's **frequency expression**:
-   - the first note reference in it (`[3].f`) → look at note 3, and repeat;
-   - failing that, if the expression mentions `base.f` → look at the BaseNote, and repeat.
-3. If nothing in the chain pins an instrument, use **Settings → Audio → Default instrument**.
+1. If the note sets an `instrument`, use it. The note starts a new player, and the line goes on from it with that instrument.
+2. Otherwise, if its start is written from the end of a note or a silence *p* (`[p].t + [p].d`, or that plus a rest such as `[p].t + [p].d + base.d * (1/2)`), use *p*'s instrument: the note is in *p*'s player. A silence carries the line, so a player can have a silence in his score.
+3. Otherwise, if the note is a copy of a note *k* of a line (start `[k].t + X`, frequency `r * [k].f`) and the copy of *k*'s predecessor exists (written from it with the same `X`), use that copy's instrument: a copy of a line is a line, a canon voice.
+4. Otherwise the note starts a line. It takes the instrument of the note its **start time** is written from (`[k].t …`; a measure bar does not count), else the BaseNote's, else **Settings → Audio → Default instrument**.
+
+The source is `src/players.js`, whose header states the same rule.
+
+In the shipped canon (the default module) this gives exactly three players: the theme (25 notes from note 9), the first bass (70 notes from note 10) and the second bass (58 notes from note 24, a note-by-note copy of the first). Setting note 9's instrument changes the whole theme; note 24's changes the second bass; note 10's changes the first bass, and also the second one while note 24 sets none, because note 24's start is written from note 10.
 
 Three consequences worth knowing:
 
-**Inheritance follows frequency only.** A note whose *start time* depends on note 5 but whose frequency is a bare number inherits nothing from note 5. Set an instrument on it directly, or make its frequency depend on note 5.
+**The frequency no longer decides the instrument.** A bass note tuned from the melody (`[9].f * (1/2)`) is still the bass: its player is the line it starts where the previous bass note ends. Retargeting a note's frequency does not change its instrument; retargeting its start time may.
 
-**Only the first reference is followed.** A frequency of `[3].f * [7].f / base.f` inherits from note 3. Note 7 has no say.
+**A note that starts a line takes the instrument of the note its start is written from.** If that is a note of another line, the new line begins with that note's instrument, but it is a player of its own: setting an instrument on it changes only its line.
 
-**The BaseNote normally pins nothing**, so an ordinary composition chains all the way up to it and lands on the default-instrument setting. That is what makes the setting reach anything at all.
+**The BaseNote normally sets nothing**, so a line whose first note is written from the BaseNote lands on the default-instrument setting. That is what makes the setting reach anything at all.
 
-::: warning A BaseNote that does pin an instrument overrides the setting
-Five of the shipped modules pin `"instrument": "sine-wave"` on their BaseNote — the five scale systems (`BP-13`, `Mixed-Base`, `TET-12`, `TET-19`, `TET-31`). Load one of those and changing "Default instrument" appears to do nothing, because every note is inheriting `sine-wave` from the BaseNote. Change the BaseNote's instrument in the note widget instead. `defaultModule` does not pin one, so the setting works there.
+::: warning A BaseNote that does set an instrument overrides the setting
+Five of the shipped modules pin `"instrument": "sine-wave"` on their BaseNote — the five scale systems (`BP-13`, `Mixed-Base`, `TET-12`, `TET-19`, `TET-31`). Load one of those and changing "Default instrument" appears to do nothing, because every line ends at `sine-wave` from the BaseNote. Change the BaseNote's instrument in the note widget instead. `defaultModule` does not pin one, so the setting works there.
 :::
 
 The BaseNote's widget row agrees with playback: with no instrument of its own it reads `Inherited: <name>`, where the name is your "Default instrument" setting.
 
+### Several notes at once
+
+The [group widget](/user-guide/notes/selection) has an INSTRUMENT section with the list of instruments and two buttons:
+
+- **Each note its own player** sets the instrument on every selected note: each becomes the first note of a player.
+- **One player** sets it on the notes that start the selection's lines (a selected note whose line predecessor is not selected) and removes it from the other selected notes, which then take it along their lines. The notice adds the number of players.
+
+Choosing *inherited* in the list makes every selected note inherit again with either button.
+
+### Modules saved before this rule
+
+A module file without `"instrumentRule": "start-time"` is older than the rule. On load, every sounding note whose instrument the rule would change gets its old instrument written onto it (it then starts its own player), so the module keeps its sound, and a console line says how many notes were pinned. Saving writes `instrumentRule: "start-time"`, so the module is not migrated again. No note of any shipped library module changes instrument.
+
 ### Deleting a note keeps its instrument alive
 
-When you delete a note with **Keep Dependencies** (the note widget's DELETE NOTE section), the deleted note's instrument is resolved and **written onto** every direct dependent that didn't already pin one. Those notes stop inheriting from that point on — including from the default-instrument setting. **Delete all** on a multi-selection does the same thing to every dependent that survives outside the group.
+When you delete a note with **Keep Dependencies** (the note widget's DELETE NOTE section), the instrument each direct dependent is playing is resolved and **written onto** it, for every direct dependent that didn't already set one (a dependent that sets its own keeps it). Those notes stop inheriting from that point on — including from the default-instrument setting — and each starts a player of its own. **Delete all** on a multi-selection does the same thing to every dependent that survives outside the group.
 
 See [Dependencies](/user-guide/notes/dependencies) for what else that operation rewrites.
 
@@ -200,4 +216,4 @@ Every instrument gets its own mix bus internally, but there are **no per-instrum
 
 - [Audio & Reverb](/user-guide/playback/audio) — the reverb, stereo placement and limiter every instrument runs through
 - [Module Format](/user-guide/modules/module-format#instruments) — the `instrument` key in module JSON
-- [Dependencies](/user-guide/notes/dependencies) — the frequency chains inheritance follows
+- [Dependencies](/user-guide/notes/dependencies) — the relations that make up a line

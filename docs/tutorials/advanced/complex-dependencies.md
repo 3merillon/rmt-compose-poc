@@ -145,7 +145,7 @@ its right edge and note 2 slides *and* stretches to match.
 ::: info There is no per-note volume
 You cannot fade an echo out — note volume is not a property. What you *can* vary per note is the
 **instrument**: the note widget has an instrument selector, and a note with no explicit instrument
-inherits one up its frequency chain. Giving the echoes a quieter timbre (`sine-wave` against an
+takes the instrument of the note its start time is written from (here note 1). Giving the echoes a quieter timbre (`sine-wave` against an
 `organ` original) is the closest available approximation.
 :::
 
@@ -224,7 +224,8 @@ hand-editing every expression. Full walkthrough in
 Press **Delete all** in the group widget and you get a confirmation, then: the selected notes are
 removed, and every note *outside* the group that referenced them is **liberated, not deleted**.
 Their expressions are inlined, so they keep their exact positions, lengths and pitches. A direct
-dependent that had no explicit instrument also inherits the deleted note's instrument.
+dependent that had no explicit instrument has the instrument it was playing written onto it, so it keeps
+its instrument and starts a player of its own.
 
 The confirmation text says "irreversible". It is not — the whole delete is one undo entry, and
 Ctrl+Z brings it back.

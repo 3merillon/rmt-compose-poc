@@ -128,13 +128,13 @@ Type an expression and press `Save`; clear the field and press `Save` to go back
 
 ### Instrument
 
-The `INSTRUMENT` row shows either **`Current:`** (the note has its own instrument) or **`Inherited:`** in grey (it is borrowing one), and a dropdown listing the eleven registered instruments by their raw ids, alphabetically:
+The `INSTRUMENT` row shows either **`Current:`** (the note has its own instrument) or **`Inherited:`** in grey (it is borrowing one, followed by `· plays with [N]`, where `N` is the first note of its line, unless the note is itself the first), and a dropdown listing the eleven registered instruments by their raw ids, alphabetically:
 
 `fm-epiano`, `harmonium`, `harmonium-soft`, `organ`, `piano`, `sawtooth-wave`, `sine-wave`, `square-wave`, `triangle-wave`, `vibraphone`, `violin`
 
 `piano` and `violin` are multisampled instruments; the other nine are synthesised.
 
-**Inheritance follows the frequency reference.** A note with no instrument of its own uses the instrument of the note its *frequency* points at, recursively. Set note 1 to `violin`, and every note whose frequency is `[1].f * …` plays as a violin unless it overrides it. A note that reaches the BaseNote and finds no instrument there falls back to the **global default in Settings → Audio**, which ships as `sine-wave`.
+**Inheritance follows the player.** A player is a line of notes, each starting where the previous one ends (`[1].t + [1].d`); a silence in the line carries it on. A note with no instrument of its own plays with the instrument of the line it is in, and a note that sets one starts a new player. Set note 1 to `violin`, and every note that follows it along the line plays as a violin until one sets its own. The frequency does not decide the instrument. A line whose first note finds no instrument (its start is written from the BaseNote, which sets none) falls back to the **global default in Settings → Audio**, which ships as `sine-wave`. The full rule is in [Instruments](/user-guide/playback/instruments#players).
 
 If a note has its own instrument — and it isn't the BaseNote — a **`Use Inherited`** button appears next to the dropdown. It clears the override and puts the note back on inheritance.
 

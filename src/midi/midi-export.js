@@ -208,6 +208,7 @@ export function planMidi(module, options = {}) {
   const byInstrument = new Map();   // instrument -> notes, in first-appearance order
 
   const ids = Object.keys(module.notes).map(Number).filter((id) => id !== 0).sort((a, b) => a - b);
+  const instrumentMemo = new Map(); // one walk per line (Module.findInstrument)
   for (const id of ids) {
     const note = module.notes[id];
     const r = cache.get(id);
@@ -274,7 +275,7 @@ export function planMidi(module, options = {}) {
     maxPitchError = Math.max(maxPitchError, Math.abs(writtenCents - cents));
     if (noteEndTick > endTick) endTick = noteEndTick;
 
-    const instrument = String(module.findInstrument(note) || 'sine-wave').toLowerCase();
+    const instrument = String(module.findInstrument(note, instrumentMemo) || 'sine-wave').toLowerCase();
     if (!byInstrument.has(instrument)) byInstrument.set(instrument, []);
     byInstrument.get(instrument).push({ id, instrument, startTick, endTick: noteEndTick, key, bend, cents, velocity, frequency, channel: -1 });
   }

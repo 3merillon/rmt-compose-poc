@@ -96,7 +96,7 @@ composing, playing and panning with it up, and clicking it never clears the sele
 | Header | The live count: *"5 notes selected"* |
 | **×** | Clears the selection (same as **Clear selection**) |
 | **Change** | One variable (amplitude, attack, release, frequency, duration), one expression, and **Set**, **×** or **Inherit** — see [Changing a group](#changing-a-group) |
-| **Instrument** | Gives every selected note the chosen instrument, or makes them inherit again (*inherited*) |
+| **Instrument** | The list of instruments and two buttons: **Each note its own player** sets the instrument on every selected note; **One player** sets it only on the notes that start the selection's lines and lets the others inherit it. Choosing *inherited* makes every selected note inherit again — see [Instruments](/user-guide/playback/instruments#several-notes-at-once) |
 | **Colour** | Gives every selected note a colour (`#ff8800`, `rgba(0,0,255,0.5)`, a colour name) |
 | **Copy to Modules** | Saves the selection to the library's Custom section. Non-destructive. |
 | **Delete all** | Deletes the selected notes, behind a confirmation |
@@ -174,8 +174,8 @@ Click **Delete all**. A confirmation appears, then:
 - Every selected note is removed.
 - **Notes outside the group that depended on them are liberated, not deleted.** The deleted notes'
   expressions are inlined into whatever still referenced them, so those notes keep their exact
-  positions, lengths and pitches. A direct dependent with no instrument of its own also inherits
-  the deleted note's instrument.
+  positions, lengths and pitches. A direct dependent with no instrument of its own has the
+  instrument it was playing written onto it, and so starts a player of its own.
 - The whole delete is **one undo entry**, and the selection is cleared.
 
 ::: warning

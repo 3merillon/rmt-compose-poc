@@ -204,7 +204,7 @@ WASM init is async and normally loses the race against `Module` construction. Ra
 the module starts on JS and upgrades later:
 
 ```javascript
-// src/module.js:66-72 (in the Module constructor)
+// src/module.js:67-73 (in the Module constructor)
 if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)) {
   const ref = new WeakRef(this);
   onWasmReady(() => {
@@ -214,7 +214,7 @@ if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)
 }
 ```
 
-`_upgradeEvaluators()` (`src/module.js:138`) swaps `_binaryEvaluator` and `_incrementalEvaluator`
+`_upgradeEvaluators()` (`src/module.js:139`) swaps `_binaryEvaluator` and `_incrementalEvaluator`
 atomically, clears the evaluation cache, and marks every note dirty so the next `evaluateModule()`
 re-evaluates on the new engine. Values are identical across engines, so nothing goes stale in
 between. The `WeakRef` keeps a discarded module from leaking through the callback list.

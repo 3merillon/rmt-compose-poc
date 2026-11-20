@@ -444,25 +444,36 @@ the registry exactly, but a newly registered instrument will not appear there au
 
 ## Instrument inheritance
 
-A note usually carries no instrument of its own. `Module.findInstrument(note)` (`module.js:765`)
-resolves one, in this order:
+A note usually carries no instrument of its own. `Module.findInstrument(note, memo)` (`module.js:775`)
+calls `instrumentOf()` in `src/players.js`, which resolves one in this order. A **player** is a line of
+notes, each starting where the previous one ends.
 
-1. The note has its own `instrument` property → **use it**. An explicit pin always wins.
-2. Otherwise, look at the note's **frequency expression**:
-   - the **first** `[N].f` reference → recurse into note *N*;
-   - else, if it contains `base.f` → recurse into the BaseNote.
-3. Nothing matched → the global default, `audio.defaultInstrument`.
+1. The note has its own `instrument` property → **use it**. It starts a new player.
+2. Its start is written from the end of a note or a silence *p* (`[p].t + [p].d`, optionally plus a
+   rest such as `base.d * (1/2)`) → *p*'s instrument: the same player. A silence carries the line.
+3. It is a copy of a note *k* of a line (start `[k].t + X`, frequency `r * [k].f`) and the copy of *k*'s
+   predecessor exists (written from it with the same `X`) → that copy's instrument. A copy of a line
+   is a line: a canon voice.
+4. Otherwise it starts a line: the instrument of the note its **start time** is written from
+   (`[k].t …`; a measure bar does not count), else the BaseNote's, else the global default,
+   `audio.defaultInstrument`.
 
-Three consequences worth stating plainly:
+Consequences worth stating plainly:
 
-- **Inheritance follows frequency only.** A note whose `startTime` depends on note 5 but whose
-  frequency is a bare literal inherits nothing from note 5.
-- **Only the first reference is followed.** `[3].f * [7].f / base.f` inherits from note **3**.
-- The BaseNote normally pins nothing, so it — and everything chaining up to it — resolves to
+- **The frequency does not decide the instrument.** A bass note tuned from the melody is still the
+  bass.
+- `findInstrument()` takes an optional `Map` memo; a caller resolving many notes in one pass shares
+  one, so each line is walked once. `module.findPlayer(note, memo)` returns `{head, prev}`.
+- A module file without `"instrumentRule": "start-time"` is migrated on load
+  (`migrateInstrumentRule()`): every sounding note whose instrument the rule would change gets its old
+  instrument written onto it. `createModuleJSON()` writes the key, so a saved module is not migrated
+  again. `scripts/test-players.mjs` checks the rule, the shipped canon (three players) and that no
+  shipped library module changes instrument.
+- The BaseNote normally pins nothing, so a line that starts from it resolves to
   `audio.defaultInstrument`. That is what makes the setting reach ordinary compositions. A BaseNote
   that *does* pin an instrument in its JSON overrides the setting for everything below it.
 
-`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1029-1044`)
+`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1033-1048`)
 via `setDefaultInstrument()`. It is resolved once per note when playback is prepared, so a change
 takes effect on the **next** playback, not mid-playback.
 

@@ -196,7 +196,7 @@ Fields: `graph`, `evaluator`, `dirty` (a `Set`), `cache` (`Map<noteId, result>`)
 | `evaluateDirty()` (`:1022`) | `beginBatch()` → a blank record for every dirty note → `evaluateVariables()` → `reportProblems()` → clear dirty → return the cache |
 | `getEvaluatedNote(id)`, `isCacheValid()` | accessors |
 
-`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` (`src/module.js:236-238`) uses it for dependents whose *values* changed but whose *bytecode* did not, and so does the batch path (`src/module.js:311-314`). It was added to reach parity with the WASM evaluator; before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
+`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` (`src/module.js:237-239`) uses it for dependents whose *values* changed but whose *bytecode* did not, and so does the batch path (`src/module.js:312-315`). It was added to reach parity with the WASM evaluator; before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
 
 Dirty tracking stays **per note**: a change to any expression of a note re-evaluates all of that note and of every note downstream. That is a superset of what strictly has to change, and it is what keeps the dirty set one cheap graph walk. Only the *order* is per variable.
 
@@ -254,7 +254,7 @@ This is the whole point of tracking corruption, and it crosses four files:
 POW produces an irrational, or ~ / a fallback an approximation
   → BinaryEvaluator._lastEvalWasCorrupted = true          binary-evaluator.js:557
   → evaluateVariable ORs the property's bit into corruptionFlags   :830
-  → Module._updateCorruptionFlags() pushes it into the graph   module.js:683-706
+  → Module._updateCorruptionFlags() pushes it into the graph   module.js:684-707
       → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1746
   → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:1005-1052
       0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
@@ -295,7 +295,7 @@ Two costs matter now. **Depth** decides how much of the module a commit touches 
 | Fraction backing | `fraction.js@5.3.4` — `n`/`d`/`s` are **BigInt**, arbitrary precision | `node_modules/fraction.js` |
 | POW exponent cap | integer exponent ≤ **65536**, result ≤ **~1 Mbit** per component; beyond, approximate | `src/value/exact.js:33-34` |
 | Note id in bytecode | `u16` → max **65535** | `binary-note.js:129` |
-| Note id accepted anywhere | integer `0 … 65535` — enforced by the loader **and the DSL parser** (and by the converter of the retired method-chain syntax) | `module.js:885`, `dsl/parser.js:284` |
+| Note id accepted anywhere | integer `0 … 65535` — enforced by the loader **and the DSL parser** (and by the converter of the retired method-chain syntax) | `module.js:861`, `dsl/parser.js:284` |
 
 ::: tip Arbitrary precision, end to end
 fraction.js 5.x is BigInt-backed, so exact rational arithmetic survives **any depth** of module tree: a 200-note `(3/2)` chain evaluates to its exact 98-digit numerator, and `(81/80)^400` is exact (see the `comma-chain-400` stress shape). `scripts/test-exactness.mjs` (part of `npm test`) locks this in: compile → evaluate → decompile → save → load → re-evaluate must reproduce every digit. Irrational powers are exact too (`2^(7/12)` stays that power). The only approximations are the *marked* ones — a `~` number, the documented fallbacks of the exact algebra, a division by zero — and the float boundary `toNumber()` where values leave for GL, Web Audio, and display.

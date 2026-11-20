@@ -101,9 +101,9 @@ If an expression will not compile at all, it is **rejected with an error** — i
 Both live on the note, and both are optional.
 
 - **`color`** — set from the note widget's `color` row. New notes get a random hue.
-- **`instrument`** — a note with none set **inherits along its frequency chain**: the app follows whatever note the `frequency` expression references, and asks *that* note. If nothing in the chain pins an instrument, the note falls back to the **Settings → Audio → default instrument** setting (`sine-wave` out of the box). The exact lookup order is in [Instruments](/user-guide/playback/instruments#how-inheritance-works).
+- **`instrument`** — a note with none set takes the instrument of its **player**, the line of notes each starting where the previous one ends. A note that sets one starts a new player. If neither the line nor the BaseNote sets an instrument, the note falls back to the **Settings → Audio → default instrument** setting (`sine-wave` out of the box). The exact rule is in [Instruments](/user-guide/playback/instruments#players).
 
-That inheritance is why most of the shipped scale-system modules pin `"instrument": "sine-wave"` on their BaseNote: it fixes the module's timbre instead of letting it follow whatever the listener happens to have set.
+That fallback is why most of the shipped scale-system modules pin `"instrument": "sine-wave"` on their BaseNote: it fixes the module's timbre instead of letting it follow whatever the listener happens to have set.
 
 ## Design for the drop
 

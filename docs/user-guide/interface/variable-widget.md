@@ -233,15 +233,15 @@ Type an expression and press `Save` to set it. Clear the field and press `Save` 
 The `INSTRUMENT` row shows one line of status and a dropdown.
 
 - **`Current: <name>`** — this note pins its own instrument.
-- **`Inherited: <name>`** (in grey) — it has none of its own and is inheriting.
+- **`Inherited: <name> · plays with [N]`** (in grey) — it has none of its own and takes the instrument of its player. `N` is the first note of the line the note belongs to; the `· plays with [N]` part is left out when the note is itself the first note of its line.
 
-Notes inherit an instrument by following their **frequency** chain upward to the first ancestor that pins one; if nobody does, they fall back to **Settings → Audio → Default instrument** (`sine-wave` out of the box). Inheritance follows frequency only — a note whose *startTime* depends on note 5 inherits nothing from note 5.
+A player is a line of notes, each starting where the previous one ends. A note that starts a line takes the instrument of the note its start time is written from, else the BaseNote's, else **Settings → Audio → Default instrument** (`sine-wave` out of the box). The frequency does not decide the instrument. The full rule is in [Instruments](/user-guide/playback/instruments#players).
 
 The dropdown lists all eleven instruments, alphabetically:
 
 `fm-epiano`, `harmonium`, `harmonium-soft`, `organ`, `piano`, `sawtooth-wave`, `sine-wave`, `square-wave`, `triangle-wave`, `vibraphone`, `violin`
 
-Change it and a `Save` button appears; Save pins that instrument on the note. Once a note has its own instrument, a grey **`Use Inherited`** button appears above the dropdown — press it to drop the pin and go back to inheriting.
+Change it and a `Save` button appears; Save pins that instrument on the note. Once a note has its own instrument, a grey **`Use Inherited`** button appears above the dropdown — press it to drop the pin and go back to inheriting. A note that sets an instrument starts a new player; the notes that follow it in its line play with that instrument.
 
 Measures have no instrument row. See [Instruments](/user-guide/playback/instruments) for what each one sounds like.
 
