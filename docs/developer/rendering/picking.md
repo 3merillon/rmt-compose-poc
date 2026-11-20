@@ -34,7 +34,7 @@ const stack = workspace.pickStackAt(clientX, clientY); // every hit, top-most fi
 
 ### `pickAllAt(clientX, clientY, expandCssPx = 2)`
 
-The mixed-type entry point (`renderer.js:9331`). It concatenates three probes, in visual top-to-bottom
+The mixed-type entry point (`renderer.js:9315`). It concatenates three probes, in visual top-to-bottom
 order:
 
 1. **Measure triangles** — `pickTrianglesAt()`, a barycentric point-in-triangle test against cached
@@ -47,7 +47,7 @@ mis-handle a click on a measure triangle.
 
 ### `pickAt(clientX, clientY, expandCssPx = 2)` — the note scan
 
-`RendererAdapter.pickAt()` (`renderer.js:3547`) walks the **instance arrays**, not `module.notes`:
+`RendererAdapter.pickAt()` (`renderer.js:3531`) walks the **instance arrays**, not `module.notes`:
 
 ```javascript
 for (let i = N - 1; i >= 0; i--) {   // reverse: last-drawn is top-most
@@ -64,7 +64,7 @@ Three details matter:
 - **Reverse order.** `sync()` writes the selected note last, so the instance arrays are already in
   draw order and iterating backwards yields the top-most hit first. No depth sort at pick time.
 - **The precise test is a rounded-rect SDF**, the same one the body shader uses
-  (`_isPointInsideRoundedNote`, `renderer.js:3492`). An AABB alone would let you select a note by
+  (`_isPointInsideRoundedNote`, `renderer.js:3476`). An AABB alone would let you select a note by
   clicking the empty pixels in its rounded corner.
 - **`expandCssPx` only applies along straight edges.** Inside the corner arcs the tolerance is
   dropped entirely — otherwise the expansion would reintroduce exactly the corner-selection artifact
@@ -74,7 +74,7 @@ There is **no spatial index**, and none is warranted: see the numbers below.
 
 ### `hitTestSubRegion(clientX, clientY)`
 
-Resolves *which part* of a note was hit (`renderer.js:3610`):
+Resolves *which part* of a note was hit (`renderer.js:3594`):
 
 ```javascript
 // -> { id, region } where region is 'body' | 'tab' | 'octaveUp' | 'octaveDown'
@@ -95,7 +95,7 @@ genuinely hit. Then:
 
 ### `pickRect(x0, y0, x1, y1)` — the marquee
 
-`renderer.js:1603`. The multi-select hit test (shift+drag on desktop, 500 ms long-press on touch).
+`renderer.js:1604`. The multi-select hit test (shift+drag on desktop, 500 ms long-press on touch).
 
 - Selects by **intersection**, not containment — any overlap with the rectangle counts.
 - **AABB only.** No rounded-rect refinement: a rubber band that skims a corner should still catch the

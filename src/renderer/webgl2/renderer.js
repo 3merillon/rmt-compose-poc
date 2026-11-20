@@ -1,6 +1,7 @@
 import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.js';
 import { toNumber } from '../../utils/fraction-num.js';
 import { noteLabel, LINE_LABEL } from './note-label.js';
+import { parseCssColor } from '../../utils/css-color.js';
 import { amplitudeToGain } from '../../player/amplitude.js';
 import { isMeasureNote } from '../../note.js';
 import { envelopeShares } from '../../instruments/instrument-manager.js';
@@ -3408,28 +3409,11 @@ export class RendererAdapter {
     return this._parseAnyColorUncached(col);
   }
 
+  // Any CSS colour a note can be given (src/utils/css-color.js). It used to read only
+  // rgba(), hsl()/hsla() and 3- or 6-digit hex, so rgb(255,255,255) or a colour name
+  // fell through to the id-derived colour: a different hue on every note.
   _parseAnyColorUncached(col) {
-    if (!col) return null;
-    if (typeof col === 'string') {
-      const s = col.trim().toLowerCase();
-      if (s.startsWith('rgba')) {
-        const m = s.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
-        if (m) return [ Number(m[1])/255, Number(m[2])/255, Number(m[3])/255, (m[4]!=null)?Number(m[4]):1 ];
-      } else if (s.startsWith('hsla') || s.startsWith('hsl')) {
-        const m = s.match(/hsla?\(([^,]+),\s*([^,]+)%,\s*([^,]+)%(?:,\s*([\d.]+))?\)/);
-        if (m) return this._hslaToRgba(Number(m[1]), Number(m[2]), Number(m[3]), (m[4]!=null)?Number(m[4]):1);
-      } else if (s.startsWith('#')) {
-        let hex = s.replace('#','');
-        if (hex.length === 3) hex = hex.split('').map(ch => ch+ch).join('');
-        if (hex.length === 6) {
-          const r = parseInt(hex.slice(0,2),16)/255;
-          const g = parseInt(hex.slice(2,4),16)/255;
-          const b = parseInt(hex.slice(4,6),16)/255;
-          return [r,g,b,1];
-        }
-      }
-    }
-    return null;
+    return parseCssColor(col);
   }
 
   _hslaToRgba(h, s, l, a) {

@@ -182,19 +182,19 @@ Three things do the work:
 
 **One draw per visual class, not per note.** Note bodies are a single
 `gl.drawArraysInstanced(TRIANGLE_FAN, 0, 4, N)` for the entire score
-(`renderer.js:2939`). So are the silence rings, the octave guides, the measure bars, the dependency
+(`renderer.js:2940`). So are the silence rings, the octave guides, the measure bars, the dependency
 link-lines and every glyph. `renderer.js` holds 53 `drawArraysInstanced` call sites in total — one
 *per pass*, not per note (the one exception is `_drawRingIdxList`, which still loops per instance
 while a drag is active). The GPU is not the bottleneck; CPU-side per-note work is.
 
 **An idle canvas issues zero draw calls.** The rAF loop always ticks, but `_render()` early-returns
-on `!this.needsRedraw` (`renderer.js:2851`). Two change-guards make that gate real: `setPlayhead()`
-returns early when the time did not move (`renderer.js:1413`), and `updateViewportBasis()` returns
-early on an unchanged camera basis (`renderer.js:595-599`). Without them, `player.js`'s own rAF loop
+on `!this.needsRedraw` (`renderer.js:2852`). Two change-guards make that gate real: `setPlayhead()`
+returns early when the time did not move (`renderer.js:1414`), and `updateViewportBasis()` returns
+early on an unchanged camera basis (`renderer.js:596-600`). Without them, `player.js`'s own rAF loop
 kept the scene permanently dirty.
 
 **Viewport culling on the overlay pass.** The per-note loop that emits pull tabs, arrows, fraction
-dividers and text is culled against the viewport (`renderer.js:7044-7075`). This is what makes 100k
+dividers and text is culled against the viewport (`renderer.js:7028-7059`). This is what makes 100k
 notes tractable — without it, overlay cost scaled with the size of the *module* rather than with
 what is on screen.
 
