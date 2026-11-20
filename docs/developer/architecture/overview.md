@@ -89,7 +89,7 @@ flowchart TB
 One language, the **DSL** (`src/dsl/`): `base.f * (3/2)`, `[1].t + [1].d`, `base.d * 4`, infix
 `+ - * / ^`. It has no functions. Every shipped module file uses it, the note widget displays it, and
 every expression the app writes on your behalf is DSL. `ExpressionCompiler.compile()`
-(`src/expression-compiler.js:45`) puts an LRU cache in front of the DSL compiler and refuses text in
+(`src/expression-compiler.js:47`) puts an LRU cache in front of the DSL compiler and refuses text in
 the retired method-chain syntax with its DSL form.
 
 Older modules are converted when they load, before anything is compiled: `Module.loadFromJSON()` runs

@@ -332,7 +332,7 @@ decompiler.decompile(expr)   // sourceText verbatim if present, else decompileTo
 decompileToDSL(expr)         // always walks the bytecode, always emits DSL
 ```
 
-`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:80`),
+`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:90`),
 so for anything compiled from text it is a pass-through. A synthesised expression (empty
 `sourceText`) is decompiled to DSL.
 

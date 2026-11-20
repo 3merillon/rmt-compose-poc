@@ -152,7 +152,7 @@ roughly fifteen graph maps — the all-property pair, plus the startTime, freque
 indexes.
 
 It is **memoized and usually skipped**. The key is
-`` `${module._depsRegGeneration}:${note.id}:${note._depsEpoch}` ``. `_depsEpoch` is bumped on every
+the numeric id for a fresh note, otherwise `` `${module._depsRegGeneration}:${note.id}:${note._depsEpoch}` ``. `_depsEpoch` is bumped on every
 expression mutation; `_depsRegGeneration` is bumped whenever the graph is rebuilt. So the cascade
 that calls this for every dependent of an edited note does almost no work for the ones that did not
 actually change.
@@ -169,7 +169,7 @@ module.markNotesDirtyBatch(noteIds) // many notes, one pass
 `markNoteDirty()` re-registers the note, calls `invalidate()` on the incremental evaluator (its
 bytecode may have changed), then marks every transitive dependent with **`markDirtyOnly()`** — they
 need re-evaluating but must not be re-registered. A note already reached by a walk of the same dirty
-cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js:253`), so callers
+cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js:256`), so callers
 that mark a note and then each dependent cost one walk. If the note *is* the BaseNote, every
 `baseNoteDependents` entry is marked too.
 
@@ -294,7 +294,7 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 4. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
    `evaluateModule()` does that.
 
-Ids are guarded (`src/module.js:902-914`): non-integer, `< 0` or `> 16777215` ids (`MAX_NOTE_ID`, the
+Ids are guarded (`src/module.js:905-917`): non-integer, `< 0` or `> 16777215` ids (`MAX_NOTE_ID`, the
 largest id a note can have) are skipped with a `[RMT Security] Invalid note ID` warning, and `__proto__` /
 `constructor` / `prototype` are blocked outright as prototype-pollution vectors.
 

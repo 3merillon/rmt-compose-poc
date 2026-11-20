@@ -22,10 +22,10 @@ An expression relates a note to other notes through **six variables** (`VAR`, se
 
 ## Entry point
 
-`ExpressionCompiler.compile(textExpr)` (`src/expression-compiler.js:45`) is the app's door in. `Note._setExpression()`, the validators and the editor all use the module-level singleton `compiler` (`src/expression-compiler.js:79`).
+`ExpressionCompiler.compile(textExpr)` (`src/expression-compiler.js:47`) is the app's door in. `Note._setExpression()`, the validators and the editor all use the module-level singleton `compiler` (`src/expression-compiler.js:95`).
 
-1. **Cache probe.** On a hit the key is deleted and re-inserted (an LRU touch) and a **clone** is returned.
-2. **Retired syntax.** Text that carries a method-chain marker (`new Fraction(`, `module.`, `.getVariable(`, `.mul(` …, or a bare variable name such as `frequency`; `isLegacyExpression()`, `src/migrate/legacy-syntax.js:57`) is refused (`src/expression-compiler.js:53`) with `The method-chain syntax was retired; write expressions in the DSL, e.g. [3].f * (3/2). In the DSL this reads: …`, the last sentence giving the converter's DSL form of what was typed when it has one. Loaded modules never reach this: they were converted before compiling.
+1. **Cache probe.** A hit moves its entry to the end of the recency list and returns a **clone**.
+2. **Retired syntax.** Text that carries a method-chain marker (`new Fraction(`, `module.`, `.getVariable(`, `.mul(` …, or a bare variable name such as `frequency`; `isLegacyExpression()`, `src/migrate/legacy-syntax.js:57`) is refused (`src/expression-compiler.js:54`) with `The method-chain syntax was retired; write expressions in the DSL, e.g. [3].f * (3/2). In the DSL this reads: …`, the last sentence giving the converter's DSL form of what was typed when it has one. Loaded modules never reach this: they were converted before compiling.
 3. **`compileDSL()`**, which throws a `DSLError` with a `userMessage` on a syntax error. There is no constant-0 fallback: interactive callers (the note widget's Save, the validators) surface the message, while the load paths catch per note and leave the property unset.
 
 `compile()` always returns `binary.clone()`, never the cached instance.
@@ -36,7 +36,7 @@ An expression relates a note to other notes through **six variables** (`VAR`, se
 const COMPILE_CACHE_MAX = 4000;  // src/expression-compiler.js:22
 ```
 
-A plain `Map` keyed on the raw expression text, used as an **LRU**: when it is full, the oldest insertion (`cache.keys().next().value`) is evicted. The cap exists because drag and resize commits mint a fresh fraction string on every commit, so an unbounded cache grows for the life of the session. There is one cache, the singleton's; the validators and the simplifier use the singleton too, or `compileDSL()` directly, which does not cache.
+A `Map` keyed on the raw expression text finds each entry. A doubly linked list keeps the entries in recency order. On a miss at capacity the compiler reuses the oldest entry. The cap exists because drag and resize commits mint a fresh fraction string on every commit, so an unbounded cache grows for the life of the session. There is one cache, the singleton's; the validators and the simplifier use the singleton too, or `compileDSL()` directly, which does not cache.
 
 ## The DSL pipeline
 
@@ -191,7 +191,7 @@ Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.js` kee
 
 - `parseLegacy()` (`src/migrate/legacy-syntax.js:89`), a strict recursive-descent parser for exactly the old building blocks (`new Fraction(a[, b])` with decimal arguments, bare decimals, `module.baseNote.getVariable('x')`, `module.getNoteById(N).getVariable('x')`, a bare variable name, parentheses, `.mul .div .add .sub .pow`), which builds a DSL syntax tree;
 - `legacyToDSL()` (`src/migrate/legacy-syntax.js:227`), which compiles that tree, decompiles it to DSL text, compiles the text again and refuses unless both give the same bytecode;
-- `migrateSyntax()` (`src/migrate/legacy-syntax.js:261`), which converts every expression of a module object and is called by `Module.loadFromJSON()` (`src/module.js:878`) right after `migrateTimeModel()`. `scripts/migrate-modules.mjs` applies both conversions to files in place.
+- `migrateSyntax()` (`src/migrate/legacy-syntax.js:261`), which converts every expression of a module object and is called by `Module.loadFromJSON()` (`src/module.js:881`) right after `migrateTimeModel()`. `scripts/migrate-modules.mjs` applies both conversions to files in place.
 
 **It refuses rather than guesses.** The old compiler was a string splitter that read a chain correctly only when its methods came in the order `.pow`, then `.mul`/`.div`, then `.add`/`.sub` (`RANK`, `src/migrate/legacy-syntax.js:48`). It silently dropped a `.mul()` or `.div()` that followed an `.add()` (`a.add(b).mul(c)` evaluated as `a + b`), a `.pow()` that followed a `.mul()`, and every `.neg()`. For those the text and the old engine disagree, so the converter throws a `SyntaxMigrationError`, and `migrateSyntax()` adds the note and variable: the module does not load rather than load with a value nobody wrote. A note id above 16777215, an unknown variable (`'tempo'`), a quoted fraction (`new Fraction('1/3')`) and a division by zero are refused too.
 
@@ -199,7 +199,7 @@ Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.js` kee
 
 ## The decompiler
 
-`ExpressionDecompiler.decompile()` (`src/expression-compiler.js:78`, singleton `decompiler`) returns `binary.sourceText` when it is set, so for anything compiled from text it is a pass-through; otherwise it returns the DSL the bytecode decompiles to (`decompileToDSL()`). `Note.getExpressionSource()` and `Note.toJSON()` use it, so a saved module is always DSL.
+`ExpressionDecompiler.decompile()` (`src/expression-compiler.js:89`, singleton `decompiler`) returns `binary.sourceText` when it is set, so for anything compiled from text it is a pass-through; otherwise it returns the DSL the bytecode decompiles to (`decompileToDSL()`). `Note.getExpressionSource()` and `Note.toJSON()` use it, so a saved module is always DSL.
 
 The DSL decompiler (`src/dsl/decompiler.js`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. Constants come out of the bytecode as BigInts and are stringified directly (`pushConst`, `src/dsl/decompiler.js:200-206`), so a big constant is printed **digit-exact** — it used to be coerced through `Number()`, which rounded and could emit unparseable scientific notation. It prints every `LOAD_REF` / `LOAD_BASE` as a property access (`[N].d`, `base.f`) and reconstructs nothing else: with no functions in the language there is nothing to fold back into a helper.
 

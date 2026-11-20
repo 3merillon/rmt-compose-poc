@@ -17,7 +17,7 @@ import { isLegacyExpression, legacyToDSL } from './migrate/legacy-syntax.js';
 
 // Cap the compile cache. Drag/resize commits generate a fresh fraction
 // string per commit, so an unbounded cache grows without limit over a long
-// session. LRU eviction (Map keeps insertion order) keeps memory bounded
+// session. Least-recently-used eviction keeps memory bounded
 // while retaining the hot working set.
 const COMPILE_CACHE_MAX = 4000;
 
@@ -34,6 +34,8 @@ function retiredSyntaxError(text) {
 export class ExpressionCompiler {
   constructor() {
     this.cache = new Map();
+    this.order = {}; // sentinel between the newest and oldest entries
+    this.order.next = this.order.prev = this.order;
   }
 
   /**
@@ -43,25 +45,39 @@ export class ExpressionCompiler {
    * @throws {Error} on a syntax error, naming what is wrong
    */
   compile(textExpr) {
-    const cached = this.cache.get(textExpr);
-    if (cached) {
-      // Mark as recently used so one-off expressions are evicted first.
-      this.cache.delete(textExpr);
-      this.cache.set(textExpr, cached);
-      return cached.clone();
+    let entry = this.cache.get(textExpr);
+    if (entry) {
+      if (entry === this.order.prev) return entry.binary.clone();
+      entry.prev.next = entry.next;
+      entry.next.prev = entry.prev;
+    } else {
+      if (isLegacyExpression(textExpr)) throw retiredSyntaxError(textExpr);
+      const binary = compileDSL(textExpr);
+      if (this.cache.size === COMPILE_CACHE_MAX) {
+        entry = this.order.next;
+        this.order.next = entry.next;
+        entry.next.prev = this.order;
+        this.cache.delete(entry.key);
+      } else {
+        entry = {};
+      }
+      entry.key = textExpr;
+      entry.binary = binary;
+      this.cache.set(textExpr, entry);
     }
-    if (isLegacyExpression(textExpr)) throw retiredSyntaxError(textExpr);
-    const binary = compileDSL(textExpr);
-    if (this.cache.size >= COMPILE_CACHE_MAX) {
-      const oldest = this.cache.keys().next().value;
-      if (oldest !== undefined) this.cache.delete(oldest);
-    }
-    this.cache.set(textExpr, binary);
-    return binary.clone();
+
+    // Touching a hot key and evicting the oldest key are both constant time.
+    // Recreating a Map iterator for every miss repeatedly walked deleted slots.
+    entry.prev = this.order.prev;
+    entry.next = this.order;
+    entry.prev.next = entry;
+    this.order.prev = entry;
+    return entry.binary.clone();
   }
 
   clearCache() {
     this.cache.clear();
+    this.order.next = this.order.prev = this.order;
   }
 }
 

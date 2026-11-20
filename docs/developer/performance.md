@@ -384,7 +384,7 @@ Three parts of it used to cost the size of the whole module, whatever the edit c
 - **The snapshot.** The history and the autosave took `JSON.stringify(createModuleJSON())`, and the
   note widget's edits stringified the object twice. They now take `createModuleJSONString()`: the
   same text, with each note's text kept and made again only when its fields read differently
-  (`src/module.js:993`).
+  (`src/module.js:996`).
 - **`toNumber()`.** It wrote both BigInts of a fraction out in decimal to count their digits, for
   every value `sync()` reads. A comparison with 10^300 decides the same (`src/utils/fraction-num.js:90`).
 
@@ -563,6 +563,13 @@ node scripts/perf/converge.mjs
 | **Spatial index for picking** | Not warranted by measurement. |
 
 ## Limits
+
+A later paired Edge run measured fetch through the animation frame after the first GL draw.
+Keeping recency links in the compile cache and using numeric dependency registration keys for
+fresh notes reduced load from **2.68 to 2.34 s at 100k**, **6.10 to 5.09 s at 250k**, and
+**12.19 to 10.54 s at 500k**. Post-GC JS heap went from 237 to 235, 540 to 536 and 1,064 to
+1,056 decimal MB. The compiler still keeps the 4,000 most recently used expressions and
+returns independent bytecode copies.
 
 Note ids go up to 16,777,215 (`MAX_NOTE_ID`, `src/binary-note.js`); the loader refuses ids above it,
 and references above 65535 compile to `LOAD_REF_WIDE`. The UI's import paths (Load Module, library

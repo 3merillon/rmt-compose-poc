@@ -200,7 +200,10 @@ export class Module {
    * avoids rewriting ~15 graph maps per untouched note.
    */
   _registerNoteDependencies(note) {
-    const regKey = `${this._depsRegGeneration}:${note.id}:${note._depsEpoch || 0}`;
+    // A newly loaded note has generation and epoch zero. Its numeric id
+    // already identifies that state, without retaining one string per note.
+    const regKey = !this._depsRegGeneration && !note._depsEpoch
+      ? note.id : `${this._depsRegGeneration}:${note.id}:${note._depsEpoch || 0}`;
     // The module identity check matters: import builds notes inside a temporary
     // module (which stamps them), then migrates the objects into this one. When
     // ids are reused — a drop after Clean Slate maps ids 1:1 — the key alone
