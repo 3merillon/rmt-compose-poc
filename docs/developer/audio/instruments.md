@@ -536,7 +536,7 @@ Consequences worth stating plainly:
   `audio.defaultInstrument`. That is what makes the setting reach ordinary compositions. A BaseNote
   that *does* pin an instrument in its JSON overrides the setting for everything below it.
 
-`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1052-1067`)
+`audio.defaultInstrument` is read at boot and re-applied on `settings:changed` (`player.js:1053-1068`)
 via `setDefaultInstrument()`. It is resolved once per note when playback is prepared, so a change
 takes effect on the **next** playback, not mid-playback.
 

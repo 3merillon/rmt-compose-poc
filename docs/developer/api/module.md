@@ -151,7 +151,7 @@ The same thing for many notes in one pass: it registers dependencies once, colle
 **and** the transitive dependencies of the marked notes, then invalidates the incremental
 evaluator selectively rather than wholesale. Collecting the *dependencies* matters — without them
 an imported note's parent may not be in the cache when the child evaluates. The module-import path
-(`src/player.js:1840`) uses it after grafting a library module onto a target note.
+(`src/player.js:1841`) uses it after grafting a library module onto a target note.
 
 ### batchSetExpressions()
 
@@ -394,7 +394,7 @@ The optional second argument is a `Map` memo, shared by a caller that resolves m
 per note on it.
 
 That default is a module-scoped value, not a constant: `player.js` calls `setDefaultInstrument()`
-whenever the `audio.defaultInstrument` setting changes (`src/player.js:1052-1067`). This is the
+whenever the `audio.defaultInstrument` setting changes (`src/player.js:1053-1068`). This is the
 bridge between the Settings panel and note timbre.
 
 ```javascript

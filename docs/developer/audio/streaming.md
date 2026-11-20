@@ -277,7 +277,7 @@ disarm moves it too, and the playhead stops where the sound does.
 **The playhead** follows `scoreElapsed()` (`:610`), the score time through the same map, plus the
 time the playback started from. It no longer derives its position from `ctx.currentTime` directly.
 
-**Commit tempo** (`commitLiveTempo()`, `src/player.js:3889`) writes the rate into the piece. The live
+**Commit tempo** (`commitLiveTempo()`, `src/player.js:3890`) writes the rate into the piece. The live
 BPM (60 / `base.d` × rate) is first snapped to the whole number the toolbar shows, then `base.d`
 becomes exactly 60 / BPM (`snapTempo()`, `time-map.js:86`); a float is never written as if it were
 exact. Every time in the module scales with `base.d`, the rate returns to 1, and the commit is one
@@ -313,7 +313,7 @@ None of these are scheduler methods. There is no `scheduler.pause()`, `resume(fr
 | Pause | `audioEngine.pauseFade()` — 200 ms fade, then `stopAll(0)`. The streaming state is dropped. |
 | Stop | `audioEngine.stopAll()` — 20 ms declick fade, then teardown. |
 | The module's end | `audioEngine.finish()` — scheduling stops; the voices still sounding ring out their releases and stop themselves. A new Play cuts what is left. |
-| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:3623`). |
+| Resume | `player.js` re-runs `preparePlayback(fromTime)` and calls `play()` again (`player.js:3624`). |
 | Seek | Same: stop, then prepare and play from the new time. |
 
 There is no seek-within-a-running-pump. Every position change is a fresh `play()`.

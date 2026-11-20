@@ -480,92 +480,110 @@ export class Note {
     if (this._variablesProxy) {
       return this._variablesProxy;
     }
-    const note = this;
-    const fnCache = new Map();
-    this._variablesProxy = new Proxy({}, {
-      get(target, prop) {
-        // Handle *String properties
-        if (typeof prop === 'string' && prop.endsWith('String')) {
-          const baseName = prop.slice(0, -6);
-          return note.getExpressionSource(baseName);
-        }
-        // Handle expression variables - return a function wrapper for legacy code
-        // Only return a function if the expression actually exists
-        const expressionVars = EXPRESSION_VARS;
-        if (expressionVars.includes(prop)) {
-          // Check if this expression actually exists
-          if (!note.hasExpression(prop)) {
-            return undefined;
-          }
-          // Create a function that includes the variable name directly in its source
-          // This is important because legacy code may call .toString() on the function
-          // and try to extract the expression from it
-          const varName = prop;
-          let fn = fnCache.get(varName);
-          if (!fn) {
-            fn = function() {
-              return note.getVariable(varName);
-            };
-            // Override toString to return a proper expression string that can be parsed
-            fn.toString = () => {
-              // Return the source expression if available, otherwise return a Fraction wrapper
-              const source = note.getExpressionSource(varName);
-              if (source) return source;
-              // Fallback: return a representation that indicates the variable name
-              return `module.getNoteById(${note.id}).getVariable('${varName}')`;
-            };
-            fnCache.set(varName, fn);
-          }
-          return fn;
-        }
-        // Handle properties
-        if (prop === 'color') return note.properties.color;
-        if (prop === 'instrument') return note.properties.instrument;
-        if (prop === 'measure') return note.properties.measure || undefined;
-        return undefined;
-      },
-      set(target, prop, value) {
-        note.setVariable(prop, value);
-        return true;
-      },
-      has(target, prop) {
-        if (prop === 'color' || prop === 'instrument') {
-          return note.properties[prop] !== null;
-        }
-        if (prop === 'measure') return note.properties.measure === true;
-        if (typeof prop === 'string' && prop.endsWith('String')) {
-          const baseName = prop.slice(0, -6);
-          return note.hasExpression(baseName);
-        }
-        const expressionVars = EXPRESSION_VARS;
-        if (expressionVars.includes(prop)) {
-          return note.hasExpression(prop);
-        }
-        return false;
-      },
-      ownKeys(target) {
-        const keys = [];
-        const expressionVars = EXPRESSION_VARS;
-        for (const name of expressionVars) {
-          if (note.hasExpression(name)) {
-            keys.push(name);
-            keys.push(name + 'String');
-          }
-        }
-        if (note.properties.color) keys.push('color');
-        if (note.properties.instrument) keys.push('instrument');
-        if (note.properties.measure) keys.push('measure');
-        return keys;
-      },
-      getOwnPropertyDescriptor(target, prop) {
-        // Required for Object.keys() to work with Proxy
-        const keys = this.ownKeys(target);
-        if (keys.includes(prop)) {
-          return { enumerable: true, configurable: true };
-        }
-        return undefined;
-      }
-    });
+    // One handler for every note; the target holds the note (and, once a
+    // function is asked for, its function wrappers)
+    this._variablesProxy = new Proxy({ [NOTE_OF]: this }, VARIABLES_HANDLER);
     return this._variablesProxy;
   }
 }
+
+// The target's keys in a `note.variables` Proxy: the note, and its wrappers by name
+const NOTE_OF = Symbol('note');
+const FNS_OF = Symbol('functions');
+
+/**
+ * The traps of every note's `variables` Proxy. A handler of closures for each
+ * note, with a Map and three function wrappers made for each note by the loops
+ * that only asked whether a note has a start, a duration and a frequency, cost
+ * about 640 B per note in Edge. The wrappers are now made when one is asked
+ * for, and kept per note as before.
+ */
+const VARIABLES_HANDLER = {
+  get(target, prop) {
+    const note = target[NOTE_OF];
+    // Handle *String properties
+    if (typeof prop === 'string' && prop.endsWith('String')) {
+      const baseName = prop.slice(0, -6);
+      return note.getExpressionSource(baseName);
+    }
+    // Handle expression variables - return a function wrapper for legacy code
+    // Only return a function if the expression actually exists
+    const expressionVars = EXPRESSION_VARS;
+    if (expressionVars.includes(prop)) {
+      // Check if this expression actually exists
+      if (!note.hasExpression(prop)) {
+        return undefined;
+      }
+      // Create a function that includes the variable name directly in its source
+      // This is important because legacy code may call .toString() on the function
+      // and try to extract the expression from it
+      const varName = prop;
+      let fnCache = target[FNS_OF];
+      if (!fnCache) fnCache = target[FNS_OF] = new Map();
+      let fn = fnCache.get(varName);
+      if (!fn) {
+        fn = function() {
+          return note.getVariable(varName);
+        };
+        // Override toString to return a proper expression string that can be parsed
+        fn.toString = () => {
+          // Return the source expression if available, otherwise return a Fraction wrapper
+          const source = note.getExpressionSource(varName);
+          if (source) return source;
+          // Fallback: return a representation that indicates the variable name
+          return `module.getNoteById(${note.id}).getVariable('${varName}')`;
+        };
+        fnCache.set(varName, fn);
+      }
+      return fn;
+    }
+    // Handle properties
+    if (prop === 'color') return note.properties.color;
+    if (prop === 'instrument') return note.properties.instrument;
+    if (prop === 'measure') return note.properties.measure || undefined;
+    return undefined;
+  },
+  set(target, prop, value) {
+    target[NOTE_OF].setVariable(prop, value);
+    return true;
+  },
+  has(target, prop) {
+    const note = target[NOTE_OF];
+    if (prop === 'color' || prop === 'instrument') {
+      return note.properties[prop] !== null;
+    }
+    if (prop === 'measure') return note.properties.measure === true;
+    if (typeof prop === 'string' && prop.endsWith('String')) {
+      const baseName = prop.slice(0, -6);
+      return note.hasExpression(baseName);
+    }
+    const expressionVars = EXPRESSION_VARS;
+    if (expressionVars.includes(prop)) {
+      return note.hasExpression(prop);
+    }
+    return false;
+  },
+  ownKeys(target) {
+    const note = target[NOTE_OF];
+    const keys = [];
+    const expressionVars = EXPRESSION_VARS;
+    for (const name of expressionVars) {
+      if (note.hasExpression(name)) {
+        keys.push(name);
+        keys.push(name + 'String');
+      }
+    }
+    if (note.properties.color) keys.push('color');
+    if (note.properties.instrument) keys.push('instrument');
+    if (note.properties.measure) keys.push('measure');
+    return keys;
+  },
+  getOwnPropertyDescriptor(target, prop) {
+    // Required for Object.keys() to work with Proxy
+    const keys = this.ownKeys(target);
+    if (keys.includes(prop)) {
+      return { enumerable: true, configurable: true };
+    }
+    return undefined;
+  }
+};

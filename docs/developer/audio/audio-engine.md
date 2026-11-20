@@ -61,7 +61,7 @@ Two of those keys are **back-compat aliases**, not separate nodes:
 | `compressor` | `graph.limiter` |
 
 There is no "general volume" node and no compressor any more. The names survive because
-`player.js:3530` destructures them. New code should reach through `audioEngine.graph`.
+`player.js:3531` destructures them. New code should reach through `audioEngine.graph`.
 
 ## unlock()
 
@@ -86,7 +86,7 @@ Both halves matter, and `ensureResumed()` is not a substitute for either:
 - The context can report `running` and still stay muted on iOS until a source has actually been
   *started* inside a gesture. That is what the silent buffer is for.
 
-Its only call site is the `pointerdown` handler on `#playPauseBtn` (`player.js:4226`). If you add
+Its only call site is the `pointerdown` handler on `#playPauseBtn` (`player.js:4227`). If you add
 another entry point to playback, it needs this call too.
 
 ## ensureResumed()
@@ -233,7 +233,7 @@ Only a **mid-note** Stop ever clicked. Pause was never affected (it already ramp
 ## finish(): the end of a piece rings out
 
 A note's end is a note-off, so when the playhead reaches the module's end the last notes are still in
-their release. `player.js` then calls `stop(false, true)` (`player.js:3699`), which calls
+their release. `player.js` then calls `stop(false, true)` (`player.js:3700`), which calls
 `audioEngine.finish()` (`:945`) instead of `stopAll()`: scheduling stops, and each voice already
 sounding stops itself at the end of its tail. The same happens at the final seam of a loop that was
 switched off. Stop, Pause, a new Play (which calls `stopAll()` first when the transport is idle) and

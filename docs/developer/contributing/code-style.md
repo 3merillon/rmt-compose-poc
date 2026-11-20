@@ -168,7 +168,7 @@ codebase has already paid for these lessons; do not re-introduce them.
 
 | Pattern | Where | Why |
 |---|---|---|
-| The `note.variables` Proxy is **memoized per note** | `src/note.js:479-486` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame. |
+| The `note.variables` Proxy is **memoized per note**, with one shared handler | `src/note.js:479-487`, `src/note.js:501` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame; then a handler of closures, a `Map` and three wrappers per note, about 640 B per note in Edge. Code that only asks whether a note has a variable calls `hasExpression()`. |
 | Dependency re-registration is skipped by key | `src/module.js:202-233` — `_depsRegKey` = `generation:id:epoch` | `markNoteDirty` registers every marked note. The key skips rewriting ~15 graph maps for notes whose expressions did not change. |
 | The compile cache is LRU-capped at **4000** | `src/expression-compiler.js:22` | Every drag commit mints a fresh fraction string, so an uncapped cache grows without bound across a session. |
 | Per-gesture state is built **once**, not per pointermove | `workspace.js`, `renderer.setDragOffsetPreview`, `setDragOverlay` | Rebuilding the moving-id set every move made allocation scale with dependent count and triggered mid-drag GC hitches. Identity-check the incoming Set and short-circuit. |

@@ -1226,7 +1226,8 @@ export class Module {
     for (const id in this.notes) {
       if (Number(id) === 0) continue; // the BaseNote's duration is the time unit, not a note
       const note = this.notes[id];
-      if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
+      // hasExpression, not note.variables: that made a Proxy and three wrappers per note
+      if (note.hasExpression('startTime') && note.hasExpression('duration') && note.hasExpression('frequency')) {
         const noteStart = note.getVariable('startTime');
         const noteDuration = note.getVariable('duration');
         if (noteStart && noteDuration) {

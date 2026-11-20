@@ -859,7 +859,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         let lastNoteEnd = 0;
         Object.values(myModule.notes).forEach(note => {
             if (note.id === 0) return; // the BaseNote's duration is the time unit, not a note
-            if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
+            // hasExpression, not note.variables: that made a Proxy and three wrappers per note
+            if (note.hasExpression('startTime') && note.hasExpression('duration') && note.hasExpression('frequency')) {
                 const noteStart = note.getVariable('startTime');
                 const noteDuration = note.getVariable('duration');
                 if (!noteStart || !noteDuration) return;
