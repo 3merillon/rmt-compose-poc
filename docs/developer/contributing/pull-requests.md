@@ -51,11 +51,13 @@ this repo, and a reflowed file buries the real diff.
 npm test
 ```
 
-This runs six scripts. The first, `scripts/validate-modules.mjs`, checks all 80 shipped library
+This runs twelve scripts. The first, `scripts/validate-modules.mjs`, checks all 80 shipped library
 modules — structure, expression syntax, self-containment, finite evaluation, and ratio/cents
-agreement; the others check exactness, per-variable evaluation, amplitude, the MIDI export and
+agreement; the others check exactness, per-variable evaluation, amplitude, the MIDI export,
 relational time (`scripts/test-relational-time.mjs`, whose oracle is
-`scripts/fixtures/old-time-oracle.json`). It is the repo's only automated gate, and it is
+`scripts/fixtures/old-time-oracle.json`), live tempo, note kinds, the one syntax, exact values,
+what every library module plays (`scripts/test-library.mjs`) and group editing
+(`scripts/test-group-edit.mjs`). It is the repo's only automated gate, and it is
 **mandatory** for any change to the DSL, the expression compiler, the evaluator, or `public/modules/`.
 
 There is no unit-test suite. "Run the tests" means this.

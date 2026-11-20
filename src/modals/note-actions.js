@@ -2,8 +2,49 @@
 // Exports:
 //   - createEvaluateSection(note, measureId, effectiveNoteId, modalsApi) => HTMLElement
 //   - createDeleteSection(note, effectiveNoteId, externalFunctions, modalsApi) => HTMLElement
+//   - createSelectSection(note, effectiveNoteId, externalFunctions) => HTMLElement|null
 import { getModule } from '../store/app-state.js';
 import { isMeasureNote } from '../note.js';
+
+// SELECT: this note and the notes related to it through one variable, as a group.
+// Dependents read this note (transitively); dependencies are what it reads. The
+// letter is the variable of the READING note that is followed: from the first note
+// of a melody chained by start, "Dependents t" selects the melody.
+const RELATIONS = [
+  { which: 't', label: 't', what: 'start' },
+  { which: 'f', label: 'f', what: 'frequency' },
+  { which: 'd', label: 'd', what: 'duration' },
+  { which: 'all', label: 'all', what: 'any variable' },
+];
+
+export function createSelectSection(note, effectiveNoteId, externalFunctions) {
+  if (!note || note === getModule()?.baseNote) return null;   // everything depends on the BaseNote
+  if (typeof externalFunctions?.selectRelatedNotes !== 'function') return null;
+  const id = effectiveNoteId ?? note.id;
+
+  const wrap = rowContainer('select-related-row');
+  wrap.appendChild(header('SELECT', 'select-related-header'));
+  for (const direction of ['dependents', 'dependencies']) {
+    const line = document.createElement('div');
+    line.className = 'select-related-line';
+    const label = document.createElement('span');
+    label.className = 'select-related-label';
+    label.textContent = direction === 'dependents' ? 'Dependents' : 'Dependencies';
+    line.appendChild(label);
+    for (const r of RELATIONS) {
+      const btn = actionButton(r.label, 'select-related-btn', () => externalFunctions.selectRelatedNotes(id, direction, r.which));
+      btn.type = 'button';
+      btn.dataset.direction = direction;
+      btn.dataset.which = r.which;
+      btn.title = direction === 'dependents'
+        ? `Select this note and every note whose ${r.what} reads it, then whatever reads those`
+        : `Select this note and every note its ${r.what} reads, back to the BaseNote`;
+      line.appendChild(btn);
+    }
+    wrap.appendChild(line);
+  }
+  return wrap;
+}
 
 function rowContainer(cls = 'variable-row') {
   const row = document.createElement('div');

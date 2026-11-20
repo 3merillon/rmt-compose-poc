@@ -1,7 +1,7 @@
 import Fraction from 'fraction.js';
 import { createVariableControls, createMeasureDurationRow } from './variable-controls.js';
 import { createAddNoteSection, createAddMeasureSection } from './note-creation.js';
-import { createEvaluateSection, createDeleteSection } from './note-actions.js';
+import { createEvaluateSection, createDeleteSection, createSelectSection } from './note-actions.js';
 import {
     validateExpression,
     detectCircularDependency,
@@ -48,7 +48,8 @@ let externalFunctions = {
     clearLastSelectedNote: null,
     originalNoteOrder: null,
     updateDependentRawExpressions: null,
-    isLastMeasureInChain: null
+    isLastMeasureInChain: null,
+    selectRelatedNotes: null
 };
 
 export function setExternalFunctions(functions) {
@@ -185,6 +186,12 @@ export function showNoteVariables(note, clickedElement, measureId = null) {
         widgetContent.appendChild(noteSection);
     }
     
+    // Select this note's relations as a group
+    const selectSection = createSelectSection(note, effectiveNoteId, externalFunctions);
+    if (selectSection) {
+        widgetContent.appendChild(selectSection);
+    }
+
     // Add evaluate section
     const evaluateSection = createEvaluateSection(note, measureId, effectiveNoteId, modals);
     if (evaluateSection) {

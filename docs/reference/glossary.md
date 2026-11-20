@@ -109,7 +109,7 @@ An exact rational value (numerator / denominator). All arithmetic in RMT Compose
 ## G
 
 ### Group widget
-The floating panel that appears when several notes are selected. It carries two actions: **Copy to Modules** (save the selection into the library's Custom section) and **Delete all**. It is white, not orange, to match the white multi-selection highlight on the canvas. See [Selection & Group Editing](/user-guide/notes/selection).
+The floating panel that appears when several notes are selected. It changes a variable, the instrument or the colour of every selected note (**Set**, **×** keeping relations, **Inherit**), and carries two actions: **Copy to Modules** (save the selection into the library's Custom section) and **Delete all**. It is white, not orange, to match the white multi-selection highlight on the canvas. See [Selection & Group Editing](/user-guide/notes/selection).
 
 ## I
 

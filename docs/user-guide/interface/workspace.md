@@ -151,7 +151,7 @@ Notes on the rules that catch people out:
 - Shift-clicking empty background does nothing — it will not throw your selection away.
 - A **plain click on a note that is in the selection drops the group** and selects just that note.
 
-With two or more notes selected, the **group widget** appears with **Copy to Modules** and **Delete all**. Full detail: [Multi-Note Selection](/user-guide/notes/selection).
+With two or more notes selected, the **group widget** appears: it changes a variable, the instrument or the colour of every selected note, and offers **Copy to Modules** and **Delete all**. The note widget's **SELECT** section selects a note with everything related to it. Full detail: [Multi-Note Selection](/user-guide/notes/selection).
 
 ## Dependency highlights
 

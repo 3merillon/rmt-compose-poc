@@ -153,7 +153,7 @@ Three ways, all equivalent: the keyboard — **Ctrl/Cmd + Z** to undo, **Ctrl/Cm
 - **Shift + click** a note toggles it in or out of the selection.
 - On a touchscreen, a **long-press** does the job of Shift: hold on empty space to marquee, hold on a note to toggle it.
 
-With more than one note selected, a **group widget** appears. It offers **Copy to Modules** — which saves the selection into the module library's Custom section, rooted at its earliest note and with its dependency tree intact — and **Delete all**. Dragging any note in the group drags the whole group.
+With more than one note selected, a **group widget** appears. It changes amplitude, attack, release, pitch, length, instrument or colour on every selected note at once, and offers **Copy to Modules** — which saves the selection into the module library's Custom section, rooted at its earliest note and with its dependency tree intact — and **Delete all**. Dragging any note in the group drags the whole group.
 
 ![A marquee rubber-band drawn over several notes, with the selected notes highlighted](/img/multi-select-marquee.png)
 

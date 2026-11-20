@@ -282,6 +282,22 @@ Any other bar gets no Add row: you extend a chain from its end.
 
 The new bar is selected and the widget re-opens on it.
 
+## Select
+
+The **`SELECT`** section turns this note and its relations into a group selection, so you can
+change, move, copy or delete them together ([Selection & Group Editing](/user-guide/notes/selection)).
+
+| Row | Selects |
+|---|---|
+| `Dependents` | this note and every note that reads it, then whatever reads those |
+| `Dependencies` | this note and every note it reads, back to the BaseNote (never selected itself) |
+
+`t`, `f`, `d` and `all` say which variable of the reading note is followed: its start, its
+frequency, its duration, or any. From the first note of a melody chained by start, `Dependents`
+`t` selects the melody. If nothing is related that way a message says so and the selection stays.
+The BaseNote has no `SELECT` section: everything depends on it. On a bar, the bars of its chain
+are left out (bars never join a group), and the notes that start from it are selected.
+
 ## Evaluate
 
 The **`EVALUATE`** section rewrites expressions to remove dependencies. Every button goes through a Yes / Cancel confirmation, and a toast confirms the result.

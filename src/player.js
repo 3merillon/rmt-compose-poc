@@ -15,7 +15,8 @@ import { PropertyMap } from './dsl/constants.js';
 import { compiler } from './expression-compiler.js';
 import { findDependencyCycle } from './variable-deps.js';
 import { findFollowedNote, followExpr } from './utils/followed-note.js';
-import { escapeHtml } from './utils/html-escape.js';
+import { escapeHtml, validateColorInput } from './utils/html-escape.js';
+import * as groupEdit from './utils/group-edit.js';
 import { settingsStore } from './settings/settings-store.js';
 import { scaleStep } from './settings/settings-schema.js';
 import { themeManager } from './theme/theme-manager.js';
@@ -166,7 +167,8 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     if (modals) {
         modals.setExternalFunctions({
-            updateVisualNotes, updateBaseNoteFraction, updateBaseNotePosition, hasMeasurePoints, getLastMeasureId, isLastMeasureInChain, updateTimingBoundaries, createMeasureBars, deleteNoteAndDependencies, deleteNoteKeepDependencies, updateDependentRawExpressions, cleanSlate, bringSelectedNoteToFront, restoreNotePosition, clearLastSelectedNote, originalNoteOrder
+            updateVisualNotes, updateBaseNoteFraction, updateBaseNotePosition, hasMeasurePoints, getLastMeasureId, isLastMeasureInChain, updateTimingBoundaries, createMeasureBars, deleteNoteAndDependencies, deleteNoteKeepDependencies, updateDependentRawExpressions, cleanSlate, bringSelectedNoteToFront, restoreNotePosition, clearLastSelectedNote, originalNoteOrder,
+            selectRelatedNotes
         });
     }
     
@@ -1942,8 +1944,21 @@ if (canvasEl) {
     // mouseup treats as "outside" — so the selection was cleared incidentally, a beat before
     // the click landed. Ctrl+Z never had that accident, and the module bar's Undo does not
     // either (it is allow-listed, so that using it does not wipe the selection).
+    //
+    // A GROUP is held by note id, not by Note object, so it survives the swap: it is
+    // remembered here and selected again once the restored module is in place, so
+    // undoing a group edit leaves the same notes selected for the next try.
+    let groupBeforeRestore = null;
     try {
-        eventBus.on('history:requestRestore', () => { try { clearSelection(); } catch (e) {} });
+        eventBus.on('history:requestRestore', () => {
+            groupBeforeRestore = multiSelection.size >= 2 ? [...multiSelection] : null;
+            try { clearSelection(); } catch (e) {}
+        });
+        eventBus.on('history:restored', () => {
+            const ids = groupBeforeRestore;
+            groupBeforeRestore = null;
+            if (ids) { try { setMultiSelectionIds(ids); } catch (e) {} }
+        });
     } catch (e) {}
 
     domCache.closeWidgetBtn.addEventListener('click', () => {
@@ -3110,6 +3125,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     count: multiSelection.size,
                     onCopyToModules: () => copySelectionToModules(),
                     onDeleteAll: () => deleteMultiSelection(),
+                    onGroupEdit: (edit) => applyGroupEdit(edit),
+                    instruments: availableInstruments(),
                     onClear: () => { clearSelection(); }
                 });
             } catch {}
@@ -3383,6 +3400,88 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         } catch (e) {
             console.warn('copySelectionToModules failed', e);
         }
+    }
+
+    // Note widget, SELECT: this note and every note related to it through one
+    // variable (src/utils/group-edit.js), as a group selection. From the first note
+    // of a chained melody, "dependents by t" is the melody.
+    const RELATION_WORD = { t: 'its start', f: 'its frequency', d: 'its duration', all: 'any variable' };
+    function selectRelatedNotes(noteId, direction, which) {
+        const id = Number(noteId);
+        let related;
+        try {
+            related = groupEdit.relatedNoteIds(myModule, id, direction, which);
+        } catch (e) {
+            console.warn('selectRelatedNotes failed', e);
+            return;
+        }
+        const others = [...related].filter(isGroupSelectable);
+        if (others.length === 0) {
+            const what = direction === 'dependents'
+                ? `No note reads this one through ${RELATION_WORD[which]}`
+                : `This note reads no other note through ${RELATION_WORD[which]}`;
+            try { menuBar.notify(what, 'info'); } catch {}
+            return;
+        }
+        setMultiSelectionIds([id, ...others]);
+    }
+
+    // Group widget, CHANGE / INSTRUMENT / COLOUR: one edit on every selected note,
+    // one undo step. The selection stays, so edits can follow one another.
+    const GROUP_OP_WORD = { set: 'set', scale: '×', inherit: 'inherits' };
+    function applyGroupEdit({ op, varName, text }) {
+        const ids = [...multiSelection];
+        if (!ids.length) return;
+        try { eventBus.emit('player:requestPause'); } catch {}
+        let r;
+        try {
+            if (op === 'set') r = groupEdit.setGroup(myModule, ids, varName, text);
+            else if (op === 'scale') r = groupEdit.scaleGroup(myModule, ids, varName, text);
+            else if (op === 'inherit') r = groupEdit.inheritGroup(myModule, ids, varName);
+            else if (op === 'instrument') r = groupEdit.setGroupProperty(myModule, ids, 'instrument', text || null);
+            else if (op === 'color') {
+                const c = validateColorInput(text);
+                if (!c) throw new Error('Not a colour: use #rrggbb, rgb(), rgba(), hsl() or a colour name');
+                r = groupEdit.setGroupProperty(myModule, ids, 'color', c);
+            } else return;
+        } catch (e) {
+            try { menuBar.notify(e.message, 'error'); } catch {}
+            return;
+        }
+
+        if (r.changed.length) {
+            for (const id of r.changed) {
+                try { myModule.markNoteDirty(id); } catch {}
+                try { myModule.getDependentNotes(id).forEach((dep) => myModule.markNoteDirty(dep)); } catch {}
+            }
+            evaluatedNotes = myModule.evaluateModule();
+            setEvaluatedNotes(evaluatedNotes);
+            updateVisualNotes(evaluatedNotes);
+            createMeasureBars();
+            invalidateModuleEndTimeCache();
+            try { glWorkspace?.renderer?.setMultiSelection?.(multiSelection); } catch {}
+            try { glWorkspace?.requestRender?.(); } catch {}
+            const what = op === 'instrument' ? `Instrument ${text || 'inherited'}`
+                : op === 'color' ? 'Colour'
+                : `${varName} ${GROUP_OP_WORD[op]}${op === 'inherit' ? '' : ' ' + String(text).trim()}`;
+            try { captureSnapshot(`${what} on ${r.changed.length} Notes`); } catch {}
+        }
+
+        const parts = [`${r.changed.length} note${r.changed.length === 1 ? '' : 's'} changed`];
+        if (r.followed.length) parts.push(`${r.followed.length} follow${r.followed.length === 1 ? 's' : ''} a selected note`);
+        if (r.skipped.length) {
+            const reasons = [...new Set(r.skipped.map((s) => s.reason))];
+            parts.push(`${r.skipped.length} skipped (${reasons.slice(0, 2).join('; ')})`);
+        }
+        try { menuBar.notify(parts.join(', '), r.changed.length ? 'success' : 'info'); } catch {}
+    }
+
+    function availableInstruments() {
+        try {
+            const all = instrumentManager?.getAvailableInstruments?.();
+            if (Array.isArray(all) && all.length) return [...all].sort();
+        } catch {}
+        return ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone'];
     }
 
     function classifyGroupMoveGL(ids) {
@@ -5571,6 +5670,8 @@ try {
 
       if (source === 'undo') notify(`Undid: ${label}`, 'success');
       else if (source === 'redo') notify(`Redid: ${label}`, 'success');
+      // The restored module is in place: a group held by id can be selected again
+      try { eventBus.emit('history:restored', { source }); } catch {}
     } catch (e) {
       console.error('History restore failed', e);
     }

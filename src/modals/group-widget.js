@@ -82,7 +82,30 @@ let placed = false;     // has it been given its first position?
 
 let count = 0;
 // The caller (player.js) owns the selection; we only hold its callbacks.
-const callbacks = { onDeleteAll: null, onClear: null, onCopyToModules: null };
+const callbacks = { onDeleteAll: null, onClear: null, onCopyToModules: null, onGroupEdit: null };
+let instrumentSelect = null;   // filled from the caller's instrument list
+
+// ---- the CHANGE section -------------------------------------------------
+//
+// One variable, one expression, three ways to apply it (src/utils/group-edit.js):
+//   Set      the same expression on every selected note
+//   ×        each note's own value times a ratio; notes that read the value from
+//            another selected note follow it instead of being changed twice
+//   Inherit  remove the notes' own value (amplitude, attack, release only)
+const CHANGE_VARS = [
+  { name: 'amplitude', placeholder: '3/4', inherits: true },
+  { name: 'attack', placeholder: '1/8', inherits: true },
+  { name: 'release', placeholder: '1/4', inherits: true },
+  { name: 'frequency', placeholder: '3/2  or  2^(1/12)', inherits: false },
+  { name: 'duration', placeholder: '2', inherits: false },
+];
+const CHANGE_HINT = {
+  amplitude: 'Set writes the expression to every note. × multiplies each note’s own value; notes that read it from a selected note follow. Inherit removes the notes’ own value.',
+  attack: 'A share of each note’s duration. Set, ×, or Inherit (back to the BaseNote’s, else the instrument’s envelope).',
+  release: 'A share of each note’s duration. Set, ×, or Inherit (back to the BaseNote’s, else the instrument’s envelope).',
+  frequency: '× transposes: each note not read from another selected note is multiplied, the others follow, so the group keeps its intervals.',
+  duration: '× changes every length by the ratio; notes that begin where another ends move with it.',
+};
 
 // ---- public API ---------------------------------------------------------
 
@@ -96,11 +119,16 @@ const callbacks = { onDeleteAll: null, onClear: null, onCopyToModules: null };
  * @param {() => void} o.onDeleteAll  run ONLY after the user confirms the delete
  * @param {() => void} o.onClear    deselect everything (the × / "Clear selection")
  * @param {() => void} o.onCopyToModules  export the selection to the Custom library
+ * @param {(edit: {op: string, varName?: string, text?: string}) => void} o.onGroupEdit
+ *        apply one edit to the selection: op 'set' | 'scale' | 'inherit' | 'instrument' | 'color'
+ * @param {string[]} o.instruments  the instruments the INSTRUMENT list offers
  */
-export function showGroupWidget({ count: n = 0, onDeleteAll = null, onClear = null, onCopyToModules = null } = {}) {
+export function showGroupWidget({ count: n = 0, onDeleteAll = null, onClear = null, onCopyToModules = null, onGroupEdit = null, instruments = null } = {}) {
   if (!ensureRoot()) return;
 
   callbacks.onCopyToModules = onCopyToModules;
+  callbacks.onGroupEdit = onGroupEdit;
+  if (Array.isArray(instruments)) fillInstruments(instruments);
   callbacks.onDeleteAll = onDeleteAll;
   callbacks.onClear = onClear;
   setCount(n);
@@ -206,8 +234,124 @@ function ensureRoot() {
   return true;
 }
 
+function edit(op, varName, text) {
+  if (typeof callbacks.onGroupEdit === 'function') callbacks.onGroupEdit({ op, varName, text });
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+function smallButton(label, action, onClick, title) {
+  const b = el('button', 'group-widget-btn group-widget-btn-small', label);
+  b.type = 'button';
+  b.dataset.action = action;
+  if (title) b.title = title;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+// CHANGE: variable, expression, Set / × / Inherit
+function renderChangeSection() {
+  const sec = el('div', 'group-widget-section');
+  sec.dataset.section = 'change';
+  sec.appendChild(el('div', 'group-widget-section-title', 'CHANGE'));
+
+  const varSel = el('select', 'group-widget-field');
+  varSel.setAttribute('aria-label', 'Variable to change');
+  for (const v of CHANGE_VARS) { const o = el('option', null, v.name); o.value = v.name; varSel.appendChild(o); }
+  sec.appendChild(varSel);
+
+  const input = el('input', 'group-widget-field');
+  input.type = 'text';
+  input.spellcheck = false;
+  input.autocomplete = 'off';
+  input.setAttribute('aria-label', 'Expression or ratio');
+  sec.appendChild(input);
+
+  const row = el('div', 'group-widget-row');
+  const value = () => input.value.trim();
+  const setBtn = smallButton('Set', 'group-set', () => { if (value()) edit('set', varSel.value, value()); else input.focus(); },
+    'Write this expression to every selected note');
+  const scaleBtn = smallButton('×', 'group-scale', () => { if (value()) edit('scale', varSel.value, value()); else input.focus(); },
+    'Multiply each note’s own value by this ratio');
+  const inheritBtn = smallButton('Inherit', 'group-inherit', () => edit('inherit', varSel.value),
+    'Remove the notes’ own value, so they inherit');
+  row.append(setBtn, scaleBtn, inheritBtn);
+  sec.appendChild(row);
+
+  const hint = el('div', 'group-widget-hint');
+  sec.appendChild(hint);
+
+  const sync = () => {
+    const v = CHANGE_VARS.find((x) => x.name === varSel.value) || CHANGE_VARS[0];
+    input.placeholder = v.placeholder;
+    inheritBtn.hidden = !v.inherits;
+    hint.textContent = CHANGE_HINT[v.name];
+    fitHeight();
+  };
+  varSel.addEventListener('change', sync);
+  input.addEventListener('keydown', (e) => {
+    // Enter scales (the usual group edit); Escape is left to the panel
+    if (e.key === 'Enter' && value()) { e.preventDefault(); edit('scale', varSel.value, value()); }
+  });
+  sync();
+  return sec;
+}
+
+// INSTRUMENT: one list, Apply; the first entry makes the notes inherit again
+function renderInstrumentSection() {
+  const sec = el('div', 'group-widget-section');
+  sec.dataset.section = 'instrument';
+  sec.appendChild(el('div', 'group-widget-section-title', 'INSTRUMENT'));
+  const row = el('div', 'group-widget-row');
+  instrumentSelect = el('select', 'group-widget-field group-widget-field-inline');
+  instrumentSelect.setAttribute('aria-label', 'Instrument');
+  fillInstruments(['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone']);
+  row.append(instrumentSelect, smallButton('Apply', 'group-instrument', () => edit('instrument', null, instrumentSelect.value)));
+  sec.appendChild(row);
+  return sec;
+}
+
+function fillInstruments(list) {
+  if (!instrumentSelect) return;
+  const keep = instrumentSelect.value;
+  instrumentSelect.innerHTML = '';
+  const inherit = el('option', null, 'inherited');
+  inherit.value = '';
+  instrumentSelect.appendChild(inherit);
+  for (const name of list) { const o = el('option', null, name); o.value = name; instrumentSelect.appendChild(o); }
+  if ([...instrumentSelect.options].some((o) => o.value === keep)) instrumentSelect.value = keep;
+}
+
+// COLOUR: any CSS colour the note widget accepts
+function renderColorSection() {
+  const sec = el('div', 'group-widget-section');
+  sec.dataset.section = 'color';
+  sec.appendChild(el('div', 'group-widget-section-title', 'COLOUR'));
+  const row = el('div', 'group-widget-row');
+  const input = el('input', 'group-widget-field group-widget-field-inline');
+  input.type = 'text';
+  input.spellcheck = false;
+  input.autocomplete = 'off';
+  input.placeholder = '#ff8800 or rgba(…)';
+  input.setAttribute('aria-label', 'Colour');
+  const apply = () => { if (input.value.trim()) edit('color', null, input.value.trim()); else input.focus(); };
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); apply(); } });
+  row.append(input, smallButton('Apply', 'group-color', apply));
+  sec.appendChild(row);
+  return sec;
+}
+
 function renderActions() {
   bodyEl.innerHTML = '';
+
+  bodyEl.appendChild(renderChangeSection());
+  bodyEl.appendChild(renderInstrumentSection());
+  bodyEl.appendChild(renderColorSection());
 
   for (const action of GROUP_ACTIONS) {
     const wrap = document.createElement('div');

@@ -1,6 +1,6 @@
 ---
 title: Selection & Group Editing
-description: Select several notes with a marquee or shift-click, drag them as one, delete them safely, and save a selection to the module library.
+description: Select several notes with a marquee, a shift-click or by their relations, change amplitude, attack, release, pitch, length, instrument or colour on all of them at once, drag them as one, delete them safely, and save a selection to the module library.
 ---
 
 # Selection & Group Editing
@@ -11,8 +11,9 @@ Most of the time you work on one note: you click it, it gets a selection ring, a
 Select **two or more** notes and the app switches presentation. The selected notes get a heavy
 selection ring (white in the default theme — the **Selection ring** picker in Settings →
 Appearance sets it), the note widget closes (with a group there is no single note for it to
-describe), and a floating **group widget** appears with the count and two actions: **Copy to
-Modules** and **Delete all**. Drag any note in the set and the whole group moves as one.
+describe), and a floating **group widget** appears with the count, edits that apply to every
+selected note (**Change**, **Instrument**, **Colour**) and two actions: **Copy to Modules** and
+**Delete all**. Drag any note in the set and the whole group moves as one.
 
 A group of exactly one note is not a group. However you get there — a lone shift-click, a marquee
 that caught one note, removing notes until one is left — it normalizes back to an ordinary single
@@ -69,6 +70,21 @@ The marquee selects by **intersection**: any note the rectangle touches is caugh
 do not have to enclose a note completely. Notes light up with the selection ring as the rectangle
 crosses them, before you release.
 
+### Selecting by relation
+
+The note widget's **SELECT** section selects a note together with the notes related to it, as a
+group (see [Note Widget → Select](/user-guide/interface/variable-widget#select)):
+
+- **Dependents** — the notes that read this one, then the notes that read those, and so on.
+- **Dependencies** — the notes this one reads, back to the BaseNote (which is never selected).
+
+The letter says which variable of the *reading* note is followed: **t** its start, **f** its
+frequency, **d** its duration, **all** any variable. A melody whose notes each begin where the one
+before ends (`[p].t + [p].d`) is, from its first note, exactly its **Dependents t**. In the canon
+that opens the app, **Dependents t** from the first bass note selects both basses, because the
+second is written from the first, and **Dependents f** from a bass note selects the note that
+answers it a fifth higher.
+
 ## The group widget
 
 The widget appears as soon as two notes are selected and hides itself when the selection drops to
@@ -79,6 +95,9 @@ composing, playing and panning with it up, and clicking it never clears the sele
 |---|---|
 | Header | The live count: *"5 notes selected"* |
 | **×** | Clears the selection (same as **Clear selection**) |
+| **Change** | One variable (amplitude, attack, release, frequency, duration), one expression, and **Set**, **×** or **Inherit** — see [Changing a group](#changing-a-group) |
+| **Instrument** | Gives every selected note the chosen instrument, or makes them inherit again (*inherited*) |
+| **Colour** | Gives every selected note a colour (`#ff8800`, `rgba(0,0,255,0.5)`, a colour name) |
 | **Copy to Modules** | Saves the selection to the library's Custom section. Non-destructive. |
 | **Delete all** | Deletes the selected notes, behind a confirmation |
 | **Clear selection** | Deselects everything |
@@ -86,6 +105,34 @@ composing, playing and panning with it up, and clicking it never clears the sele
 Pressing **Escape** clears the selection, but only while focus is already inside the widget (for
 example, right after you tab into it). There is no global Escape-to-deselect and no Delete-key
 shortcut — see [Keyboard Shortcuts](/user-guide/interface/keyboard-shortcuts).
+
+## Changing a group
+
+Pick a variable in **Change**, type an expression or a ratio, and choose how it applies:
+
+| Button | What it does |
+|---|---|
+| **Set** | Writes the expression to every selected note, replacing what each had, relations included. `3/4` as amplitude makes every note 3/4; `[9].a` makes every note read note 9's (note 9 itself is skipped: it would read itself). |
+| **×** | Multiplies each note's own value by the ratio, keeping its relations: `3/4`, `0.75`, `2`, or a tempered factor such as `2^(1/12)`, which stays exact. **Enter** in the field does the same. |
+| **Inherit** | Removes the notes' own amplitude, attack or release, so each inherits again (the BaseNote's, else 1 for amplitude, else the instrument's envelope). |
+
+**× changes each note once.** A selected note whose value is read, through the same variable, from
+another selected note follows that note: it is not multiplied itself, or it would change twice.
+Transpose a chord whose third and fifth hang off its root by `3/2` and only the root is
+multiplied; the third and the fifth follow it, and the chord keeps its intervals. Select both
+basses of the canon and multiply their frequency by `3/2`: the 70 notes of the first bass are
+multiplied, and the 58 of the second, each written as `(3/2) * [n].f` of a note of the first,
+follow. The same holds for notes outside the selection: whatever reads a changed note follows it,
+as it does for any edit.
+
+**× on duration** changes every length by the ratio, and a note that begins where another ends
+(`[p].t + [p].d`) moves with it, so a chained melody spreads out or closes up by itself. A note
+whose start is written from the BaseNote keeps its start.
+
+A note **×** cannot change is skipped and counted in the message that follows: an attack or
+release multiplied where nothing sets one (the instrument's envelope has no value to multiply),
+or a Set that would make a note read itself. Each change is one undo step, and undo keeps the
+group selected, so you can try another value straight away.
 
 ## Moving a group
 
@@ -201,8 +248,9 @@ Drop that copy back on the note it came from and it lands on top of itself. See
 ## What clears a selection
 
 **Clears it:** a plain click or tap on empty background (which also moves the playhead), a plain
-click on any note, the widget's **×** or **Clear selection**, locking the workspace, undo or redo,
-and loading a module.
+click on any note, the widget's **×** or **Clear selection**, locking the workspace, and loading
+a module. Undo and redo keep a group: the same notes are selected again in the restored module
+(a single note's selection is dropped, as before).
 
 **Does not clear it:** clicking inside the group widget, the note widget, the
 [Settings panel](/user-guide/interface/settings), the gear button, or the library toolbar — and any

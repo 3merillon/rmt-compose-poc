@@ -225,7 +225,7 @@ The compiler refuses garbage by throwing, but validation is still a separate gat
 | Gate | Where | What it does |
 |---|---|---|
 | UI edits | `validateExpression()`, `src/modals/validation.js:6` | refuses the retired syntax with its DSL form, then `validateDSL()`, `compileDSL()` to prove it yields bytecode, then the self-reference and cycle check on that bytecode — per (note, variable), see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable) |
-| DSL syntax | `validateDSL()`, `src/dsl/index.js:68` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
+| DSL syntax | `validateDSL()`, `src/dsl/index.js:69` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
 | JSON import | `validateExpressionSyntax()`, `src/utils/safe-expression-validator.js:26` | rejects strings over 10 000 chars and a blocklist (`eval(`, `Function(`, `import(`, `document.`, `__proto__`, `<script`, …), then proves the string compiles — a compiler throw comes back as `{valid: false, error}` |
 
 Nothing anywhere calls `eval()` or `new Function()` on an expression.
