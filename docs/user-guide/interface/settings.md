@@ -94,6 +94,8 @@ Turning **Show note arrows** off does three things at once: the arrows stop bein
 | **Master volume** | 0–100%, step 1% | **100%** |
 | **Default instrument** | sine-wave, square-wave, sawtooth-wave, triangle-wave, organ, vibraphone, fm-epiano, harmonium, harmonium-soft, piano, violin | **sine-wave** |
 | **Most voices at once** | 128, 256, 512, 1024, 2048, 4096 | **256** |
+| **Transpose each repeat by** (Loop) | a ratio n / d, 1/16 to 16 | **1/1** |
+| **Keep within an octave** (Loop) | on / off | **on** |
 | *Pure / Tempered* | | |
 | **Play tempered (12-TET)** | on / off | **off** |
 | *Room / Reverb* | | |

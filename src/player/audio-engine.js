@@ -3,6 +3,8 @@ import { InstrumentManager } from '../instruments/instrument-manager.js';
 import { AudioGraph } from './audio-graph.js';
 import { amplitudeToGain } from './amplitude.js';
 import { TimeMap, clampRate } from './time-map.js';
+import { passFactor } from './loop-transpose.js';
+import { settingsStore } from '../settings/settings-store.js';
 
 // Short enough to read as instant, long enough that the cut is not a step.
 const DECLICK_FADE = 0.02; // seconds
@@ -189,6 +191,8 @@ export class AudioEngine {
           }
         } catch {}
         if (!(baseF > 0)) baseF = 440;
+        // Kept for transposed loop passes: their tempered twins and stereo places.
+        this._baseF = baseF;
 
         // BaseNote amplitude: what every note without its own inherits (the
         // same fallback Module.findAmplitude and the evaluator's [id].a use).
@@ -360,6 +364,10 @@ export class AudioEngine {
       map: new TimeMap(this.rate),
       nextIndex: 0,
       cycle: 0,           // 0 = the initial (possibly partial) pass
+      // Loop transposition (Settings > Audio > Loop), read once per playback: pass k
+      // sounds at passFactor(ratio, k, fold) times the written frequencies.
+      loopRatio: (() => { try { return settingsStore.get('audio.loop.transpose'); } catch { return null; } })(),
+      loopFold: (() => { try { return settingsStore.get('audio.loop.fold') !== false; } catch { return true; } })(),
       cycleStart: 0,      // rel-time at which `list`'s pass begins
       // Loop fields, installed by _applyLoop().
       looping: false,
@@ -410,7 +418,8 @@ export class AudioEngine {
             const start = s.baseStartTime + startClock;
             // passStartTime keeps its contract (passStartTime + noteData.startTime is
             // the note's absolute start) at any rate.
-            this._scheduleNote(noteData, start - noteData.startTime, s.initialVolume, { duration, scoreStart: at });
+            const transpose = s.looping || s.cycle > 0 ? passFactor(s.loopRatio, s.cycle, s.loopFold) : 1;
+            this._scheduleNote(noteData, start - noteData.startTime, s.initialVolume, { duration, scoreStart: at, transpose });
           }
           s.nextIndex++;
         }
@@ -476,6 +485,18 @@ export class AudioEngine {
     s.firstLen = firstLen;
     s.cutRel = null;
     s.loopEndTime = null;
+    // Transposed passes reach pitches the first pass did not prepare: decode every
+    // zone of the sampled instruments the loop uses now, during the first pass, so
+    // no note of a later pass falls back to a sine while its zone loads.
+    if (s.loopRatio && s.loopRatio.n !== s.loopRatio.d) {
+      const names = new Set(notes.map((n) => n && n.instrument).filter(Boolean));
+      for (const name of names) {
+        try {
+          const inst = this.instrumentManager.getInstrument(name);
+          if (inst && typeof inst.prepare === 'function' && Array.isArray(inst.zones)) inst.prepare(inst.zones.map((z) => z.rootHz));
+        } catch {}
+      }
+    }
     return true;
   }
 
@@ -650,9 +671,12 @@ export class AudioEngine {
     // Pure or tempered (Settings → Audio), read here like the stereo placement:
     // per voice, as it is scheduled. A note prepared without a tempered pitch
     // plays the one it has.
-    const frequency = (this.graph.temperedEnabled && noteData.temperedFrequency > 0)
-      ? noteData.temperedFrequency
-      : noteData.frequency;
+    // A transposed loop pass: every written frequency times one factor; its
+    // tempered twin is taken from the transposed pitch.
+    const k = (timing && timing.transpose > 0) ? timing.transpose : 1;
+    const frequency = k === 1
+      ? ((this.graph.temperedEnabled && noteData.temperedFrequency > 0) ? noteData.temperedFrequency : noteData.frequency)
+      : (this.graph.temperedEnabled ? temperedFrequency(noteData.frequency * k, this._baseF || 440) : noteData.frequency * k);
 
     // Create the voice (may be a bare OscillatorNode or a wrapper) + envelope.
     const voice = this.instrumentManager.createOscillator(noteData.instrument, frequency);
@@ -689,7 +713,8 @@ export class AudioEngine {
     if (this.graph.stereoEnabled && noteData.panPos != null && typeof ctx.createStereoPanner === 'function') {
       try {
         panner = ctx.createStereoPanner();
-        const p = noteData.panPos * this.graph.stereoWidth;
+        const pos = k === 1 ? noteData.panPos : this.graph.panPosition(noteData.frequency * k, this._baseF || 440);
+        const p = pos * this.graph.stereoWidth;
         panner.pan.value = p < -1 ? -1 : p > 1 ? 1 : p;
       } catch { panner = null; }
     }
@@ -716,7 +741,7 @@ export class AudioEngine {
     // the incoming pass's attacks), so "which pass is this voice in" can only be
     // answered from its own scheduled time.
     const entry = {
-      voice, gainNode, panner, startTime: start, scoreStart: timing ? timing.scoreStart : null, noteId: noteData.id,
+      voice, gainNode, panner, startTime: start, scoreStart: timing ? timing.scoreStart : null, noteId: noteData.id, frequency,
       // The note-off and the end of the tail (absolute ctx time), and the gain at a
       // time in the release: what _makeRoomAt needs to steal it without a step.
       offTime: start + (times ? times.off : duration), endTime: start + length,

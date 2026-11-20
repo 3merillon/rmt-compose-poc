@@ -63,6 +63,8 @@ export function scaleStep(lo, hi) {
  * Factory for a fresh defaults object (never share a mutable reference).
  * @returns {object}
  */
+import { validateLoopRatio } from '../player/loop-transpose.js';
+
 /** The voice limits Settings → Audio offers (audio.maxVoices). */
 export const VOICE_LIMITS = [128, 256, 512, 1024, 2048, 4096];
 
@@ -108,6 +110,9 @@ export function defaultSettings() {
       // At most this many voices sound at once; above it the quietest voice
       // already ringing after its note's end fades out (audio-engine.js).
       maxVoices: 256,
+      // Loop playback (long-press Play): each repeat transposed by n/d against the
+      // one before (1/1 = none), kept within one octave when `fold` is on.
+      loop: { transpose: { n: 1, d: 1 }, fold: true },
       reverb: {
         // On by default (user decision 2026-07-12): a touch of room ambience is
         // the nicer out-of-box sound. Stereo stays off; limiter stays on.
@@ -233,6 +238,9 @@ export function validateSettings(raw, prev) {
   d.audio.defaultInstrument = typeof au.defaultInstrument === 'string' ? au.defaultInstrument : d.audio.defaultInstrument;
   d.audio.tempered.enabled = asBool(tp.enabled, d.audio.tempered.enabled);
   d.audio.maxVoices = VOICE_LIMITS.includes(Number(au.maxVoices)) ? Number(au.maxVoices) : d.audio.maxVoices;
+  const lp = au.loop || {};
+  d.audio.loop.transpose = validateLoopRatio(lp.transpose, d.audio.loop.transpose);
+  d.audio.loop.fold = asBool(lp.fold, d.audio.loop.fold);
   d.audio.reverb.enabled = asBool(rv.enabled, d.audio.reverb.enabled);
   d.audio.reverb.roomSize = clampNum(rv.roomSize, 0, 1, d.audio.reverb.roomSize);
   d.audio.reverb.decaySec = clampNum(rv.decaySec, 0.1, 12, d.audio.reverb.decaySec);

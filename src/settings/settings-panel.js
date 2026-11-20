@@ -431,6 +431,33 @@ function buildAudioTab(container) {
     container.appendChild(row('Most voices at once', sel, 'Above it, the quietest note already ringing after its end fades out first; a note is never cut before its end. Each voice costs processor time: one core plays about 2,000 sine, organ or harmonium voices, 1,700 piano or violin, 600–700 square, sawtooth or fm-epiano (measured on one computer).'));
   }
 
+  {
+    // Loop (long-press Play): each repeat transposed by a ratio, like the arrow ratio editor.
+    container.appendChild(el('div', 'rmt-set-subhead', 'Loop (long-press Play)'));
+    const cur = settingsStore.get('audio.loop.transpose');
+    const wrap = el('div', 'rmt-set-ratio');
+    const nIn = el('input'); nIn.type = 'number'; nIn.min = 1; nIn.className = 'rmt-set-number'; nIn.value = cur.n;
+    const dIn = el('input'); dIn.type = 'number'; dIn.min = 1; dIn.className = 'rmt-set-number'; dIn.value = cur.d;
+    const centsOut = el('span', 'rmt-set-cents', `${cents(cur.n, cur.d).toFixed(1)}¢`);
+    const commit = () => {
+      settingsStore.set('audio.loop.transpose', { n: parseInt(nIn.value, 10), d: parseInt(dIn.value, 10) });
+      const v = settingsStore.get('audio.loop.transpose');
+      nIn.value = v.n; dIn.value = v.d;
+      centsOut.textContent = `${cents(v.n, v.d).toFixed(1)}¢`;
+    };
+    nIn.addEventListener('change', commit);
+    dIn.addEventListener('change', commit);
+    addSync(null, () => {
+      const v = settingsStore.get('audio.loop.transpose');
+      if (nIn !== document.activeElement) nIn.value = v.n;
+      if (dIn !== document.activeElement) dIn.value = v.d;
+      centsOut.textContent = `${cents(v.n, v.d).toFixed(1)}¢`;
+    });
+    wrap.append(nIn, el('span', 'rmt-set-ratio-slash', '/'), dIn, centsOut);
+    container.appendChild(row('Transpose each repeat by', wrap, 'Each time the loop comes round it sounds this ratio higher than the time before: 9/8 plays Bach\'s Canon per tonos as written. 1/1 repeats it unchanged. Takes effect at the next Play.'));
+    container.appendChild(row('Keep within an octave', toggle('audio.loop.fold'), 'Six pure whole tones are an octave and a comma, so a rise never comes home: on, the repeats drop an octave each time they pass one, and the loop can go on for ever; off, they keep climbing.'));
+  }
+
   container.appendChild(el('div', 'rmt-set-subhead', 'Pure / Tempered'));
   container.appendChild(row('Play tempered (12-TET)', toggle('audio.tempered.enabled'), 'Plays each note on the nearest key of a keyboard tuned from the BaseNote, to compare with the pure intervals. The module is not changed.'));
 

@@ -133,6 +133,31 @@ const lim = await page.evaluate(async () => {
 });
 check(`the voice limit holds (${lim.max})`, lim.worst <= lim.max && lim.stolen >= 300 - lim.max, `at most ${lim.worst} sounding, ${lim.stolen} stolen`);
 
+// 9. Loop transposition: every pass a 9/8 above the one before, folded into one octave.
+const lt = await page.evaluate(async () => {
+  const ae = window.__ae, mod = window.__rmtPerf.getModuleRef();
+  const { settingsStore } = await import('/src/settings/settings-store.js');
+  settingsStore.set('audio.loop.transpose', { n: 9, d: 8 }); settingsStore.set('audio.loop.fold', true);
+  const list = await ae.preparePlayback(mod, 0);
+  const end = mod.getModuleEndTime();
+  const seen = new Map(); // noteId@pass -> frequency
+  ae.play(list, { initialVolume: 0.2, loop: { period: end, notes: list, firstCycleAudioLength: end } });
+  for (let i = 0; i < 14; i++) {
+    await window.__wait(0.5);
+    for (const e of ae.activeOscillators) { const pass = Math.round((e.scoreStart - (list.find((n) => n.id === e.noteId)?.startTime || 0)) / end); seen.set(`${e.noteId}@${pass}`, e.frequency); }
+  }
+  ae.stopAll();
+  settingsStore.set('audio.loop.transpose', { n: 1, d: 1 });
+  const out = [];
+  for (const [key, f] of seen) { const [id, pass] = key.split('@').map(Number); const f0 = list.find((n) => n.id === id).frequency; out.push([id, pass, f / f0]); }
+  return out;
+});
+const want = (pass) => 2 ** ((pass * Math.log2(9 / 8)) % 1);
+const bad = lt.filter(([, pass, r]) => Math.abs(r - want(pass)) > 1e-9 * want(pass));
+const passes = new Set(lt.map(([, p]) => p));
+check('loop transposition 9/8: each pass a whole tone above the last, folded into an octave', lt.length > 0 && bad.length === 0 && passes.size >= 6,
+  `${lt.length} voices over passes ${[...passes].sort((a, b) => a - b).join(',')}; pass 6 at ${(lt.find(([, p]) => p === 6) || [0, 0, NaN])[2].toFixed?.(6)} (531441/524288 = ${(531441 / 524288).toFixed(6)})${bad.length ? '; wrong: ' + JSON.stringify(bad.slice(0, 3)) : ''}`);
+
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 await page.evaluate(() => { localStorage.removeItem('rmt:moduleSnapshot:v1'); });
 await browser.close();

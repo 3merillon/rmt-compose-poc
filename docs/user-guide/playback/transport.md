@@ -67,6 +67,12 @@ When you arm it:
 
 There is no gap and no re-trigger at the wrap: nothing is torn down and rebuilt when the module repeats. A note's release tail and its reverb tail ring on across the boundary exactly as they would in the middle of the piece.
 
+### Rising (or falling) each time round
+
+Settings → Audio → **Loop (long-press Play)** → **Transpose each repeat by** makes every repeat sound a ratio higher than the one before: the first pass as written, the second at that ratio, the third at its square, and so on. Set it to **9/8** and a canon that modulates up a whole tone, like Bach's Canon per tonos, comes round in the next key every time, for as long as the loop runs. 1/1 (the default) repeats the module unchanged; a ratio below 1, such as 8/9, falls instead. Every note of a pass is moved by the same factor, so the intervals inside a pass are exactly as written. The setting is read when playback starts.
+
+Pure intervals never close: six pure whole tones are an octave and a Pythagorean comma (531441/262144), so a rise by 9/8 never comes back to where it started. With **Keep within an octave** on (the default), each repeat that would pass the octave above the start is played an octave lower instead, so the loop can go on for ever within one octave, and after every six passes it stands one comma (23.5 cents) higher than six passes before. Turn it off and the repeats keep climbing (at 9/8, out of hearing after about 37 passes from 263 Hz). The workspace shows the module as written; only what you hear is transposed.
+
 When you disarm it with the same gesture, the icon changes back immediately, but the audio **finishes the pass it is playing** and stops at the end of the module. It does not cut out mid-pass.
 
 ### Getting out of loop mode
