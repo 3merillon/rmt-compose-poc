@@ -145,8 +145,8 @@ and hands the object to `PersistentEvaluator.registerNote(id, expressions)`, whe
 `serde-wasm-bindgen` deserializes it.
 
 ::: danger This is the hang site
-`WasmPersistentEvaluatorWrapper.registerNote` (`evaluator-adapter.js:509`), called from
-`WasmIncrementalEvaluator.evaluateDirty` (`evaluator-adapter.js:355`), is where the browser locks up
+`WasmPersistentEvaluatorWrapper.registerNote` (`evaluator-adapter.js:426`), called from
+`WasmIncrementalEvaluator.evaluateDirty` (`evaluator-adapter.js:283`), is where the browser locks up
 after an `invalidateAll()`. The JS side of that call is straightforward; the loop is inside the Rust
 binary.
 :::
@@ -185,7 +185,7 @@ its cache in JS. Same interface where it matters: `evaluate(expr, evalCache)`,
 `evaluateNote(note, evalCache)`, `invalidate`, `invalidateAll`, `getCachedValue`, `getPoolStats`.
 
 It can only evaluate a whole note at a time, so it cannot be driven by the JS evaluator's
-per-variable order. `WasmNoteOrderIncrementalEvaluator` (`evaluator-adapter.js:282`) pairs it with
+per-variable order. `WasmNoteOrderIncrementalEvaluator` (`evaluator-adapter.js:210`) pairs it with
 the per-note Kahn sort instead: the JS incremental evaluator's dirty tracking, `WasmIncrementalEvaluator`'s
 `topoSort()`, then one `evaluateNote()` per note.
 
@@ -204,7 +204,7 @@ WASM init is async and normally loses the race against `Module` construction. Ra
 the module starts on JS and upgrades later:
 
 ```javascript
-// src/module.js:67-73 (in the Module constructor)
+// src/module.js:71-77 (in the Module constructor)
 if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)) {
   const ref = new WeakRef(this);
   onWasmReady(() => {
@@ -214,7 +214,7 @@ if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)
 }
 ```
 
-`_upgradeEvaluators()` (`src/module.js:139`) swaps `_binaryEvaluator` and `_incrementalEvaluator`
+`_upgradeEvaluators()` (`src/module.js:146`) swaps `_binaryEvaluator` and `_incrementalEvaluator`
 atomically, clears the evaluation cache, and marks every note dirty so the next `evaluateModule()`
 re-evaluates on the new engine. Values are identical across engines, so nothing goes stale in
 between. The `WeakRef` keeps a discarded module from leaking through the callback list.

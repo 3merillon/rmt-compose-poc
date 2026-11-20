@@ -75,7 +75,7 @@ const KIND_APPROX_BIG = 5;   // approximate, too large for numbers: readValueTex
 const REQUIRED_CORE_METHODS = [
   'registerNotes', 'removeNote', 'invalidateAll', 'evaluateDirty',
   'takeCycles', 'takeUnresolved', 'takeFailures', 'takeDivisionsByZero',
-  'hasCachedNote', 'readNote', 'readNotes', 'readValueText', 'readCorruptionFlags', 'cachedIds',
+  'hasCachedNote', 'readNote', 'readNotes', 'readValueText', 'clearValues',
 ];
 
 /**
@@ -162,50 +162,18 @@ export function createIncrementalEvaluator(module, dependencyGraph, evaluator) {
 // ============================================================================
 
 /**
- * Lazy cache proxy that reads from WASM on-demand
- * Implements Map-like interface for compatibility with existing code
+ * The evaluation cache of the WASM path: a Map of noteId -> record, filled
+ * with the records of every batch right after it is evaluated (in one call),
+ * so that reading it is a plain Map read and it behaves exactly as the JS
+ * evaluator's cache does: the same records, keys, order and size.
+ *
+ * Only delete() and clear() do more: the Rust core holds the values that
+ * evaluation reads, so they must go there as well.
  */
-class LazyWasmCacheProxy {
+class WasmEvaluationCache extends Map {
   constructor(evaluatorWrapper) {
+    super();
     this._evaluator = evaluatorWrapper;
-    this._localCache = new Map();
-    // Records set here that the core did not have (none in practice)
-    this._localOnly = 0;
-  }
-
-  get(noteId) {
-    // Check local cache first (for values fetched this cycle)
-    if (this._localCache.has(noteId)) {
-      return this._localCache.get(noteId);
-    }
-
-    // Fetch from WASM; a note without a record is undefined, as in a Map
-    const result = this._evaluator.getEvaluatedNote(noteId);
-    if (result) {
-      this._localCache.set(noteId, result);
-      return result;
-    }
-    return undefined;
-  }
-
-  set(noteId, value) {
-    // Store locally - WASM cache is the source of truth
-    if (!this._localCache.has(noteId) && !this._evaluator.hasCachedNote(noteId)) this._localOnly++;
-    this._localCache.set(noteId, value);
-  }
-
-  has(noteId) {
-    return this._localCache.has(noteId) || this._evaluator.hasCachedNote(noteId);
-  }
-
-  /**
-   * The corruption flags of several notes in one call, without building
-   * their records (Module._updateCorruptionFlags reads only these)
-   * @param {Array<number>} noteIds
-   * @returns {Int32Array} One per id; -1 for a note without a record
-   */
-  corruptionFlagsOf(noteIds) {
-    return this._evaluator.readCorruptionFlags(noteIds);
   }
 
   /**
@@ -214,61 +182,20 @@ class LazyWasmCacheProxy {
    * references it would go on reading its last values instead of defaults.
    */
   delete(noteId) {
-    if (this._localOnly > 0 && this._localCache.has(noteId) && !this._evaluator.hasCachedNote(Number(noteId))) this._localOnly--;
-    this._localCache.delete(noteId);
     this._evaluator.removeNote(Number(noteId));
+    return super.delete(noteId);
   }
 
+  /** Drop every value, here and in the core (the notes stay registered) */
   clear() {
-    this._localCache.clear();
-    this._localOnly = 0;
-  }
-
-  get size() {
-    return this._localOnly === 0 ? this._evaluator.evaluator.cacheSize : this._ids().length;
-  }
-
-  /**
-   * Every note id with a record: the core's, ascending (the order in which a
-   * JS evaluation cache first receives them), then any set here only
-   * @returns {Array<number>}
-   */
-  _ids() {
-    const ids = Array.from(this._evaluator.evaluator.cachedIds());
-    if (this._localOnly > 0) {
-      const inCore = new Set(ids);
-      for (const key of this._localCache.keys()) {
-        if (!inCore.has(key)) ids.push(key);
-      }
-    }
-    return ids;
-  }
-
-  // Iteration covers every record, as a Map's does, not only the ones read so far
-
-  *entries() {
-    for (const id of this._ids()) {
-      const value = this.get(id);
-      if (value !== undefined) yield [id, value];
-    }
-  }
-
-  *keys() {
-    yield* this._ids();
-  }
-
-  *values() {
-    for (const [, value] of this.entries()) yield value;
-  }
-
-  forEach(callback, thisArg) {
-    for (const [id, value] of this.entries()) callback.call(thisArg, value, id, this);
-  }
-
-  [Symbol.iterator]() {
-    return this.entries();
+    this._evaluator.clearValues();
+    super.clear();
   }
 }
+
+const mapSet = Map.prototype.set;
+const mapDelete = Map.prototype.delete;
+const mapClear = Map.prototype.clear;
 
 /**
  * Incremental evaluator backed by the Rust core.
@@ -277,7 +204,8 @@ class LazyWasmCacheProxy {
  * does. Everything else happens in one WASM call per batch: the core orders
  * the batch per (note, variable), evaluates it, and says what it could not
  * get right (rust/src/evaluator.rs, the twin of
- * BinaryEvaluator.evaluateVariables()).
+ * BinaryEvaluator.evaluateVariables()). One more call reads the batch's
+ * records into the cache.
  */
 class WasmIncrementalEvaluator {
   constructor(module, dependencyGraph, evaluator) {
@@ -288,8 +216,8 @@ class WasmIncrementalEvaluator {
     // Set of dirty note IDs needing re-evaluation
     this.dirty = new Set();
 
-    // Lazy cache proxy for WASM cache access
-    this.cache = new LazyWasmCacheProxy(evaluator);
+    // noteId -> record, as JSIncrementalEvaluator.cache
+    this.cache = new WasmEvaluationCache(evaluator);
 
     // Generation counter
     this.generation = 0;
@@ -332,7 +260,7 @@ class WasmIncrementalEvaluator {
 
   invalidateAll() {
     this.evaluator.invalidateAll();
-    this.cache.clear();
+    mapClear.call(this.cache);
     this.dirty.clear();
     this.generation++;
 
@@ -350,7 +278,7 @@ class WasmIncrementalEvaluator {
 
   /**
    * Evaluate all dirty notes, one variable at a time, in dependency order
-   * @returns {LazyWasmCacheProxy} Cache (Map-like interface)
+   * @returns {WasmEvaluationCache} noteId -> record
    */
   evaluateDirty() {
     if (this.dirty.size === 0) {
@@ -370,6 +298,7 @@ class WasmIncrementalEvaluator {
       const note = this.module.getNoteById(noteId);
       if (!note) {
         this.evaluator.removeNote(noteId);
+        mapDelete.call(this.cache, noteId);
         continue;
       }
       if (!this.evaluator.isRegistered(noteId)) {
@@ -379,14 +308,13 @@ class WasmIncrementalEvaluator {
     }
     this.evaluator.registerNotes(unregistered);
 
-    // Only the notes of the batch change; every other record stays as it is
-    const batch = ids.subarray(0, count);
-    for (let i = 0; i < count; i++) {
-      this.cache._localCache.delete(batch[i]);
-    }
-
     // SINGLE WASM CALL - orders and evaluates the whole batch
+    const batch = ids.subarray(0, count);
     this.evaluator.evaluateDirty(batch);
+
+    // Only the notes of the batch change; every other record stays as it is.
+    // Map.set keeps a key where it was, as the JS evaluator's cache does.
+    this.evaluator.readRecords(batch, (noteId, record) => mapSet.call(this.cache, noteId, record));
 
     this.dirty.clear();
     return this.cache;
@@ -408,8 +336,8 @@ class WasmIncrementalEvaluator {
 /**
  * Wrapper around the Rust PersistentEvaluator.
  *
- * Compiled expressions go to WASM once per note; evaluated values stay there
- * and are converted to fraction.js objects only for the notes someone reads.
+ * Compiled expressions go to WASM once per note; evaluated values live there,
+ * and each batch's records come back as fraction.js values in one call.
  */
 class WasmPersistentEvaluatorWrapper {
   constructor(wasm, module) {
@@ -422,14 +350,6 @@ class WasmPersistentEvaluatorWrapper {
     this.module = module;
     this.evaluator = new core();
     this.generation = 0;
-
-    // fraction.js records of the notes read so far (lazy conversion from WASM)
-    this._jsCache = new Map();
-
-    // The last batch, until its records are read: the first read fetches
-    // them all in one call (whoever reads one record after an evaluation
-    // reads them all, the renderer first)
-    this._unread = null;
 
     // Track which notes have been registered
     this._registeredNotes = new Set();
@@ -448,8 +368,6 @@ class WasmPersistentEvaluatorWrapper {
 
   invalidateAll() {
     this.evaluator.invalidateAll();
-    this._jsCache.clear();
-    this._unread = null;
     this._registeredNotes.clear();
     this.generation++;
   }
@@ -498,7 +416,6 @@ class WasmPersistentEvaluatorWrapper {
     this.evaluator.registerNotes(packed.subarray(0, at));
     for (const note of notes) {
       this._registeredNotes.add(note.id);
-      this._jsCache.delete(note.id);
     }
   }
 
@@ -536,7 +453,11 @@ class WasmPersistentEvaluatorWrapper {
   removeNote(noteId) {
     this.evaluator.removeNote(noteId);
     this._registeredNotes.delete(noteId);
-    this._jsCache.delete(noteId);
+  }
+
+  /** Forget every value; the notes stay registered */
+  clearValues() {
+    this.evaluator.clearValues();
   }
 
   /**
@@ -549,12 +470,6 @@ class WasmPersistentEvaluatorWrapper {
     const ids = noteIds instanceof Uint32Array ? noteIds : new Uint32Array(noteIds);
     const count = this.evaluator.evaluateDirty(ids);
     this.generation++;
-
-    // The notes of the batch have new values; nothing else changed
-    for (let i = 0; i < ids.length; i++) {
-      this._jsCache.delete(ids[i]);
-    }
-    this._unread = ids.length > 1 ? ids : null;
 
     if (this.evaluator.hasProblems) {
       this._reportProblems();
@@ -611,48 +526,28 @@ class WasmPersistentEvaluatorWrapper {
   }
 
   /**
-   * Get evaluated values for a note (with lazy Fraction.js conversion)
+   * One note's evaluated values, read from WASM
    * @param {number} noteId - The note ID
    * @returns {Object|null} Evaluated values with Fraction.js objects
    */
   getEvaluatedNote(noteId) {
-    let cached = this._jsCache.get(noteId);
-    if (cached !== undefined) {
-      return cached;
-    }
-    if (this._unread !== null) {
-      this._readBatch();
-      cached = this._jsCache.get(noteId);
-      if (cached !== undefined) return cached;
-    }
-
     const packed = this.evaluator.readNote(noteId);
     if (packed.length === 0) return null;
-
-    const record = this._toRecord(noteId, packed, 0);
-    this._jsCache.set(noteId, record);
-    return record;
-  }
-
-  /** Read every record of the last batch in one call */
-  _readBatch() {
-    const ids = this._unread;
-    this._unread = null;
-    const packed = this.evaluator.readNotes(ids);
-    const stride = 2 + 3 * VARIABLE_NAMES.length;
-    for (let i = 0, at = 0; i < ids.length; i++, at += stride) {
-      if (packed[at] < 0 || this._jsCache.has(ids[i])) continue; // no record, or already read
-      this._jsCache.set(ids[i], this._toRecord(ids[i], packed, at));
-    }
+    return this._toRecord(noteId, packed, 0);
   }
 
   /**
-   * The corruption flags of several notes
-   * @param {Array<number>|Uint32Array} noteIds
-   * @returns {Int32Array}
+   * The records of several notes, read in one call
+   * @param {Uint32Array} noteIds
+   * @param {function(number, Object)} put - Receives each note that has a record
    */
-  readCorruptionFlags(noteIds) {
-    return this.evaluator.readCorruptionFlags(noteIds instanceof Uint32Array ? noteIds : Uint32Array.from(noteIds));
+  readRecords(noteIds, put) {
+    if (noteIds.length === 0) return;
+    const packed = this.evaluator.readNotes(noteIds);
+    const stride = 2 + 3 * VARIABLE_NAMES.length;
+    for (let i = 0, at = 0; i < noteIds.length; i++, at += stride) {
+      if (packed[at] >= 0) put(noteIds[i], this._toRecord(noteIds[i], packed, at));
+    }
   }
 
   /**

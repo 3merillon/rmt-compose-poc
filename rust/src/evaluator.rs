@@ -822,6 +822,13 @@ impl PersistentEvaluator {
         self.generation += 1;
     }
 
+    /// Forget every value; the notes stay registered (an evaluation cache's clear())
+    #[wasm_bindgen(js_name = clearValues)]
+    pub fn clear_values(&mut self) {
+        self.records.clear();
+        self.generation += 1;
+    }
+
     /// Forget every note and every value
     #[wasm_bindgen(js_name = invalidateAll)]
     pub fn invalidate_all(&mut self) {
@@ -930,26 +937,6 @@ impl PersistentEvaluator {
 
 #[wasm_bindgen]
 impl PersistentEvaluator {
-    /// The ids of every note that has a record, ascending
-    #[wasm_bindgen(js_name = cachedIds)]
-    pub fn cached_ids(&self) -> Vec<u32> {
-        self.records
-            .records
-            .iter()
-            .enumerate()
-            .filter_map(|(id, record)| record.as_ref().map(|_| id as u32))
-            .collect()
-    }
-
-    /// The corruption flags of several notes, one per id; -1 for a note without a record
-    #[wasm_bindgen(js_name = readCorruptionFlags)]
-    pub fn read_corruption_flags(&self, note_ids: &[u32]) -> Vec<i32> {
-        note_ids
-            .iter()
-            .map(|&id| self.records.get(id).map_or(-1, |record| record.corruption_flags as i32))
-            .collect()
-    }
-
     /// The records of several notes in one call: readNote() of each, one
     /// after the other, every one 2 + 3 * VAR_COUNT long; a note without a
     /// record is -1 followed by zeros.
@@ -1228,7 +1215,6 @@ mod tests {
             base_263(),
             note(1, &[(Var::Frequency, then(&[constant(2, 1), constant(1, 12)], Op::Pow))]),
         ]);
-        assert_eq!(evaluator.read_corruption_flags(&[1, 0, 9]), vec![1 << Var::Frequency as i32, 0, -1]);
         let bulk = evaluator.read_notes(&[0, 9, 1]);
         let stride = 2 + 3 * VAR_COUNT;
         assert_eq!(bulk.len(), 3 * stride);
@@ -1247,6 +1233,17 @@ mod tests {
             out.extend(bytecode);
         }
         out
+    }
+
+    #[test]
+    fn test_clear_values_keeps_the_notes() {
+        let mut evaluator = evaluated(vec![base_263(), note(1, &[(Var::Frequency, load_base(Var::Frequency))])]);
+        evaluator.clear_values();
+        assert!(!evaluator.has_cached_note(0) && !evaluator.has_cached_note(1));
+        assert_eq!(evaluator.note_count(), 2);
+        evaluator.evaluate_batch(&[1]);
+        // the BaseNote has no record now: its frequency is the default
+        assert_eq!(text(&evaluator, 1, Var::Frequency), "440");
     }
 
     #[test]

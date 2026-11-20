@@ -53,7 +53,7 @@ once. A group move does the same per mover.
 
 ## 2. The module marks dirty
 
-`Module.markNoteDirty(noteId)` (`src/module.js:214`):
+`Module.markNoteDirty(noteId)` (`src/module.js:221`):
 
 1. Adds the id to `_dirtyNotes`.
 2. `_registerNoteDependencies(note)` — re-scans the note's bytecode and rewrites its rows in the
@@ -71,7 +71,7 @@ once. A group move does the same per mover.
 
 ## 3. Evaluation
 
-`Module.evaluateModule()` (`src/module.js:638`) delegates to
+`Module.evaluateModule()` (`src/module.js:659`) delegates to
 `IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1022`):
 
 ```
@@ -224,7 +224,7 @@ Note 1's frequency changes
 ```
 
 For *visualisation* — the coloured dependency lines and rings — the module asks a different question.
-`module.getDependentsByProperty(noteId)` (`src/module.js:413`) returns
+`module.getDependentsByProperty(noteId)` (`src/module.js:434`) returns
 
 ```javascript
 { frequency: [...], startTime: [...], duration: [...] }

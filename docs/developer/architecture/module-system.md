@@ -31,7 +31,7 @@ module.notes.get(5)      // ❌ TypeError — notes is not a Map
 
 ### BaseNote defaults
 
-With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js:80-93`):
+With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js:87-100`):
 
 | Property | Stored expression | Evaluates to |
 |---|---|---|
@@ -292,7 +292,7 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 4. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
    `evaluateModule()` does that.
 
-Ids are guarded (`src/module.js:869-881`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
+Ids are guarded (`src/module.js:885-897`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
 `LOAD_REF`) are skipped with a `[RMT Security] Invalid note ID` warning, and `__proto__` /
 `constructor` / `prototype` are blocked outright as prototype-pollution vectors.
 
@@ -389,7 +389,7 @@ fires (via `player:invalidateModuleEndTimeCache`) on every expression change. If
 
 WASM init is async and normally loses the race against `Module` construction, which used to strand
 every module on the JS evaluator for the whole session. The constructor therefore registers an
-`onWasmReady` callback holding a `WeakRef(this)`, and `_upgradeEvaluators()` (`src/module.js:139`)
+`onWasmReady` callback holding a `WeakRef(this)`, and `_upgradeEvaluators()` (`src/module.js:146`)
 atomically swaps `_binaryEvaluator` and `_incrementalEvaluator` for the WASM versions, clears the
 evaluation cache, and marks everything dirty so the next evaluation runs on the new engine.
 

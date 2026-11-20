@@ -192,14 +192,10 @@ export class PersistentEvaluator {
         return ret >>> 0;
     }
     /**
-     * The ids of every note that has a record, ascending
-     * @returns {Uint32Array}
+     * Forget every value; the notes stay registered (an evaluation cache's clear())
      */
-    cachedIds() {
-        const ret = wasm.persistentevaluator_cachedIds(this.__wbg_ptr);
-        var v1 = getArrayU32FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-        return v1;
+    clearValues() {
+        wasm.persistentevaluator_clearValues(this.__wbg_ptr);
     }
     /**
      * Evaluate the given notes, each variable after what it reads. Returns
@@ -254,19 +250,6 @@ export class PersistentEvaluator {
     get noteCount() {
         const ret = wasm.persistentevaluator_noteCount(this.__wbg_ptr);
         return ret >>> 0;
-    }
-    /**
-     * The corruption flags of several notes, one per id; -1 for a note without a record
-     * @param {Uint32Array} note_ids
-     * @returns {Int32Array}
-     */
-    readCorruptionFlags(note_ids) {
-        const ptr0 = passArray32ToWasm0(note_ids, wasm.__wbindgen_malloc);
-        const len0 = WASM_VECTOR_LEN;
-        const ret = wasm.persistentevaluator_readCorruptionFlags(this.__wbg_ptr, ptr0, len0);
-        var v2 = getArrayI32FromWasm0(ret[0], ret[1]).slice();
-        wasm.__wbindgen_free(ret[0], ret[1] * 4, 4);
-        return v2;
     }
     /**
      * One note's record: its corruption flags, its approximation flags, then
@@ -709,11 +692,6 @@ function getArrayF64FromWasm0(ptr, len) {
     return getFloat64ArrayMemory0().subarray(ptr / 8, ptr / 8 + len);
 }
 
-function getArrayI32FromWasm0(ptr, len) {
-    ptr = ptr >>> 0;
-    return getInt32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
-}
-
 function getArrayU32FromWasm0(ptr, len) {
     ptr = ptr >>> 0;
     return getUint32ArrayMemory0().subarray(ptr / 4, ptr / 4 + len);
@@ -738,14 +716,6 @@ function getFloat64ArrayMemory0() {
         cachedFloat64ArrayMemory0 = new Float64Array(wasm.memory.buffer);
     }
     return cachedFloat64ArrayMemory0;
-}
-
-let cachedInt32ArrayMemory0 = null;
-function getInt32ArrayMemory0() {
-    if (cachedInt32ArrayMemory0 === null || cachedInt32ArrayMemory0.byteLength === 0) {
-        cachedInt32ArrayMemory0 = new Int32Array(wasm.memory.buffer);
-    }
-    return cachedInt32ArrayMemory0;
 }
 
 function getStringFromWasm0(ptr, len) {
@@ -874,7 +844,6 @@ function __wbg_finalize_init(instance, module) {
     wasmModule = module;
     cachedDataViewMemory0 = null;
     cachedFloat64ArrayMemory0 = null;
-    cachedInt32ArrayMemory0 = null;
     cachedUint32ArrayMemory0 = null;
     cachedUint8ArrayMemory0 = null;
     wasm.__wbindgen_start();

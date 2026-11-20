@@ -199,7 +199,8 @@ function moduleFiles(dir) {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) out.push(...moduleFiles(path));
-    else if (name.endsWith('.json')) out.push(path);
+    // voices-*.json are generated stress modules, gitignored (npm run perf:gen): not part of the library
+    else if (name.endsWith('.json') && !/^voices-\d+\.json$/.test(name)) out.push(path);
   }
   return out.sort();
 }
@@ -330,6 +331,7 @@ function fuzzModule(random, count) {
 
 const SUITES = [
   'scripts/test-variable-deps.mjs',
+  'scripts/test-dirty-marking.mjs',
   'scripts/test-relational-time.mjs',
   'scripts/test-exact-values.mjs',
   'scripts/test-exactness.mjs',

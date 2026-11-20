@@ -41,6 +41,10 @@ export function getDefaultInstrument() {
  * All expression evaluation is done through the binary evaluator.
  * No Function-based evaluation or *String dual storage.
  */
+// What markNoteDirty() hands the incremental evaluator for a note whose
+// dependents are already dirty
+const NO_DEPENDENTS = [];
+
 export class Module {
   constructor(baseNoteVariables = {}) {
     this.notes = {};
@@ -75,6 +79,9 @@ export class Module {
     // Evaluation cache (Map<noteId, {startTime, duration, ...}>)
     this._evaluationCache = new Map();
     this._dirtyNotes = new Set();
+    // Notes whose dependents markNoteDirty() has already marked dirty since
+    // the last evaluation: marking one of them again needs no second walk
+    this._dirtyClosed = new Set();
     this._evaluating = false; // reentrancy guard for evaluateModule()
 
     // Create base note with default values
@@ -221,6 +228,18 @@ export class Module {
       this._registerNoteDependencies(note);
     }
 
+    // Already reached by the walk of a note marked earlier in this dirty
+    // cycle: everything that reads it is dirty already (the walk is
+    // transitive), so only its own bytecode may be new. Callers commonly mark
+    // a note and then each of its dependents; without this every one of those
+    // walked its own dependents again, quadratic in the length of a chain.
+    if (this._dirtyClosed.has(numId)) {
+      if (this._incrementalEvaluator) {
+        this._incrementalEvaluator.invalidate(numId, NO_DEPENDENTS);
+      }
+      return;
+    }
+
     // Everything that reads this note, directly or through other notes. The walk
     // crosses the base note: whatever reads it (base.d, base.f, an inherited
     // amplitude) follows, and so does whatever reads those.
@@ -232,8 +251,10 @@ export class Module {
     }
 
     // Also mark dependents as dirty (but don't invalidate - their bytecode hasn't changed)
+    this._dirtyClosed.add(numId);
     for (const depId of dependents) {
       this._dirtyNotes.add(depId);
+      this._dirtyClosed.add(depId);
       // Use markDirtyOnly for dependents - they need re-evaluation but not re-registration
       if (this._incrementalEvaluator && typeof this._incrementalEvaluator.markDirtyOnly === 'function') {
         this._incrementalEvaluator.markDirtyOnly(depId);
@@ -653,6 +674,9 @@ export class Module {
     // capture the dirty set before it is cleared and scope the flag update
     // to it (previously this scanned ALL notes on every evaluation).
     const dirtyIds = this._dirtyNotes.size > 0 ? Array.from(this._dirtyNotes) : null;
+    // The evaluation consumes the dirty sets: from here on a note marked dirty
+    // walks its dependents again
+    this._dirtyClosed.clear();
 
     this._evaluating = true;
     let cache;
@@ -671,6 +695,7 @@ export class Module {
     this._updateCorruptionFlags(cache, dirtyIds);
 
     this._dirtyNotes.clear();
+    this._dirtyClosed.clear();
 
     return cache;
   }
@@ -691,18 +716,9 @@ export class Module {
     }
 
     try {
-      const ids = noteIds !== null ? noteIds : Object.keys(this.notes);
-      // The WASM cache gives every flag in one call, without building records
-      if (typeof cache.corruptionFlagsOf === 'function') {
-        const numericIds = ids.map(Number);
-        const flags = cache.corruptionFlagsOf(numericIds);
-        for (let i = 0; i < numericIds.length; i++) {
-          if (flags[i] >= 0) this._dependencyGraph.setCorruptionFlags(numericIds[i], flags[i]);
-        }
-        return;
-      }
       // Fetch per-id from cache (rather than iterating cache.entries()) so
       // both regular Maps and lazy WASM cache proxies are handled correctly.
+      const ids = noteIds !== null ? noteIds : Object.keys(this.notes);
       for (const id of ids) {
         const noteId = Number(id);
         const result = cache.get(noteId);
@@ -1085,6 +1101,7 @@ export class Module {
     this._depsRegGeneration++; // invalidate cached registration keys (e.g., reused baseNote)
     this._evaluationCache.clear();
     this._dirtyNotes.clear();
+    this._dirtyClosed.clear();
 
     for (const id in this.notes) {
       const note = this.notes[id];
@@ -1111,6 +1128,7 @@ export class Module {
   invalidateAll() {
     this._evaluationCache.clear();
     this._dirtyNotes.clear();
+    this._dirtyClosed.clear();
 
     for (const id of Object.keys(this.notes)) {
       this._dirtyNotes.add(Number(id));

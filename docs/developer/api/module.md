@@ -29,14 +29,14 @@ Creates a module with a BaseNote (id `0`) and nothing else.
 
 ::: warning Numbers are silently ignored
 The constructor only honours values that are a `string`, a `function`, a `*String` key, or
-`color` / `instrument` (`src/module.js:96-116`). `new Module({ duration: 0.5 })` drops the `0.5`
+`color` / `instrument` (`src/module.js:103-123`). `new Module({ duration: 0.5 })` drops the `0.5`
 and leaves the time unit at 1 s. Write `new Module({ duration: '1/2' })`.
 :::
 
 ### BaseNote defaults
 
 Any key you do not override falls back to these. They are **expression strings** in the DSL
-(`src/module.js:80-93`):
+(`src/module.js:87-100`):
 
 | Property | Default expression | Value |
 |---|---|---|
@@ -60,7 +60,7 @@ module.notes  // { [id: number]: Note } — a plain object, not a Map
 
 Keyed by note id, and it **includes the BaseNote at key `0`**. `module.notes.get(1)` throws;
 use `module.getNoteById(1)`. Iterating with `Object.values(module.notes)` yields the BaseNote
-too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:947`).
+too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:963`).
 
 ### baseNote
 
@@ -164,7 +164,7 @@ once, then calls `markNotesDirtyBatch()`. The widget's **Evaluate Module** actio
 
 ::: danger The keys are `varName` and `expr`
 Not `property` and `expression`. The update objects are destructured as
-`{ noteId, varName, expr }` (`src/module.js:337`); passing the wrong keys throws
+`{ noteId, varName, expr }` (`src/module.js:358`); passing the wrong keys throws
 `TypeError: Cannot read properties of undefined (reading 'endsWith')`.
 :::
 
@@ -213,7 +213,7 @@ TET notes.
 const cache = module.getEvaluationCache()
 ```
 
-**Evaluates first if anything is dirty**, then returns the cache (`src/module.js:704-709`). This
+**Evaluates first if anything is dirty**, then returns the cache (`src/module.js:719-725`). This
 is the lazy entry point that `Note.getVariable()` goes through; it is not a peek.
 
 ### evaluateNoteVariable()
@@ -298,7 +298,7 @@ module.getParentChainByProperty(2, 'frequency')  // → [1, 0]
 ```
 
 The ancestor chain for one property, walking back to the BaseNote. **The starting note is not in
-the result** (`src/module.js:518`) — `chain[0]` is its parent. `property` is one of
+the result** (`src/module.js:539`) — `chain[0]` is its parent. `property` is one of
 `'frequency' | 'startTime' | 'duration'`.
 
 ### getChildrenTreeByProperty()
@@ -486,7 +486,7 @@ Before it builds any note, it runs the data through two conversions, in this ord
 Both are exact: every start, duration, frequency and interpretation value keeps the same fraction.
 See [Module System](/developer/architecture/module-system#loading-old-modules).
 
-Per-note id guards (`src/module.js:869-881`): ids that are not integers, are `< 0`, or are
+Per-note id guards (`src/module.js:885-897`): ids that are not integers, are `< 0`, or are
 `> 65535` (the `u16` ceiling of `LOAD_REF`) are skipped with a `[RMT Security]` warning; the
 literal ids `__proto__`, `constructor` and `prototype` are blocked outright. There is no `eval()`
 anywhere in this path — expressions are compiled to bytecode.
@@ -536,7 +536,7 @@ Fraction-pool occupancy from the evaluator. Used by the perf harness.
 
 The module builds its evaluators through `src/wasm/evaluator-adapter.js`. When the WASM hot-swap
 is enabled it registers an `onWasmReady` callback that replaces both evaluators mid-session
-(`_upgradeEvaluators()`, `src/module.js:139`), marks everything dirty, and warms the new engine on
+(`_upgradeEvaluators()`, `src/module.js:146`), marks everything dirty, and warms the new engine on
 an idle callback.
 
 ::: danger WASM evaluation is disabled
