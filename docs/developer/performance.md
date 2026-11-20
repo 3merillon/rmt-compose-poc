@@ -50,6 +50,13 @@ panning were in the note overlays, including rebuilding and uploading the
 tab and arrow regions. The add-note form's `refreshEvaluations` also appeared
 on selection and drop. Each field built a new cache of every variable of every note.
 
+The add-note form now reads the explicit references of the compiled preview
+expression and the BaseNote for inherited values. The text and tooltips for
+valid, irrational, missing-reference, invalid and large-fraction inputs matched
+the previous build. Selecting the 4,999-dependent hub took 774 → 521 ms at 100k,
+1,826 → 1,156 ms at 250k, and 3,987 → 2,169 ms at 500k. Dropping it after a
+move took 669 → 392, 1,670 → 1,087 and 3,690 → 1,857 ms respectively.
+
 | Module | Notes | Idle | Pan | `sync()` p50 | Redraw, no selection | Redraw, hub selected |
 |---|---|---|---|---|---|---|
 | `voices-5000` | 5,001 | 60.2 fps, **0/100 frames redrawn** | 60.2 fps | 2.0 ms (p95 5.2) | 0.77 ms | 1.20 ms |

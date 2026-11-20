@@ -379,15 +379,18 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       // Compile the expression using safe parser
       const binary = compileDSL(expr);
 
-      // Build an eval cache from current module state (the BaseNote is id 0)
+      // The preview reads the same getVariable() values as the form displays.
+      // LOAD_REF only reads explicit dependencies; inherited values can also read 0.
       const evalCache = new Map();
-      for (const id in module.notes) {
+      const ids = binary.getDependencySet();
+      ids.add(0);
+      for (const id of ids) {
         const noteObj = module.notes[id];
         if (noteObj) {
           try {
             const rec = {};
             for (const v of EXPRESSION_VARS) rec[v] = noteObj.getVariable(v);
-            evalCache.set(parseInt(id, 10), rec);
+            evalCache.set(id, rec);
           } catch {}
         }
       }
@@ -422,7 +425,6 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   freqInput.addEventListener('input', refreshEvaluations);
   durInput.addEventListener('input', refreshEvaluations);
   stInput.addEventListener('input', refreshEvaluations);
-  refreshEvaluations();
 
   function updateModeFields() {
     if (silenceRadio.checked) {

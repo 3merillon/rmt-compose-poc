@@ -264,7 +264,7 @@ actually costs.
 
 | GL element | Colour | Source |
 |---|---|---|
-| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2177`, `note-creation.js:516-528` |
+| Note body **fill** | per-note user data (`note.color`) — the preset only sets the random saturation a *new* note is born with | `player.js:2177`, `note-creation.js:518-530` |
 
 ![The Appearance tab of the Settings panel: theme dropdown, three geometry sliders, and fifteen colour pickers grouped into Interface, Workspace and Dependency highlights](/img/settings-appearance.png)
 
