@@ -10,7 +10,9 @@
  *     spans) and refreshes public/samples/CREDITS.md.
  *
  * Reproducible: `node scripts/build-samples.mjs` (needs ffmpeg on PATH and
- * network). Output (~1–2 MB total) is committed; sources are not.
+ * network). Output (~1–2 MB total) is committed; sources are not. Then run
+ * `node scripts/tune-samples.mjs`: it measures each zone's pitch and writes its
+ * `tuneCents` (this script writes the manifests without it).
  *
  * Velocity: the app has no per-note dynamics, so one layer per zone is used.
  * The manifest schema reserves an optional `velLayers[]` for a future

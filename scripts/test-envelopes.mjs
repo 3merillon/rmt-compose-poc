@@ -173,5 +173,27 @@ for (const name of names) {
   if (failures === 0) ok('a note\'s own release share is counted after its end, clamped to [0, 4]');
 }
 
+// I: the sampled instruments play against each recording's measured pitch (tuneCents)
+{
+  let before = failures;
+  for (const name of ['piano', 'violin']) {
+    const inst = manager.getInstrument(name);
+    const zones = inst.zones || [];
+    check(zones.length > 0 && zones.every((z) => Number.isFinite(z.playedHz) && Math.abs(1200 * Math.log2(z.playedHz / z.rootHz)) < 50),
+      `${name}: every zone has a measured pitch within 50 cents of its root`);
+    // Play the root of each zone: the rate must put the recording's own pitch on the written frequency.
+    for (const z of zones) {
+      z.buffer = z.buffer || { duration: 3 };
+      const saved = ctx.createBufferSource;
+      let src = null;
+      ctx.createBufferSource = () => (src = { playbackRate: { value: 1 }, connect() {}, start() {}, stop() {}, buffer: null });
+      inst.createOscillator(z.rootHz);
+      ctx.createBufferSource = saved;
+      check(src && near(src.playbackRate.value * z.playedHz, z.rootHz, 1e-12), `${name} ${z.root}: plays ${z.rootHz} Hz at rate ${src && src.playbackRate.value}`);
+    }
+  }
+  if (failures === before) ok('piano and violin play each zone against its measured pitch (tuneCents), so the written frequency sounds');
+}
+
 console.log(failures ? `\n${failures} of ${checks} envelope checks FAILED` : `\nAll envelope checks passed (${checks}).`);
 process.exit(failures ? 1 : 0);

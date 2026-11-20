@@ -124,6 +124,28 @@ SHEETS['phase-i-6'] = {
       predict: 'Now: the chord mellows as it rings.' },
   ],
 };
+SHEETS['phase-i-7a'] = {
+  title: 'Phase I, step 7a: each recording played at its own measured pitch',
+  intro: 'Each file plays a passage twice: first as before this step, a second of silence, then as now. Same notes, same pure ratios of 263 Hz, reverb and limiter on. ' +
+    'What changes: each piano and violin recording is played against the pitch it was measured to have (tuneCents in its manifest), so a ratio between notes from two recordings is the ratio written. Within one recording nothing changes.',
+  passages: [
+    { name: 'Piano, a low C (32.9 Hz) under a C4 triad (3 s)', instrument: 'piano', notes: chord([[1, 8], [1, 1], [5, 4], [3, 2]], 0, 3),
+      change: 'The low C comes from the C1 recording (measured 29 cents flat), the triad from C4 (5 flat). Before: the bass 24 cents flat of the written 1/8. Now: exact.',
+      predict: 'Now: the bass locks under the chord; before: a slow beat between the bass\'s upper partials and the chord.' },
+    { name: 'Piano, an octave 526–1052 Hz (3 s)', instrument: 'piano', notes: chord([[2, 1], [4, 1]], 0, 3),
+      change: 'C5 recording (−0.3 c) against C6 (+6.6 c): before, the octave 6.9 cents wide. Now: the written 2/1 between the recordings\' first partials.',
+      predict: 'Now: a calmer octave (a piano\'s octave still beats a little: its strings\' upper partials are sharp); before: a faster shimmer.' },
+    { name: 'Piano, a scale from 263 to 1052 Hz (0.3 s notes)', instrument: 'piano', notes: seq([[1, 1], [9, 8], [5, 4], [4, 3], [3, 2], [5, 3], [15, 8], [2, 1], [9, 4], [5, 2], [8, 3], [3, 1], [10, 3], [15, 4], [4, 1]], 0.3),
+      change: 'It crosses five recordings; before, each step into a new one moved by its offset (up to 11 cents).',
+      predict: 'Now: an even scale; before, slightly uneven at the C5 and C6 crossings.' },
+    { name: 'Violin, a fifth 1052–1578 Hz (3 s)', instrument: 'violin', notes: chord([[4, 1], [6, 1]], 0, 3),
+      change: 'C6 recording (−12 c) against G6 (+19 c): before, the fifth 32 cents wide. Now: corrected to their average pitches (the vibrato is still in the recordings).',
+      predict: 'Now: clearly a fifth; before: a sour, wide fifth.' },
+    { name: 'Violin, an octave 440–880 Hz (3 s)', instrument: 'violin', notes: chord([[440, 263], [880, 263]], 0, 3),
+      change: 'A4 recording (+13.7 c) against A5 (+2.4 c): before 11 cents narrow.',
+      predict: 'Now: a truer octave, still moving with the vibrato.' },
+  ],
+};
 const sheet = SHEETS[SHEET];
 if (!sheet) { console.error(`unknown sheet ${SHEET}`); process.exit(2); }
 

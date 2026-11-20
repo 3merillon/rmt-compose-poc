@@ -23,7 +23,12 @@
  * so a future note-dynamics feature can add layers without a migration):
  *   { schema, name, displayName, license:{id,source,author,url}, gainDb,
  *     envelope:{attack,release}, zones:[{root, rootHz, lowHz, highHz, url,
- *     loop?, velLayers?}] }
+ *     tuneCents?, loop?, velLayers?}] }
+ * `tuneCents` is the recording's own pitch against rootHz, measured by
+ * scripts/tune-samples.mjs (Phase I): the zone is played against that pitch, so a
+ * note sounds exactly the frequency written and every ratio between two zones is
+ * exact. (Without it the stretch tuning of the piano recordings and the offsets of
+ * the violin's, up to ±25 cents, were carried into every interval across zones.)
  * `envelope` is in seconds: the attack from the note's start, the release after
  * its end (the note's end is a note-off; see instrument-manager.js).
  */
@@ -67,6 +72,8 @@ export class MultisampleInstrument {
         .map((z) => ({
           root: z.root || null,
           rootHz: +z.rootHz,
+          // The pitch the recording actually has (rootHz corrected by its measured tuneCents)
+          playedHz: +z.rootHz * Math.pow(2, (isFinite(z.tuneCents) ? +z.tuneCents : 0) / 1200),
           lowHz: isFinite(z.lowHz) ? +z.lowHz : 0,
           highHz: isFinite(z.highHz) ? +z.highHz : Infinity,
           url: /^https?:|^\//.test(z.url) ? z.url : this.baseDir + z.url,
@@ -156,7 +163,8 @@ export class MultisampleInstrument {
 
     const source = this.audioContext.createBufferSource();
     source.buffer = zone.buffer;
-    source.playbackRate.value = frequency / zone.rootHz;
+    // Against the recording's measured pitch, so the written frequency is what sounds
+    source.playbackRate.value = frequency / (zone.playedHz || zone.rootHz);
 
     // Gentle anti-alias / anti-boom filter based on shift direction.
     const filter = this.audioContext.createBiquadFilter();

@@ -192,6 +192,8 @@ To hear what they are for, put a chord on [loop](/user-guide/playback/transport#
 | `piano` | 14 | C1, G1, C2, G2, C3, G3, C4, G4, C5, G5, C6, G6, C7, G7 |
 | `violin` | 15 | G3, A3, C4, E4, G4, A4, C5, E5, G5, A5, C6, E6, G6, A6, C7 |
 
+Each recording is played at the pitch it was **measured** to have, not the one its name gives: the upright piano's recordings are stretch-tuned (its bass flat, its treble sharp, by up to 29 cents) and the violin's sit up to 19 cents off. Without that, a ratio between two notes taken from two recordings would carry their difference; with it, every note sounds the frequency written, to within about 3 cents on the piano. The violin's recordings are played with vibrato, so their pitch is a mean, and a pure interval on the violin still moves with it.
+
 Both are mono. If you want them placed across the stereo field, that comes from the app's [stereo width](/user-guide/playback/audio) stage, not from the samples.
 
 ### Where they come from

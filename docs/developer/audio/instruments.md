@@ -329,8 +329,18 @@ nearest-root path is effectively unreachable below 20 kHz.
 ### Playback
 
 ```javascript
-source.playbackRate.value = frequency / zone.rootHz;
+source.playbackRate.value = frequency / (zone.playedHz || zone.rootHz);
 ```
+
+`zone.playedHz` is `rootHz · 2^(tuneCents / 1200)`: the pitch the recording actually has. `tuneCents` is
+measured once per zone by `scripts/tune-samples.mjs` (partials 1–12 of the held tone fitted to a stiff string's
+series f_n = n·f0·√(1 + B·n²), the first partial f0·√(1 + B); for the violin, whose bowed partials are exactly
+harmonic, B = 0) and written into the manifest. Without it a zone was played against its nominal root, and the
+recordings' own offsets (the piano's stretch tuning, −29 cents at C1 to +12 at C7; the violin's −12 to +19) were
+carried into every ratio between two zones. `node scripts/tune-samples.mjs --check` measures what the corrected
+instrument plays: every piano and violin zone within 3 cents (the measure's own resolution on a low string). The
+violin's recordings carry vibrato, so their measured pitch is a mean, uncertain by several cents. Within one zone
+nothing changes: two notes of the same recording were always in the exact ratio of their playback rates.
 
 into a biquad — **lowpass** at `min(0.48 × sampleRate, 16000 / √ratio)` when shifting up, **highpass**
 at `max(20, 60 × √ratio)` when shifting down, `Q = 0.5` either way.
@@ -374,8 +384,9 @@ damper that follows pitch, `byPitch(f, [32.703 Hz, 0.30 s], [1046.5 Hz, 0.10 s])
 (F#6, where a piano has no dampers) it is 1.5 s. The `release` in the piano's manifest is
 therefore never used; its `attack` is.
 
-`displayName` and `license` are parsed and never rendered anywhere in the app. `zones[].loop` and
-`zones[].velLayers[]` are reserved and not even parsed.
+`displayName` and `license` are parsed and never rendered anywhere in the app. `zones[].tuneCents` is the
+recording's measured pitch against `rootHz` (above). `zones[].loop` and `zones[].velLayers[]` are reserved and not
+even parsed.
 
 ### The shipped samples
 
