@@ -37,7 +37,7 @@ build one by hand — the compilers do it.
 |---|---|---|
 | `bytecode` | `Uint8Array` | The instruction stream. Capacity, not content — read only the first `length` bytes. |
 | `length` | `number` | Bytes actually used. |
-| `dependencies` | `Uint16Array` | Note ids referenced by `LOAD_REF`. Initial capacity 16, doubles. |
+| `dependencies` | `Uint32Array` | Note ids referenced by `LOAD_REF` and `LOAD_REF_WIDE`. Initial capacity 16, doubles. |
 | `depCount` | `number` | Entries used in `dependencies`. |
 | `sourceText` | `string` | The original text, verbatim and untrimmed. `''` for a synthesised expression. |
 | `referencesBase` | `boolean` | True when the expression contains a `LOAD_BASE`. |
@@ -131,6 +131,7 @@ Used by the compilers; you need these only if you emit bytecode yourself.
 | `ensureCapacity(n)` | grows the buffer if `n` more bytes will not fit |
 | `writeByte(v)` | 1 byte |
 | `writeUint16(v)` | 2 bytes, big-endian |
+| `writeUint32(v)` | 4 bytes, big-endian |
 | `writeInt32(v)` | 4 bytes, big-endian, signed |
 | `writeBigIntSigned(v)` | `[sign(1)][len(2)][bytes]` |
 | `writeBigIntUnsigned(v)` | `[len(2)][bytes]`; throws above 65535 bytes |
@@ -145,6 +146,7 @@ Used by the compilers; you need these only if you emit bytecode yourself.
 | `LOAD_REF` | `0x02` | 3 — u16 noteId, u8 varIndex | → note property |
 | `LOAD_BASE` | `0x03` | 1 — u8 varIndex | → BaseNote property |
 | `LOAD_CONST_BIG` | `0x04` | variable (see below) | → big fraction |
+| `LOAD_REF_WIDE` | `0x05` | 5 — u32 noteId, u8 varIndex | → note property |
 | `ADD` | `0x10` | — | a, b → a+b |
 | `SUB` | `0x11` | — | a, b → a−b |
 | `MUL` | `0x12` | — | a, b → a×b |
@@ -190,6 +192,9 @@ LOAD_CONST      01 [num:i32 BE] [den:i32 BE]
 LOAD_REF        02 [noteId:u16 BE] [varIndex:u8]
                    └─ 2 bytes ───┘└─ 1 byte ──┘
 
+LOAD_REF_WIDE   05 [noteId:u32 BE] [varIndex:u8]
+                   └─ 4 bytes ───┘└─ 1 byte ──┘
+
 LOAD_BASE       03 [varIndex:u8]
 
 LOAD_CONST_BIG  04 [sign:u8] [numLen:u16] [num bytes…] [denLen:u16] [den bytes…]
@@ -200,11 +205,17 @@ Constants are GCD-normalised and the sign moved to the numerator before emission
 is used only when the numerator or denominator falls outside the i32 range
 (−2 147 483 648 … 2 147 483 647) — which happens with exact ratios that have very large terms.
 
-`LOAD_REF` encodes the id as a `u16`, and `dependencies` is a `Uint16Array`.
-`Module.loadFromJSON()` guards the boundary: it rejects (skips, with a console warning) any note
-whose id is above 65535. The DSL parser enforces the same range at compile time —
-`[70000].f` is a parse error (`src/dsl/parser.js:284`), and so is `module.getNoteById(70000)` in
-the converter of the retired method-chain syntax — so an id can never wrap.
+`LOAD_REF` encodes the id as a `u16`, for ids up to 65535. `LOAD_REF_WIDE` encodes it as a `u32`,
+for ids 65536 to 16,777,215. The DSL compiler writes the 2-byte form whenever the id fits, so a
+module whose ids fit compiles to the same bytecode as before. `dependencies` is a `Uint32Array`.
+
+`MAX_NOTE_ID` (`0xFFFFFF`, 16,777,215, exported from `src/binary-note.js`) is the largest id a note
+can have. The renderer's picking draws each id in 24 bits of colour, and 2^24 − 1 is also the
+largest integer a float32 vertex attribute holds exactly. `Module.loadFromJSON()` rejects (skips,
+with a console warning) any note whose id is outside `0 … MAX_NOTE_ID`. The DSL parser enforces the
+same range at compile time — `[16777216].f` is a parse error (`src/dsl/parser.js:283-284`), and so is
+`module.getNoteById(16777216)` in the converter of the retired method-chain syntax — so an id can
+never wrap.
 
 ## Worked example
 

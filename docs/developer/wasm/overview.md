@@ -42,7 +42,7 @@ engine leaves the other behind. `RMT_EVALUATOR=wasm` in Node still runs the Rust
 | `initWasm()` is called at import time | `src/store/app-state.js:7` | Shares the one initialization |
 | `initWasm()` is `await`ed during `initApp()` | `src/main.js:82` | Shares it |
 | `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:147` | Shares it |
-| `Module` constructor registers a hot-swap callback | `src/module.js:139-145` | Only when the gate is open |
+| `Module` constructor registers a hot-swap callback | `src/module.js:140-146` | Only when the gate is open |
 | Evaluation | `src/binary-evaluator.js` until the swap, then `src/wasm/evaluator-adapter.js` | JavaScript, or WASM after the swap |
 
 `initWasm()` (`src/wasm/index.js:53`) is called three times at boot, and every call now shares one
@@ -51,7 +51,7 @@ the module again, and the last to finish replaced the instance under objects mad
 one: `recursive use of an object` errors, or a hang. With `?evaluator=js`, `initWasm()` returns
 `false` before it fetches anything, so the 294 KB `rmt_core_bg.wasm` is never downloaded.
 
-Otherwise `Module._upgradeEvaluators()` (`src/module.js:214`) swaps each module to the WASM
+Otherwise `Module._upgradeEvaluators()` (`src/module.js:215`) swaps each module to the WASM
 evaluator once the binary is ready. See [the hot-swap](/developer/wasm/adapters#the-hot-swap).
 
 ## The crate
@@ -104,9 +104,9 @@ BaseNote. The opcodes `0x20`, `0x21` and `0x22` fail as unknown opcodes, as in J
 
 ### PersistentEvaluator
 
-`rust/src/evaluator.rs:675`. It holds notes and their records in arrays indexed by note id.
+`rust/src/evaluator.rs:666`. It holds notes and their records in arrays indexed by note id.
 Evaluation is ordered per (note, variable) with Tarjan's strongly connected components, exactly
-as `BinaryEvaluator.evaluateVariables()` does it (`rust/src/evaluator.rs:498`). Cycles and
+as `BinaryEvaluator.evaluateVariables()` does it (`rust/src/evaluator.rs:489`). Cycles and
 unresolved references are not printed by Rust: it hands them to the JavaScript side, which prints
 them in the JavaScript evaluator's own words.
 
@@ -195,8 +195,15 @@ check and the snapshot text now cost what the edit changed. See
 
 ## Limits
 
-Note ids are 16-bit in the bytecode. The loader refuses ids above 65535, so `voices-100000`
-loads 65,536 notes.
+Note ids go up to 16,777,215 (`MAX_NOTE_ID`). The loader refuses ids above it, and `voices-100000`
+loads all 100,001 notes when it is the module the page opens (the perf harness serves it so). The
+import paths of the UI are tighter: **Load Module** refuses a file over 3 MB or with more than
+10,000 notes (`src/player.js`, `validateModuleStructure`), and library upload, Load UI and Copy to
+Modules refuse more than 10,000 notes (`src/menu/menu-bar.js`).
+
+The autosave writes the whole module to `localStorage`, which holds about 5 MB per origin. A module
+of a few tens of thousands of notes exceeds it (`voices-100000` is about 15 MB as JSON), and every
+edit then logs `[RMT] Autosave failed (history capture): QuotaExceededError …`.
 
 ## See also
 

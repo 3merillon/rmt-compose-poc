@@ -223,7 +223,7 @@ See [Binary Evaluator](/developer/core/binary-evaluator) for how the bytecode ru
 | `5 / 0` | Accepted. Evaluates to **1** with a console warning, and the property is flagged corrupted (crosshatch) |
 | `2^(1/12)` | Accepted. Irrational, kept exact — the property is hatched (crosshatch) |
 | `2^100000` | Accepted. Past the exact-power caps — approximate, and the property is hatched |
-| `[70000].f` | Rejected on save: `Note IDs must be integers between 0 and 65535` |
+| `[16777216].f` | Rejected on save: `Invalid note ID '16777216'. Note IDs must be integers between 0 and 16777215` |
 | Anything the compiler cannot parse | Rejected: `console.error` plus a thrown compile error; the widget shows the message, and on a file load the property is left unset |
 
 The `Evaluated:` line in the note widget still repays a glance after saving anything unusual.

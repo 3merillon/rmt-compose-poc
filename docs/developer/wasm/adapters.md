@@ -111,7 +111,7 @@ base evaluator is a `WasmPersistentEvaluatorWrapper`, and `JSIncrementalEvaluato
 
 ## The interface of PersistentEvaluator
 
-What the adapter calls on the Rust class (`rust/src/evaluator.rs:675`):
+What the adapter calls on the Rust class (`rust/src/evaluator.rs:666`):
 
 | Method | Purpose |
 |---|---|
@@ -205,7 +205,7 @@ WASM init is async and normally loses the race against `Module` construction. Ra
 the module starts on JS and upgrades later:
 
 ```javascript
-// src/module.js:139-145 (in the Module constructor)
+// src/module.js:140-146 (in the Module constructor)
 if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)) {
   const ref = new WeakRef(this);
   onWasmReady(() => {
@@ -215,7 +215,7 @@ if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)
 }
 ```
 
-`_upgradeEvaluators()` (`src/module.js:214`) swaps `_binaryEvaluator` and `_incrementalEvaluator`
+`_upgradeEvaluators()` (`src/module.js:215`) swaps `_binaryEvaluator` and `_incrementalEvaluator`
 atomically, clears the evaluation cache, and marks every note dirty so the next `evaluateModule()`
 re-evaluates on the new engine. Values are identical across engines, so nothing goes stale in
 between. The `WeakRef` keeps a discarded module from leaking through the callback list.

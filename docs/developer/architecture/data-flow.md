@@ -53,7 +53,7 @@ once. A group move does the same per mover.
 
 ## 2. The module marks dirty
 
-`Module.markNoteDirty(noteId)` (`src/module.js:289`):
+`Module.markNoteDirty(noteId)` (`src/module.js:290`):
 
 1. Adds the id to `_dirtyNotes`.
 2. `_registerNoteDependencies(note)` — re-scans the note's bytecode and rewrites its rows in the
@@ -71,13 +71,13 @@ once. A group move does the same per mover.
 
 Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a
 walk of the same dirty cycle now only re-registers its own bytecode (`Module._dirtyClosed`,
-`src/module.js:304`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
+`src/module.js:305`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
 in the middle of `chain-1000` ran 501 walks over 125,000 notes. Both engines do this.
 
 ## 3. Evaluation
 
-`Module.evaluateModule()` (`src/module.js:727`) delegates to
-`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1022`):
+`Module.evaluateModule()` (`src/module.js:728`) delegates to
+`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1039`):
 
 ```
 evaluateDirty()
@@ -90,7 +90,7 @@ evaluateDirty()
 ```
 
 **The order is per variable, on the evaluator, not the graph.** The dirty set is a set of *notes*;
-inside it, `evaluateVariables()` (`binary-evaluator.js:659`) walks depth-first from every variable
+inside it, `evaluateVariables()` (`binary-evaluator.js:676`) walks depth-first from every variable
 and evaluates whatever it reads first. Each variable is one node: `[1].f` may read `[2].f` while
 `[2].t` reads `[1].t` and `[1].d`, and a note's own variables may read each other in any direction.
 What a variable reads comes straight from its bytecode, `base.x` included. Notes start in ascending
@@ -98,7 +98,7 @@ id, so the order is deterministic. On a true cycle — a variable that reads its
 throw: it `console.error`s `Dependency cycle detected!` with the loop named, and evaluates the
 members in a fixed order against defaults.
 
-`evaluateVariable()` (`binary-evaluator.js:802`) evaluates one expression into the note's record
+`evaluateVariable()` (`binary-evaluator.js:819`) evaluates one expression into the note's record
 and ORs a corruption bit for that property when its expression made an irrational `^` result or an approximation. Irrational values stay exact (`record.exact`); see [Exact Values](/developer/core/symbolic-power).
 
 A cache entry is:
@@ -229,7 +229,7 @@ Note 1's frequency changes
 ```
 
 For *visualisation* — the coloured dependency lines and rings — the module asks a different question.
-`module.getDependentsByProperty(noteId)` (`src/module.js:502`) returns
+`module.getDependentsByProperty(noteId)` (`src/module.js:503`) returns
 
 ```javascript
 { frequency: [...], startTime: [...], duration: [...] }
@@ -319,7 +319,7 @@ At startup `src/player.js` loads the saved session (`rmt:moduleSnapshot:v1`) or
 ```
 any committing edit
   → captureSnapshot(label)              player.js:5633
-      → module.createModuleJSONString() → snapshotStr   module.js:1044
+      → module.createModuleJSONString() → snapshotStr   module.js:1045
           (= JSON.stringify(createModuleJSON()); only the notes that changed are serialized again)
       → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshotStr })
       → eventBus.emit('history:capture',     { label, snapshotStr })

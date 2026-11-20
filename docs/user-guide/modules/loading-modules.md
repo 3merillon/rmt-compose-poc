@@ -116,7 +116,7 @@ Loading a module from a **file** enforces:
 | The module passes those checks but fails to build (for example, it has no `notes` key at all) | A red banner: `Error loading module: <message>` |
 | **The file is not valid JSON** | A red toast: `Error loading module: <message>` |
 
-**Library uploads**, **Load UI** imports and **Copy to Modules** run a *different*, stricter check — not an additional one. It does not enforce the 3 MB cap or the nesting limit, but it does what the file path never does: every expression string is screened for dangerous-looking patterns and must compile, note ids must be unique and within `0 … 65535`, and every `color` must be on the colour whitelist. For an entry-point-by-entry-point table of who checks what, see [Module Format](/user-guide/modules/module-format#what-is-checked-and-where).
+**Library uploads**, **Load UI** imports and **Copy to Modules** run a *different*, stricter check — not an additional one. It does not enforce the 3 MB cap or the nesting limit, but it does what the file path never does: every expression string is screened for dangerous-looking patterns and must compile, note ids must be unique and within `0 … 16777215`, and every `color` must be on the colour whitelist. For an entry-point-by-entry-point table of who checks what, see [Module Format](/user-guide/modules/module-format#what-is-checked-and-where).
 
 ::: warning Loading a file does not check its expressions
 The **Load Module from file…** path checks size and shape only. A malformed expression does not stop the load: the compiler refuses it with a `console.error` and the affected property is left **unset**, so the note falls back to its defaults rather than loading at a silent zero. Likewise, a reference to a note that does not exist (`[99].f`) and a dependency cycle both load without an error message. If a load "succeeded" but the result looks wrong, open the browser console.
@@ -141,7 +141,7 @@ Open the browser console. The failures that do not surface in the UI all log the
 - `Failed to compile expression: …` — the expression was refused; the property was left unset and the note fell back to its default.
 - `Dependency cycle detected! …` — a property that depends on itself, with the loop spelled out (`[1].frequency → [2].frequency → [1].frequency`).
 - `Unresolved reference! …` — a reference to a note or property that does not exist. It resolves to a default (440 Hz, 0 s, 1 s), and the message names both ends: `[7].frequency reads [99].frequency, but note 99 does not exist (used 440)`.
-- `[RMT Security] Invalid note ID: … (must be 0-65535), skipping` — an id outside `0 … 65535`, or not an integer.
+- `[RMT Security] Invalid note ID: … (must be 0-16777215), skipping` — an id outside `0 … 16777215`, or not an integer.
 
 ### No sound when playing
 

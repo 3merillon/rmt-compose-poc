@@ -76,7 +76,7 @@ No tempo is stored anywhere. The note widget shows `60 / base.d` beside the Base
 
 | Field | Required | Notes |
 |---|---|---|
-| `id` | **yes** | Integer, `0 ≤ id ≤ 65535` (note ids are 16-bit in the bytecode). `0` is reserved for the BaseNote. |
+| `id` | **yes** | Integer, `0 ≤ id ≤ 16777215`. `0` is reserved for the BaseNote. |
 | `startTime` | in practice, yes | Seconds. |
 | `duration` | no | Seconds, written in time units: `base.d * 2`. Its absence is meaningful — see below. |
 | `frequency` | no | Hz. Its absence is meaningful — see below. |
@@ -218,11 +218,11 @@ Nothing is added to the BaseNote on the way out: the file holds the expressions 
 | Max file size (**Load Module**) | 3 MB |
 | Max notes | 10 000 |
 | Max JSON nesting depth (**Load Module**) | 20 |
-| Valid note id | integer, 0 – 65 535 |
+| Valid note id | integer, 0 – 16 777 215 |
 | Max expression length | 10 000 characters |
 | Note ids blocked outright | `__proto__`, `constructor`, `prototype` |
 
-The id ceiling matches the bytecode: a reference is encoded as a 16-bit integer, the loader rejects (skips, with a console warning) any id above 65 535, and an expression like `[70000].f` is rejected when it compiles — so an id can never wrap to a different note.
+The id ceiling is 2^24 − 1: the renderer's picking draws each id in 24 bits of colour. The loader rejects (skips, with a console warning) any id above 16 777 215, and an expression like `[16777216].f` is rejected when it compiles — so an id can never wrap to a different note.
 
 ## What is checked, and where
 

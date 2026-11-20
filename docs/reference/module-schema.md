@@ -77,7 +77,7 @@ These three keys were removed. A module that still has them is converted exactly
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `id` | integer | **yes** | `0 ≤ id ≤ 65535`. `0` is reserved for the BaseNote. Duplicates are rejected by the library validator. |
+| `id` | integer | **yes** | `0 ≤ id ≤ 16777215`. `0` is reserved for the BaseNote. Duplicates are rejected by the library validator. |
 | `startTime` | expression string | in practice, yes | Seconds from time zero. |
 | `duration` | expression string | no | Seconds. Absent = a plain marker with no length. |
 | `frequency` | expression string | no | Hz. Absent (with a `duration` present) = a silence, or a measure bar. |
@@ -239,13 +239,13 @@ Hard limits, wherever a module is read:
 | Max file size (Load Module) | **3 MB** |
 | Max notes | **10 000** |
 | Max JSON nesting depth (Load Module) | **20** |
-| Valid note id | integer, **0 – 65 535** (ids are encoded as u16 in the evaluator's bytecode) |
+| Valid note id | integer, **0 – 16 777 215** (`MAX_NOTE_ID`) |
 | Max expression length | **10 000 characters** |
 | Note ids blocked outright | `__proto__`, `constructor`, `prototype` |
 
 Toasts you can hit on load: `Module file too large (max 3MB)`, `Invalid module file structure`, `Module loaded successfully`.
 
-The id ceiling exists because a reference is encoded as a 16-bit integer in the evaluator's bytecode. The loader rejects (and skips) any note whose id is above 65 535, and both expression parsers enforce the same range at compile time — `[70000].f` is a parse error (`Note IDs must be integers between 0 and 65535`), not a silently truncated reference to a different note.
+The id ceiling is 2^24 − 1. The renderer's picking draws each note's id in 24 bits of colour, and 2^24 − 1 is also the largest integer a float32 vertex attribute holds exactly. The loader rejects (and skips) any note whose id is above 16 777 215, and both expression parsers enforce the same range at compile time — `[16777216].f` is a parse error (`Note IDs must be integers between 0 and 16777215`), not a silently truncated reference to a different note.
 
 Expression strings are additionally screened for dangerous-looking patterns (`eval(`, `Function(`, `fetch(`, `document.`, `window.`, `__proto__`, `<script`, `javascript:`, …) at the library-upload and Load-UI entry points. Malformed expressions are caught by the compiler itself, which throws instead of guessing (see above).
 

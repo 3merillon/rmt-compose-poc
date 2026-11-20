@@ -155,9 +155,9 @@ is, and twelve steps of `2^(1/12)` give exactly 2. See
 | `base.prop` | Property of the BaseNote |
 | `[0].prop` | The BaseNote. Note id 0 **is** the BaseNote |
 
-`N` must be a literal integer between **0 and 65535** — the range a module's ids can occupy.
+`N` must be a literal integer between **0 and 16777215** — the range a module's ids can occupy.
 Anything outside it is rejected when the expression compiles
-(`Note IDs must be integers between 0 and 65535`). There is no `[prev]`, no arithmetic inside
+(`Note IDs must be integers between 0 and 16777215`). There is no `[prev]`, no arithmetic inside
 the brackets, and no variables.
 
 Saving rewrites `[0]` to `base`: `[0].d` is saved as `base.d`.

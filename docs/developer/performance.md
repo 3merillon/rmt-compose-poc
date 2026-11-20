@@ -356,7 +356,7 @@ Three parts of it used to cost the size of the whole module, whatever the edit c
 - **The snapshot.** The history and the autosave took `JSON.stringify(createModuleJSON())`, and the
   note widget's edits stringified the object twice. They now take `createModuleJSONString()`: the
   same text, with each note's text kept and made again only when its fields read differently
-  (`src/module.js:1044`).
+  (`src/module.js:1045`).
 - **`toNumber()`.** It wrote both BigInts of a fraction out in decimal to count their digits, for
   every value `sync()` reads. A comparison with 10^300 decides the same (`src/utils/fraction-num.js:90`).
 

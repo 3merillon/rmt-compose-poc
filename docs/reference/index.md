@@ -151,6 +151,7 @@ A bitmask, one bit per property, recording which of a note's values are tempered
 | `LOAD_REF` | `0x02` | Push a property of note N (16-bit id, 8-bit variable index) |
 | `LOAD_BASE` | `0x03` | Push a property of the BaseNote (8-bit variable index) |
 | `LOAD_CONST_BIG` | `0x04` | Push a constant fraction with arbitrary-precision parts |
+| `LOAD_REF_WIDE` | `0x05` | Push a property of note N for an id above 65535 (32-bit id, 8-bit variable index) |
 | `ADD` | `0x10` | Pop 2, push sum |
 | `SUB` | `0x11` | Pop 2, push difference |
 | `MUL` | `0x12` | Pop 2, push product |
@@ -175,7 +176,7 @@ plain `LOAD_BASE` of variable index 1.
 | An expression the compiler cannot parse | Compile error — `console.error` plus a thrown message; validators return `valid: false`; on a file load the note's property is left unset |
 | Decimal → fraction | Exact as written — the digits over the matching power of ten, reduced (`0.333333` is `333333/1000000`) |
 | Constant fits `LOAD_CONST` when both parts are within | −2 147 483 648 to 2 147 483 647 (bigger constants use `LOAD_CONST_BIG`, exact at any size) |
-| Note id in a reference | 0 – 65 535, enforced when the expression compiles |
+| Note id in a reference | 0 – 16 777 215, enforced when the expression compiles |
 | Exact `^` caps | Integer exponent ≤ 65 536 and result ≤ ~1 Mbit per component; past either, the value is approximate and flagged corrupted |
 | Maximum expression length accepted on import | 10 000 characters |
 | Compiled-expression cache | 4 000 entries, least-recently-used eviction |

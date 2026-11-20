@@ -115,7 +115,7 @@ graph, the evaluators, and the dirty set. It is also the JSON load/save path. Se
 `properties.instrument` and `properties.measure` (the measure-bar flag, read with `isMeasureNote()`).
 
 **`BinaryExpression`** (`src/binary-note.js`) is a growable `Uint8Array` of bytecode plus a
-`Uint16Array` of referenced note ids. It can hand back a `Map<noteId, Set<varIndex>>` by scanning
+`Uint32Array` of referenced note ids. It can hand back a `Map<noteId, Set<varIndex>>` by scanning
 its own bytecode — that scan is where the dependency graph gets its edges.
 
 **`BinaryEvaluator`** (`src/binary-evaluator.js`) is a stack VM over that bytecode. Its stack holds
@@ -292,7 +292,7 @@ There is no serializer to update. The touch-points are:
 3. `src/module.js` — `createModuleJSON()` and `reindexModule()` both read `EXPRESSION_VARS`, so
    the property round-trips to JSON and has its references rewritten without a second list.
    `noteJSONText()` (behind `createModuleJSONString()`) reads the six by name for speed: with any
-   other list (`KEEPS_NOTE_TEXT`, `src/module.js:65`) it keeps nothing and the text stays right but
+   other list (`KEEPS_NOTE_TEXT`, `src/module.js:66`) it keeps nothing and the text stays right but
    every note is serialized on every edit, so give it the new variable too.
 4. `src/dsl/constants.js` — `PropertyMap` (input aliases) and `PropertyShortNames` (what the
    decompiler prints); then `varNameToIndex()` in `src/dsl/compiler.js`. (The converters in

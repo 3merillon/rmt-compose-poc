@@ -178,7 +178,7 @@ Edits take effect **on save**, not while you type.
 The interval `2/1`. Also the default [arrow interval](#arrow-interval).
 
 ### Opcode
-One instruction of the [bytecode](#binary-bytecode): `LOAD_CONST`, `LOAD_REF`, `LOAD_BASE`, `ADD`, `SUB`, `MUL`, `DIV`, `NEG`, `POW`.
+One instruction of the [bytecode](#binary-bytecode): `LOAD_CONST`, `LOAD_REF`, `LOAD_BASE`, `LOAD_REF_WIDE`, `ADD`, `SUB`, `MUL`, `DIV`, `NEG`, `POW`.
 
 ### Override (color override)
 A single [theme token](#theme-token) you have changed by hand, stored as a sparse diff on top of the active **theme preset**. You only override what you touch.

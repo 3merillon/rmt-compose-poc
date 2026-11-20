@@ -52,14 +52,14 @@ A fallback never fails and never passes as exact: its result is an `Approx`, fla
 
 ## Approximate values
 
-An approximate value comes from `~` in an expression (`base.f * ~1.4983`, see [Approximate numbers](/reference/expressions/syntax#approximate-numbers)) or from a fallback above. Everything computed from it is approximate (`add`, `mul`, `div` and `pow` all check first), and it never equals an exact value: `~1.5` is not `3/2`. The DSL compiles `~x` to the literal followed by the opcode `APPROX` (0x16), which the evaluator turns into an `Approx` (`src/binary-evaluator.js:562`).
+An approximate value comes from `~` in an expression (`base.f * ~1.4983`, see [Approximate numbers](/reference/expressions/syntax#approximate-numbers)) or from a fallback above. Everything computed from it is approximate (`add`, `mul`, `div` and `pow` all check first), and it never equals an exact value: `~1.5` is not `3/2`. The DSL compiles `~x` to the literal followed by the opcode `APPROX` (0x16), which the evaluator turns into an `Approx` (`src/binary-evaluator.js:579`).
 
 ## In the evaluator
 
 - **The stack** holds pooled `Fraction`s for rational values and immutable `Irrational` / `Approx` objects otherwise. `ADD`, `SUB`, `MUL`, `DIV` and `NEG` take the old fraction path when both operands are rational, and the exact module otherwise. A pooled Fraction is copied out of the pool before an exact value keeps it, because the pool reuses its objects.
-- **`POW`** (`src/binary-evaluator.js:550`) calls `pow()` and pushes whatever kind it returns.
+- **`POW`** (`src/binary-evaluator.js:567`) calls `pow()` and pushes whatever kind it returns.
 - **Records** keep, for each variable, a `Fraction` in the usual field (`record.frequency`) and the exact value in `record.exact.frequency` when it is not rational (`createEvaluationRecord()`, `src/binary-evaluator.js:34`). The Fraction is the **shadow**: the value itself when rational, the approximation when approximate, and the exact binary value of the nearest double when irrational (`shadow()`, `src/value/exact.js:229`). `record.approxFlags` has a bit per approximate variable.
-- **References read the exact value** (`recordValue()`, `src/binary-evaluator.js:63`), so a dependent is computed from `263 * 2^(7/12)`, never from its shadow. `evaluate()` still returns a Fraction (the shadow), with the exact value in `_lastExact` (`src/binary-evaluator.js:600`); `Note.getExactVariable(name)` (`src/note.js:230`) gives the exact value of an evaluated note.
+- **References read the exact value** (`recordValue()`, `src/binary-evaluator.js:63`), so a dependent is computed from `263 * 2^(7/12)`, never from its shadow. `evaluate()` still returns a Fraction (the shadow), with the exact value in `_lastExact` (`src/binary-evaluator.js:617`); `Note.getExactVariable(name)` (`src/note.js:230`) gives the exact value of an evaluated note.
 
 ## Where numbers leave
 
@@ -73,13 +73,13 @@ Evaluate to BaseNote, Evaluate Module, re-anchoring a moved note, Liberate, the 
 
 ## The flags and the hatching
 
-The `CORRUPT` bitmask (`src/binary-note.js:63-70`) has a bit per variable (`0x01` start … `0x20` release). A variable's bit is set when **its own expression** makes a non-exact value: an irrational power (`src/binary-evaluator.js:557`), a `~` literal (`src/binary-evaluator.js:567`), a division by zero (`src/binary-evaluator.js:533`), or an approximation of the exact algebra (`pushResult()`, `src/binary-evaluator.js:373`). A note that only *reads* such a value gets no bit of its own; the dependency graph reports it transitively.
+The `CORRUPT` bitmask (`src/binary-note.js:73-80`) has a bit per variable (`0x01` start … `0x20` release). A variable's bit is set when **its own expression** makes a non-exact value: an irrational power (`src/binary-evaluator.js:574`), a `~` literal (`src/binary-evaluator.js:584`), a division by zero (`src/binary-evaluator.js:550`), or an approximation of the exact algebra (`pushResult()`, `src/binary-evaluator.js:383`). A note that only *reads* such a value gets no bit of its own; the dependency graph reports it transitively.
 
 ```
 POW makes an irrational, or ~ / a fallback makes an approximation
   → BinaryEvaluator._lastEvalWasCorrupted = true
-  → evaluateVariable() ORs the variable's bit into corruptionFlags   binary-evaluator.js:830
-  → Module._updateCorruptionFlags()                                  module.js:777
+  → evaluateVariable() ORs the variable's bit into corruptionFlags   binary-evaluator.js:847
+  → Module._updateCorruptionFlags()                                  module.js:778
       → DependencyGraph.setCorruptionFlags(id, flags)                dependency-graph.js:1746
   → RendererAdapter.sync() → a_corruptionType per note               renderer.js:1015
   → the shader hatches the note

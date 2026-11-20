@@ -244,7 +244,7 @@ evaluator, held to the JavaScript one by a parity test. You do not need it to de
 - In a browser the default is the **WASM** evaluator. At boot `initWasm()` fetches and instantiates
   the binary (about 115 KB gzipped). Each `Module` usually exists before the core is ready, so it
   starts on JavaScript and hot-swaps to WASM when the core is ready
-  (`Module._upgradeEvaluators`, `src/module.js:214`). Both give the same records.
+  (`Module._upgradeEvaluators`, `src/module.js:215`). Both give the same records.
 - `?evaluator=js` keeps the JavaScript evaluator and skips the fetch. If the core fails to load,
   JavaScript stays (`WASM_CONFIG.fallbackOnError`).
 - In Node (tests, benches) the JavaScript evaluator runs unless a script calls `initWasm()`, sets

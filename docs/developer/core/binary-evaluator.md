@@ -77,7 +77,7 @@ Step 3 is the inheritance rule users feel: `[5].a` on a note with no amplitude y
 | `attack` | `0` |
 | `release` | `0` |
 
-(`UNRESOLVED_DEFAULTS`, `binary-evaluator.js:29`, pushed by `pushDefault()` at `:324`.) The default is no longer silent. `evaluate()` records every reference it replaced in `_lastEvalUnresolved`, and module evaluation reports them once per batch, naming both ends and the reason (`reportProblems()`, `:854`):
+(`UNRESOLVED_DEFAULTS`, `binary-evaluator.js:29`, pushed by `pushDefault()` at `:334`.) The default is no longer silent. `evaluate()` records every reference it replaced in `_lastEvalUnresolved`, and module evaluation reports them once per batch, naming both ends and the reason (`reportProblems()`, `:871`):
 
 ```
 Unresolved reference! A hard-coded default was used instead:
@@ -97,7 +97,7 @@ Delete a note and its dependents evaluate against these defaults — a dependent
 | Situation | What happens |
 |---|---|
 | `DIV` with a zero divisor | `console.warn('Division by zero in binary evaluator, using 1')`, pushes an **approximate** `1`, **and sets the corruption flag** for the property being evaluated — the note crosshatches, same path as an irrational `POW` (`:526-541`) |
-| `APPROX` (after a constant: `~261.63`) | pushes the constant as an approximate value and sets the corruption flag (`src/binary-evaluator.js:562`) |
+| `APPROX` (after a constant: `~261.63`) | pushes the constant as an approximate value and sets the corruption flag (`src/binary-evaluator.js:579`) |
 | Stack depth ≠ 1 at the end | `console.warn('Stack has N items after evaluation, expected 1')`, returns the top (`:591-593`) |
 | `pop()` on an empty stack | throws `Stack underflow in binary evaluator` (`:294-300`) |
 | `peek()` on an empty stack | throws `Stack empty in binary evaluator` |
@@ -107,7 +107,7 @@ Delete a note and its dependents evaluate against these defaults — a dependent
 
 ## `POW` and corruption
 
-`OP.POW` (`src/binary-evaluator.js:550`) is the only place a value can leave the rationals, and it does so **exactly**. It calls `pow()` in `src/value/exact.js` (`src/value/exact.js:356`), which returns one of three kinds of value:
+`OP.POW` (`src/binary-evaluator.js:567`) is the only place a value can leave the rationals, and it does so **exactly**. It calls `pow()` in `src/value/exact.js` (`src/value/exact.js:356`), which returns one of three kinds of value:
 
 | Kind | What it is | Example |
 |---|---|---|
@@ -119,7 +119,7 @@ The stack holds pooled `Fraction`s for rational values and these immutable objec
 
 `_lastEvalWasCorrupted` is set when the power is irrational (the note's own expression makes a tempered value) and when the evaluation makes an approximation itself (a division by zero, which also evaluates to 1 as before). It becomes the variable's `corruptionFlags` bit, as before, so the hatching is unchanged. A note that only *reads* a tempered value gets no bit of its own; the dependency graph reports it transitively, as before.
 
-`evaluate()` still returns a `Fraction`: for a value that is not rational, the **shadow**, its nearest double as an exact Fraction (`shadow()`, `src/value/exact.js:229`), with the exact value in `_lastExact` (`src/binary-evaluator.js:600`). `evaluateVariable()` stores both: the shadow in the record's field (`record.frequency`), the exact value in `record.exact.frequency` (`src/binary-evaluator.js:815`), and a bit in `record.approxFlags` when it is approximate. References read the exact value first (`recordValue()`, `src/binary-evaluator.js:63`), so dependents compute from exact values, never from shadows. Drawing, sound and MIDI read the shadow through `toNumber()`, which gives the same double as `toNumber(exact)`.
+`evaluate()` still returns a `Fraction`: for a value that is not rational, the **shadow**, its nearest double as an exact Fraction (`shadow()`, `src/value/exact.js:229`), with the exact value in `_lastExact` (`src/binary-evaluator.js:617`). `evaluateVariable()` stores both: the shadow in the record's field (`record.frequency`), the exact value in `record.exact.frequency` (`src/binary-evaluator.js:832`), and a bit in `record.approxFlags` when it is approximate. References read the exact value first (`recordValue()`, `src/binary-evaluator.js:63`), so dependents compute from exact values, never from shadows. Drawing, sound and MIDI read the shadow through `toNumber()`, which gives the same double as `toNumber(exact)`.
 
 Verified against the running VM:
 
@@ -174,7 +174,7 @@ workingCache.set(note.id, result);   // :1281-1282
 There used to be one. An expression that read a variable *later* in it got the hard-coded default, or whatever the note had evaluated to last time — a BaseNote variable computed from 440, then from the previous frequency after every edit. The list survives as `VAR_ORDER` (`:22`: frequency, startTime, duration, amplitude, attack, release), but only as the order in which the walk *starts*; anything a variable reads is evaluated ahead of it.
 :::
 
-After each variable, if `_lastEvalWasCorrupted` was set by a `POW`, the matching bit is OR-ed into `corruptionFlags` (`:829-831`). The bits are the `CORRUPT` mask from `src/binary-note.js:63-70`, `1 << varIndex`: `startTime 0x01`, `duration 0x02`, `frequency 0x04`, `amplitude 0x08`, `attack 0x10`, `release 0x20`.
+After each variable, if `_lastEvalWasCorrupted` was set by a `POW`, the matching bit is OR-ed into `corruptionFlags` (`:829-831`). The bits are the `CORRUPT` mask from `src/binary-note.js:73-80`, `1 << varIndex`: `startTime 0x01`, `duration 0x02`, `frequency 0x04`, `amplitude 0x08`, `attack 0x10`, `release 0x20`.
 
 ### No computed measure length
 
@@ -196,9 +196,9 @@ Fields: `graph`, `evaluator`, `dirty` (a `Set`), `cache` (`Map<noteId, result>`)
 | `evaluateDirty()` (`:1022`) | `beginBatch()` → a blank record for every dirty note → `evaluateVariables()` → `reportProblems()` → clear dirty → return the cache |
 | `getEvaluatedNote(id)`, `isCacheValid()` | accessors |
 
-`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` (`src/module.js:326-328`) uses it for dependents whose *values* changed but whose *bytecode* did not, and so does the batch path (`src/module.js:401-404`). Both the JavaScript and the WASM incremental evaluators have it. Before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
+`markDirtyOnly()` is the one to know about. `Module.markNoteDirty()` (`src/module.js:327-329`) uses it for dependents whose *values* changed but whose *bytecode* did not, and so does the batch path (`src/module.js:402-405`). Both the JavaScript and the WASM incremental evaluators have it. Before it existed, `module.js` guarded the call with a `typeof === 'function'` check, so on the JS path **editing the BaseNote never re-evaluated its indirect dependents**.
 
-**One walk per dirty cycle.** `Module.markNoteDirty()` marks a note and every transitive dependent. Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a walk of the same dirty cycle now only re-registers its own bytecode: `Module._dirtyClosed` (`src/module.js:152`, checked at `src/module.js:304`) remembers them, and is cleared whenever the dirty set is. Before, a commit in the middle of `chain-1000` ran 501 walks over 125,000 notes. `scripts/test-dirty-marking.mjs` checks one walk per cycle and values equal to a reload's. Both engines behave this way.
+**One walk per dirty cycle.** `Module.markNoteDirty()` marks a note and every transitive dependent. Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a walk of the same dirty cycle now only re-registers its own bytecode: `Module._dirtyClosed` (`src/module.js:153`, checked at `src/module.js:305`) remembers them, and is cleared whenever the dirty set is. Before, a commit in the middle of `chain-1000` ran 501 walks over 125,000 notes. `scripts/test-dirty-marking.mjs` checks one walk per cycle and values equal to a reload's. Both engines behave this way.
 
 Dirty tracking stays **per note**: a change to any expression of a note re-evaluates all of that note and of every note downstream. That is a superset of what strictly has to change, and it is what keeps the dirty set one cheap graph walk. Only the *order* is per variable.
 
@@ -214,7 +214,7 @@ What a variable reads comes from `src/variable-deps.js`, the one place that stat
 
 | A variable reads… | Resolved by |
 |---|---|
-| every `LOAD_REF` / `LOAD_BASE` in its bytecode, `base.x` being note 0 | `BinaryExpression.getVariableRefs()` (`binary-note.js:304`), decoded once per expression |
+| every `LOAD_REF` / `LOAD_BASE` in its bytecode, `base.x` being note 0 | `BinaryExpression.getVariableRefs()` (`binary-note.js:332`), decoded once per expression |
 | the BaseNote's variable instead, when the reference is to an `amplitude`, `attack` or `release` the named note does not define (indices `>= FIRST_INTERPRETATION_VAR`) | `resolveVariableRef()` (`variable-deps.js:81`) |
 | nothing schedulable, when no note defines it — `evaluate()` falls back to the default and reports it | — |
 
@@ -245,7 +245,7 @@ It does **not** throw, and the loop still gets values. Because the order inside 
 Cycles are meant to be prevented upstream, by `validateExpression()` in `src/modals/validation.js`, which uses the same per-variable rule — see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable).
 
 ::: info The WASM path orders the same way
-The Rust `PersistentEvaluator` evaluates a batch per (note, variable) with Tarjan's strongly connected components, exactly as `evaluateVariables()` does here (`rust/src/evaluator.rs:498`). It does not print: it hands cycles and unresolved references to the JavaScript side, which reports them through this evaluator's `reportProblems()`, so the messages are the same. `scripts/test-wasm-parity.mjs` compares the two engines' records exactly.
+The Rust `PersistentEvaluator` evaluates a batch per (note, variable) with Tarjan's strongly connected components, exactly as `evaluateVariables()` does here (`rust/src/evaluator.rs:489`). It does not print: it hands cycles and unresolved references to the JavaScript side, which reports them through this evaluator's `reportProblems()`, so the messages are the same. `scripts/test-wasm-parity.mjs` compares the two engines' records exactly.
 :::
 
 ## From corruption flag to pixels
@@ -254,9 +254,9 @@ This is the whole point of tracking corruption, and it crosses four files:
 
 ```
 POW produces an irrational, or ~ / a fallback an approximation
-  → BinaryEvaluator._lastEvalWasCorrupted = true          binary-evaluator.js:557
+  → BinaryEvaluator._lastEvalWasCorrupted = true          binary-evaluator.js:574
   → evaluateVariable ORs the property's bit into corruptionFlags   :830
-  → Module._updateCorruptionFlags() pushes it into the graph   module.js:777-800
+  → Module._updateCorruptionFlags() pushes it into the graph   module.js:778-801
       → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1746
   → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:1015-1062
       0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
@@ -296,14 +296,14 @@ Two costs matter now. **Depth** decides how much of the module a commit touches 
 | Fraction pool (evaluator) | 256, doubles when exhausted | `:178` (class default is 128, `:88`) |
 | Fraction backing | `fraction.js@5.3.4` — `n`/`d`/`s` are **BigInt**, arbitrary precision | `node_modules/fraction.js` |
 | POW exponent cap | integer exponent ≤ **65536**, result ≤ **~1 Mbit** per component; beyond, approximate | `src/value/exact.js:33-34` |
-| Note id in bytecode | `u16` → max **65535** | `binary-note.js:129` |
-| Note id accepted anywhere | integer `0 … 65535` — enforced by the loader **and the DSL parser** (and by the converter of the retired method-chain syntax) | `module.js:954`, `dsl/parser.js:284` |
+| Note id in bytecode | `LOAD_REF` holds a `u16` (ids to 65535); `LOAD_REF_WIDE` a `u32` (ids 65536 to **16,777,215**) | `binary-note.js:21-23` |
+| Note id accepted anywhere | integer `0 … 16777215` (`MAX_NOTE_ID`) — enforced by the loader **and the DSL parser** (and by the converter of the retired method-chain syntax) | `module.js:955`, `dsl/parser.js:283` |
 
 ::: tip Arbitrary precision, end to end
 fraction.js 5.x is BigInt-backed, so exact rational arithmetic survives **any depth** of module tree: a 200-note `(3/2)` chain evaluates to its exact 98-digit numerator, and `(81/80)^400` is exact (see the `comma-chain-400` stress shape). `scripts/test-exactness.mjs` (part of `npm test`) locks this in: compile → evaluate → decompile → save → load → re-evaluate must reproduce every digit. Irrational powers are exact too (`2^(7/12)` stays that power). The only approximations are the *marked* ones — a `~` number, the documented fallbacks of the exact algebra, a division by zero — and the float boundary `toNumber()` where values leave for GL, Web Audio, and display.
 :::
 
-Note ids above 65 535 used to silently truncate to a different note in the compilers ([70000] bound to note 4464); the DSL parser now rejects them at compile time with the same 0…65535 range the JSON loader enforces.
+Note ids above 65 535 used to silently truncate to a different note in the compilers ([70000] bound to note 4464). Ids now go to 16,777,215 (`LOAD_REF_WIDE` carries those above 65535), and the DSL parser rejects anything outside 0…16777215 at compile time, the same range the JSON loader enforces.
 
 ## See also
 

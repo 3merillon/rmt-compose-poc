@@ -169,7 +169,7 @@ codebase has already paid for these lessons; do not re-introduce them.
 | Pattern | Where | Why |
 |---|---|---|
 | The `note.variables` Proxy is **memoized per note** | `src/note.js:478-485` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame. |
-| Dependency re-registration is skipped by key | `src/module.js:253-284` — `_depsRegKey` = `generation:id:epoch` | `markNoteDirty` registers every marked note. The key skips rewriting ~15 graph maps for notes whose expressions did not change. |
+| Dependency re-registration is skipped by key | `src/module.js:254-285` — `_depsRegKey` = `generation:id:epoch` | `markNoteDirty` registers every marked note. The key skips rewriting ~15 graph maps for notes whose expressions did not change. |
 | The compile cache is LRU-capped at **4000** | `src/expression-compiler.js:22` | Every drag commit mints a fresh fraction string, so an uncapped cache grows without bound across a session. |
 | Per-gesture state is built **once**, not per pointermove | `workspace.js`, `renderer.setDragOffsetPreview`, `setDragOverlay` | Rebuilding the moving-id set every move made allocation scale with dependent count and triggered mid-drag GC hitches. Identity-check the incoming Set and short-circuit. |
 | Keep overlay work **O(visible), not O(module)** | `renderer.js` viewport cull | This is what makes 100,000 notes tractable. |
