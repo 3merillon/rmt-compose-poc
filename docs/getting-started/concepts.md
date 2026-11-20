@@ -1,11 +1,11 @@
 ---
 title: Core Concepts
-description: The BaseNote, exact ratios, expressions, dependencies, modules and the ≈ symbol — the six ideas RMT Compose is built on.
+description: The BaseNote, exact ratios, expressions, dependencies, measure bars, modules and the ≈ symbol — the ideas RMT Compose is built on.
 ---
 
 # Core Concepts
 
-Six ideas carry the whole tool: the **BaseNote**, **ratios**, **expressions**, **dependencies**, **modules**, and the **≈ symbol**.
+A handful of ideas carry the whole tool: the **BaseNote**, **ratios**, **expressions**, **dependencies**, **measure bars**, **modules**, and the **≈ symbol**.
 
 ## Relative music theory
 
@@ -15,10 +15,11 @@ Musical relationships are ratios. RMT Compose takes that literally: nothing is s
 
 **Relative:** the BaseNote is *whatever you say it is*. The note above it is `base.f * (3/2)`. The fifth is explicit, and exactly a fifth.
 
-That buys you three things:
+That buys you four things:
 
 - **Pure intervals.** 3/2 is stored as the fraction 3/2 and evaluated as a fraction. It never becomes 1.5000001.
 - **One-edit transposition.** Change the base frequency; everything defined against it moves, in tune.
+- **Time works the same way.** Starts and lengths are relationships too, so changing one note's duration can stretch everything built on it.
 - **Tunings as arithmetic.** `2^(1/12)` is a 12-TET semitone. `3^(1/13)` is a Bohlen-Pierce step. No special mode required.
 
 ## The BaseNote
@@ -29,32 +30,29 @@ Every module has one **BaseNote** — note id 0, drawn as the orange circle. It 
 |----------|-----------|------------|--------------|
 | `frequency` | `f` | Reference frequency in Hz | 440 |
 | `startTime` | `t` | Reference start time in seconds | 0 |
-| `tempo` | `tempo` | Beats per minute | 60 |
-| `beatsPerMeasure` | `bpm` | Beats in a measure | 4 |
-| `measureLength` | `ml` | Length of a measure in seconds | derived: `60 / tempo × beatsPerMeasure` |
+| `duration` | `d` | Reference length in seconds — the **time unit** | 1 |
 
 ::: info Defaults vs. the default module
-The table's right-hand column is what a module gets when it is constructed with no JSON. The **default module the app boots with** overrides them: **frequency 263, startTime 0, tempo 100, beatsPerMeasure 4**. That is what a new user actually sees, and it is what the examples on this page use.
+The table's right-hand column is what a module gets when it is constructed with no JSON. The **default module the app boots with** overrides them: **frequency 263, startTime 0, duration 3/5** (a time unit of 0.6 s, which the note widget shows as 100 BPM). That is what a new user actually sees, and it is what the examples on this page use.
 :::
 
-**The BaseNote has no `duration`.** It is a reference point, not a sounding note — `base.d` resolves to nothing. When you want a length in terms of the BaseNote's tempo, use `beat(base)`.
+### Every value is a relation; only the BaseNote is absolute
+
+A note has three **language variables**: `frequency` (`f`), `startTime` (`t`) and `duration` (`d`). Each one is an exact expression relating the note to other notes. The BaseNote holds the only absolute values in the module: a frequency in hertz, and a start and a duration in seconds.
+
+### The time unit
+
+`base.d` is the **time unit**: one beat, if you count in beats. A quarter note is `base.d`, an eighth is `base.d * (1/2)`, and a note of three units is `base.d * 3`. Change the BaseNote's duration and every length written this way changes with it.
+
+There is no stored tempo. The BaseNote's duration row in the [note widget](/user-guide/interface/variable-widget) shows `60 / base.d` beside the value, for example "= 100 BPM", as a read-only view. To change the pace, edit the duration. See [the time unit](/reference/properties/duration#the-time-unit).
 
 Every other note can reference it:
 
 ```
 base.f * (3/2)      # a perfect fifth above the base
 base.t              # start when the BaseNote starts
-beat(base) * 2      # two beats long, at the BaseNote's tempo
+base.d * 2          # two time units long
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.baseNote.getVariable('startTime')
-```
-</details>
 
 ::: tip Think of it as a capo
 The BaseNote is a capo. It sets where everything sits; the shapes above it don't change.
@@ -85,7 +83,7 @@ Compare a fifth in two systems:
 
 The difference is small and audible. The just fifth locks; the tempered one beats slightly.
 
-RMT Compose stores ratios with [fraction.js](https://github.com/rawify/Fraction.js), so a 3/2 is kept as the numerator/denominator pair **3, 2** — an exact rational — rather than a float. Arithmetic on rationals stays rational and stays exact. (Irrational values, like a TET step, are a separate case; see [the ≈ symbol](#the-symbol-approximation) below.)
+RMT Compose stores ratios with [fraction.js](https://github.com/rawify/Fraction.js), so a 3/2 is kept as the numerator/denominator pair **3, 2** — an exact rational — rather than a float. Arithmetic on rationals stays rational and stays exact. (Irrational values, like a TET step, are kept exact as powers; see [the ≈ symbol](#the-symbol-approximation) below.)
 
 ## Expressions
 
@@ -118,9 +116,8 @@ Every property has a short form, and that short form is what the app writes:
 | frequency | `f`, `freq`, `frequency` |
 | startTime | `t`, `s`, `start`, `startTime` |
 | duration | `d`, `dur`, `duration` |
-| tempo | `tempo` |
-| beatsPerMeasure | `bpm`, `beatsPerMeasure` |
-| measureLength | `ml`, `measureLength` |
+
+Two further variables are not part of the notation: `amplitude` (`a`), and `attack` and `release` (`atk`, `rel`). See [Interpretation variables](#interpretation-variables).
 
 ### Operations
 
@@ -129,40 +126,17 @@ Every property has a short form, and that short form is what the app writes:
 | Add | `+` | `[3].t + [3].d` |
 | Subtract | `-` | `[3].t - (1/4)` |
 | Multiply | `*` | `base.f * (3/2)` |
-| Divide | `/` | `beat(base) / 2` |
+| Divide | `/` | `base.d / 2` |
 | Power | `^` | `2^(1/12)` |
 | Negate | `-` (prefix) | `-base.f` |
 
 Precedence runs `+ -` loosest, then `* /`, then unary minus, then `^` tightest. `^` is right-associative, so `[1].f * 2^(1/12)` means `[1].f * (2^(1/12))` — exactly what you want when writing a TET step.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+### No functions
 
-| Operation | Syntax |
-|-----------|--------|
-| Add | `.add(x)` |
-| Subtract | `.sub(x)` |
-| Multiply | `.mul(x)` |
-| Divide | `.div(x)` |
-| Power | `.pow(x)` |
-| Negate | `.neg()` |
-</details>
+The language has no functions. Older versions had `beat()`, `tempo()` and `measure()`; they are gone, along with the `tempo`, `beatsPerMeasure` and `measureLength` variables. Typing one is refused with a message naming the replacement: `base.d` for `beat(base)`, and `[N].d` for the length of note N. See [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions).
 
-### Helper functions
-
-There are exactly three, and each takes a bare note reference (`base` or `[N]`) — not an expression.
-
-| Call | Meaning |
-|------|---------|
-| `beat(x)` | one beat of x's tempo, in seconds — i.e. `60 / tempo(x)` |
-| `tempo(x)` | x's tempo |
-| `measure(x)` | x's measure length, in seconds |
-
-`beat(base)` is the idiom for durations. A quarter note is `beat(base)`; a dotted eighth is `beat(base) * (3/4)`; a whole measure is `beat(base) * base.bpm`.
-
-::: info `tempo()` and `measure()` are input sugar
-They compile to the same bytecode as `x.tempo` and `x.ml`, and that is how they come back when you re-open the note. Only `beat()` survives a save as-is. Comments (`#` to end of line) are dropped on save too.
-:::
+A quarter note is `base.d`; a dotted eighth is `base.d * (3/4)`; a whole measure of four is `base.d * 4`.
 
 ## Dependencies
 
@@ -199,9 +173,45 @@ The app refuses the edit and tells you why: the reason appears in red under the 
 
 ## Silences
 
-A note with a **start time** and a **duration** but **no frequency** is a **silence**. It occupies time and nothing else, and it draws as a dark rectangle with a dashed border. You create one by choosing **Silence** instead of **Note** in the [Note Widget](/user-guide/interface/variable-widget)'s **ADD NOTE / SILENCE** section — the frequency field disappears.
+A note with a **start time** and a **duration** but **no frequency** is a **silence**. It occupies time and nothing else, and it draws as a dark rectangle with a dashed border. You create one by choosing **Silence** instead of **Note** in the [Note Widget](/user-guide/interface/variable-widget)'s **ADD NOTE / SILENCE / REFERENCE** section — the frequency field disappears.
 
 Silences are still full participants in the dependency graph: other notes can hang their start times off a silence's end. See [Creating Notes](/user-guide/notes/creating-notes).
+
+## References and key changes
+
+A note with a **frequency** and **no duration** never sounds: it is something the other notes relate to.
+With no start time it is a **reference**, a pitch outside time: the tonic, the key, the root of a chord.
+With a start time it is a **key change**: from that moment on, this is the reference. The editor draws a
+reference as a long-dashed line across the whole workspace at its pitch, and a key change as the same
+line from its start on, each labelled with its id. Notes hang from them like from any note, so
+`(3/2) * [1].f` is the fifth of the tonic in note 1, and moving the tonic moves everything written
+from it. Create one by choosing **Reference** or **Key change** in the Note Widget's add section.
+
+A key or a chord root therefore no longer has to be carried by a note that sounds.
+
+## Measure bars
+
+A **measure bar** is a silent note with a start and a duration, no frequency, and the flag `"measure": true` in the saved file. It is a note like any other: its start and length are expressions, and other notes can depend on them.
+
+The editor draws bars as dashed lines with triangles, never as rests. A silent note without the flag is a silence; a note with only a start is a plain marker, not a bar.
+
+Bars chain. The first bar starts at `base.t` and lasts `base.d * 4`. Each next bar starts where the one before it ends and, unless you change it, is as long:
+
+```
+[1].t + [1].d       # bar 2: starts when bar 1 ends
+[1].d               # bar 2: the same length as bar 1
+```
+
+A meter change is one bar's duration; the bars after it follow. Notes attach to a bar through `[bar].t` and `[bar].d * (1/4)`. See [Measures](/tutorials/intermediate/measures) and [Measure bars](/reference/module-schema#measure-bars).
+
+## Interpretation variables
+
+`amplitude` (`a`), `attack` (`atk`) and `release` (`rel`) are not part of the notation. They say how a note is played, not where it sits in pitch or time. They are the only variables that fall back to the BaseNote when a note does not set them.
+
+- `amplitude` is a relative gain, default 1.
+- `attack` and `release` are **shares of the note's own duration**, such as `1/8`. The attack counts from the note's start (clamped to 0–1); the release counts from the note's end, because the end of a note is a lifted key and the sound rings after it (clamped to 0–4). When neither the note nor the BaseNote sets one, the instrument's own envelope applies.
+
+See [attack and release](/reference/properties/attack-release).
 
 ## Transposition arrows
 
@@ -224,15 +234,14 @@ A **module** is a collection of notes: a whole composition, or a reusable fragme
   "baseNote": {
     "frequency": "263",
     "startTime": "0",
-    "tempo": "100",
-    "beatsPerMeasure": "4"
+    "duration": "3/5"
   },
   "notes": [
     {
       "id": 1,
       "frequency": "base.f",
       "startTime": "base.t",
-      "duration": "beat(base) * 2",
+      "duration": "base.d * 2",
       "color": "rgba(255, 100, 100, 0.7)",
       "instrument": "sine-wave"
     },
@@ -240,44 +249,22 @@ A **module** is a collection of notes: a whole composition, or a reusable fragme
       "id": 2,
       "frequency": "(5/4) * [1].f",
       "startTime": "[1].t",
-      "duration": "beat(base) * 2"
+      "duration": "base.d * 2"
     },
     {
       "id": 3,
       "startTime": "[1].t + [1].d",
-      "duration": "beat(base)"
+      "duration": "base.d"
     }
   ]
 }
 ```
 
-Note 2 is a major third above note 1 — defined against *note 1*, not against the base. Note 3 has no `frequency`: it is a silence.
-
-<details>
-<summary>Legacy JavaScript syntax (still loads)</summary>
-
-```json
-{
-  "baseNote": {
-    "frequency": "new Fraction(263)",
-    "startTime": "new Fraction(0)"
-  },
-  "notes": [
-    {
-      "id": 1,
-      "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))",
-      "startTime": "module.baseNote.getVariable('startTime')"
-    }
-  ]
-}
-```
-
-Modules are saved in the current syntax. A legacy file loads fine and is rewritten on the next save.
-</details>
+Note 2 is a major third above note 1 — defined against *note 1*, not against the base. Note 3 has no `frequency`: it is a silence. All three lengths are written in time units, so editing the BaseNote's `duration` changes the pace of the whole module.
 
 ### The module library
 
-The [module bar](/user-guide/interface/module-bar) under the top bar ships **79 modules** in six sections:
+The [module bar](/user-guide/interface/module-bar) under the top bar ships **81 modules** in six sections:
 
 | Section | Count | Contents |
 |---------|-------|----------|
@@ -286,9 +273,9 @@ The [module bar](/user-guide/interface/module-bar) under the top bar ships **79 
 | **Progressions** | 8 | Four progressions (V7–I, ii–V–I, I–IV–V–I, I–vi–IV–V) and four cadences |
 | **Melodies** | 7 | Public-domain tunes: Ode to Joy, Twinkle Twinkle, Frère Jacques, Amazing Grace, Greensleeves, Bach Minuet in G, Scarborough Fair |
 | **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 1 | Where your own modules land. Ships with `canon base`. |
+| **Custom** | 3 | Where your own modules land. Ships with the canon per tonos: `canon` (the whole piece), `canon base` and `canon melody`. |
 
-Every module in the library is **relational and self-contained** — no expression refers to anything outside its own file. That is what lets you **drag a module onto any note** and have it re-root there: its `base.f` references become that note's frequency, its `base.t` references become that note's start time, and the internal structure survives intact. Drop the ii–V–I onto a note a fourth up and you get the same progression, a fourth up.
+Every module in the library is **relational and self-contained** — no expression refers to anything outside its own file. That is what lets you **drag a module onto any note** and have it re-root there: its `base.f` and `base.t` references become that note's frequency and start time, and the internal structure survives intact. Its `base.d` stays `base.d`: the module keeps its rhythm in time units and plays at your workspace's pace, whatever the length of the note you drop it on. Drop the ii–V–I onto a note a fourth up and you get the same progression, a fourth up.
 
 [The Module Library](/user-guide/modules/module-library) lists every module and how to search them.
 
@@ -302,29 +289,29 @@ See [Saving Modules](/user-guide/modules/saving-modules).
 
 ## The ≈ symbol (approximation) {#the-symbol-approximation}
 
-Some values display with a leading **≈**. That means the value is **irrational** — it cannot be written as an exact fraction.
+A value is one of three kinds. A **rational** value is an exact fraction (3/2). An **irrational** value is exact but not a fraction: it is kept as a power, like `2^(7/12)`. An **approximate** value is a number that stands for a value it is not exactly, like a measured `~261.63`. A leading **≈** in the note widget means only one thing: the value is approximate.
 
 ### When does that happen?
 
-Equal temperament. A 12-TET semitone is:
+Equal temperament produces irrational values. A 12-TET semitone is:
 
 ```
-2^(1/12)            # ≈ 1.0594630943...
+2^(1/12)            # 1.0594630943...
 ```
 
-There is no fraction that equals it. RMT Compose calls such a value **corrupted** — not broken, just no longer exact — and marks it everywhere it appears.
+There is no fraction that equals it, so RMT Compose keeps it as the power it is. Everything computed from it stays exact: twelve semitones multiply to exactly 2, so the 12-TET octave is exactly 2. A value becomes approximate only when you write it with `~`, or when an operation cannot be kept exact (a division by a sum of irrational terms, a division by zero). See [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
 
-### How corruption is shown
+### How it is shown
 
-- In the note widget, the **frequency** value is prefixed with **≈** and shown in italic amber — whether the note is corrupted directly or through something it depends on.
-- On the canvas, the note is **hatched**, and the hatch pattern tells you which:
+- In the note widget, an irrational value shows its exact form and its value, for example `(263/4) * 2^(1/4) = 78.190368…`. An approximate value shows `≈493.12500`. A rational value shows its fraction, also when a tempered chain lands on one.
+- On the canvas, the note's label shows the same kind: a fraction (`3/2`), a power (`2^(7/12)`), or `≈` with a rounded fraction for an approximate note (or an exact fraction too long for the label). The note is **hatched** when it is tempered or approximate (not a pure ratio), and the hatch pattern tells you which:
 
 | Hatching | Meaning |
 |----------|---------|
-| **Crosshatch** (both diagonals) | **Directly** corrupted — this note's own expression contains an irrational power |
-| **Single diagonal hatch** | **Transitively** corrupted — the note is clean itself, but something it depends on isn't |
+| **Crosshatch** (both diagonals) | This note's own expression contains an irrational power, a `~` number or a division by zero |
+| **Single diagonal hatch** | The note is pure itself, but something it depends on is tempered or approximate |
 
-Not every `^` corrupts. `4^(1/2)` is 2 — a perfect root, so the result is rational and the note stays clean. Only genuinely irrational powers corrupt.
+The app's internal word for the hatched state is *corrupted*; nothing is broken. Not every `^` hatches: `4^(1/2)` is exactly 2, a perfect root, so the result is rational and the note stays clean.
 
 ### Symbolic simplification
 
@@ -336,15 +323,15 @@ When you save an expression, RMT Compose simplifies it algebraically, and it mer
 4^(1/2) * base.f                 ->   2 * base.f
 ```
 
-So two semitones up stays a single exact symbolic step of `2^(1/6)`, rather than degenerating into a stack of floats. The **stored form** keeps its algebraic structure; the **displayed value** is a rational approximation of it, and the ≈ is there to remind you of the difference.
+So two semitones up stays a single exact step of `2^(1/6)`. Evaluation keeps the same exact form, so nothing is rounded along the way.
 
 ### Just intonation vs equal temperament
 
 | | Just intonation | Equal temperament |
 |--|-----------------|-------------------|
-| Ratios | exact fractions (3/2) | irrational powers (2^(7/12)) |
+| Ratios | exact fractions (3/2) | exact irrational powers (2^(7/12)) |
 | Sound | pure, locked | a compromise that works in every key |
-| Display | no marking | ≈, and hatching on the note |
+| Display | no marking | hatching on the note |
 
 [Pure Ratios](/user-guide/tuning/ratios) and [Equal Temperament](/user-guide/tuning/equal-temperament) go further into both.
 
@@ -352,17 +339,19 @@ So two semitones up stays a single exact symbolic step of `2^(1/6)`, rather than
 
 | Concept | In one line |
 |---------|-------------|
-| **BaseNote** | Note 0. Silent. The reference every ratio is measured from. |
+| **BaseNote** | Note 0. Silent. The only absolute values: a frequency in Hz, a start and a duration in seconds. |
+| **Time unit** | `base.d`. One beat, if you count in beats. |
 | **Ratio** | An exact fraction. 3/2 is a fifth. |
-| **Expression** | The text that defines a property: `base.f * (3/2)`, `beat(base)`, `[1].t + [1].d`. |
+| **Expression** | The text that defines a property: `base.f * (3/2)`, `base.d`, `[1].t + [1].d`. |
 | **Dependency** | One note referencing another. Change the parent, the child follows. |
 | **Silence** | A note with time but no frequency. |
+| **Measure bar** | A silent note flagged `measure`. Bars chain by `[p].t + [p].d`. |
 | **Module** | A collection of notes. Self-contained, so it can be dropped anywhere. |
-| **≈** | This value is irrational. The note is hatched on the canvas. |
+| **≈** | This value is approximate (written with `~`, or a fallback). Tempered and approximate notes are hatched on the canvas. |
 
 ## Next steps
 
-- [Your First Composition](/getting-started/first-composition) — put all six ideas on screen in five minutes
+- [Your First Composition](/getting-started/first-composition) — put the main ideas on screen in five minutes
 - [Expression syntax reference](/reference/expressions/syntax) — the complete language
 - [Dependencies](/user-guide/notes/dependencies) — the graph in detail
 - [Tutorials](/tutorials/) — hands-on

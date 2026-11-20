@@ -76,17 +76,6 @@ base.f * 3 ^ (4/13)      # 7   (585.2¢ — just 7/5 is 582.5¢)
 base.f * 3 ^ (7/13)      # 9   (1024.1¢ — just 9/5 is 1017.6¢)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// BP major chord (3:5:7)
-module.baseNote.getVariable('frequency')
-module.baseNote.getVariable('frequency').mul(new Fraction(3).pow(new Fraction(6, 13)))
-module.baseNote.getVariable('frequency').mul(new Fraction(3).pow(new Fraction(10, 13)))
-```
-</details>
-
 ::: tip Hear the just version too
 The library ships both chords as pure ratios. **Base-3 chord** (3:5:7:9) and **Base-5 chord** (5:7:9:11) are in the **Chords** section. Drop one next to a tempered BP chord and compare — the tempered one is a few cents off and beats very slowly.
 :::
@@ -113,17 +102,16 @@ The library's **Scale Systems** section ships a **Bohlen–Pierce** module (file
 |---|---|
 | Notes | 14 — thirteen steps plus the note you start on |
 | Base frequency | 440 Hz |
-| Tempo | 80 |
-| Beats per measure | 4 |
+| BaseNote duration (time unit) | `3/4` s, shown as 80 BPM |
 | Instrument | `sine-wave` |
-| Note duration | `beat(base) * (1/2)` |
+| Note duration | `base.d * (1/2)` |
 | Step | `[n].f * 3 ^ (1/13)` |
 
 Note 1 is `base.f`; every later note is the previous one times `3 ^ (1/13)`. Note 14 is therefore exactly three times note 1 — the tritave, not an octave. Listen for it: the scale closes somewhere your ear does not expect.
 
 To load it, drag the tile from **Scale Systems** (or search `bohlen`, `tritave` or `base-3` with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-All thirteen steps after the first show a **≈** prefix and cross-hatching, because `3^(k/13)` is irrational.
+All thirteen steps after the first are cross-hatched and labelled with their power, `3^(1/13)` … `3^(12/13)`, because `3^(k/13)` is irrational.
 
 ## Timbre matters more here than anywhere else
 
@@ -131,10 +119,10 @@ BP is a scale designed for odd-harmonic spectra. Play it on a timbre with strong
 
 Use an odd-harmonic voice. Of the built-in instruments, **`square-wave`** is the one to reach for: a square wave's spectrum is odd harmonics only, which is precisely what BP was designed around. `sine-wave` (the module's default) is also safe, because a sine has no harmonics at all to clash with.
 
-The full instrument list is `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `piano`, `violin`. Set the default in **Settings → Audio → Default instrument**, or set `instrument` on a single note.
+The full instrument list is `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`, `piano`, `violin`. Set the default in **Settings → Audio → Default instrument**, or set `instrument` on a single note.
 
-::: warning Sawtooth and the sampled voices will fight the scale
-`sawtooth-wave` has all harmonics, even ones included, and the sampled `piano` and `violin` are recordings of instruments with full harmonic spectra. They will play BP pitches accurately — the samplers pitch-shift by `frequency / rootHz`, so the frequencies are correct — but the harmonic clash is real, and BP chords will not lock on them.
+::: warning Sawtooth, the harmonium voices and the sampled voices will fight the scale
+`sawtooth-wave`, `harmonium` and `harmonium-soft` have all harmonics, even ones included, and the sampled `piano` and `violin` are recordings of instruments with full harmonic spectra. They will play BP pitches accurately — the samplers pitch-shift by `frequency / rootHz`, so the frequencies are correct — but the harmonic clash is real, and BP chords will not lock on them.
 :::
 
 ## Neighbours in the same section

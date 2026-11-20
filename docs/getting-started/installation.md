@@ -90,7 +90,7 @@ Validating modules across 6 sections...
   melodies: 7/7 ok
   scale-systems: 6/6 ok
   custom: 1/1 ok
-79 modules validated, 0 failure(s).
+81 modules validated, 0 failure(s).
 ```
 
 Run it after editing any module JSON.

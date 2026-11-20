@@ -55,6 +55,8 @@ Every control writes to the settings store on change. The store re-validates, pe
 | **Note height** | 8–60 world units, step 1 | 22 wu |
 | **Border thickness** | 0–6 px, step 0.5 | 1 px |
 | **Corner radius** | 0–20 px, step 1 | 6 px |
+| **Envelope inside notes** | Notes that set attack or release / Every note / None | Notes that set attack or release |
+| **Tails after the note's end** | on / off | off |
 | **Colour pickers** | 15 pickers in three groups | per theme |
 | **Reset colors to theme** | button, disabled when you have no custom colours | — |
 
@@ -85,12 +87,17 @@ Turning **Show note arrows** off does three things at once: the arrows stop bein
 
 ## Audio
 
-![The Settings panel open on the Audio tab, showing master volume, default instrument, and the Room / Reverb, Stereo width and Master sections](/img/settings-audio.png)
+![The Settings panel open on the Audio tab, showing master volume, default instrument, the Pure / Tempered switch, the Room / Reverb section and the start of the Stereo width section](/img/settings-audio.png)
 
 | Control | Range | Default |
 |---|---|---|
 | **Master volume** | 0–100%, step 1% | **100%** |
-| **Default instrument** | sine-wave, square-wave, sawtooth-wave, triangle-wave, organ, vibraphone, fm-epiano, piano, violin | **sine-wave** |
+| **Default instrument** | sine-wave, square-wave, sawtooth-wave, triangle-wave, organ, vibraphone, fm-epiano, harmonium, harmonium-soft, piano, violin | **sine-wave** |
+| **Most voices at once** | 128, 256, 512, 1024, 2048, 4096 | **256** |
+| **Transpose each repeat by** (Loop) | a ratio n / d, 1/16 to 16: the current module's own repeat, saved with it | **1/1** for a new composition |
+| **Keep within an octave** (Loop) | on / off | **on** |
+| *Pure / Tempered* | | |
+| **Play tempered (12-TET)** | on / off | **off** |
 | *Room / Reverb* | | |
 | **Enable reverb** | on / off | **on** |
 | **Room size** | 0–1, step 0.01 | 0.5 |
@@ -101,16 +108,20 @@ Turning **Show note arrows** off does three things at once: the arrows stop bein
 | *Stereo width* | | |
 | **Spread notes by pitch** | on / off | **off** |
 | **Amount** | 0–100%, step 1% | 60% |
+| *Live tempo* | | |
+| **Tempo range** | 1–1000 BPM, two fields | **20–300** |
 | *Master* | | |
 | **Limiter** | on / off | **on** |
 
-Reverb, stereo and the limiter all apply live during playback.
+Tempered playback, reverb, stereo and the limiter all apply live during playback.
+
+**Play tempered (12-TET)** plays each note on the nearest key of a keyboard tuned from the BaseNote — twelve equal steps to the octave — so you can hear the same module pure and then tempered. It changes the sound only: the module, its fraction labels and a saved file keep the exact ratios. Like stereo, it is applied when a note is *scheduled*. It is remembered across reloads, so it stays on until you turn it off. See [Pure / Tempered](/user-guide/playback/audio#pure-tempered).
 
 **Reverb is on by default** at 25% wet — a little room, not a hall. **Room size**, **Decay** and **Damping** rebuild the reverb's impulse response, so they land a fraction of a second after you stop dragging; **Reverb amount**, **Pre-delay** and the on/off toggle are immediate.
 
 **Spread notes by pitch** pans low notes left and high notes right, as if you were sitting at the instrument. It is applied when a note is *scheduled*, so it changes what you play next, not what is already sounding.
 
-**Default instrument** is what a note plays when neither it nor anything it inherits from names an instrument — including the BaseNote. See [Instruments](/user-guide/playback/instruments).
+**Default instrument** is what a note plays when neither the note, nor its player, nor the BaseNote names an instrument. See [Instruments](/user-guide/playback/instruments).
 
 ::: tip The master volume knob is shared.
 The volume slider in the top bar and **Master volume** here are the same number. Drag either and the other follows.

@@ -46,15 +46,15 @@ Every chord module shipped in the library uses the second form. So will you.
 1. Click the **BaseNote** (the orange circle).
 2. Scroll to **DELETE ALL NOTES** and click **Clean Slate**, then **Yes, Clean Slate**.
 
-The BaseNote keeps its defaults: 263 Hz, 100 BPM.
+The BaseNote keeps its defaults: 263 Hz, duration `3/5` s (100 BPM).
 
 ## Step 2: Create the root
 
 1. Click the **BaseNote** again to reopen its widget.
-2. Scroll to **ADD NOTE / SILENCE**. Kind stays on **Note**.
+2. Scroll to **ADD NOTE / SILENCE / REFERENCE**. Kind stays on **Note**.
 3. Set the fields:
    - **Frequency:** `base.f`
-   - **Duration:** `beat(base) * 2` (a half note — long enough to hear the chord ring)
+   - **Duration:** `base.d * 2` (a half note — long enough to hear the chord ring)
    - **Start Time:** `base.t`
 4. Click **Create**.
 
@@ -64,7 +64,7 @@ You now have Note 1, selected, with its widget open.
 
 This is the step that makes it a chord rather than a melody.
 
-1. With **Note 1** selected, scroll to **ADD NOTE / SILENCE**.
+1. With **Note 1** selected, scroll to **ADD NOTE / SILENCE / REFERENCE**.
 2. Change the position radio from **At End** to **At Start**.
 
    Watch the **Start Time** field: it changes from `[1].t + [1].d` to `[1].t`. The new note will start *when Note 1 starts*, not after it.
@@ -84,7 +84,7 @@ If you forget to switch to **At Start**, you get an arpeggio, not a chord. The p
 ## Step 4: Create the fifth
 
 1. Select **Note 1** again — the root. Not Note 2.
-2. In **ADD NOTE / SILENCE**, set the position to **At Start** again.
+2. In **ADD NOTE / SILENCE / REFERENCE**, set the position to **At Start** again.
 3. Frequency:
 
 ```

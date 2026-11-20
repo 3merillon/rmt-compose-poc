@@ -37,16 +37,16 @@ The app opens with a 169-note demo composition. Get rid of it.
 The dialog says "This action cannot be undone." It is wrong — Clean Slate is captured in the undo history and `Ctrl+Z` brings the composition back.
 :::
 
-Clean Slate closes the note widget and clears the selection. The BaseNote keeps its defaults: **263 Hz**, **100 BPM**, 4 beats per measure. Leave them alone — the scale is built from ratios, so the starting pitch does not matter.
+Clean Slate closes the note widget and clears the selection. The BaseNote keeps its defaults: **263 Hz** and a duration of `3/5` s (**= 100 BPM** in the widget). Leave them alone — the scale is built from ratios, so the starting pitch does not matter.
 
 ## Step 2: Create Do
 
 1. Click the **BaseNote** again to reopen its widget.
-2. Scroll to the **ADD NOTE / SILENCE** section.
+2. Scroll to the **ADD NOTE / SILENCE / REFERENCE** section.
 3. Leave the kind set to **Note**.
 4. The three fields are already filled in for you:
    - **Frequency:** `base.f`
-   - **Duration:** `beat(base)`
+   - **Duration:** `base.d`
    - **Start Time:** `base.t`
 5. Click **Create**.
 
@@ -60,11 +60,11 @@ The new note appears, gets selected, and the widget re-opens on it as **Note [1]
 
 Now you are working from a normal note, and the widget looks different.
 
-1. With Note 1 selected, scroll to **ADD NOTE / SILENCE**.
+1. With Note 1 selected, scroll to **ADD NOTE / SILENCE / REFERENCE**.
 2. Leave the kind on **Note** and the position on **At End** — this is the default, and it is what you want for a scale. Each note starts where the previous one stops.
 3. The fields prefill from Note 1:
    - **Frequency:** `[1].f` ← you will replace this
-   - **Duration:** `beat(base)` ← leave it
+   - **Duration:** `base.d` ← leave it
    - **Start Time:** `[1].t + [1].d` ← leave it; this is what "At End" means
 4. Replace the **Frequency** field with:
 
@@ -92,16 +92,6 @@ Repeat Step 3 six more times. Each time: select the note you just made, keep **A
 | Do (Note 8) | Note 7 | `base.f * 2` |
 
 Every note anchors its *pitch* to the BaseNote and its *timing* to the note before it. That split is deliberate, and Step 11 shows why it matters.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Older modules store expressions as method chains. The widget decompiles them to DSL for display, so you will not need to type this — but you may see it in a hand-edited file.
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(9, 8))
-```
-</details>
 
 ## Step 10: Listen
 
@@ -166,7 +156,7 @@ Change three notes:
 
 ### 2. Slow it down
 
-Select a note, find the **duration** row, and click the **half note** icon. The Raw field fills with `beat(base) * 2` — then click **Save**. The icon buttons write the expression for you; they do not commit it.
+Select a note, find the **duration** row, and click the **half note** icon. The Raw field fills with `base.d * 2` — then click **Save**. The icon buttons write the expression for you; they do not commit it.
 
 ### 3. Hear the difference against 12-TET
 

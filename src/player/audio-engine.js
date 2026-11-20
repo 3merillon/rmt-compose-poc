@@ -1,6 +1,9 @@
 import { toNumber } from '../utils/fraction-num.js';
-import { InstrumentManager } from '../instruments/instrument-manager.js';
+import { InstrumentManager, envelopeGainAt } from '../instruments/instrument-manager.js';
 import { AudioGraph } from './audio-graph.js';
+import { amplitudeToGain } from './amplitude.js';
+import { TimeMap, clampRate } from './time-map.js';
+import { passTransposition } from './display-transpose.js';
 
 // Short enough to read as instant, long enough that the cut is not a step.
 const DECLICK_FADE = 0.02; // seconds
@@ -14,6 +17,43 @@ const MIN_LOOP_PERIOD = 0.05; // seconds
 const MAX_CYCLES_PER_BATCH = 64;
 // Float slop when comparing a note's scheduled time against a pass boundary.
 const SEAM_EPS = 1e-6;
+// A voice whose envelope could not be computed is stopped this long after its
+// note's end (the length every voice had before the release followed the note-off).
+const FALLBACK_TAIL = 0.15;
+// At most this many voices sound at once (the default of Settings → Audio → Most
+// voices at once, audio.maxVoices, which the graph holds as maxVoices). Above it
+// the quietest voice already past its note-off is faded out over STEAL_FADE; a
+// voice before its note-off is never stolen (design/phase-i-instruments.md §9).
+export const MAX_VOICES = 256;
+const STEAL_FADE = 0.015;
+// Lines (Phase I, design §5): a slur's crossfade (violin), a new bow stroke on the
+// same pitch, a damper on a re-struck pitch (piano, vibraphone, fm-epiano).
+const SLUR_XFADE = 0.04;
+const REBOW_FADE = 0.03;
+const DAMP_FADE = 0.02;
+const EPS_GAIN = 0.0001; // the envelope's floor (instrument-manager.js EPS)
+// A live tempo change takes effect this far ahead of the audio clock, so no voice
+// is ever rescheduled into the past (the pump runs on a 100 ms timer).
+const RATE_CHANGE_LEAD = 0.05; // seconds
+
+/**
+ * The same pitch on the nearest key of a keyboard tuned from the BaseNote:
+ * twelve equal steps to the octave, counted from `baseFreq`. This is what the
+ * `audio.tempered` setting sounds instead of the module's own frequency. It
+ * lives on the float side of the boundary on purpose — the module's exact
+ * fractions are never rewritten, only what a voice is handed.
+ *
+ * The BaseNote and its octaves come back unchanged, bit for bit; two notes a
+ * comma apart come back as one key.
+ *
+ * @param {number} freq Hz
+ * @param {number} baseFreq Hz, the BaseNote's frequency
+ * @returns {number} Hz (freq itself if either argument is not a positive number)
+ */
+export function temperedFrequency(freq, baseFreq) {
+  if (!(freq > 0) || !(baseFreq > 0)) return freq;
+  return baseFreq * Math.pow(2, Math.round(12 * Math.log2(freq / baseFreq)) / 12);
+}
 
 export class AudioEngine {
   constructor({ initialVolume = 0.2, rampTime = 0.2 } = {}) {
@@ -32,9 +72,15 @@ export class AudioEngine {
     // Track currently scheduled/playing voices for pause/stop.
     /** @type {Set<{voice:any,gainNode:GainNode,panner:StereoPannerNode|null}>} */
     this.activeOscillators = new Set();
+    // Voices in flight at most, and voices stolen to stay under MAX_VOICES.
+    this.voiceStats = { peak: 0, stolen: 0 };
 
     // Streaming playback state
     this._streamingState = null;
+
+    // Live tempo: score seconds per clock second (see time-map.js). Outside the
+    // notation; player.js resets it to 1 when a module is loaded.
+    this.rate = 1;
 
     // Pending pause-fade teardown (cancelable so a quick pause→play can't let a
     // stale timer stopAll() the new playback).
@@ -130,9 +176,10 @@ export class AudioEngine {
 
         // Cache instrument lookups
         const instrumentCache = new Map();
+        const instrumentMemo = new Map(); // shared by every lookup: each chain is walked once
         const getInstrument = (note) => {
           if (!instrumentCache.has(note.id)) {
-            instrumentCache.set(note.id, module.findInstrument(note).toLowerCase());
+            instrumentCache.set(note.id, module.findInstrument(note, instrumentMemo).toLowerCase());
           }
           return instrumentCache.get(note.id);
         };
@@ -148,10 +195,28 @@ export class AudioEngine {
           }
         } catch {}
         if (!(baseF > 0)) baseF = 440;
+        // Kept for transposed loop passes: their tempered twins and stereo places.
+        this._baseF = baseF;
+
+        // BaseNote amplitude: what every note without its own inherits (the
+        // same fallback Module.findAmplitude and the evaluator's [id].a use).
+        let baseAmplitude = null;
+        // Likewise its attack and release (shares of each note's duration);
+        // null when the BaseNote sets none, and then the instrument's apply.
+        let baseAttack = null, baseRelease = null;
+        try {
+          const baseCached = evalCache.get(0);
+          if (baseCached && baseCached.amplitude) baseAmplitude = baseCached.amplitude;
+          if (baseCached && baseCached.attack) baseAttack = baseCached.attack;
+          if (baseCached && baseCached.release) baseRelease = baseCached.release;
+        } catch {}
+        const share = (v) => (v ? toNumber(v) : null);
 
         // Build note data list (no oscillators yet)
         const noteDataList = [];
         for (const id in module.notes) {
+          // The BaseNote has a duration now (the time unit), but it never sounds and is not drawn as a note.
+          if (Number(id) === 0) continue;
           const note = module.notes[id];
           const cached = evalCache.get(Number(id));
           if (!cached || !cached.startTime || !cached.duration) continue;
@@ -170,7 +235,33 @@ export class AudioEngine {
               startTime: adjustedStart,
               duration: adjustedDuration,
               frequency: freq,
+              // Its tempered twin, always computed: which of the two sounds is
+              // decided per voice in _scheduleNote, so the setting can be
+              // switched while the module plays.
+              temperedFrequency: freq != null ? temperedFrequency(freq, baseF) : null,
               instrument: freq != null ? getInstrument(note) : null,
+              // Its player (src/players.js): the first note of its line, and the note
+              // it follows in the line (null for a first note).
+              ...(freq != null ? (() => {
+                const pl = module.findPlayer ? module.findPlayer(note, instrumentMemo) : null;
+                if (!pl) return {};
+                // Slurred (bowed instruments) when it starts exactly where the note it
+                // follows in its line ends: no rest between them, compared exactly.
+                let slur = false;
+                if (pl.prev != null) {
+                  const pc = evalCache.get(pl.prev);
+                  try { slur = !!(pc && pc.startTime && pc.duration && pc.frequency && pc.startTime.add(pc.duration).equals(cached.startTime)); } catch {}
+                }
+                return { player: pl.head, prev: pl.prev, slur };
+              })() : {}),
+              // Relative gain on the per-note peak, clamped to [0, 4] (see
+              // amplitude.js); exactly 1 when neither the note nor the
+              // BaseNote defines an amplitude.
+              amplitude: amplitudeToGain(cached.amplitude || baseAmplitude),
+              // The note's own envelope shape, or the BaseNote's, or null (the
+              // instrument's): shares of the duration, clamped in the envelope.
+              attack: share(cached.attack || baseAttack),
+              release: share(cached.release || baseRelease),
               // Normalized pan position (−1..1) before width scaling; width and
               // enable are applied live at schedule time so mid-play stereo
               // changes affect newly-scheduled notes.
@@ -196,6 +287,11 @@ export class AudioEngine {
             let list = freqsByInstrument.get(note.instrument);
             if (!list) { list = []; freqsByInstrument.set(note.instrument, list); }
             list.push(note.frequency);
+            // Either pitch may be the one that sounds, and the two can fall in
+            // different sample zones: have both decoded.
+            if (note.temperedFrequency != null && note.temperedFrequency !== note.frequency) {
+              list.push(note.temperedFrequency);
+            }
           }
         });
 
@@ -246,17 +342,21 @@ export class AudioEngine {
    * looping cannot be done by calling play() again from the playhead (that path
    * re-anchors at currentTime + 0.1 and stopAll()s the tail: a ≥100 ms hole).
    *
-   * Time is measured two ways here, and mixing them up is the easy bug:
-   *   - `rel`        playback-relative seconds  (ctx.currentTime - baseStartTime)
+   * Time is measured three ways here, and mixing them up is the easy bug:
+   *   - clock rel    playback-relative clock seconds (ctx.currentTime - baseStartTime)
+   *   - `rel`        playback-relative SCORE seconds: s.map.scoreAt(clock rel). Every
+   *                  other time in the state (cycleStart, firstLen, period, cutRel) is
+   *                  score time, so pass boundaries do not move when the tempo does.
    *   - `cycleStart` rel-time at which the current pass begins
-   * A note's absolute start is therefore baseStartTime + cycleStart + startTime.
+   * A note's absolute start is therefore baseStartTime + map.clockAt(cycleStart + startTime);
+   * at rate 1 that is baseStartTime + cycleStart + startTime, as before live tempo.
    *
    * @param {Array} noteDataList notes for the FIRST pass (from preparePlayback(fromTime),
    *   so their startTimes are relative to fromTime and the head note may be truncated)
    * @param {{initialVolume?:number, loop?:{period:number,notes:Array,firstCycleAudioLength?:number}|null}} options
    * @returns {number} baseStartTime
    */
-  play(noteDataList, { initialVolume = this.INITIAL_VOLUME, loop = null } = {}) {
+  play(noteDataList, { initialVolume = this.INITIAL_VOLUME, loop = null, transpose = null } = {}) {
     const baseStartTime = this.audioContext.currentTime + 0.1;
 
     // Stop any existing streaming
@@ -274,8 +374,17 @@ export class AudioEngine {
       baseStartTime,
       initialVolume,
       list: noteDataList, // notes of the pass currently being scheduled
+      firstList: noteDataList, // pass 0's notes (setRate() may rewind into it)
+      // Score time -> clock time for this playback, at the live rate.
+      map: new TimeMap(this.rate),
       nextIndex: 0,
       cycle: 0,           // 0 = the initial (possibly partial) pass
+      // Repeat transposition, fixed for this playback: pass c sounds at
+      // passTransposition(ratio, passOffset + c, fold) times the written frequencies
+      // (exact; see display-transpose.js). The player hands it in: the module's own
+      // repeat (its BaseNote's `repeat`) and the fold preference; without it, none.
+      ...this._transposeState(transpose),
+      passFactors: new Map(),
       cycleStart: 0,      // rel-time at which `list`'s pass begins
       // Loop fields, installed by _applyLoop().
       looping: false,
@@ -290,13 +399,14 @@ export class AudioEngine {
     this._streamingState = s;
 
     if (loop) this._applyLoop(s, loop);
+    this._prepareTransposed(s, noteDataList);
 
     const pump = () => {
       if (this._streamingState !== s || s.stopped) return;
       s.timerId = null;
 
-      const rel = this.audioContext.currentTime - s.baseStartTime;
-      const targetTime = rel + LOOKAHEAD;
+      const clockRel = this.audioContext.currentTime - s.baseStartTime;
+      const targetTime = s.map.scoreAt(clockRel + LOOKAHEAD); // score time
 
       // `more` = this playback still has notes to schedule at some point.
       let more = true;
@@ -316,9 +426,18 @@ export class AudioEngine {
           // Not due yet.
           if (at > targetTime) { horizonReached = true; break; }
 
-          // Skip notes without frequency (measure markers)
-          if (noteData.frequency && noteData.instrument) {
-            this._scheduleNote(noteData, s.baseStartTime + s.cycleStart, s.initialVolume);
+          // Skip notes without frequency (measure markers) and silent notes
+          // (amplitude 0): there is nothing to hear, so no voice is built.
+          if (noteData.frequency && noteData.instrument && noteData.amplitude !== 0) {
+            // Through the time map: the clock start, and the clock length of the
+            // note's score span (attack and release are shares of it, so they scale).
+            const startClock = s.map.clockAt(at);
+            const duration = s.map.clockAt(at + noteData.duration) - startClock;
+            const start = s.baseStartTime + startClock;
+            // passStartTime keeps its contract (passStartTime + noteData.startTime is
+            // the note's absolute start) at any rate.
+            const transpose = this._passFactor(s, s.cycle);
+            this._scheduleNote(noteData, start - noteData.startTime, s.initialVolume, { duration, scoreStart: at, transpose });
           }
           s.nextIndex++;
         }
@@ -384,7 +503,46 @@ export class AudioEngine {
     s.firstLen = firstLen;
     s.cutRel = null;
     s.loopEndTime = null;
+    this._prepareTransposed(s, notes);
     return true;
+  }
+
+  /** The transposition fields of a streaming state, from play()'s `transpose` or the setting. */
+  _transposeState(transpose) {
+    if (transpose) {
+      return { transposeRatio: transpose.ratio || null, transposeFold: transpose.fold !== false, passOffset: Math.max(0, transpose.offset | 0) };
+    }
+    // Without one, no transposition: a repeat belongs to the module (its BaseNote's
+    // `repeat`), which the player reads; nothing app-wide is imposed.
+    return { transposeRatio: null, transposeFold: true, passOffset: 0 };
+  }
+
+  /** The factor every written frequency of pass `cycle` of this playback is multiplied by. */
+  _passFactor(s, cycle) {
+    if (!s.transposeRatio) return 1;
+    const pass = s.passOffset + cycle;
+    if (pass === 0) return 1;
+    let f = s.passFactors.get(pass);
+    if (f === undefined) {
+      try { f = toNumber(passTransposition(s.transposeRatio, pass, s.transposeFold), 1); } catch { f = 1; }
+      if (!(f > 0)) f = 1;
+      s.passFactors.set(pass, f);
+    }
+    return f;
+  }
+
+  // A transposed pass reaches pitches its notes' preparation did not: decode every
+  // zone of the sampled instruments these notes use, so no note of a later pass
+  // falls back to a sine while its zone loads.
+  _prepareTransposed(s, notes) {
+    if (!s.transposeRatio || !Array.isArray(notes)) return;
+    const names = new Set(notes.map((n) => n && n.instrument).filter(Boolean));
+    for (const name of names) {
+      try {
+        const inst = this.instrumentManager.getInstrument(name);
+        if (inst && typeof inst.prepare === 'function' && Array.isArray(inst.zones)) inst.prepare(inst.zones.map((z) => z.rootHz));
+      } catch {}
+    }
   }
 
   /**
@@ -420,12 +578,12 @@ export class AudioEngine {
     const s = this._streamingState;
     if (!s || s.stopped || !s.looping) return null;
 
-    const rel = this.audioContext.currentTime - s.baseStartTime;
+    const rel = s.map.scoreAt(this.audioContext.currentTime - s.baseStartTime);
     const cutRel = this._nextSeamRel(rel, s);
 
     s.looping = false;
     s.cutRel = cutRel;
-    s.loopEndTime = s.baseStartTime + cutRel;
+    s.loopEndTime = s.baseStartTime + s.map.clockAt(cutRel);
 
     this._cancelScheduledFrom(s.loopEndTime);
     return s.loopEndTime;
@@ -438,7 +596,76 @@ export class AudioEngine {
 
   getLoopEndTime() {
     const s = this._streamingState;
-    return s ? s.loopEndTime : null;
+    if (!s) return null;
+    // Recomputed: a tempo change after the disarm moves the final seam on the clock.
+    if (s.cutRel != null && s.map) s.loopEndTime = s.baseStartTime + s.map.clockAt(s.cutRel);
+    return s.loopEndTime;
+  }
+
+  /**
+   * Score seconds elapsed in the playback in flight (negative during the 0.1 s
+   * lead-in), through the same map the voices were scheduled with: the playhead
+   * follows this, so it moves with the sound at any rate. null when nothing plays.
+   */
+  scoreElapsed() {
+    const s = this._streamingState;
+    if (!s || s.stopped || !s.map) return null;
+    return s.map.scoreAt(this.audioContext.currentTime - s.baseStartTime);
+  }
+
+  /**
+   * Live tempo. From RATE_CHANGE_LEAD ahead of now the playback in flight runs at
+   * `rate` score seconds per clock second; later playbacks start at it.
+   *
+   * Voices that begin after the change are cancelled (they have not sounded) and
+   * the pump rewinds to the first note at or after that score instant, so they are
+   * scheduled again through the new map. Voices already begun keep their length.
+   * Pass boundaries are score times, so a loop stays seamless across a change.
+   * Frequencies are untouched.
+   * @returns {number} the rate now in force
+   */
+  setRate(rate) {
+    const r = clampRate(rate);
+    this.rate = r;
+    const s = this._streamingState;
+    if (!s || s.stopped || !s.map) return r;
+    if (r === s.map.rate) return r;
+
+    const cutClock = Math.max(0, this.audioContext.currentTime - s.baseStartTime + RATE_CHANGE_LEAD);
+    const cutScore = s.map.setRate(r, cutClock);
+
+    // Cancel by score position: the same numbers the rewind below compares, so a
+    // note is either kept or rescheduled, never both and never neither.
+    for (const entry of Array.from(this.activeOscillators)) {
+      if (entry.scoreStart == null || entry.scoreStart < cutScore) continue;
+      this.activeOscillators.delete(entry);
+      this._restoreFaded(entry);
+      try { entry.voice.stop(entry.startTime); } catch {}
+      try { entry.voice.disconnect(); } catch {}
+      try { entry.gainNode.disconnect(); } catch {}
+      try { entry.panner && entry.panner.disconnect(); } catch {}
+    }
+
+    // Rewind the pump to the pass holding cutScore and the first note at or after it.
+    let cycle = 0, cycleStart = 0, list = s.firstList;
+    if (s.loopNotes && s.period > 0 && cutScore >= s.firstLen) {
+      cycle = Math.floor((cutScore - s.firstLen) / s.period) + 1;
+      cycleStart = s.firstLen + (cycle - 1) * s.period;
+      list = s.loopNotes;
+    }
+    let i = 0;
+    while (i < list.length && cycleStart + list[i].startTime < cutScore) i++;
+    // Only ever rewind: a pump that is behind keeps its place (nothing it has not
+    // scheduled yet was cancelled).
+    if (cycle < s.cycle || (cycle === s.cycle && i < s.nextIndex)) {
+      s.cycle = cycle;
+      s.cycleStart = cycleStart;
+      s.list = list;
+      s.nextIndex = i;
+    }
+    if (s.timerId) { clearTimeout(s.timerId); s.timerId = null; }
+    if (s.pump) s.pump();
+    return r;
   }
 
   /** Playback-relative time of the first pass boundary STRICTLY after `rel`. */
@@ -463,6 +690,7 @@ export class AudioEngine {
       // Drop it from tracking first: the entry's own cleanup() timer checks
       // membership and will now bail, leaving this the only teardown.
       this.activeOscillators.delete(entry);
+      this._restoreFaded(entry);
       try { entry.voice.stop(entry.startTime); } catch {}
       try { entry.voice.disconnect(); } catch {}
       try { entry.gainNode.disconnect(); } catch {}
@@ -473,17 +701,32 @@ export class AudioEngine {
   /**
    * Schedule a single note for playback.
    * Voice chain: source → voiceGain(env) → [StereoPanner] → instrument bus.
+   * The source's pitch is the note's own frequency, or its tempered twin when
+   * the `audio.tempered` setting is on at this moment.
    *
-   * @param {number} passStartTime absolute ctx time at which this note's PASS begins
-   *   (baseStartTime for a normal playback; baseStartTime + cycleStart when looping)
+   * @param {number} passStartTime absolute ctx time such that passStartTime +
+   *   noteData.startTime is the note's start (at rate 1: baseStartTime + cycleStart)
+   * @param {{duration?:number, scoreStart?:number}} [timing] the note's clock length
+   *   through the time map (default noteData.duration), and its score position,
+   *   which setRate() cancels against
    */
-  _scheduleNote(noteData, passStartTime, initialVolume) {
+  _scheduleNote(noteData, passStartTime, initialVolume, timing = null) {
     const ctx = this.audioContext;
     const start = passStartTime + noteData.startTime;
-    const duration = noteData.duration;
+    const duration = (timing && Number.isFinite(timing.duration) && timing.duration > 0) ? timing.duration : noteData.duration;
+
+    // Pure or tempered (Settings → Audio), read here like the stereo placement:
+    // per voice, as it is scheduled. A note prepared without a tempered pitch
+    // plays the one it has.
+    // A transposed loop pass: every written frequency times one factor; its
+    // tempered twin is taken from the transposed pitch.
+    const k = (timing && timing.transpose > 0) ? timing.transpose : 1;
+    const frequency = k === 1
+      ? ((this.graph.temperedEnabled && noteData.temperedFrequency > 0) ? noteData.temperedFrequency : noteData.frequency)
+      : (this.graph.temperedEnabled ? temperedFrequency(noteData.frequency * k, this._baseF || 440) : noteData.frequency * k);
 
     // Create the voice (may be a bare OscillatorNode or a wrapper) + envelope.
-    const voice = this.instrumentManager.createOscillator(noteData.instrument, noteData.frequency);
+    const voice = this.instrumentManager.createOscillator(noteData.instrument, frequency);
     const gainNode = ctx.createGain();
     // A GainNode defaults to 1, and voices are built up to LOOKAHEAD seconds
     // before they sound. That default is what a pending voice's gain reads back
@@ -493,10 +736,47 @@ export class AudioEngine {
     // the envelope's setValueAtTime(EPS, start) takes over from here.
     gainNode.gain.value = 0;
 
+    // The note's amplitude scales the envelope peak. `?? 1` keeps callers that
+    // build noteData without it (and every module that never sets amplitude)
+    // at exactly the old peak: x * 1 === x.
+    const peak = initialVolume * (noteData.amplitude ?? 1);
+
+    // A line (src/players.js): a bowed note that starts exactly where the previous
+    // note of its line ends is slurred from it, unless it repeats its pitch (a new
+    // stroke). preparePlayback marks the notes that touch their predecessor.
+    let articulation = 'sustained';
+    try { articulation = this.instrumentManager.getInstrument(noteData.instrument)?.articulation || 'sustained'; } catch {}
+    const prevVoice = articulation === 'bowed' && noteData.slur && noteData.prev != null ? this._voiceOf(noteData.prev, start) : null;
+    const repeatsPitch = !!prevVoice && Math.abs(prevVoice.frequency - frequency) <= 1e-9 * frequency;
+    const slur = !!prevVoice && !repeatsPitch;
+
+    // The note's end is a note-off: its release rings after it, so the voice
+    // lives for `length` seconds, the note and its tail. A slurred note has no bow
+    // attack of its own: it enters over the crossfade.
+    const shape = {
+      attack: noteData.attack ?? (slur ? Math.min(1, SLUR_XFADE / Math.max(duration, 1e-3)) : null),
+      release: noteData.release ?? null,
+    };
+    let length = duration + FALLBACK_TAIL;
+    let times = null;
     try {
-      this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, initialVolume);
+      this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, peak, shape, frequency);
+      length = this.instrumentManager.voiceLength(noteData.instrument, duration, shape, frequency);
+      times = this.instrumentManager.envelopeTimesFor(noteData.instrument, duration, shape, frequency);
     } catch (e) {
       console.warn('applyEnvelope failed', e);
+    }
+    this._makeRoomAt(start);
+    // The voice this one takes over from (a slur, a new stroke, a re-struck pitch)
+    // fades from the level it has at this note's start.
+    const faded = [];
+    if (slur) faded.push(this._fadeVoice(prevVoice, start, SLUR_XFADE, true));
+    else if (repeatsPitch) faded.push(this._fadeVoice(prevVoice, start, REBOW_FADE, false));
+    if (articulation === 'struck') {
+      for (const e of this.activeOscillators) {
+        if (e.instrument !== noteData.instrument || e.fade || !(e.startTime < start && e.endTime > start)) continue;
+        if (Math.abs(e.frequency - frequency) <= 1e-9 * frequency) faded.push(this._fadeVoice(e, start, DAMP_FADE, false));
+      }
     }
 
     // Pitch-driven stereo pan (only when enabled and supported).
@@ -504,7 +784,8 @@ export class AudioEngine {
     if (this.graph.stereoEnabled && noteData.panPos != null && typeof ctx.createStereoPanner === 'function') {
       try {
         panner = ctx.createStereoPanner();
-        const p = noteData.panPos * this.graph.stereoWidth;
+        const pos = k === 1 ? noteData.panPos : this.graph.panPosition(noteData.frequency * k, this._baseF || 440);
+        const p = pos * this.graph.stereoWidth;
         panner.pan.value = p < -1 ? -1 : p > 1 ? 1 : p;
       } catch { panner = null; }
     }
@@ -520,19 +801,29 @@ export class AudioEngine {
       }
     } catch {}
 
-    // Stop past gain-zero so exponential releases finish cleanly (no click).
-    const RELEASE_TAIL = 0.15;
+    // Stop once the release has reached zero (no click).
     try {
-      voice.start(start);
-      voice.stop(start + duration + RELEASE_TAIL);
+      voice.start(start, slur ? (voice.bowOffset || 0) : 0);
+      voice.stop(start + length);
     } catch {}
 
     // `startTime` is what disarmLoop() cancels against — around a loop seam the set
     // holds voices from two passes at once (the outgoing pass's release tails overlap
     // the incoming pass's attacks), so "which pass is this voice in" can only be
     // answered from its own scheduled time.
-    const entry = { voice, gainNode, panner, startTime: start };
+    const entry = {
+      voice, gainNode, panner, startTime: start, scoreStart: timing ? timing.scoreStart : null, noteId: noteData.id, frequency,
+      instrument: noteData.instrument, slur,
+      // The note-off and the end of the tail (absolute ctx time), and the gain at
+      // any time: what a fade (_makeRoomAt, _fadeVoice) starts from, without a step.
+      offTime: start + (times ? times.off : duration), endTime: start + length,
+      levelAt: times ? (x) => envelopeGainAt(times, peak, x - start) : null,
+      times, peak,
+      // The voices this one faded (restored if it is cancelled before it sounds)
+      faded: faded.filter(Boolean),
+    };
     this.activeOscillators.add(entry);
+    if (this.activeOscillators.size > this.voiceStats.peak) this.voiceStats.peak = this.activeOscillators.size;
 
     const cleanup = () => {
       if (!this.activeOscillators.has(entry)) return;
@@ -547,8 +838,112 @@ export class AudioEngine {
     try {
       voice.onended = () => { ended = true; cleanup(); };
     } catch {}
-    const ms = Math.max(0, (start + duration + RELEASE_TAIL - ctx.currentTime) * 1000) + 60;
+    const ms = Math.max(0, (start + length - ctx.currentTime) * 1000) + 60;
     setTimeout(() => { if (!ended) cleanup(); }, ms);
+  }
+
+  /**
+   * Keep the voices sounding at `at` under MAX_VOICES: while there are as many as
+   * that, fade out the one whose note-off is the longest past (the furthest into
+   * its release, so the quietest), from `at` over STEAL_FADE. Its gain follows its
+   * own release up to `at` (the exponential is rebuilt through that point), so the
+   * fade starts from the level it has there. A voice before its note-off is left.
+   */
+  _makeRoomAt(at) {
+    const limit = (this.graph && this.graph.maxVoices > 0) ? this.graph.maxVoices : MAX_VOICES;
+    let sounding = 0;
+    // A voice already being stolen no longer counts: it is fading out.
+    for (const e of this.activeOscillators) if (!e.stolen && e.startTime <= at && e.endTime > at) sounding++;
+    while (sounding >= limit) {
+      let victim = null;
+      for (const e of this.activeOscillators) {
+        if (!(e.offTime <= at && e.endTime > at + STEAL_FADE) || !e.levelAt || e.stolen) continue;
+        if (!victim || e.offTime < victim.offTime) victim = e;
+      }
+      if (!victim) return;
+      victim.stolen = true;
+      victim.fade = victim.fade || { at, origEnd: victim.endTime };
+      try {
+        const g = victim.gainNode.gain;
+        g.cancelScheduledValues(at);
+        g.exponentialRampToValueAtTime(victim.levelAt(at), at);
+        g.linearRampToValueAtTime(0, at + STEAL_FADE);
+        victim.voice.stop(at + STEAL_FADE + 0.005);
+        victim.endTime = at + STEAL_FADE + 0.005;
+      } catch {}
+      this.voiceStats.stolen++;
+      sounding--;
+    }
+  }
+
+  /** The voice of note `noteId` sounding at `at` (the latest that began before it), or null. */
+  _voiceOf(noteId, at) {
+    let best = null;
+    for (const e of this.activeOscillators) {
+      if (e.noteId !== noteId || !(e.startTime < at) || !(e.endTime > at - 1e-3) || e.fade) continue;
+      if (!best || e.startTime > best.startTime) best = e;
+    }
+    return best;
+  }
+
+  /**
+   * Fade a voice out from `at` over `dur`, starting from the gain its envelope has
+   * there (the exponential is rebuilt up to that point, so there is no step);
+   * equal-power (a quarter cosine) for a slur's crossfade, linear otherwise.
+   * @returns {object|null} the entry, marked with its fade
+   */
+  _fadeVoice(e, at, dur, equalPower) {
+    if (!e || e.fade || !e.levelAt) return null;
+    try {
+      const g = e.gainNode.gain;
+      const L = Math.max(EPS_GAIN, e.levelAt(at));
+      g.cancelScheduledValues(at);
+      g.exponentialRampToValueAtTime(L, at);
+      if (equalPower) {
+        const N = 16, curve = new Float32Array(N);
+        for (let i = 0; i < N; i++) curve[i] = L * Math.cos((Math.PI / 2) * (i / (N - 1)));
+        g.setValueCurveAtTime(curve, at + 1e-4, dur);
+      } else {
+        g.linearRampToValueAtTime(0, at + dur);
+      }
+      e.voice.stop(at + dur + 0.01);
+      e.fade = { at, origEnd: e.endTime };
+      e.endTime = at + dur + 0.01;
+    } catch { return null; }
+    return e;
+  }
+
+  /**
+   * Undo a fade whose cause never sounds (the voice that faded it was cancelled:
+   * a live tempo change, a loop switched off): when the fade began in the faded
+   * voice's release, that release is rebuilt as it was.
+   */
+  _restoreFaded(entry) {
+    for (const e of entry.faded || []) {
+      if (!e.fade || !this.activeOscillators.has(e) || !e.times) continue;
+      const at = e.fade.at;
+      if (at < e.offTime - 1e-9) continue;   // faded in its body: left faded (rare)
+      try {
+        const g = e.gainNode.gain;
+        g.cancelScheduledValues(at);
+        g.exponentialRampToValueAtTime(Math.max(EPS_GAIN, e.levelAt(at)), at);
+        g.exponentialRampToValueAtTime(EPS_GAIN, e.startTime + e.times.end);
+        g.linearRampToValueAtTime(0, e.startTime + e.times.end + 0.004);
+        e.voice.stop(e.fade.origEnd);
+        e.endTime = e.fade.origEnd;
+        e.fade = null;
+      } catch {}
+    }
+  }
+
+  /**
+   * The playback reached its end (the module's end, or the final seam of a loop
+   * that was switched off): stop scheduling, but let the voices already sounding
+   * ring out their releases. Each stops itself at the end of its tail. A new
+   * play(), stopAll() or pauseFade() still cuts them.
+   */
+  finish() {
+    this._stopStreaming();
   }
 
   /**

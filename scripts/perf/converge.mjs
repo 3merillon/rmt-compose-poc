@@ -17,7 +17,9 @@ const flag = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] 
 const URL_BASE = flag('--url', 'http://localhost:3000');
 const MODULE = flag('--module', 'voices-5000');
 
-const browser = await chromium.launch({ headless: true, args: ['--use-angle=default', '--enable-gpu'] });
+const browser = await chromium.launch({
+  channel: process.env.PW_CHANNEL || undefined, // PW_CHANNEL=msedge where bundled Chromium is absent
+  headless: true, args: ['--use-angle=default', '--enable-gpu'] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 1 });
 const page = await ctx.newPage();
 await page.addInitScript(() => { try { localStorage.removeItem('rmt:moduleSnapshot:v1'); } catch {} });

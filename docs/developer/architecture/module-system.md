@@ -31,27 +31,20 @@ module.notes.get(5)      // ❌ TypeError — notes is not a Map
 
 ### BaseNote defaults
 
-With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js:76-88`):
+With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js:80-93`):
 
 | Property | Stored expression | Evaluates to |
 |---|---|---|
-| `frequency` | `new Fraction(440)` | 440 Hz |
-| `startTime` | `new Fraction(0)` | 0 s |
-| `tempo` | `new Fraction(60)` | 60 BPM |
-| `beatsPerMeasure` | `new Fraction(4)` | 4 |
-| `measureLength` | `'beat(base) * base.bpm'` | 4 s |
+| `frequency` | `'440'` | 440 Hz |
+| `startTime` | `'0'` | 0 s |
+| `duration` | `'1'` | 1 s |
 
-There is **no `duration` default on the BaseNote** — it has none.
+The BaseNote holds the only absolute values in a module: a frequency in Hz, a start and a duration in
+seconds. Its duration is the **time unit** (`base.d`), one beat if you count in beats. Nothing stores a
+tempo; `60 / module.getTimeUnit()` is a read-only view of it.
 
-The four simple defaults are still legacy-format strings (a user never sees them: every shipped
-module JSON is DSL, and their values are plain constants that print identically either way). The
-one that used to leak — `measureLength`, which `createModuleJSON()` emits on the BaseNote **even
-when the source file omitted the key** — is now the DSL string `beat(base) * base.bpm`, so a
-saved pure-DSL file stays pure DSL. It compiles to the exact same bytecode as the old legacy
-chain.
-
-The BaseNote a fresh user actually sees comes from `public/modules/defaultModule.json`:
-frequency `263`, startTime `0`, tempo `100`, beatsPerMeasure `4`.
+The BaseNote a fresh user actually sees comes from `public/modules/defaultModule.json`: frequency
+`263`, startTime `0`, duration `3/5` (100 BPM as a view), and measure bars after it.
 
 ## Note management
 
@@ -61,32 +54,23 @@ frequency `263`, startTime `0`, tempo `100`, beatsPerMeasure `4`.
 const note = module.addNote({
   frequency: 'base.f * (3/2)',
   startTime: 'base.t',
-  duration:  'beat(base)'
+  duration:  'base.d'
 })
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-const note = module.addNote({
-  frequency: "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
-  startTime: "module.baseNote.getVariable('startTime')",
-  duration:  "new Fraction(60).div(module.findTempo(module.baseNote))"
-})
-```
-</details>
 
 `addNote()` assigns `id = this.nextId++`, compiles each expression to bytecode, registers the note's
 dependencies, marks it dirty, invalidates the module end-time cache, and returns the `Note`.
 
-Any of the six expression keys is optional. Which ones a note *has* is what determines its kind:
+Any of the six expression keys is optional. Which ones a note *has*, with its `measure` flag
+(`isMeasureNote()`), determines its kind:
 
 | Kind | Rule |
 |---|---|
-| Measure bar | has `startTime`, no `duration`, no `frequency` |
-| Silence | has `startTime` and `duration`, no `frequency` |
+| Measure bar | has `startTime` and `duration`, no `frequency`, and `measure: true` |
+| Silence | has `startTime` and `duration`, no `frequency`, and no `measure` flag |
 | Note | has `startTime`, `duration` and `frequency` |
+| Marker | has only a `startTime`; not a bar |
 
 ### Removing
 
@@ -226,7 +210,7 @@ reentrant call it serves the in-progress cache rather than restarting the whole 
 A result:
 
 ```javascript
-{ startTime, duration, frequency, tempo, beatsPerMeasure, measureLength, corruptionFlags }
+{ startTime, duration, frequency, amplitude, attack, release, corruptionFlags }
 ```
 
 ```javascript
@@ -240,26 +224,24 @@ module.getDependencyGraph()               // the graph, for debugging
 ## Musical lookups
 
 ```javascript
-module.findTempo(note)          // → Fraction (BPM)
-module.findMeasureLength(note)  // → Fraction (seconds) = beatsPerMeasure / tempo * 60
-module.findInstrument(note)     // → string
+module.getTimeUnit()            // → Fraction (seconds): the BaseNote's duration, 1 if not positive
+module.getMeasureNotes()        // → Note[]: every measure bar
+module.findAmplitude(note)      // → Fraction: the note's own, else the BaseNote's, else 1
+module.findInstrument(note)     // → string: its own, else its player's, else the default
 ```
 
-`findTempo` and `findMeasureLength` walk up `note.parentId` looking for a note that declares the
-property, falling back to the BaseNote.
+`findTempo()` and `findMeasureLength()` are removed, with the variables they read. A beat in seconds is
+`getTimeUnit()`; the length of a measure bar is the bar's own `duration`.
 
-::: danger `parentId` is not persisted
+::: info `parentId` is not persisted
 `Note` never initializes `parentId`, and `createModuleJSON()` never writes it. It is only ever set
-imperatively — by `generateMeasures()`, by module import, and by `reindexModule()`. So for a module
-loaded from JSON, every note's `parentId` is `undefined` and the ancestry walk in `findTempo()` /
-`findMeasureLength()` terminates immediately at the BaseNote. Do not rely on it surviving a
-save-and-reload.
+imperatively — by `generateMeasures()`, by module import, and by `reindexModule()`. For a module loaded
+from JSON, every note's `parentId` is `undefined`. Evaluation does not read it.
 :::
 
 `findInstrument(note)` is different — it does not use `parentId`. It reads the note's own
-`properties.instrument`, and if absent, parses the note's **frequency expression** for a parent
-reference (`[N].f` in DSL, `module.getNoteById(N).getVariable('frequency')` in legacy) and recurses
-into that note. The terminal fallback is the module-level default instrument, driven by the
+`properties.instrument`, and if absent, follows the note's **start time** along its line
+(`src/players.js`). The terminal fallback is the module-level default instrument, driven by the
 `audio.defaultInstrument` setting through `setDefaultInstrument()` (default `sine-wave`).
 
 ## Measures
@@ -268,21 +250,23 @@ into that note. The terminal fallback is the module-level default instrument, dr
 module.generateMeasures(fromNote, n)   // → Note[] (already added to the module)
 ```
 
-These are **real notes**, not markers — measure-bar notes, which is to say notes with a `startTime`
-and nothing else. Each is chained to the previous one and gets a `parentId`. The expression it writes
-depends on the format of the previous note's startTime:
+These are **real notes**: a measure bar is a silent note with a `startTime` and a `duration`, no
+frequency, and the flag `measure: true` (saved in the JSON as `"measure": true`; read with
+`isMeasureNote()`). Each is chained to the previous one and gets a `parentId`. The expressions are
+always DSL. The first bar, when started from the BaseNote or from a note that is not a bar, is
 
 ```
-[5].t + measure([5])       # DSL
+startTime: base.t        duration: base.d * 4
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+and each next bar, when `[5]` is the previous bar, is
 
-```javascript
-module.getNoteById(5).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(5)))
 ```
-</details>
+startTime: [5].t + [5].d    duration: [5].d
+```
+
+So a meter change is one bar's duration, and the bars after it follow. Nothing computes a measure
+length from a tempo and a beats-per-measure value.
 
 ## Serialization
 
@@ -297,15 +281,64 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 
 `source` is either a **URL string** (fetched) or a **plain object**. The steps:
 
-1. Copy `data.baseNote`'s keys into the BaseNote variables and `new Module(baseVars)`.
-2. For each entry in `data.notes`, validate the id, build a `Note`, install it at `notes[id]`,
+1. **`migrateTimeModel(data)`** (`src/migrate/relational-time.js`), then **`migrateSyntax(data)`**
+   (`src/migrate/legacy-syntax.js`), before anything is built. A module in the current form comes
+   back unchanged. A module of the old time model, or in the retired method-chain syntax, is
+   converted (see [Loading old modules](#loading-old-modules)); one a converter cannot convert throws
+   a `TimeMigrationError` or `SyntaxMigrationError`, so it never loads wrong.
+2. Copy `data.baseNote`'s keys into the BaseNote variables and `new Module(baseVars)`.
+3. For each entry in `data.notes`, validate the id, build a `Note`, install it at `notes[id]`,
    register its dependencies, and advance `nextId`.
-3. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
+4. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
    `evaluateModule()` does that.
 
-Ids are guarded (`module.js:864-880`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
+Ids are guarded (`src/module.js:860-872`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
 `LOAD_REF`) are skipped with a `[RMT Security] Invalid note ID` warning, and `__proto__` /
 `constructor` / `prototype` are blocked outright as prototype-pollution vectors.
+
+### Loading old modules
+
+A module written for the old time model stored a tempo and a beats-per-measure value on the BaseNote
+(and optionally on any note), wrote durations in beats with `beat(base)`, and drew a measure bar as a
+note with only a start time whose length came from `measure([n])`. The converter, `migrateTimeModel()`,
+rewrites such a module into the relational form:
+
+- It is **exact**: every start, duration, frequency and amplitude keeps the same fraction.
+  `scripts/test-relational-time.mjs` checks the shipped library against values recorded from the old
+  engine (`scripts/fixtures/old-time-oracle.json`).
+- It works on the **JSON text** of the expressions, before anything is compiled, so it does not depend
+  on the old evaluator. A small constant evaluator inside it computes the old tempo, beats per measure
+  and measure length.
+- It **refuses rather than guesses**: a tempo that is not a constant expression of other tempos, a
+  reference to a note that does not exist, or a time expression it cannot read throws a
+  `TimeMigrationError`.
+- `beat(base)` becomes `base.d`, `measure([N])` on a bar becomes `[N].d`, a tempo T becomes a BaseNote
+  duration of `60/T`, and an old bar becomes a silent note with a duration and `"measure": true`.
+
+On disk, `node scripts/migrate-modules.mjs <file-or-folder> [--dry-run]` applies the same conversion
+to files in place. The library in `public/modules/` is already converted. A module saved by this
+version does not load in the published editor.
+
+The user-facing translation table is under
+[Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions).
+
+Then the **method-chain syntax** (`module.getNoteById(3).getVariable('frequency').mul(new Fraction(3, 2))`)
+is converted to DSL by `migrateSyntax()` (`src/migrate/legacy-syntax.js`), exactly, and the module is
+saved in the DSL from then on. The time conversion runs first because it rewrites old time constructs
+inside method-chain text and keeps that text in the same syntax. The syntax converter refuses the call
+orders the old compiler did not read as written (a `.mul()` after an `.add()`, a `.pow()` after a
+`.mul()`, any `.neg()`) with a `SyntaxMigrationError` naming the note and the variable;
+`scripts/test-legacy-syntax.mjs` checks every converted value against the old compiler
+(`scripts/fixtures/legacy-syntax-oracle.json`). See
+[Expression Compiler](/developer/core/expression-compiler#the-retired-method-chain-syntax).
+
+### Boot fallback
+
+At startup `src/player.js` loads the saved session (`rmt:moduleSnapshot:v1`) with
+`Module.loadFromJSON()`. If that throws and a saved session existed (for instance a module of the old
+model that the converter refuses), the session is copied to `rmt:moduleSnapshot:v1:unloadable` before the
+autosave can replace it, an error is logged, and `modules/defaultModule.json` opens instead. If the
+default module itself fails to load, the error propagates.
 
 ### Save
 
@@ -315,8 +348,8 @@ const text = await module.exportOrderedModule()  // → pretty JSON string (2-sp
 ```
 
 `createModuleJSON()` emits each note's **verbatim expression source text**
-(`note.getExpressionSource(name)`) plus `color` and `instrument` when set, sorted by id. Saving does
-**not** convert legacy expressions to DSL.
+(`note.getExpressionSource(name)`) plus `color` and `instrument` when set, sorted by id. Every
+expression is DSL by then: loading converted any other form.
 
 `exportOrderedModule()` is what the **Save Module** button downloads. It is *not* a byte copy of what
 you loaded: it round-trips through `createModuleJSON()` → `loadFromJSON()` → `reindexModule()` →
@@ -328,8 +361,8 @@ you loaded: it round-trips through `createModuleJSON()` → `loadFromJSON()` →
 module.reindexModule()
 ```
 
-Renumbers from 1 — **measures first** (sorted by evaluated `startTime`), then regular notes (also by
-`startTime`) — and rewrites every `[N]` and `module.getNoteById(N)` reference to match. Then it
+Renumbers from 1 — **measure bars first** (`isMeasureNote()`, sorted by evaluated `startTime`), then regular notes (also by
+`startTime`) — and rewrites every `[N]` reference to match. Then it
 rebuilds the dependency graph and re-evaluates.
 
 ::: warning Ids change on save
@@ -343,7 +376,7 @@ differ from the ids you saw on screen. There is no byte-stable round-trip.
 module.getModuleEndTime()   // → seconds
 ```
 
-The later of (last measure's start + its measure length) and (last note's start + duration).
+The later of (last measure bar's start + its duration) and (last note's start + duration).
 
 ::: warning The memo is module-level, not per-instance
 `memoizedModuleEndTime` is a file-scope `let` in `src/module.js`, shared by every `Module` in the
@@ -356,15 +389,15 @@ fires (via `player:invalidateModuleEndTimeCache`) on every expression change. If
 
 WASM init is async and normally loses the race against `Module` construction, which used to strand
 every module on the JS evaluator for the whole session. The constructor therefore registers an
-`onWasmReady` callback holding a `WeakRef(this)`, and `_upgradeEvaluators()` (`module.js:133`)
+`onWasmReady` callback holding a `WeakRef(this)`, and `_upgradeEvaluators()` (`src/module.js:139`)
 atomically swaps `_binaryEvaluator` and `_incrementalEvaluator` for the WASM versions, clears the
-evaluation cache, and marks everything dirty so the next evaluation runs on the new engine. Values are
-identical across engines, so nothing goes visually stale mid-swap.
+evaluation cache, and marks everything dirty so the next evaluation runs on the new engine.
 
-::: warning It never runs in a browser
-The registration is gated on `isEvaluatorHotSwapEnabled()`, which returns `false` in a browser unless
-the URL carries `?evaluator=wasm`. In production, `_upgradeEvaluators()` is never called. It runs in
-headless Node so the benches and `scripts/perf/test-wasm-swap.mjs` can exercise it.
+::: warning It never runs
+The registration is gated on `isEvaluatorHotSwapEnabled()`, which returns `false` everywhere while
+`WASM_MATCHES_VARIABLE_LAYOUT` is `false` (`src/wasm/evaluator-adapter.js`): the Rust core still has
+the old variable layout, so the WASM evaluator is disabled until it is ported. `_upgradeEvaluators()` is
+never called, and `?evaluator=wasm` is ignored with a console warning.
 :::
 
 The practical consequence for anyone holding an evaluator reference: it can be **replaced between

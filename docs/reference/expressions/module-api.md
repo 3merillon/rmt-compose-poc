@@ -1,64 +1,57 @@
 ---
 title: Module API
-description: Note references and built-in functions in RMT Compose expressions — base, [N], tempo(), measure(), beat() — plus the legacy module.* compatibility spelling.
+description: Note references in RMT Compose expressions — base, [N], the six properties, inheritance — plus the Module methods getTimeUnit() and getMeasureNotes().
 ---
 
 # Module API
 
-An expression reaches other notes through **references** and **built-in functions**. That is the
-whole surface: three ways to name a note, six properties, three functions.
+An expression reaches other notes through **references**. That is the whole surface: two ways to
+name a note, six properties. The language has no functions.
 
 ```
 base.f                 # the BaseNote's frequency
 [1].t + [1].d          # note 1's start plus note 1's duration
-beat(base)             # one beat, in seconds
+base.d * 2             # two time units
 ```
 
 ::: info There is no `module` object
-In the DSL there is nothing called `module` and nothing to call methods on. The
-`module.getNoteById(…)` / `module.findTempo(…)` spellings on this page belong to the older
-legacy format; they are kept in collapsed blocks so you can read an old file. The compiled
-result is identical either way.
+In the DSL there is nothing called `module` and nothing to call methods on.
 :::
 
 ## Note references
 
 ### The BaseNote: `base`
 
-The BaseNote is note **0**. It is the module's reference point — the frequency, tempo and
-meter everything else is measured against. It is not a playable note.
+The BaseNote is note **0**. It is the module's reference point: the frequency, the start and the
+duration everything else is measured against. It is not a playable note.
 
 ```
-base.f                 # frequency
-base.t                 # start time
-base.tempo             # tempo, in BPM
-base.bpm               # beats per measure
-base.ml                # measure length, in seconds
+base.f                 # frequency, in Hz
+base.t                 # start time, in seconds
+base.d                 # duration, in seconds: the time unit
+base.a                 # amplitude, a relative gain
+base.attack            # attack, a share of each note's duration
+base.release           # release, a share of each note's duration, counted from the note's end
 ```
 
-`[0].p` means exactly the same thing as `base.p`, everywhere — including inside a function
-argument, where `beat([0])` is `beat(base)`. Saving rewrites `[0]` to `base`.
+`[0].p` means exactly the same thing as `base.p`. Saving rewrites `[0]` to `base`.
 
-::: warning The BaseNote has no duration
-`base.d` compiles, but the BaseNote does not define a duration and none of the modules that
-ship with the app give it one. The reference cannot be resolved, so evaluation substitutes the
-fallback for `duration` — a flat **1 second**, unrelated to the tempo. Nothing on screen says
-so. If you need a length, use `beat(base)` or `measure(base)`.
-:::
+`base.d` is the **time unit**, one beat if you count in beats. It is what `beat(base)` used to be.
+`60 / base.d` is the tempo in BPM, a read-only view in the note widget; nothing stores a tempo. See
+[the time unit](/reference/properties/duration#the-time-unit).
 
-What the BaseNote actually defines:
+What the BaseNote defines:
 
-| Property | Defined on the BaseNote? |
+| Variable | Defined on the BaseNote? |
 |---|---|
-| `frequency` | Yes |
-| `startTime` | Yes |
-| `tempo` | Yes |
-| `beatsPerMeasure` | Yes |
-| `measureLength` | Yes (derived from tempo and beatsPerMeasure unless you override it) |
-| `duration` | **No** |
+| `frequency` | Yes. Default 440 Hz. |
+| `startTime` | Yes. Default 0 s. |
+| `duration` | Yes. Default 1 s. The time unit. |
+| `amplitude` | Only if you set it. Otherwise `base.a` reads as 1. |
+| `attack`, `release` | Only if you set them. Otherwise the instrument's own envelope applies. |
 
-The module that ships as the default puts the BaseNote at 263 Hz, 100 BPM, 4/4. Loading a
-different module replaces all of that — a module file defines its own BaseNote.
+The module that ships as the default puts the BaseNote at 263 Hz with a duration of 3/5 s (100 BPM).
+Loading a different module replaces all of that: a module file defines its own BaseNote.
 
 ### Another note: `[N]`
 
@@ -71,107 +64,83 @@ different module replaces all of that — a module file defines its own BaseNote
 `N` must be a literal non-negative integer. There is no `[prev]`, no arithmetic in the brackets,
 and no variables.
 
+On a measure bar, `[N].d` is the bar's length. That is what `measure([N])` used to be.
+
 Referencing a note that does not exist is not an error. Evaluation substitutes a fixed default
-and carries on — `startTime` 0, `duration` 1, `frequency` 440, `tempo` 60, `beatsPerMeasure` 4,
-`measureLength` 4. Nothing on screen tells you this happened, so check the `Evaluated:` line.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency')          // base.f
-module.baseNote.getVariable('tempo')              // base.tempo
-module.getNoteById(1).getVariable('frequency')    // [1].f
-module.getNoteById(5).getVariable('startTime')    // [5].t
-module.getNoteById(10).getVariable('duration')    // [10].d
-```
-</details>
+and carries on — `startTime` 0, `duration` 1, `frequency` 440. The three
+[inheriting](#inheritance) variables read the BaseNote's value instead, exactly as they would on
+a note that exists but does not define them. Nothing on screen tells you this happened, so check
+the `Evaluated:` line.
 
 ## Properties
 
-Six properties, each with one or more accepted spellings.
+Six properties, in two groups, each with one or more accepted spellings.
 
-| Property | Accepted spellings | Saved as | Unit |
-|---|---|---|---|
-| frequency | `f`, `freq`, `frequency` | `f` | Hz |
-| startTime | `t`, `s`, `start`, `startTime` | `t` | seconds |
-| duration | `d`, `dur`, `duration` | `d` | seconds |
-| tempo | `tempo` | `tempo` | BPM |
-| beatsPerMeasure | `bpm`, `beatsPerMeasure` | `bpm` | beats |
-| measureLength | `ml`, `measureLength` | `ml` | seconds |
+| Group | Property | Accepted spellings | Saved as | Unit |
+|---|---|---|---|---|
+| Language | frequency | `f`, `freq`, `frequency` | `f` | Hz |
+| Language | startTime | `t`, `s`, `start`, `startTime` | `t` | seconds |
+| Language | duration | `d`, `dur`, `duration` | `d` | seconds |
+| Interpretation | amplitude | `a`, `amp`, `amplitude` | `a` | none, a relative gain |
+| Interpretation | attack | `attack`, `atk` | `attack` | none, a share of the note's duration |
+| Interpretation | release | `release`, `rel` | `release` | none, a share of the note's duration |
 
-Anything else is rejected: there is no `l`, `len`, `st` or `pitch`.
+The first three are the **language**: the notation, each variable a relation to other notes. The
+last three **interpret** a note: they say how it sounds, and are not part of the notation.
+
+Anything else is rejected: there is no `l`, `len`, `st`, `pitch`, `vol` or `velocity`, and the
+removed `tempo`, `bpm` and `ml` are refused with a message naming the replacement (see
+[Expression Syntax](/reference/expressions/syntax#there-are-no-functions)).
 
 ### Inheritance
 
-`tempo`, `beatsPerMeasure` and `measureLength` **fall back to the BaseNote** when the note you
-reference does not define them. `[5].tempo` on a note with no tempo of its own returns the base
-note's tempo. This is what makes a single tempo change on the BaseNote move the whole piece.
+`amplitude`, `attack` and `release` **fall back to the BaseNote** when the note you reference does
+not define them. `[5].a` on a note with no amplitude of its own returns the BaseNote's. This is what
+makes a single `amplitude` on the BaseNote scale the whole piece.
+
+If the BaseNote does not define the variable either, the last resort is a fixed default:
+`amplitude` 1. For `attack` and `release`, a note that reads neither its own nor the BaseNote's
+sounds with the instrument's own envelope; a reference that cannot be resolved at all reads as 0.
 
 `startTime`, `duration` and `frequency` do **not** inherit. Each note either has its own
-expression or it does not.
+expression or it does not. There is no fallback of timing to the BaseNote.
 
-## Built-in functions
+## No functions
 
-Three, each takes exactly one argument, and the argument must be a bare note reference — `[N]`
-or `base`. It cannot be an expression.
+There is no `beat()`, `tempo()` or `measure()`, and no `instrument()`. The three time forms were
+removed, and typing one is refused with the replacement:
 
-### `tempo(x)`
-
-The tempo of `x`, in BPM.
-
-```
-tempo(base)
-tempo([5])
-```
-
-`tempo(x)` compiles to the same bytecode as `x.tempo`, and is saved as `x.tempo`. It is input
-sugar.
-
-### `measure(x)`
-
-The length of one of `x`'s measures, in seconds. Computed as `beatsPerMeasure / tempo * 60`.
+| Old | New |
+|---|---|
+| `beat(base)`, `beat([N])` | `base.d` |
+| `measure([N])` on a bar | `[N].d` |
 
 ```
-measure(base)                # one measure at the base tempo and meter
-[5].t + measure([5]) * 2     # two measures after note 5 starts
+base.d                       # one time unit
+base.d * 2                   # two (a half note in 4/4)
+base.d * (1/2)               # half of one (an eighth note)
+base.d * (3/2)               # a dotted unit
+base.d * 4                   # a measure of four, if you count in fours
 ```
 
-At 120 BPM in 4/4: 4 beats ÷ 120 BPM × 60 = **2 seconds** per measure.
+`base.d * (n/d)` is also what the note-length buttons in the note widget write for you.
 
-`measure(x)` compiles to the same bytecode as `x.ml`, and is saved as `x.ml`.
+An instrument is not an expression value. See
+[Which instrument a note plays](#which-instrument-a-note-plays) below for what decides it.
 
-### `beat(x)`
+## The Module object, from JavaScript
 
-One beat of `x`, in seconds — `60 / tempo(x)`.
+Outside an expression, the application's `Module` has two methods for the new time model
+(`src/module.js`):
 
-```
-beat(base)                   # one beat
-beat(base) * 2               # two beats (a half note in 4/4)
-beat(base) * (1/2)           # half a beat (an eighth note)
-beat(base) * (3/2)           # a dotted beat
-beat(base) * base.bpm        # a full measure
-```
+| Method | Returns |
+|---|---|
+| `getTimeUnit()` | The BaseNote's evaluated duration, as a `Fraction`, or `1` when it is not positive. `60 / getTimeUnit()` is the tempo. |
+| `getMeasureNotes()` | Every measure bar, unordered: the notes flagged `"measure": true`. |
 
-`beat()` is the one function the decompiler reconstructs, so it is the only one that survives a
-save. It is also what the note-length buttons in the note widget write for you.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.findTempo(module.baseNote)                             // tempo(base)
-module.findMeasureLength(module.baseNote)                     // measure(base)
-new Fraction(60).div(module.findTempo(module.baseNote))       // beat(base)
-```
-</details>
-
-::: warning There is no `instrument()` function
-`instrument(note)` and `module.findInstrument(…)` look plausible, but neither parser accepts
-them — an instrument is not an expression value. See
-[Which instrument a note plays](#which-instrument-a-note-plays) below for what actually decides
-this.
-:::
+`findTempo()` and `findMeasureLength()` are gone, and the bytecode opcodes `FIND_TEMPO` and
+`FIND_MEASURE` are retired. `EXPRESSION_VARS` (the six variable names) and `isMeasureNote(note)` are exported from
+`src/note.js`.
 
 ## Dependencies
 
@@ -182,9 +151,9 @@ Referencing another note creates a **dependency**, automatically:
 [1].f * (3/2)          # note 2 now depends on note 1
 ```
 
-Change note 1's frequency and note 2 re-evaluates. Dependencies are tracked per *property*, not
+Change note 1's frequency and note 2 re-evaluates. Dependencies are tracked per *variable*, not
 per note: the expression above records "note 2's frequency depends on note 1's frequency",
-which is what lets the workspace draw dependency lines in property colours — orange for
+which is what lets the workspace draw dependency lines in variable colours — orange for
 frequency, teal for startTime, purple for duration.
 
 ![Dependency lines between notes, colour-coded by property](/img/dependency-lines.png)
@@ -206,18 +175,21 @@ See [Dependencies](/user-guide/notes/dependencies) and
 ## Which instrument a note plays
 
 There is no expression for this, but it is worth knowing here because it is the one property
-that is decided by *another* property's expression.
+that is decided by *other* properties' expressions.
 
 A note's instrument is resolved like this:
 
-1. If the note has an explicit `instrument` field, use it.
-2. Otherwise, look at the note's **frequency expression**. If it references another note
-   (`[N].f`) or the BaseNote (`base.f`), take that note's instrument — recursively.
-3. If nothing along that chain sets one, use the global default instrument
+1. If the note has an explicit `instrument` field, use it. The note starts a new player.
+2. Otherwise, if its start is written from the end of a note or a silence (`[p].t + [p].d`, with
+   or without a rest added), take that note's instrument: the note is in the same player.
+3. Otherwise, if it is a copy of a note of a line (start `[k].t + X`, frequency `r * [k].f`) and
+   the copy of that note's predecessor exists, take that copy's instrument.
+4. Otherwise it starts a line: take the instrument of the note its start time is written from
+   (`[k].t …`), else the BaseNote's, else the global default instrument
    (Settings → Audio → default instrument; `sine-wave` out of the box).
 
-So instrument follows the *frequency* chain. Retargeting a note's frequency to a different
-parent can change what it sounds like. See [Instruments](/user-guide/playback/instruments).
+So the instrument follows the *start time*, not the frequency. See
+[Instruments](/user-guide/playback/instruments#players).
 
 ## Worked patterns
 
@@ -235,13 +207,13 @@ base.f / 2             # an octave below the BaseNote
 [7].t + [7].d          # start the instant note 7 ends
 ```
 
-### Tempo-relative timing
+### Time-unit-relative timing
 
 ```
-beat(base)                       # one beat
-beat(base) * (1/2)               # half a beat
-measure(base)                    # one measure
-base.t + beat(base) * (1/4)      # a quarter-beat after the BaseNote starts
+base.d                           # one time unit
+base.d * (1/2)                   # half of one
+[1].d                            # as long as note 1
+base.t + base.d * (1/4)          # a quarter of a time unit after the BaseNote starts
 ```
 
 ### Equal temperament
@@ -252,30 +224,10 @@ base.f * 2^(4/12)      # a 12-TET major third
 [1].f * 3^(1/13)       # one Bohlen-Pierce step above note 1
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Perfect fifth above the BaseNote
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-
-// Start when note 7 ends
-module.getNoteById(7).getVariable('startTime')
-  .add(module.getNoteById(7).getVariable('duration'))
-
-// Half a beat
-new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(1, 2))
-
-// 12-TET semitone above the BaseNote
-module.baseNote.getVariable('frequency')
-  .mul(new Fraction(2).pow(new Fraction(1, 12)))
-```
-</details>
-
 ## See also
 
 - [Expression Syntax](/reference/expressions/syntax) — the full grammar
 - [Operators](/reference/expressions/operators) — precedence and result types
-- [Fraction API](/reference/expressions/fraction-api) — exact numbers, and the legacy surface
+- [Fraction API](/reference/expressions/fraction-api) — exact numbers
 - [Dependencies](/user-guide/notes/dependencies) — dependency lines in the workspace
 - [Dependency Graph](/developer/core/dependency-graph) — how the graph is built

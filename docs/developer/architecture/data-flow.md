@@ -23,37 +23,37 @@ The note widget's `Raw:` field commits **on Save**, not while typing.
 
 ```
 Save clicked
-  → validateExpression()            src/modals/validation.js:11
-  → simplify (simplifyDSL)          src/utils/simplify.js:98
+  → validateExpression()            src/modals/validation.js:6
+  → simplify (simplifyDSL)          src/utils/simplify.js:66
   → Note.setVariable('frequencyString', text)
-      → Note._setExpression()       src/note.js:195
-          → compiler.compile(text, 'frequency')   → BinaryExpression
+      → Note._setExpression()       src/note.js:305
+          → compiler.compile(text)   → BinaryExpression
           → note._depsEpoch++
-          → Note._notifyChange()    src/note.js:223
+          → Note._notifyChange()    src/note.js:349
               → module.markNoteDirty(note.id)
               → eventBus.emit('player:invalidateModuleEndTimeCache')
 ```
 
 `compiler` is the singleton exported from `src/expression-compiler.js`. It probes a 4000-entry LRU
-cache keyed on the raw text, routes DSL vs legacy through `isDSLSyntax()`, and returns a **clone** of
-the cached `BinaryExpression`.
+cache keyed on the raw text, compiles the DSL (refusing the retired method-chain syntax with its DSL
+form), and returns a **clone** of the cached `BinaryExpression`.
 
 There is a silent path too: **`Module.batchSetExpressions(updates)`** takes
 `[{ noteId, varName, expr }]`, applies every change through `_setExpressionSilent()` (no per-note
 notification), re-registers dependencies once, and marks everything dirty in one pass. Its one caller
-is **Evaluate Module** (`evaluateEntireModule()`, `src/modals/index.js:1435`). **Evaluate to
-BaseNote** does *not* use it: `evaluateNoteToBaseNote()` (`src/modals/index.js:1270`) writes each
+is **Evaluate Module** (`evaluateEntireModule()`, `src/modals/index.js:810`). **Evaluate to
+BaseNote** does *not* use it: `evaluateNoteToBaseNote()` (`src/modals/index.js:758`) writes each
 property with `note.setVariable(name + 'String', expr)` and then calls `markNoteDirty()`.
 
 ::: info Drag and resize do not use the batch path
 A move commit writes each moved note individually with `n.setVariable('startTimeString', raw)` inside
-`commitNoteStartGL()` (`src/player.js:5693`), then runs the dependent-retarget passes, then evaluates
+`commitNoteStartGL()` (`src/player.js:4960`), then runs the dependent-retarget passes, then evaluates
 once. A group move does the same per mover.
 :::
 
 ## 2. The module marks dirty
 
-`Module.markNoteDirty(noteId)` (`src/module.js:213`):
+`Module.markNoteDirty(noteId)` (`src/module.js:214`):
 
 1. Adds the id to `_dirtyNotes`.
 2. `_registerNoteDependencies(note)` — re-scans the note's bytecode and rewrites its rows in the
@@ -71,8 +71,8 @@ once. A group move does the same per mover.
 
 ## 3. Evaluation
 
-`Module.evaluateModule()` (`src/module.js:637`) delegates to
-`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1757`):
+`Module.evaluateModule()` (`src/module.js:638`) delegates to
+`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1022`):
 
 ```
 evaluateDirty()
@@ -85,7 +85,7 @@ evaluateDirty()
 ```
 
 **The order is per variable, on the evaluator, not the graph.** The dirty set is a set of *notes*;
-inside it, `evaluateVariables()` (`binary-evaluator.js:1381`) walks depth-first from every variable
+inside it, `evaluateVariables()` (`binary-evaluator.js:659`) walks depth-first from every variable
 and evaluates whatever it reads first. Each variable is one node: `[1].f` may read `[2].f` while
 `[2].t` reads `[1].t` and `[1].d`, and a note's own variables may read each other in any direction.
 What a variable reads comes straight from its bytecode, `base.x` included. Notes start in ascending
@@ -93,42 +93,46 @@ id, so the order is deterministic. On a true cycle — a variable that reads its
 throw: it `console.error`s `Dependency cycle detected!` with the loop named, and evaluates the
 members in a fixed order against defaults.
 
-`evaluateVariable()` (`binary-evaluator.js:1524`) evaluates one expression into the note's record
-and ORs a corruption bit for that property when an irrational `^` result appeared.
+`evaluateVariable()` (`binary-evaluator.js:802`) evaluates one expression into the note's record
+and ORs a corruption bit for that property when its expression made an irrational `^` result or an approximation. Irrational values stay exact (`record.exact`); see [Exact Values](/developer/core/symbolic-power).
 
 A cache entry is:
 
 ```javascript
-{ startTime, duration, frequency, tempo, beatsPerMeasure, measureLength, corruptionFlags }
+{ startTime, duration, frequency, amplitude, attack, release, corruptionFlags }
 ```
 
-::: warning Two gotchas in the cache
-`measureLength` on a *measure bar* or the BaseNote may be **computed** rather than evaluated from an
-expression (`binary-evaluator.js:1561-1581`) — it is still a real, exact `Fraction`. And pooled
-fractions are never cached — `evaluateVariable()` copies each result into a fresh
+The first three are the language; `amplitude`, `attack` and `release` are `null` unless the note
+defines them. There is no stored tempo, beats-per-measure or measure length: the BaseNote's
+`duration` is the time unit (`base.d`), and a measure bar is an ordinary note whose `duration` is its
+length.
+
+::: warning A gotcha in the cache
+Pooled fractions are never cached — `evaluateVariable()` copies each result into a fresh
 `new Fraction(...)` first, because the pool is rewound at the start of the next batch.
 :::
 
 An unresolvable reference does **not** throw. `LOAD_REF` falls back to the BaseNote for the three
-inheritable properties (`tempo`, `beatsPerMeasure`, `measureLength`), and otherwise pushes a
-hard-coded default: `startTime 0`, `duration 1`, `frequency 440`, `tempo 60`, `bpm 4`,
-`measureLength 4`. This is why deleting a note does not break its dependents — they pick up these
+interpretation variables (`amplitude`, `attack`, `release`, the indices from `FIRST_INTERPRETATION_VAR`),
+and otherwise pushes a hard-coded default: `startTime 0`, `duration 1`, `frequency 440`, `amplitude 1`,
+`attack 0`, `release 0`. This is why deleting a note does not break its dependents — they pick up these
 defaults, and the evaluation says so with a `console.error` naming the note and variable on both
-ends of every such reference.
+ends of every such reference. An `amplitude` nobody sets is the one exception: its `1` is the
+variable's value, not a stand-in, and reading it is reported only when the note it names does not exist.
 
 Finally, `Module._updateCorruptionFlags(cache, dirtyIds)` pushes each result's `corruptionFlags`
 into `DependencyGraph.setCorruptionFlags()` — scoped to the dirty set, not all notes.
 
 ::: warning Which evaluator actually runs
-The JS `BinaryEvaluator` / `IncrementalEvaluator`. The WASM pair is installed only when
-`isEvaluatorHotSwapEnabled() && isWasmAvailable()`, and in a browser the first half of that is `false`
-unless the URL carries `?evaluator=wasm` (`src/wasm/evaluator-adapter.js:36-40`). It is not a
-"WASM if available" branch.
+Always the JS `BinaryEvaluator` / `IncrementalEvaluator`. The WASM evaluator is disabled until the
+Rust core is ported to the new variable layout: `WASM_MATCHES_VARIABLE_LAYOUT` is `false`, so
+`isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:50-54`) and `?evaluator=wasm`
+is ignored with a console warning.
 :::
 
 ## 4. Rendering
 
-`RendererAdapter.sync()` (`renderer.js:589`) is the CPU rebuild:
+`RendererAdapter.sync()` (`renderer.js:681`) is the CPU rebuild:
 
 ```javascript
 renderer.sync({
@@ -154,7 +158,7 @@ depend on?" for every note (a transitive BFS per note — O(N²) on deep chains)
 question: *i* transitively depends on a corrupt note **iff** *i* is a transitive dependent of one. So
 a single multi-source BFS over the `dependents` graph, seeded by the (usually empty) corrupt set,
 answers it for all notes at once in O(N+E) — and is a complete no-op when nothing is corrupt
-(`renderer.js:823-898`).
+(`renderer.js:1015-1062`).
 
 The result lands in `_corruptionType`, a `Float32Array` bound to vertex attribute 7:
 
@@ -170,7 +174,7 @@ draws. When nothing changed, `_render()` returns immediately and the frame costs
 `player.js` calls `sync()` on every commit. A drag does **not** call it: the workspace previews the
 gesture through the renderer's preview setters (`setDragOffsetPreview()` shifts moving notes on the
 GPU), and `sync()` runs once, on the drop. `player.js`'s rAF loop still carries a `tempOverrides`
-re-sync branch (`player.js:2119`), but nothing assigns `glTempOverrides` today, so it never fires.
+re-sync branch (`player.js:1882`), but nothing assigns `glTempOverrides` today, so it never fires.
 See [WebGL2 Renderer](/developer/rendering/webgl2-renderer).
 
 ## 5. Audio playback
@@ -178,7 +182,7 @@ See [WebGL2 Renderer](/developer/rendering/webgl2-renderer).
 ```
 Play pressed
   → module.evaluateModule() → cache
-  → build noteDataList: { id, startTime, duration, frequency, instrument }
+  → build noteDataList: { id, startTime, duration, frequency, instrument, amplitude, attack, release }
   → AudioEngine.play(noteDataList)
   → every BATCH_INTERVAL (100 ms):
       schedule every note starting within LOOKAHEAD (2.0 s)
@@ -196,9 +200,14 @@ instrumentBus ─┬─ dry ─────────────────�
 reverbInput → preDelay → Convolver(IR) → reverbReturn(wet) → masterGain → [limiter] → destination
 ```
 
-`instrument` is resolved by `module.findInstrument(note)`, which walks the note's **frequency**
-expression up to its parent and repeats, terminating at the module-level default instrument
-(driven by the `audio.defaultInstrument` setting).
+A note's own `attack` and `release`, or the BaseNote's, travel with it as shares of its duration and
+reach `applyEnvelope()` as a `shape`; with neither set, the instrument's own envelope (in seconds) applies. See
+[Audio Engine](/developer/audio/audio-engine).
+
+`instrument` is resolved by `module.findInstrument(note, memo)`, which follows the note's **start time**
+along its line (its player), terminating at the BaseNote's instrument or the module-level default
+instrument (driven by the `audio.defaultInstrument` setting). `module.findPlayer(note, memo)` adds `player`
+(the id of the first note of the line) and `prev` (the line predecessor) to each note's data.
 
 Reverb defaults **on** (`wet` 0.25, `decaySec` 1.8), the limiter defaults **on** (−6 dB threshold,
 knee 6, ratio 12), stereo spread defaults **off**. So the documented flow above is what a user
@@ -215,7 +224,7 @@ Note 1's frequency changes
 ```
 
 For *visualisation* — the coloured dependency lines and rings — the module asks a different question.
-`module.getDependentsByProperty(noteId)` (`src/module.js:412`) returns
+`module.getDependentsByProperty(noteId)` (`src/module.js:413`) returns
 
 ```javascript
 { frequency: [...], startTime: [...], duration: [...] }
@@ -229,12 +238,12 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 
 | Cache | Where | Lifetime |
 |---|---|---|
-| Compile cache | `ExpressionCompiler`, LRU **4000** entries, keyed on raw text | Per compiler instance — [six independent caches](/developer/core/expression-compiler#the-compile-cache) in a running app. |
+| Compile cache | `ExpressionCompiler`, LRU **4000** entries, keyed on raw text | One, the singleton's ([compile cache](/developer/core/expression-compiler#the-compile-cache)). |
 | Compiled bytecode | Inside each `BinaryExpression` | Until the expression text changes. |
 | Evaluation cache | `Map<noteId, result>` on the module and the incremental evaluator | Invalidated per note when marked dirty. |
 | Module end time | A **module-level** `let` in `src/module.js`, not a per-instance field | Cleared by `invalidateModuleEndTimeCache()`, emitted on every expression change. |
 | Renderer instance arrays | `RendererAdapter` | Rebuilt wholesale on every `sync()`. No per-note tracking. |
-| Children-tree (drag preview) | `renderer.js:10129`, keyed `anchorId\|_posEpoch\|_sceneEpoch` | Survives a drag (which changes neither key), invalidated by any real edit. |
+| Children-tree (drag preview) | `renderer.js:10498`, keyed `anchorId\|_posEpoch\|_sceneEpoch` | Survives a drag (which changes neither key), invalidated by any real edit. |
 
 ## Events
 
@@ -242,20 +251,20 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 
 | Event | Emitted by | Does |
 |---|---|---|
-| `workspace:noteMoveCommit` | `workspace.js:1954` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
-| `workspace:noteResizeCommit` | `workspace.js:1964` | `{noteId, newDurationSec}` |
-| `workspace:measureResizeCommit` | `workspace.js:1973` | `{measureId, newStartSec}` |
-| `workspace:groupMoveCommit` | `workspace.js:1945` | `{ids, deltaSec}` → clamps the batch so it can't cross the BaseNote, then commits each mover. |
-| `workspace:marqueeCommit` | `workspace.js:1935` | `{ids, additive}` → sets the multi-selection. |
-| `workspace:multiSelectToggle` | `workspace.js:2280` | `{id}` — shift-click / long-press adds or removes one note. |
+| `workspace:noteMoveCommit` | `note.js:354` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
+| `workspace:noteResizeCommit` | `workspace.js:1756` | `{noteId, newDurationSec}` |
+| `workspace:measureResizeCommit` | `workspace.js:1765` | `{measureId, newStartSec}` |
+| `workspace:groupMoveCommit` | `workspace.js:1737` | `{ids, deltaSec}` → clamps the batch so it can't cross the BaseNote, then commits each mover. |
+| `workspace:marqueeCommit` | `workspace.js:1727` | `{ids, additive}` → sets the multi-selection. |
+| `workspace:multiSelectToggle` | `workspace.js:2072` | `{id}` — shift-click / long-press adds or removes one note. |
 | `player:octaveChange` | note widget arrows, GL arrow regions | `{noteId, direction}` → multiplies the frequency expression by the arrow interval. |
-| `player:invalidateModuleEndTimeCache` | `note.js:228` | Any expression change. |
+| `player:invalidateModuleEndTimeCache` | `note.js:354` | Any expression change. |
 | `player:importModuleAtTarget` | `menu-bar.js` | `{targetNoteId, moduleData, clientX, clientY}` |
 | `player:selectNote`, `player:requestPause` | various | Selection and transport. |
 | `history:capture` / `seedIfEmpty` / `undo` / `redo` / `requestRestore` / `stackChanged` | everywhere an edit commits | Undo. `player.js` also listens to `history:capture` to write the localStorage autosave. |
 | `settings:changed` / `settings:loaded` / `settings:panelToggled` | `settings-store.js`, `settings-panel.js` | `{path, value, settings}` |
 | `modals:show` / `requestRefresh` / `cleared` / `init` | modals | Widget lifecycle. |
-| `audio:masterVolumeInput` | `player.js:4977` | Live echo from the transport slider so the Settings panel tracks it mid-drag. |
+| `audio:masterVolumeInput` | `player.js:4298` | Live echo from the transport slider so the Settings panel tracks it mid-drag. |
 
 ## Settings → runtime
 
@@ -278,11 +287,33 @@ dotted path. A consumer that only matches `path.startsWith('library.')` will sil
 "Reset this tab" and "Reset all".
 :::
 
+## Loading a module
+
+```
+Module.loadFromJSON(source)
+  → fetch (when source is a URL) or take the object
+  → migrateTimeModel(data)          src/migrate/relational-time.js
+  → migrateSyntax(data)             src/migrate/legacy-syntax.js
+  → new Module(baseNote)            the BaseNote
+  → one Note per entry in data.notes, each expression compiled
+  → invalidateAll()                 every note dirty, ready to evaluate
+```
+
+`migrateTimeModel()` and then `migrateSyntax()` run before any note is built. Both leave a module
+in the current form untouched. A module of the old time model (tempo, beats per measure, `beat()`,
+`measure()`, `module.findTempo` chains) or in the retired method-chain syntax is converted exactly,
+on the JSON text; either conversion refuses (`TimeMigrationError`, `SyntaxMigrationError`) rather
+than guess. See [Module System](/developer/architecture/module-system#loading-old-modules).
+
+At startup `src/player.js` loads the saved session (`rmt:moduleSnapshot:v1`) or
+`modules/defaultModule.json`. If the saved session cannot be loaded, it is kept under
+`rmt:moduleSnapshot:v1:unloadable` before the autosave replaces it, and the default module opens.
+
 ## History
 
 ```
 any committing edit
-  → captureSnapshot(label)              player.js:6503
+  → captureSnapshot(label)              player.js:5631
       → module.createModuleJSON()
       → JSON.stringify once → snapshotStr   (shared, not serialized twice)
       → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot, snapshotStr })

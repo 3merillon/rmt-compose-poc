@@ -33,8 +33,8 @@ same thing: note id 0 *is* the BaseNote.
 
 ::: warning
 Frequency does **not** inherit. `[5].f` on a note that has no frequency expression does not walk up
-to its parent — it falls back to the hard-coded `440`. Only `tempo`, `beatsPerMeasure` and
-`measureLength` inherit from the BaseNote.
+to its parent — it falls back to the hard-coded `440`. Of the six variables, only the three
+interpretation variables (`amplitude`, `attack` and `release`) inherit from the BaseNote.
 :::
 
 ## Where you edit it
@@ -104,32 +104,12 @@ base.f * 2             # octave above
 base.f / (4/3)         # perfect fourth below
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency')
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.baseNote.getVariable('frequency').mul(new Fraction(2))
-module.baseNote.getVariable('frequency').div(new Fraction(4, 3))
-```
-</details>
-
 ### Relative to another note
 
 ```
 [1].f * (5/4)          # major third above note 1
 [3].f / 2              # octave below note 3
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))
-module.getNoteById(3).getVariable('frequency').div(new Fraction(2))
-```
-</details>
 
 ### Equal temperament
 
@@ -142,15 +122,6 @@ base.f * 2^(1/19)      # one 19-TET step
 ```
 
 Exponents are reduced on save: `base.f * 2^(4/12)` is stored as `base.f * 2^(1/3)`.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(7, 12)))
-```
-</details>
 
 ## Just-intonation ratios
 
@@ -172,13 +143,15 @@ module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(7,
 
 ## Irrational frequencies (corruption)
 
-A `^` whose result is irrational marks the property **corrupted**. `2^(1/12)` corrupts;
+A `^` whose result is irrational marks the property **corrupted** (tempered, not a pure ratio), and
+the value stays exact. `2^(1/12)` corrupts;
 `4^(1/2)` does not, because it is exactly 2 — `base.f * 4^(1/2)` is simplified to `base.f * 2` on
 save.
 
-A corrupted frequency shows in the widget with an **`≈`** prefix and in italics. In the workspace the
+The widget shows an irrational frequency as its exact form and its value (`(263/4) * 2^(1/4) = 78.190368…`); only an approximate one (written with `~`) gets an **`≈`** prefix. In the workspace the
 note is **hatched**: a crosshatch means the note is corrupted at the source, a single diagonal hatch
-means it merely depends on something corrupted.
+means it merely depends on something corrupted. A tempered chain that lands on a rational shows its
+fraction: twelve 12-TET steps are exactly 2.
 
 Simplification merges like bases: `2^(1/12) * 2^(1/12) * base.f` saves as `2^(1/6) * base.f`.
 
@@ -198,15 +171,12 @@ depends on the selection.
 Referencing the BaseNote (`base.f`) is not recorded as a graph edge — it is a flag on the
 expression — but it behaves the same: edit the BaseNote and every note anchored to it moves.
 
-## Instrument inheritance follows frequency
+## Frequency does not decide the instrument
 
-If a note has no `instrument` of its own, the app resolves one by walking the **frequency
-expression**: a note whose frequency is `[7].f * (3/2)` inherits note 7's instrument; a note whose
-frequency is `base.f * (5/4)` inherits the BaseNote's. If nothing along that chain pins an
-instrument, the fallback is the **Settings → Audio → default instrument** (`sine-wave` out of the
-box).
-
-So retuning a note against a different parent can also change what it sounds like.
+A note's instrument no longer follows its frequency expression: a note tuned from note 7
+(`[7].f * (3/2)`) is not thereby in note 7's line. The instrument comes from the note's **player**,
+the line of notes each starting where the previous one ends, so retuning a note against a different
+parent does not change what it sounds like. See [Instruments](/user-guide/playback/instruments#players).
 
 ## In the workspace
 
@@ -218,14 +188,14 @@ So retuning a note against a different parent can also change what it sounds lik
   `BaseNote` (or `Note [N]` when a note with a frequency is selected — the guides re-reference
   themselves to the selection), plus `+1`, `+2`, `-1`, … for the octaves around it.
 - The **vertical dashed lines** are measure bars, not octaves. See
-  [beatsPerMeasure](/reference/properties/beats-per-measure).
+  [Measure bars](/reference/module-schema#measure-bars).
 
 ## In playback
 
 The evaluated frequency is converted to a floating-point number at schedule time.
 
 - Synth instruments (`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`,
-  `vibraphone`, `fm-epiano`) set oscillator frequency directly.
+  `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`) set oscillator frequency directly.
 - `piano` and `violin` are multisampled: the nearest zone is picked and played back at
   `frequency / zone.rootHz`. There is no oscillator.
 - With **Settings → Audio → stereo** enabled (off by default), frequency also drives the pan

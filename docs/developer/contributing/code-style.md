@@ -1,6 +1,6 @@
 ---
 title: Code Style
-description: The conventions RMT Compose actually follows — DSL-first expressions, the two-format invariant, swallow-and-degrade compilation, and defaults that preserve behavior.
+description: The conventions RMT Compose actually follows — one expression language, value-checked rewrites, swallow-and-degrade compilation, and defaults that preserve behavior.
 ---
 
 # Code Style
@@ -10,8 +10,8 @@ or `format` script**. That makes these conventions load-bearing: a reviewer is t
 a change and the codebase, so match what is already there.
 
 The rules that matter most in this project are not the formatting ones. They are the four project
-invariants further down: [DSL-first expressions](#expressions-dsl-is-primary), the
-[two-format invariant](#the-two-format-invariant), [swallow-and-degrade error handling](#error-handling-swallow-and-degrade),
+invariants further down: [one expression language](#expressions-one-language),
+[value-checked rewrites](#writing-expressions-from-code), [swallow-and-degrade error handling](#error-handling-throw-at-the-compiler-catch-at-the-boundary),
 and [defaults that preserve behavior](#new-settings-must-default-to-the-old-behavior).
 
 ## Formatting
@@ -59,24 +59,25 @@ External first, then internal, in dependency order:
 import Fraction from 'fraction.js';
 
 import { BinaryExpression, OP, VAR } from './binary-note.js';
-import { isDSLSyntax, compileDSL, decompileToDSL } from './dsl/index.js';
+import { compileDSL, decompileToDSL } from './dsl/index.js';
 ```
 
 Always include the `.js` extension — these are native ES modules, and Vite serves them unbundled in
 dev.
 
-## Expressions: DSL is primary
+## Expressions: one language
 
-Every one of the 79 shipped modules is written in the DSL. Legacy method-chain syntax is the
-compatibility path, not the norm — `ExpressionCompiler.compile()` tries the DSL *first*
-(`src/expression-compiler.js:66`).
+The DSL is the only expression language. Every shipped module is written in it, the compiler
+compiles nothing else, and modules in the retired method-chain syntax are converted to it when they
+load (`src/migrate/legacy-syntax.js`; see
+[Expression Compiler](/developer/core/expression-compiler#the-retired-method-chain-syntax)).
 
 Write DSL in code, in comments, in tests and in docs:
 
 ```
 base.f * (3/2)          # perfect fifth above the BaseNote
 [1].t + [1].d           # starts when note 1 ends
-beat(base) * 2          # two beats long
+base.d * 2              # two time units long (base.d is the time unit)
 2^(7/12)                # 12-TET fifth
 ```
 
@@ -87,90 +88,39 @@ Property shortnames — use these, and no others:
 | frequency | `f`, `freq`, `frequency` |
 | startTime | `t`, `s`, `start`, `startTime` |
 | duration | `d`, `dur`, `duration` |
-| tempo | `tempo` |
-| beatsPerMeasure | `bpm`, `beatsPerMeasure` |
-| measureLength | `ml`, `measureLength` |
+| amplitude | `a`, `amp`, `amplitude` |
+| attack | `atk`, `attack` |
+| release | `rel`, `release` |
 
-Helper functions: `tempo(ref)`, `measure(ref)`, `beat(ref)` (`src/dsl/constants.js`).
+The DSL has **no functions** (`src/dsl/constants.js` keeps `RetiredTimeFunctions` and
+`RetiredTimeProperties` only to explain the removed names). `beat()`, `tempo()`, `measure()`, `.tempo`,
+`.bpm`, `.beatsPerMeasure`, `.ml` and `.measureLength` are refused with a message that names the
+replacement. A beat is the BaseNote's duration: **write `base.d`**, never a division by a tempo; the
+shipped library writes `base.d * (1/4)`, `base.d * 2` and so on. A measure bar's length is `[N].d`.
 
-**Use `beat(base)`, never `60 / tempo(base)`.** They compute the same quantity; the whole shipped
-library uses `beat(base) * (1/4)`, `beat(base) * 2` and so on, and `60 / tempo(` appears exactly zero
-times in `public/modules/`. An expression that spells out the arithmetic is one a reader has to
-decode.
+## Writing expressions from code
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
+Any code that writes an expression writes DSL, and the BaseNote is `base` (`[0]` parses as the same
+thing, but nothing in the codebase or the shipped library emits it). Never branch on the format of
+an existing expression: after loading, there is only one.
 
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.getNoteById(1).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(1)))
-```
+Where a rewrite could change the value (folding a coefficient, for example), **evaluate before and
+after and fall back to the original if they disagree**. `src/utils/simplify.js` is the reference:
+`simplifyDSL()` and `scaleDSL()` (`src/dsl/simplify.js`) do the algebra, and the wrapper keeps a
+rewrite only when it evaluates to exactly the same value and the same corruption flag
+(`multiplyExpressionByFraction()`, `src/utils/simplify.js:40`).
 
-Still parsed, still supported, still present in saved files. Do not write new code that *emits* it
-except on the legacy branch required by the invariant below.
-</details>
-
-## The two-format invariant
-
-::: danger Any code that writes an expression must handle both formats
-A note's expression is stored as source text and round-trips verbatim — saving does **not** convert
-legacy to DSL. So a single module can hold both formats at once whenever a legacy-authored file is
-loaded. (The code-level defaults no longer leak legacy into DSL modules: the BaseNote's default
-`measureLength` is now the DSL string `beat(base) * base.bpm`.)
-
-If you emit a new expression for an existing note, you must emit it in **the format that note is
-already written in**. Emitting DSL onto a legacy note (or the reverse) produces an expression the
-user did not write and cannot recognise.
-:::
-
-The pattern, everywhere in the codebase: read the note's current source text, sniff it with
-`isDSLSyntax()`, branch.
-
-```javascript
-import { isDSLSyntax } from './dsl/index.js';
-
-// src/module.js:798-810 — chaining a new measure onto the previous one
-const prevRaw = prevNote.variables?.startTimeString || '';
-const useDSL = isDSLSyntax(prevRaw) || (i === 0 && isDSLSyntax(fromNote.variables?.startTimeString || ''));
-
-let rawString;
-if (useDSL) {
-  const pRef = (prevNote.id === 0) ? 'base' : `[${prevNote.id}]`;
-  rawString = `${pRef}.t + measure(${pRef})`;
-} else if (prevNote.id === 0) {
-  rawString = "module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))";
-} else {
-  rawString = `module.getNoteById(${prevNote.id}).getVariable('startTime')`
-            + `.add(module.findMeasureLength(module.getNoteById(${prevNote.id})))`;
-}
-```
-
-Note the BaseNote special case in each branch: the emitted reference for id 0 is **`base` in DSL and
-`module.baseNote` in legacy**. (`[0]` does parse, but nothing in the codebase or the shipped library
-emits it, and `reindexModule()` normalises the legacy form to `module.baseNote`.)
-
-`src/utils/simplify.js` is the reference implementation of the invariant. `_simplify()` routes DSL to
-`simplifyDSL()` (the DSL has its own canonical form, and the method-chain parser cannot read it) and
-everything else to the legacy sum-of-products normaliser, then verifies that the rewritten expression
-still evaluates to the same value before returning it. Copy that shape:
-
-1. Sniff the format.
-2. Rewrite in that format.
-3. Where the rewrite could change the value (folding a coefficient, for example), **evaluate before
-   and after and fall back to the original if they disagree** — see `multiplyExpressionByFraction()`.
-
-Call sites that already do this and are worth reading: `src/module.js` (`generateMeasures`,
-`findInstrument`), `src/player.js` (drag/resize commit, module import, the interval arrows),
-`src/modals/variable-controls.js`.
+Code that creates a new expression from nothing, such as `Module.generateMeasures()` (`[p].t + [p].d`
+and `[p].d`), writes it in its canonical form directly.
 
 ## Error handling: throw at the compiler, catch at the boundary
 
 ::: warning Expression compilation throws — but the throw is caught per note
-`ExpressionCompiler.compile()` raises a plain `Error` (not a `SyntaxError`) on an unparseable
-expression, after logging `Failed to compile expression: …` via `console.error`
-(`src/expression-compiler.js:98-107`). `Note._setExpression()` and the constructor wrap the
+`ExpressionCompiler.compile()` raises on an unparseable expression: a `DSLError` from the DSL
+parser, or a plain `Error` for text in the retired method-chain syntax
+(`src/expression-compiler.js:53`). `Note._setExpression()` and the constructor wrap the
 compile in `try/catch` and, on failure, `console.warn` and leave the previous expression in place
-(`src/note.js:195-203`) — so callers of `setVariable()` still see no exception.
+(`src/note.js:305-313`) — so callers of `setVariable()` still see no exception.
 :::
 
 This is a deliberate convention — a bad expression degrades a single property instead of tearing
@@ -218,8 +168,8 @@ codebase has already paid for these lessons; do not re-introduce them.
 
 | Pattern | Where | Why |
 |---|---|---|
-| The `note.variables` Proxy is **memoized per note** | `src/note.js:345-352` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame. |
-| Dependency re-registration is skipped by key | `src/module.js:172-195` — `_depsRegKey` = `generation:id:epoch` | `markNoteDirty` registers every marked note. The key skips rewriting ~15 graph maps for notes whose expressions did not change. |
+| The `note.variables` Proxy is **memoized per note** | `src/note.js:475-482` | It used to allocate a fresh `Proxy` on *every* access, on paths that run per note per frame. |
+| Dependency re-registration is skipped by key | `src/module.js:178-209` — `_depsRegKey` = `generation:id:epoch` | `markNoteDirty` registers every marked note. The key skips rewriting ~15 graph maps for notes whose expressions did not change. |
 | The compile cache is LRU-capped at **4000** | `src/expression-compiler.js:22` | Every drag commit mints a fresh fraction string, so an uncapped cache grows without bound across a session. |
 | Per-gesture state is built **once**, not per pointermove | `workspace.js`, `renderer.setDragOffsetPreview`, `setDragOverlay` | Rebuilding the moving-id set every move made allocation scale with dependent count and triggered mid-drag GC hitches. Identity-check the incoming Set and short-circuit. |
 | Keep overlay work **O(visible), not O(module)** | `renderer.js` viewport cull | This is what makes 100,000 notes tractable. |
@@ -234,8 +184,8 @@ Explain *why*. The code already says what.
 
 ```javascript
 // Good — the reason is not recoverable from the code
-// scaleDSL folds the factor into the expression's coefficient, so unlike the
-// legacy path below it can genuinely get the value wrong. Check it.
+// scaleDSL folds the factor into the expression's coefficient, so it can
+// genuinely get the value wrong. Check it.
 
 // Bad — restates the line
 // Add x and y
@@ -266,9 +216,8 @@ After changing Rust, run `npm run wasm:build` and **commit `src/wasm/rmt_core.js
 
 Docs live in `docs/` (VitePress). Two rules a reviewer will hold you to:
 
-- **DSL first.** Every expression example is DSL. Legacy appears only inside a
-  `<details><summary>Legacy JavaScript syntax</summary>` block, and only where a reader migrating an
-  old module needs it.
+- **DSL only.** Every expression example is DSL. The retired method-chain syntax appears only where
+  the docs explain its conversion (the syntax reference and the expression-compiler page).
 - **Document what ships.** If a control does nothing, or a path is blocked (like the WASM evaluator),
   say so plainly rather than describing the intent.
 

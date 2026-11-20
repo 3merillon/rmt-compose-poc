@@ -11,7 +11,7 @@ You'll start from an empty workspace, create three notes — a root, a perfect f
 
 Go to [rmt.world](https://rmt.world), or run `npm run dev` locally and open `http://localhost:3000`.
 
-The app boots with the **default module** already loaded: 169 notes, with the BaseNote at 263 Hz and tempo 100. Play it, drag things around, get a feel for it. Then clear it out.
+The app boots with the **default module** already loaded: 169 notes, with the BaseNote at 263 Hz and a time unit of 3/5 s (100 BPM). Play it, drag things around, get a feel for it. Then clear it out.
 
 ![The RMT Compose workspace: notes as coloured rectangles on a frequency/time grid, with the orange BaseNote circle at the left](/img/workspace-overview.png)
 
@@ -25,9 +25,9 @@ The app boots with the **default module** already loaded: 169 notes, with the Ba
 Everything disappears except the BaseNote.
 
 ::: info The BaseNote is not a note
-The BaseNote (id 0) makes no sound. It is the reference every other note is measured against: it holds the base **frequency**, **startTime**, **tempo** and **beatsPerMeasure** for the whole module. To hear anything, you have to add notes that reference it.
+The BaseNote (id 0) makes no sound. It is the reference every other note is measured against: it holds the base **frequency**, **startTime** and **duration** (the time unit) for the whole module. To hear anything, you have to add notes that reference it.
 
-In the default module those values are 263 Hz, 0, tempo 100, 4 beats per measure.
+In the default module those values are 263 Hz, 0 and 3/5 s, which the note widget shows as 100 BPM.
 :::
 
 ## Step 3: Read the workspace
@@ -44,9 +44,9 @@ In the default module those values are 263 Hz, 0, tempo 100, 4 beats per measure
 
 ## Step 4: Create the root note
 
-With the BaseNote still selected, scroll the note widget to the section headed **ADD NOTE / SILENCE**.
+With the BaseNote still selected, scroll the note widget to the section headed **ADD NOTE / SILENCE / REFERENCE**.
 
-![The note widget's ADD NOTE / SILENCE section, showing the Note/Silence radios and the Frequency, Duration and Start Time expression fields](/img/note-widget.png)
+![The note widget's ADD NOTE / SILENCE / REFERENCE section, showing the Note/Silence radios and the Frequency, Duration and Start Time expression fields](/img/note-widget.png)
 
 You'll see:
 
@@ -58,7 +58,7 @@ For a note created from the BaseNote, the defaults are:
 | Field | Expression | Meaning |
 |---|---|---|
 | Frequency | `base.f` | the BaseNote's frequency — 263 Hz |
-| Duration | `beat(base)` | one beat, at the BaseNote's tempo |
+| Duration | `base.d` | one time unit, the BaseNote's duration |
 | Start Time | `base.t` | the BaseNote's start time — 0 |
 
 Leave all three alone and click **Create**.
@@ -72,7 +72,7 @@ Those options appear only when you create a note *from another note* — they sa
 ## Step 5: Create the fifth
 
 1. Click your new note in the workspace. The widget retitles to **Note [1] Variables**.
-2. Scroll to **ADD NOTE / SILENCE** again. This time there is an extra pair of radios: **At Start** / **At End**. **At End** is already selected — that's what you want, so the new note plays *after* this one.
+2. Scroll to **ADD NOTE / SILENCE / REFERENCE** again. This time there is an extra pair of radios: **At Start** / **At End**. **At End** is already selected — that's what you want, so the new note plays *after* this one.
 3. Look at the **Frequency** field. It is prefilled with `[1].f` — **the parent's frequency, not the base's**. New notes inherit the pitch of the note you created them from, which is why they start out at the same height. Replace it with:
 
 ```
@@ -83,18 +83,10 @@ base.f * (3/2)
 
 The second note lands a perfect fifth above the first, starting exactly where the first one ends — because its Start Time was prefilled as `[1].t + [1].d`, "note 1's start plus note 1's duration". That reference is a **dependency**: move note 1 and note 2 follows it.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-```
-</details>
-
 ## Step 6: Create the octave
 
 1. Select note 2.
-2. In **ADD NOTE / SILENCE**, leave **At End** selected.
+2. In **ADD NOTE / SILENCE / REFERENCE**, leave **At End** selected.
 3. Replace the **Frequency** field with:
 
 ```
@@ -137,7 +129,7 @@ The **frequency** row of a selected note has **▲** and **▼** buttons. By def
 
 ### Change a duration
 
-The **duration** row has five note-length buttons — **Whole**, **Half**, **Quarter**, **Eighth**, **Sixteenth** — plus two dot buttons: `.` multiplies by 3/2, `..` by 7/4. Quarter is one beat, so it writes `beat(base)`; a dotted eighth writes `beat(base) * (3/4)`.
+The **duration** row has five note-length buttons — **Whole**, **Half**, **Quarter**, **Eighth**, **Sixteenth** — plus two dot buttons: `.` multiplies by 3/2, `..` by 7/4. Quarter is one time unit, so it writes `base.d`; a dotted eighth writes `base.d * (3/4)`.
 
 ### Try other intervals
 
@@ -149,7 +141,7 @@ The **duration** row has five note-length buttons — **Whole**, **Half**, **Qua
 | Harmonic seventh | 7/4 | `base.f * (7/4)` |
 | 12-TET semitone | 2^(1/12) | `base.f * 2^(1/12)` |
 
-A 12-TET semitone is irrational, so that last note displays with a leading **≈** and is hatched on the canvas. That is expected — see [the ≈ symbol](/getting-started/concepts#the-symbol-approximation).
+A 12-TET semitone is irrational, so that last note is hatched on the canvas, and its widget shows the exact form with its value. That is expected — see [the ≈ symbol](/getting-started/concepts#the-symbol-approximation).
 
 ### Undo
 
@@ -161,7 +153,7 @@ Three ways, all equivalent: the keyboard — **Ctrl/Cmd + Z** to undo, **Ctrl/Cm
 - **Shift + click** a note toggles it in or out of the selection.
 - On a touchscreen, a **long-press** does the job of Shift: hold on empty space to marquee, hold on a note to toggle it.
 
-With more than one note selected, a **group widget** appears. It offers **Copy to Modules** — which saves the selection into the module library's Custom section, rooted at its earliest note and with its dependency tree intact — and **Delete all**. Dragging any note in the group drags the whole group.
+With more than one note selected, a **group widget** appears. It changes amplitude, attack, release, pitch, length, instrument or colour on every selected note at once, and offers **Copy to Modules** — which saves the selection into the module library's Custom section, rooted at its earliest note and with its dependency tree intact — and **Delete all**. Dragging any note in the group drags the whole group.
 
 ![A marquee rubber-band drawn over several notes, with the selected notes highlighted](/img/multi-select-marquee.png)
 
@@ -180,8 +172,8 @@ The same submenu holds **Reset Default Module**, which restores the composition 
 ## What you've learned
 
 - The **BaseNote** is the reference; it makes no sound.
-- Every note property is an **expression** — `base.f * (3/2)`, `beat(base)`, `[1].t + [1].d`.
-- New notes are created from the **ADD NOTE / SILENCE** section of the note widget, and inherit the pitch of the note you create them from.
+- Every note property is an **expression** — `base.f * (3/2)`, `base.d`, `[1].t + [1].d`.
+- New notes are created from the **ADD NOTE / SILENCE / REFERENCE** section of the note widget, and inherit the pitch of the note you create them from.
 - Referencing another note creates a **dependency**: change the parent, the child follows.
 - Ratios like 3/2 and 5/4 are stored exactly, so transposing is a single edit.
 

@@ -1,12 +1,15 @@
 import Fraction from 'fraction.js';
-import { Note } from './note.js';
+import { Note, EXPRESSION_VARS, isMeasureNote } from './note.js';
+import { migrateTimeModel } from './migrate/relational-time.js';
+import { migrateSyntax } from './migrate/legacy-syntax.js';
 import { toNumber } from './utils/fraction-num.js';
 import { DependencyGraph } from './dependency-graph.js';
 import { inheritsFromBase } from './variable-deps.js';
 import { createEvaluator, createIncrementalEvaluator, isWasmBackedEvaluator, isEvaluatorHotSwapEnabled } from './wasm/evaluator-adapter.js';
 import { onWasmReady } from './wasm/index.js';
-import { compiler, decompiler } from './expression-compiler.js';
-import { isDSLSyntax } from './dsl/index.js';
+import { compiler } from './expression-compiler.js';
+import { compare as compareExact } from './value/exact.js';
+import { instrumentOf, playerOf, migrateInstrumentRule, INSTRUMENT_RULE } from './players.js';
 
 let memoizedModuleEndTime = null;
 let moduleLastModifiedTime = 0;
@@ -75,27 +78,25 @@ export class Module {
     this._evaluating = false; // reentrancy guard for evaluateModule()
 
     // Create base note with default values
+    // The reference note holds the only absolute values: a frequency in Hz,
+    // a start and a duration in seconds. Its duration is the time unit every
+    // other duration relates to (`base.d`); 60 / base.d is the tempo, as a view.
     const defaultBaseNoteVariables = {
-      frequency: 'new Fraction(440)',
-      startTime: 'new Fraction(0)',
-      tempo: 'new Fraction(60)',
-      beatsPerMeasure: 'new Fraction(4)',
+      frequency: '440',
+      startTime: '0',
+      duration: '1',
       // No hardcoded base instrument: with none set, findInstrument() resolves
       // the base note (and everything inheriting from it) to the global default
       // instrument (_defaultInstrumentName, default 'sine-wave' → behavior
       // unchanged at defaults). This is what makes the audio.defaultInstrument
       // setting reach the common inheriting-note case. A caller/JSON may still
       // pass an explicit `instrument` to pin the base note's timbre.
-      // DSL form of 60/tempo(base) * base.bpm — compiles to the exact same
-      // bytecode (LOAD_CONST 60, LOAD_BASE tempo, DIV, LOAD_BASE bpm, MUL) as
-      // the old legacy method-chain string, but keeps saved modules pure DSL.
-      measureLength: 'beat(base) * base.bpm',
     };
 
     // Merge defaults with provided variables (convert functions to strings if needed)
     const finalVars = { ...defaultBaseNoteVariables };
     for (const [key, value] of Object.entries(baseNoteVariables)) {
-      if (key === 'color' || key === 'instrument') {
+      if (key === 'color' || key === 'instrument' || key === 'repeat') {
         finalVars[key] = value;
       } else if (key.endsWith('String')) {
         // Use the string value directly
@@ -187,7 +188,7 @@ export class Module {
     const allDeps = note.getAllDependencies();
     const refsBase = note.referencesBaseNote();
     this._dependencyGraph._updateDependencies(note.id, allDeps, refsBase);
-    // Measure bars and `beat([n])`-style reads can follow the base note
+    // An `[n].a` read of a note without an amplitude follows the base note
     // without naming it; re-evaluation has to know about those too.
     this._dependencyGraph.setImplicitBaseDependent(note.id, inheritsFromBase(note));
 
@@ -221,8 +222,8 @@ export class Module {
     }
 
     // Everything that reads this note, directly or through other notes. The walk
-    // crosses the base note: whatever reads it (module.baseNote, findTempo,
-    // findMeasureLength, an inherited tempo) follows, and so does whatever reads those.
+    // crosses the base note: whatever reads it (base.d, base.f, an inherited
+    // amplitude) follows, and so does whatever reads those.
     const dependents = this._dependencyGraph.getEvaluationDependents(numId);
 
     // Invalidate incremental evaluator (this note's bytecode may have changed)
@@ -637,7 +638,7 @@ export class Module {
   evaluateModule() {
     if (this._evaluating) {
       // Reentrant call from an evaluation callback (bytecode CALL ops like
-      // findTempo/getVariable re-enter via getEvaluationCache). Serve the
+      // getVariable re-enter via getEvaluationCache). Serve the
       // in-progress cache: topological order guarantees any dependency the
       // callback needs is already finalized. Recursing here instead used to
       // re-run the whole dirty set per callback.
@@ -730,136 +731,78 @@ export class Module {
   }
 
   /**
-   * Find tempo for a note (walks inheritance chain)
+   * The time unit: the reference note's evaluated duration in seconds (one
+   * beat, if you count in beats). 60 / getTimeUnit() is the tempo in BPM, a
+   * view only; nothing stores it.
+   * @returns {Fraction}
    */
-  findTempo(note) {
-    if (!note) return this.baseNote.getVariable('tempo') || new Fraction(60);
+  getTimeUnit() {
+    const d = this.baseNote.getVariable('duration');
+    return (d && typeof d.compare === 'function' && d.compare(0) > 0) ? d : new Fraction(1);
+  }
 
-    let current = note;
-    while (current) {
-      if (current.hasExpression('tempo')) {
-        return current.getVariable('tempo');
-      }
-      current = current.parentId !== undefined ? this.getNoteById(current.parentId) : null;
-    }
-    return this.baseNote.getVariable('tempo') || new Fraction(60);
+  /** All measure bars, unordered. */
+  getMeasureNotes() {
+    return Object.values(this.notes).filter(isMeasureNote);
   }
 
   /**
-   * Find measure length for a note
+   * Find the amplitude (relative gain) a note sounds at: its own when it
+   * defines one, else the BaseNote's, else 1. Same fallback the evaluator
+   * applies to `[id].a`, so playback, export and expressions agree.
+   * @returns {Fraction} exact and unclamped — each consumer clamps for its medium
    */
-  findMeasureLength(note) {
-    const tempo = this.findTempo(note);
-
-    // Find beatsPerMeasure
-    let beatsPerMeasure = null;
-    const isMeasure = (n) => {
-      try {
-        return !!(n && n.hasExpression('startTime') && !n.hasExpression('duration') && !n.hasExpression('frequency'));
-      } catch {
-        return false;
-      }
-    };
-
-    // Check direct per-note override
-    if (note && note.hasExpression('beatsPerMeasure')) {
-      beatsPerMeasure = note.getVariable('beatsPerMeasure');
-    } else {
-      // Walk up ancestry (skip measure ancestors)
-      let cur = note;
-      while (cur && cur.id !== 0) {
-        cur = this.getNoteById(cur.parentId);
-        if (!cur) break;
-        if (cur.hasExpression('beatsPerMeasure') && !isMeasure(cur)) {
-          beatsPerMeasure = cur.getVariable('beatsPerMeasure');
-          break;
-        }
-      }
-      if (!beatsPerMeasure) {
-        beatsPerMeasure = this.baseNote.getVariable('beatsPerMeasure');
-      }
+  findAmplitude(note) {
+    if (note && note.id !== 0) {
+      const own = note.getVariable('amplitude');
+      if (own) return own;
     }
-
-    if (!beatsPerMeasure) beatsPerMeasure = new Fraction(4);
-    if (!tempo) return beatsPerMeasure.mul(1); // 1 second per beat default
-
-    return beatsPerMeasure.div(tempo).mul(60);
+    return this.baseNote.getVariable('amplitude') || new Fraction(1);
   }
 
   /**
    * Find instrument for a note
    */
-  findInstrument(note) {
-    if (!note) return 'sine-wave';
-    if (!note.hasExpression('frequency') && !note.getVariable('frequency')) {
-      return _defaultInstrumentName;
-    }
-
-    // Check direct instrument property
-    if (note.properties.instrument) {
-      return note.properties.instrument;
-    }
-
-    // Check frequency expression for parent reference
-    const freqSource = note.getExpressionSource('frequency');
-    if (freqSource) {
-      if (isDSLSyntax(freqSource)) {
-        // DSL format: [N].f for note references, base.f for base note
-        const dslNoteRef = freqSource.match(/\[(\d+)\]\.f/);
-        if (dslNoteRef) {
-          const parentId = parseInt(dslNoteRef[1], 10);
-          const parentNote = this.getNoteById(parentId);
-          if (parentNote) return this.findInstrument(parentNote);
-        }
-
-        if (freqSource.includes('base.f')) {
-          return this.findInstrument(this.baseNote);
-        }
-      } else {
-        // Legacy format
-        const noteRefMatch = freqSource.match(/module\.getNoteById\((\d+)\)\.getVariable\('frequency'\)/);
-        if (noteRefMatch) {
-          const parentId = parseInt(noteRefMatch[1], 10);
-          const parentNote = this.getNoteById(parentId);
-          if (parentNote) return this.findInstrument(parentNote);
-        }
-
-        if (freqSource.includes("module.baseNote.getVariable('frequency')")) {
-          return this.findInstrument(this.baseNote);
-        }
-      }
-    }
-
-    return _defaultInstrumentName;
+  /**
+   * The instrument a note sounds with: its own, else along its START TIME (the
+   * line it is in, through rests and silences, or the copy of a line it is;
+   * else the note its start is written from), else the BaseNote's, else the
+   * default. See src/players.js for the rule and the owner's words.
+   * @param {object} note
+   * @param {Map} [memo] resolved in this pass, by note id: a caller resolving many
+   *   notes passes one Map, so each line is walked once rather than once per note
+   */
+  findInstrument(note, memo = null) {
+    return instrumentOf(this, note, memo, _defaultInstrumentName);
   }
 
   /**
-   * Generate measure notes starting from a given note
+   * The player of a note: the first note of its line (which decides the
+   * instrument) and the note it follows in the line (null for a first note).
+   * @returns {{head:number, prev:number|null}}
+   */
+  findPlayer(note, memo = null) {
+    return playerOf(this, note, memo);
+  }
+
+  /**
+   * Append `n` measure bars after `fromNote`. A bar is a silent note flagged
+   * `measure`: it starts where the previous one ends and lasts as long
+   * (`[p].t + [p].d`, `[p].d`), so changing one bar's duration carries to the
+   * bars that follow. From the BaseNote, the first bar starts at `base.t` and
+   * lasts four time units (`base.d * 4`).
    */
   generateMeasures(fromNote, n) {
     const notesArray = [];
 
     for (let i = 0; i < n; i++) {
       const prevNote = (i === 0) ? fromNote : this.getNoteById(notesArray[i - 1].id);
+      const vars = (!prevNote || prevNote.id === 0 || !isMeasureNote(prevNote))
+        ? { startTime: 'base.t', duration: 'base.d * 4', measure: true }
+        : { startTime: `[${prevNote.id}].t + [${prevNote.id}].d`, duration: `[${prevNote.id}].d`, measure: true };
 
-      // Detect DSL vs legacy from the previous note's startTime expression
-      const prevRaw = prevNote.variables?.startTimeString || '';
-      const useDSL = isDSLSyntax(prevRaw) || (i === 0 && isDSLSyntax(fromNote.variables?.startTimeString || ''));
-
-      let rawString;
-      if (useDSL) {
-        const pRef = (prevNote.id === 0) ? 'base' : `[${prevNote.id}]`;
-        rawString = `${pRef}.t + measure(${pRef})`;
-      } else if (prevNote.id === 0) {
-        rawString = "module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))";
-      } else {
-        rawString = `module.getNoteById(${prevNote.id}).getVariable('startTime').add(module.findMeasureLength(module.getNoteById(${prevNote.id})))`;
-      }
-
-      const newNote = this.addNote({
-        startTime: rawString
-      });
-      newNote.parentId = prevNote.id;
+      const newNote = this.addNote(vars);
+      newNote.parentId = prevNote ? prevNote.id : 0;
       notesArray.push(newNote);
     }
 
@@ -877,6 +820,23 @@ export class Module {
       data = await response.json();
     } else {
       data = source;
+    }
+
+    // A module written for the old time model (tempo, beats per measure,
+    // beat()/measure()) is converted first, exactly; see migrate/relational-time.js.
+    // A module it cannot convert throws a TimeMigrationError, never loads wrong.
+    const migration = migrateTimeModel(data);
+    if (migration.migrated) {
+      data = migration.data;
+      console.info('[RMT] Converted a module to relational time: ' + migration.report.join('; '));
+    }
+    // Then expressions in the retired method-chain syntax become DSL, exactly;
+    // see migrate/legacy-syntax.js. One it cannot read as written throws a
+    // SyntaxMigrationError naming the note.
+    const syntax = migrateSyntax(data);
+    if (syntax.migrated) {
+      data = syntax.data;
+      console.info('[RMT] ' + syntax.report.join('; '));
     }
 
     // Create base note variables from JSON
@@ -926,6 +886,16 @@ export class Module {
       }
     }
 
+    // A module saved before instruments followed the start time (Phase I) keeps the
+    // instruments it had: the notes the new rule would move to another instrument
+    // get their old one written onto them (src/players.js, migrateInstrumentRule).
+    if (data.instrumentRule !== INSTRUMENT_RULE) {
+      const pinned = migrateInstrumentRule(moduleInstance, _defaultInstrumentName);
+      if (pinned.length) {
+        console.info(`[RMT] Instruments now follow the start time; kept the instrument of ${pinned.length} note(s) as before: ${pinned.slice(0, 20).join(', ')}${pinned.length > 20 ? ', …' : ''}`);
+      }
+    }
+
     // Mark all notes dirty for initial evaluation using invalidateAll for clean slate
     moduleInstance.invalidateAll();
 
@@ -950,7 +920,7 @@ export class Module {
 
     // Export base note
     const baseObj = {};
-    const baseExprs = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+    const baseExprs = EXPRESSION_VARS;
     for (const name of baseExprs) {
       const source = this.baseNote.getExpressionSource(name);
       if (source) {
@@ -959,6 +929,7 @@ export class Module {
     }
     if (this.baseNote.properties.color) baseObj.color = this.baseNote.properties.color;
     if (this.baseNote.properties.instrument) baseObj.instrument = this.baseNote.properties.instrument;
+    if (this.baseNote.properties.repeat) baseObj.repeat = this.baseNote.properties.repeat;
     moduleObj.baseNote = baseObj;
 
     // Export notes
@@ -975,12 +946,15 @@ export class Module {
       }
       if (note.properties.color) noteObj.color = note.properties.color;
       if (note.properties.instrument) noteObj.instrument = note.properties.instrument;
+      if (note.properties.measure) noteObj.measure = true;
 
       notesArray.push(noteObj);
     }
 
     notesArray.sort((a, b) => a.id - b.id);
     moduleObj.notes = notesArray;
+    // Saved under the start-time instrument rule: loading it again migrates nothing.
+    moduleObj.instrumentRule = INSTRUMENT_RULE;
 
     return moduleObj;
   }
@@ -999,11 +973,7 @@ export class Module {
       const note = this.notes[id];
       if (Number(id) === 0) continue;
 
-      const isMeasure = note.hasExpression('startTime') &&
-                        !note.hasExpression('duration') &&
-                        !note.hasExpression('frequency');
-
-      if (isMeasure) {
+      if (isMeasureNote(note)) {
         measureNotes.push(note);
       } else {
         regularNotes.push(note);
@@ -1014,11 +984,11 @@ export class Module {
     // rationals that differ past double precision), with id tie-break so
     // export renumbering stays deterministic.
     const sortByStartTime = (a, b) => {
-      const aStart = a.getVariable('startTime');
-      const bStart = b.getVariable('startTime');
+      const aStart = a.getExactVariable('startTime');
+      const bStart = b.getExactVariable('startTime');
       if (!aStart || !bStart) return a.id - b.id;
       try {
-        const cmp = aStart.compare(bStart);
+        const cmp = compareExact(aStart, bStart);
         if (cmp !== 0) return cmp;
       } catch (e) { /* non-Fraction value — fall through to id order */ }
       return a.id - b.id;
@@ -1047,10 +1017,9 @@ export class Module {
       }
     }
 
-    // Update expression references (supports both DSL and legacy formats)
+    // Update expression references: [N] -> [new id]
     const updateReferences = (exprText) => {
-      // DSL format: [N].prop, beat([N]), measure([N]), tempo([N])
-      let updated = exprText.replace(/\[(\d+)\]/g, (match, p1) => {
+      const updated = exprText.replace(/\[(\d+)\]/g, (match, p1) => {
         const oldRefId = parseInt(p1, 10);
         const newRefId = newMapping[oldRefId];
         if (typeof newRefId !== 'number') {
@@ -1059,21 +1028,6 @@ export class Module {
         }
         return '[' + newRefId + ']';
       });
-
-      // Legacy format: module.getNoteById(N) or getNoteById(N)
-      updated = updated.replace(/(?:module\.)?getNoteById\(\s*(\d+)\s*\)/g, (match, p1) => {
-        const oldRefId = parseInt(p1, 10);
-        if (oldRefId === 0) {
-          return 'module.baseNote';
-        }
-        const newRefId = newMapping[oldRefId];
-        if (typeof newRefId !== 'number') {
-          console.warn('No new mapping found for old id ' + oldRefId);
-          return match;
-        }
-        return 'module.getNoteById(' + newRefId + ')';
-      });
-
       return updated;
     };
 
@@ -1088,7 +1042,7 @@ export class Module {
 
       // Create new variables with updated references
       const variables = {};
-      const exprNames = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+      const exprNames = EXPRESSION_VARS;
 
       for (const name of exprNames) {
         const source = note.getExpressionSource(name);
@@ -1099,6 +1053,7 @@ export class Module {
 
       if (note.properties.color) variables.color = note.properties.color;
       if (note.properties.instrument) variables.instrument = note.properties.instrument;
+      if (note.properties.measure) variables.measure = true;
 
       const newNote = new Note(updatedId, variables);
       newNote.module = this;
@@ -1171,9 +1126,7 @@ export class Module {
     this.evaluateModule();
 
     // Compute measure end time
-    const measureNotes = Object.values(this.notes).filter(note =>
-      note.variables.startTime && !note.variables.duration && !note.variables.frequency
-    );
+    const measureNotes = this.getMeasureNotes();
 
     let measureEnd = 0;
     if (measureNotes.length > 0) {
@@ -1181,14 +1134,14 @@ export class Module {
       // one lossy conversion at the end (a NaN from valueOf overflow here
       // used to cascade into silent playback and a never-stopping playhead).
       let lastMeasure = measureNotes[0];
-      let lastMeasureStart = lastMeasure.getVariable('startTime');
+      let lastMeasureStart = lastMeasure.getExactVariable('startTime');
 
       for (let i = 1; i < measureNotes.length; i++) {
         const note = measureNotes[i];
-        const noteStart = note.getVariable('startTime');
+        const noteStart = note.getExactVariable('startTime');
         if (noteStart && lastMeasureStart) {
           try {
-            if (noteStart.compare(lastMeasureStart) > 0) {
+            if (compareExact(noteStart, lastMeasureStart) > 0) {
               lastMeasure = note;
               lastMeasureStart = noteStart;
             }
@@ -1196,14 +1149,16 @@ export class Module {
         }
       }
 
-      if (lastMeasureStart) {
-        measureEnd = toNumber(lastMeasureStart.add(this.findMeasureLength(lastMeasure)));
+      const lastMeasureLength = lastMeasure.getVariable('duration');
+      if (lastMeasureStart && lastMeasureLength) {
+        measureEnd = toNumber(lastMeasureStart.add(lastMeasureLength));
       }
     }
 
     // Compute last note end time — exact add, then one conversion
     let lastNoteEnd = 0;
     for (const id in this.notes) {
+      if (Number(id) === 0) continue; // the BaseNote's duration is the time unit, not a note
       const note = this.notes[id];
       if (note.variables.startTime && note.variables.duration && note.variables.frequency) {
         const noteStart = note.getVariable('startTime');

@@ -94,16 +94,6 @@ base.f * 2 ^ (10/31)
 base.f * 2 ^ (18/31)
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency')
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(10, 31)))
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(18, 31)))
-```
-</details>
-
 ## The shipped module
 
 The library's **Scale Systems** section ships a **31-TET** module (file `scale-systems/TET-31.json`; the tile reads **31-TET**).
@@ -112,17 +102,16 @@ The library's **Scale Systems** section ships a **31-TET** module (file `scale-s
 |---|---|
 | Notes | 32 — thirty-one steps plus the note you start on |
 | Base frequency | 440 Hz |
-| Tempo | 120 |
-| Beats per measure | 4 |
+| BaseNote duration (time unit) | `1/2` s, shown as 120 BPM |
 | Instrument | `sine-wave` |
-| Note duration | `beat(base) * (1/4)` |
+| Note duration | `base.d * (1/4)` |
 | Step | `[n].f * 2 ^ (1/31)` |
 
-The short note duration matters: at 120 BPM with sixteenth-note steps, all 31 degrees go by in about four seconds, which is what you want when you are listening for the shape of the scale rather than individual pitches.
+The short note duration matters: with a time unit of `1/2` s (120 BPM) and sixteenth-note steps, all 31 degrees go by in about four seconds, which is what you want when you are listening for the shape of the scale rather than individual pitches.
 
 To load it, drag the tile from **Scale Systems** (or search `31` or the `microtonal` tag with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-Thirty-one of the thirty-two notes carry the **≈** prefix and cross-hatching. This is the module where that display earns its keep — the approximated ratios next to each note are the quickest way to see which just interval each degree is standing in for.
+Thirty-one of the thirty-two notes are cross-hatched and labelled with their power, `2^(k/31)`. To see which just interval a degree stands in for, compare it with a pure ratio from the Intervals section.
 
 ## Meantone repertoire
 

@@ -28,7 +28,12 @@ export const defaultRendererConfig = {
     // drifting off it. Changing this shifts notes AND their guides together.
     centerAnchorWU: 10,
     roundedCornerPxAtZoom1: 6,
-    borderPxAtZoom1: 1
+    borderPxAtZoom1: 1,
+    // Which notes draw their envelope inside them (Settings > Appearance >
+    // "Envelope inside notes"): 'own' = the notes that set an attack or a release,
+    // 'all', 'none'. And whether each note's release is drawn past its end.
+    envelopeMode: 'own',
+    showTails: false
   },
 
   // Base note glyph circle (world-space size)

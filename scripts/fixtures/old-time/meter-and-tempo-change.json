@@ -1,0 +1,20 @@
+{
+  "baseNote": { "frequency": "264", "startTime": "0", "tempo": "120", "beatsPerMeasure": "4" },
+  "notes": [
+    { "id": 1, "startTime": "base.t" },
+    { "id": 2, "startTime": "[1].t + measure([1])" },
+    { "id": 3, "startTime": "[2].t + measure([2])", "beatsPerMeasure": "3" },
+    { "id": 4, "startTime": "[3].t + measure([3])", "beatsPerMeasure": "3", "tempo": "90" },
+    { "id": 5, "startTime": "[4].t + measure([4])" },
+    { "id": 6, "startTime": "[5].t + measure([5])" },
+    { "id": 10, "startTime": "[1].t", "duration": "beat(base) * 2", "frequency": "base.f" },
+    { "id": 11, "startTime": "[3].t + beat([3])", "duration": "beat([3])", "frequency": "(3/2) * base.f" },
+    { "id": 12, "startTime": "[4].t", "duration": "beat([4]) * (3/2)", "frequency": "(5/4) * [11].f" },
+    { "id": 13, "startTime": "[4].t + measure([4]) - beat([4])", "duration": "measure([2]) * (1/4)", "frequency": "[12].f * (6/5)" },
+    { "id": 14, "startTime": "[5].t", "duration": "60 / tempo(base) * base.bpm", "frequency": "base.f * 2", "amplitude": "(1/2)" },
+    { "id": 15, "startTime": "[14].t + [14].d", "duration": "measure(base) / [3].bpm", "frequency": "[14].f", "amplitude": "[14].a * (3/4)" },
+    { "id": 16, "startTime": "[15].t + [15].d", "duration": "beat([10]) + beat([4]) * [4].tempo / base.tempo", "frequency": "[15].f * (8/9)" },
+    { "id": 17, "startTime": "[16].t + [16].d", "duration": "[4].ml - [3].ml", "frequency": "[16].f" },
+    { "id": 18, "startTime": "[17].t + [17].d", "duration": "base.d * (1/2) + [2].d", "frequency": "[17].f * (3/2)" }
+  ]
+}

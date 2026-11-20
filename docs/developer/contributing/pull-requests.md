@@ -35,8 +35,8 @@ change is.
 Follow [Code Style](/developer/contributing/code-style). Two invariants a reviewer will check before
 anything else:
 
-- **Both expression formats.** Any code that writes an expression must detect whether the note is
-  written in DSL or legacy syntax (`isDSLSyntax()`) and emit in the same one.
+- **DSL only, value-checked.** Any code that writes an expression writes DSL, and a rewrite that
+  could change a value is evaluated before and after (see `src/utils/simplify.js`).
 - **Defaults preserve behavior.** A new setting must default to what the app already does, so a fresh
   user sees no change.
 
@@ -51,10 +51,14 @@ this repo, and a reflowed file buries the real diff.
 npm test
 ```
 
-This runs `scripts/validate-modules.mjs` against all 79 shipped library modules — structure,
-expression syntax, self-containment, finite evaluation, and ratio/cents agreement. It is the repo's
-only automated gate, and it is **mandatory** for any change to the DSL, the expression compiler, the
-evaluator, or `public/modules/`.
+This runs sixteen scripts. The first, `scripts/validate-modules.mjs`, checks all 81 shipped library
+modules — structure, expression syntax, self-containment, finite evaluation, and ratio/cents
+agreement; the others check exactness, per-variable evaluation, amplitude, the MIDI export,
+relational time (`scripts/test-relational-time.mjs`, whose oracle is
+`scripts/fixtures/old-time-oracle.json`), live tempo, note kinds, the one syntax, exact values,
+what every library module plays (`scripts/test-library.mjs`), group editing
+(`scripts/test-group-edit.mjs`) note colours (`scripts/test-css-color.mjs`), players and the instrument rule (`scripts/test-players.mjs`: the rule, the shipped canon's three players, the migration of old modules, and that no shipped library module changes instrument) the repeat transposition (`scripts/test-repeat.mjs`: the exact factor of each loop pass, folded into an octave, and a module's own repeat: kept as written, saved, evaluated exactly, cleared by Clean Slate) and the envelopes (`scripts/test-envelopes.mjs`: every instrument's envelope replayed on a recording gain, checked for silence at both ends, the release after the note's end, the voice length, the drawn shares, and the gain a fade starts from). It is the repo's only automated gate, and it is
+**mandatory** for any change to the DSL, the expression compiler, the evaluator, or `public/modules/`.
 
 There is no unit-test suite. "Run the tests" means this.
 
@@ -189,7 +193,7 @@ Closes #123
 - [ ] **Touch tested** if the change goes anywhere near interaction — the app has a substantial touch
       path (long-press multi-select, touch-driven module bar, mobile viewport handling). A desktop-only
       check will not catch a touch regression.
-- [ ] Expression-writing code handles **both** DSL and legacy
+- [ ] Expression-writing code writes DSL only, and checks the value of any rewrite
 - [ ] New settings default to the existing behavior
 - [ ] Renderer changes measured **and** pixel-diffed
 - [ ] User-facing changes update the relevant page under `docs/user-guide/`
@@ -200,7 +204,7 @@ Closes #123
 Reviewers look for:
 
 - **Correctness** — does it do what it claims, including at the edges?
-- **The two-format invariant** — see above. This is the most common defect in expression code.
+- **Expression rewrites** — DSL only, and the value checked before and after; see above.
 - **Defaults** — no behavior change for an existing user who has not touched a setting.
 - **Performance** — no new per-frame allocation on a drag path; no work that scales with the module
   rather than with what is on screen.
@@ -230,8 +234,8 @@ scripts under `scripts/perf/` for rendering and interaction. State which module 
 
 ### Documentation
 
-Docs are VitePress markdown under `docs/`. The house rules: **DSL first** (legacy method-chain syntax
-only inside a `<details>` block), and **document only what ships** — if a control does nothing or a
+Docs are VitePress markdown under `docs/`. The house rules: **DSL only** (the retired method-chain syntax
+appears only where its conversion is explained), and **document only what ships** — if a control does nothing or a
 path is blocked, say so.
 
 ## Getting help

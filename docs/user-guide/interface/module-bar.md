@@ -5,7 +5,7 @@ description: The library bar under the top bar — search, collapsible sections,
 
 # Module Bar
 
-The **module bar** is the panel pinned under the top bar. It holds the shipped catalog — 79 modules across six sections — and it is where you grab a module and drag it onto a note.
+The **module bar** is the panel pinned under the top bar. It holds the shipped catalog — 81 modules across six sections — and it is where you grab a module and drag it onto a note.
 
 The bar is yours to rearrange. Sections collapse, tiles swap places, you can upload your own `.json` modules, add your own sections, and the whole layout is saved in your browser.
 
@@ -17,7 +17,7 @@ For what is actually *in* the catalog — and why every module is built as a rel
 
 | Zone | What is in it |
 |---|---|
-| **Toolbar row** (top, always visible) | Left: the search magnifier. Right: the **Start** / **End** drop-mode buttons, then **Undo** and **Redo**. |
+| **Toolbar row** (top, always visible) | Left: the search magnifier, then the **live tempo** control. Right: the **Start** / **End** drop-mode buttons, then **Undo** and **Redo**. |
 | **Icons area** (scrolls) | One row per section: the section label chip, its module tiles, then a dashed **`+`** tile. Dotted lines separate sections. |
 | **Bottom of the icons area** | **Save UI**, **Load UI**, **Add Category**, **Reload Defaults**. |
 | **Pull tab** | A small accent-coloured tab hanging below the bar. Drag it up or down to resize the bar. |
@@ -25,6 +25,17 @@ For what is actually *in* the catalog — and why every module is built as a rel
 The bar opens on first run tall enough for the toolbar plus one row of icons. After that, its height is yours — but note that it **shrinks itself when the content gets shorter** (widen the window and icons unwrap onto fewer rows) and it never grows itself back. Drag the pull tab to open it up again.
 
 ## The toolbar
+
+### Live tempo
+
+Next to the magnifier sits a small slider with a tempo, for example **100** with **BPM** under it. It is the tempo the piece is written at: 60 divided by the BaseNote's duration (`base.d`, the time unit).
+
+Drag the slider and playback runs faster or slower **at once, while it plays**, without changing the piece. The playhead follows the sound, nothing jumps, a loop stays seamless, and pitches never change. The number turns to the accent colour while it differs from the written tempo, and a **check-mark button** appears beside it:
+
+- **Check mark (Commit tempo)**: writes the shown tempo into the piece. The BaseNote's duration becomes exactly 60 / BPM (120 BPM gives `1/2`), every note keeps its relation to it, and the change is one undo step. MIDI export then uses the new tempo.
+- **Double-click** the slider or the number to go back to the written tempo.
+
+The slider spans **Settings → Audio → Tempo range** (20–300 BPM unless you change it), and always reaches the written tempo. The live tempo itself is not saved: loading a module, or reloading the page, plays at the written tempo again. Only Commit keeps it. On a phone the slider is shorter, and the control steps aside while the search field is open.
 
 ### Search
 
@@ -133,9 +144,9 @@ Drop mode is **ignored when you drop on the BaseNote**. A module dropped on the 
 
 | Target | What happens |
 |---|---|
-| **A note** | Start time, duration and frequency all re-anchor to that note. The drop mode applies. |
+| **A note** | Start time and frequency re-anchor to that note (`base.t` and `base.f` become its `t` and `f`). Durations stay in the workspace's time unit (`base.d` stays `base.d`), so the module plays at the workspace's pace. The drop mode applies. |
 | **The BaseNote** | The module keeps its `base.*` anchors — you get it exactly as the author wrote it. Drop mode is ignored. |
-| **A measure bar** | Start time and duration anchor to the measure bar. Frequency stays anchored to `base.f`, because a measure bar has no pitch. |
+| **A measure bar** | Start time and duration anchor to the bar. Frequency, amplitude, attack and release stay with the BaseNote, because a bar has no pitch. |
 | **A silence** | Rejected: *"Cannot drop onto a silence. Drop on a note or the BaseNote instead."* |
 | **Empty background** | Rejected. Modules import onto something, not into space. |
 
@@ -160,7 +171,7 @@ The copy is complete: structure and pitches, but also each note's **colour** and
 
 Two settings shape the bar, both on the **Library** tab of [Settings](/user-guide/interface/settings#library): **Icon size** (56 px by default) and **Show cents** (on by default). Both apply immediately.
 
-Turn the icons down and the whole 79-module catalog fits in far less vertical space; turn **Show cents** off if you would rather read ratios alone.
+Turn the icons down and the whole 81-module catalog fits in far less vertical space; turn **Show cents** off if you would rather read ratios alone.
 
 ## Resizing the bar
 
@@ -224,7 +235,7 @@ The per-section `index.json` files under `public/modules/` are a **legacy fallba
 
 ## See also
 
-- [Module Library](/user-guide/modules/module-library) — the 79 shipped modules and how they are built
+- [Module Library](/user-guide/modules/module-library) — the 81 shipped modules and how they are built
 - [Module Format](/user-guide/modules/module-format) — the module JSON schema
 - [Loading Modules](/user-guide/modules/loading-modules) — loading a module as your whole composition
 - [Workspace](/user-guide/interface/workspace) — where you drop them

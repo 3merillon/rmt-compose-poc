@@ -12,15 +12,15 @@ Three deep dives for readers who are comfortable writing expressions by hand.
 ### [Microtonal Composition](/tutorials/advanced/microtonal)
 
 Compose outside 12-TET. Equal temperaments (19-TET, 31-TET, quarter tones), just intonation
-up to the 23-limit, and the Bohlen–Pierce tritave scale. Also covers what the `≈` prefix and
+up to the 23-limit, and the Bohlen–Pierce tritave scale. Also covers what the exact irrational values, the `≈` prefix and
 the hatched note rectangles are telling you.
 
 ### [Understanding SymbolicPower](/tutorials/advanced/symbolic-power)
 
 What "exact" actually means in RMT Compose. Rational powers like `2^(12/12)` and perfect roots
-like `4^(1/2)` resolve exactly. Genuinely irrational powers like `2^(1/12)` do **not** — they are
-approximated and the note is flagged. This page shows you where the line is, so you stop
-expecting exactness where the app never promised it.
+like `4^(1/2)` resolve to fractions, and irrational powers like `2^(1/12)` are kept exact as powers: twelve
+semitones are exactly an octave. This page shows the three kinds of value (rational, irrational,
+approximate) and what the hatching means.
 
 ### [Complex Dependencies](/tutorials/advanced/complex-dependencies)
 
@@ -33,7 +33,7 @@ You should be comfortable with:
 
 - [Dependencies](/tutorials/intermediate/dependencies) — referencing other notes
 - [Octaves](/tutorials/intermediate/octaves) — the `^` operator and the ▲/▼ arrows
-- [Measures](/tutorials/intermediate/measures) — tempo, beats, measure chains
+- [Measures](/tutorials/intermediate/measures) — the time unit, measure bars, meter changes
 
 ## Before you type anything
 

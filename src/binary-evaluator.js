@@ -6,28 +6,27 @@
  */
 
 import Fraction from 'fraction.js';
-import { OP, VAR, VAR_NAMES, getCorruptionFlag } from './binary-note.js';
+import { OP, VAR, VAR_NAMES, FIRST_INTERPRETATION_VAR, getCorruptionFlag } from './binary-note.js';
 import {
   getVariableExpression,
   getVariableRefs,
-  hasComputedMeasureLength,
   definesVariable,
   resolveVariableRef,
   findVariableCycle,
   describeVariable,
 } from './variable-deps.js';
+import * as X from './value/exact.js';
 
 // Order in which a note's variables are visited when nothing forces another
 // one. Dependencies are pulled in ahead on demand, so this only breaks ties.
 const VAR_ORDER = [
-  VAR.TEMPO, VAR.BEATS_PER_MEASURE, VAR.FREQUENCY,
-  VAR.MEASURE_LENGTH, VAR.START_TIME, VAR.DURATION,
+  VAR.FREQUENCY, VAR.START_TIME, VAR.DURATION,
+  VAR.AMPLITUDE, VAR.ATTACK, VAR.RELEASE,
 ];
 
 // What a reference evaluates to when nothing defines the variable it names,
-// indexed by VAR: startTime, duration, frequency, tempo, beatsPerMeasure,
-// measureLength.
-const UNRESOLVED_DEFAULTS = [0, 1, 440, 60, 4, 4];
+// indexed by VAR: startTime, duration, frequency, amplitude, attack, release.
+const UNRESOLVED_DEFAULTS = [0, 1, 440, 1, 0, 0];
 
 // Longest list of cycles / unresolved references written to the console
 const MAX_REPORTED_PROBLEMS = 10;
@@ -37,707 +36,50 @@ function createEvaluationRecord() {
     startTime: null,
     duration: null,
     frequency: null,
-    tempo: null,
-    beatsPerMeasure: null,
-    measureLength: null,
-    corruptionFlags: 0, // Track irrational values (TET scales)
+    // The interpretation variables stay null when the note does not define
+    // them: readers fall back to the BaseNote's, then to the default
+    // (amplitude 1, see Module.findAmplitude; attack and release the
+    // instrument's own envelope).
+    amplitude: null,
+    attack: null,
+    release: null,
+    // Bit per variable (1 << VAR index): the variable's own expression made an
+    // irrational value (a power such as 2^(1/12)) or an approximation (a
+    // division by zero, a fallback of the exact algebra). Inherited values are
+    // reported transitively by the dependency graph, not here.
+    corruptionFlags: 0,
+    // Bit per variable: its value is approximate (src/value/exact.js), own or inherited.
+    approxFlags: 0,
+    // The exact value of each variable that is not rational: { frequency: Irrational|Approx, ... }.
+    // The fields above then hold a Fraction shadow (the nearest double) for the
+    // code that reads Fractions; evaluation itself reads these.
+    exact: null,
   };
 }
 
-/**
- * SymbolicPower represents an irrational value preserving its algebraic structure:
- * value = coefficient × base₁^exp₁ × base₂^exp₂ × ... × baseₙ^expₙ
- *
- * This enables mathematical operations like combining like-base powers:
- * 2^(1/12) × 2^(1/12) = 2^(1/6)
- *
- * Used for multi-base TET support (base 2, 3, etc.)
- */
-export class SymbolicPower {
-  /**
-   * @param {Fraction} coefficient - Rational coefficient
-   * @param {Array<{base: number, exp: Fraction}>} powers - Array of power terms (base is positive integer)
-   */
-  constructor(coefficient, powers = []) {
-    this.coefficient = coefficient instanceof Fraction ? coefficient : new Fraction(coefficient);
-    this.powers = powers; // [{base: number, exp: Fraction}, ...]
+const VAR_FIELDS = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
+
+/** What a reference to this variable of a record reads: the exact value, else the Fraction. */
+export function recordValue(rec, varIdx) {
+  const name = VAR_FIELDS[varIdx];
+  if (name === undefined || !rec) return null;
+  const ex = rec.exact;
+  if (ex) {
+    const v = ex[name];
+    if (v != null) return v;
   }
-
-  /**
-   * Create a symbolic power from a single base^exponent
-   * @param {number} base - Positive integer base
-   * @param {Fraction} exp - Rational exponent
-   */
-  static fromPower(base, exp) {
-    return new SymbolicPower(new Fraction(1), [{ base, exp: exp instanceof Fraction ? exp : new Fraction(exp) }]);
-  }
-
-  /**
-   * Create a symbolic power from just a rational coefficient (no power terms)
-   */
-  static fromRational(frac) {
-    return new SymbolicPower(frac instanceof Fraction ? frac : new Fraction(frac), []);
-  }
-
-  /**
-   * Convert to f64 for audio playback/rendering
-   */
-  toFloat() {
-    let result = this.coefficient.valueOf();
-    for (const p of this.powers) {
-      result *= Math.pow(p.base, p.exp.valueOf());
-    }
-    return result;
-  }
-
-  /**
-   * Check if this is purely rational (no irrational power terms)
-   */
-  isRational() {
-    return this.powers.length === 0 || this.powers.every(p => p.exp.d === 1n);
-  }
-
-  /**
-   * If rational, convert to Fraction; otherwise return null
-   */
-  toRationalFraction() {
-    if (!this.isRational()) return null;
-
-    let result = this.coefficient;
-    for (const p of this.powers) {
-      // exp.d is 1n, so this is an integer power — computed exactly in BigInt
-      const intExp = p.exp.s * p.exp.n;
-      const powered = bigIntPow(BigInt(p.base), intExp < 0n ? -intExp : intExp);
-      if (powered === null) return null; // beyond the DoS cap — treat as irrational
-      if (intExp >= 0n) {
-        result = result.mul(new Fraction(powered, 1n));
-      } else {
-        result = result.div(new Fraction(powered, 1n));
-      }
-    }
-    return result;
-  }
-
-  /**
-   * Normalize: sort powers by base, remove zero exponents
-   */
-  normalize() {
-    // Filter out zero exponents
-    this.powers = this.powers.filter(p => p.exp.n !== 0n);
-    // Three-way compare: a subtraction comparator would throw via
-    // ToNumber if bases ever become BigInt.
-    this.powers.sort((a, b) => (a.base < b.base ? -1 : a.base > b.base ? 1 : 0));
-    return this;
-  }
-
-  /**
-   * Multiply two SymbolicPower values
-   * Combines like-base powers: base^a × base^b = base^(a+b)
-   */
-  mul(other) {
-    const newCoeff = this.coefficient.mul(other.coefficient);
-
-    // Merge power terms, combining like bases
-    const powerMap = new Map();
-
-    for (const p of this.powers) {
-      powerMap.set(p.base, { base: p.base, exp: new Fraction(p.exp.s * p.exp.n, p.exp.d) });
-    }
-
-    for (const p of other.powers) {
-      if (powerMap.has(p.base)) {
-        const existing = powerMap.get(p.base);
-        existing.exp = existing.exp.add(p.exp);
-      } else {
-        powerMap.set(p.base, { base: p.base, exp: new Fraction(p.exp.s * p.exp.n, p.exp.d) });
-      }
-    }
-
-    // Filter out zero exponents
-    const newPowers = [...powerMap.values()].filter(p => p.exp.n !== 0n);
-
-    return new SymbolicPower(newCoeff, newPowers).normalize();
-  }
-
-  /**
-   * Divide by another SymbolicPower
-   * base^a ÷ base^b = base^(a-b)
-   */
-  div(other) {
-    const newCoeff = this.coefficient.div(other.coefficient);
-
-    // Merge power terms, subtracting exponents for like bases
-    const powerMap = new Map();
-
-    for (const p of this.powers) {
-      powerMap.set(p.base, { base: p.base, exp: new Fraction(p.exp.s * p.exp.n, p.exp.d) });
-    }
-
-    for (const p of other.powers) {
-      if (powerMap.has(p.base)) {
-        const existing = powerMap.get(p.base);
-        existing.exp = existing.exp.sub(p.exp);
-      } else {
-        // Subtracting: 1 / base^exp = base^(-exp)
-        powerMap.set(p.base, { base: p.base, exp: p.exp.neg() });
-      }
-    }
-
-    const newPowers = [...powerMap.values()].filter(p => p.exp.n !== 0n);
-
-    return new SymbolicPower(newCoeff, newPowers).normalize();
-  }
-
-  /**
-   * Raise to a rational power
-   * (coeff × base^exp)^n = coeff^n × base^(exp×n)
-   */
-  pow(exponent) {
-    const exp = exponent instanceof Fraction ? exponent : new Fraction(exponent);
-
-    // Try to compute coefficient^exp as rational; fall back to a float
-    // approximation (guarded — the 5.x constructor throws on NaN/Infinity)
-    const coeffPow = tryRationalPower(this.coefficient, exp);
-    let newCoeff = coeffPow;
-    if (!newCoeff) {
-      const approx = Math.pow(this.coefficient.valueOf(), exp.valueOf());
-      newCoeff = Number.isFinite(approx)
-        ? new Fraction(approx)
-        : new Fraction(approx > 0 ? Number.MAX_VALUE : -Number.MAX_VALUE);
-    }
-
-    const newPowers = this.powers.map(p => ({
-      base: p.base,
-      exp: p.exp.mul(exp)
-    }));
-
-    return new SymbolicPower(newCoeff, newPowers).normalize();
-  }
-
-  /**
-   * Multiply by a rational Fraction
-   */
-  mulRational(frac) {
-    return new SymbolicPower(this.coefficient.mul(frac), this.powers.map(p => ({ ...p })));
-  }
-
-  /**
-   * Clone this SymbolicPower
-   */
-  clone() {
-    return new SymbolicPower(
-      new Fraction(this.coefficient.s * this.coefficient.n, this.coefficient.d),
-      this.powers.map(p => ({ base: p.base, exp: new Fraction(p.exp.s * p.exp.n, p.exp.d) }))
-    );
-  }
-
-  /**
-   * Check equality with another SymbolicPower
-   */
-  equals(other) {
-    if (!this.coefficient.equals(other.coefficient)) return false;
-    if (this.powers.length !== other.powers.length) return false;
-
-    const aNorm = this.clone().normalize();
-    const bNorm = other.clone().normalize();
-
-    for (let i = 0; i < aNorm.powers.length; i++) {
-      if (aNorm.powers[i].base !== bNorm.powers[i].base) return false;
-      if (!aNorm.powers[i].exp.equals(bNorm.powers[i].exp)) return false;
-    }
-    return true;
-  }
-
-  /**
-   * Convert to expression string for serialization
-   */
-  toExpressionString() {
-    let parts = [];
-
-    // Add coefficient if not 1
-    if (!this.coefficient.equals(1)) {
-      if (this.coefficient.d === 1n) {
-        parts.push(`new Fraction(${this.coefficient.s * this.coefficient.n})`);
-      } else {
-        parts.push(`new Fraction(${this.coefficient.s * this.coefficient.n}, ${this.coefficient.d})`);
-      }
-    }
-
-    // Add each power term
-    for (const p of this.powers) {
-      if (p.exp.d === 1n) {
-        parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.exp.s * p.exp.n}))`);
-      } else {
-        parts.push(`new Fraction(${p.base}).pow(new Fraction(${p.exp.s * p.exp.n}, ${p.exp.d}))`);
-      }
-    }
-
-    if (parts.length === 0) {
-      return 'new Fraction(1)';
-    }
-
-    // Chain with .mul()
-    return parts.reduce((acc, part) => acc ? `${acc}.mul(${part})` : part);
-  }
-
-  /**
-   * Serialize to JSON-compatible object.
-   * n/d serialize as decimal strings (JSON.stringify throws on BigInt), the
-   * same convention as the Rust BigRational boundary.
-   */
-  toJSON() {
-    return {
-      symbolic: true,
-      coefficient: {
-        s: Number(this.coefficient.s),
-        n: this.coefficient.n.toString(),
-        d: this.coefficient.d.toString(),
-      },
-      powers: this.powers.map(p => ({
-        base: p.base,
-        exp: { s: Number(p.exp.s), n: p.exp.n.toString(), d: p.exp.d.toString() }
-      })),
-      f: this.toFloat()
-    };
-  }
-
-  /**
-   * Deserialize from JSON object.
-   * Accepts both the string form and legacy Number fields.
-   */
-  static fromJSON(json) {
-    if (!json || !json.symbolic) return null;
-
-    const toFrac = (o) => new Fraction(BigInt(o.s) * BigInt(o.n), BigInt(o.d));
-    const coeff = toFrac(json.coefficient);
-    const powers = json.powers.map(p => ({
-      base: p.base,
-      exp: toFrac(p.exp)
-    }));
-
-    return new SymbolicPower(coeff, powers);
-  }
+  return rec[name];
 }
 
-/**
- * MusicValue wrapper supporting rational, irrational, and symbolic numbers
- *
- * Enables TET scale support via expressions like 2^(1/12) while preserving
- * exact rational arithmetic when possible, and symbolic form for irrational powers.
- */
-export class MusicValue {
-  /**
-   * @param {'rational'|'irrational'|'symbolic'} type - Value type
-   * @param {Fraction|number|SymbolicPower} data - Fraction for rational, number for irrational, SymbolicPower for symbolic
-   */
-  constructor(type, data) {
-    this.type = type;
-    if (type === 'rational') {
-      this.fraction = data; // Fraction.js instance
-      this.float = null;
-      this.symbolic = null;
-    } else if (type === 'symbolic') {
-      this.fraction = null;
-      this.float = null;
-      this.symbolic = data; // SymbolicPower instance
-    } else {
-      this.fraction = null;
-      this.float = data; // f64 number
-      this.symbolic = null;
-    }
-  }
-
-  /**
-   * Create a rational value from a Fraction
-   */
-  static rational(frac) {
-    return new MusicValue('rational', frac);
-  }
-
-  /**
-   * Create an irrational value from a number
-   */
-  static irrational(f) {
-    return new MusicValue('irrational', f);
-  }
-
-  /**
-   * Create a symbolic value from a SymbolicPower
-   */
-  static symbolic(sp) {
-    return new MusicValue('symbolic', sp);
-  }
-
-  /**
-   * Create from numerator and denominator
-   */
-  static fromND(n, d) {
-    return MusicValue.rational(new Fraction(n, d));
-  }
-
-  /**
-   * Check if this value is corrupted (irrational or symbolic)
-   */
-  isCorrupted() {
-    return this.type === 'irrational' || this.type === 'symbolic';
-  }
-
-  /**
-   * Check if this value is symbolic (preserves algebraic structure)
-   */
-  isSymbolic() {
-    return this.type === 'symbolic';
-  }
-
-  /**
-   * Get the SymbolicPower if symbolic, or convert to one
-   */
-  toSymbolic() {
-    if (this.type === 'symbolic') {
-      return this.symbolic;
-    } else if (this.type === 'rational') {
-      return SymbolicPower.fromRational(this.fraction);
-    } else {
-      // Irrational - cannot convert to symbolic, return as coefficient only
-      // (guarded: the 5.x constructor throws on NaN/Infinity)
-      const f = Number.isFinite(this.float) ? this.float : 0;
-      return new SymbolicPower(new Fraction(f), []);
-    }
-  }
-
-  /**
-   * Convert to f64
-   */
-  toFloat() {
-    if (this.type === 'rational') {
-      return this.fraction.valueOf();
-    } else if (this.type === 'symbolic') {
-      return this.symbolic.toFloat();
-    }
-    return this.float;
-  }
-
-  /**
-   * Get a Fraction representation (approximates irrational/symbolic values)
-   */
-  toFraction() {
-    if (this.type === 'rational') {
-      return this.fraction;
-    }
-    // Approximate irrational/symbolic as a fraction. Guarded: the 5.x
-    // constructor throws on NaN/Infinity where 4.x silently made NaN values.
-    let approx;
-    if (this.type === 'symbolic') {
-      // If symbolic is actually rational, return exact value
-      const rational = this.symbolic.toRationalFraction();
-      if (rational) return rational;
-      approx = this.symbolic.toFloat();
-    } else {
-      approx = this.float;
-    }
-    if (Number.isFinite(approx)) return new Fraction(approx);
-    if (Number.isNaN(approx)) return new Fraction(0);
-    return new Fraction(approx > 0 ? Number.MAX_VALUE : -Number.MAX_VALUE);
-  }
-
-  /**
-   * Get fraction components for compatibility with existing code.
-   * Always BigInt (matching 5.x Fraction fields) so consumers never see
-   * mixed Number/BigInt types.
-   */
-  get s() {
-    if (this.type === 'rational') return this.fraction.s;
-    if (this.type === 'symbolic') {
-      const f = this.symbolic.toFloat();
-      return f < 0 ? -1n : f > 0 ? 1n : 0n;
-    }
-    return this.float < 0 ? -1n : this.float > 0 ? 1n : 0n;
-  }
-  get n() {
-    if (this.type === 'rational') return this.fraction.n;
-    return 0n;
-  }
-  get d() {
-    if (this.type === 'rational') return this.fraction.d;
-    return 1n;
-  }
-
-  /**
-   * Add two values
-   * Note: Addition of different symbolic forms falls back to irrational
-   */
-  add(other) {
-    if (this.type === 'rational' && other.type === 'rational') {
-      return MusicValue.rational(this.fraction.add(other.fraction));
-    }
-    // Symbolic addition is only preserved for same-form values
-    // For now, fall back to irrational for mixed/symbolic addition
-    // TODO: Could optimize for same-symbolic-form addition (e.g., 2*2^(1/12) + 3*2^(1/12) = 5*2^(1/12))
-    return MusicValue.irrational(this.toFloat() + other.toFloat());
-  }
-
-  /**
-   * Subtract two values
-   */
-  sub(other) {
-    if (this.type === 'rational' && other.type === 'rational') {
-      return MusicValue.rational(this.fraction.sub(other.fraction));
-    }
-    return MusicValue.irrational(this.toFloat() - other.toFloat());
-  }
-
-  /**
-   * Multiply two values
-   * Preserves symbolic form when possible
-   */
-  mul(other) {
-    // Both rational: stay rational
-    if (this.type === 'rational' && other.type === 'rational') {
-      return MusicValue.rational(this.fraction.mul(other.fraction));
-    }
-
-    // Any symbolic involved: combine symbolically
-    if (this.type === 'symbolic' || other.type === 'symbolic') {
-      const aSymbolic = this.toSymbolic();
-      const bSymbolic = other.toSymbolic();
-      const result = aSymbolic.mul(bSymbolic);
-
-      // Check if result is actually rational
-      if (result.isRational()) {
-        const rational = result.toRationalFraction();
-        if (rational) return MusicValue.rational(rational);
-      }
-
-      return MusicValue.symbolic(result);
-    }
-
-    // Rational * irrational or irrational * irrational: fall back to f64
-    return MusicValue.irrational(this.toFloat() * other.toFloat());
-  }
-
-  /**
-   * Divide two values
-   * Preserves symbolic form when possible
-   */
-  div(other) {
-    // Both rational: stay rational
-    if (this.type === 'rational' && other.type === 'rational') {
-      return MusicValue.rational(this.fraction.div(other.fraction));
-    }
-
-    const divisor = other.toFloat();
-    if (divisor === 0) {
-      // Match Fraction behavior: return 1 for division by zero
-      return MusicValue.fromND(1, 1);
-    }
-
-    // Any symbolic involved: divide symbolically
-    if (this.type === 'symbolic' || other.type === 'symbolic') {
-      const aSymbolic = this.toSymbolic();
-      const bSymbolic = other.toSymbolic();
-      const result = aSymbolic.div(bSymbolic);
-
-      // Check if result is actually rational
-      if (result.isRational()) {
-        const rational = result.toRationalFraction();
-        if (rational) return MusicValue.rational(rational);
-      }
-
-      return MusicValue.symbolic(result);
-    }
-
-    return MusicValue.irrational(this.toFloat() / divisor);
-  }
-
-  /**
-   * Negate the value
-   */
-  neg() {
-    if (this.type === 'rational') {
-      return MusicValue.rational(this.fraction.neg());
-    }
-    if (this.type === 'symbolic') {
-      return MusicValue.symbolic(this.symbolic.mulRational(new Fraction(-1)));
-    }
-    return MusicValue.irrational(-this.float);
-  }
-
-  /**
-   * Power operation - the key to TET support
-   * Returns symbolic result to preserve algebraic structure
-   */
-  pow(exponent) {
-    // Both rational: try for rational result first
-    if (this.type === 'rational' && exponent.type === 'rational') {
-      const result = tryRationalPower(this.fraction, exponent.fraction);
-      if (result) {
-        return MusicValue.rational(result);
-      }
-      // Irrational result: return symbolic to preserve base^exp structure.
-      // Only for positive integer bases below 2^53 — SymbolicPower stores
-      // base as a Number (bases are small TET integers in practice), and the
-      // exact field test avoids the valueOf rounding that a huge BigInt
-      // numerator would silently pass through.
-      if (this.fraction.d === 1n && this.fraction.s > 0n && this.fraction.n <= 9007199254740991n) {
-        return MusicValue.symbolic(SymbolicPower.fromPower(Number(this.fraction.n), exponent.fraction));
-      }
-      // Non-integer, negative, or oversized base: fall back to irrational
-      return MusicValue.irrational(Math.pow(this.toFloat(), exponent.toFloat()));
-    }
-
-    // Symbolic base with rational exponent: raise symbolic to power
-    if (this.type === 'symbolic' && exponent.type === 'rational') {
-      const result = this.symbolic.pow(exponent.fraction);
-
-      // Check if result is actually rational
-      if (result.isRational()) {
-        const rational = result.toRationalFraction();
-        if (rational) return MusicValue.rational(rational);
-      }
-
-      return MusicValue.symbolic(result);
-    }
-
-    // Fall back to irrational for other cases
-    return MusicValue.irrational(Math.pow(this.toFloat(), exponent.toFloat()));
-  }
-
-  /**
-   * Get valueOf for compatibility
-   */
-  valueOf() {
-    return this.toFloat();
-  }
+/** The exact value of a record's variable by name (Fraction, Irrational or Approx), or null. */
+export function exactValue(rec, name) {
+  if (!rec) return null;
+  const v = rec.exact && rec.exact[name];
+  return v != null ? v : (rec[name] ?? null);
 }
 
-// DoS caps for exact exponentiation: BigInt ** with an unbounded exponent
-// can allocate gigabit integers or hang the tab (4.x just overflowed to
-// Infinity). Beyond either cap the power is treated as irrational — same UX
-// as an inexact root (corruption flag + float approximation).
-const MAX_POW_EXPONENT = 65536n;
-const MAX_POW_RESULT_BITS = 1048576n; // ~1 Mbit per component
-
-/**
- * base ** exp for non-negative BigInt exp, or null when the result would
- * exceed the DoS caps.
- * @param {bigint} base
- * @param {bigint} exp - non-negative
- * @returns {bigint|null}
- */
-function bigIntPow(base, exp) {
-  if (exp === 0n) return 1n;
-  if (exp > MAX_POW_EXPONENT) return null;
-  const mag = base < 0n ? -base : base;
-  if (mag > 1n) {
-    const bits = BigInt(mag.toString(2).length) * exp;
-    if (bits > MAX_POW_RESULT_BITS) return null;
-  }
-  return base ** exp;
-}
-
-/**
- * Try to compute base^(num/den) as a rational if possible
- * Returns Fraction if rational, null if irrational (or beyond the DoS caps)
- */
-function tryRationalPower(base, exp) {
-  const expNum = exp.s * exp.n;
-  const expDen = exp.d;
-
-  // Zero exponent: always 1
-  if (expNum === 0n) {
-    return new Fraction(1, 1);
-  }
-
-  // Integer exponent: always rational
-  if (expDen === 1n) {
-    return rationalIntPower(base, expNum);
-  }
-
-  // Fractional exponent: check for perfect n-th root
-  // base^(p/q) = (base^p)^(1/q)
-  const basePowered = rationalIntPower(base, expNum);
-  if (!basePowered) return null;
-  return tryPerfectNthRoot(basePowered, expDen);
-}
-
-/**
- * Compute base^n for BigInt integer n — exact at any magnitude within the
- * DoS caps; null beyond them (callers treat that as irrational).
- * @param {Fraction} base
- * @param {bigint} n
- */
-function rationalIntPower(base, n) {
-  if (n === 0n) {
-    return new Fraction(1, 1);
-  }
-
-  const absN = n < 0n ? -n : n;
-  const num = bigIntPow(base.s * base.n, absN);
-  const den = bigIntPow(base.d, absN);
-  if (num === null || den === null) return null;
-
-  if (n < 0n) {
-    if (num === 0n) return null; // 0^negative — no rational value
-    return new Fraction(den, num);
-  }
-  return new Fraction(num, den);
-}
-
-/**
- * Check if value has a perfect n-th root that is rational
- * Returns Fraction if perfect root, null otherwise
- * @param {Fraction} value
- * @param {bigint} n - root degree (≥ 2; fraction.js keeps d positive)
- */
-function tryPerfectNthRoot(value, n) {
-  if (n === 0n) return null;
-  if (n === 1n) return value;
-
-  const numRoot = integerNthRoot(value.n, n);
-  const denRoot = integerNthRoot(value.d, n);
-
-  if (numRoot === null || denRoot === null) {
-    return null;
-  }
-
-  // Handle sign: odd roots preserve sign, even roots of negatives are not real
-  if (value.s < 0n) {
-    if ((n & 1n) === 1n) {
-      return new Fraction(-numRoot, denRoot);
-    }
-    return null; // Even root of negative is not real
-  }
-  return new Fraction(numRoot, denRoot);
-}
-
-/**
- * Exact integer n-th root via binary search (roots are verified exactly, so
- * perfect roots of any magnitude are found — the old float version silently
- * missed them past 2^53). Returns BigInt root or null when not exact.
- * @param {bigint} value - non-negative
- * @param {bigint} n - root degree ≥ 2
- */
-function integerNthRoot(value, n) {
-  if (value === 0n) return 0n;
-  if (value === 1n) return 1n;
-
-  const bitLen = BigInt(value.toString(2).length);
-  // root has about bitLen/n bits; +1 covers rounding
-  let hi = 1n << (bitLen / n + 1n);
-  let lo = 1n;
-
-  while (lo < hi) {
-    const mid = (lo + hi + 1n) >> 1n;
-    const p = mid ** n;
-    if (p === value) return mid;
-    if (p < value) {
-      lo = mid;
-    } else {
-      hi = mid - 1n;
-    }
-  }
-  return lo ** n === value ? lo : null;
-}
+/** A pooled stack Fraction copied out of the pool, so an exact value can keep it. */
+const own = (v) => (v.kind === undefined ? new Fraction(v.s * v.n, v.d) : v);
 
 /**
  * Fraction object pool to reduce GC pressure
@@ -844,6 +186,8 @@ export class BinaryEvaluator {
     // Track if the last evaluation produced an irrational value (corruption)
     // This is set during evaluate() when a POW operation produces an irrational result
     this._lastEvalWasCorrupted = false;
+    // The exact value of the last evaluate() when it was not rational (src/value/exact.js)
+    this._lastExact = null;
 
     // References the last evaluate() could not resolve and replaced with a
     // hard-coded default: packed (noteId << 3) | varIndex, or null when none
@@ -978,9 +322,27 @@ export class BinaryEvaluator {
    * remember the reference, so whoever asked for the evaluation can name it.
    */
   pushDefault(noteId, varIdx) {
+    if (varIdx === VAR.AMPLITUDE && this.amplitudeIsUnset(noteId)) {
+      this.push(this.pool.alloc(1, 1));
+      return;
+    }
     if (this._lastEvalUnresolved === null) this._lastEvalUnresolved = [];
     this._lastEvalUnresolved.push((noteId << 3) | varIdx);
     this.push(this.pool.alloc(UNRESOLVED_DEFAULTS[varIdx] || 0, 1));
+  }
+
+  /**
+   * Whether a missing amplitude is simply the default: the note exists and
+   * neither it nor the BaseNote sets one. Such a note sounds at 1, and that 1
+   * is the variable's value, not a stand-in. (A note that does not exist, or
+   * an amplitude that is set but lost to a cycle or a failed evaluation, is
+   * an unresolved reference like any other.)
+   */
+  amplitudeIsUnset(noteId) {
+    const note = this.lookupNote(noteId);
+    if (!note || definesVariable(note, VAR.AMPLITUDE)) return false;
+    const base = noteId === 0 ? note : this.lookupNote(0);
+    return !(base && definesVariable(base, VAR.AMPLITUDE));
   }
 
   /**
@@ -989,16 +351,28 @@ export class BinaryEvaluator {
   getCachedValue(noteId, varIndex) {
     const cached = this.cache.get(noteId);
     if (!cached) return null;
+    return recordValue(cached, varIndex);
+  }
 
-    switch (varIndex) {
-      case VAR.START_TIME: return cached.startTime;
-      case VAR.DURATION: return cached.duration;
-      case VAR.FREQUENCY: return cached.frequency;
-      case VAR.TEMPO: return cached.tempo;
-      case VAR.BEATS_PER_MEASURE: return cached.beatsPerMeasure;
-      case VAR.MEASURE_LENGTH: return cached.measureLength;
-      default: return null;
+  /**
+   * Push a value read from a record or computed by src/value/exact.js: a
+   * Fraction goes through the pool, an exact value (immutable) as it is.
+   */
+  pushValue(v) {
+    if (v.kind === undefined) this.push(this.pool.allocFrom(v));
+    else this.push(v);
+  }
+
+  /**
+   * Push the result of an operation on exact values. An approximation the
+   * operation made itself (not one it inherited from an operand) flags the
+   * evaluation, like an irrational power does.
+   */
+  pushResult(v, a, b) {
+    if (v.kind === 'approx' && a.kind !== 'approx' && (b === undefined || b.kind !== 'approx')) {
+      this._lastEvalWasCorrupted = true;
     }
+    this.pushValue(v);
   }
 
   /**
@@ -1011,7 +385,10 @@ export class BinaryEvaluator {
   evaluate(expr, evalCache = null) {
     // Reset corruption flag for this evaluation
     this._lastEvalWasCorrupted = false;
+    // The exact value of the last evaluate() when it was not rational (src/value/exact.js)
+    this._lastExact = null;
     this._lastEvalUnresolved = null;
+    this._lastExact = null;
 
     if (expr.isEmpty()) {
       return this.pool.alloc(0, 1);
@@ -1058,16 +435,7 @@ export class BinaryEvaluator {
           let value = null;
           if (evalCache) {
             const cached = evalCache.get(noteId);
-            if (cached) {
-              switch (varIdx) {
-                case VAR.START_TIME: value = cached.startTime; break;
-                case VAR.DURATION: value = cached.duration; break;
-                case VAR.FREQUENCY: value = cached.frequency; break;
-                case VAR.TEMPO: value = cached.tempo; break;
-                case VAR.BEATS_PER_MEASURE: value = cached.beatsPerMeasure; break;
-                case VAR.MEASURE_LENGTH: value = cached.measureLength; break;
-              }
-            }
+            if (cached) value = recordValue(cached, varIdx);
           }
 
           if (!value) {
@@ -1075,19 +443,13 @@ export class BinaryEvaluator {
             value = this.getCachedValue(noteId, varIdx);
           }
 
-          // For inheritable properties (tempo, beatsPerMeasure, measureLength),
-          // fall back to base note if not found on the target note
-          if (!value && (varIdx === VAR.TEMPO || varIdx === VAR.BEATS_PER_MEASURE || varIdx === VAR.MEASURE_LENGTH)) {
+          // Interpretation variables (amplitude, attack, release) fall back to
+          // the BaseNote's when the target note has none. Time and pitch never do.
+          if (!value && varIdx >= FIRST_INTERPRETATION_VAR) {
             // Try base note (ID 0)
             if (evalCache) {
               const baseCache = evalCache.get(0);
-              if (baseCache) {
-                switch (varIdx) {
-                  case VAR.TEMPO: value = baseCache.tempo; break;
-                  case VAR.BEATS_PER_MEASURE: value = baseCache.beatsPerMeasure; break;
-                  case VAR.MEASURE_LENGTH: value = baseCache.measureLength; break;
-                }
-              }
+              if (baseCache) value = recordValue(baseCache, varIdx);
             }
             if (!value) {
               value = this.getCachedValue(0, varIdx);
@@ -1099,8 +461,8 @@ export class BinaryEvaluator {
             // graceful degradation when expressions can't be fully resolved
             this.pushDefault(noteId, varIdx);
           } else {
-            // Push a copy to avoid mutation issues
-            this.push(this.pool.allocFrom(value));
+            // A Fraction is copied into the pool; an exact value is immutable
+            this.pushValue(value);
           }
           break;
         }
@@ -1112,16 +474,7 @@ export class BinaryEvaluator {
           let value = null;
           if (evalCache) {
             const cached = evalCache.get(0); // Base note is ID 0
-            if (cached) {
-              switch (varIdx) {
-                case VAR.START_TIME: value = cached.startTime; break;
-                case VAR.DURATION: value = cached.duration; break;
-                case VAR.FREQUENCY: value = cached.frequency; break;
-                case VAR.TEMPO: value = cached.tempo; break;
-                case VAR.BEATS_PER_MEASURE: value = cached.beatsPerMeasure; break;
-                case VAR.MEASURE_LENGTH: value = cached.measureLength; break;
-              }
-            }
+            if (cached) value = recordValue(cached, varIdx);
           }
 
           if (!value) {
@@ -1132,7 +485,7 @@ export class BinaryEvaluator {
             // Return sensible defaults for base note variables
             this.pushDefault(0, varIdx);
           } else {
-            this.push(this.pool.allocFrom(value));
+            this.pushValue(value);
           }
           break;
         }
@@ -1140,160 +493,79 @@ export class BinaryEvaluator {
         case OP.ADD: {
           const b = this.pop();
           const a = this.pop();
-          const result = a.add(b);
-          this.push(this.pool.allocFrom(result));
+          if (a.kind === undefined && b.kind === undefined) {
+            this.push(this.pool.allocFrom(a.add(b)));
+          } else {
+            this.pushResult(X.add(own(a), own(b)), a, b);
+          }
           break;
         }
 
         case OP.SUB: {
           const b = this.pop();
           const a = this.pop();
-          const result = a.sub(b);
-          this.push(this.pool.allocFrom(result));
+          if (a.kind === undefined && b.kind === undefined) {
+            this.push(this.pool.allocFrom(a.sub(b)));
+          } else {
+            this.pushResult(X.sub(own(a), own(b)), a, b);
+          }
           break;
         }
 
         case OP.MUL: {
           const b = this.pop();
           const a = this.pop();
-          const result = a.mul(b);
-          this.push(this.pool.allocFrom(result));
+          if (a.kind === undefined && b.kind === undefined) {
+            this.push(this.pool.allocFrom(a.mul(b)));
+          } else {
+            this.pushResult(X.mul(own(a), own(b)), a, b);
+          }
           break;
         }
 
         case OP.DIV: {
           const b = this.pop();
           const a = this.pop();
-          // Check for division by zero (pool fields are BigInt)
-          if (b.n === 0n) {
+          if (X.isZero(b)) {
             console.warn('Division by zero in binary evaluator, using 1');
-            // Flag the result as corrupted so the note's property picks up a
-            // corruption flag (same path POW uses for irrational results) —
-            // the substituted 1 is not the expression's real value.
+            // The substituted 1 is not the expression's value: it is
+            // approximate, and flags the note like an irrational power does.
             this._lastEvalWasCorrupted = true;
-            this.push(this.pool.alloc(1, 1));
+            this.push(new X.Approx(new Fraction(1)));
+          } else if (a.kind === undefined && b.kind === undefined) {
+            this.push(this.pool.allocFrom(a.div(b)));
           } else {
-            const result = a.div(b);
-            this.push(this.pool.allocFrom(result));
+            this.pushResult(X.div(own(a), own(b)), a, b);
           }
           break;
         }
 
         case OP.NEG: {
           const a = this.pop();
-          const result = a.neg();
-          this.push(this.pool.allocFrom(result));
+          if (a.kind === undefined) this.push(this.pool.allocFrom(a.neg()));
+          else this.pushValue(X.neg(a));
           break;
         }
 
         case OP.POW: {
-          // Power operation for TET support
-          // Note: This is handled by the WASM evaluator in most cases,
-          // but we implement it here for completeness and fallback
+          // Exact: 2^(1/12) stays 2^(1/12) (src/value/exact.js). A power that
+          // is not rational flags the evaluation (the note is tempered); an
+          // approximation it had to make flags it too.
           const exp = this.pop();
           const base = this.pop();
-
-          // Convert to MusicValue for power calculation
-          const baseValue = MusicValue.rational(new Fraction(base.s * base.n, base.d));
-          const expValue = MusicValue.rational(new Fraction(exp.s * exp.n, exp.d));
-          const powResult = baseValue.pow(expValue);
-
-          // Convert back to pooled Fraction
-          if (powResult.isCorrupted()) {
-            // Track that this evaluation produced an irrational result
-            this._lastEvalWasCorrupted = true;
-            // Approximate as fraction (toFraction is guarded against the
-            // NaN/Infinity floats the 5.x constructor refuses)
-            this.push(this.pool.allocFrom(powResult.toFraction()));
-          } else {
-            this.push(this.pool.allocFrom(powResult.fraction));
-          }
+          const result = X.pow(own(base), own(exp));
+          if (result.kind === 'irrational') this._lastEvalWasCorrupted = true;
+          this.pushResult(result, base, exp);
           break;
         }
 
-        case OP.FIND_TEMPO: {
-          // Find tempo for a note (walks parent chain)
-          const noteRef = this.pop();
-          // For now, use base note tempo (most notes inherit from base)
-          let tempoValue = null;
-          if (evalCache) {
-            const baseCache = evalCache.get(0);
-            if (baseCache) tempoValue = baseCache.tempo;
-          }
-          if (!tempoValue) {
-            tempoValue = this.getCachedValue(0, VAR.TEMPO);
-          }
-          if (tempoValue) {
-            this.push(this.pool.allocFrom(tempoValue));
-          } else {
-            this.push(this.pool.alloc(60, 1)); // Default tempo 60 BPM
-          }
-          break;
-        }
-
-        case OP.FIND_MEASURE: {
-          // Find measure length for a note: beatsPerMeasure / tempo * 60
-          const noteRef = this.pop();
-          // noteRef is a Fraction containing the note ID
-          const noteId = noteRef ? Math.round(noteRef.valueOf()) : 0;
-
-          // Get beatsPerMeasure - try note first, then base note
-          let beatsPerMeasure = null;
-          if (evalCache) {
-            const noteCache = evalCache.get(noteId);
-            if (noteCache && noteCache.beatsPerMeasure) {
-              beatsPerMeasure = noteCache.beatsPerMeasure;
-            }
-            if (!beatsPerMeasure) {
-              const baseCache = evalCache.get(0);
-              if (baseCache && baseCache.beatsPerMeasure) {
-                beatsPerMeasure = baseCache.beatsPerMeasure;
-              }
-            }
-          }
-          if (!beatsPerMeasure) {
-            beatsPerMeasure = this.getCachedValue(noteId, VAR.BEATS_PER_MEASURE);
-          }
-          if (!beatsPerMeasure) {
-            beatsPerMeasure = this.getCachedValue(0, VAR.BEATS_PER_MEASURE);
-          }
-          if (!beatsPerMeasure) {
-            beatsPerMeasure = this.pool.alloc(4, 1); // Default 4 beats
-          }
-
-          // Get tempo - try note first, then base note
-          let tempo = null;
-          if (evalCache) {
-            const noteCache = evalCache.get(noteId);
-            if (noteCache && noteCache.tempo) {
-              tempo = noteCache.tempo;
-            }
-            if (!tempo) {
-              const baseCache = evalCache.get(0);
-              if (baseCache && baseCache.tempo) {
-                tempo = baseCache.tempo;
-              }
-            }
-          }
-          if (!tempo) {
-            tempo = this.getCachedValue(noteId, VAR.TEMPO);
-          }
-          if (!tempo) {
-            tempo = this.getCachedValue(0, VAR.TEMPO);
-          }
-          if (!tempo) {
-            tempo = this.pool.alloc(60, 1); // Default 60 BPM
-          }
-
-          // Compute measureLength = beatsPerMeasure * 60 / tempo.
-          // Fraction methods return new instances (they never mutate) — the
-          // old code discarded every result and pushed 1/1.
-          try {
-            const ml = beatsPerMeasure.mul(60).div(tempo);
-            this.push(this.pool.allocFrom(ml));
-          } catch (e) {
-            this.push(this.pool.alloc(4, 1));
-          }
+        case OP.APPROX: {
+          // `~261.63`: an approximate number. It flags the evaluation like an
+          // irrational power does (the note is not exact), and everything
+          // computed from it is approximate.
+          const v = this.pop();
+          this._lastEvalWasCorrupted = true;
+          this.push(new X.Approx(X.shadow(own(v))));
           break;
         }
 
@@ -1320,15 +592,21 @@ export class BinaryEvaluator {
       console.warn(`Stack has ${this.stackTop} items after evaluation, expected 1`);
     }
 
-    return this.stackTop > 0 ? this.pop() : this.pool.alloc(0, 1);
+    if (this.stackTop === 0) return this.pool.alloc(0, 1);
+    const result = this.pop();
+    if (result.kind === undefined) return result;
+    // Not rational: the exact value stays available as _lastExact, the caller
+    // gets its Fraction shadow (the nearest double, or the approximation)
+    this._lastExact = result;
+    return this.pool.allocFrom(X.shadow(result));
   }
 
   /**
    * Evaluate a note and cache the results
    *
    * The note's variables are evaluated in dependency order, so a variable may
-   * read another variable of the same note (the BaseNote's tempo from its
-   * frequency, a measureLength from tempo). Everything it reads from OTHER
+   * read another variable of the same note (a start from its own duration, an
+   * attack from its own release). Everything it reads from OTHER
    * notes must already be in `evalCache` (or in this evaluator's own cache).
    *
    * @param {Note|BinaryNote} note - The note to evaluate (supports both Note and BinaryNote)
@@ -1439,7 +717,7 @@ export class BinaryEvaluator {
               candidate = (targetPosition << 3) | refVar;
             } else {
               // A start, duration or frequency of a note outside the group is final
-              if (targetPosition === undefined && refVar < VAR.TEMPO) continue;
+              if (targetPosition === undefined && refVar < FIRST_INTERPRETATION_VAR) continue;
               // Otherwise the read may be inherited from the BaseNote
               const target = resolveVariableRef(getNote, ref);
               if (target < 0) continue; // nothing defines it: evaluate() falls back to the default
@@ -1517,7 +795,7 @@ export class BinaryEvaluator {
    * Evaluate one variable of a note into the note's record
    *
    * @param {Note|BinaryNote} note
-   * @param {number} varIndex - VAR.START_TIME ... VAR.MEASURE_LENGTH
+   * @param {number} varIndex - VAR.START_TIME ... VAR.RELEASE
    * @param {Object} record - The note's evaluated values; must already be in evalCache
    * @param {Map} evalCache - noteId -> evaluated values of everything it reads
    */
@@ -1531,13 +809,19 @@ export class BinaryEvaluator {
         // Pooled fractions get reused when pool.reset() is called, which would
         // corrupt our cached values.
         const value = new Fraction(pooledValue.s * pooledValue.n, pooledValue.d);
+        const exact = this._lastExact;
+        if (exact !== null) {
+          if (record.exact === null) record.exact = {};
+          record.exact[VAR_FIELDS[varIndex]] = exact;
+          if (exact.kind === 'approx') record.approxFlags |= getCorruptionFlag(varIndex);
+        }
         switch (varIndex) {
           case VAR.START_TIME: record.startTime = value; break;
           case VAR.DURATION: record.duration = value; break;
           case VAR.FREQUENCY: record.frequency = value; break;
-          case VAR.TEMPO: record.tempo = value; break;
-          case VAR.BEATS_PER_MEASURE: record.beatsPerMeasure = value; break;
-          case VAR.MEASURE_LENGTH: record.measureLength = value; break;
+          case VAR.AMPLITUDE: record.amplitude = value; break;
+          case VAR.ATTACK: record.attack = value; break;
+          case VAR.RELEASE: record.release = value; break;
         }
 
         // Check if the evaluation actually produced an irrational value
@@ -1555,28 +839,6 @@ export class BinaryEvaluator {
         }
       } catch (e) {
         console.warn(`Failed to evaluate ${VAR_NAMES[varIndex]} for note ${note.id}:`, e);
-      }
-    }
-
-    // If measureLength wasn't explicitly defined but this is a measure note or base note,
-    // compute it from beatsPerMeasure and tempo. This is needed because findMeasureLength()
-    // references are compiled as LOAD_REF which looks up measureLength in the cache.
-    // Only for measure notes (have startTime, no duration/frequency) or base note (id=0)
-    // to avoid expensive Fraction operations for regular notes.
-    if (varIndex === VAR.MEASURE_LENGTH && record.measureLength === null && hasComputedMeasureLength(note)) {
-      // Use this note's beatsPerMeasure and tempo, or fall back to the base note's
-      const baseRecord = evalCache.get(0);
-      const beats = record.beatsPerMeasure || (baseRecord ? baseRecord.beatsPerMeasure : null);
-      const tempo = record.tempo || (baseRecord ? baseRecord.tempo : null);
-      // Compute measureLength = beatsPerMeasure * 60 / tempo as an exact
-      // Fraction. The old duck-typed {s,n,d,valueOf} POJO quantized to 1e-6
-      // AND its Number fields would poison BigInt-backed consumers.
-      try {
-        const b = beats instanceof Fraction ? beats : new Fraction(4);
-        const t = tempo instanceof Fraction ? tempo : new Fraction(60);
-        record.measureLength = b.mul(60).div(t);
-      } catch (e) {
-        record.measureLength = new Fraction(4);
       }
     }
   }
@@ -1645,8 +907,11 @@ export class BinaryEvaluator {
       reason = 'which has no value because of a dependency cycle or a failed evaluation';
     } else if (noteId === 0) {
       reason = `but the BaseNote has no ${name}`;
-    } else if (varIndex >= VAR.TEMPO) {
-      reason = `but neither note ${noteId} nor the BaseNote has a ${name}`;
+    } else if (varIndex >= FIRST_INTERPRETATION_VAR) {
+      const base = this.lookupNote(0);
+      reason = base && definesVariable(base, varIndex)
+        ? `which note ${noteId} inherits from the BaseNote, where it has no value because of a dependency cycle or a failed evaluation`
+        : `but neither note ${noteId} nor the BaseNote has a ${name}`;
     } else {
       reason = `but note ${noteId} has no ${name}`;
     }

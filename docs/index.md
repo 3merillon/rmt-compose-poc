@@ -32,11 +32,11 @@ features:
     title: Tuning Beyond 12-TET
     details: The library ships 12-TET, 19-TET, 31-TET, Bohlen-Pierce, an 81-note Tesla scale and a mixed-base experiment. Power expressions let you build your own.
   - icon: 📦
-    title: A 79-Module Library
+    title: An 81-Module Library
     details: Six sections — Intervals, Chords, Progressions, Melodies, Scale Systems, Custom — searchable by name, ratio, cents or tag. Drag a module onto a note and the whole structure re-roots itself there.
   - icon: 🎧
     title: Playback With a Room
-    details: Seven synth voices plus CC0 multisampled piano and violin, running through a reverb send, an optional pitch-based stereo spread and a master limiter.
+    details: Nine synth voices plus CC0 multisampled piano and violin, running through a reverb send, an optional pitch-based stereo spread and a master limiter.
   - icon: 🎛️
     title: Settings and Themes
     details: Five tabs behind the top-bar gear — Appearance (four theme presets with per-colour overrides), Arrows (the interval the transpose arrows use), Audio, Library and Scale. Changes apply live and persist across reloads.
@@ -72,22 +72,12 @@ base.f * (5/4)      # a major third above it
 base.f * (3/2)      # a perfect fifth above it
 ```
 
-Time works the same way. `beat(base)` is one beat in seconds, and `[1].t + [1].d` means "start exactly when note 1 ends":
+Time works the same way. `base.d` is the BaseNote's duration, the time unit (one beat, if you count in beats), and `[1].t + [1].d` means "start exactly when note 1 ends":
 
 ```
-beat(base) * 2      # two beats long
+base.d * 2          # two time units long
 [1].t + [1].d       # starts when note 1 ends
 ```
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Older modules used a method-chain format. It still loads, and the app converts it to the expression language above as soon as you open it in the [Note Widget](/user-guide/interface/variable-widget).
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-```
-</details>
 
 See the [expression syntax reference](/reference/expressions/syntax) for the full language.
 

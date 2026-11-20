@@ -30,17 +30,20 @@ While you are there:
 | **Limiter** | on (default) | Stops a stack of sustained sines from clipping |
 | **Default instrument** | `sine-wave` | A pure tone shows the beat rate between fundamentals most cleanly |
 
-**Use long notes.** Beating takes time to become audible. `beat(base) * 4` is a sensible minimum.
+**Use long notes.** Beating takes time to become audible. `base.d * 4` is a sensible minimum.
 
 **Loop it.** Shift-click (or long-press) the **Play** button. The play icon's bars become dashes
 orbiting a figure-8 while the loop runs. Park on a sustained dyad and let it beat at you while you
 retune the upper note. Shift-click again to exit.
 
-**Nine instruments ship:** `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`,
-`vibraphone`, `fm-epiano`, `piano`, `violin`. `piano` and `violin` are multisampled. A sine isolates
-the fundamentals; `organ` and `violin` add upper partials that expose roughness a sine will hide.
+**Eleven instruments ship:** `sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`,
+`vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`, `piano`, `violin`. `piano` and `violin` are
+multisampled. A sine isolates the fundamentals; `organ` and `violin` add upper partials that expose
+roughness a sine will hide. `harmonium` has every partial up to the 16th and holds them still, so the
+overtones two notes share beat plainly when an interval is mistuned.
 The instrument is a **per-note** property — set it from the note widget — and a note without one
-inherits it up its frequency chain.
+takes the instrument of its player, the line of notes it belongs to (see
+[Instruments](/user-guide/playback/instruments#players)).
 
 ## The basic rig
 
@@ -48,7 +51,7 @@ Two notes, sounding together, one of which you retune.
 
 | Note | frequency | startTime | duration |
 |---|---|---|---|
-| 1 (reference) | `base.f` | `base.t` | `beat(base) * 4` |
+| 1 (reference) | `base.f` | `base.t` | `base.d * 4` |
 | 2 (the variable) | `[1].f * 2^(1/19)` | `[1].t` | `[1].d` |
 
 Edit note 2's `frequency` in its `Raw:` field, press **Save**, listen. Repeat.
@@ -77,8 +80,8 @@ or build them as four separate pairs).
 - **19-TET** — 7.4¢ *flat*. Beats the other way, slower than 12-TET.
 - **31-TET** — 0.8¢ sharp. Very nearly as still as pure.
 
-Notes 3, 4 and 5 will be **crosshatched** and show `≈` — their powers are irrational and have been
-approximated. Note 2 is clean. That is correct, and it is worth knowing why:
+Notes 3, 4 and 5 will be **crosshatched** — their powers are irrational, kept exact but tempered
+rather than pure. Note 2 is clean. That is correct, and it is worth knowing why:
 [Understanding SymbolicPower](/tutorials/advanced/symbolic-power).
 
 ::: tip Skip the typing

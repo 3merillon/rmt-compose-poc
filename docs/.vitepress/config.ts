@@ -101,6 +101,7 @@ export default defineConfig({
             { text: 'The Module Library', link: '/user-guide/modules/module-library' },
             { text: 'Loading Modules', link: '/user-guide/modules/loading-modules' },
             { text: 'Saving Modules', link: '/user-guide/modules/saving-modules' },
+            { text: 'Exporting MIDI', link: '/user-guide/modules/exporting-midi' },
             { text: 'Creating Modules', link: '/user-guide/modules/creating-modules' },
             { text: 'Module Format', link: '/user-guide/modules/module-format' }
           ]
@@ -173,9 +174,15 @@ export default defineConfig({
           items: [
             { text: 'frequency', link: '/reference/properties/frequency' },
             { text: 'startTime', link: '/reference/properties/start-time' },
-            { text: 'duration', link: '/reference/properties/duration' },
-            { text: 'tempo', link: '/reference/properties/tempo' },
-            { text: 'beatsPerMeasure', link: '/reference/properties/beats-per-measure' }
+            { text: 'duration', link: '/reference/properties/duration' }
+          ]
+        },
+        {
+          text: 'Interpretation',
+          collapsed: false,
+          items: [
+            { text: 'amplitude', link: '/reference/properties/amplitude' },
+            { text: 'attack / release', link: '/reference/properties/attack-release' }
           ]
         },
         {
@@ -207,7 +214,7 @@ export default defineConfig({
             { text: 'Expression Compiler', link: '/developer/core/expression-compiler' },
             { text: 'Binary Evaluator', link: '/developer/core/binary-evaluator' },
             { text: 'Dependency Graph', link: '/developer/core/dependency-graph' },
-            { text: 'SymbolicPower', link: '/developer/core/symbolic-power' }
+            { text: 'Exact Values', link: '/developer/core/symbolic-power' }
           ]
         },
         {
@@ -254,7 +261,8 @@ export default defineConfig({
             { text: 'Module Class', link: '/developer/api/module' },
             { text: 'Note Class', link: '/developer/api/note' },
             { text: 'BinaryExpression', link: '/developer/api/binary-expression' },
-            { text: 'EventBus', link: '/developer/api/event-bus' }
+            { text: 'EventBus', link: '/developer/api/event-bus' },
+            { text: 'MIDI Export', link: '/developer/api/midi-export' }
           ]
         },
         {

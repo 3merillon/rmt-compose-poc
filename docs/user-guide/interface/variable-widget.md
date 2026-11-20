@@ -7,7 +7,7 @@ description: The floating panel that opens when you click a note, silence, measu
 
 Click one thing in the workspace — a note, a silence, a measure bar's triangle, or the BaseNote circle — and the note widget opens on it. It is the only place in the app where you read and edit a note's **expressions**, and it is where you create new notes, transpose, change instruments, and delete.
 
-The widget fits itself to what you clicked. A measure shows two rows; the BaseNote shows five and a different delete button. Nothing is greyed out — sections that don't apply are simply not there.
+The widget fits itself to what you clicked. A measure bar shows two rows; the BaseNote shows its own set and a different delete button. Nothing is greyed out — sections that don't apply are simply not there.
 
 ![The note widget open on a note, showing the evaluated and raw value of each variable](/img/note-widget.png)
 
@@ -51,23 +51,23 @@ Rows appear in the order listed.
 | Section | BaseNote | Note | Silence | Measure |
 |---|---|---|---|---|
 | `STARTTIME` | yes | yes | yes | yes |
-| `DURATION` (+ note-length icons) | — | yes | yes | — |
+| `DURATION` (+ note-length icons) | yes, the time unit, with a BPM view and no icons | yes | yes | `duration (bar length)`, no icons |
 | `FREQUENCY` (+ ▲/▼ arrows) | yes | yes | — | — |
-| `TEMPO` | yes | — | — | — |
-| `BEATSPERMEASURE` | yes | — | — | — |
+| `AMPLITUDE` | yes | yes | only if set | — |
+| `ATTACK` | yes | yes | only if set | — |
+| `RELEASE` | yes | yes | only if set | — |
 | `COLOR` | only if set | yes | yes | — |
 | `INSTRUMENT` | yes | yes | yes | — |
-| `MEASURE DURATION` | — | — | — | yes |
 | Add measure | `ADD NEW MEASURE CHAIN` | — | — | `ADD MEASURE`, last in chain only |
-| `ADD NOTE / SILENCE` | yes | yes | yes | — |
+| `ADD NOTE / SILENCE / REFERENCE` | yes | yes | yes | — |
 | `EVALUATE` | `Evaluate Module` | `Liberate Dependencies`, `Evaluate to BaseNote` | same as note | `Evaluate to BaseNote` |
 | Delete | `DELETE ALL NOTES` → `Clean Slate` | `DELETE NOTE` → `Keep Dependencies`, `Delete Dependencies` | same as note | same as note |
 
 The rules behind the table:
 
 - A **silence** is a note with a startTime and a duration but **no frequency**. That is the whole definition — it is why a silence has no `FREQUENCY` row and no transpose arrows.
-- A **measure** has a startTime and neither duration nor frequency.
-- The BaseNote's `measureLength` is deliberately hidden, and the BaseNote carries no duration expression, so it has no `DURATION` row.
+- A **measure bar** is a silent note with a startTime and a duration, no frequency, and the `measure` flag. Its duration row is labelled `duration (bar length)`.
+- The BaseNote has a `DURATION` row. Its value is the **time unit**, `base.d`; see [The BaseNote's duration](#the-basenotes-duration). There are no tempo or beats-per-measure rows, because neither is stored.
 - `Liberate Dependencies` is never offered on a measure bar or on the BaseNote.
 
 ## Variable rows
@@ -80,7 +80,7 @@ Every row is the variable name over two lines:
 ```
 base.f * (3/2)          # frequency: a perfect fifth above the BaseNote
 [5].t + [5].d           # startTime: start when note 5 ends
-beat(base)              # duration: one beat
+base.d                  # duration: one time unit
 ```
 
 The full grammar is in [Expressions](/user-guide/notes/expressions) and [Syntax reference](/reference/expressions/syntax).
@@ -89,43 +89,39 @@ The full grammar is in [Expressions](/user-guide/notes/expressions) and [Syntax 
 
 Typing in a `Raw:` field changes nothing. The `Save` button is **hidden until you type** — it appears on your first keystroke — and only pressing it commits the edit. Saving pauses playback, validates the expression, simplifies it, rewrites the note and everything downstream of it, redraws, and pushes an undo entry.
 
-Validation rejects an empty expression, an expression that references its own note, and an expression that would create a circular dependency.
+Validation rejects an empty expression, an expression that references its own note, and an expression that would create a circular dependency. The one exception to the first rule is the `AMPLITUDE` row, where saving an empty field is how you remove the value — see [Amplitude](#amplitude).
 
 When a save is rejected, the reason appears **inline**: the validator's message shows in red under the `Save` button and the `Raw:` field gets a red border. Both clear on your next keystroke or your next save attempt. (`COLOR` is the odd one out: an unparseable colour raises a browser alert telling you the accepted formats — hex, `rgb()`, `rgba()`, `hsl()`, `hsla()`, or a named colour.)
 
 ### The `Raw:` field always shows DSL
 
-Even for a note stored in the old method-chain format, the widget decompiles the compiled expression and shows you DSL. A consequence worth knowing: **saving a legacy note's row converts that expression to DSL.**
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-A note authored as
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-```
-
-is displayed in the widget as `base.f * (3/2)`. Press Save and it is stored that way too.
-</details>
+The widget decompiles the compiled expression and shows you DSL.
 
 ### The `≈` symbol
 
-Fractions are exact; powers usually are not. `base.f * 2^(7/12)` — a 12-TET fifth — has an irrational result the evaluator can only approximate. When that happens the **`Evaluated:`** readout is prefixed with **`≈`** and the value prints as a decimal to 8 significant figures, in italic brown.
+Fractions are exact, and so are powers: `base.f * 2^(7/12)` — a 12-TET fifth — is an exact irrational value. The **`Evaluated:`** readout shows the kind of value you have:
 
-Any row whose **own expression** is irrational carries the `≈` — a startTime or duration built on a power shows it just like a frequency does. The *transitive* case — a note that merely inherits an irrational frequency from a note further up its chain — is tracked for **frequency only**, so the whole of a TET scale built on `[1].f * 2^(1/12)` reads `≈` on its `FREQUENCY` rows.
+| Kind | Readout |
+|---|---|
+| Rational | The fraction. Also when a tempered chain lands on a rational: the 12-TET octave note shows `263/2` |
+| Irrational | The exact form and its value, in italic brown: `(263/4) * 2^(1/4) = 78.190368…` (no `≈`) |
+| Approximate | `≈` and a decimal to 8 significant figures, in italic brown: `≈493.12500` |
 
-A value can also earn an `≈` with nothing irrational in sight. Exact fractions can grow enormous in deep chains, and once one passes 24 digits (numerator and denominator together) the readout collapses to an eight-figure approximation — hover the `Evaluated:` line and the tooltip shows the exact, elided `n/d` form. The value underneath is still exact; only the readout is compressed, and it is not shown in brown.
+The `≈` sign means only "approximate": a number you wrote with `~` (see [Approximate numbers](/reference/expressions/syntax#approximate-numbers)), or the fallback result of an operation that cannot be kept exact, such as a division by zero. Anything computed from an approximate value is approximate.
+
+Any row whose **own expression** holds a power, a `~` number or a division by zero is marked — a startTime or duration built on a power shows it just like a frequency does. The *transitive* case — a note that merely inherits a tempered frequency from a note further up its chain — is tracked for **frequency only**.
+
+A very long exact fraction is also shortened. Exact fractions can grow enormous in deep chains, and once one passes 24 digits (numerator and denominator together) the readout collapses to an eight-figure decimal — hover the `Evaluated:` line and the tooltip shows the exact, elided `n/d` form. The value underneath is still exact; only the readout is compressed, and it is not shown in brown.
 
 On the canvas the same notes are hatched, and the hatching tells you *which* kind you are looking at:
 
 | Hatching | Meaning |
 |---|---|
-| **Crosshatch** (both diagonals) | Directly corrupted — this note's own expression is irrational |
-| **Single diagonal hatch** | Transitively corrupted — it depends on a corrupted note |
-| None | Exact |
+| **Crosshatch** (both diagonals) | Directly corrupted — this note's own expression is tempered or approximate |
+| **Single diagonal hatch** | Transitively corrupted — it depends on a tempered or approximate note |
+| None | A pure ratio |
 
-Nothing is lost: the note plays at the approximated value and the expression you wrote is preserved verbatim.
+Nothing is lost: the note plays at the nearest double of the exact value and the expression you wrote is preserved verbatim.
 
 ## Transpose arrows (▲ / ▼)
 
@@ -152,63 +148,114 @@ Up then down returns you to exactly the expression you started with. A TET note 
 
 ## Duration presets
 
-The `DURATION` row carries a strip of icon buttons: whole, half, quarter, eighth, sixteenth, followed by two dot buttons.
+The `DURATION` row of a note or silence carries a strip of icon buttons: whole, half, quarter, eighth, sixteenth, followed by two dot buttons. The BaseNote's row and a bar's row have none: the BaseNote's duration *is* the time unit, so `base.d * k` would read itself, and a bar's length is a measure, not a note value.
 
 | Button | Tooltip | Length |
 |---|---|---|
-| Whole-note icon | `Whole note` | 4 beats |
-| Half-note icon | `Half note` | 2 beats |
-| Quarter-note icon | `Quarter note` | 1 beat |
-| Eighth-note icon | `Eighth note` | 1/2 beat |
-| Sixteenth-note icon | `Sixteenth note` | 1/4 beat |
+| Whole-note icon | `Whole note` | 4 time units |
+| Half-note icon | `Half note` | 2 time units |
+| Quarter-note icon | `Quarter note` | 1 time unit |
+| Eighth-note icon | `Eighth note` | 1/2 time unit |
+| Sixteenth-note icon | `Sixteenth note` | 1/4 time unit |
 | `.` | `. dotted` | ×3/2 on the selected length |
 | `..` | `.. dotted` | ×7/4 on the selected length |
 
-Clicking a button **writes the expression into the `Raw:` field and reveals `Save` — it does not commit.** You still press Save. A quarter note writes `beat(base)`; an eighth writes `beat(base) * (1/2)`; a whole writes `beat(base) * 4`.
+Clicking a button **writes the expression into the `Raw:` field and reveals `Save` — it does not commit.** You still press Save. A quarter note writes `base.d`; an eighth writes `base.d * (1/2)`; a whole writes `base.d * 4`.
 
 The dots toggle: click the selected dot again to remove it.
 
 The widget pre-selects the button matching the note's current duration. If the duration isn't one an icon can express — a triplet, say — **no button is highlighted**. That is correct, not a fault.
 
-## Measure Duration
+## The BaseNote's duration {#the-basenotes-duration}
 
-A measure gets a **`MEASURE DURATION`** row under its `STARTTIME`. It edits the measure's `beatsPerMeasure` — how long that measure is — with a `Raw:` field and a `Save` button laid out beneath it. Save writes the value onto that measure only; other measures keep inheriting from the BaseNote.
+The BaseNote's `DURATION` row holds the **time unit** (`base.d`), in seconds. Next to the evaluated value the widget shows the same number as a tempo, read only:
 
 ```
-4               # four beats — the default
-(7/2)           # three and a half beats: seven eighth-notes
+Evaluated: 3/5   = 100 BPM
 ```
 
-The value is counted in beats, so `(7/2)` — not `(7/8)` — is what a 7/8 bar comes to when the beat is a quarter note.
+The hint is `60 / base.d`. Nothing stores it, and you cannot type into it. To change the pace, edit the duration: `1` reads "= 60 BPM", `1/2` reads "= 120 BPM". Every duration written in `base.d` follows. See [the time unit](/reference/properties/duration#the-time-unit).
 
-Unlike `DURATION`, this row has no note-length icon buttons: type the value, press `Save`.
+A value that is not a whole number of beats per minute shows as "≈" with up to three decimals.
 
-Measures are what a `measure([N])` reference in a startTime expression resolves against — see [Expressions](/user-guide/notes/expressions) — and the triangles along the bottom of the [workspace](/user-guide/interface/workspace#measures) are the same objects you are editing here.
+## Bar length
+
+A measure bar gets a **`duration (bar length)`** row under its `STARTTIME`. It is the bar's own duration, an ordinary expression with a `Raw:` field and a `Save` button, and next to the value the widget shows the length in time units:
+
+```
+Evaluated: 12/5   = 4 time units
+```
+
+The next bar in the chain starts at `[p].t + [p].d` and lasts `[p].d`, so changing one bar's length is a meter change and the bars after it follow.
+
+```
+base.d * 4        # four time units: 4/4 when the unit is a quarter note
+base.d * (7/2)    # three and a half units: seven eighth-notes
+[2].d             # as long as bar 2
+```
+
+Unlike a note's `DURATION`, this row has no note-length icon buttons: type the value, press `Save`.
+
+Bars are what a `[N].t` or `[N].d` reference resolves against in another note's expression (see [Expressions](/user-guide/notes/expressions)), and the triangles along the bottom of the [workspace](/user-guide/interface/workspace#measures) are the same objects you are editing here. Dragging a triangle changes the length of the previous bar; the dragged bar keeps its own.
+
+## Amplitude
+
+The `AMPLITUDE` row is a note's loudness, as a relative gain: `1` is the default level, `2` twice the amplitude, `(1/2)` half. It is an ordinary variable row — `Evaluated:` over `Raw:` — and takes any expression:
+
+```
+base.a * (3/2)          # an accent against the piece's level
+(121/100) * [5].a       # a touch louder than note 5
+```
+
+Unlike the other expression rows it is there even when the note has no amplitude of its own, because that is how you give it one:
+
+- **`Inherited: <value>`** (in grey), with an empty `Raw:` field — the note defines none and sounds at the BaseNote's amplitude, or at `1` if the BaseNote defines none either.
+- **`Evaluated: <value>`** — the note has its own expression.
+
+Type an expression and press `Save` to set it. Clear the field and press `Save` to remove it again; the note goes back to inheriting. On the BaseNote the row sets the level of every note that does not define its own — with nothing set it reads `Evaluated: 1`.
+
+Playback clamps the value to 0–4. Silences only show the row if they already carry an amplitude; measure bars never do. The full rules are in the [amplitude reference](/reference/properties/amplitude).
+
+## Attack and Release
+
+The `ATTACK` and `RELEASE` rows work like `AMPLITUDE`, and they are interpretation variables too: they say how a note is played, not where it sits. Each is a **share of the note's own duration**, for example `1/8`. The attack runs from the note's start (clamped to 0–1); the release runs from the note's end, so it rings after the note (clamped to 0–4). Under the value the widget prints the hint "A share of the note's duration, e.g. 1/8".
+
+The row reads one of three ways:
+
+- **`Default: instrument envelope`** — neither the note nor the BaseNote sets it, so the instrument's own envelope applies.
+- **`Inherited: <value>`** (in grey), with an empty `Raw:` field — the BaseNote sets one and the note does not.
+- **`Evaluated: <value>`** — the note has its own expression.
+
+Type an expression and press `Save` to set it. Clear the field and press `Save` to remove it again. On the BaseNote the rows set the shape of every note that does not define its own. Silences show them only if they already carry one; bars never do. The full rules, including what fits inside the note and what rings after it, are in [attack and release](/reference/properties/attack-release).
 
 ## Instrument
 
 The `INSTRUMENT` row shows one line of status and a dropdown.
 
 - **`Current: <name>`** — this note pins its own instrument.
-- **`Inherited: <name>`** (in grey) — it has none of its own and is inheriting.
+- **`Inherited: <name> · plays with [N]`** (in grey) — it has none of its own and takes the instrument of its player. `N` is the first note of the line the note belongs to; the `· plays with [N]` part is left out when the note is itself the first note of its line.
 
-Notes inherit an instrument by following their **frequency** chain upward to the first ancestor that pins one; if nobody does, they fall back to **Settings → Audio → Default instrument** (`sine-wave` out of the box). Inheritance follows frequency only — a note whose *startTime* depends on note 5 inherits nothing from note 5.
+A player is a line of notes, each starting where the previous one ends. A note that starts a line takes the instrument of the note its start time is written from, else the BaseNote's, else **Settings → Audio → Default instrument** (`sine-wave` out of the box). The frequency does not decide the instrument. The full rule is in [Instruments](/user-guide/playback/instruments#players).
 
-The dropdown lists all nine instruments, alphabetically:
+The dropdown lists all eleven instruments, alphabetically:
 
-`fm-epiano`, `organ`, `piano`, `sawtooth-wave`, `sine-wave`, `square-wave`, `triangle-wave`, `vibraphone`, `violin`
+`fm-epiano`, `harmonium`, `harmonium-soft`, `organ`, `piano`, `sawtooth-wave`, `sine-wave`, `square-wave`, `triangle-wave`, `vibraphone`, `violin`
 
-Change it and a `Save` button appears; Save pins that instrument on the note. Once a note has its own instrument, a grey **`Use Inherited`** button appears above the dropdown — press it to drop the pin and go back to inheriting.
+Change it and a `Save` button appears; Save pins that instrument on the note. Once a note has its own instrument, a grey **`Use Inherited`** button appears above the dropdown — press it to drop the pin and go back to inheriting. A note that sets an instrument starts a new player; the notes that follow it in its line play with that instrument.
 
 Measures have no instrument row. See [Instruments](/user-guide/playback/instruments) for what each one sounds like.
 
 The BaseNote's row follows the same rules: with nothing pinned it reads **`Inherited: <name>`**, where the name is whatever **Settings → Audio → Default instrument** is set to — the same instrument playback uses.
 
+## Repeat
+
+The BaseNote's widget has a **`REPEAT`** row: the ratio from one repeat of a loop (long-press Play) to the next, for example `9/8` (a whole tone up), `3/2`, `2^(1/6)` or `[24].f / base.f`. `Evaluated:` shows it, `(9/8) each repeat (203.9¢)`, or `none: repeats as written`. Save an empty `Raw:` to remove it. A value that does not evaluate, or lies outside 1/16 to 16, is refused with an error and the old one is kept. The same value appears as **Transpose each repeat by** in Settings → Audio → Loop. While such a loop plays, every frequency the widget shows is that of the pass being heard, marked `(repeat k)`. See [loop playback](/user-guide/playback/transport#rising-or-falling-each-time-round).
+
 ## Add Note / Silence
 
 This is how notes are created. There is no double-click-to-create in the workspace.
 
-The **`ADD NOTE / SILENCE`** section is at the bottom of the widget for the BaseNote, any note and any silence. It creates a new note *relative to the one you have open*.
+The **`ADD NOTE / SILENCE / REFERENCE`** section is at the bottom of the widget for the BaseNote, any note and any silence. It creates a new note *relative to the one you have open*. The whole section is tinted teal, the colour of its title and top border, so its Frequency, Duration and Start Time fields are not mistaken for the open note's own when the title has scrolled out of view.
 
 | Control | Options | Default |
 |---|---|---|
@@ -222,7 +269,7 @@ The **`ADD NOTE / SILENCE`** section is at the bottom of the widget for the Base
 - **`At End`** builds a sequence: the new note starts when the open one ends.
 - **`At Start`** builds a chord: the new note starts with the open one.
 
-Flipping between `At Start` and `At End` rewrites the Start Time field for you. From the BaseNote there is no position choice — the new note starts at `base.t`, with `base.f` and `beat(base)`.
+Flipping between `At Start` and `At End` rewrites the Start Time field for you. From the BaseNote there is no position choice — the new note starts at `base.t`, with `base.f` and `base.d`.
 
 Each of the three fields carries a **live `Evaluated:` preview** that updates as you type, printing `Invalid` for an expression it cannot parse. This is the only live evaluation anywhere in the widget; every other field waits for `Save`.
 
@@ -232,12 +279,28 @@ The new note inherits the open note's colour (or gets a random one if there isn'
 
 ## Add Measure
 
-- On the **BaseNote** the row reads **`ADD NEW MEASURE CHAIN`**. Its `Add` button starts a fresh chain anchored at `base.t`.
-- On a **measure that nothing else chains off** — the last one in its chain — the row reads **`ADD MEASURE`**, and `Add` appends one more measure to that chain.
+- On the **BaseNote** the row reads **`ADD NEW MEASURE CHAIN`**. Its `Add` button starts a fresh chain anchored at `base.t`, whose first bar lasts `base.d * 4`.
+- On a **bar that nothing else chains off** — the last one in its chain — the row reads **`ADD MEASURE`**, and `Add` appends one more bar to that chain: it starts at `[p].t + [p].d` and lasts `[p].d`.
 
-Any other measure gets no Add row: you extend a chain from its end.
+Any other bar gets no Add row: you extend a chain from its end.
 
-The new measure is selected and the widget re-opens on it.
+The new bar is selected and the widget re-opens on it.
+
+## Select
+
+The **`SELECT`** section turns this note and its relations into a group selection, so you can
+change, move, copy or delete them together ([Selection & Group Editing](/user-guide/notes/selection)).
+
+| Row | Selects |
+|---|---|
+| `Dependents` | this note and every note that reads it, then whatever reads those |
+| `Dependencies` | this note and every note it reads, back to the BaseNote (never selected itself) |
+
+`t`, `f`, `d` and `all` say which variable of the reading note is followed: its start, its
+frequency, its duration, or any. From the first note of a melody chained by start, `Dependents`
+`t` selects the melody. If nothing is related that way a message says so and the selection stays.
+The BaseNote has no `SELECT` section: everything depends on it. On a bar, the bars of its chain
+are left out (bars never join a group), and the notes that start from it are selected.
 
 ## Evaluate
 
@@ -246,12 +309,12 @@ The **`EVALUATE`** section rewrites expressions to remove dependencies. Every bu
 | Button | Shown on | What it does |
 |---|---|---|
 | `Liberate Dependencies` | notes, silences | Replaces every reference *to this note* with this note's own raw expressions. The dependents stop depending on it; the note itself survives. |
-| `Evaluate to BaseNote` | everything except the BaseNote (measures included) | Rewrites this note's startTime, duration and frequency so they reference only the BaseNote. All its other dependencies are lost. |
+| `Evaluate to BaseNote` | everything except the BaseNote (bars included) | Rewrites this note's startTime, duration, frequency and amplitude so they reference only the BaseNote (a bar: startTime and duration). All its other dependencies are lost. |
 | `Evaluate Module` | the BaseNote only | Does the same to every note in the module at once. |
 
 While the widget is open, the notes this one **depends on** and the notes that **depend on it** are highlighted in the workspace — so you can see the blast radius before you confirm. See [Dependencies](/user-guide/notes/dependencies).
 
-**Liberate is not a flatten.** If note 2's startTime is `[1].t + [1].d`, and note 1's expressions are `base.t` and `beat(base)`, liberating note 1 leaves note 2 with `base.t + beat(base)`. Note 2 has not moved; it just no longer references note 1. That is the safe way to lift a note out of the middle of a chain before deleting it.
+**Liberate is not a flatten.** If note 2's startTime is `[1].t + [1].d`, and note 1's expressions are `base.t` and `base.d`, liberating note 1 leaves note 2 with `base.t + base.d`. Note 2 has not moved; it just no longer references note 1. That is the safe way to lift a note out of the middle of a chain before deleting it.
 
 **Evaluate to BaseNote is algebraic, not numeric.** It traces the frequency chain symbolically, so a TET power survives: `base.f * 2^(7/12)` stays a power rather than collapsing into an ugly decimal fraction.
 
@@ -278,7 +341,7 @@ For a note, a silence or a measure, the **`DELETE NOTE`** section offers two but
 
 ### Clean Slate
 
-On the **BaseNote** the section becomes **`DELETE ALL NOTES`** with a single button: **`Clean Slate`**. It deletes every note in the module except the BaseNote. The confirmation button reads `Yes, Clean Slate`.
+On the **BaseNote** the section becomes **`DELETE ALL NOTES`** with a single button: **`Clean Slate`**. It deletes every note in the module except the BaseNote, and removes the BaseNote's [repeat](#repeat), so a new composition repeats as written. The confirmation button reads `Yes, Clean Slate`.
 
 ::: tip
 Clean Slate is undoable, and the confirmation dialog says so — it captures an undo snapshot like everything else, so `Ctrl/Cmd + Z` brings your notes back.

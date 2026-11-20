@@ -20,12 +20,17 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `appearance.note.heightWU` | number | `22` | 8 – 60, step 1 | Note height |
 | `appearance.note.borderPxAtZoom1` | number | `1` | 0 – 6, step 0.5 | Border thickness |
 | `appearance.note.roundedCornerPxAtZoom1` | number | `6` | 0 – 20, step 1 | Corner radius |
+| `appearance.envelopes` | string | `'own'` | `own`, `all`, `none` | Envelope inside notes (an older boolean `showEnvelopes: true` reads as `all`) |
+| `appearance.showTails` | boolean | `false` | — | Tails after the note's end |
 | `arrows.enabled` | boolean | `true` | — | Show note arrows |
 | `arrows.mode` | string | `'reciprocal'` | `reciprocal`, `independent` | Arrow mode |
 | `arrows.up` | `{n, d, label}` | `{n: 2, d: 1, label: null}` | positive integers; `1/16 ≤ n/d ≤ 16`; `n/d ≠ 1` | Up interval + quick-pick chips |
 | `arrows.down` | `{n, d, label}` | `{n: 1, d: 2, label: null}` | same; derived from `up` in reciprocal mode | Down interval — shown in independent mode only |
 | `audio.masterVolume` | number | `1` | 0 – 1, step 0.01 | Master volume (and the transport slider) |
-| `audio.defaultInstrument` | string | `'sine-wave'` | the nine [instrument names](#instrument-names) | Default instrument |
+| `audio.defaultInstrument` | string | `'sine-wave'` | the eleven [instrument names](#instrument-names) | Default instrument |
+| `audio.maxVoices` | number | `256` | `128`, `256`, `512`, `1024`, `2048`, `4096` | Most voices at once |
+| `audio.loop.fold` | boolean | `true` | — | Keep within an octave |
+| `audio.tempered.enabled` | boolean | **`false`** | — | Play tempered (12-TET) |
 | `audio.reverb.enabled` | boolean | **`true`** | — | Enable reverb |
 | `audio.reverb.roomSize` | number | `0.5` | 0 – 1, step 0.01 | Room size |
 | `audio.reverb.decaySec` | number | `1.8` | 0.1 – 12, step 0.1 | Decay |
@@ -35,6 +40,7 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `audio.stereo.enabled` | boolean | **`false`** | — | Spread notes by pitch |
 | `audio.stereo.width` | number | `0.6` | 0 – 1, step 0.01 | Amount |
 | `audio.limiter.enabled` | boolean | **`true`** | — | Limiter |
+| `audio.tempoRange` | `{min, max}` | `{min: 20, max: 300}` | whole BPM, 1 – 1000, `min < max` (an inverted pair resets to the default) | Tempo range |
 | `library.iconSizePx` | number | `56` | 32 – 96, step 4 | Icon size |
 | `library.showCents` | boolean | `true` | — | Show cents |
 | `library.layoutVersion` | number | `2` | any number | **no UI, no consumer** |
@@ -45,7 +51,7 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `scale.limits.yMin` | number | `0.3` | 0.001 – 1000 | Vertical range |
 | `scale.limits.yMax` | number | `5` | 0.001 – 1000 | Vertical range |
 
-Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate exception: **reverb now defaults on**. Stereo defaults off; the limiter defaults on.
+Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate exception: **reverb now defaults on**. Stereo and tempered playback default off; the limiter defaults on.
 
 ## Appearance
 
@@ -57,6 +63,8 @@ Defaults reproduce the app's pre-settings behaviour exactly, with one deliberate
 | **Note height** | slider, `N wu` | 8 – 60, step 1 | 22 wu | "Bar thickness in world units." |
 | **Border thickness** | slider, `N px` | 0 – 6, step 0.5 | 1 px | — |
 | **Corner radius** | slider, `N px` | 0 – 20, step 1 | 6 px | — |
+| **Envelope inside notes** | select | Notes that set attack or release / Every note / None | Notes that set attack or release | "The envelope each note sounds with, drawn inside it on a loudness (dB) scale: its own attack and release, else its instrument's." |
+| **Tails after the note's end** | toggle | on / off | off | "Draws the release that rings after each note's end, as a key lifted or a bow leaving the string. Display only: picking, dragging and snapping use the note itself." |
 | **Reset colors to theme** | button | — | — | Disabled while you have no overrides |
 
 Then fifteen color pickers (a native swatch plus an uppercase hex readout), in three groups.
@@ -135,7 +143,12 @@ In **Independent up/down** mode a **Down interval (ratio)** row renders below th
 | Control | Type | Range | Default | Hint shown |
 |---|---|---|---|---|
 | **Master volume** | slider, `%` | 0 – 1, step 0.01 | 100% | — |
-| **Default instrument** | dropdown | nine names | `sine-wave` | — |
+| **Default instrument** | dropdown | eleven names | `sine-wave` | — |
+| **Transpose each repeat by** | ratio editor (n / d, with cents) | 1/16 – 16 | the module's | Not a setting: the current module's own repeat (its BaseNote's `repeat`), saved with the module, written as `n/d` (1/1 removes it). Clean Slate and a new composition start at 1/1. A tempered repeat is shown here and edited in the BaseNote's REPEAT row. |
+| **Keep within an octave** | toggle | on / off | on | "Six pure whole tones are an octave and a comma, so a rise never comes home: on, the repeats drop an octave each time they pass one, and the loop can go on for ever; off, they keep climbing." |
+| **Most voices at once** | dropdown | 128 / 256 / 512 / 1024 / 2048 / 4096 | 256 | "Above it, the quietest note already ringing after its end fades out first; a note is never cut before its end. Each voice costs processor time: one core plays about 2,000 sine, organ or harmonium voices, 1,700 piano or violin, 600–700 square, sawtooth or fm-epiano (measured on one computer)." |
+| *Pure / Tempered* | | | | |
+| **Play tempered (12-TET)** | checkbox | — | **off** | "Plays each note on the nearest key of a keyboard tuned from the BaseNote, to compare with the pure intervals. The module is not changed." |
 | *Room / Reverb* | | | | |
 | **Enable reverb** | checkbox | — | **on** | "Adds spatial ambience to the output." |
 | **Room size** | slider | 0 – 1, step 0.01 | 0.5 | — |
@@ -146,20 +159,27 @@ In **Independent up/down** mode a **Down interval (ratio)** row renders below th
 | *Stereo width* | | | | |
 | **Spread notes by pitch** | checkbox | — | **off** | "Places low notes toward the left speaker and high notes toward the right, as if seated at the instrument. Off = centered (mono-position)." |
 | **Amount** | slider, `%` | 0 – 1, step 0.01 | 60% | — |
+| *Live tempo* | | | | |
+| **Tempo range** | two number fields, `min – max` | 1 – 1000 BPM, step 1 | 20 – 300 | "The span of the live-tempo slider in the module bar, in BPM. It always reaches the tempo the piece is written at." |
 | *Master* | | | | |
 | **Limiter** | checkbox | — | **on** | "Gentle output limiting to avoid clipping." |
 
-The tab's footer reads: *"Reverb, stereo and the limiter apply live during playback."*
+The live-tempo slider spans the **Tempo range**, kept within 0.1× to 10× of the written tempo (the
+engine's rate limits) and always reaching the written tempo itself: a piece written at 10 BPM gets a
+slider from 10 to 100. Editing one end so that it passes the other moves the other end by 1 BPM.
+The tab's footer reads: *"Tempered playback, reverb, stereo and the limiter apply live during playback."*
 
 ### Instrument names
 
-`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `piano`, `violin`.
+`sine-wave`, `square-wave`, `sawtooth-wave`, `triangle-wave`, `organ`, `vibraphone`, `fm-epiano`, `harmonium`, `harmonium-soft`, `piano`, `violin`.
 
-`audio.defaultInstrument` is the **fallback**, not an override: a note uses it only when neither it nor anything up its frequency chain pins an `instrument`. See [instrument inheritance](/reference/module-schema#instruments).
+`audio.defaultInstrument` is the **fallback**, not an override: a note uses it only when neither the note, nor its player, nor the BaseNote sets an `instrument`. See [Instruments](/user-guide/playback/instruments#players).
 
 ### Behaviour worth knowing
 
 - **Master volume is two-way bound** to the transport volume slider in the top bar. Dragging either moves the other. The transport slider only *persists* on release; while you drag it, it emits a live echo the panel follows.
+- **Play tempered changes what a note sounds at, and nothing else.** With it on, a note of frequency `f` sounds at `base × 2^(round(12 × log2(f / base)) / 12)`, where `base` is the BaseNote's frequency: the nearest of twelve equal steps to the octave, counted from the BaseNote. The BaseNote and its octaves never move; `5/4` moves up 13.7 cents, `3/2` down 2.0, `7/4` up 31.2. The module's expressions, its fraction labels and a saved file are untouched.
+- **Play tempered is applied when a note is scheduled**, like stereo, so it changes newly-started voices, not ones already sounding. It is stored like every other setting: it stays on across reloads until you turn it off.
 - **Room size, Decay and Damping re-render the reverb impulse response**, debounced by 250 ms. Reverb amount, pre-delay and the enable toggle are live parameters.
 - **Stereo width is applied when a note is scheduled**, so it changes newly-started voices, not ones already sounding.
 - The limiter is a peak catcher: −6 dB threshold, knee 6, ratio 12, attack 0.003 s, release 0.25 s.
@@ -237,9 +257,11 @@ Everything lives in one `localStorage` key.
   "audio": {
     "masterVolume": 1,
     "defaultInstrument": "sine-wave",
+    "tempered": { "enabled": false },
     "reverb": { "enabled": true, "roomSize": 0.5, "decaySec": 1.8, "damping": 0.5, "preDelayMs": 20, "wet": 0.25 },
     "stereo": { "enabled": false, "width": 0.6 },
-    "limiter": { "enabled": true }
+    "limiter": { "enabled": true },
+    "tempoRange": { "min": 20, "max": 300 }
   },
   "library": { "iconSizePx": 56, "showCents": true, "layoutVersion": 2 },
   "scale": {

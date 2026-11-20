@@ -4,14 +4,12 @@
 //   - createAddMeasureSection(note, measureId, externalFunctions) => HTMLElement
 import { eventBus } from '../utils/event-bus.js';
 import { getModule, setEvaluatedNotes } from '../store/app-state.js';
-import { isDSLSyntax, compileDSL, decompileToDSL } from '../dsl/index.js';
+import { compileDSL, decompileToDSL } from '../dsl/index.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
-import { ExpressionCompiler } from '../expression-compiler.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
 import { hugeFractionDisplay } from './fraction-display.js';
+import { EXPRESSION_VARS, isReferenceNote } from '../note.js';
 
-// Singleton compiler for safe evaluation
-const safeCompiler = new ExpressionCompiler();
 
 function pauseIfPlaying() {
   try {
@@ -33,9 +31,8 @@ function refreshModals(note, measureId = null) {
   }
 }
 
-function beatUnitFor(noteRef) {
-  return `beat(${noteRef})`;
-}
+// The time unit: the reference note's duration
+const TIME_UNIT = 'base.d';
 
 function defaultFrequencyFormulaFor(note) {
   if (!note || !note.id) {
@@ -61,11 +58,13 @@ function getDefaultDuration(note) {
         return decompileToDSL(expr);
       }
     } catch {}
+    // A reference has no duration to borrow: one time unit.
+    if (isReferenceNote(note)) return TIME_UNIT;
     // Fallback: reference the parent note's duration
     return `[${note.id}].d`;
   }
-  // Default to beat(base)
-  return `beat(base)`;
+  // Default to one time unit
+  return TIME_UNIT;
 }
 
 function sectionHeader(text) {
@@ -120,21 +119,13 @@ export function createAddMeasureSection(note, measureId, externalFunctions) {
       const maxID = currentIDs.length > 0 ? Math.max(...currentIDs) : 0;
       module.nextId = maxID + 1;
 
-      let newMeasures = [];
-      let fromNote;
-
-      if (note === module.baseNote) {
-        fromNote = module.baseNote;
-        const newMeasure = module.addNote({
-          startTime: () => module.baseNote.getVariable('startTime'),
-          startTimeString: "base.t"
-        });
-        newMeasure.parentId = module.baseNote.id;
-        newMeasures.push(newMeasure);
-      } else {
-        fromNote = (measureId != null) ? module.getNoteById(measureId) : module.baseNote;
-        newMeasures = module.generateMeasures(fromNote, 1);
-      }
+      // From the BaseNote this starts a new chain: { startTime: 'base.t',
+      // duration: 'base.d * 4', measure: true }. From a bar it appends the next
+      // one: starts where it ends ([p].t + [p].d) and lasts as long ([p].d).
+      const fromNote = (note === module.baseNote || measureId == null)
+        ? module.baseNote
+        : (module.getNoteById(Number(measureId)) || module.baseNote);
+      const newMeasures = module.generateMeasures(fromNote, 1);
 
       newMeasures.forEach((m) => { try { m.getVariable('startTime'); } catch {} });
 
@@ -193,7 +184,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   addSection.style.marginBottom = '18px';
   addSection.style.borderTop = '2px solid #00ffcc';
 
-  addSection.appendChild(sectionHeader('ADD NOTE / SILENCE'));
+  addSection.appendChild(sectionHeader('ADD NOTE / SILENCE / REFERENCE'));
 
   // Mode toggle
   const modeToggle = document.createElement('div');
@@ -201,6 +192,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   modeToggle.style.alignItems = 'center';
   modeToggle.style.gap = '10px';
   modeToggle.style.marginBottom = '10px';
+  modeToggle.style.flexWrap = 'wrap';
 
   const noteRadio = document.createElement('input');
   noteRadio.type = 'radio';
@@ -223,10 +215,32 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   silenceLabel.textContent = 'Silence';
   silenceLabel.htmlFor = silenceRadio.id;
 
+  // Notes that only relate, never sound: a frequency alone (a tonic, a key, a chord
+  // root, drawn as a line across the workspace), or a frequency and a start (a key
+  // change, the same line from that start on).
+  const mkRadio = (value, text, title) => {
+    const r = document.createElement('input');
+    r.type = 'radio';
+    r.name = `addType${isBase ? 'Base' : ''}`;
+    r.value = value;
+    r.id = `addType${isBase ? 'Base' : ''}${value}`;
+    const l = document.createElement('label');
+    l.textContent = text;
+    l.htmlFor = r.id;
+    l.title = title;
+    return [r, l];
+  };
+  const [refRadio, refLabel] = mkRadio('Reference', 'Reference', 'A frequency alone: a tonic, key or root that notes relate to. Never sounds.');
+  const [keyRadio, keyLabel] = mkRadio('KeyChange', 'Key change', 'A frequency and a start: a reference from that start on. Never sounds.');
+
   modeToggle.appendChild(noteRadio);
   modeToggle.appendChild(noteLabel);
   modeToggle.appendChild(silenceRadio);
   modeToggle.appendChild(silenceLabel);
+  modeToggle.appendChild(refRadio);
+  modeToggle.appendChild(refLabel);
+  modeToggle.appendChild(keyRadio);
+  modeToggle.appendChild(keyLabel);
   addSection.appendChild(modeToggle);
 
   // At start / at end (relative to parent) - only for non-base notes
@@ -269,8 +283,6 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
     addSection.appendChild(posToggle);
   }
 
-  const noteRefForTempo = "base";
-
   // Frequency row (hidden for silence)
   const freqRow = labeledRow('Frequency');
   const freqEval = document.createElement('div');
@@ -303,7 +315,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   durInput.type = 'text';
   durInput.className = 'raw-value-input';
   durInput.value = isBase
-    ? `${beatUnitFor(noteRefForTempo)}`
+    ? TIME_UNIT
     : getDefaultDuration(note);
 
   durRaw.appendChild(durInput);
@@ -330,6 +342,12 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       return;
     }
     const parentId = note?.id ?? 0;
+    // From a reference: a key change has a start to begin at, a plain reference has
+    // neither start nor duration, so the new note starts at the BaseNote's start.
+    if (parentId !== 0 && isReferenceNote(note)) {
+      stInput.value = note.hasExpression('startTime') ? `[${parentId}].t` : `base.t`;
+      return;
+    }
     const startRef = parentId === 0 ? `base.t` : `[${parentId}].t`;
     const durRef = parentId === 0 ? `base.d` : `[${parentId}].d`;
     stInput.value = atStartRadio.checked ? startRef : `${startRef} + ${durRef}`;
@@ -358,40 +376,17 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       }
 
       // Compile the expression using safe parser
-      let binary;
-      if (isDSLSyntax(expr)) {
-        binary = compileDSL(expr);
-      } else {
-        binary = safeCompiler.compile(expr);
-      }
+      const binary = compileDSL(expr);
 
-      // Build an eval cache from current module state
+      // Build an eval cache from current module state (the BaseNote is id 0)
       const evalCache = new Map();
-      // Add baseNote as ID 0
-      const baseNote = module.baseNote;
-      if (baseNote) {
-        evalCache.set(0, {
-          startTime: baseNote.getVariable('startTime'),
-          duration: baseNote.getVariable('duration'),
-          frequency: baseNote.getVariable('frequency'),
-          tempo: baseNote.getVariable('tempo'),
-          beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
-          measureLength: module.findMeasureLength(baseNote)
-        });
-      }
-      // Add other notes
       for (const id in module.notes) {
         const noteObj = module.notes[id];
         if (noteObj) {
           try {
-            evalCache.set(parseInt(id, 10), {
-              startTime: noteObj.getVariable('startTime'),
-              duration: noteObj.getVariable('duration'),
-              frequency: noteObj.getVariable('frequency'),
-              tempo: module.findTempo(noteObj),
-              beatsPerMeasure: noteObj.getVariable('beatsPerMeasure'),
-              measureLength: module.findMeasureLength(noteObj)
-            });
+            const rec = {};
+            for (const v of EXPRESSION_VARS) rec[v] = noteObj.getVariable(v);
+            evalCache.set(parseInt(id, 10), rec);
           } catch {}
         }
       }
@@ -414,7 +409,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
   }
   function refreshEvaluations() {
     try {
-      if (noteRadio.checked) {
+      if (!silenceRadio.checked) {
         setEvalDisplay(freqEval.querySelector('#add-note-freq-eval'), safeEval(freqInput.value));
       } else {
         setEvalDisplay(freqEval.querySelector('#add-note-freq-eval'), { text: '—', title: '' });
@@ -438,10 +433,18 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
         freqInput.value = defaultFrequencyFormulaFor(note);
       }
     }
+    // A reference has no duration; a plain reference has no start either.
+    const noDuration = refRadio.checked || keyRadio.checked;
+    durRow.row.style.display = noDuration ? 'none' : '';
+    stRow.row.style.display = refRadio.checked ? 'none' : '';
+    // At Start / At End means nothing next to a reference (it has no end).
+    if (posToggle) posToggle.style.display = (refRadio.checked || isReferenceNote(note)) ? 'none' : 'flex';
     refreshEvaluations();
   }
   noteRadio.addEventListener('change', updateModeFields);
   silenceRadio.addEventListener('change', updateModeFields);
+  refRadio.addEventListener('change', updateModeFields);
+  keyRadio.addEventListener('change', updateModeFields);
   updateModeFields();
 
   // Create button
@@ -460,6 +463,10 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       if (!module?.addNote) throw new Error('Module not initialized');
 
       const isSilence = silenceRadio.checked;
+      const isReference = refRadio.checked;          // f only
+      const isKeyChange = keyRadio.checked;          // f and t
+      const hasStart = !isReference;
+      const hasDuration = !isReference && !isKeyChange;
       const fFormula = freqInput.value;
       const dFormula = durInput.value;
       const sFormula = stInput.value;
@@ -469,14 +476,18 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       // The module's evaluateModule() will safely evaluate them via binary compilation.
 
       // Validate all expressions first
-      const stValidation = validateExpressionSyntax(sFormula);
-      if (!stValidation.valid) {
-        throw new Error(`Invalid start time expression: ${stValidation.error}`);
+      if (hasStart) {
+        const stValidation = validateExpressionSyntax(sFormula);
+        if (!stValidation.valid) {
+          throw new Error(`Invalid start time expression: ${stValidation.error}`);
+        }
       }
 
-      const durValidation = validateExpressionSyntax(dFormula);
-      if (!durValidation.valid) {
-        throw new Error(`Invalid duration expression: ${durValidation.error}`);
+      if (hasDuration) {
+        const durValidation = validateExpressionSyntax(dFormula);
+        if (!durValidation.valid) {
+          throw new Error(`Invalid duration expression: ${durValidation.error}`);
+        }
       }
 
       if (!isSilence) {
@@ -488,8 +499,8 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
 
       // Store expressions as strings - they will be compiled safely later
       const vars = {};
-      vars.startTimeString = sFormula;
-      vars.durationString = dFormula;
+      if (hasStart) vars.startTimeString = sFormula;
+      if (hasDuration) vars.durationString = dFormula;
 
       if (!isSilence) {
         vars.frequencyString = fFormula;
@@ -549,7 +560,7 @@ export function createAddNoteSection(note, isBase, externalFunctions) {
       try {
         const snap = module.createModuleJSON ? module.createModuleJSON() : null;
         if (snap) {
-          const lbl = `Add ${isSilence ? 'Silence' : 'Note'} ${newNote.id}`;
+          const lbl = `Add ${isSilence ? 'Silence' : isReference ? 'Reference' : isKeyChange ? 'Key change' : 'Note'} ${newNote.id}`;
           eventBus.emit('history:capture', { label: lbl, snapshot: snap });
         }
       } catch {}

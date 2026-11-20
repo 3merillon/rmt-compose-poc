@@ -21,14 +21,15 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 | **WebGL2** | The workspace. A hard requirement — `player.js` probes for a context and, without one, never constructs the `Workspace`. There is no DOM fallback renderer. |
 | **Web Audio API** | Synthesis, sample playback, the reverb/limiter signal graph. |
 | **fraction.js 5.3.4** | Exact rational arithmetic. BigInt-backed — arbitrary precision, at any magnitude and depth. |
-| **Rust → WASM** | An alternative evaluator core that ships in the bundle but is **off by default**. |
+| **Rust → WASM** | An alternative evaluator core that ships in the bundle but is **disabled** until it is ported to the new variable layout. |
 | **VitePress** | This documentation site (`docs/`, deployed separately). |
 
-::: warning The WASM evaluator is not the default path
-The `rmt-core` WASM binary is **not even fetched** on a normal page load — `initWasm()` returns
-early without the URL flag `?evaluator=wasm` (`src/wasm/evaluator-adapter.js:36-40`), and that
-flag currently hangs the tab on a full re-evaluation. Everything you experience in the app runs
-on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
+::: warning The WASM evaluator is disabled
+The `rmt-core` WASM binary is **not fetched** on any page load — `initWasm()` returns early because
+`isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:50-54`): the Rust core still
+has the old variable layout, so `WASM_MATCHES_VARIABLE_LAYOUT` is `false` and `?evaluator=wasm` is
+ignored with a console warning. Everything you experience in the app runs on the **JavaScript**
+evaluator. See [WASM Overview](/developer/wasm/overview).
 :::
 
 ## The layers
@@ -40,8 +41,8 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 │  menu/ (module library) · settings/ (panel + store) · theme/          │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Expression front ends                                                │
-│  dsl/          lexer → parser → compiler → decompiler   (primary)    │
-│  expression-compiler.js   legacy method-chain parser + routing + LRU  │
+│  dsl/          lexer → parser → compiler → decompiler   (the DSL)    │
+│  expression-compiler.js   compile entry point + LRU cache             │
 ├──────────────────────────────────────────────────────────────────────┤
 │ Core                                                                 │
 │  module.js  ·  note.js                                               │
@@ -53,11 +54,12 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 │  renderer/webgl2/   renderer · workspace · camera · config           │
 │  player/            audio-engine → audio-graph → reverb              │
 │  instruments/       synths + multisampled piano/violin               │
+│  midi/              midi-export: module → Standard MIDI File (pure)  │
 ├──────────────────────────────────────────────────────────────────────┤
 │ State                                                                │
 │  store/app-state.js · store/history.js · utils/event-bus.js          │
 ├──────────────────────────────────────────────────────────────────────┤
-│ wasm/  (alternative evaluator core — opt-in, currently blocked)      │
+│ wasm/  (alternative evaluator core — disabled until ported)          │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -72,10 +74,10 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 
 ### Core systems
 
-- **[Expression Compiler](/developer/core/expression-compiler)** — text → bytecode, DSL and legacy
+- **[Expression Compiler](/developer/core/expression-compiler)** — text → bytecode, and the conversion of retired syntax on load
 - **[Binary Evaluator](/developer/core/binary-evaluator)** — the stack VM and incremental evaluation
 - **[Dependency Graph](/developer/core/dependency-graph)** — property-specific forward and inverse indexes
-- **[SymbolicPower](/developer/core/symbolic-power)** — irrational algebra and what actually survives evaluation
+- **[Exact Values](/developer/core/symbolic-power)** — rational, irrational and approximate values, kept exact through evaluation
 
 ### Rendering
 
@@ -108,6 +110,7 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 - **[Note Class](/developer/api/note)**
 - **[BinaryExpression](/developer/api/binary-expression)**
 - **[EventBus](/developer/api/event-bus)**
+- **[MIDI Export](/developer/api/midi-export)**
 
 ### Contributing
 
@@ -123,11 +126,14 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 | `src/main.js` | Entry point (`index.html` loads this). Registers instruments, boots WASM, modals, menu, settings. |
 | `src/player.js` | The orchestrator: transport, selection, drag/resize commits, undo wiring, scale controls. ~6.6k lines. |
 | `src/module.js` | `Module` — notes, dependency registration, evaluation, JSON load/save, reindexing. |
-| `src/note.js` | `Note` — six `BinaryExpression`s plus `color` / `instrument`. |
-| `src/dsl/` | The primary expression language: `lexer` → `parser` → `compiler` → `decompiler`, plus `simplify`. |
-| `src/expression-compiler.js` | The **legacy** method-chain parser, the format router (`isDSLSyntax`), and the 4000-entry LRU compile cache. |
+| `src/note.js` | `Note` — six `BinaryExpression`s plus `color` / `instrument` / `measure`; `EXPRESSION_VARS`, `isMeasureNote()`. |
+| `src/migrate/relational-time.js` | `migrateTimeModel()` — converts a module of the old time model (tempo, beats per measure, `beat()`, `measure()`) on load. |
+| `src/migrate/legacy-syntax.js` | `migrateSyntax()` — converts expressions in the retired method-chain syntax to the DSL on load. |
+| `src/dsl/` | The expression language: `lexer` → `parser` → `compiler` → `decompiler`, plus `simplify`. |
+| `src/expression-compiler.js` | The compile entry point: the 4000-entry LRU cache in front of the DSL compiler, and the decompiler that gives an expression's text back. |
 | `src/binary-note.js` | `OP`, `VAR`, `CORRUPT`, `BinaryExpression`. |
-| `src/binary-evaluator.js` | `BinaryEvaluator` (stack VM), `IncrementalEvaluator`, `FractionPool`, `SymbolicPower`. |
+| `src/binary-evaluator.js` | `BinaryEvaluator` (stack VM), `IncrementalEvaluator`, `FractionPool`. |
+| `src/value/exact.js` | The three kinds of value: rational, irrational (exact powers), approximate (`~`). |
 | `src/dependency-graph.js` | Forward and inverse dependency indexes, per-property indexes, corruption flags. |
 | `src/renderer/webgl2/renderer.js` | `RendererAdapter` — 22 shader programs, all instance buffers, `sync()`, CPU picking. |
 | `src/renderer/webgl2/workspace.js` | `Workspace` — pointer interaction, drag/marquee/multi-select arbitration. |
@@ -139,7 +145,7 @@ on the **JavaScript** evaluator. See [WASM Overview](/developer/wasm/overview).
 | `src/theme/theme-manager.js` | `appearance.*` → CSS custom properties + `renderer.setConfig` / `setThemeColors`. |
 | `src/store/history.js` | Undo/redo. String snapshots, 50 entries, 12 MB cap. |
 | `src/utils/event-bus.js` | The pub/sub bus every subsystem talks over. |
-| `src/utils/simplify.js` | Expression simplification and the arrow-interval coefficient fold. |
+| `src/utils/simplify.js` | Value-checked simplification and the arrow-interval coefficient fold (the algebra is `src/dsl/simplify.js`). |
 
 The save/load path is `Module.loadFromJSON()` and `Module.createModuleJSON()` in `src/module.js`.
 (The dead `src/module-serializer.js` that used to sit beside it has been deleted.)

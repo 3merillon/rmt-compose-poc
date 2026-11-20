@@ -39,6 +39,8 @@ The play icon has three states:
 
 Reverb tails are not cut short by Stop — the reverb ring-out is what you hear decaying afterwards.
 
+When playback reaches the end of the module by itself, the last notes are not cut: a note's end is a note-off, and their releases ring out to silence. Stop, Pause and a new Play silence them at once.
+
 ## Move the playhead
 
 **Click an empty part of the workspace background.** The playhead jumps to that point in time, clamped to the module. This is the only way to start from the middle of a piece: seek, then press Play.
@@ -64,6 +66,16 @@ When you arm it:
 - If it was already playing, the loop is armed **without restarting the audio** — the pass in flight no longer stops at the end.
 
 There is no gap and no re-trigger at the wrap: nothing is torn down and rebuilt when the module repeats. A note's release tail and its reverb tail ring on across the boundary exactly as they would in the middle of the piece.
+
+### Rising (or falling) each time round
+
+A module can say how it repeats: its BaseNote's **REPEAT** row (in the [note widget](/user-guide/interface/variable-widget#repeat)) holds the ratio from one repeat to the next, for example `9/8`. Every repeat then sounds that ratio higher than the one before: the first pass as written, the second at 9/8, the third at (9/8)², and so on. A canon that modulates up a whole tone, like Bach's Canon per tonos, comes round in the next key every time, for as long as the loop runs. The shipped canon is saved with `9/8`. A repeat is an expression like any other: it can be a relation (`[24].f / base.f`, the interval of note 24 above the BaseNote) or a tempered step (`2^(1/6)`); a ratio below 1, such as `8/9`, falls instead. It must lie between 1/16 and 16.
+
+The value belongs to the module, not to the app: it is saved with it, a new composition and **Clean Slate** start without one, and a loaded file brings its own. Settings → Audio → **Loop (long-press Play)** → **Transpose each repeat by** shows and edits the same value as a ratio n / d (1/1 for none; a tempered repeat is shown there and edited in the BaseNote's row). It is read when playback starts.
+
+Every note of a pass is moved by the same factor, so the intervals inside a pass are exactly as written. While the loop plays, the values on screen follow it: the BaseNote's circle and every frequency in the note widget show the pass being heard (marked "repeat k"), exactly; the ratios on the notes do not change. **Pause** keeps that pass, and **Play** resumes in that key; **Stop** returns everything to the module as written. Nothing is written into the module.
+
+Pure intervals never close: six pure whole tones are an octave and a Pythagorean comma (531441/262144), so a rise by 9/8 never comes back to where it started. With **Keep within an octave** on (the default), each repeat that would pass the octave above the start is played an octave lower instead, so the loop can go on for ever within one octave, and after every six passes it stands one comma (23.5 cents) higher than six passes before. Turn it off and the repeats keep climbing (at 9/8, out of hearing after about 37 passes from 263 Hz). This one is a listening preference of the app, not part of the module.
 
 When you disarm it with the same gesture, the icon changes back immediately, but the audio **finishes the pass it is playing** and stops at the end of the module. It does not cut out mid-pass.
 
@@ -99,6 +111,10 @@ The slider is the **master output level**, from 0 to 100%. It defaults to **100%
 - It is the same value as **Settings → Audio → Master volume**. Drag either one and the other follows. See [Audio & Reverb](/user-guide/playback/audio).
 
 If a module is too loud, this is the knob. The limiter downstream catches peaks, but it is not a volume control.
+
+## Tempo
+
+The live tempo control is in the module bar's toolbar, next to the search magnifier. It changes how fast playback runs while it plays, without changing the piece; the check-mark button commits the shown tempo into the piece. See [Module Bar → Live tempo](/user-guide/interface/module-bar#live-tempo).
 
 ## Editing pauses playback for you
 

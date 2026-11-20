@@ -15,6 +15,7 @@ The workspace is the WebGL2 canvas that fills the app below the two bars. It dra
 |---|---|
 | **Note rectangle** | One note. Width is its duration, vertical position is its frequency. |
 | **Silence** | A note with no frequency — a dark rectangle with a dashed border and the word `silence`. It occupies time and can be depended on, but makes no sound. |
+| **Reference line** | A note with a frequency and no duration: a long-dashed line at its pitch, labelled `[id]`. Across the whole workspace for a **reference** (a tonic, a key, a chord root); from its start on for a **key change**. Click the line to open its widget. It never sounds, and notes relate to it like to any note. |
 | **BaseNote circle** | The filled circle at the origin. This is note id `0`, the anchor every other note is ultimately measured against. |
 | **Measure bars** | Vertical dashed lines. Two extra **solid** lines sit just outside the module's start and end. |
 | **Measure triangles** | The handles along the bottom of the screen — one per measure. Click and drag these, not the line. |
@@ -30,12 +31,12 @@ Every note carries two labels:
 - `[N]` at the top-left — the note's **id**. This is the number you write in an expression: `[5].t`, `[5].f`.
 - A **fraction** in the middle — the note's frequency as a ratio of the base frequency.
 
-A note whose frequency is irrational (any TET step, for instance) cannot be written as an exact fraction. Those notes show a fractional **approximation** prefixed with `≈`, and they are **hatched**:
+The label on a note is its exact relation to the BaseNote: a pure ratio as its fraction (`3/2`), a tempered note as its power on one line (`2^(7/12)`, or `3/2·2^(1/2)` with a coefficient), and `≈` with a rounded fraction only for an approximate note, or for an exact fraction too long for the label (more than four digits in its numerator or denominator, such as 19683/16384). A note that is tempered or approximate (not a pure ratio) is also **hatched**:
 
 | Hatching | Meaning |
 |---|---|
-| Crosshatch (two diagonals) | **Directly** corrupted — this note's own expression is irrational. |
-| Single diagonal | **Transitively** corrupted — the note is exact in itself, but something it depends on is not. |
+| Crosshatch (two diagonals) | **Directly** corrupted — this note's own expression is tempered or approximate. |
+| Single diagonal | **Transitively** corrupted — the note is a pure ratio in itself, but something it depends on is not. |
 
 ## Navigating
 
@@ -97,7 +98,7 @@ All three of these gestures act on **one note**, whether or not it was selected 
 
 Drag the **body** of the note (anywhere except the arrow column on the left and the pull tab on the right). The cursor shows `grab` over a body and `grabbing` while you drag.
 
-- The start time snaps to a **quarter of a beat** — a sixteenth note when the beat is a quarter note. The beat length comes from the tempo in effect at that note.
+- The start time snaps to a **quarter of the time unit** (`base.d`) — a sixteenth note when the time unit is a quarter note.
 - A note can never be dragged to start before the BaseNote.
 - Notes that depend on the one you are dragging **preview their new positions** as you go.
 - Dragging changes start time only. **Nothing you drag ever changes a pitch** — pitch comes from the arrows or from the expression.
@@ -108,7 +109,7 @@ On touch, the drag commits after about 6 px of travel; before that a second fing
 
 Drag the **pull tab** — the strip on the inner-right edge of the note, about half the note's height wide. The cursor turns into `ew-resize`.
 
-Duration snaps to the same quarter-beat grid, and cannot go below one grid step.
+Duration snaps to the same quarter-unit grid, and cannot go below one grid step.
 
 ### Transpose a note
 
@@ -123,11 +124,11 @@ See [Transposing with Arrows](/user-guide/notes/transposing).
 
 ## Measures
 
-A measure bar is a note too — it has a start time and takes part in the dependency graph — but it is drawn as a vertical line rather than a rectangle.
+A measure bar is a note too — a silent one with a start time and a duration, flagged `measure` — and it takes part in the dependency graph. It is drawn as a dashed vertical line with a triangle, never as a rest rectangle.
 
-**You select and drag a measure by its triangle handle at the bottom of the screen, not by its line.** The line itself is not clickable. Drag a triangle and the measure moves; the measures downstream of it in the same chain follow.
+**You select and drag a measure bar by its triangle handle at the bottom of the screen, not by its line.** The line itself is not clickable. Dragging a triangle changes the length of the **previous** bar; the dragged bar keeps its own length, and the bars after it follow because each starts where the one before ends.
 
-Measure chains are what a `measure([N])` reference in a start-time expression resolves against — see [Expressions](/user-guide/notes/expressions) for the helper functions.
+Other notes attach to a bar with `[N].t` and `[N].d` in their expressions. See [Working with Measures](/tutorials/intermediate/measures).
 
 ## Multi-note selection
 
@@ -150,7 +151,7 @@ Notes on the rules that catch people out:
 - Shift-clicking empty background does nothing — it will not throw your selection away.
 - A **plain click on a note that is in the selection drops the group** and selects just that note.
 
-With two or more notes selected, the **group widget** appears with **Copy to Modules** and **Delete all**. Full detail: [Multi-Note Selection](/user-guide/notes/selection).
+With two or more notes selected, the **group widget** appears: it changes a variable, the instrument or the colour of every selected note, and offers **Copy to Modules** and **Delete all**. The note widget's **SELECT** section selects a note with everything related to it. Full detail: [Multi-Note Selection](/user-guide/notes/selection).
 
 ## Dependency highlights
 

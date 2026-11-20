@@ -98,6 +98,7 @@ The **"+"** button opens the main menu. Its two bars rotate together into a sing
 | **Redo** | Redo the last undone change. |
 | **Reorder Module** | Reindex the notes by start time. Asks for confirmation first: *"Reorder the current module? This will reindex notes. Proceed?"* |
 | **Save Module** | Download the current module as `module.json`. |
+| **Export MIDI** | Download the current module as `module.mid`, a MIDI file that keeps the exact tuning. See [Exporting MIDI](/user-guide/modules/exporting-midi). |
 | **Load Module ▾** | Open a submenu. |
 | ↳ **Load Module from file…** | Pick a `.json` module from disk. |
 | ↳ **Reset Default Module** | Load the built-in default module. Asks for confirmation; the reset can be undone from history. |

@@ -118,6 +118,7 @@ layout(location=3) in vec2  a_noteSize;      // CSS px (deprecated, kept for com
 layout(location=5) in float a_flags;         // 1.0 = silence
 layout(location=6) in float a_dragFlag;      // 1.0 = apply u_dragOffset
 layout(location=7) in float a_corruptionType;// 0 = clean, 1 = transitive, 2 = direct
+layout(location=8) in vec4  a_env;           // envelope shares (attack, decay, sustain, release); zeros = none
 ```
 
 Note that `a_corruptionType` is a **float with three states**, not a bitmask. The `CORRUPT` bitmask
@@ -127,18 +128,18 @@ one value.
 | Value | Meaning | Visual |
 |---|---|---|
 | `0.0` | clean | none |
-| `1.0` | transitively corrupted (depends on something irrational) | single 45° diagonal hatch |
-| `2.0` | directly corrupted (irrational, no corrupt dependency) | crosshatch |
+| `1.0` | transitively corrupted (depends on a tempered or approximate note) | single 45° diagonal hatch |
+| `2.0` | directly corrupted (its own expression is tempered or approximate) | crosshatch |
 
 ## `sync()` — the per-edit rebuild
 
-`sync()` (`renderer.js:589`) rebuilds every instance array, rebuilds `_noteIdToIndex`, computes the
+`sync()` (`renderer.js:681`) rebuilds every instance array, rebuilds `_noteIdToIndex`, computes the
 corruption types, and uploads.
 
 The corruption scan inside `sync()` used to be the dominant cost of a commit — a transitive BFS per
 note, O(N²) on deep chains. It is now one multi-source BFS over the *dependents* graph, seeded by
 the corrupt set: O(N+E), and a complete no-op when nothing is corrupt, which is the common case
-(`renderer.js:823-898`). [Performance](/developer/performance) tells the full before/after story.
+(`renderer.js:1015-1062`). [Performance](/developer/performance) tells the full before/after story.
 
 ::: warning `sync()` has no per-note dirty tracking
 It reallocates the CPU-side `Float32Array`s for **all N notes** and re-uploads them wholesale with
@@ -156,16 +157,16 @@ if (!this.needsRedraw) return;
 this.needsRedraw = false;
 ```
 
-The rAF loop always ticks (`renderer.js:501-505`), and so does `player.js`'s own loop. What is gated
+The rAF loop always ticks (`renderer.js:593-597`), and so does `player.js`'s own loop. What is gated
 is the **body** of `_render()`. On an idle canvas, that gate holds and the frame costs **zero draw
 calls** — verified at 5k, 20k and 100k notes (0 of 100 frames redrawn).
 
 Two guards make the gate real, and both are load-bearing:
 
-- **`setPlayhead()`** (`renderer.js:1262`) returns early when the time did not change. `player.js`
+- **`setPlayhead()`** (`renderer.js:1489`) returns early when the time did not change. `player.js`
   calls it every frame whether playing or not; dirtying unconditionally kept `needsRedraw`
   permanently true.
-- **`updateViewportBasis()`** (`renderer.js:551-555`) returns early on an unchanged basis.
+- **`updateViewportBasis()`** (`renderer.js:643-647`) returns early on an unchanged basis.
   `player.js`'s rAF pushed a camera update every frame (to release the tracking X-lock), which bumped
   `_viewEpoch` 60×/s on a perfectly still canvas and invalidated every view-keyed cache.
 
@@ -189,7 +190,7 @@ signal.
 ### Viewport culling
 
 The per-note overlay loop — pull tab, interval arrows, fraction divider, silence band, and all of a
-note's text runs — is culled against the viewport (`renderer.js:6847-6878`). Every overlay is
+note's text runs — is culled against the viewport (`renderer.js:7209-7240`). Every overlay is
 scissored to that note's own rect, so a note entirely off-canvas cannot produce a single pixel; the
 cull is *exact*, not an approximation, which is why the picture stays pixel-identical.
 
@@ -205,7 +206,7 @@ only shift x and width, so the vertical bound needs no slack.
 
 ### Batched rings
 
-`_drawRingIdxList()` (`renderer.js:2548`) is the one remaining per-instance loop that could approach
+`_drawRingIdxList()` (`renderer.js:2913`) is the one remaining per-instance loop that could approach
 O(N): it fires when a hub note with ~1000 dependents is selected.
 
 - **No drag active:** `u_dragOffset` is `(0,0)` for every ring, so the whole bucket shares identical
@@ -219,7 +220,7 @@ O(N): it fires when a hub note with ~1000 dependents is selected.
 ![Dependency lines radiating from a selected note, colour-coded by property](/img/dependency-lines.png)
 
 Selecting a note lights up its relatives, colour-coded by **which property** of the selected note
-would move them (`renderer.js:2760-2818`):
+would move them (`renderer.js:3130-3194`):
 
 | Property | Colour | RGBA (dependency / dependent) |
 |---|---|---|
@@ -237,8 +238,8 @@ During a drag the property being edited stays at full brightness and the other t
 ::: warning The dependency colours are not themeable today
 Every theme preset defines `depFrequency` / `depStartTime` / `depDuration`, `themeManager` passes them
 to `renderer.setThemeColors()`, and the renderer stores them on `this._themeColors`
-(`renderer.js:363-365`) — but **nothing reads them back**. Every draw path uses the hard-coded
-literals above (`renderer.js:2774-2792`, `5396-5404`). Switching theme does not change a dependency
+(`renderer.js:372-374`) — but **nothing reads them back**. Every draw path uses the hard-coded
+literals above (`renderer.js:3150-3168`, `5396-5404`). Switching theme does not change a dependency
 ring or link-line colour. Do not document these tokens as working.
 :::
 
@@ -273,12 +274,12 @@ document or build on it.
 
 The live path:
 
-- `RendererAdapter.pickAllAt()` (`renderer.js:9109`) — measure triangles (top) → base circle → the
+- `RendererAdapter.pickAllAt()` (`renderer.js:9496`) — measure triangles (top) → base circle → the
   note stack. Returns hits top-most first.
-- `RendererAdapter.pickAt()` (`renderer.js:3363`) — a **reverse linear scan** over `_instanceNoteIds`
+- `RendererAdapter.pickAt()` (`renderer.js:3712`) — a **reverse linear scan** over `_instanceNoteIds`
   (last-drawn is top-most), a fast world-space AABB reject, then a precise **rounded-rect** test so
   the corners of a note are not selectable.
-- `hitTestSubRegion()` (`renderer.js:3426`) — which *sub-region* was hit (pull tab, arrow column).
+- `hitTestSubRegion()` (`renderer.js:3775`) — which *sub-region* was hit (pull tab, arrow column).
   Only runs once a note body is hit, and respects the rounded interior.
 
 There is **no spatial index**, and measurement says none is warranted: `pickAt` is **0.017 ms at 5,000

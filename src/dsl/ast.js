@@ -11,6 +11,7 @@ export const NodeType = {
   // Literals
   NumberLiteral: 'NumberLiteral',       // 440, -5, 3.14
   FractionLiteral: 'FractionLiteral',   // (3/2), (1/12)
+  Approximate: 'Approximate',           // ~261.63, ~(3/2): a number that is not exact
 
   // References
   NoteReference: 'NoteReference',       // [246].f, base.t
@@ -19,8 +20,6 @@ export const NodeType = {
   BinaryOp: 'BinaryOp',                 // +, -, *, /, ^
   UnaryOp: 'UnaryOp',                   // - (negation)
 
-  // Helper calls
-  HelperCall: 'HelperCall',             // tempo([246]), measure(base), beat([5])
 };
 
 /**
@@ -45,6 +44,19 @@ export function createNumberLiteral(value, numerator, denominator) {
  * @param {number} denominator - The denominator
  * @returns {Object} AST node
  */
+/**
+ * An approximate number: a literal marked with `~` (a measurement, a rounded
+ * value). It evaluates to an approximate value, and so does everything computed
+ * from it (src/value/exact.js).
+ * @param {Object} literal - NumberLiteral or FractionLiteral, possibly negated (UnaryOp '-')
+ */
+export function createApproximate(literal) {
+  return {
+    type: NodeType.Approximate,
+    literal,
+  };
+}
+
 export function createFractionLiteral(numerator, denominator) {
   return {
     type: NodeType.FractionLiteral,
@@ -94,20 +106,6 @@ export function createUnaryOp(operator, operand) {
     type: NodeType.UnaryOp,
     operator,
     operand,
-  };
-}
-
-/**
- * Create a helper call node
- * @param {string} helper - 'tempo', 'measure', 'beat'
- * @param {number|'base'} noteArg - Note ID or 'base'
- * @returns {Object} AST node
- */
-export function createHelperCall(helper, noteArg) {
-  return {
-    type: NodeType.HelperCall,
-    helper,
-    noteArg,
   };
 }
 
@@ -162,9 +160,6 @@ export function referencesBase(node) {
     case NodeType.NoteReference:
       return node.noteId === 'base' || node.noteId === 0;
 
-    case NodeType.HelperCall:
-      return node.noteArg === 'base' || node.noteArg === 0;
-
     case NodeType.BinaryOp:
       return referencesBase(node.left) || referencesBase(node.right);
 
@@ -189,12 +184,6 @@ export function collectDependencies(node, deps = new Set()) {
     case NodeType.NoteReference:
       if (typeof node.noteId === 'number' && node.noteId !== 0) {
         deps.add(node.noteId);
-      }
-      break;
-
-    case NodeType.HelperCall:
-      if (typeof node.noteArg === 'number' && node.noteArg !== 0) {
-        deps.add(node.noteArg);
       }
       break;
 
@@ -229,11 +218,11 @@ export function printAST(node, indent = 0) {
     case NodeType.FractionLiteral:
       return `${pad}Fraction(${node.numerator}/${node.denominator})`;
 
+    case NodeType.Approximate:
+      return `${pad}Approximate\n${printAST(node.literal, indent + 1)}`;
+
     case NodeType.NoteReference:
       return `${pad}Ref([${node.noteId}].${node.property})`;
-
-    case NodeType.HelperCall:
-      return `${pad}Helper(${node.helper}([${node.noteArg}]))`;
 
     case NodeType.BinaryOp:
       return [

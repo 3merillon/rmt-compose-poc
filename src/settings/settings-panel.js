@@ -23,7 +23,7 @@
  */
 
 import { settingsStore } from './settings-store.js';
-import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep } from './settings-schema.js';
+import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep, TEMPO_HARD_MIN, TEMPO_HARD_MAX, VOICE_LIMITS } from './settings-schema.js';
 import { THEME_PRESETS, getPreset } from '../theme/presets.js';
 import { eventBus } from '../utils/event-bus.js';
 import { showConfirmation } from '../utils/confirm-dialog.js';
@@ -33,6 +33,10 @@ import {
   MIN_BUFFER,
 } from '../utils/draggable-widget.js';
 import { raisePanel } from '../utils/panel-stack.js';
+import { getModule } from '../store/app-state.js';
+import { moduleRepeatRatio, setModuleRepeat, repeatExprForRatio } from '../player/display-transpose.js';
+import { validateLoopRatio } from '../player/loop-transpose.js';
+import { isRational as isRationalValue, toText as exactTextOf } from '../value/exact.js';
 import { viewportWidth, viewportHeight } from '../utils/viewport.js';
 
 // Themeable color tokens exposed as individual pickers (key + friendly label),
@@ -95,7 +99,7 @@ const TABS = [
 // Instrument list for the Audio tab default-instrument selector. Kept in sync
 // with the built-in instruments; the audio phase can replace this with a live
 // query if desired.
-const INSTRUMENTS = ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone', 'fm-epiano', 'piano', 'violin'];
+const INSTRUMENTS = ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone', 'fm-epiano', 'harmonium', 'harmonium-soft', 'piano', 'violin'];
 
 // Quick-pick intervals for the Arrows tab (name, n, d).
 const ARROW_PRESETS = [
@@ -280,6 +284,12 @@ function buildAppearanceTab(container) {
   container.appendChild(row('Note height', slider('appearance.note.heightWU', 8, 60, 1, (v) => `${v} wu`), 'Bar thickness in world units.'));
   container.appendChild(row('Border thickness', slider('appearance.note.borderPxAtZoom1', 0, 6, 0.5, (v) => `${v} px`)));
   container.appendChild(row('Corner radius', slider('appearance.note.roundedCornerPxAtZoom1', 0, 20, 1, (v) => `${v} px`)));
+  container.appendChild(row('Envelope inside notes', select('appearance.envelopes', [
+    ['own', 'Notes that set attack or release'],
+    ['all', 'Every note'],
+    ['none', 'None'],
+  ]), 'The envelope each note sounds with, drawn inside it on a loudness (dB) scale: its own attack and release, else its instrument\'s.'));
+  container.appendChild(row('Tails after the note\'s end', toggle('appearance.showTails'), 'Draws the release that rings after each note\'s end, as a key lifted or a bow leaving the string. Display only: picking, dragging and snapping use the note itself.'));
 
   // Per-token color pickers (write sparse overrides over the active preset).
   for (const group of COLOR_TOKEN_GROUPS) {
@@ -415,6 +425,67 @@ function buildAudioTab(container) {
 
   container.appendChild(row('Default instrument', select('audio.defaultInstrument', INSTRUMENTS)));
 
+  {
+    // Stored as a number, so not the generic select() (which stores the option's string).
+    const sel = el('select', 'rmt-set-select');
+    for (const n of VOICE_LIMITS) { const o = el('option', null, String(n)); o.value = String(n); sel.appendChild(o); }
+    sel.value = String(settingsStore.get('audio.maxVoices'));
+    sel.addEventListener('change', () => settingsStore.set('audio.maxVoices', Number(sel.value)));
+    addSync(sel, () => { sel.value = String(settingsStore.get('audio.maxVoices')); });
+    container.appendChild(row('Most voices at once', sel, 'Above it, the quietest note already ringing after its end fades out first; a note is never cut before its end. Each voice costs processor time: one core plays about 2,000 sine, organ or harmonium voices, 1,700 piano or violin, 600–700 square, sawtooth or fm-epiano (measured on one computer).'));
+  }
+
+  {
+    // Loop (long-press Play): each repeat transposed by a ratio, like the arrow ratio editor.
+    container.appendChild(el('div', 'rmt-set-subhead', 'Loop (long-press Play)'));
+    // Not a setting: the current module's own repeat (its BaseNote's `repeat`),
+    // saved with it; Clean Slate and a new composition start at 1/1.
+    const wrap = el('div', 'rmt-set-ratio');
+    const nIn = el('input'); nIn.type = 'number'; nIn.min = 1; nIn.className = 'rmt-set-number';
+    const dIn = el('input'); dIn.type = 'number'; dIn.min = 1; dIn.className = 'rmt-set-number';
+    const centsOut = el('span', 'rmt-set-cents', '');
+    const show = () => {
+      const m = getModule();
+      let r = null;
+      try { r = m ? moduleRepeatRatio(m) : null; } catch {}
+      if (!r) { nIn.value = 1; dIn.value = 1; centsOut.textContent = '0.0¢'; nIn.disabled = dIn.disabled = false; return; }
+      if (isRationalValue(r)) {
+        if (nIn !== document.activeElement) nIn.value = String(r.n);
+        if (dIn !== document.activeElement) dIn.value = String(r.d);
+        centsOut.textContent = `${(1200 * Math.log2(Number(r.n) / Number(r.d))).toFixed(1)}¢`;
+        nIn.disabled = dIn.disabled = false;
+      } else {
+        // An irrational repeat (a tempered step) is written in the BaseNote's REPEAT row
+        nIn.value = ''; dIn.value = '';
+        nIn.disabled = dIn.disabled = true;
+        centsOut.textContent = `${exactTextOf(r)} (BaseNote)`;
+      }
+    };
+    const commit = () => {
+      const m = getModule();
+      if (!m) return;
+      const v = validateLoopRatio({ n: parseInt(nIn.value, 10), d: parseInt(dIn.value, 10) }, { n: 1, d: 1 });
+      setModuleRepeat(m, repeatExprForRatio(v.n, v.d));
+      try {
+        const snap = m.createModuleJSON();
+        eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap });
+        eventBus.emit('history:capture', { label: v.n === v.d ? 'Repeat as written' : `Repeat ${v.n}/${v.d}`, snapshot: snap });
+      } catch {}
+      show();
+    };
+    nIn.addEventListener('change', commit);
+    dIn.addEventListener('change', commit);
+    show();
+    disposers.push(eventBus.on('module:repeatChanged', show));
+    disposers.push(eventBus.on('history:restored', show));
+    wrap.append(nIn, el('span', 'rmt-set-ratio-slash', '/'), dIn, centsOut);
+    container.appendChild(row('Transpose each repeat by', wrap, 'This module\'s own value (its BaseNote\'s repeat), saved with it: each time the loop comes round it sounds this ratio higher than the time before. 9/8 plays Bach\'s Canon per tonos as written; 1/1 repeats it unchanged. Clean Slate and a new composition start at 1/1. Takes effect at the next Play.'));
+    container.appendChild(row('Keep within an octave', toggle('audio.loop.fold'), 'Six pure whole tones are an octave and a comma, so a rise never comes home: on, the repeats drop an octave each time they pass one, and the loop can go on for ever; off, they keep climbing.'));
+  }
+
+  container.appendChild(el('div', 'rmt-set-subhead', 'Pure / Tempered'));
+  container.appendChild(row('Play tempered (12-TET)', toggle('audio.tempered.enabled'), 'Plays each note on the nearest key of a keyboard tuned from the BaseNote, to compare with the pure intervals. The module is not changed.'));
+
   const rvHeader = el('div', 'rmt-set-subhead', 'Room / Reverb');
   container.appendChild(rvHeader);
   container.appendChild(row('Enable reverb', toggle('audio.reverb.enabled'), 'Adds spatial ambience to the output.'));
@@ -429,11 +500,14 @@ function buildAudioTab(container) {
   container.appendChild(row('Spread notes by pitch', toggle('audio.stereo.enabled'), 'Places low notes toward the left speaker and high notes toward the right, as if seated at the instrument. Off = centered (mono-position).'));
   container.appendChild(row('Amount', slider('audio.stereo.width', 0, 1, 0.01, (v) => `${Math.round(v * 100)}%`)));
 
+  container.appendChild(el('div', 'rmt-set-subhead', 'Live tempo'));
+  container.appendChild(row('Tempo range', tempoRangeControl(), 'The span of the live-tempo slider in the module bar, in BPM. It always reaches the tempo the piece is written at.'));
+
   const lmHeader = el('div', 'rmt-set-subhead', 'Master');
   container.appendChild(lmHeader);
   container.appendChild(row('Limiter', toggle('audio.limiter.enabled'), 'Gentle output limiting to avoid clipping.'));
 
-  const note = el('div', 'rmt-set-note', 'Reverb, stereo and the limiter apply live during playback.');
+  const note = el('div', 'rmt-set-note', 'Tempered playback, reverb, stereo and the limiter apply live during playback.');
   container.appendChild(note);
 }
 
@@ -477,6 +551,7 @@ function scaleControl(axis) {
     const step = scaleStep(lo, hi);
     range.min = lo; range.max = hi; range.step = step;
     num.min = lo; num.max = hi;
+    num.dataset.step = String(step);   // the arrows step like the slider (number-stepper.js)
     const v = settingsStore.get(path);
     if (range !== document.activeElement) range.value = v;
     if (num !== document.activeElement) num.value = fmtScale(v);
@@ -501,6 +576,46 @@ function scaleControl(axis) {
 // The min/max pair for one axis, written as ONE store update: two separate sets
 // would leave the tree momentarily inverted, and the schema resets an inverted
 // range to defaults.
+// The live-tempo slider's span, as ONE store update (an inverted pair would be
+// reset to the defaults by the schema). Whole BPM; the edited field wins.
+function tempoRangeControl() {
+  const wrap = el('div', 'rmt-set-range');
+  const mk = () => {
+    const i = el('input');
+    i.type = 'number';
+    i.className = 'rmt-set-number';
+    i.step = 1;
+    i.min = TEMPO_HARD_MIN;
+    i.max = TEMPO_HARD_MAX;
+    return i;
+  };
+  const loIn = mk();
+  const hiIn = mk();
+  const seed = () => {
+    const r = settingsStore.get('audio.tempoRange') || {};
+    if (loIn !== document.activeElement) loIn.value = r.min;
+    if (hiIn !== document.activeElement) hiIn.value = r.max;
+  };
+  const commit = (edited) => {
+    let lo = clamp(Math.round(parseFloat(loIn.value)), TEMPO_HARD_MIN, TEMPO_HARD_MAX);
+    let hi = clamp(Math.round(parseFloat(hiIn.value)), TEMPO_HARD_MIN, TEMPO_HARD_MAX);
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) { seed(); return; }
+    if (hi <= lo) {
+      if (edited === 'lo') hi = Math.min(TEMPO_HARD_MAX, lo + 1);
+      else lo = Math.max(TEMPO_HARD_MIN, hi - 1);
+    }
+    if (hi <= lo) { seed(); return; }
+    settingsStore.set('audio.tempoRange', { min: lo, max: hi });
+    seed();
+  };
+  loIn.addEventListener('change', () => commit('lo'));
+  hiIn.addEventListener('change', () => commit('hi'));
+  seed();
+  wrap.append(loIn, el('span', 'rmt-set-ratio-slash', '–'), hiIn);
+  addSync(null, seed);
+  return wrap;
+}
+
 function limitControl(axis) {
   const wrap = el('div', 'rmt-set-range');
   const mk = () => {

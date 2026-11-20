@@ -34,7 +34,7 @@ note and the whole scale re-roots onto that note.
 The magnifier at the left of the module bar's toolbar opens a search field
 (`Search name, ratio, tag…`). It matches the module name, its **ratio**, its **cents**, its
 **family** (`3-limit`, `7-limit`, `comma`, …) and its **tags** — so typing `7/4`, `septimal` or
-`comma` narrows 79 modules to the handful you want. Matches surface even inside collapsed
+`comma` narrows 81 modules to the handful you want. Matches surface even inside collapsed
 sections. Closing the field always clears the query.
 :::
 
@@ -60,14 +60,6 @@ base.f * (7/4)          # harmonic seventh
 The parentheses are part of the fraction literal. `(5/4)` is an exact rational; `5/4` written bare
 is a division that still evaluates exactly, but the literal form is what the app itself writes and
 what round-trips through a save.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(5, 4))
-```
-</details>
 
 ## Equal temperaments
 
@@ -192,12 +184,12 @@ Four notes, each starting where the previous one ends, each pitched off note 1:
 
 | Note | frequency | startTime | duration |
 |---|---|---|---|
-| 1 | `base.f` | `base.t` | `beat(base)` |
-| 2 | `[1].f * 2^(3/19)` | `[1].t + [1].d` | `beat(base)` |
-| 3 | `[1].f * 2^(6/19)` | `[2].t + [2].d` | `beat(base)` |
-| 4 | `[1].f * 2^(8/19)` | `[3].t + [3].d` | `beat(base)` |
+| 1 | `base.f` | `base.t` | `base.d` |
+| 2 | `[1].f * 2^(3/19)` | `[1].t + [1].d` | `base.d` |
+| 3 | `[1].f * 2^(6/19)` | `[2].t + [2].d` | `base.d` |
+| 4 | `[1].f * 2^(8/19)` | `[3].t + [3].d` | `base.d` |
 
-Create every note from the **ADD NOTE / SILENCE** section of a widget. Note 1 comes from the
+Create every note from the **ADD NOTE / SILENCE / REFERENCE** section of a widget. Note 1 comes from the
 BaseNote's widget, which has no **At Start** / **At End** toggle — it always writes `base.t` — and
 whose button reads **Create**. Notes 2–4 come from the previous note's widget: pick **Note**, pick
 **At End**, then press **Create Note**. Then open each variable's `Raw:` field and type the
@@ -209,7 +201,7 @@ All four notes share note 1's start and length; only the pitch differs.
 
 | Note | frequency | startTime | duration |
 |---|---|---|---|
-| 1 (root) | `base.f` | `base.t` | `beat(base) * 2` |
+| 1 (root) | `base.f` | `base.t` | `base.d * 2` |
 | 2 (major 3rd) | `[1].f * (5/4)` | `[1].t` | `[1].d` |
 | 3 (fifth) | `[1].f * (3/2)` | `[1].t` | `[1].d` |
 | 4 (harmonic 7th) | `[1].f * (7/4)` | `[1].t` | `[1].d` |
@@ -221,27 +213,27 @@ same structure the shipped **Harmonic 7th** chord module uses (4:5:6:7).
 
 Type `base.f * 2^(1/12)` and two things happen.
 
-**In the note widget**, the `Evaluated:` line shows a value with a `≈` prefix, in italic amber.
+**In the note widget**, the `Evaluated:` line shows the exact form and its value, in italic amber: `(263/4) * 2^(1/4) = 78.190368…`.
 
 **In the workspace**, the note rectangle is hatched:
 
 | Hatch | Meaning |
 |---|---|
-| **Crosshatch** (two diagonals) | The note's *own* expression produced an irrational value |
-| **Single diagonal** | The note is clean, but something it depends on is not |
+| **Crosshatch** (two diagonals) | The note's *own* expression holds an irrational power (or a `~` number) |
+| **Single diagonal** | The note is pure itself, but something it depends on is tempered or approximate |
 
-Both cases display `≈`. The hatching is what tells them apart.
+Both cases show the exact value. The hatching is what tells them apart.
 
-::: warning `≈` means approximated, not merely rounded
-When a `^` produces a genuinely irrational result, the evaluator converts it straight back to a
-rational approximation and marks the property corrupted. The stored value really is an
-approximation — subsequent arithmetic works on the approximation, not on a symbolic form.
+::: tip Irrational values are exact
+When a `^` produces a genuinely irrational result, the evaluator keeps it as the power it is, so
+`2^(1/12)` twelve times over is exactly 2. `≈` is used only for an *approximate* value: a number
+you wrote with `~`, or the fallback of an operation that cannot be kept exact.
 
-A power that resolves to a rational is *not* corrupted: `2^(12/12)` is exactly 2, and `4^(1/2)` is
+A power that resolves to a rational is *not* hatched: `2^(12/12)` is exactly 2, and `4^(1/2)` is
 exactly 2. Only genuinely irrational powers hatch.
 
-[Understanding SymbolicPower](/tutorials/advanced/symbolic-power) works through exactly where the
-line falls and how much error accumulates when you chain irrational steps.
+[Understanding SymbolicPower](/tutorials/advanced/symbolic-power) works through the three kinds of
+value and what the hatching means.
 :::
 
 ## Listening well
@@ -257,14 +249,14 @@ Open the Settings panel from the top-bar gear, go to the **Audio** tab and switc
 ### Use sustained notes
 
 Beating between two nearly-in-tune pitches takes time to become audible. Give test notes at least
-a couple of beats. `beat(base) * 4` is a reasonable starting length.
+a couple of beats. `base.d * 4` is a reasonable starting length.
 
 ### Pick a timbre that reveals it
 
 A `sine-wave` shows the beat rate between two fundamentals most cleanly; `organ` and `violin` add
 harmonics that expose roughness higher up. Set the default in Settings → Audio →
 **Default instrument**, or set one note's instrument from its widget. The full listening rig —
-all nine instruments and the settings worth changing — is in
+all eleven instruments and the settings worth changing — is in
 [Microtonal Experiments](/tutorials/workflows/microtonal-experiments).
 
 ### Loop it

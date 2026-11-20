@@ -1,5 +1,13 @@
 import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.js';
 import { toNumber } from '../../utils/fraction-num.js';
+import { noteLabel, LINE_LABEL } from './note-label.js';
+import { parseCssColor } from '../../utils/css-color.js';
+import { amplitudeToGain } from '../../player/amplitude.js';
+import { isMeasureNote } from '../../note.js';
+import { envelopeShares } from '../../instruments/instrument-manager.js';
+import { getDisplayTransposition } from '../../player/display-transpose.js';
+import * as X from '../../value/exact.js';
+import { getInstrumentManager } from '../../store/app-state.js';
 /**
  * WebGL2 RendererAdapter
  * - Non-interactive overlay renderer for notes and playhead
@@ -402,7 +410,79 @@ export class RendererAdapter {
   // drifting off its own frequency.
   _cfgCenterAnchor() { try { return this._config?.note?.centerAnchorWU ?? 10; } catch { return 10; } }
   _cfgNoteH() { try { return this._config?.note?.heightWU ?? 22; } catch { return 22; } }
+  // Note height as a picture of loudness: the configured height times the square
+  // root of the gain playback uses (amplitude clamped to 0..4), kept within
+  // 0.6x..2x so that the quietest note still holds its labels. Amplitude 1 gives
+  // exactly 1: a module that sets no amplitude draws as it always has.
+  _amplitudeHeightScale(amplitude) {
+    const gain = amplitudeToGain(amplitude);
+    if (gain === 1) return 1;
+    const s = Math.sqrt(gain);
+    return s < 0.6 ? 0.6 : (s > 2 ? 2 : s);
+  }
   _noteCenterY(freq) { return this._frequencyToY(freq) + this._cfgCenterAnchor(); }
+  // The envelope of one note as shares of its duration, from the same function the
+  // audio engine uses (envelopeShares in instrument-manager.js): the note's own
+  // attack and release, the instrument's envelope (in seconds, some following the
+  // pitch) for what it leaves unset, the anti-click floors. Returns [attack, decay,
+  // level, release, tail, levelAtEnd] or null. The release sounds AFTER the note's
+  // end, so inside the note there is none to draw (release share 0): the band holds
+  // the level the body reaches until the end. `tail` is that release as a share of
+  // the duration (drawn past the end when tails are on), starting from `levelAtEnd`.
+  _envelopeSharesFor(module, note, durSec, attack, release, freq, memo = null) {
+    try {
+      const shape = { attack: attack ? toNumber(attack, null) : null, release: release ? toNumber(release, null) : null };
+      let env = {};
+      const im = getInstrumentManager();
+      if (im && typeof im.getInstrument === 'function') {
+        const inst = im.getInstrument(String(module.findInstrument(note, memo) || '').toLowerCase());
+        if (inst && typeof inst.getEnvelopeSettings === 'function') env = inst.getEnvelopeSettings(durSec, Number(freq)) || {};
+      }
+      const s = envelopeShares(env, durSec, shape);
+      return [s.attack, s.decay, s.sustain, 0, s.release, s.sustain];
+    } catch { return null; }
+  }
+
+  // The tails sync() collected, into their instance buffers. Nothing to do (and
+  // nothing uploaded) when tails are off: tailCount 0 skips the pass entirely.
+  _syncTails() {
+    const items = this._tailItems || [];
+    const M = items.length;
+    this.tailCount = M;
+    if (!M || !this.gl || !this.tailPosSizeBuffer) return;
+    const pos = new Float32Array(M * 4), col = new Float32Array(M * 4), lvl = new Float32Array(M * 2);
+    for (let i = 0; i < M; i++) {
+      const t = items[i], o = i * 4;
+      pos[o] = t.x; pos[o + 1] = t.y; pos[o + 2] = Math.max(0.0001, t.w); pos[o + 3] = Math.max(0.0001, t.h);
+      col[o] = t.color[0]; col[o + 1] = t.color[1]; col[o + 2] = t.color[2]; col[o + 3] = t.color[3];
+      lvl[i * 2] = t.level; lvl[i * 2 + 1] = t.under || 0;
+    }
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailPosSizeBuffer); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailColorBuffer); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailLevelBuffer); gl.bufferData(gl.ARRAY_BUFFER, lvl, gl.DYNAMIC_DRAW);
+  }
+
+  _drawTails(vpW, vpH) {
+    const gl = this.gl, prog = this.tailProgram;
+    if (!this._uniforms) this._uniforms = {};
+    const U = this._uniforms.tail || (this._uniforms.tail = {
+      u_matrix: gl.getUniformLocation(prog, 'u_matrix'), u_viewport: gl.getUniformLocation(prog, 'u_viewport'),
+      u_offset: gl.getUniformLocation(prog, 'u_offset'), u_scale: gl.getUniformLocation(prog, 'u_scale'),
+    });
+    gl.useProgram(prog);
+    gl.uniformMatrix3fv(U.u_matrix, false, this.matrix);
+    gl.uniform2f(U.u_viewport, vpW, vpH);
+    gl.uniform2f(U.u_offset, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
+    gl.uniform2f(U.u_scale, this.xScalePxPerWU || 1.0, this.yScalePxPerWU || 1.0);
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
+    gl.bindVertexArray(this.tailVAO);
+    gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.tailCount);
+    gl.bindVertexArray(null);
+    gl.depthMask(true);
+    gl.enable(gl.DEPTH_TEST);
+  }
 
   init(containerEl) {
     if (!containerEl) throw new Error('RendererAdapter.init: containerEl required');
@@ -630,6 +710,12 @@ export class RendererAdapter {
       return evaluatedNotes[id];
     };
 
+    // The BaseNote's exact frequency (src/value/exact.js), for exact note labels
+    try {
+      const b0 = getEv(0);
+      this._baseFreqExact = (b0 && (b0.exact?.frequency ?? b0.frequency)) ?? module.baseNote.getExactVariable?.('frequency') ?? null;
+    } catch { this._baseFreqExact = null; }
+
     // Resolve base frequency (fast path via evaluated cache)
     try {
       const baseEv = getEv(0)?.frequency;
@@ -683,9 +769,17 @@ export class RendererAdapter {
         }
       };
 
-      // Prefer evaluated base frequency, fall back to raw baseNote variable
+      // Prefer evaluated base frequency, fall back to raw baseNote variable.
+      // During a transposed loop the circle shows the BaseNote of the pass being
+      // heard (display only; a rational factor: an irrational one leaves it written,
+      // the note widget shows that exact value).
       const baseEv = getEv(0)?.frequency;
-      coerceFrom(baseEv);
+      const shown = getDisplayTransposition();
+      if (shown.factor && X.isRational(shown.factor) && this._baseFreqExact && X.isRational(this._baseFreqExact)) {
+        coerceFrom(X.mul(this._baseFreqExact, shown.factor));
+      } else {
+        coerceFrom(baseEv);
+      }
       if (!assigned) {
         const bf = module?.baseNote?.getVariable?.('frequency');
         coerceFrom(bf);
@@ -706,18 +800,55 @@ export class RendererAdapter {
 
     // Build list of visible notes (those with startTime and duration)
     const items = [];
+    // What a note without an amplitude of its own inherits: the BaseNote's.
+    const baseEvForAmp = getEv(0);
+    const baseHeightScale = (baseEvForAmp && baseEvForAmp.amplitude) ? this._amplitudeHeightScale(baseEvForAmp.amplitude) : 1;
+    // And its attack and release, which a note without its own inherits.
+    const baseAttack = baseEvForAmp ? baseEvForAmp.attack : null;
+    const baseRelease = baseEvForAmp ? baseEvForAmp.release : null;
+    // Settings > Appearance > "Envelope inside notes": 'own' (the notes that set an
+    // attack or a release), 'all', 'none'; and "Tails after the note's end".
+    const envMode = this._config?.note?.envelopeMode || 'own';
+    const showTails = this._config?.note?.showTails === true;
+    // The tails to draw past the notes' ends (display only; see _drawTails).
+    const tails = [];
+    // Instruments resolved during this pass, by note id (see Module.findInstrument).
+    const instrumentMemo = new Map();
+    const tailUnder = Math.max(0, this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0);
     // Latest end time across playable notes, accumulated here for free because this loop
     // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
     // re-derive it with a second full pass over module.notes (~31ms at 100k notes).
     let maxNoteEndSec = 0;
+    // Notes that only relate: a frequency and no duration (a tonic, a key, a root;
+    // with a start, a key change from there on). Drawn as reference lines by
+    // _renderReferenceLines, never as note bodies, never played.
+    const refLines = [];
     for (const idStr in module.notes) {
       const note = module.notes[idStr];
       if (!note) continue;
+      // The BaseNote has a duration now (the time unit), but it never sounds and is not drawn as a note.
+      if (Number(note.id) === 0) continue;
+      // A measure bar has a start and a duration but is drawn as a bar line and a
+      // triangle (_syncMeasureBars), never as a rest.
+      if (isMeasureNote(note)) continue;
       try {
         // Use evaluatedNotes cache if available (required for correct display after reorder)
         const ev = getEv(note.id);
         const hasStart = ev ? (ev.startTime != null) : !!note.getVariable('startTime');
         const hasDur = ev ? (ev.duration != null) : !!note.getVariable('duration');
+        if (!hasDur && note.hasExpression && note.hasExpression('frequency') && !note.hasExpression('duration')) {
+          const fr = (ev && ev.frequency != null) ? ev.frequency : note.getVariable('frequency');
+          const fv = fr ? (fr._floatValue !== undefined && fr._irrational ? fr._floatValue : toNumber(fr, NaN)) : NaN;
+          if (isFinite(fv) && fv > 0) {
+            let startSec = null;
+            if (hasStart) {
+              const st = toNumber((ev && ev.startTime != null) ? ev.startTime : note.getVariable('startTime'), NaN);
+              if (isFinite(st)) startSec = st;
+            }
+            refLines.push({ id: Number(note.id), freq: fv, startSec });
+          }
+          continue;
+        }
         if (!hasStart || !hasDur) continue;
 
         // Prefer evaluated cache values to avoid stale data after module reorder
@@ -767,21 +898,49 @@ export class RendererAdapter {
         // top-left from the height. At the default height this is identical to the
         // old fixed -1 shift (anchor 10 - 22/2 = -1); at any other height the note
         // stays centred on its line instead of drifting off it.
-        const h = this._cfgNoteH(); // world units
+        // The height also shows the note's amplitude (silences have none).
+        const isSilence = (freqVal == null || !isFinite(Number(freqVal)));
+        const heightScale = isSilence ? 1 : ((ev && ev.amplitude) ? this._amplitudeHeightScale(ev.amplitude) : baseHeightScale);
+        const h = this._cfgNoteH() * heightScale; // world units
         y = y + this._cfgCenterAnchor() - h * 0.5;
 
-        const isSilence = (freqVal == null || !isFinite(Number(freqVal)));
         const baseColor = this._resolveColor(ev, note, module);
         const color = isSilence ? [0.0, 0.0, 0.0, 0.75] : baseColor;
 
+        // The envelope a note sounds with, drawn inside it (see rectBorderFS) as the
+        // "Envelope inside notes" setting says: by default when the note or the
+        // BaseNote sets an attack or a release. Otherwise null, and the note draws
+        // exactly as before. Its tail, past its end, when tails are on.
+        let env = null;
+        if (!isSilence) {
+          const atk = (ev && ev.attack) || baseAttack;
+          const rel = (ev && ev.release) || baseRelease;
+          const inside = envMode === 'all' || (envMode === 'own' && !!(atk || rel));
+          if (inside || showTails) {
+            const e = this._envelopeSharesFor(module, note, durSec, atk, rel, freqVal, instrumentMemo);
+            if (e) {
+              if (inside) env = e;
+              // The tail starts under the note, one corner radius in (the radius is in
+              // world units along x: rectBorderFS scales it by the same px-per-unit as
+              // the note), so the note's rounded corners sit over it instead of leaving
+              // a notch between the note and its tail.
+              if (showTails && e[4] > 0) tails.push({ x: x + w, y, w: w * e[4], h, color, level: e[5], under: Math.min(tailUnder, w * 0.5) });
+            }
+          }
+        }
+
         // Carry freqVal so the fraction-label pass below does not have to look the note up in
         // evaluatedNotes a second time and re-unwrap the Fraction.
-        items.push({ id: note.id, x, y, w, h, color, isSilence, freqVal });
+        // The exact frequency (Fraction, or an exact Irrational / Approx) for the label
+        const freqExact = ev ? (ev.exact?.frequency ?? ev.frequency ?? null) : null;
+        items.push({ id: note.id, x, y, w, h, color, isSilence, freqVal, freqExact, env });
       } catch {
         // Ignore malformed notes
       }
     }
     this._maxNoteEndSec = maxNoteEndSec;
+    this._refLines = refLines;
+    this._tailItems = tails;
 
     // PERFORMANCE: Instead of O(n log n) sort, use O(1) swap to move selected note to end
     // This avoids full buffer reallocation on every selection change
@@ -807,6 +966,9 @@ export class RendererAdapter {
       this._dragFlags = new Float32Array(N);
       this._corruptionType = new Float32Array(N);
     }
+    if (!this._envShape || this._envShape.length !== N * 4) {
+      this._envShape = new Float32Array(N * 4);
+    }
 
     // Fill arrays with reordered data
     for (let i = 0; i < N; i++) {
@@ -822,6 +984,13 @@ export class RendererAdapter {
       this.colors[o + 1] = it.color[1];
       this.colors[o + 2] = it.color[2];
       this.colors[o + 3] = it.color[3];
+
+      // Envelope shape (attack, decay, sustain, release); all zeros = none drawn
+      const env = it.env;
+      this._envShape[o + 0] = env ? env[0] : 0;
+      this._envShape[o + 1] = env ? env[1] : 0;
+      this._envShape[o + 2] = env ? env[2] : 0;
+      this._envShape[o + 3] = env ? env[3] : 0;
 
       // Per-instance flags: 1 for silence, 0 otherwise
       if (this._instanceFlags) {
@@ -964,22 +1133,19 @@ export class RendererAdapter {
           let depsHasBase = false;
           let rdepsHasBase = false;
 
-          const isMeasureNote = (id) => {
-            try {
-              const n = module.getNoteById(Number(id));
-              return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
-            } catch { return false; }
+          const isBarId = (id) => {
+            try { return isMeasureNote(module.getNoteById(Number(id))); } catch { return false; }
           };
 
           for (let k = 0; k < deps.length; k++) {
             const id = Number(deps[k]);
             if (id === 0) { depsHasBase = true; continue; }
-            if (isMeasureNote(id)) depMeasureIds.push(id);
+            if (isBarId(id)) depMeasureIds.push(id);
           }
           for (let k = 0; k < rdeps.length; k++) {
             const id = Number(rdeps[k]);
             if (id === 0) { rdepsHasBase = true; continue; }
-            if (isMeasureNote(id)) rdepMeasureIds.push(id);
+            if (isBarId(id)) rdepMeasureIds.push(id);
           }
 
           // Cache the computed data (including posEpoch for invalidation)
@@ -1104,8 +1270,26 @@ export class RendererAdapter {
     // against itself and text would never be marked dirty.
     this._noteFracNumStrs = new Array(N);
     this._noteFracDenStrs = new Array(N);
+    // 1 where the label is drawn with ≈: an approximate value, or an exact one too long to show
+    this._noteLabelApprox = new Uint8Array(N);
     const baseValNum = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
+    const baseExact = this._baseFreqExact;
     const fracCache = this._fracStrCache || (this._fracStrCache = new Map());
+    // Exact labels, memoised per value object: a record keeps its Fraction / exact value
+    // until the note is re-evaluated, so a steady sync costs one WeakMap lookup per note.
+    const exactCache = (this._labelCacheBase === baseExact && this._exactLabelCache) || new WeakMap();
+    this._exactLabelCache = exactCache;
+    this._labelCacheBase = baseExact;
+    const approxFrac = (ratio) => {
+      let pair = fracCache.get(ratio);
+      if (pair === undefined) {
+        const fr = (typeof this._approximateFraction === 'function') ? this._approximateFraction(ratio, 8192, 4) : { n: Math.round(ratio * 1000), d: 1000 };
+        pair = [String(fr.n), String(fr.d)];
+        if (fracCache.size > 65536) fracCache.clear();
+        fracCache.set(ratio, pair);
+      }
+      return pair;
+    };
     for (let i = 0; i < N; i++) {
       try {
         // items[i] is instance i (the selected-note swap above keeps them aligned), and its
@@ -1113,21 +1297,33 @@ export class RendererAdapter {
         // that avoids a transient "silence" label at initial load. Re-reading evaluatedNotes
         // here was a second Map lookup plus a Fraction unwrap for every note.
         const fnum = items[i] ? items[i].freqVal : null;
+        const fex = items[i] ? items[i].freqExact : null;
         if (fnum != null && isFinite(fnum) && baseValNum && isFinite(baseValNum) && baseValNum !== 0) {
-          // The label is a pure function of the frequency ratio, and a piece of music reuses a
-          // small set of ratios across many notes. Memoising skips both the continued-fraction
-          // approximation and two string allocations per note per sync (200k strings at 100k
-          // notes). The ratio already folds in the base frequency, so a base change re-keys.
-          const ratio = fnum / baseValNum;
-          let pair = fracCache.get(ratio);
-          if (pair === undefined) {
-            const fr = (typeof this._approximateFraction === 'function') ? this._approximateFraction(ratio, 8192, 4) : { n: Math.round(ratio * 1000), d: 1000 };
-            pair = [String(fr.n), String(fr.d)];
-            if (fracCache.size > 65536) fracCache.clear();
-            fracCache.set(ratio, pair);
+          // The label states the note's exact relation to the BaseNote (note-label.js): a
+          // pure ratio as its fraction, a tempered note as its power, ≈ only for an
+          // approximation or an exact value too long for the label.
+          let label = (fex && typeof fex === 'object' && baseExact) ? exactCache.get(fex) : undefined;
+          if (label === undefined && fex && typeof fex === 'object' && baseExact) {
+            label = noteLabel(fex, baseExact) || null;
+            exactCache.set(fex, label);
           }
-          this._noteFracNumStrs[i] = pair[0];
-          this._noteFracDenStrs[i] = pair[1];
+          if (label) {
+            if (label.approx) {
+              const pair = approxFrac(fnum / baseValNum);
+              this._noteFracNumStrs[i] = pair[0];
+              this._noteFracDenStrs[i] = pair[1];
+              this._noteLabelApprox[i] = 1;
+            } else {
+              this._noteFracNumStrs[i] = label.num;
+              this._noteFracDenStrs[i] = label.den;
+            }
+          } else {
+            // No exact value at hand (e.g. the WASM path): the float ratio, as before
+            const pair = approxFrac(fnum / baseValNum);
+            this._noteFracNumStrs[i] = pair[0];
+            this._noteFracDenStrs[i] = pair[1];
+            if (this._corruptionType && this._corruptionType[i] > 0) this._noteLabelApprox[i] = 1;
+          }
         } else {
           // Only mark as 'silence' when we truly lack/invalid frequency even after fallback
           this._noteFracNumStrs[i] = 'silence';
@@ -1140,6 +1336,7 @@ export class RendererAdapter {
     }
 
     this.instanceCount = N;
+    this._syncTails();
 
     // Upload to GPU
     if (this.gl && this.rectInstancePosSizeBuffer && this.rectInstanceColorBuffer) {
@@ -1169,6 +1366,11 @@ export class RendererAdapter {
       if (this.rectInstanceCorruptionBuffer && this._corruptionType) {
         gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceCorruptionBuffer);
         gl.bufferData(gl.ARRAY_BUFFER, this._corruptionType, gl.DYNAMIC_DRAW);
+      }
+      // Envelope shapes follow the same order, so they are uploaded with it
+      if (this.rectInstanceEnvBuffer && this._envShape) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceEnvBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, this._envShape, gl.DYNAMIC_DRAW);
       }
 
       // Ensure all enabled per-instance attribute buffers are large enough for instanceCount draws
@@ -1244,12 +1446,13 @@ export class RendererAdapter {
     // Determine if text content or selection changed (avoid forcing text rebuild on every sync)
     const prevNum = this._lastNoteFracNumStrs;
     const prevDen = this._lastNoteFracDenStrs;
+    const prevApx = this._lastNoteLabelApprox;
     let contentChanged = false;
-    if (!prevNum || !prevDen || prevNum.length !== this._noteFracNumStrs.length || prevDen.length !== this._noteFracDenStrs.length) {
+    if (!prevNum || !prevDen || !prevApx || prevNum.length !== this._noteFracNumStrs.length || prevDen.length !== this._noteFracDenStrs.length) {
       contentChanged = true;
     } else {
       for (let i = 0; i < this._noteFracNumStrs.length; i++) {
-        if (this._noteFracNumStrs[i] !== prevNum[i] || this._noteFracDenStrs[i] !== prevDen[i]) { contentChanged = true; break; }
+        if (this._noteFracNumStrs[i] !== prevNum[i] || this._noteFracDenStrs[i] !== prevDen[i] || this._noteLabelApprox[i] !== prevApx[i]) { contentChanged = true; break; }
       }
     }
     const selChanged = (this._lastSelectedNoteId !== (selectedNoteId == null ? null : selectedNoteId));
@@ -1258,6 +1461,7 @@ export class RendererAdapter {
     // Persist current snapshot for next-diff
     this._lastNoteFracNumStrs = this._noteFracNumStrs;
     this._lastNoteFracDenStrs = this._noteFracDenStrs;
+    this._lastNoteLabelApprox = this._noteLabelApprox;
 
     // Rebuild glyph runs only when necessary; viewport changes are handled by _lastTextViewEpoch gating in _render()
     // PERFORMANCE: Selection change doesn't affect text content (fractions, "silence"), only ring/highlights
@@ -1755,6 +1959,7 @@ export class RendererAdapter {
       layout(location=5) in float a_flags;     // 1.0 = silence, 0.0 = normal
       layout(location=6) in float a_dragFlag;  // 1.0 = apply drag offset, 0.0 = no offset
       layout(location=7) in float a_corruptionType; // 0=none, 1=transitive, 2=direct
+      layout(location=8) in vec4 a_env;        // envelope (attack, decay, sustain, release); zeros = none
 
       uniform mat3 u_matrix;                   // world -> screen (page CSS px)
       uniform vec2 u_viewport;                 // (canvas CSS width, canvas CSS height)
@@ -1770,6 +1975,7 @@ export class RendererAdapter {
       out vec2 v_noteSize;                     // note size in CSS px
       out float v_isSilence;                   // flag propagated to FS
       out float v_corruptionType;              // corruption type for hatching
+      out vec4 v_env;                          // envelope shape for the FS
 
       void main() {
         // Apply drag offset only to flagged instances
@@ -1792,6 +1998,7 @@ export class RendererAdapter {
         v_noteSize = sizeAdjusted * u_scale;
         v_isSilence = a_flags;
         v_corruptionType = a_corruptionType;
+        v_env = a_env;
       }
     `;
     const rectBorderFS = `#version 300 es
@@ -1802,6 +2009,7 @@ export class RendererAdapter {
       in vec2 v_noteSize;             // CSS px
       in float v_isSilence;           // 1.0 for silence -> suppress solid border
       in float v_corruptionType;      // 0=none, 1=transitive, 2=direct
+      in vec4 v_env;                  // (attack, decay, sustain, release) shares; zeros = none
 
       uniform float u_cornerRadius;   // CSS px (scaled with zoom)
       uniform float u_borderWidth;    // CSS px (scaled with zoom)
@@ -1811,6 +2019,11 @@ export class RendererAdapter {
       uniform vec4  u_hatchColor;     // RGBA for hatching lines
 
       out vec4 outColor;
+
+      // Loudness: a gain in dB, and the band height that shows it (full at 0 dB,
+      // nothing at -48 dB). An exponential fall is a straight line on this scale.
+      float toDb(float g) { return 8.685889638 * log(max(g, 1e-4)); }
+      float dbHeight(float g) { return clamp(1.0 + toDb(g) / 48.0, 0.0, 1.0); }
 
       // Signed distance to rounded rectangle with half-size b and corner radius r.
       // Negative inside, positive outside, zero at the boundary.
@@ -1880,11 +2093,36 @@ export class RendererAdapter {
         // Composite: apply hatch color over note color in interior
         vec3 hatchedRgb = mix(v_color.rgb, u_hatchColor.rgb, hatchMask * u_hatchColor.a);
 
+        // Envelope: the gain the note sounds with, as a band about its centre line
+        // (attack ramp, decay to the sustain level, hold, release ramp). Inside the
+        // band the note has its full colour; outside it is dimmed. A note without
+        // an attack or release of its own (or the BaseNote's) has v_env = 0 and
+        // draws as before.
+        float interiorAlpha = v_color.a;
+        if (v_env.x > 0.0) {   // attack is never 0 when drawn (floor); a disabled attribute reads (0,0,0,1)
+          float x = clamp(v_uv.x, 0.0, 1.0);
+          float atk = max(v_env.x, 1e-5);
+          float dec = v_env.y;
+          float sus = v_env.z;
+          float rel = max(v_env.w, 1e-5);
+          // The curve that sounds, on the dB scale: a linear rise in gain, an
+          // exponential decay (straight in dB) to the level held to the note's end.
+          float level;
+          if (x < atk) level = dbHeight(x / atk);
+          else if (x < atk + dec) level = clamp(1.0 + mix(0.0, toDb(sus), (x - atk) / max(dec, 1e-5)) / 48.0, 0.0, 1.0);
+          else if (x < 1.0 - rel) level = dbHeight(sus);
+          else level = dbHeight(sus) * clamp((1.0 - x) / rel, 0.0, 1.0);
+          float halfBand = level * he.y;
+          float dy = abs(p.y) - halfBand;           // CSS px outside the band (negative inside)
+          float band = 1.0 - smoothstep(-0.75, 0.75, dy);
+          interiorAlpha = v_color.a * mix(0.3, 1.0, band);
+        }
+
         // Composite color and alpha:
         // - Border draws with u_borderColor on the ring (if not silence)
         // - Interior draws with hatched note color
         vec3 rgb = u_borderColor.rgb * ring + hatchedRgb * interior;
-        float a   = u_borderColor.a   * ring + v_color.a   * interior;
+        float a   = u_borderColor.a   * ring + interiorAlpha * interior;
 
         // Discard fragments with no coverage to avoid unnecessary blending
         if (a <= 0.0) discard;
@@ -1892,6 +2130,73 @@ export class RendererAdapter {
       }
     `;
     this.rectBorderProgram = this._createProgram(rectBorderVS, rectBorderFS);
+
+    // Tails (Phase I): the release that rings after a note's end, drawn past it as
+    // the note's envelope band continuing to silence. Display only: nothing picks,
+    // snaps or drags by it.
+    const tailVS = `#version 300 es
+      precision highp float;
+      layout(location=0) in vec2 a_unit;
+      layout(location=1) in vec4 a_posSize;    // (x, y, w, h) world: from the note's end, as tall as the note
+      layout(location=2) in vec4 a_color;
+      layout(location=3) in vec2 a_level;      // (gain at the note-off as a share of the peak, world units it starts under the note)
+      uniform mat3 u_matrix;
+      uniform vec2 u_viewport;
+      uniform vec2 u_offset;
+      uniform vec2 u_scale;
+      out vec4 v_color;
+      out vec2 v_uv;
+      out float v_heightCss;
+      out float v_level;
+      out float v_t;                           // 0 at the note's end, 1 at silence
+      out float v_tailPx;                      // the tail's length, CSS px
+      out float v_underPx;                     // how far it starts under the note, CSS px
+      void main() {
+        float under = a_level.y;
+        vec2 worldPos = vec2(a_posSize.x - under, a_posSize.y) + a_unit * vec2(a_posSize.z + under, a_posSize.w);
+        v_t = (a_unit.x * (a_posSize.z + under) - under) / a_posSize.z;
+        vec2 l = (u_matrix * vec3(worldPos, 1.0)).xy - u_offset;
+        gl_Position = vec4((l.x / u_viewport.x) * 2.0 - 1.0, 1.0 - (l.y / u_viewport.y) * 2.0, 0.0, 1.0);
+        v_color = a_color;
+        v_uv = a_unit;
+        v_heightCss = a_posSize.w * u_scale.y;
+        v_level = a_level.x;
+        v_tailPx = a_posSize.z * u_scale.x;
+        v_underPx = under * u_scale.x;
+      }
+    `;
+    const tailFS = `#version 300 es
+      precision highp float;
+      in vec4 v_color;
+      in vec2 v_uv;
+      in float v_heightCss;
+      in float v_level;
+      in float v_t;
+      in float v_tailPx;
+      in float v_underPx;
+      out vec4 outColor;
+      void main() {
+        // Under the note only its rounded corners' cut-outs are drawn: the note's
+        // body (translucent) must not be tinted by the tail beneath it.
+        float dxPx = v_t * v_tailPx;
+        if (dxPx < 0.0) {
+          float r = v_underPx, halfH = 0.5 * v_heightCss;
+          vec2 q = vec2(dxPx + r, abs(v_uv.y - 0.5) * v_heightCss - (halfH - r));
+          if (!(q.y > 0.0 && length(q) > r - 0.5)) discard;
+        }
+        // The release falls exponentially from the note-off level to -80 dB: a
+        // straight line in dB, drawn on the body's scale (full at 0 dB, nothing at -48).
+        float startDb = 8.685889638 * log(max(v_level, 1e-4));
+        float db = mix(startDb, -80.0, clamp(v_t, 0.0, 1.0));   // level held under the note's corner
+        float level = clamp(1.0 + db / 48.0, 0.0, 1.0);
+        float dy = abs(v_uv.y - 0.5) * v_heightCss - level * 0.5 * v_heightCss;
+        float band = 1.0 - smoothstep(-0.75, 0.75, dy);
+        float a = v_color.a * 0.45 * band;
+        if (a <= 0.004) discard;
+        outColor = vec4(v_color.rgb, a);
+      }
+    `;
+    this.tailProgram = this._createProgram(tailVS, tailFS);
     // Cache uniform locations for rectBorderProgram to avoid per-frame getUniformLocation calls
     try {
       if (!this._uniforms) this._uniforms = {};
@@ -2524,6 +2829,42 @@ export class RendererAdapter {
     gl.vertexAttribPointer(7, 1, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(7, 1); // per-instance
 
+    // Envelope shape (loc 8) - (attack, decay, sustain level, release) as shares of
+    // the note; all zeros = no envelope drawn
+    this.rectInstanceEnvBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceEnvBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(8);
+    gl.vertexAttribPointer(8, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(8, 1); // per-instance
+
+    // ========== Tails (Phase I) ==========
+    // Their own VAO and instance buffers (filled by _syncTails), on the rects' unit quad.
+    this.tailVAO = gl.createVertexArray();
+    gl.bindVertexArray(this.tailVAO);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectUnitBuffer);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    this.tailPosSizeBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailPosSizeBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(1, 1);
+    this.tailColorBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailColorBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(2, 1);
+    this.tailLevelBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailLevelBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 2 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(3, 1);
+    gl.bindVertexArray(this.rectVAO); // back to the rects for the setup below
+
     // Dedicated buffer for single-instance draws (avoid corrupting shared per-instance buffer)
     this._singlePosSizeBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
@@ -2708,6 +3049,11 @@ export class RendererAdapter {
     // Update canvas offset for proper coordinate transformation
     this.canvasOffset = { x: rectCss.left, y: rectCss.top };
     
+
+    // Tails first, under the note bodies: a note that follows paints over the tail
+    // of the one before. Hidden while a drag previews new positions (they return
+    // when it is committed and the notes are synced).
+    if (this.tailCount > 0 && this.tailProgram && this.tailVAO && !this._dragActive) this._drawTails(vpW, vpH);
 
     // Draw notes as simple rectangles with flat colors (clipped to rounded rect)
     if (this.instanceCount > 0) {
@@ -3155,18 +3501,8 @@ export class RendererAdapter {
     const startTimeString = note.variables?.startTimeString;
     let parentId = null;
     if (startTimeString) {
-      // Legacy
-      const m = /getNoteById\(\s*(\d+)\s*\)/.exec(startTimeString);
-      if (m) parentId = parseInt(m[1], 10);
-      // DSL
-      if (parentId == null) {
-        const dm = /\[(\d+)\]\./.exec(startTimeString);
-        if (dm) parentId = parseInt(dm[1], 10);
-        else {
-          const dh = /\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/.exec(startTimeString);
-          if (dh) parentId = parseInt(dh[1], 10);
-        }
-      }
+      const dm = /\[(\d+)\]\./.exec(startTimeString);
+      if (dm) parentId = parseInt(dm[1], 10);
     }
     if (parentId == null && note.parentId != null) parentId = note.parentId;
     if (parentId == null) return module.baseNote;
@@ -3254,28 +3590,11 @@ export class RendererAdapter {
     return this._parseAnyColorUncached(col);
   }
 
+  // Any CSS colour a note can be given (src/utils/css-color.js). It used to read only
+  // rgba(), hsl()/hsla() and 3- or 6-digit hex, so rgb(255,255,255) or a colour name
+  // fell through to the id-derived colour: a different hue on every note.
   _parseAnyColorUncached(col) {
-    if (!col) return null;
-    if (typeof col === 'string') {
-      const s = col.trim().toLowerCase();
-      if (s.startsWith('rgba')) {
-        const m = s.match(/rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)/);
-        if (m) return [ Number(m[1])/255, Number(m[2])/255, Number(m[3])/255, (m[4]!=null)?Number(m[4]):1 ];
-      } else if (s.startsWith('hsla') || s.startsWith('hsl')) {
-        const m = s.match(/hsla?\(([^,]+),\s*([^,]+)%,\s*([^,]+)%(?:,\s*([\d.]+))?\)/);
-        if (m) return this._hslaToRgba(Number(m[1]), Number(m[2]), Number(m[3]), (m[4]!=null)?Number(m[4]):1);
-      } else if (s.startsWith('#')) {
-        let hex = s.replace('#','');
-        if (hex.length === 3) hex = hex.split('').map(ch => ch+ch).join('');
-        if (hex.length === 6) {
-          const r = parseInt(hex.slice(0,2),16)/255;
-          const g = parseInt(hex.slice(2,4),16)/255;
-          const b = parseInt(hex.slice(4,6),16)/255;
-          return [r,g,b,1];
-        }
-      }
-    }
-    return null;
+    return parseCssColor(col);
   }
 
   _hslaToRgba(h, s, l, a) {
@@ -4671,17 +4990,22 @@ export class RendererAdapter {
       catch { return false; }
     };
 
-    // Measure notes: a startTime and nothing else.
+    // Measure bars: notes flagged `measure` (a start and a duration, drawn as bar lines).
     proto._collectMeasureNotes = function (module) {
       const out = [];
       try {
         for (const id in module.notes) {
           const n = module.notes[id];
-          if (!n) continue;
-          if (hasVar(n, 'startTime') && !hasVar(n, 'duration') && !hasVar(n, 'frequency')) out.push(n);
+          if (n && isMeasureNote(n)) out.push(n);
         }
       } catch {}
       return out;
+    };
+
+    // A bar's length is its own duration, in seconds (0 when it has none).
+    const barLengthSec = (bar) => {
+      try { return toNumber(bar ? bar.getVariable('duration') : null, 0) || 0; }
+      catch { return 0; }
     };
 
     proto._computeModuleEndTime = function (module, measureNotes) {
@@ -4701,8 +5025,9 @@ export class RendererAdapter {
           if (lastMeasure) {
             const st = lastMeasure.getVariable('startTime');
             if (st) {
-              const ml = module.findMeasureLength(lastMeasure);
-              measureEnd = toNumber(st.add(ml), 0);
+              // The last bar ends at its start plus its own duration (exact add, one conversion)
+              const ml = lastMeasure.getVariable('duration');
+              measureEnd = toNumber(ml ? st.add(ml) : st, 0);
             }
           }
         }
@@ -4718,7 +5043,7 @@ export class RendererAdapter {
         try {
           for (const id in module.notes) {
             const n = module.notes[id];
-            if (!n) continue;
+            if (!n || Number(id) === 0) continue;   // the BaseNote's duration is the time unit, not a note
             if (hasVar(n, 'startTime') && hasVar(n, 'duration') && hasVar(n, 'frequency')) {
               try {
                 const s = toNumber(n.getVariable('startTime'), 0);
@@ -4830,19 +5155,16 @@ export class RendererAdapter {
       try {
         const triTimes = [];
         const triIds = [];
-        for (const id in module.notes) {
-          const n = module.notes[id];
-          if (!n) continue;
-          // Measure notes: have startTime but no duration/frequency
-          if (n.variables?.startTime && !n.variables?.duration && !n.variables?.frequency) {
-            try {
-              const st = n.getVariable('startTime');
-              if (st != null) {
-                triTimes.push(toNumber(st, 0));
-                triIds.push(Number(id));
-              }
-            } catch {}
-          }
+        // One triangle per measure bar (the list collected above)
+        for (let i = 0; i < measureNotes.length; i++) {
+          const n = measureNotes[i];
+          try {
+            const st = n.getVariable('startTime');
+            if (st != null) {
+              triTimes.push(toNumber(st, 0));
+              triIds.push(Number(n.id));
+            }
+          } catch {}
         }
         // Sort by time and build next arrays
         const zipped = triTimes.map((t, i) => ({ t, id: triIds[i] })).sort((a, b) => a.t - b.t);
@@ -4866,12 +5188,7 @@ export class RendererAdapter {
           if (nextTimes && nextIds && nextTimes.length > 0) {
             const lastIdx = nextTimes.length - 1;
             const lastId = Number(nextIds[lastIdx]);
-            let mlSec = 0;
-            try {
-              const lastNote = module.getNoteById(lastId);
-              const mlVal = module.findMeasureLength(lastNote);
-              mlSec = toNumber(mlVal, 0) || 0;
-            } catch {}
+            const mlSec = barLengthSec(module.getNoteById(lastId));
             this._lastMeasureMeta = {
               id: lastId,
               baseStartSec: Number(nextTimes[lastIdx]) || 0,
@@ -5055,7 +5372,7 @@ export class RendererAdapter {
                     ml = this._lastMeasureMeta.lengthSec;
                   } else {
                     const lastNote = this._moduleRef.getNoteById(Number(lastId));
-                    const mlVal = this._moduleRef.findMeasureLength(lastNote);
+                    const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
                     ml = toNumber(mlVal, 0) || 0;
                   }
                   endFromMeasures = Math.max(0, lastStart + ml);
@@ -5082,7 +5399,7 @@ export class RendererAdapter {
                   ml = this._lastMeasureMeta.lengthSec;
                 } else {
                   const lastNote = this._moduleRef.getNoteById(Number(lastId));
-                  const mlVal = this._moduleRef.findMeasureLength(lastNote);
+                  const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
                   ml = toNumber(mlVal, 0) || 0;
                 }
                 endFromMeasures = Math.max(0, lastStart + ml);
@@ -5239,7 +5556,7 @@ const e = startSec + addDx + durSec;
             ml = this._lastMeasureMeta.lengthSec;
           } else {
             const lastNote = this._moduleRef.getNoteById(Number(lastId));
-            const mlVal = this._moduleRef.findMeasureLength(lastNote);
+            const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
             ml = toNumber(mlVal, 0) || 0;
           }
           endFromMeasures = Math.max(0, lastStart + ml);
@@ -5264,7 +5581,7 @@ const e = startSec + addDx + durSec;
           ml = this._lastMeasureMeta.lengthSec;
         } else {
           const lastNote = this._moduleRef.getNoteById(Number(lastId));
-          const mlVal = this._moduleRef.findMeasureLength(lastNote);
+          const mlVal = lastNote ? lastNote.getVariable('duration') : null; // the bar's own length
           ml = toNumber(mlVal, 0) || 0;
         }
         endFromMeasures = Math.max(0, lastStart + ml);
@@ -6109,6 +6426,8 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       if (this.drawOctaveGuides) {
         try { this._renderOctaveGuides(); } catch {}
       }
+      // 4b) Reference lines: notes with a frequency and no duration
+      try { this._renderReferenceLines(); } catch {}
 
       // Restore depth state for subsequent passes (note overlays/text flush)
       gl.enable(gl.DEPTH_TEST);
@@ -7006,8 +7325,32 @@ try {
           const numStr = this._noteFracNumStrs ? this._noteFracNumStrs[i] : null;
           const denStr = this._noteFracDenStrs ? this._noteFracDenStrs[i] : null;
           const isSilence = (numStr === 'silence');
- 
-          if (isSilence) {
+          const isLine = (denStr === LINE_LABEL);
+
+          if (isLine) {
+            // A tempered note: its exact power on one line (2^(7/12)), after the arrows,
+            // squeezed horizontally like the silence text when the note is short
+            const fontPx = this.useGlyphCache ? Math.max(5, Math.round(hCss * 0.26)) : this._clampFontPx(Math.max(5, Math.round(hCss * 0.26)));
+            const text = String(numStr);
+            const sLeft = contentLeft;
+            const sWidth = Math.max(1, contentRight - sLeft);
+            const runW = this._measureGlyphRunWidth(text, fontPx);
+            const runH = this._getRunHeight(text, fontPx);
+            const sx = runW > 0 ? Math.min(1.0, sWidth / runW) : 1.0;
+            const ny = Math.round((top + hCss * 0.5 - runH * 0.5) * 2.0) / 2.0;
+            this._deferredGlyphRuns.push({
+              text, noteId: id, x: sLeft, y: ny, fontPx, color: this._noteTextRgba(), layerZ, scaleX: sx,
+              scLeft: scLeftCss, scTop: scTopCss, scW: scWidthCss, scH: scHeightCss,
+              rrCx, rrCy, rrHx, rrHy, rrR
+            });
+            // No fraction bar for a one-line label
+            if (!_dividerRegions) _dividerRegions = new Float32Array(this.instanceCount * 4);
+            const oDiv = i * 4;
+            _dividerRegions[oDiv + 0] = 1.0;
+            _dividerRegions[oDiv + 1] = 0.0;
+            _dividerRegions[oDiv + 2] = 0.0;
+            _dividerRegions[oDiv + 3] = 0.0;
+          } else if (isSilence) {
             // Silence: draw only "silence" text, left-aligned; HORIZONTAL scaling only (no vertical scaling).
             // Use full left content area (no octave arrows for silences) while keeping ID placement unchanged.
             const fontPx = this.useGlyphCache ? Math.max(5, Math.round(hCss * 0.26)) : this._clampFontPx(Math.max(5, Math.round(hCss * 0.26)));
@@ -7061,8 +7404,9 @@ try {
               : this._clampFontPx(Math.max(5, Math.round(hCss * (this._config?.overlays?.fractionFontFactor ?? 0.26)))); // slightly larger fraction numerals
             const gapPx  = Math.max(1, Math.round(fontPx * 0.08));
 
-            // Check if note is corrupted (direct or transitive) to show ≈ prefix
-            const isCorrupted = this._corruptionType && this._corruptionType[i] > 0;
+            // ≈ before the fraction: the value is approximate, or the exact fraction is too long
+            // to show and this one is rounded (a tempered note has a one-line label instead)
+            const isCorrupted = !!(this._noteLabelApprox && this._noteLabelApprox[i] === 1);
             const approxSymbol = '≈';
             const approxW = isCorrupted ? this._measureGlyphRunWidth(approxSymbol, fontPx) : 0;
             const approxGap = isCorrupted ? Math.max(1, Math.round(fontPx * 0.1)) : 0;
@@ -9168,6 +9512,11 @@ try {
             // Already includes { type:'note', id }
             list.push(...nHits);
           } catch {}
+          // Reference lines last: they cross everything, so anything else wins
+          try {
+            const rHits = this.pickReferenceLinesAt(clientX, clientY);
+            if (rHits && rHits.length) list.push(...rHits);
+          } catch {}
           return list;
         } catch { return []; }
       };
@@ -9935,7 +10284,7 @@ try {
               const isMeasureNoteId = (id) => {
                 try {
                   const n = mref?.getNoteById?.(Number(id));
-                  return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                  return isMeasureNote(n);
                 } catch { return false; }
               };
 
@@ -9987,7 +10336,7 @@ try {
                 if (st.type === 'move' && Number(st.dxSec) > 0) {
                   try {
                     const n = mref?.getNoteById?.(Number(anchorId));
-                    const isMeasureAnchor = !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                    const isMeasureAnchor = isMeasureNote(n);
                     if (isMeasureAnchor) usePros = false;
                   } catch {}
                 }
@@ -10056,43 +10405,20 @@ try {
 
                     out.parsed = true;
 
-                    // Legacy base ref
-                    const baseRefRe = /module\.baseNote\s*\.\s*getVariable\s*\(\s*['"](startTime|duration)['"]\s*\)/;
-                    out.hasBase = baseRefRe.test(s);
-                    // DSL base ref
-                    if (!out.hasBase) {
-                      out.hasBase = /\bbase\./.test(s) || /\b(?:beat|tempo|measure)\s*\(\s*base\s*\)/.test(s);
-                    }
+                    out.hasBase = /\bbase\./.test(s);
 
                     const seen = new Set();
-                    // Legacy note refs
-                    const re = /module\.getNoteById\(\s*(\d+)\s*\)\s*\.\s*getVariable\s*\(\s*['"](startTime|duration)['"]\s*\)/g;
-                    let m;
-                    while ((m = re.exec(s))) {
-                      const id = Number(m[1]);
-                      if (!isFinite(id) || id === 0) continue;
-                      if (id === Number(anchorId) || seen.has(id)) continue;
-                      seen.add(id);
-                      try {
-                        const ref = mod.getNoteById(id);
-                        const isMeasure = !!(ref && ref.variables && ref.variables.startTime && !ref.variables.duration && !ref.variables.frequency);
-                        if (isMeasure) out.measureIds.push(id);
-                        else out.noteIds.push(id);
-                      } catch {
-                        out.noteIds.push(id);
-                      }
-                    }
-                    // DSL note refs: [N].t, [N].d, beat([N]), measure([N])
-                    const dslRe = /\[(\d+)\]\.|\b(?:beat|tempo|measure)\s*\(\s*\[(\d+)\]\s*\)/g;
+                    // Note refs: [N].t, [N].d
+                    const dslRe = /\[(\d+)\]\./g;
                     let dm;
                     while ((dm = dslRe.exec(s))) {
-                      const id = Number(dm[1] ?? dm[2]);
+                      const id = Number(dm[1]);
                       if (!isFinite(id) || id === 0) continue;
                       if (id === Number(anchorId) || seen.has(id)) continue;
                       seen.add(id);
                       try {
                         const ref = mod.getNoteById(id);
-                        const isMeasure = !!(ref && ref.variables && ref.variables.startTime && !ref.variables.duration && !ref.variables.frequency);
+                        const isMeasure = isMeasureNote(ref);
                         if (isMeasure) out.measureIds.push(id);
                         else out.noteIds.push(id);
                       } catch {
@@ -10118,7 +10444,7 @@ try {
                   const isMeasureNoteId = (id) => {
                     try {
                       const n = mref.getNoteById(Number(id));
-                      return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                      return isMeasureNote(n);
                     } catch { return false; }
                   };
                   const d = mref.getDirectDependencies(Number(anchorId)) || [];
@@ -10228,7 +10554,7 @@ try {
                 const isMeasureNoteIdRdeps = (id) => {
                   try {
                     const n = mref.getNoteById(Number(id));
-                    return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                    return isMeasureNote(n);
                   } catch { return false; }
                 };
 
@@ -10263,7 +10589,7 @@ try {
                 const isMeasureNoteIdFallback = (id) => {
                   try {
                     const n = mref.getNoteById(Number(id));
-                    return !!(n && n.variables && n.variables.startTime && !n.variables.duration && !n.variables.frequency);
+                    return isMeasureNote(n);
                   } catch { return false; }
                 };
                 const rRaw = mref.getDependentNotes(Number(anchorId)) || [];
@@ -10933,6 +11259,111 @@ try {
       _prevRenderM.call(this);
       if (!wasDirty) return;
       try { this._renderMarquee(); } catch {}
+    };
+  } catch {}
+})();
+
+// Reference lines: notes that only relate (a frequency, no duration). A tonic, a key
+// or a chord root is a dashed line across the whole workspace at its pitch; with a
+// start it is a key change, the same line from that start on. They never sound. Drawn
+// with the octave guides' per-line dashed program (one draw per line; it re-uploads
+// its quad every draw, so sharing its buffer leaves nothing stale), longer dashes.
+(() => {
+  try {
+    if (typeof RendererAdapter === 'undefined') return;
+    const proto = RendererAdapter.prototype;
+
+    proto._renderReferenceLines = function () {
+      const gl = this.gl;
+      const lines = this._refLines;
+      this._refLineCss = [];
+      if (!gl || !this.canvas || !lines || !lines.length) return;
+      if (!this.octaveLineProgram || !this.octaveLineVAO || !this.octaveLinePosSizeBuffer) return;
+
+      const rect = this.canvas.getBoundingClientRect();
+      const vpW = Math.max(1, rect.width), vpH = Math.max(1, rect.height);
+      const m = this.matrix;
+      const ox = this.canvasOffset?.x ?? 0, oy = this.canvasOffset?.y ?? 0;
+      const sx = this._cfgSX() * (this.currentXScaleFactor || 1);
+      const ac = this._accentRgba();
+      const sel = this._lastSelectedNoteId != null ? Number(this._lastSelectedNoteId) : null;
+
+      const P = this.octaveLineProgram;
+      const uVP = gl.getUniformLocation(P, 'u_viewport');
+      const uDash = gl.getUniformLocation(P, 'u_dashLen');
+      const uGap = gl.getUniformLocation(P, 'u_gapLen');
+      const uCol = gl.getUniformLocation(P, 'u_color');
+      const uHole = gl.getUniformLocation(P, 'u_holeRect');
+      const T = this.textProgram;
+      const uVPt = T ? gl.getUniformLocation(T, 'u_viewport') : null;
+      const uTint = T ? gl.getUniformLocation(T, 'u_tint') : null;
+      const uTex = T ? gl.getUniformLocation(T, 'u_tex') : null;
+      gl.disable(gl.SCISSOR_TEST);
+
+      for (const L of lines) {
+        const yw = this._noteCenterY(L.freq);
+        const xw = L.startSec != null ? L.startSec * sx : 0;
+        const lyRaw = m[1] * xw + m[4] * yw + m[7] - oy;
+        const y = Math.floor(lyRaw) + 0.5;
+        if (y < -4 || y > vpH + 4) continue;
+        const x0 = L.startSec != null ? Math.max(-1, m[0] * xw + m[3] * yw + m[6] - ox) : -1;
+        if (x0 > vpW) continue;
+        const selected = sel === L.id;
+        const entry = this._createTextTexture(`[${L.id}]`);
+        // A key change's label sits just before its start, where it reads as the
+        // marker for what follows (after it, the first note in the new key covers it).
+        let lx = 8;
+        if (L.startSec != null) {
+          const w = entry ? entry.wCss : 0;
+          lx = (x0 - w - 6 >= 8) ? (x0 - w - 6) : Math.max(8, x0 + 6);
+        }
+
+        gl.useProgram(P);
+        if (uVP) gl.uniform2f(uVP, vpW, vpH);
+        if (uDash) gl.uniform1f(uDash, 8.0);   // longer than the octave guides' 3/3
+        if (uGap) gl.uniform1f(uGap, 4.0);
+        if (uCol) gl.uniform4f(uCol, ac[0], ac[1], ac[2], selected ? 1.0 : 0.7);
+        if (uHole) {
+          if (entry) gl.uniform4f(uHole, lx - 3, y - entry.hCss * 0.5 - 1, entry.wCss + 6, entry.hCss + 2);
+          else gl.uniform4f(uHole, 0, 0, 0, 0);
+        }
+        gl.bindVertexArray(this.octaveLineVAO);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.octaveLinePosSizeBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([x0, selected ? y - 0.5 : y, vpW + 2 - x0, selected ? 2 : 1]), gl.DYNAMIC_DRAW);
+        gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+
+        if (entry && entry.tex && T && this.textVAO && this.textPosSizeBuffer) {
+          gl.useProgram(T);
+          if (uVPt) gl.uniform2f(uVPt, vpW, vpH);
+          if (uTex) gl.uniform1i(uTex, 0);
+          if (uTint) gl.uniform4f(uTint, 1, 1, 1, selected ? 1.0 : 0.9);
+          gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          gl.activeTexture(gl.TEXTURE0);
+          gl.bindTexture(gl.TEXTURE_2D, entry.tex);
+          gl.bindVertexArray(this.textVAO);
+          gl.bindBuffer(gl.ARRAY_BUFFER, this.textPosSizeBuffer);
+          gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([lx, y - entry.hCss * 0.5, entry.wCss, entry.hCss]), gl.DYNAMIC_DRAW);
+          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, 1);
+          gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          gl.bindTexture(gl.TEXTURE_2D, null);
+        }
+        this._refLineCss.push({ id: L.id, y, x0 });
+      }
+      gl.bindVertexArray(null);
+      gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    };
+
+    // Within 4 CSS px of a drawn line (and, for a key change, at or after its start).
+    proto.pickReferenceLinesAt = function (clientX, clientY) {
+      const css = this._refLineCss;
+      if (!css || !css.length) return [];
+      const px = clientX - (this.canvasOffset?.x ?? 0);
+      const py = clientY - (this.canvasOffset?.y ?? 0);
+      const hits = [];
+      for (const r of css) {
+        if (px >= r.x0 - 2 && Math.abs(py - r.y) <= 4) hits.push({ type: 'reference', id: r.id });
+      }
+      return hits;
     };
   } catch {}
 })();

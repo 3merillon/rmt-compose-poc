@@ -83,7 +83,9 @@ async function applyScene(page, setup) {
     }
 
     if (s.selectHub) {
-      const hub = P.pickHubNoteId();
+      // HUB_ID pins the selected note: the hub pick can change between builds when
+      // dependency counts tie (v2: every note relates to base.d, so the BaseNote wins).
+      const hub = window.__HUB_ID != null ? { id: window.__HUB_ID } : P.pickHubNoteId();
       window.__rmtSelectedForShot = hub.id;
       r.sync({
         evaluatedNotes: P.getEvaluatedNotesRef(),
@@ -130,6 +132,7 @@ async function shootModule(browser, moduleName, dir) {
   // attributed to culling vs. the other renderer changes.
   if (process.env.CULL_OFF) await page.addInitScript(() => { window.__CULL_OFF = true; });
   if (process.env.METRICS_MEMO_OFF) await page.addInitScript(() => { window.__METRICS_MEMO_OFF = true; });
+  if (process.env.HUB_ID) await page.addInitScript((id) => { window.__HUB_ID = id; }, Number(process.env.HUB_ID));
   if (process.env.ATLAS_CACHE_OFF) await page.addInitScript(() => { window.__ATLAS_CACHE_OFF = true; });
 
   if (moduleName !== 'defaultModule') {
@@ -194,6 +197,7 @@ const diffDir = join(OUT, 'diff');
 for (const d of [OUT, baseDir, curDir, diffDir]) mkdirSync(d, { recursive: true });
 
 const browser = await chromium.launch({
+  channel: process.env.PW_CHANNEL || undefined, // PW_CHANNEL=msedge where bundled Chromium is absent
   headless: true,
   args: ['--use-angle=default', '--enable-gpu', '--ignore-gpu-blocklist']
 });

@@ -44,6 +44,7 @@ Start with [Getting Started](/getting-started/) if you have not opened the app y
 - **[Module Library](/user-guide/modules/module-library)** — what ships in the library and where it lives
 - **[Loading Modules](/user-guide/modules/loading-modules)** — import from the library or from a file
 - **[Saving Modules](/user-guide/modules/saving-modules)** — export your work
+- **[Exporting MIDI](/user-guide/modules/exporting-midi)** — a MIDI file that keeps the tuning
 - **[Creating Modules](/user-guide/modules/creating-modules)** — build one from scratch
 - **[Module Format](/user-guide/modules/module-format)** — the JSON schema
 
@@ -51,7 +52,7 @@ Start with [Getting Started](/getting-started/) if you have not opened the app y
 
 - **[Transport Controls](/user-guide/playback/transport)** — play, pause, stop, loop
 - **[Playhead Tracking](/user-guide/playback/tracking)** — follow the playhead during playback
-- **[Instruments](/user-guide/playback/instruments)** — the nine built-in sounds
+- **[Instruments](/user-guide/playback/instruments)** — the eleven built-in sounds
 - **[Audio and Effects](/user-guide/playback/audio)** — reverb, stereo width, the limiter
 
 ## Quick reference
@@ -64,7 +65,7 @@ Expressions are written in the DSL. `base` is the BaseNote; `[N]` is the note wi
 base.f                  # the BaseNote's frequency
 [3].f * (3/2)           # a perfect fifth above note 3
 [3].t + [3].d           # starts exactly when note 3 ends
-beat(base) * 2          # two beats long
+base.d * 2              # two time units long
 ```
 
 Property shortnames:
@@ -74,9 +75,11 @@ Property shortnames:
 | frequency | `f`, `freq`, `frequency` |
 | startTime | `t`, `s`, `start`, `startTime` |
 | duration | `d`, `dur`, `duration` |
-| tempo | `tempo` |
-| beatsPerMeasure | `bpm`, `beatsPerMeasure` |
-| measureLength | `ml`, `measureLength` |
+| amplitude | `a`, `amp`, `amplitude` |
+| attack | `atk`, `attack` |
+| release | `rel`, `release` |
+
+The first three are the notation; the last three say how a note is played. `base.d`, the BaseNote's duration, is the **time unit**: there is no tempo variable, and the language has no functions.
 
 ### Common intervals
 
@@ -103,17 +106,6 @@ Multiply a frequency by a ratio.
 | Bohlen-Pierce | `[1].f * 3 ^ (1/13)` |
 
 These are the expressions the shipped **Scale Systems** modules actually use.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-Older modules store expressions as method chains. They still load and still evaluate.
-
-```javascript
-module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))
-module.getNoteById(3).getVariable('startTime').add(module.getNoteById(3).getVariable('duration'))
-```
-</details>
 
 ### Keyboard and gestures
 

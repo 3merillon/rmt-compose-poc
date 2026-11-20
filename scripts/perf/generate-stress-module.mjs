@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const outDir = resolve(process.argv[2] || join(here, '..', '..', 'public', 'modules', 'perf'));
 
-const BASE = { frequency: '440', startTime: '0', tempo: '60', beatsPerMeasure: '4' };
+const BASE = { frequency: '440', startTime: '0', duration: '1' };
 
 // Product of one full cycle is exactly 1 -> bounded fraction magnitudes at any depth.
 const CYCLE = ['(3/2)', '(4/3)', '(1/2)'];
@@ -46,8 +46,8 @@ function chain(n) {
   for (let k = 1; k <= n; k++) {
     notes.push({
       id: k,
-      startTime: k === 1 ? 'base.t' : `[${k - 1}].t + beat(base) / 4`,
-      duration: 'beat(base)',
+      startTime: k === 1 ? 'base.t' : `[${k - 1}].t + base.d / 4`,
+      duration: 'base.d',
       frequency: k === 1 ? 'base.f' : `${CYCLE[(k - 2) % CYCLE.length]} * [${k - 1}].f`,
       color: color(k)
     });
@@ -62,8 +62,8 @@ function commaChain(n) {
   for (let k = 1; k <= n; k++) {
     notes.push({
       id: k,
-      startTime: k === 1 ? 'base.t' : `[${k - 1}].t + beat(base) / 4`,
-      duration: 'beat(base)',
+      startTime: k === 1 ? 'base.t' : `[${k - 1}].t + base.d / 4`,
+      duration: 'base.d',
       frequency: k === 1 ? 'base.f' : `(81/80) * [${k - 1}].f`,
       color: color(k)
     });
@@ -73,14 +73,14 @@ function commaChain(n) {
 
 function fan(n) {
   const notes = [{
-    id: 1, startTime: 'base.t', duration: 'beat(base)', frequency: 'base.f', color: color(1)
+    id: 1, startTime: 'base.t', duration: 'base.d', frequency: 'base.f', color: color(1)
   }];
   for (let k = 2; k <= n; k++) {
     const step = Math.floor((k - 2) / JI.length);
     notes.push({
       id: k,
-      startTime: `base.t + beat(base) * ${step}`,
-      duration: 'beat(base)',
+      startTime: `base.t + base.d * ${step}`,
+      duration: 'base.d',
       frequency: `${JI[(k - 2) % JI.length]} * [1].f`,
       color: color(k)
     });
@@ -96,17 +96,17 @@ function lattice(chains, perChain) {
       const myId = id(c, i);
       let startTime, frequency;
       if (i === 0) {
-        startTime = c === 0 ? 'base.t' : `[${id(c - 1, 0)}].t + beat(base) / 2`;
+        startTime = c === 0 ? 'base.t' : `[${id(c - 1, 0)}].t + base.d / 2`;
         frequency = `${JI[c % JI.length]} * base.f`;
       } else if (i % 10 === 0 && c > 0) {
         // Cross-link into the neighboring chain: intertwined dependencies.
-        startTime = `[${id(c - 1, i)}].t + beat(base) / 2`;
+        startTime = `[${id(c - 1, i)}].t + base.d / 2`;
         frequency = `${CYCLE[(i - 1) % CYCLE.length]} * [${id(c, i - 1)}].f`;
       } else {
-        startTime = `[${id(c, i - 1)}].t + beat(base) / 4`;
+        startTime = `[${id(c, i - 1)}].t + base.d / 4`;
         frequency = `${CYCLE[(i - 1) % CYCLE.length]} * [${id(c, i - 1)}].f`;
       }
-      notes.push({ id: myId, startTime, duration: 'beat(base)', frequency, color: color(myId) });
+      notes.push({ id: myId, startTime, duration: 'base.d', frequency, color: color(myId) });
     }
   }
   return { baseNote: { ...BASE }, notes };
@@ -121,8 +121,8 @@ function chordsDense(chordCount) {
     const rootId = j * 4 + 1;
     notes.push({
       id: rootId,
-      startTime: j === 0 ? 'base.t' : `[${(j - 1) * 4 + 1}].t + beat(base)`,
-      duration: 'beat(base)',
+      startTime: j === 0 ? 'base.t' : `[${(j - 1) * 4 + 1}].t + base.d`,
+      duration: 'base.d',
       frequency: j === 0 ? 'base.f' : `${CYCLE[(j - 1) % CYCLE.length]} * [${(j - 1) * 4 + 1}].f`,
       color: color(rootId, 40)
     });
@@ -130,7 +130,7 @@ function chordsDense(chordCount) {
       notes.push({
         id: rootId + m + 1,
         startTime: `[${rootId}].t`,
-        duration: 'beat(base)',
+        duration: 'base.d',
         frequency: `${r} * [${rootId}].f`,
         color: color(rootId + m + 1)
       });
@@ -160,9 +160,9 @@ function voicesShape(n, perChain = 200, voices = 8) {
       notes.push({
         id: myId,
         startTime: i === 0
-          ? `base.t + beat(base) * ${startBeats}`
-          : `[${myId - 1}].t + beat(base) / 4`,
-        duration: 'beat(base) / 2',
+          ? `base.t + base.d * ${startBeats}`
+          : `[${myId - 1}].t + base.d / 4`,
+        duration: 'base.d / 2',
         frequency: i === 0
           ? `${JI[voice % JI.length]} * ${1 << (voice % 4)} * base.f`
           : `${CYCLE[(i - 1) % CYCLE.length]} * [${myId - 1}].f`,
@@ -180,14 +180,14 @@ function voicesShape(n, perChain = 200, voices = 8) {
 // the anchor, so the anchor's dependents really do have to follow it.
 function hub(n) {
   const notes = [{
-    id: 1, startTime: 'base.t', duration: 'beat(base)', frequency: 'base.f', color: color(1)
+    id: 1, startTime: 'base.t', duration: 'base.d', frequency: 'base.f', color: color(1)
   }];
   for (let k = 2; k <= n; k++) {
     const slot = k - 2;
     notes.push({
       id: k,
-      startTime: `[1].t + beat(base) * ${(slot % 400) + 1} / 4`,
-      duration: 'beat(base) / 2',
+      startTime: `[1].t + base.d * ${(slot % 400) + 1} / 4`,
+      duration: 'base.d / 2',
       frequency: `${JI[slot % JI.length]} * ${1 << (Math.floor(slot / 400) % 4)} * [1].f`,
       color: color(k)
     });

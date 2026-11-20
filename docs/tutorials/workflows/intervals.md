@@ -14,26 +14,15 @@ Two notes, sounding together, one of which you retune.
 
 | Note | frequency | startTime | duration |
 |---|---|---|---|
-| 1 (reference) | `base.f` | `base.t` | `beat(base) * 4` |
+| 1 (reference) | `base.f` | `base.t` | `base.d * 4` |
 | 2 (the interval) | `[1].f * (3/2)` | `[1].t` | `[1].d` |
 
-Create both from the **ADD NOTE / SILENCE** section of a widget. Note 1 comes from the BaseNote's
+Create both from the **ADD NOTE / SILENCE / REFERENCE** section of a widget. Note 1 comes from the BaseNote's
 widget — it has no **At Start** / **At End** toggle, and its button reads **Create**. Note 2 comes
 from note 1's widget: pick **Note**, pick **At Start** so it stacks, then **Create Note**. To try a
 different interval, edit note 2's `frequency` in its `Raw:` field and press **Save**.
 
 Note 2 is defined against note 1, so it follows note 1 anywhere. Note 1 is your movable reference.
-
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-// Note 2: a perfect fifth above note 1
-frequency: module.getNoteById(1).getVariable('frequency').mul(new Fraction(3, 2))
-startTime: module.getNoteById(1).getVariable('startTime')
-duration:  module.getNoteById(1).getVariable('duration')
-```
-</details>
 
 ### Before you listen: turn reverb off
 
@@ -171,8 +160,8 @@ Add a third note and compare the same interval two ways.
 Play 1+2: smooth, beatless. Play 1+3: a slow shimmer. The gap is 13.7 cents, and on a sustained tone
 it is unmistakable.
 
-Note 3 will be **crosshatched** and its value shown with a `≈` prefix — that is the app telling you
-`2^(4/12)` is irrational and has been approximated. See
+Note 3 will be **crosshatched** — that is the app telling you
+`2^(4/12)` is irrational (tempered, not a pure ratio). Its value is kept exact: the widget shows `2^(1/3)` with its value. See
 [Understanding SymbolicPower](/tutorials/advanced/symbolic-power).
 
 ## Interval inversion

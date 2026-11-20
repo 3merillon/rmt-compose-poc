@@ -12,7 +12,7 @@ job through to a result you keep.
 
 ### [Building a Module Library](/tutorials/workflows/module-library)
 
-How the shipped library is actually organised (six sections, 79 modules), how to get your own work
+How the shipped library is actually organised (six sections, 81 modules), how to get your own work
 into it — mainly by selecting notes and pressing **Copy to Modules** — and how to back the whole
 layout up.
 
@@ -40,7 +40,7 @@ If you last used RMT Compose a while ago, these three will save you the most tim
 the **Custom** section — rooted at its earliest note, dependency tree intact. This replaces the old
 Save Module → rename → upload dance entirely.
 
-**The library search.** The magnifier at the left of the library bar's toolbar filters all 79
+**The library search.** The magnifier at the left of the library bar's toolbar filters all 81
 modules by name, ratio, cents, family or tag. Naming conventions are no longer how you find things.
 
 **Undo/Redo everywhere.** `Ctrl+Z` / `Ctrl+Y`, buttons in the "+" menu, and buttons in the library

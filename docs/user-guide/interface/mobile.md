@@ -23,7 +23,7 @@ Touch is a first-class path, not a retrofit. Every target on a note — the body
 | **Drag a note's body** | Move it in time. |
 | **Drag a note's right-hand pull tab** | Resize it — change its duration. |
 | **Tap a note's ▲ or ▼ arrow** | Transpose it by the arrow interval (default: an octave). |
-| **Drag a measure-bar triangle** | Move the measure and its chain. |
+| **Drag a measure-bar triangle** | Change the previous bar's length; the bars after it follow. |
 | **Long-press empty background** | Start a marquee selection. |
 | **Long-press a note** | Add it to, or remove it from, the multi-selection. |
 | **Drag a note that is already in the selection** | Move the whole group. |

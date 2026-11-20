@@ -25,6 +25,8 @@
  *   audio.reverb.preDelayMs→ preDelay.delayTime (live, no IR regen)
  *   audio.reverb.{roomSize,decaySec,damping} → IR regen (debounced 250 ms)
  *   audio.stereo.{enabled,width} → per-voice StereoPanner (applied at schedule)
+ *   audio.tempered.enabled → which of a note's two pitches its voice is given
+ *                            (applied at schedule; see AudioEngine._scheduleNote)
  */
 
 import { settingsStore } from '../settings/settings-store.js';
@@ -75,6 +77,11 @@ export class AudioGraph {
     // --- stereo -------------------------------------------------------------
     this.stereoEnabled = !!st.enabled;
     this.stereoWidth = clamp01(st.width != null ? st.width : 0.6);
+
+    // --- tempered playback (read by the engine as each voice is scheduled) ---
+    this.temperedEnabled = !!(s.tempered && s.tempered.enabled);
+    // The voice limit the engine keeps (Settings > Audio > Most voices at once).
+    this.maxVoices = Number(s.maxVoices) > 0 ? Number(s.maxVoices) : 256;
 
     // --- per-instrument buses (created lazily) -----------------------------
     /** @type {Map<string,{bus:GainNode,send:GainNode}>} */
@@ -187,6 +194,11 @@ export class AudioGraph {
     // Stereo (applied to newly-scheduled voices).
     this.stereoEnabled = !!st.enabled;
     this.stereoWidth = clamp01(st.width != null ? st.width : 0.6);
+
+    // Tempered playback (likewise: newly-scheduled voices).
+    this.temperedEnabled = !!(s.tempered && s.tempered.enabled);
+    // The voice limit the engine keeps (Settings > Audio > Most voices at once).
+    this.maxVoices = Number(s.maxVoices) > 0 ? Number(s.maxVoices) : 256;
 
     // Reverb enable + wet + pre-delay (all live params, no IR regen).
     this._reverbEnabled = !!rv.enabled;

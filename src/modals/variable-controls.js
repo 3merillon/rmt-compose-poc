@@ -1,22 +1,28 @@
 // Modularized variable controls for the Modals panel
 // Creates a single "variable row" for a given key/value pair
 // API: createVariableControls(key, value, note, measureId, externalFunctions)
+import { setModuleRepeat, moduleRepeatRatio } from '../player/display-transpose.js';
 import { validateExpression } from './validation.js';
 import { eventBus } from '../utils/event-bus.js';
 import Fraction from 'fraction.js';
 import { getModule, setEvaluatedNotes, getInstrumentManager } from '../store/app-state.js';
 import { simplifyFrequency, simplifyDuration, simplifyStartTime, simplifyGeneric } from '../utils/simplify.js';
-import { decompileToDSL, isDSLSyntax, compileDSL } from '../dsl/index.js';
-import { ExpressionCompiler } from '../expression-compiler.js';
+import { decompileToDSL, compileDSL } from '../dsl/index.js';
+import { isIrrational, isApprox, toText as exactText, toNumber as exactToNumber } from '../value/exact.js';
 import { BinaryEvaluator } from '../binary-evaluator.js';
 import { escapeHtml, validateColorInput } from '../utils/html-escape.js';
 import { settingsStore } from '../settings/settings-store.js';
 import { validateExpressionSyntax } from '../utils/safe-expression-validator.js';
 import { toNumber } from '../utils/fraction-num.js';
 import { hugeFractionDisplay } from './fraction-display.js';
+import { EXPRESSION_VARS, isMeasureNote } from '../note.js';
+import { CORRUPT } from '../binary-note.js';
 
-// Singleton compiler for safe evaluation
-const safeCompiler = new ExpressionCompiler();
+
+// Variables a note may leave unset: an empty Raw removes the expression and the
+// note inherits again (the BaseNote's, else 1 for amplitude, else the
+// instrument's own envelope for attack and release).
+const OPTIONAL_VARS = ['amplitude', 'attack', 'release'];
 
 // Helpers
 function pauseIfPlaying() {
@@ -25,12 +31,68 @@ function pauseIfPlaying() {
   } catch {}
 }
 
-function isMeasureNote(note) {
-  try {
-    return !!(note?.getVariable?.('startTime') && !note?.getVariable?.('duration') && !note?.getVariable?.('frequency'));
-  } catch {
-    return false;
+// Every note's evaluated variables, for evaluating a free-standing expression
+function buildEvalCache(moduleInstance) {
+  const cache = new Map();
+  for (const id in moduleInstance?.notes || {}) {
+    const n = moduleInstance.notes[id];
+    if (!n || typeof n.getVariable !== 'function') continue;
+    const rec = {};
+    try { for (const v of EXPRESSION_VARS) rec[v] = n.getVariable(v); } catch {}
+    cache.set(parseInt(id, 10), rec);
   }
+  return cache;
+}
+
+// The time unit (base.d) when it is a usable positive value, else null
+function positiveTimeUnit(moduleInstance) {
+  try {
+    const d = moduleInstance?.baseNote?.getVariable?.('duration');
+    return (d && typeof d.compare === 'function' && d.compare(0) > 0) ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+function isApproximate(frac, value) {
+  return !!(value?.isCorrupted || value?.isTransitivelyCorrupted || frac?._irrational || frac?._floatValue !== undefined);
+}
+
+// "= 100 BPM": the time unit read as a tempo, 60 / base.d (a view; nothing stores it)
+function bpmHintText(unit, value) {
+  if (!unit || typeof unit.compare !== 'function' || unit.compare(0) <= 0) return null;
+  const bpm = new Fraction(60).div(unit);
+  const approx = isApproximate(unit, value);
+  if (!approx && bpm.d === 1n) return `= ${bpm.s * bpm.n} BPM`;
+  const num = toNumber(bpm, NaN);
+  if (!isFinite(num)) return null;
+  const txt = String(Number(num.toFixed(3)));
+  return (!approx && bpm.mul(1000).d === 1n) ? `= ${txt} BPM` : `≈ ${txt} BPM`;
+}
+
+// "= 4 time units": a bar's length over the time unit, d / base.d
+function timeUnitsHintText(duration, unit, value) {
+  if (!duration || typeof duration.div !== 'function' || !unit) return null;
+  const k = duration.div(unit);
+  const plural = k.equals(1) ? '' : 's';
+  if (isApproximate(duration, value)) {
+    const num = toNumber(k, NaN);
+    return isFinite(num) ? `≈ ${Number(num.toPrecision(6))} time unit${plural}` : null;
+  }
+  const huge = hugeFractionDisplay(k);
+  if (huge) return `${huge.text} time units`;
+  const txt = (k.d === 1n) ? `${k.s * k.n}` : `${k.s * k.n}/${k.d}`;
+  return `= ${txt} time unit${plural}`;
+}
+
+function makeHint(text, block = false) {
+  const hint = document.createElement(block ? 'div' : 'span');
+  hint.className = 'value-hint';
+  hint.textContent = text;
+  Object.assign(hint.style, block
+    ? { color: '#aaa', fontSize: '0.85em', marginTop: '2px' }
+    : { color: '#aaa', marginLeft: '8px' });
+  return hint;
 }
 
 function recompileNoteAndDependents(noteId, visited = new Set()) {
@@ -55,29 +117,20 @@ function buildEvaluatedDiv(value) {
   let exactTitle = '';
   if (value?.evaluated !== null && value?.evaluated !== undefined) {
     const ev = value.evaluated;
-    // Check if this is a directly corrupted (irrational) value — either flagged
-    // per-property by the dependency graph, or marked on the value by WASM
-    const isDirectlyCorrupted = value.isCorrupted || ev._irrational || ev._floatValue !== undefined;
-    // Check if this is transitively corrupted (depends on a corrupted note) - for display only
-    const isTransitivelyCorrupted = value.isTransitivelyCorrupted;
+    const exact = value.exact;
+    // A tempered value (its own power, or read from a tempered note) keeps the
+    // corrupted-value style; the text says what kind of number it is.
+    if (value.isCorrupted || value.isTransitivelyCorrupted) evaluatedDiv.classList.add('corrupted-value');
 
-    if (isDirectlyCorrupted) {
-      // Display as float with reasonable precision
-      // Prefer _floatValue (exact irrational), fall back to the approximated fraction
-      const floatVal = ev._floatValue !== undefined ? ev._floatValue : toNumber(ev, NaN);
-      displayValue = `≈${Number(floatVal).toPrecision(8)}`;
-      evaluatedDiv.classList.add('corrupted-value');
-    } else if (isTransitivelyCorrupted) {
-      // Transitively corrupted: show fraction with ≈ prefix to indicate it's an approximation
-      const huge = hugeFractionDisplay(ev);
-      if (huge) {
-        displayValue = huge.text;
-        exactTitle = huge.title;
-      } else {
-        displayValue = `≈${String(ev)}`;
-      }
+    if (isIrrational(exact)) {
+      // Exact, irrational: its exact form and its value
+      displayValue = `${exactText(exact)} = ${Number(exactToNumber(exact)).toPrecision(8)}…`;
+    } else if (isApprox(exact)) {
+      // An approximation: ≈ and its value
+      displayValue = `≈${Number(exactToNumber(exact)).toPrecision(8)}`;
       evaluatedDiv.classList.add('corrupted-value');
     } else {
+      // Rational, exact (also when a tempered chain lands on a rational, e.g. an octave)
       const huge = hugeFractionDisplay(ev);
       if (huge) {
         displayValue = huge.text;
@@ -88,15 +141,29 @@ function buildEvaluatedDiv(value) {
     }
   }
 
+  // A transposed loop pass: say so beside the value (display-transpose.js)
+  if (Number.isInteger(value?.transposedPass) && value.transposedPass > 0) {
+    displayValue += ` (repeat ${value.transposedPass})`;
+  }
+
   // SECURITY: Escape displayValue to prevent XSS
-  evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${escapeHtml(displayValue)}`;
+  if (value?.isDefault) {
+    // Neither the note nor the BaseNote defines it: the instrument's own applies.
+    evaluatedDiv.innerHTML = `<span class="value-label">Default:</span> <span style="color: #aaa;">instrument envelope</span>`;
+  } else if (value?.isInherited) {
+    // The note does not define this variable: same wording and grey as an
+    // inherited instrument (buildInstrumentControl).
+    evaluatedDiv.innerHTML = `<span class="value-label">Inherited:</span> <span style="color: #aaa;">${escapeHtml(displayValue)}</span>`;
+  } else {
+    evaluatedDiv.innerHTML = `<span class="value-label">Evaluated:</span> ${escapeHtml(displayValue)}`;
+  }
   if (exactTitle) evaluatedDiv.title = exactTitle;
   return evaluatedDiv;
 }
 
 /**
  * Convert a raw expression to DSL format for display
- * @param {string} rawExpr - Raw expression (could be legacy or DSL)
+ * @param {string} rawExpr - Raw expression
  * @param {Object} note - The note object (to get binary expression)
  * @param {string} key - The variable key (frequency, startTime, etc.)
  * @returns {string} DSL-formatted expression
@@ -175,15 +242,12 @@ function buildRawEditor(initialRaw, note = null, key = null) {
   return { rawDiv, rawInput, saveButton, showError, clearError };
 }
 
-// Helper to build canonical duration expression: beatUnit * (n/d)
-function computeDurationExpr(multiplierNum, multiplierDen = 1, useDSL = false) {
-  if (useDSL) {
-    if (multiplierNum === 1 && multiplierDen === 1) return 'beat(base)';
-    return (multiplierDen === 1)
-      ? `beat(base) * ${multiplierNum}`
-      : `beat(base) * (${multiplierNum}/${multiplierDen})`;
-  }
-  return `new Fraction(60).div(module.findTempo(module.baseNote)).mul(new Fraction(${multiplierNum}, ${multiplierDen}))`;
+// Helper to build canonical duration expression: the time unit times n/d, base.d * (n/d)
+function computeDurationExpr(multiplierNum, multiplierDen = 1) {
+  if (multiplierNum === 1 && multiplierDen === 1) return 'base.d';
+  return (multiplierDen === 1)
+    ? `base.d * ${multiplierNum}`
+    : `base.d * (${multiplierNum}/${multiplierDen})`;
 }
 
 // Multiply two rational values and reduce (n1/d1) * (n2/d2).
@@ -302,8 +366,7 @@ function createDurationSelector(rawInput, saveButton, note, value) {
       const mod = dotPicks[selectedDotIdx];
       [n, d] = mulFrac(n, d, mod.n, mod.d);
     }
-    const noteUseDSL = isDSLSyntax(note?.variables?.durationString || '');
-    const expr = computeDurationExpr(n, d, noteUseDSL);
+    const expr = computeDurationExpr(n, d);
     rawInput.value = expr;
     try {
       saveButton.style.display = 'inline-block';
@@ -416,132 +479,42 @@ function createDurationSelector(rawInput, saveButton, note, value) {
     const computeAndSelect = () => {
       const raw = (rawInput && typeof rawInput.value === 'string') ? rawInput.value : '';
 
-      // Prefer evaluated beats for robustness (handles newly dropped modules and any formatting)
-      let mNum = 1, mDen = 1, found = false;
+      // Beats = duration / time unit (d / base.d), divided exactly; only the icon
+      // match below is approximate.
+      let m = NaN;
 
-      // 1) Use evaluated duration + tempo to compute beats (tolerance matching is approximate)
+      // 1) The evaluated duration (handles newly dropped modules and any formatting)
       try {
-        const moduleInstance = getModule();
-        const durationVal = (value && value.evaluated != null)
-          ? toNumber(value.evaluated, NaN)
-          : (note && typeof note.getVariable === 'function' ? toNumber(note.getVariable('duration'), NaN) : NaN);
-
-        const tempoVal = toNumber(moduleInstance?.findTempo?.(note), NaN);
-
-        if (isFinite(durationVal) && isFinite(tempoVal) && tempoVal > 0) {
-          const beatLen = 60 / tempoVal;
-          const beats = durationVal / beatLen;
-          const frac = new Fraction(beats);
-          mNum = toNumber(frac.n);
-          mDen = toNumber(frac.d);
-          found = true;
+        const unit = positiveTimeUnit(getModule());
+        const dur = (value && value.evaluated != null)
+          ? value.evaluated
+          : (note && typeof note.getVariable === 'function' ? note.getVariable('duration') : null);
+        if (unit && dur && typeof dur.div === 'function') {
+          m = toNumber(dur.div(unit), NaN);
         }
       } catch {}
 
-      // 2) Fall back to raw string parsing if evaluation path wasn't available yet
-      if (!found && isDSLSyntax(raw)) {
-        // DSL format: beat(base) * (n/d) or beat([id]) * (n/d) or beat(base) * n or bare beat(...)
-        const dslFracMatch = raw.match(/\bbeat\s*\([^)]*\)\s*\*\s*\(\s*(\d+)\s*\/\s*(\d+)\s*\)/);
-        if (dslFracMatch) {
-          mNum = parseInt(dslFracMatch[1]); mDen = parseInt(dslFracMatch[2]); found = true;
-        } else {
-          const dslIntMatch = raw.match(/\bbeat\s*\([^)]*\)\s*\*\s*(\d+)\s*$/);
-          if (dslIntMatch) {
-            mNum = parseInt(dslIntMatch[1]); mDen = 1; found = true;
-          } else {
-            const dslBeatOnly = raw.match(/^\s*beat\s*\([^)]*\)\s*$/);
-            if (dslBeatOnly) {
-              mNum = 1; mDen = 1; found = true;
-            }
-          }
-        }
-      }
-      if (!found) {
-        const fracMatch = raw.match(/\.mul\s*\(\s*new\s+Fraction\s*\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)\s*\)/);
-        if (fracMatch) {
-          mNum = parseFloat(fracMatch[1]); mDen = parseFloat(fracMatch[2]); found = true;
-        } else {
-          const numMatch = raw.match(/\.mul\s*\(\s*([0-9.]+)\s*\)/);
-          if (numMatch) {
-            const f = parseFloat(numMatch[1]);
-            if (!isNaN(f)) {
-              // Approximate fraction with denominator up to 1024
-              const denom = 1024;
-              mNum = Math.round(f * denom);
-              mDen = denom;
-              found = true;
-            }
-          } else {
-            // Bare beat unit without .mul() -> multiplier = 1
-            const beatOnly = raw.match(/^new\s*Fraction\s*\(\s*60\s*\)\s*\.div\s*\(\s*module\.findTempo\s*\(\s*[^)]+\)\s*\)\s*$/);
-            if (beatOnly) {
-              mNum = 1; mDen = 1; found = true;
-            }
-          }
-        }
-      }
-
-      // 3) Final fallback: evaluate raw string directly to seconds and convert to beats
+      // 2) Fallback: evaluate the raw string directly to seconds, then divide by the time unit
       // SECURITY: Use safe binary compilation instead of new Function()
-      if (!found && raw) {
+      if (!isFinite(m) && raw) {
         try {
           const moduleInstance = getModule();
+          const unit = positiveTimeUnit(moduleInstance);
           const validation = validateExpressionSyntax(raw);
-          if (validation.valid) {
+          if (unit && validation.valid) {
             // Compile using safe parser
-            let binary;
-            if (isDSLSyntax(raw)) {
-              binary = compileDSL(raw);
-            } else {
-              binary = safeCompiler.compile(raw);
-            }
-
-            // Build eval cache
-            const evalCache = new Map();
-            const baseNote = moduleInstance?.baseNote;
-            if (baseNote) {
-              evalCache.set(0, {
-                startTime: baseNote.getVariable('startTime'),
-                duration: baseNote.getVariable('duration'),
-                frequency: baseNote.getVariable('frequency'),
-                tempo: baseNote.getVariable('tempo'),
-                beatsPerMeasure: baseNote.getVariable('beatsPerMeasure'),
-                measureLength: moduleInstance.findMeasureLength?.(baseNote)
-              });
-            }
-            for (const id in moduleInstance?.notes || {}) {
-              const noteObj = moduleInstance.notes[id];
-              if (noteObj) {
-                try {
-                  evalCache.set(parseInt(id, 10), {
-                    startTime: noteObj.getVariable?.('startTime'),
-                    duration: noteObj.getVariable?.('duration'),
-                    frequency: noteObj.getVariable?.('frequency'),
-                    tempo: moduleInstance.findTempo?.(noteObj),
-                    beatsPerMeasure: noteObj.getVariable?.('beatsPerMeasure'),
-                    measureLength: moduleInstance.findMeasureLength?.(noteObj)
-                  });
-                } catch {}
-              }
-            }
-
+            const binary = compileDSL(raw);
             // Evaluate using safe binary evaluator
             const evaluator = new BinaryEvaluator(moduleInstance);
-            const val = evaluator.evaluate(binary, evalCache);
-            const durationSec = toNumber(val, NaN);
-            const tempoVal = toNumber(moduleInstance?.findTempo?.(note), NaN);
-            if (isFinite(durationSec) && isFinite(tempoVal) && tempoVal > 0) {
-              const beatLen = 60 / tempoVal;
-              const beats = durationSec / beatLen;
-              const frac = new Fraction(beats);
-              mNum = toNumber(frac.n);
-              mDen = toNumber(frac.d);
-              found = true;
+            const val = evaluator.evaluate(binary, buildEvalCache(moduleInstance));
+            if (val && typeof val.div === 'function') {
+              m = toNumber(val.div(unit), NaN);
             }
           }
         } catch {}
       }
 
+      const found = isFinite(m);
       if (!found) {
         // Retry after evaluation/paint if data might still be settling
         if (attempts < maxAttempts) {
@@ -554,8 +527,6 @@ function createDurationSelector(rawInput, saveButton, note, value) {
         }
         return;
       }
-
-      const m = mNum / mDen;
 
       // Try to match base or base*dots within small tolerance
       const tol = 1e-2; // slightly relaxed tolerance to account for rounding and float beats
@@ -592,89 +563,32 @@ function createDurationSelector(rawInput, saveButton, note, value) {
   return container;
 }
 
+/**
+ * The bar-length row of a measure bar. A bar's length is its own duration, an
+ * expression like any other: the next bar reads it as `[p].d`, so changing one
+ * bar's length (a meter change) carries to the bars that follow.
+ * @returns {HTMLElement|null}
+ */
 export function createMeasureDurationRow(note, measureId, externalFunctions) {
-  ensureModalsStyleInjected();
-
   const moduleInstance = getModule();
-  if (!moduleInstance) {
-    const empty = document.createElement('div');
-    return empty;
-  }
+  if (!moduleInstance) return null;
 
-  const measureNote = (() => {
+  const bar = (() => {
     try { return moduleInstance.getNoteById(Number(measureId)); } catch { return null; }
   })();
+  if (!bar) return null;
 
-  const variableRow = document.createElement('div');
-  variableRow.className = 'variable-row';
-
-  const variableNameDiv = document.createElement('div');
-  variableNameDiv.className = 'variable-name';
-  variableNameDiv.textContent = 'Measure Duration';
-
-  const variableValueDiv = document.createElement('div');
-  variableValueDiv.className = 'variable-value';
-
-  // Initial RAW expression (prefer measure override, fallback to base)
-  let initialRaw = '4';
+  let isCorrupted = false;
   try {
-    if (measureNote?.variables?.beatsPerMeasureString) {
-      initialRaw = measureNote.variables.beatsPerMeasureString;
-    } else if (moduleInstance?.baseNote?.variables?.beatsPerMeasureString) {
-      initialRaw = moduleInstance.baseNote.variables.beatsPerMeasureString;
-    }
+    isCorrupted = !!moduleInstance.getDependencyGraph()?.isPropertyCorrupted?.(bar.id, CORRUPT.DURATION);
   } catch {}
 
-  const { rawDiv, rawInput, saveButton } = buildRawEditor(initialRaw, measureNote || moduleInstance?.baseNote, 'beatsPerMeasure');
-
-  // Layout: show Save underneath input for this section only
-  try {
-    rawDiv.style.display = 'flex';
-    rawDiv.style.flexDirection = 'column';
-    saveButton.style.display = 'none';
-  } catch {}
-
-  saveButton.addEventListener('click', () => {
-    try {
-      pauseIfPlaying();
-      if (!measureNote) return;
-
-      const raw = (rawInput.value || '').trim() || '4';
-      // Set the expression string directly - the Note class will compile it to binary
-      measureNote.setVariable('beatsPerMeasureString', raw);
-
-      // Recompile note and its dependents so functions stay in sync
-      recompileNoteAndDependents(measureNote.id);
-
-      // Re-evaluate and refresh visuals
-      const evaluated = moduleInstance.evaluateModule();
-      setEvaluatedNotes(evaluated);
-      if (typeof externalFunctions.updateVisualNotes === 'function') {
-        externalFunctions.updateVisualNotes(evaluated);
-      }
-      if (typeof externalFunctions.createMeasureBars === 'function') {
-        externalFunctions.createMeasureBars();
-      }
-
-      // Refresh modals so the UI reflects the new value
-      refreshModals(null, measureNote.id);
-
-      // History snapshot
-      try {
-        const snap = getModule().createModuleJSON();
-        try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
-        eventBus.emit('history:capture', { label: `Edit measure duration Measure ${measureNote.id}`, snapshot: snap });
-      } catch {}
-    } catch (err) {
-      console.error('Error saving measure duration (beatsPerMeasure) for measure', measureId, err);
-    }
-  });
-
-  variableRow.appendChild(variableNameDiv);
-  variableValueDiv.appendChild(rawDiv);
-  variableRow.appendChild(variableValueDiv);
-
-  return variableRow;
+  const value = {
+    evaluated: bar.getVariable('duration'),
+    raw: bar.variables.durationString || '',
+    isCorrupted
+  };
+  return createVariableControls('duration', value, bar, measureId, externalFunctions);
 }
 
 function refreshModals(note, measureId) {
@@ -715,7 +629,9 @@ function buildInstrumentControl(value, note, externalFunctions) {
   // SECURITY: Escape instrument name to prevent XSS
   const instrumentName = escapeHtml(value?.evaluated ?? 'sine-wave');
   if (value?.isInherited) {
-    evaluatedText.innerHTML = `<span class="value-label">Inherited:</span> <span style="color: #aaa;">${instrumentName}</span>`;
+    // Who it plays with: the first note of its line, whose instrument it inherits.
+    const withNote = Number.isInteger(value?.playerHead) ? ` <span style="color: #aaa;">· plays with [${value.playerHead}]</span>` : '';
+    evaluatedText.innerHTML = `<span class="value-label">Inherited:</span> <span style="color: #aaa;">${instrumentName}</span>${withNote}`;
   } else {
     evaluatedText.innerHTML = `<span class="value-label">Current:</span> ${instrumentName}`;
   }
@@ -891,9 +807,12 @@ export function createVariableControls(key, value, note, measureId, externalFunc
   const variableRow = document.createElement('div');
   variableRow.className = 'variable-row';
 
+  const isBase = !!(note && Number(note.id) === 0);
+  const isBar = !isBase && ((measureId !== null && measureId !== undefined) || isMeasureNote(note));
+
   const variableNameDiv = document.createElement('div');
   variableNameDiv.className = 'variable-name';
-  variableNameDiv.textContent = key;
+  variableNameDiv.textContent = (key === 'duration' && isBar) ? 'duration (bar length)' : key;
 
   const variableValueDiv = document.createElement('div');
   variableValueDiv.className = 'variable-value';
@@ -910,6 +829,30 @@ export function createVariableControls(key, value, note, measureId, externalFunc
     const evaluatedDiv = buildEvaluatedDiv(value);
     variableValueDiv.appendChild(evaluatedDiv);
 
+    // Read-only hints next to the value
+    try {
+      if (key === 'duration' && isBase) {
+        // The BaseNote's duration is the time unit; 60 / base.d reads it as a tempo
+        const text = bpmHintText(value?.evaluated, value);
+        if (text) {
+          const hint = makeHint(text);
+          hint.title = 'The time unit read as a tempo: 60 / base.d (read only)';
+          evaluatedDiv.appendChild(hint);
+        }
+      } else if (key === 'duration' && isBar) {
+        const text = timeUnitsHintText(value?.evaluated, positiveTimeUnit(getModule()), value);
+        if (text) {
+          const hint = makeHint(text);
+          hint.title = 'The bar length in time units: d / base.d';
+          evaluatedDiv.appendChild(hint);
+        }
+      } else if (key === 'attack' || key === 'release') {
+        variableValueDiv.appendChild(makeHint("A share of the note's duration, e.g. 1/8", true));
+      } else if (key === 'repeat') {
+        variableValueDiv.appendChild(makeHint('The ratio from one repeat of a loop to the next, e.g. 9/8 (a whole tone up) or [24].f / base.f. Empty: none.', true));
+      }
+    } catch {}
+
     // Raw editor (pass note and key for DSL conversion)
     const { rawDiv, rawInput, saveButton, showError, clearError } = buildRawEditor(value?.raw ?? '', note, key);
     saveButton.addEventListener('click', () => {
@@ -918,6 +861,24 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         pauseIfPlaying();
         const moduleInstance = getModule();
         const currentNoteId = measureId !== null && measureId !== undefined ? measureId : note.id;
+        // The BaseNote's repeat: a relation kept as text, checked by evaluating it
+        if (key === 'repeat') {
+          const text = String(rawInput.value ?? '').trim();
+          const prev = note.properties.repeat || null;
+          setModuleRepeat(moduleInstance, text || null);
+          if (text && !moduleRepeatRatio(moduleInstance)) {
+            setModuleRepeat(moduleInstance, prev);
+            showError('Not a repeat: write the ratio from one repeat to the next, between 1/16 and 16, for example 9/8');
+            return;
+          }
+          try {
+            const snap = getModule().createModuleJSON();
+            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+            eventBus.emit('history:capture', { label: text ? `Repeat ${text}` : 'Repeat as written', snapshot: snap });
+          } catch {}
+          refreshModals(note, null);
+          return;
+        }
         if (key === 'color') {
           const newColor = validateColorInput(rawInput.value);
           if (!newColor) {
@@ -940,6 +901,26 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           refreshModals(note, null);
           return;
         }
+        // amplitude, attack and release are optional: an empty Raw means "not
+        // defined on this note", so it is removed and the note inherits again
+        // (the BaseNote's, else 1 for amplitude, else the instrument's envelope).
+        if (OPTIONAL_VARS.includes(key) && !String(rawInput.value ?? '').trim()) {
+          note.clearExpression(key);
+          recompileNoteAndDependents(currentNoteId);
+          const evaluated = moduleInstance.evaluateModule();
+          setEvaluatedNotes(evaluated);
+          if (typeof externalFunctions.updateVisualNotes === 'function') {
+            externalFunctions.updateVisualNotes(evaluated);
+          }
+          refreshModals(note, measureId);
+          try {
+            const snap = getModule().createModuleJSON();
+            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+            eventBus.emit('history:capture', { label: `Reset ${key} Note ${note?.id}`, snapshot: snap });
+          } catch {}
+          return;
+        }
+
         const validatedExpression = validateExpression(moduleInstance, currentNoteId, rawInput.value, key);
 
         // optional originalDuration to trigger dependent updates
@@ -961,7 +942,7 @@ export function createVariableControls(key, value, note, measureId, externalFunc
           } else if (key === 'startTime') {
             simplifiedExpression = simplifyStartTime(validatedExpression, moduleInstance);
           } else {
-            // Fallback for other variable types (e.g., tempo, beatsPerMeasure) if provided
+            // Other expression variables (amplitude, attack, release)
             simplifiedExpression = simplifyGeneric ? simplifyGeneric(validatedExpression, key, moduleInstance) : validatedExpression;
           }
         } catch (e) {
@@ -982,15 +963,6 @@ export function createVariableControls(key, value, note, measureId, externalFunc
 
         // Recompile updated note + dependents to ensure functions are in sync
         recompileNoteAndDependents(currentNoteId);
-
-        // Trigger dependent duration updates if provided by external functions
-        if (key === 'duration' && typeof externalFunctions.checkAndUpdateDependentNotes === 'function' && originalDuration !== undefined) {
-          const udv = note.getVariable('duration');
-          const updatedDuration = udv != null ? toNumber(udv, NaN) : undefined;
-          if (Math.abs((updatedDuration ?? 0) - (originalDuration ?? 0)) > 0.001) {
-            externalFunctions.checkAndUpdateDependentNotes(currentNoteId, originalDuration, updatedDuration);
-          }
-        }
 
         // Re-evaluate and refresh
         const evaluated = moduleInstance.evaluateModule();
@@ -1030,8 +1002,10 @@ export function createVariableControls(key, value, note, measureId, externalFunc
       }
     }
 
-    // Duration note-length preset selector (icons)
-    if (key === 'duration') {
+    // Duration note-length preset selector (icons), in time units (base.d). Not for
+    // the BaseNote (its duration IS the time unit; base.d * k would read itself)
+    // nor for a bar (its length is a measure, not a note value).
+    if (key === 'duration' && !isBase && !isBar) {
       const selector = createDurationSelector(rawInput, saveButton, note, value);
       variableValueDiv.appendChild(selector);
       // Proactively preselect after append to avoid timing issues after module drops

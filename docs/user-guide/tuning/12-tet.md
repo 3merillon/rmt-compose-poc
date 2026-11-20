@@ -48,16 +48,6 @@ base.f * 2 ^ (4/12)     # a major third above the BaseNote
 
 You can reduce the exponent by hand — `4/12` is `1/3`, so `2^(1/3)` is the same major third — but you do not have to. Save the expression and the simplifier reduces the fraction for you.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-new Fraction(2).pow(new Fraction(7, 12))
-module.baseNote.getVariable('frequency').mul(new Fraction(2).pow(new Fraction(4, 12)))
-module.getNoteById(1).getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))
-```
-</details>
-
 ## Every interval
 
 | Interval | Semitones | Expression | Nearest just ratio | 12-TET is off by |
@@ -85,17 +75,16 @@ The library's **Scale Systems** section ships a **12-TET** module. (The file is 
 |---|---|
 | Notes | 13 — twelve steps plus the note you start on |
 | Base frequency | `(263/4)` = 65.75 Hz |
-| Tempo | 100 |
-| Beats per measure | 4 |
+| BaseNote duration (time unit) | `3/5` s, shown as 100 BPM |
 | Instrument | `sine-wave` |
-| Note duration | `beat(base) * (3/4)` |
+| Note duration | `base.d * (3/4)` |
 | Step | `[n].f * 2 ^ (1/12)` |
 
 Note 1 is `base.f`. Every later note is the previous note times one semitone, so the scale is a chain — lift note 1 and all thirteen move with it.
 
 To load it, drag the tile from **Scale Systems** (or search `12` with the library magnifier) onto a note or onto the BaseNote circle — a drop on empty canvas is refused. The module's `base` references are rewritten to your drop target, so the scale re-roots onto that note. The full loading workflow is on [Equal Temperament](/user-guide/tuning/equal-temperament#loading-one).
 
-Once loaded, twelve of the thirteen notes show a **≈** prefix and cross-hatching. That is correct: `2^(1/12)` is irrational, and the fraction the app draws is the note's approximate ratio to the BaseNote, not its exact value. Only note 1 — plain `base.f` — is unhatched.
+Once loaded, the notes are cross-hatched and each label shows its exact step above the BaseNote: `2^(1/12)`, `2^(1/6)`, `2^(1/4)` … `2^(11/12)` (the exponents are reduced, so the third step reads `2^(1/4)`). That is correct: `2^(1/12)` is irrational, and the app keeps it as the power it is. The octave note's label reads `2/1`, exactly. Only note 1 — plain `base.f` — is unhatched.
 
 ## Why 12-TET won
 

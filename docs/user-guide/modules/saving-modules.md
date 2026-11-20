@@ -30,16 +30,17 @@ If the export fails, a red `Error exporting module: <message>` banner appears fo
 
 ## What gets saved
 
-The file has exactly two top-level keys: `baseNote` and `notes`.
+The file has three top-level keys: `baseNote`, `notes` and `instrumentRule` (always `"start-time"`, which tells the loader that the file does not need its instruments migrated; see [Module Format](/user-guide/modules/module-format#instruments)).
 
 | Per note | |
 |---|---|
 | `id` | The note's number |
-| The six expression keys | `startTime`, `duration`, `frequency`, `tempo`, `beatsPerMeasure`, `measureLength` |
+| The six expression keys | `startTime`, `duration`, `frequency`, `amplitude`, `attack`, `release` — each only if the note defines it |
 | `color` | If set |
 | `instrument` | If set |
+| `measure` | `true` on a measure bar |
 
-There is **no `measures` array**. Measure bars are saved as ordinary entries in `notes` — a measure bar is a note with a `startTime` and no `duration` and no `frequency`. Silences are entries with a `startTime` and a `duration` but no `frequency`. All three kinds share the same array and the same id space. See [Module Format](/user-guide/modules/module-format#note-kinds-are-inferred-not-declared).
+There is **no `measures` array**. Measure bars are saved as ordinary entries in `notes` — a measure bar is a silent note flagged `"measure": true`. Silences are entries with a `startTime` and a `duration` but no `frequency` and no flag. All three kinds share the same array and the same id space. See [Module Format](/user-guide/modules/module-format#note-kinds-are-inferred-not-declared).
 
 There is no metadata block: no name, no author, no version, no description. Any extra key you add to the file is dropped on the next save.
 
@@ -53,24 +54,15 @@ The **raw expression** is written out, never the number it evaluated to:
 
 That is what makes a module portable. Load it somewhere else, or drop it onto a different note, and the fifth is still a fifth — relative to whatever it now sits on.
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-A module authored in the older method-chain format saves back in that format, verbatim:
-
-```json
-{ "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))" }
-```
-
-Saving does **not** convert legacy expressions to DSL, or DSL to legacy. The source text round-trips exactly as written.
-
-</details>
-
-### Two things change on the way out
+### What changes on the way out
 
 **The file is reindexed.** Measure bars are renumbered first (sorted by start time), then the remaining notes (also by start time), starting at id 1, and every `[N]` reference is rewritten to match. The ids in the downloaded file will generally differ from the ids you saw on screen. **Reorder Module** in the **+** menu applies the same renumbering to the live workspace, behind a confirmation — it is not something you need to do before saving.
 
-**The BaseNote gains a `measureLength`,** even if it never had one. It is written in DSL form — `beat(base) * base.bpm` — so a pure-DSL file stays pure DSL on the way out.
+**Nothing is added to the BaseNote.** The file holds the expressions the BaseNote has, including its `duration`, the time unit. No tempo is stored.
+
+::: warning A file saved here does not open in the published editor
+Files saved by this version use `duration` on the BaseNote and the `measure` flag on bars. The published editor does not read them. Older files load here and are converted; see [Modules from earlier versions](/user-guide/modules/module-format#modules-from-earlier-versions).
+:::
 
 ## Is there an autosave?
 
@@ -144,7 +136,7 @@ The module bar's footer carries four buttons: **Save UI**, **Load UI**, **Add Ca
 - the full module JSON of anything **uploaded** — an upload has no file on disk to re-fetch, so its data is embedded
 - the drop mode (**Start** or **End**)
 
-Built-in modules are stored **by file path**, not by value, which is what keeps the file small with a 79-module catalog.
+Built-in modules are stored **by file path**, not by value, which is what keeps the file small with a 81-module catalog.
 
 **Load UI** re-validates every embedded module before applying it. Anything that fails is stripped of its data — the icon survives, its module does not — and the toast reads `UI state loaded — N invalid module(s) skipped`.
 
@@ -160,17 +152,20 @@ A module is a plain JSON file. Email it, drop it in cloud storage, put it in a g
 
 No account, no plugin, no runtime — just the file.
 
+For a DAW or a synthesizer, **Export MIDI** in the same menu writes the piece as `module.mid` with its tuning intact — see [Exporting MIDI](/user-guide/modules/exporting-midi). That file is an export, not a save: it cannot be loaded back.
+
 ## Tips
 
 1. **Rename the download.** Every export is `module.json`. Rename it the moment it lands.
 2. **Save before you load.** Loading a file replaces the whole workspace. It is undoable with `Ctrl/Cmd + Z`, but do not make undo your backup strategy.
-3. **Use `base.f` and `beat(base)`, not numbers.** A module written in absolute Hz and seconds cannot be re-rooted and is much less useful to anyone else.
+3. **Use `base.f` and `base.d`, not numbers.** A module written in absolute Hz and seconds cannot be re-rooted and is much less useful to anyone else.
 4. **Test after saving.** Load the file back and listen. Reindexing renumbers everything, so this is a real check, not a formality.
 5. **Version by hand.** `my-song-v1.json`, `my-song-v2.json`. There is no version history in the file.
 
 ## See also
 
 - [Loading Modules](/user-guide/modules/loading-modules) — the other half of the round trip
+- [Exporting MIDI](/user-guide/modules/exporting-midi) — the piece as a MIDI file, tuning included
 - [Module Format](/user-guide/modules/module-format) — what is in the file
 - [Module JSON Schema](/reference/module-schema) — the exhaustive reference
 - [Module Bar](/user-guide/interface/module-bar) — organizing the library

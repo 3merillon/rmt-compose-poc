@@ -19,14 +19,6 @@ Write this in Note 2's frequency field:
 
 Note 2 now **depends on** Note 1's frequency. Change Note 1 and Note 2 follows, without you touching it. `[1]` means "note with id 1"; `.f` means frequency. The other shortnames are `.t` (startTime) and `.d` (duration).
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-module.getNoteById(1).getVariable('frequency')
-```
-</details>
-
 ## Why bother
 
 Suppose you want three notes: a root, a fifth above it, and an octave above it.
@@ -48,7 +40,7 @@ Change Note 1 once and the other two move with it, exactly in tune, forever. Tha
 ### Step 1: the root
 
 1. Click the **BaseNote**, **Clean Slate** the workspace, then click the BaseNote again.
-2. In **ADD NOTE / SILENCE**, accept the defaults (`base.f`, `beat(base)`, `base.t`) and click **Create**.
+2. In **ADD NOTE / SILENCE / REFERENCE**, accept the defaults (`base.f`, `base.d`, `base.t`) and click **Create**.
 
 Note 1 inherits the BaseNote's pitch — **263 Hz** by default.
 
@@ -112,10 +104,10 @@ Start when Note 1 starts. The **At Start** radio writes this. This is how chords
 ### An offset
 
 ```
-[1].t + beat(base) * (1/2)
+[1].t + base.d * (1/2)
 ```
 
-Half a beat after Note 1 starts. Write the offset in beats, not seconds — `[1].t + (1/2)` would mean half a *second*, which will not survive a tempo change.
+Half a time unit after Note 1 starts. Write the offset in time units, not seconds — `[1].t + (1/2)` would mean half a *second*, which will not survive a change of the BaseNote's duration.
 
 ### Shared duration
 
@@ -123,7 +115,7 @@ Give several notes the same length by pointing them all at one:
 
 | Note | Duration | Role |
 |---|---|---|
-| 1 | `beat(base) * 2` | the master |
+| 1 | `base.d * 2` | the master |
 | 2, 3, 4 | `[1].d` | followers |
 
 Resize Note 1 and they all resize. Purple lines will show you the group.
@@ -168,7 +160,7 @@ Select a note, click **Evaluate to BaseNote**, confirm.
 
 This rewrites the selected note's own startTime, duration and frequency so they reference nothing but the BaseNote. The note stops depending on anything else, and it does not move.
 
-It is smarter than freezing numbers: it traces the frequency chain algebraically, so a TET note written `base.f * 2^(7/12)` stays a power expression rather than collapsing into an ugly approximate fraction.
+It is smarter than freezing numbers: it traces the frequency chain algebraically, so a TET note written `base.f * 2^(7/12)` stays a power expression rather than collapsing into a fraction. An approximate value is written with `~`.
 
 From the **BaseNote**, the same section offers **Evaluate Module**, which does this to every note at once. It flattens the entire dependency graph onto the BaseNote — useful before exporting, destructive to the structure you built.
 

@@ -23,10 +23,50 @@
  * so a future note-dynamics feature can add layers without a migration):
  *   { schema, name, displayName, license:{id,source,author,url}, gainDb,
  *     envelope:{attack,release}, zones:[{root, rootHz, lowHz, highHz, url,
- *     loop?, velLayers?}] }
+ *     tuneCents?, loop?, velLayers?}] }
+ * `tuneCents` is the recording's own pitch against rootHz, measured by
+ * scripts/tune-samples.mjs (Phase I): the zone is played against that pitch, so a
+ * note sounds exactly the frequency written and every ratio between two zones is
+ * exact. (Without it the stretch tuning of the piano recordings and the offsets of
+ * the violin's, up to ±25 cents, were carried into every interval across zones.)
+ * `envelope` is in seconds: the attack from the note's start, the release after
+ * its end (the note's end is a note-off; see instrument-manager.js).
  */
 
-import { applyVoiceEnvelope } from './instrument-manager.js';
+import { applyVoiceEnvelope, envelopeLength } from './instrument-manager.js';
+
+/** The crossfade length baked before a loop's end (seconds). */
+export const LOOP_XFADE = 0.12;
+
+/**
+ * Make a recording's loop seamless: the LOOP_XFADE seconds before its end are
+ * blended into the same length before its start, so when playback jumps from the
+ * end back to the start the sound continues from where it would have been. The
+ * blend keeps the level: its gains a, b satisfy a² + b² + 2abc = 1, where c is the
+ * correlation of the two stretches (equal power when they are unrelated, equal gain
+ * when they are alike, as loop points chosen for a match tend to be). Done once,
+ * on the decoded buffer: nothing is re-encoded, and a decoder that shifts the
+ * samples slightly only moves the seam, never opens it.
+ * @param {AudioBuffer} buf
+ * @param {{start:number, end:number}} loop seconds
+ */
+export function bakeLoopCrossfade(buf, loop) {
+  const sr = buf.sampleRate, L = Math.round(LOOP_XFADE * sr);
+  const s = Math.round(loop.start * sr), e = Math.round(loop.end * sr);
+  if (!(s - L >= 0 && e <= buf.length && e - L > s)) return false;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const x = buf.getChannelData(c);
+    let xy = 0, xx = 0, yy = 0;
+    for (let i = 0; i < L; i++) { const p = x[e - L + i], q = x[s - L + i]; xy += p * q; xx += p * p; yy += q * q; }
+    const corr = Math.max(0, xy / Math.sqrt(xx * yy + 1e-30));
+    for (let i = 0; i < L; i++) {
+      const w = (i + 1) / L, a0 = Math.cos((Math.PI / 2) * w), b0 = Math.sin((Math.PI / 2) * w);
+      const k = 1 / Math.sqrt(1 + 2 * a0 * b0 * corr);
+      x[e - L + i] = (x[e - L + i] * a0 + x[s - L + i] * b0) * k;
+    }
+  }
+  return true;
+}
 
 export class MultisampleInstrument {
   /**
@@ -44,8 +84,9 @@ export class MultisampleInstrument {
     /** @type {Array<{rootHz:number, lowHz:number, highHz:number, url:string, buffer:AudioBuffer|null, decoding:Promise|null}>} */
     this.zones = [];
     this.gain = 1;
-    this.envelope = { attack: 0.006, release: 0.18 };
+    this.envelope = { attack: 0.005, release: 0.12 };
     this.manifestLoaded = false;
+    this.articulation = 'sustained';   // subclasses: 'struck' (piano), 'bowed' (violin)
     this.manifestPromise = this._loadManifest();
   }
 
@@ -64,6 +105,12 @@ export class MultisampleInstrument {
         .map((z) => ({
           root: z.root || null,
           rootHz: +z.rootHz,
+          // A loop (seconds into the recording) repeated while a note is held: the violin's
+          loop: z.loop && isFinite(z.loop.start) && isFinite(z.loop.end) && z.loop.end > z.loop.start + 0.2 ? { start: +z.loop.start, end: +z.loop.end } : null,
+          // How fast the recording dies away (s to fall 60 dB; measured, for the drawing)
+          decayT60: isFinite(z.decayT60) && +z.decayT60 > 0 ? +z.decayT60 : null,
+          // The pitch the recording actually has (rootHz corrected by its measured tuneCents)
+          playedHz: +z.rootHz * Math.pow(2, (isFinite(z.tuneCents) ? +z.tuneCents : 0) / 1200),
           lowHz: isFinite(z.lowHz) ? +z.lowHz : 0,
           highHz: isFinite(z.highHz) ? +z.highHz : Infinity,
           url: /^https?:|^\//.test(z.url) ? z.url : this.baseDir + z.url,
@@ -108,6 +155,7 @@ export class MultisampleInstrument {
         if (!res.ok) throw new Error(`zone ${res.status}`);
         const arr = await res.arrayBuffer();
         const buf = await this.audioContext.decodeAudioData(arr);
+        if (zone.loop) bakeLoopCrossfade(buf, zone.loop);
         zone.buffer = buf;
         return buf;
       } catch (e) {
@@ -153,7 +201,8 @@ export class MultisampleInstrument {
 
     const source = this.audioContext.createBufferSource();
     source.buffer = zone.buffer;
-    source.playbackRate.value = frequency / zone.rootHz;
+    // Against the recording's measured pitch, so the written frequency is what sounds
+    source.playbackRate.value = frequency / (zone.playedHz || zone.rootHz);
 
     // Gentle anti-alias / anti-boom filter based on shift direction.
     const filter = this.audioContext.createBiquadFilter();
@@ -168,10 +217,20 @@ export class MultisampleInstrument {
       filter.Q.value = 0.5;
     }
     source.connect(filter);
+    // A held note repeats the recording's loop (scripts/tune-samples.mjs found it, and
+    // _decodeZone blended its end into its start), so it lasts as long as written
+    if (zone.loop) {
+      source.loop = true;
+      source.loopStart = zone.loop.start;
+      source.loopEnd = zone.loop.end;
+    }
 
     return {
       frequency: { value: frequency },
-      start: (when) => { try { source.start(when); } catch {} },
+      // `offset` (seconds into the recording) lets a slurred note enter past its onset
+      start: (when, offset = 0) => { try { source.start(when, Math.max(0, Math.min(offset, zone.buffer.duration * 0.5))); } catch {} },
+      // Where a slur enters this recording: past the bow's onset (its own peak, at most 0.25 s)
+      bowOffset: zone.bowOffset != null ? zone.bowOffset : 0.15,
       stop: (when) => { try { source.stop(when); } catch {} },
       connect: (dest) => { try { filter.connect(dest); } catch {} return dest; },
       disconnect: () => { try { filter.disconnect(); } catch {} try { source.disconnect(); } catch {} },
@@ -181,32 +240,29 @@ export class MultisampleInstrument {
   }
 
   /**
-   * Envelope for applyVoiceEnvelope, honoring the manifest's `envelope` block.
-   * The manifest declares absolute seconds (`attack`, `release`); when the note
-   * duration is known they override the default ratios below. The ratio keys
-   * (`attackTimeRatio` etc.) may also be declared directly in the manifest.
+   * The envelope, in seconds, from the manifest's `envelope` block: a short
+   * attack (the recording carries its own onset), full gain until the note-off
+   * (the recording carries its own decay), then the release.
    * @param {number} [duration] note length in seconds
+   * @param {number} [frequency] the pitch that sounds
    */
-  getEnvelopeSettings(duration) {
-    const env = {
-      attackTimeRatio: 0.02,
-      decayTimeRatio: 0,
-      sustainLevel: 1,
-      releaseTimeRatio: 0.12,
-    };
+  getEnvelopeSettings(duration, frequency) {
     const e = this.envelope || {};
-    for (const k of Object.keys(env)) {
-      if (e[k] != null && isFinite(e[k])) env[k] = +e[k];
-    }
-    if (isFinite(duration) && duration > 0) {
-      if (e.attack != null && isFinite(e.attack) && e.attack >= 0) env.attackTimeRatio = e.attack / duration;
-      if (e.release != null && isFinite(e.release) && e.release >= 0) env.releaseTimeRatio = e.release / duration;
-    }
+    const sec = (v, d) => (v != null && isFinite(v) && v >= 0 ? +v : d);
+    // drawT60: the recording's own decay, which the workspace draws; the audio does
+    // not apply it (the recording already decays).
+    const z = isFinite(frequency) && frequency > 0 ? this._zoneFor(frequency) : null;
+    const env = { attack: sec(e.attack, 0.005), release: sec(e.release, 0.12) };
+    if (z && z.decayT60) env.drawT60 = z.decayT60 * (z.playedHz ? z.playedHz / frequency : 1);
     return env;
   }
 
-  applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0) {
-    // Reuse the shared click-free envelope; samples hold at full then release.
-    applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.gain, this.getEnvelopeSettings(duration));
+  applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null, frequency = null) {
+    applyVoiceEnvelope(gainNode, startTime, duration, initialVolume * this.gain, this.getEnvelopeSettings(duration, frequency), shape);
+  }
+
+  /** Seconds from the note's start until the voice can be stopped. */
+  voiceLength(duration, shape = null, frequency = null) {
+    return envelopeLength(this.getEnvelopeSettings(duration, frequency), duration, shape);
   }
 }

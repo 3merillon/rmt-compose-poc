@@ -29,27 +29,26 @@ Creates a module with a BaseNote (id `0`) and nothing else.
 
 ::: warning Numbers are silently ignored
 The constructor only honours values that are a `string`, a `function`, a `*String` key, or
-`color` / `instrument` (`src/module.js:92-113`). `new Module({ tempo: 120 })` drops the `120`
-and leaves the BaseNote at 60 BPM. Write `new Module({ tempo: '120' })`.
+`color` / `instrument` (`src/module.js:96-116`). `new Module({ duration: 0.5 })` drops the `0.5`
+and leaves the time unit at 1 s. Write `new Module({ duration: '1/2' })`.
 :::
 
 ### BaseNote defaults
 
-Any key you do not override falls back to these — note that they are **expression strings**, and
-that they are still in the legacy format (`src/module.js:76-88`):
+Any key you do not override falls back to these. They are **expression strings** in the DSL
+(`src/module.js:80-93`):
 
 | Property | Default expression | Value |
 |---|---|---|
-| `frequency` | `new Fraction(440)` | 440 Hz |
-| `startTime` | `new Fraction(0)` | 0 s |
-| `tempo` | `new Fraction(60)` | 60 BPM |
-| `beatsPerMeasure` | `new Fraction(4)` | 4 |
-| `measureLength` | `'beat(base) * base.bpm'` | 4 s at the defaults |
+| `frequency` | `'440'` | 440 Hz |
+| `startTime` | `'0'` | 0 s |
+| `duration` | `'1'` | 1 s, the time unit |
 
-There is **no `duration` default** — the BaseNote has no duration.
-
-Because `measureLength` is seeded from that DSL string and `createModuleJSON()` writes source text
-verbatim, a saved pure-DSL module stays pure DSL.
+The BaseNote holds the only absolute values in a module: a frequency in Hz, a start and a duration
+in seconds. Its duration is the *time unit* every other duration relates to (`base.d`), one beat if
+you count in beats. Nothing stores a tempo; `60 / module.getTimeUnit()` is the tempo as a view. See
+[`getTimeUnit()`](#gettimeunit). `createModuleJSON()` writes source text verbatim, so a saved
+module stays in the syntax it was written in.
 
 ## Properties
 
@@ -61,7 +60,7 @@ module.notes  // { [id: number]: Note } — a plain object, not a Map
 
 Keyed by note id, and it **includes the BaseNote at key `0`**. `module.notes.get(1)` throws;
 use `module.getNoteById(1)`. Iterating with `Object.values(module.notes)` yields the BaseNote
-too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:918`).
+too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:938`).
 
 ### baseNote
 
@@ -92,21 +91,12 @@ invalidates the module end-time cache. Returns the new `Note`.
 const note = module.addNote({
   frequency: 'base.f * (3/2)',
   startTime: 'base.t',
-  duration: 'beat(base)'
+  duration: 'base.d'
 })
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-```javascript
-const note = module.addNote({
-  frequency: "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))",
-  startTime: "module.baseNote.getVariable('startTime')",
-  duration: "new Fraction(60).div(module.findTempo(module.baseNote))"
-})
-```
-</details>
+Pass `measure: true` to create a [measure bar](#generatemeasures) (a silent note with a start and
+a duration).
 
 ### getNoteById()
 
@@ -144,8 +134,8 @@ module.markNoteDirty(noteId)
 
 Marks the note dirty, re-registers its dependencies, and cascades to everything downstream —
 transitively, and across the BaseNote: when the cascade reaches note `0` it continues into every
-note that reads the BaseNote (by writing `base`, or by inheriting a tempo or measure length) and on
-through whatever reads those.
+note that reads the BaseNote (by writing `base`, or by inheriting an amplitude, attack or release)
+and on through whatever reads those.
 
 ### markNotesDirtyBatch()
 
@@ -157,7 +147,7 @@ The same thing for many notes in one pass: it registers dependencies once, colle
 **and** the transitive dependencies of the marked notes, then invalidates the incremental
 evaluator selectively rather than wholesale. Collecting the *dependencies* matters — without them
 an imported note's parent may not be in the cache when the child evaluates. The module-import path
-(`src/player.js:2070`) uses it after grafting a library module onto a target note.
+(`src/player.js:1833`) uses it after grafting a library module onto a target note.
 
 ### batchSetExpressions()
 
@@ -170,11 +160,11 @@ module.batchSetExpressions([
 
 Compiles all the expressions with per-note notifications suppressed, re-registers dependencies
 once, then calls `markNotesDirtyBatch()`. The widget's **Evaluate Module** action
-(`src/modals/index.js:1435`) rewrites every note in the composition through this in one pass.
+(`src/modals/index.js:810`) rewrites every note in the composition through this in one pass.
 
 ::: danger The keys are `varName` and `expr`
 Not `property` and `expression`. The update objects are destructured as
-`{ noteId, varName, expr }` (`src/module.js:336`); passing the wrong keys throws
+`{ noteId, varName, expr }` (`src/module.js:337`); passing the wrong keys throws
 `TypeError: Cannot read properties of undefined (reading 'endsWith')`.
 :::
 
@@ -200,14 +190,19 @@ Each cache entry is:
   startTime: Fraction,
   duration: Fraction,
   frequency: Fraction,
-  tempo: Fraction,
-  beatsPerMeasure: Fraction,
-  measureLength: Fraction,   // may be a plain {s, n, d, valueOf} object when derived
+  amplitude: Fraction,       // null unless the note defines one — see findAmplitude()
+  attack: Fraction,          // null unless the note defines one; a share of the note's duration, from its start
+  release: Fraction,         // null unless the note defines one; a share of the note's duration, from its end (it rings after the note)
   corruptionFlags: number    // CORRUPT bitmask; 0 when clean
 }
 ```
 
-`corruptionFlags` is the per-property irrational marker — see
+The three language variables (`startTime`, `duration`, `frequency`) are always filled. The three
+interpretation variables stay `null` when the note does not define them; readers fall back to the
+BaseNote's. Index and flag values are in the
+[VAR table](/developer/api/binary-expression#variable-indices).
+
+`corruptionFlags` is the per-property "tempered or approximate" marker — see
 [BinaryExpression](/developer/api/binary-expression#corruption-flags). After each evaluation the
 module pushes those flags into the dependency graph, which is what drives the hatched rendering of
 TET notes.
@@ -218,7 +213,7 @@ TET notes.
 const cache = module.getEvaluationCache()
 ```
 
-**Evaluates first if anything is dirty**, then returns the cache (`src/module.js:664-670`). This
+**Evaluates first if anything is dirty**, then returns the cache (`src/module.js:694-700`). This
 is the lazy entry point that `Note.getVariable()` goes through; it is not a peek.
 
 ### evaluateNoteVariable()
@@ -240,8 +235,8 @@ Clears the evaluation cache and marks **every** note — BaseNote included — d
 ::: warning Build a module by hand? Call `invalidateAll()` before you read values
 `new Module()` marks the BaseNote dirty on the module, but not on the incremental evaluator, so
 a module you assemble with `addNote()` evaluates its notes *without* ever evaluating note 0. Base
-references then fall back to the VM's hard-coded defaults (440 Hz, 60 BPM, 4 beats), and a
-`beat(base)` duration comes out at 1 s no matter what tempo you set. `Module.loadFromJSON()` ends
+references then fall back to the VM's hard-coded defaults (440 Hz, start 0, duration 1 s), and a
+`base.d` duration comes out at 1 s no matter what duration you gave the BaseNote. `Module.loadFromJSON()` ends
 with `invalidateAll()`, which is why the app never hits this. See
 [Known rough edges](#known-rough-edges) below.
 :::
@@ -303,7 +298,7 @@ module.getParentChainByProperty(2, 'frequency')  // → [1, 0]
 ```
 
 The ancestor chain for one property, walking back to the BaseNote. **The starting note is not in
-the result** (`src/module.js:522`) — `chain[0]` is its parent. `property` is one of
+the result** (`src/module.js:518`) — `chain[0]` is its parent. `property` is one of
 `'frequency' | 'startTime' | 'duration'`.
 
 ### getChildrenTreeByProperty()
@@ -335,23 +330,42 @@ Escape hatch to the raw indexes (`detectCycles()`, `hasDependencyPath()`, `getCo
 
 ## Musical lookups
 
-### findTempo()
+### getTimeUnit()
 
 ```javascript
-const tempo = module.findTempo(note)  // Fraction (BPM)
+const unit = module.getTimeUnit()  // Fraction, seconds
 ```
 
-Returns the note's own `tempo` expression if it has one, otherwise walks the `parentId` chain,
-otherwise the BaseNote's tempo (falling back to `new Fraction(60)`).
+The BaseNote's evaluated duration: the time unit, one beat if you count in beats. Returns
+`new Fraction(1)` when that duration is not positive. `60 / unit` is the tempo in BPM, a read-only
+view (the note widget shows it as "= 100 BPM" beside the BaseNote's duration; the MIDI export
+writes it as the tempo). Nothing stores a tempo.
 
-### findMeasureLength()
+### getMeasureNotes()
 
 ```javascript
-const seconds = module.findMeasureLength(note)  // Fraction
+const bars = module.getMeasureNotes()  // Note[], unordered
 ```
 
-`beatsPerMeasure / tempo × 60`. `beatsPerMeasure` comes from the note, else from the nearest
-non-measure ancestor, else from the BaseNote.
+Every note for which [`isMeasureNote()`](/developer/api/note#ismeasurenote) is true, in
+`Object.values(module.notes)` order. `getModuleEndTime()` and `reindexModule()` use it.
+
+::: warning Removed: findTempo() and findMeasureLength()
+`module.findTempo(note)` and `module.findMeasureLength(note)` no longer exist, and neither do the
+`tempo`, `beatsPerMeasure` and `measureLength` variables they read. A beat in seconds is
+`module.getTimeUnit()`; the length of a bar is the bar's own `duration`.
+:::
+
+### findAmplitude()
+
+```javascript
+const gain = module.findAmplitude(note)  // Fraction — exact, unclamped
+```
+
+The amplitude a note sounds at: its own `amplitude` expression if it has one, otherwise the
+BaseNote's, otherwise `new Fraction(1)`. This is the same fallback the evaluator applies to
+`[id].a`. There is no `parentId` walk. Consumers clamp for their medium — the audio engine through
+`amplitudeToGain()` in `src/player/amplitude.js` (0–4).
 
 ### findInstrument()
 
@@ -359,13 +373,24 @@ non-measure ancestor, else from the BaseNote.
 const name = module.findInstrument(note)  // string
 ```
 
-Returns `note.properties.instrument` when it is pinned. Otherwise it follows the note's
-**frequency expression** to its parent (`[N].f` in DSL, `module.getNoteById(N).getVariable('frequency')`
-in legacy) and asks that note, recursively. A note that bottoms out at `base.f` — or at nothing —
-resolves to the module-level default instrument.
+Returns `note.properties.instrument` when it is set. Otherwise the instrument follows the note's
+**start time**, not its frequency (the rule is in `src/players.js`; `findInstrument()` delegates to
+`instrumentOf()`):
+
+1. a note whose start is written from the end of a note or a silence *p* (`[p].t + [p].d`, with or
+   without a rest added) takes *p*'s instrument: the same player;
+2. a copy of a note *k* of a line (start `[k].t + X`, frequency `r * [k].f`) whose predecessor's copy
+   exists (written from it with the same `X`) takes that copy's instrument;
+3. otherwise the note starts a line and takes the instrument of the note its start time is written
+   from (`[k].t …`; a measure bar does not count), else the BaseNote's, else the module-level default
+   instrument.
+
+The optional second argument is a `Map` memo, shared by a caller that resolves many notes in one pass
+(the audio engine, the renderer and the MIDI export do), so each line is walked once rather than once
+per note on it.
 
 That default is a module-scoped value, not a constant: `player.js` calls `setDefaultInstrument()`
-whenever the `audio.defaultInstrument` setting changes (`src/player.js:1176-1188`). This is the
+whenever the `audio.defaultInstrument` setting changes (`src/player.js:1045-1060`). This is the
 bridge between the Settings panel and note timbre.
 
 ```javascript
@@ -375,6 +400,21 @@ setDefaultInstrument('piano')
 getDefaultInstrument()  // → 'piano'
 ```
 
+### findPlayer()
+
+```javascript
+const { head, prev } = module.findPlayer(note, memo)  // {head: number, prev: number|null}
+```
+
+A note's player: `head` is the id of the first note of its line (the note that decides the
+instrument), and `prev` the id of the note it follows in the line, `null` for a first note and for a
+note that sets its own instrument, which starts a new player. `preparePlayback()` puts both on each
+note's data as `player` and `prev`; nothing audible uses them yet. The note widget's
+`Inherited: <name> · plays with [N]` line shows `head`.
+
+A module file saved before this rule is migrated by `loadFromJSON()`, and `createModuleJSON()` writes
+`instrumentRule: "start-time"` at the top level; see [Module System](/developer/architecture/module-system).
+
 Initial value: `'sine-wave'`.
 
 ### generateMeasures()
@@ -383,31 +423,23 @@ Initial value: `'sine-wave'`.
 const measures = module.generateMeasures(fromNote, n)  // → Note[]
 ```
 
-**This mutates the module.** It creates `n` new measure bars (notes with a `startTime` and
-nothing else), chains each to the previous one, sets `parentId`, and returns the created `Note`
-objects. It is a factory, not a read-only helper for the renderer.
+**This mutates the module.** It creates `n` new measure bars, chains each to the previous one, sets
+`parentId`, and returns the created `Note` objects. It is a factory, not a read-only helper for the
+renderer.
 
-The chained expression is written in the format of the note you started from — it sniffs
-`fromNote`'s `startTime` source with `isDSLSyntax()`:
+A measure bar is a silent note (a start and a duration, no frequency) flagged `measure: true`; see
+[`isMeasureNote()`](/developer/api/note#ismeasurenote). The expressions are always DSL:
 
 ```
-base.t + measure(base)      # first, when fromNote is the BaseNote
-[3].t + measure([3])        # each subsequent measure
+startTime: base.t         duration: base.d * 4     # first bar: fromNote is the BaseNote
+                                                   # or is not a measure bar
+startTime: [3].t + [3].d  duration: [3].d          # each next bar, [3] being the previous bar
 ```
 
-<details>
-<summary>Legacy JavaScript syntax</summary>
-
-A BaseNote whose `startTime` is still the constructor default (`new Fraction(0)`) sniffs as
-**legacy**, so a module built with a bare `new Module()` gets legacy measure chains instead:
-
-```javascript
-module.baseNote.getVariable('startTime').add(module.findMeasureLength(module.baseNote))
-```
-
-Modules loaded from a saved file have a DSL `startTime` (`'0'`) on the BaseNote and get the DSL
-form above.
-</details>
+Each bar starts where the previous one ends and lasts as long, so a meter change is one bar's
+duration: change it and the bars after it follow. Nothing is computed from a tempo or a
+beats-per-measure value. The module ends at the later of the last bar's start plus its duration and
+the last note's end (`getModuleEndTime()`).
 
 ## Serialization
 
@@ -440,7 +472,21 @@ const module = await Module.loadFromJSON(source)
 `source` is either a URL string (which gets `fetch`ed) or a plain object. Ends with
 `invalidateAll()`, so the returned module is ready to evaluate.
 
-Per-note id guards (`src/module.js:864-880`): ids that are not integers, are `< 0`, or are
+Before it builds any note, it runs the data through two conversions, in this order:
+
+1. `migrateTimeModel()` (`src/migrate/relational-time.js`): a module written for the old time
+   model (tempo, beats per measure, `beat()`, `measure()`, `module.findTempo` chains) is rewritten
+   in relational time. A module it cannot convert throws a `TimeMigrationError`. A converted load
+   logs one `[RMT] Converted a module to relational time` line.
+2. `migrateSyntax()` (`src/migrate/legacy-syntax.js`): every expression in the retired method-chain
+   syntax becomes DSL. One it cannot read as written throws a `SyntaxMigrationError` naming the
+   note and variable. A converted load logs `[RMT] N expression(s) converted from the method-chain
+   syntax to the DSL`.
+
+Both are exact: every start, duration, frequency and interpretation value keeps the same fraction.
+See [Module System](/developer/architecture/module-system#loading-old-modules).
+
+Per-note id guards (`src/module.js:860-872`): ids that are not integers, are `< 0`, or are
 `> 65535` (the `u16` ceiling of `LOAD_REF`) are skipped with a `[RMT Security]` warning; the
 literal ids `__proto__`, `constructor` and `prototype` are blocked outright. There is no `eval()`
 anywhere in this path — expressions are compiled to bytecode.
@@ -455,8 +501,8 @@ Both appeared in older docs. The real methods are the three above.
 module.reindexModule()
 ```
 
-Renumbers in place, from 1: measure bars first (sorted by evaluated `startTime`), then regular
-notes. Rewrites every `[N]` and `module.getNoteById(N)` reference to match, rebuilds the dependency
+Renumbers in place, from 1: measure bars (`isMeasureNote()`) first, sorted by evaluated `startTime`, then regular
+notes. Rewrites every `[N]` reference to match, rebuilds the dependency
 graph, and re-evaluates (which repopulates corruption flags).
 
 ## Timing and diagnostics
@@ -467,7 +513,7 @@ graph, and re-evaluates (which repopulates corruption flags).
 const seconds = module.getModuleEndTime()
 ```
 
-The later of (last measure start + its measure length) and (last note start + its duration).
+The later of (last measure bar's start + its duration) and (last note start + its duration).
 Memoized in a module-file-level cache that is cleared by `invalidateModuleEndTimeCache()` — a
 plain exported function, **not** an event.
 
@@ -490,33 +536,33 @@ Fraction-pool occupancy from the evaluator. Used by the perf harness.
 
 The module builds its evaluators through `src/wasm/evaluator-adapter.js`. When the WASM hot-swap
 is enabled it registers an `onWasmReady` callback that replaces both evaluators mid-session
-(`_upgradeEvaluators()`, `src/module.js:133`), marks everything dirty, and warms the new engine on
+(`_upgradeEvaluators()`, `src/module.js:139`), marks everything dirty, and warms the new engine on
 an idle callback.
 
-::: danger WASM evaluation does not ship
-The hot-swap only arms when the page is loaded with `?evaluator=wasm`
-(`isEvaluatorHotSwapEnabled()`, `src/wasm/evaluator-adapter.js:36-40`), and that flag exists
-because the WASM wrapper's in-browser behaviour has never been verified — before the hot-swap
-existed, module creation always won the race against WASM init, so the wrapper never actually ran.
-**Every user session runs on the JS evaluator.** Treat the WASM path as unverified scaffolding, not
-a feature. See [WASM Adapters](/developer/wasm/adapters).
+::: danger WASM evaluation is disabled
+The Rust core still has the old variable layout (`tempo`, `beatsPerMeasure`, `measureLength`), so
+`WASM_MATCHES_VARIABLE_LAYOUT` is `false` (`src/wasm/evaluator-adapter.js:37`). While it is
+false, `isEvaluatorHotSwapEnabled()` never arms the hot-swap, `?evaluator=wasm` is ignored with a
+console warning, and **every session runs on the JS evaluator**. Porting the Rust core to the new
+layout is planned. See [WASM Adapters](/developer/wasm/adapters).
 :::
 
 ## Example
 
 ```javascript
 const module = await Module.loadFromJSON({
-  baseNote: { frequency: '263', startTime: '0', tempo: '120', beatsPerMeasure: '4' },
+  baseNote: { frequency: '263', startTime: '0', duration: '1/2' },
   notes: [
-    { id: 1, startTime: 'base.t',        duration: 'beat(base)', frequency: 'base.f' },
-    { id: 2, startTime: '[1].t + [1].d', duration: 'beat(base)', frequency: '[1].f * (3/2)' }
+    { id: 1, startTime: 'base.t',        duration: 'base.d', frequency: 'base.f' },
+    { id: 2, startTime: '[1].t + [1].d', duration: 'base.d', frequency: '[1].f * (3/2)' }
   ]
 })
 
 const cache = module.evaluateModule()
 
+module.getTimeUnit().valueOf()     // 0.5   — 120 BPM as a view: 60 / 0.5
 cache.get(1).frequency.valueOf()   // 263
-cache.get(1).duration.valueOf()    // 0.5   — beat(base) at 120 BPM
+cache.get(1).duration.valueOf()    // 0.5   — base.d, one time unit
 cache.get(2).frequency.valueOf()   // 394.5 — a just fifth above note 1
 cache.get(2).startTime.valueOf()   // 0.5   — starts when note 1 ends
 

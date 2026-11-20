@@ -19,10 +19,9 @@ export class DependencyGraph {
     // Track baseNote references separately
     this.baseNoteDependents = new Set();
 
-    // Notes that can follow the BaseNote without writing `base`: measure bars
-    // (their computed measureLength inherits tempo and beatsPerMeasure) and
-    // notes reading `[n].tempo` / `beat([n])` / `measure([n])`, which inherit
-    // when note n has none of its own. Only re-evaluation needs these, so
+    // Notes that can follow the BaseNote without writing `base`: notes reading
+    // `[n].a` (amplitude, attack, release), which inherit the BaseNote's when
+    // note n has none of its own. Only re-evaluation needs these, so
     // they are kept apart from baseNoteDependents (which the UI also reads).
     this.implicitBaseDependents = new Set();
 
@@ -68,7 +67,7 @@ export class DependencyGraph {
 
     // Corruption tracking for irrational number support (TET scales)
     // Maps noteId -> u8 bitmask indicating which properties are corrupted (contain irrational values)
-    // Bit flags: 0x01=startTime, 0x02=duration, 0x04=frequency, 0x08=tempo, 0x10=beatsPerMeasure, 0x20=measureLength
+    // Bit flags: 0x01=startTime, 0x02=duration, 0x04=frequency, 0x08=amplitude, 0x10=attack, 0x20=release
     this.corruptionFlags = new Map();
 
     // Epoch counter for corruption changes (allows renderer to skip buffer upload when unchanged)
@@ -128,12 +127,10 @@ export class DependencyGraph {
    * @param {Set} oldDeps - The OLD forward deps (captured before _updateStartTimeDependencies)
    */
   _updateStartTimePropertyDependencies(noteId, newPropDeps, oldDeps) {
-    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency, 5 = measureLength
-    // measureLength is derived from duration, so treat it as duration-related
+    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency
     const VAR_START_TIME = 0;
     const VAR_DURATION = 1;
     const VAR_FREQUENCY = 2;
-    const VAR_MEASURE_LENGTH = 5;
 
     // Helper to update a specific property inverse map
     // varIndices is an array of VAR indices that should map to this property
@@ -168,8 +165,7 @@ export class DependencyGraph {
 
     for (const depNoteId of allDepNotes) {
       updatePropertyMap(this.startTimeOnStartTimeDependents, depNoteId, [VAR_START_TIME], newPropDeps);
-      // measureLength (5) is derived from duration, so include it with duration
-      updatePropertyMap(this.startTimeOnDurationDependents, depNoteId, [VAR_DURATION, VAR_MEASURE_LENGTH], newPropDeps);
+      updatePropertyMap(this.startTimeOnDurationDependents, depNoteId, [VAR_DURATION], newPropDeps);
       updatePropertyMap(this.startTimeOnFrequencyDependents, depNoteId, [VAR_FREQUENCY], newPropDeps);
     }
   }
@@ -285,12 +281,10 @@ export class DependencyGraph {
    * @param {Set} oldDeps - The OLD forward deps (captured before _updateFrequencyDependencies)
    */
   _updateFrequencyPropertyDependencies(noteId, newPropDeps, oldDeps) {
-    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency, 5 = measureLength
-    // measureLength is derived from duration, so treat it as duration-related
+    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency
     const VAR_START_TIME = 0;
     const VAR_DURATION = 1;
     const VAR_FREQUENCY = 2;
-    const VAR_MEASURE_LENGTH = 5;
 
     const updatePropertyMap = (propMap, depNoteId, varIndices, newPropDeps) => {
       const newNoteProps = newPropDeps.get(depNoteId);
@@ -323,8 +317,7 @@ export class DependencyGraph {
 
     for (const depNoteId of allDepNotes) {
       updatePropertyMap(this.frequencyOnStartTimeDependents, depNoteId, [VAR_START_TIME], newPropDeps);
-      // measureLength (5) is derived from duration, so include it with duration
-      updatePropertyMap(this.frequencyOnDurationDependents, depNoteId, [VAR_DURATION, VAR_MEASURE_LENGTH], newPropDeps);
+      updatePropertyMap(this.frequencyOnDurationDependents, depNoteId, [VAR_DURATION], newPropDeps);
       updatePropertyMap(this.frequencyOnFrequencyDependents, depNoteId, [VAR_FREQUENCY], newPropDeps);
     }
   }
@@ -399,12 +392,10 @@ export class DependencyGraph {
    * @param {Set} oldDeps - The OLD forward deps (captured before _updateDurationDependencies)
    */
   _updateDurationPropertyDependencies(noteId, newPropDeps, oldDeps) {
-    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency, 5 = measureLength
-    // measureLength is derived from duration, so treat it as duration-related
+    // VAR indices: 0 = startTime, 1 = duration, 2 = frequency
     const VAR_START_TIME = 0;
     const VAR_DURATION = 1;
     const VAR_FREQUENCY = 2;
-    const VAR_MEASURE_LENGTH = 5;
 
     const updatePropertyMap = (propMap, depNoteId, varIndices, newPropDeps) => {
       const newNoteProps = newPropDeps.get(depNoteId);
@@ -437,8 +428,7 @@ export class DependencyGraph {
 
     for (const depNoteId of allDepNotes) {
       updatePropertyMap(this.durationOnStartTimeDependents, depNoteId, [VAR_START_TIME], newPropDeps);
-      // measureLength (5) is derived from duration, so include it with duration
-      updatePropertyMap(this.durationOnDurationDependents, depNoteId, [VAR_DURATION, VAR_MEASURE_LENGTH], newPropDeps);
+      updatePropertyMap(this.durationOnDurationDependents, depNoteId, [VAR_DURATION], newPropDeps);
       updatePropertyMap(this.durationOnFrequencyDependents, depNoteId, [VAR_FREQUENCY], newPropDeps);
     }
   }

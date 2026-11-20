@@ -12,7 +12,10 @@ and rebuilt by `scripts/build-samples.mjs`.
 - **URL:** https://github.com/sgossner/VSCO-2-CE
 - Piano: "Upright Nr1"; Violin: "Solo Violin — Arco Vib" (sustained).
 
-Sources were downmixed to mono, leading silence trimmed, length-capped with a
-short tail fade, and encoded to AAC (`.m4a`, ~96 kbps) for broad browser
-`decodeAudioData` support (Safari can't decode Ogg/Opus). CC0 imposes no
-attribution requirement; this credit is provided as good practice.
+Sources were downmixed to mono, leading silence trimmed, and encoded to AAC
+(`.m4a`, ~96 kbps) for broad browser `decodeAudioData` support (Safari can't
+decode Ogg/Opus). Piano recordings are kept until they decay below -66 dBFS (at
+most 20 s); violin recordings are capped at 3.5 s with a short tail fade. Each
+zone's measured pitch (`tuneCents`) and the piano's measured decay
+(`decayT60`) are added to the manifests by `scripts/tune-samples.mjs`. CC0
+imposes no attribution requirement; this credit is provided as good practice.

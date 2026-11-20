@@ -49,7 +49,7 @@ const check = (name, pass, detail) => {
 // Deliberately NOT passing --autoplay-policy=no-user-gesture-required: the real
 // gesture rules are part of what we are testing. Relaxing them here would hide a
 // play() that never actually reaches a running AudioContext.
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, channel: process.env.PW_CHANNEL || undefined }); // PW_CHANNEL=msedge where bundled Chromium is absent
 
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 4 });
 const page = await ctx.newPage();

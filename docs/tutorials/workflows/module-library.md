@@ -1,6 +1,6 @@
 ---
 title: Building a Module Library
-description: How the shipped 79-module library is organised, how to add your own modules with Copy to Modules or uploads, and how to back up the layout.
+description: How the shipped 81-module library is organised, how to add your own modules with Copy to Modules or uploads, and how to back up the layout.
 ---
 
 # Building a Module Library
@@ -10,7 +10,7 @@ editable, and the fastest way to add to it is to select some notes and press one
 
 ## What ships
 
-**79 modules in six sections.**
+**81 modules in six sections.**
 
 | Section | Modules | What's in it |
 |---|---|---|
@@ -19,7 +19,7 @@ editable, and the fastest way to add to it is to select some notes and press one
 | **Progressions** | 8 | ii–V–I, I–IV–V–I, I–vi–IV–V, V7–I, plus four cadences |
 | **Melodies** | 7 | Ode to Joy, Twinkle Twinkle, Frère Jacques, Amazing Grace, Greensleeves, Bach Minuet in G, Scarborough Fair |
 | **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 1 | `canon base` — and where your own modules land |
+| **Custom** | 3 | `canon`, `canon base` and `canon melody` — and where your own modules land |
 
 ![The module bar showing coloured module tiles grouped into labelled sections](/img/module-library-icons.png)
 
@@ -65,8 +65,8 @@ What you get is a genuinely reusable module, not a snapshot:
 - Expressions that reference only notes *inside* the selection are copied **verbatim** (ids
   renumbered). So `[1].t + [1].d` stays `[1].t + [1].d` — internal branching survives.
 - Expressions that reached *outside* the selection would dangle, so they are rebuilt against the new
-  base as ratios and beat offsets: `k * base.f`, `base.t + beat(base) * k`, `beat(base) * k`.
-- The new BaseNote is a copy of your current one, so `base.f` and `beat(base)` keep meaning what
+  base as ratios and time-unit offsets: `k * base.f`, `base.t + base.d * k`, `base.d * k`.
+- The new BaseNote is a copy of your current one, so `base.f` and `base.d` keep meaning what
   they meant, and pitches survive as **ratios** — which is what lets the copy transpose correctly
   when you drop it on a different note.
 
@@ -109,9 +109,9 @@ its internal ids renumbered so nothing collides.
 
 | Drop target | Result |
 |---|---|
-| A note | Imported and re-rooted onto that note |
+| A note | Imported and re-rooted onto that note's start and pitch; its durations stay in the workspace's time unit |
 | The BaseNote circle | Imported keeping its `base.*` anchors |
-| A measure bar | Timing anchors to the measure; **frequency stays on `base.f`** (a measure bar has no pitch) |
+| A measure bar | Start and duration anchor to the bar; **frequency stays on `base.f`** (a bar has no pitch) |
 | A silence | **Rejected** — *"Cannot drop onto a silence."* |
 | Empty background | **Rejected** — *"Drop onto a note or the BaseNote circle to import a module."* |
 

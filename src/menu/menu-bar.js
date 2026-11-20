@@ -6,6 +6,10 @@ import { settingsStore } from '../settings/settings-store.js';
 import { pointerOf } from '../utils/draggable-widget.js';
 import { viewportHeight } from '../utils/viewport.js';
 import { history } from '../store/history.js';
+import { EXPRESSION_VARS } from '../note.js';
+
+// JSON keys of the old time model (tempo, beats per measure, measure length)
+const RETIRED_TIME_KEYS = ['tempo', 'beatsPerMeasure', 'measureLength'];
 
 const menuAPI = (function() {
     const domCache = {
@@ -295,6 +299,7 @@ const menuAPI = (function() {
     // being pushed against it.
     const ICON_DROP_START = '<path d="M5 4v16"/><path d="M19 12H9"/><path d="m13 8-4 4 4 4"/>';
     const ICON_DROP_END = '<path d="M19 4v16"/><path d="M5 12h10"/><path d="m11 8 4 4-4 4"/>';
+    const ICON_COMMIT = '<path d="M5 12.5 10 17.5 19 7"/>';
 
     function createToolButton(cls, label, iconPaths) {
         const btn = document.createElement('button');
@@ -427,8 +432,42 @@ const menuAPI = (function() {
         group.appendChild(undo);
         group.appendChild(redo);
 
+        // Live tempo (a performance setting, outside the notation): a slider in whole
+        // BPM, the effective tempo, and a commit button that appears only while the
+        // tempo differs from the written one. player.js owns the behaviour and finds
+        // these by id (refreshTempoUI, and delegated listeners on the document).
+        const tempo = document.createElement('div');
+        tempo.className = 'library-tempo';
+        tempo.title = 'Live tempo: plays faster or slower without changing the piece. Double-click to return to the written tempo.';
+        const tempoSlider = document.createElement('input');
+        tempoSlider.type = 'range';
+        tempoSlider.id = 'tempoSlider';
+        tempoSlider.className = 'library-tempo-slider';
+        tempoSlider.min = '15'; tempoSlider.max = '240'; tempoSlider.step = '1'; tempoSlider.value = '60';
+        tempoSlider.setAttribute('aria-label', 'Live tempo');
+        const tempoValue = document.createElement('span');
+        tempoValue.id = 'tempoValue';
+        tempoValue.className = 'library-tempo-value';
+        tempoValue.textContent = '60';
+        const tempoUnit = document.createElement('span');
+        tempoUnit.className = 'library-tempo-unit';
+        tempoUnit.textContent = 'BPM';
+        // The number over its unit, both in the accent colour: two short lines in the
+        // 30px control instead of one wide one.
+        const readout = document.createElement('span');
+        readout.className = 'library-tempo-readout';
+        readout.appendChild(tempoValue);
+        readout.appendChild(tempoUnit);
+        tempo.appendChild(tempoSlider);
+        tempo.appendChild(readout);
+        const tempoCommit = createToolButton('library-tempo-commit', 'Commit tempo: the BaseNote\'s duration becomes exactly 60 / BPM', ICON_COMMIT);
+        tempoCommit.id = 'tempoCommitBtn';
+        tempoCommit.hidden = true;
+
         row.appendChild(toggle);
         row.appendChild(input);
+        row.appendChild(tempo);
+        row.appendChild(tempoCommit);
         row.appendChild(dropGroup);
         row.appendChild(group);
         return row;
@@ -505,6 +544,8 @@ const menuAPI = (function() {
         if (orphan) orphan.remove();
         if (!body.querySelector(':scope > .library-toolbar')) {
             body.insertBefore(createToolbar(), body.firstChild);
+            // The live-tempo control in it is filled in by player.js.
+            try { eventBus.emit('toolbar:built'); } catch (e) {}
         }
         // Only now that the row is IN the document can syncHistoryButtons find its buttons.
         // It has to run here and not merely on the next history:stackChanged: the bus does
@@ -1466,7 +1507,10 @@ const menuAPI = (function() {
      */
     function validateModuleData(data) {
         const errors = [];
-        const expressionVars = ['startTime', 'duration', 'frequency', 'tempo', 'beatsPerMeasure', 'measureLength'];
+        // The note's expression variables, plus the keys of the old time model:
+        // a module saved before relational time is still accepted (it is converted
+        // exactly when it loads), so its old expressions are checked here too.
+        const expressionVars = [...EXPRESSION_VARS, ...RETIRED_TIME_KEYS];
 
         if (!data || typeof data !== 'object' || Array.isArray(data)) {
             return { valid: false, errors: ['Module must be a JSON object'] };
@@ -2523,6 +2567,26 @@ const menuAPI = (function() {
                is what keeps the row's height constant (see getToolbarHeight). */
             .library-tool-btn { pointer-events: auto; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; padding: 0; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.62); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); color: var(--rmt-accent, #ffa800); cursor: pointer; -webkit-appearance: none; appearance: none; transition: color 0.2s ease-in-out, border-color 0.2s ease-in-out, background-color 0.2s ease-in-out, opacity 0.2s ease-in-out; }
             .library-tool-btn svg { width: 18px; height: 18px; display: block; }
+            .library-tempo { pointer-events: auto; flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; box-sizing: border-box; border-radius: 6px; border: 1px solid var(--rmt-surface-border, rgba(255,168,0,0.4)); background: rgba(var(--rmt-bg-rgb), 0.62); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); transition: border-color 0.2s ease-in-out, background-color 0.2s ease-in-out; }
+            .library-tempo:hover, .library-tempo.changed { border-color: var(--rmt-accent, #ffa800); }
+            .library-tempo-slider { -webkit-appearance: none; appearance: none; width: 64px; height: 2px; margin: 0; border-radius: 2px; background: var(--rmt-accent, #ffa800); outline: none; cursor: pointer; }
+            .library-tempo-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; border-radius: 50%; background: var(--rmt-accent, #ffa800); box-shadow: 0 0 8px rgba(var(--rmt-accent-rgb), 0.6); transition: background-color 0.2s ease-in-out; }
+            .library-tempo-slider::-moz-range-thumb { width: 12px; height: 12px; border: none; border-radius: 50%; background: var(--rmt-accent, #ffa800); box-shadow: 0 0 8px rgba(var(--rmt-accent-rgb), 0.6); }
+            .library-tempo-slider:active::-webkit-slider-thumb, .library-tempo-slider:hover::-webkit-slider-thumb { background: var(--rmt-danger, #ff0000); box-shadow: 0 0 8px rgba(var(--rmt-danger-rgb), 0.6); }
+            .library-tempo-slider:active::-moz-range-thumb, .library-tempo-slider:hover::-moz-range-thumb { background: var(--rmt-danger, #ff0000); }
+            .library-tempo-readout { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1; gap: 1px; }
+            .library-tempo-value { min-width: 3ch; text-align: center; font-family: 'Roboto Mono', monospace; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--rmt-accent, #ffa800); white-space: nowrap; user-select: none; -webkit-user-select: none; }
+            .library-tempo-unit { font-family: 'Roboto Mono', monospace; font-size: 8px; letter-spacing: 0.06em; color: var(--rmt-accent, #ffa800); user-select: none; -webkit-user-select: none; }
+            .library-tempo-commit[hidden] { display: none; }
+            /* Phones: the row was already full. A shorter slider, and the tempo
+               steps aside while the search field is open so the field keeps its width. */
+            @media (max-width: 420px) {
+              .library-tempo { gap: 6px; padding: 0 8px; }
+              .library-tempo-slider { width: 44px; }
+            }
+            @media (max-width: 600px) {
+              .library-toolbar.search-open .library-tempo, .library-toolbar.search-open .library-tempo-commit { display: none; }
+            }
             .library-tool-btn:hover:not(:disabled), .library-tool-btn:focus-visible { outline: none; border-color: var(--rmt-accent, #ffa800); background: rgba(var(--rmt-accent-rgb), 0.18); }
             /* Nothing on the stack: dimmed and inert, but still drawn — the row must not
                change shape as history fills up. */

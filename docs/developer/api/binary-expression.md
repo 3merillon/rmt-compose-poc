@@ -152,24 +152,34 @@ Used by the compilers; you need these only if you emit bytecode yourself.
 | `NEG` | `0x14` | — | a → −a |
 | `POW` | `0x15` | — | a, b → a^b (may corrupt) |
 
-`OP` also declares `FIND_TEMPO` (`0x20`), `FIND_MEASURE` (`0x21`), `FIND_INSTRUMENT` (`0x22`),
-`DUP` (`0x30`) and `SWAP` (`0x31`). **No compiler emits any of them.** `tempo(x)` and `measure(x)`
-lower to a plain `LOAD_BASE` / `LOAD_REF` with the tempo or measureLength variable index; `beat(x)`
-lowers to `60`, `tempo(x)`, `DIV`. `FIND_INSTRUMENT` is not even handled by the VM. Treat all five
-as reserved.
+`OP` also declares `FIND_INSTRUMENT` (`0x22`), `DUP` (`0x30`) and `SWAP` (`0x31`). **No compiler
+emits any of them.** `FIND_INSTRUMENT` is not even handled by the VM. Treat all three as reserved.
+
+::: warning Removed: FIND_TEMPO and FIND_MEASURE
+The opcodes `FIND_TEMPO` (`0x20`) and `FIND_MEASURE` (`0x21`) are retired together with the tempo
+and measure-length variables. They are no longer in `OP`, and `src/binary-note.js` says not to
+reuse the two byte values.
+:::
 
 ### Variable indices
 
 `VAR` (and its reverse map `VAR_NAMES`) are exported constants:
 
-| Index | Property |
-|---|---|
-| 0 | `startTime` |
-| 1 | `duration` |
-| 2 | `frequency` |
-| 3 | `tempo` |
-| 4 | `beatsPerMeasure` |
-| 5 | `measureLength` |
+| Index | `VAR` name | Variable | Kind |
+|---|---|---|---|
+| 0 | `START_TIME` | `startTime` | language |
+| 1 | `DURATION` | `duration` | language |
+| 2 | `FREQUENCY` | `frequency` | language |
+| 3 | `AMPLITUDE` | `amplitude` | interpretation |
+| 4 | `ATTACK` | `attack` | interpretation |
+| 5 | `RELEASE` | `release` | interpretation |
+
+`FIRST_INTERPRETATION_VAR` is `VAR.AMPLITUDE` (3). Indices below it relate a note to other notes;
+indices from it up interpret the note when it sounds, and **only those fall back to the BaseNote**
+when the note does not define them (`src/variable-deps.js` resolves inheritance for indices
+`>= FIRST_INTERPRETATION_VAR` and nothing else). The variables `tempo`, `beatsPerMeasure` and
+`measureLength` that held indices 3 to 5 before are removed; the indices were reused for amplitude,
+attack and release.
 
 ### Instruction encoding
 
@@ -192,9 +202,9 @@ is used only when the numerator or denominator falls outside the i32 range
 
 `LOAD_REF` encodes the id as a `u16`, and `dependencies` is a `Uint16Array`.
 `Module.loadFromJSON()` guards the boundary: it rejects (skips, with a console warning) any note
-whose id is above 65535. Both expression parsers enforce the same range at compile time —
-`[70000].f` is a parse error (`src/dsl/parser.js:253`, `src/expression-compiler.js:215`) — so an
-id can never wrap.
+whose id is above 65535. The DSL parser enforces the same range at compile time —
+`[70000].f` is a parse error (`src/dsl/parser.js:284`), and so is `module.getNoteById(70000)` in
+the converter of the retired method-chain syntax — so an id can never wrap.
 
 ## Worked example
 
@@ -223,33 +233,41 @@ Stack:
 0x08    10            ADD
 ```
 
-`beat(base)` — 12 bytes, because `beat` is sugar for `60 / tempo(x)`:
+`base.d` — 2 bytes, the time unit (what `beat(base)` used to be):
 
 ```
-0x00    01 00 00 00 3C 00 00 00 01   LOAD_CONST 60/1
-0x09    03 03                        LOAD_BASE varIndex 3 (tempo)
-0x0B    13                           DIV
+0x00    03 01         LOAD_BASE varIndex 1 (duration)
+```
+
+`base.d * 4` — 12 bytes, the length of a four-unit measure bar:
+
+```
+0x00    03 01                        LOAD_BASE varIndex 1 (duration)
+0x02    01 00 00 00 04 00 00 00 01   LOAD_CONST 4/1
+0x0B    12                           MUL
 ```
 
 ## Corruption flags
 
-A `POW` whose result is irrational (`2^(1/12)`) marks the property being evaluated as **corrupted**.
-The bitmask lives in the same file:
+A property whose own expression makes a value that is not an exact rational marks it as
+**corrupted**: a `POW` with an irrational result (`2^(1/12)`, kept exact — see
+[Exact Values](/developer/core/symbolic-power)), a `~` number, a division by zero, or a fallback
+of the exact algebra to an approximation. The bitmask lives in the same file:
 
 | Flag | Value |
 |---|---|
 | `CORRUPT.START_TIME` | `0x01` |
 | `CORRUPT.DURATION` | `0x02` |
 | `CORRUPT.FREQUENCY` | `0x04` |
-| `CORRUPT.TEMPO` | `0x08` |
-| `CORRUPT.BEATS_PER_MEASURE` | `0x10` |
-| `CORRUPT.MEASURE_LENGTH` | `0x20` |
+| `CORRUPT.AMPLITUDE` | `0x08` |
+| `CORRUPT.ATTACK` | `0x10` |
+| `CORRUPT.RELEASE` | `0x20` |
 
 ```javascript
 getCorruptionFlag(VAR.FREQUENCY)  // → 4, i.e. 1 << varIndex
 ```
 
-`evaluateVariable()` ORs the flag for whichever property was being evaluated when the irrational
+`evaluateVariable()` ORs the flag for whichever property was being evaluated when such a value
 appeared, and returns it as `corruptionFlags` on the evaluated record. `Module.evaluateModule()`
 forwards those into the dependency graph, which is what lets the renderer hatch directly-corrupted
 notes and, through `isFrequencyTransitivelyCorrupted()`, their descendants.
@@ -262,62 +280,53 @@ stays clean.
 ```javascript
 import { compiler } from './expression-compiler.js'
 
-const expr = compiler.compile('base.f * (3/2)', 'frequency')
+const expr = compiler.compile('base.f * (3/2)')
 ```
 
 `compiler` is the shared `ExpressionCompiler` singleton — there is no bare `compile()` export.
-`compile(text, varName)`:
+`compile(text)`:
 
 1. Checks its LRU cache (`COMPILE_CACHE_MAX = 4000`, keyed on the raw text) and returns a **clone**
    on a hit.
-2. Routes on `isDSLSyntax(text)` — a regex sniff, not a parse — to `compileDSL()`.
-3. Falls back to the legacy method-chain parser, and if *that* throws, retries `compileDSL()` (the
-   sniff can misclassify).
-4. If everything fails, logs a `console.error` and **throws** an `Error` whose message carries both
-   parsers' failures — there is no constant-0 fallback.
+2. Refuses text in the retired method-chain syntax, with its DSL form in the message (modules in
+   that syntax are converted when they load; see
+   [Expression Compiler](/developer/core/expression-compiler#the-retired-method-chain-syntax)).
+3. Compiles with `compileDSL()`, which **throws** a `DSLError` on a syntax error — there is no
+   constant-0 fallback.
 
-To compile DSL directly, skipping the routing:
+To compile DSL directly, without the cache:
 
 ```javascript
-import { compileDSL, validateDSL, isDSLSyntax } from './dsl/index.js'
+import { compileDSL, validateDSL } from './dsl/index.js'
 
 const expr = compileDSL('[1].f * 2^(7/12)')
 ```
 
-The DSL path is lexer → parser → compiler (`src/dsl/`), producing the AST node types in
-`src/dsl/ast.js`. The legacy path has its own parser and AST in `src/expression-compiler.js`; both
-emit the same bytecode.
+The pipeline is lexer → parser → compiler (`src/dsl/`), producing the AST node types in
+`src/dsl/ast.js`.
 
 ## Decompilation
 
-Two decompilers, and they do not agree — pick deliberately.
-
 ```javascript
-import { decompiler, dslDecompiler } from './expression-compiler.js'
+import { decompiler } from './expression-compiler.js'
 import { decompileToDSL } from './dsl/index.js'
 
-decompiler.decompile(expr)   // sourceText verbatim if present, else LEGACY method chains
+decompiler.decompile(expr)   // sourceText verbatim if present, else decompileToDSL(expr)
 decompileToDSL(expr)         // always walks the bytecode, always emits DSL
-dslDecompiler.decompile(expr)  // same as decompileToDSL
 ```
 
-`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:851-855`),
-so for anything compiled from text it is a pass-through — a DSL expression comes back as DSL. Only
-a synthesised expression (empty `sourceText`) actually gets decompiled, and then it comes back as
-legacy JavaScript.
+`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:80`),
+so for anything compiled from text it is a pass-through. A synthesised expression (empty
+`sourceText`) is decompiled to DSL.
 
-`decompileToDSL()` reconstructs `beat(x)` from the `60 / x.tempo` pattern, but `tempo(x)` and
-`measure(x)` come back as `x.tempo` and `x.ml` — they compile to identical bytecode, so the
-information is gone.
+`decompileToDSL()` prints each `LOAD_REF` / `LOAD_BASE` as a property access (`base.d`, `[2].f`).
+The DSL has no functions, so there is nothing to reconstruct beyond the six variables.
 
 ## Error handling
 
-`compiler.compile()` **throws** on an unparseable expression. After the legacy parser fails it
-retries the other syntax; if the DSL parser fails too, it logs
-`Failed to compile expression: …` via `console.error` and throws an `Error` whose message includes
-both parser messages (`Unparseable expression: "…" — legacy parser: …; DSL parser: …`). Callers
-that can show the message do (the note widget's inline error, the validators); load paths catch
-per-note and leave the property unset rather than zeroing it.
+`compiler.compile()` **throws** on an unparseable expression: the `DSLError` of the DSL parser, or
+the retired-syntax refusal. Callers that can show the message do (the note widget's inline error,
+the validators); load paths catch per-note and leave the property unset rather than zeroing it.
 
 The DSL layer *does* throw, with its own error classes (`src/dsl/errors.js`) — `DSLError` and its
 subclasses `DSLLexerError`, `DSLParseError`, `DSLCompileError`. Each carries a `position` and a
@@ -335,7 +344,7 @@ try {
 } catch (e) {
   if (e instanceof DSLError) console.error(e.formatWithContext('base.z'))
 }
-// Unknown property 'z'. Valid properties: f (frequency), t (startTime), d (duration), tempo, bpm, ml (at column 6)
+// Unknown property 'z'. Valid properties: f (frequency), t (startTime), d (duration), a (amplitude), attack, release (at column 6)
 //
 // base.z
 //      ^
@@ -343,6 +352,15 @@ try {
 
 Validate before you compile if you want a structured `{ valid, error }` result rather than a
 thrown `Error`.
+
+The names of the old time model are refused with a message that names the replacement. `beat()`,
+`tempo()` and `measure()` are not functions any more (the DSL has no functions), and `.tempo`,
+`.bpm`, `.beatsPerMeasure`, `.ml` and `.measureLength` are not properties:
+
+```javascript
+validateDSL('beat(base)')
+// → { valid: false, error: "'beat()' was removed: the reference note's duration is the time unit, so write base.d for beat(base), or [N].d to relate to note N (at column 1)" }
+```
 
 ## Performance
 
@@ -361,7 +379,7 @@ containers are `Note` and `Module`. Do not build against them without checking t
 
 ## See also
 
-- [Expression Compiler](/developer/core/expression-compiler) — routing, the legacy parser, the cache
+- [Expression Compiler](/developer/core/expression-compiler) — the DSL pipeline, the cache, the retired syntax
 - [Binary Evaluator](/developer/core/binary-evaluator) — the stack VM, `POW`, and the fallback defaults
 - [Note Class](/developer/api/note) — the owner of six of these
 - [Expression Syntax](/reference/expressions/syntax) — the DSL grammar

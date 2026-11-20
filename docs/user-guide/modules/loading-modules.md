@@ -34,7 +34,7 @@ The other entry in that dropdown restores the composition the app ships with.
 2. Confirm: *"This will reset the workspace to the default module. This action can be undone/redone via History. Proceed?"* → **Yes, Reset**.
 3. Toast: `Default module reset`. Undoable, like any other load.
 
-The default module is `public/modules/defaultModule.json`: 169 entries at 263 Hz and 100 BPM, including a chain of measure bars and a handful of silences. It is not part of the module library and does not appear in the module bar.
+The default module is `public/modules/defaultModule.json`: the canon per tonos in three voices, 161 entries at 263 Hz with a BaseNote duration of 3/5 s (shown as 100 BPM): a chain of 8 measure bars, the theme, the bass, and the bass again a fifth higher and one bar later, each of its notes written as `(3/2) * [n].f` of the note it answers. It is not part of the module library and does not appear in the module bar.
 
 ## Drop a library module onto a note
 
@@ -44,13 +44,15 @@ Open the module bar (drag the pull tab hanging below it), then drag a tile out o
 
 That is the whole idea: drop the **Perfect 5th** interval on note 7 and you get a fifth above note 7, not a fifth above A440.
 
+`base.d` is **not** remapped: the module keeps its rhythm in time units and plays at your workspace's pace (your BaseNote's duration), whatever the length of the note you drop it on.
+
 ### Where you can drop
 
 | Target | Result |
 |---|---|
-| **A note** | Imported. Start time, duration and frequency all re-anchor to that note. |
+| **A note** | Imported. Start time, duration and frequency all re-anchor to that note: `base.t`, `base.d` and `base.f` become the note's `t`, `d` and `f`. |
 | **The BaseNote** | Imported. Expressions keep their `base.*` anchors. |
-| **A measure bar** | Imported. `startTime` anchors to the measure bar, but `frequency` stays anchored to `base.f` — a measure bar has no pitch to inherit. |
+| **A measure bar** | Imported. `startTime` and `duration` anchor to the bar (`base.t` and `base.d` become the bar's `t` and `d`), but frequency, amplitude, attack and release stay with the BaseNote — a measure bar has no pitch to inherit. |
 | **A silence** | **Rejected.** `Cannot drop onto a silence. Drop on a note or the BaseNote instead.` |
 | **Empty background** | **Rejected.** `Drop onto a note or the BaseNote circle to import a module.` |
 
@@ -78,7 +80,7 @@ See [Module Bar](/user-guide/interface/module-bar) for dragging, reordering and 
 
 ## Find a module in the library
 
-The library ships 79 modules across six sections — Intervals (46), Chords (11), Progressions (8), Melodies (7), Scale Systems (6) and Custom (1). Scrolling for one is slow.
+The library ships 81 modules across six sections — Intervals (46), Chords (11), Progressions (8), Melodies (7), Scale Systems (6) and Custom (3). Scrolling for one is slow.
 
 Click the **magnifier** at the left of the module bar's toolbar. A search field unfolds; type into it and the library filters live. A module matches if your text appears in its **name**, **ratio**, **family**, **cents**, **tags**, or its file path — so `3-limit`, `701`, `fifth` and `3/2` all find the Perfect 5th.
 
@@ -145,12 +147,12 @@ Open the browser console. The failures that do not surface in the UI all log the
 
 - Browsers will not start audio without a user gesture. If nothing plays on the very first click, click **Play** again.
 - Check the notes actually have a `frequency`. A note with `startTime` and `duration` but no `frequency` is a **silence**, by design.
-- A note with no `duration` and no `frequency` is a **measure bar**, not a note.
+- A note with a `startTime` and a `duration`, no `frequency` and `"measure": true` is a **measure bar**, not a note.
 
 ## See also
 
 - [Saving Modules](/user-guide/modules/saving-modules) — export, Save UI, and getting your work into the library
 - [Module Format](/user-guide/modules/module-format) — what is actually in the file
 - [Module Bar](/user-guide/interface/module-bar) — organizing the library
-- [The Module Library](/user-guide/modules/module-library) — what the 79 shipped modules are and how they are built
+- [The Module Library](/user-guide/modules/module-library) — what the 81 shipped modules are and how they are built
 - [Creating Modules](/user-guide/modules/creating-modules) — designing a module that drops well

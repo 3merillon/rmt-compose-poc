@@ -2,7 +2,7 @@
  * Variable-level dependencies
  *
  * A note has six variables, and an expression reads specific variables of
- * specific notes: `[2].f`, `base.tempo`, `beat([5])`. Evaluation order and
+ * specific notes: `[2].f`, `base.d`, `[5].a`. Evaluation order and
  * cycle checks have to work at that granularity. Note 1's frequency may read
  * note 2's frequency while note 2's start reads note 1's start and duration:
  * between whole notes that is a loop, between variables it is a tree.
@@ -15,9 +15,12 @@
  * A variable is addressed as one integer, (noteId << 3) | varIndex.
  */
 
-import { VAR, VAR_NAMES } from './binary-note.js';
+import { VAR, VAR_NAMES, FIRST_INTERPRETATION_VAR } from './binary-note.js';
 
 const NO_REFS = [];
+
+// startTime ... release. Three bits address a variable, so eight is the limit.
+const VAR_COUNT = Object.keys(VAR).length;
 
 /**
  * The compiled expression behind one variable, or null when the note has none.
@@ -34,23 +37,12 @@ export function getVariableExpression(note, varIndex) {
     case VAR.START_TIME: expr = expressions.startTime; break;
     case VAR.DURATION: expr = expressions.duration; break;
     case VAR.FREQUENCY: expr = expressions.frequency; break;
-    case VAR.TEMPO: expr = expressions.tempo; break;
-    case VAR.BEATS_PER_MEASURE: expr = expressions.beatsPerMeasure; break;
-    case VAR.MEASURE_LENGTH: expr = expressions.measureLength; break;
+    case VAR.AMPLITUDE: expr = expressions.amplitude; break;
+    case VAR.ATTACK: expr = expressions.attack; break;
+    case VAR.RELEASE: expr = expressions.release; break;
     default: return null;
   }
   return expr && expr.length > 0 ? expr : null;
-}
-
-/**
- * A measure bar or the BaseNote: when it has no measureLength expression the
- * evaluator computes one from beatsPerMeasure and tempo.
- */
-export function hasComputedMeasureLength(note) {
-  if (note.id === 0) return true;
-  return getVariableExpression(note, VAR.START_TIME) !== null &&
-         getVariableExpression(note, VAR.DURATION) === null &&
-         getVariableExpression(note, VAR.FREQUENCY) === null;
 }
 
 /**
@@ -58,8 +50,7 @@ export function hasComputedMeasureLength(note) {
  */
 export function definesVariable(note, varIndex) {
   if (!note) return false;
-  if (getVariableExpression(note, varIndex) !== null) return true;
-  return varIndex === VAR.MEASURE_LENGTH && hasComputedMeasureLength(note);
+  return getVariableExpression(note, varIndex) !== null;
 }
 
 /**
@@ -69,21 +60,19 @@ export function definesVariable(note, varIndex) {
  */
 export function getVariableRefs(note, varIndex) {
   const expr = getVariableExpression(note, varIndex);
-  if (expr !== null) return expr.getVariableRefs();
-  if (varIndex === VAR.MEASURE_LENGTH && hasComputedMeasureLength(note)) {
-    // Computed as beatsPerMeasure * 60 / tempo, each its own or the BaseNote's
-    return [(note.id << 3) | VAR.BEATS_PER_MEASURE, (note.id << 3) | VAR.TEMPO];
-  }
-  return NO_REFS;
+  return expr !== null ? expr.getVariableRefs() : NO_REFS;
 }
 
 /**
  * The variable a reference actually reads, or -1 when nothing defines it.
  *
- * tempo, beatsPerMeasure and measureLength inherit: `[5].tempo` on a note with
- * no tempo of its own reads the BaseNote's. startTime, duration and frequency
- * do not, so a reference to one that is missing resolves to nothing and the
- * evaluator substitutes a hard-coded default.
+ * Only the interpretation variables (amplitude, attack, release) inherit:
+ * `[5].a` on a note with no amplitude of its own reads the BaseNote's. The
+ * language variables startTime, duration and frequency never do; they are
+ * relations, written or absent, so a reference to one that is missing resolves
+ * to nothing and the evaluator substitutes a hard-coded default. (An
+ * interpretation variable nobody sets resolves to nothing as well; playback
+ * then uses its default.)
  *
  * @param {function(number): Object|null} getNote
  * @param {number} ref - Packed (noteId << 3) | varIndex
@@ -93,24 +82,23 @@ export function resolveVariableRef(getNote, ref) {
   const varIndex = ref & 7;
   const noteId = ref >> 3;
   if (definesVariable(getNote(noteId), varIndex)) return ref;
-  if (varIndex >= VAR.TEMPO && noteId !== 0 && definesVariable(getNote(0), varIndex)) {
+  if (varIndex >= FIRST_INTERPRETATION_VAR && noteId !== 0 && definesVariable(getNote(0), varIndex)) {
     return varIndex; // the BaseNote's, (0 << 3) | varIndex
   }
   return -1;
 }
 
 /**
- * Whether a note can depend on the BaseNote without writing `base`: a measure
- * bar's computed measureLength inherits tempo and beatsPerMeasure, and a
- * reference such as `beat([5])` inherits when note 5 has no tempo of its own.
+ * Whether a note can depend on the BaseNote without writing `base`: a
+ * reference such as `[5].a` inherits when note 5 has no amplitude (attack,
+ * release) of its own. Time and pitch never follow the BaseNote unless written.
  */
 export function inheritsFromBase(note) {
   if (!note || note.id === 0) return false;
-  if (hasComputedMeasureLength(note)) return true;
-  for (let varIndex = 0; varIndex < 6; varIndex++) {
+  for (let varIndex = 0; varIndex < VAR_COUNT; varIndex++) {
     const refs = getVariableRefs(note, varIndex);
     for (let i = 0; i < refs.length; i++) {
-      if ((refs[i] & 7) >= VAR.TEMPO && (refs[i] >> 3) !== 0) return true;
+      if ((refs[i] & 7) >= FIRST_INTERPRETATION_VAR && (refs[i] >> 3) !== 0) return true;
     }
   }
   return false;
@@ -172,7 +160,7 @@ export function findVariableCycle(getNote, start) {
 export function findCycleIfAssigned(getNote, noteId, varIndex, expr) {
   const current = getNote(noteId);
   const expressions = {};
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < VAR_COUNT; i++) {
     expressions[VAR_NAMES[i]] = i === varIndex ? expr : (current ? getVariableExpression(current, i) : null);
   }
   const edited = { id: noteId, expressions };
@@ -189,13 +177,13 @@ export function findCycleIfAssigned(getNote, noteId, varIndex, expr) {
  *
  * @param {Module} moduleInstance
  * @param {number|string} noteId
- * @param {string} variableName - 'startTime', 'duration', 'frequency', ...
+ * @param {string} variableName - 'startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'
  * @param {BinaryExpression} expr - The compiled candidate expression
  * @returns {number[]|null} See findVariableCycle()
  */
 export function findDependencyCycle(moduleInstance, noteId, variableName, expr) {
   let varIndex = -1;
-  for (let i = 0; i < 6; i++) {
+  for (let i = 0; i < VAR_COUNT; i++) {
     if (VAR_NAMES[i] === variableName) varIndex = i;
   }
   // Not one of the six evaluated variables: nothing reads it, so no cycle
@@ -210,7 +198,7 @@ export function findDependencyCycle(moduleInstance, noteId, variableName, expr) 
 }
 
 /**
- * Human-readable name of a packed variable: `[5].frequency`, `base.tempo`.
+ * Human-readable name of a packed variable: `[5].frequency`, `base.duration`.
  */
 export function describeVariable(ref) {
   const noteId = ref >> 3;

@@ -1,0 +1,21 @@
+{
+  "baseNote": {
+    "frequency": "new Fraction(263)",
+    "startTime": "new Fraction(0)",
+    "duration": "new Fraction(1, 2)",
+    "amplitude": "new Fraction(3, 4)"
+  },
+  "notes": [
+    { "id": 1, "startTime": "module.baseNote.getVariable('startTime')", "duration": "module.baseNote.getVariable('duration').mul(new Fraction(2))", "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, 2))" },
+    { "id": 2, "startTime": "module.getNoteById(1).getVariable('startTime').add(module.getNoteById(1).getVariable('duration'))", "duration": "module.getNoteById(1).getVariable('duration').div(new Fraction(3))", "frequency": "module.getNoteById(1).getVariable('frequency').mul(new Fraction(5, 4))", "amplitude": "module.baseNote.getVariable('amplitude').mul(new Fraction(1, 2))" },
+    { "id": 3, "startTime": "module.getNoteById(2).getVariable('startTime').add(module.baseNote.getVariable('duration').mul(new Fraction(3, 4)))", "duration": "module.getNoteById(2).getVariable('duration').add(module.getNoteById(1).getVariable('duration')).sub(new Fraction(1, 6))", "frequency": "new Fraction(2).pow(new Fraction(7, 12)).mul(module.baseNote.getVariable('frequency'))" },
+    { "id": 4, "startTime": "(module.getNoteById(1).getVariable('startTime').add(module.getNoteById(2).getVariable('duration'))).mul(new Fraction(2))", "duration": "new Fraction(0.25)", "frequency": "module.getNoteById(3).getVariable('frequency').mul(new Fraction(2).pow(new Fraction(1, 12)))" },
+    { "id": 5, "startTime": "module.getNoteById(4).getVariable('startTime').sub(new Fraction(1.5, 3))", "duration": "module.baseNote.getVariable('duration').mul(new Fraction(-3)).add(new Fraction(2))", "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3, -4)).mul(new Fraction(-1))" },
+    { "id": 6, "startTime": "module.getNoteById(5).getVariable('startTime').add(module.getNoteById(5).getVariable('duration'))", "duration": "(module.baseNote.getVariable('duration'))", "frequency": "module.getNoteById(1).getVariable('frequency').mul(new Fraction(123456789012345678901234567890, 123456789012345678901234567891))", "attack": "new Fraction(1, 8)", "release": "module.baseNote.getVariable('amplitude').div(new Fraction(3))" },
+    { "id": 7, "startTime": "module.getNoteById(6).getVariable('startTime')", "duration": "module.getNoteById(6).getVariable('duration').mul(module.getNoteById(2).getVariable('duration').add(new Fraction(1)))", "frequency": "module.baseNote.getVariable('frequency').mul(new Fraction(3).pow(new Fraction(2))).div(new Fraction(8).pow(new Fraction(1)))" },
+    { "id": 8, "startTime": "module.getNoteById(7).getVariable('startTime').add(new Fraction(1, 3)).add(new Fraction(1, 5)).sub(new Fraction(1, 7))", "duration": "module.getNoteById(7).getVariable('duration').div(module.getNoteById(2).getVariable('duration').mul(new Fraction(2)))", "frequency": "module.getNoteById(0).getVariable('frequency').mul(new Fraction(9, 8))" },
+    { "id": 9, "startTime": "module.getNoteById(8).getVariable('startTime')", "duration": "2", "frequency": "frequency" },
+    { "id": 10, "startTime": "module.getNoteById(8).getVariable('startTime')", "duration": "(0.5)", "frequency": "module.getNoteById(9).getVariable('frequency').mul(module.getNoteById(4).getVariable('frequency')).div(module.getNoteById(3).getVariable('frequency'))" },
+    { "id": 11, "startTime": "module.getNoteById(8).getVariable('startTime')", "duration": "module.baseNote.getVariable('duration').mul(new Fraction(2).pow(new Fraction(-1)))", "frequency": "new Fraction(2).pow(new Fraction(1, 2)).mul(module.baseNote.getVariable('frequency'))" }
+  ]
+}

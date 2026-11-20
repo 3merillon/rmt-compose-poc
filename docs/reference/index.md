@@ -12,23 +12,32 @@ tells you what is true.
 ## Expression language
 
 - [Syntax](/reference/expressions/syntax) — the complete grammar: tokens, literals, references,
-  functions, operators, precedence, error behaviour
+  operators, precedence, the removed `beat()` / `tempo()` / `measure()` forms, error behaviour
 - [Operators](/reference/expressions/operators) — per-operator semantics and result types
-- [Module API](/reference/expressions/module-api) — note references and built-in functions
-- [Fraction API](/reference/expressions/fraction-api) — exact numbers, and the legacy
-  `new Fraction()` compatibility surface
+- [Module API](/reference/expressions/module-api) — note references, the six properties and inheritance
+- [Fraction API](/reference/expressions/fraction-api) — exact numbers
 
 ## Note properties
 
+A note has six variables, in two groups. The first three are the **language**, the notation: each is
+an exact relation to other notes, and the BaseNote holds the only absolute values. The last three are
+**interpretation**: how the note sounds, not part of the notation.
+
+The language:
+
 - [frequency](/reference/properties/frequency) — pitch
 - [startTime](/reference/properties/start-time) — when a note begins
-- [duration](/reference/properties/duration) — how long it lasts
-- [tempo](/reference/properties/tempo) — beats per minute
-- [beatsPerMeasure](/reference/properties/beats-per-measure) — meter
+- [duration](/reference/properties/duration) — how long it lasts; on the BaseNote it is the
+  [time unit](/reference/properties/duration#the-time-unit), `base.d`
 
-The sixth property, `measureLength`, has no page of its own: it is derived from `tempo` and
-`beatsPerMeasure` and has no UI. It is covered under
-[tempo](/reference/properties/tempo#tempo-and-measure-length).
+Interpretation:
+
+- [amplitude](/reference/properties/amplitude) — loudness, as a relative gain
+- [attack and release](/reference/properties/attack-release) — the envelope, as shares of the note's
+  duration
+
+There is no tempo or meter variable. A tempo is 60 / `base.d`, a read-only view; a meter is the
+length of a [measure bar](/reference/module-schema#measure-bars).
 
 ## Formats
 
@@ -53,34 +62,34 @@ The exhaustive tables live on the pages that own them. These are the ones you lo
 | 31-TET | `2^(1/31)` | ≈ 1.022611 |
 | Bohlen-Pierce (13 divisions of the tritave) | `3^(1/13)` | ≈ 1.088182 |
 
-`n` steps is `2^(n/12)`, `2^(n/19)`, and so on. All of these are irrational, so a note using one
-is flagged corrupted and drawn crosshatched. See [Operators](/reference/expressions/operators).
+`n` steps is `2^(n/12)`, `2^(n/19)`, and so on. All of these are irrational and kept exact, so a note using one
+is drawn crosshatched (tempered, not a pure ratio); twelve 12-TET steps are exactly 2. See [Operators](/reference/expressions/operators).
 
 ### Note lengths
 
-| Note | Beats | Expression |
+| Note | Time units | Expression |
 |---|---|---|
-| Whole | 4 | `beat(base) * 4` |
-| Half | 2 | `beat(base) * 2` |
-| Quarter | 1 | `beat(base)` |
-| Eighth | 1/2 | `beat(base) * (1/2)` |
-| Sixteenth | 1/4 | `beat(base) * (1/4)` |
-| Dotted quarter | 3/2 | `beat(base) * (3/2)` |
+| Whole | 4 | `base.d * 4` |
+| Half | 2 | `base.d * 2` |
+| Quarter | 1 | `base.d` |
+| Eighth | 1/2 | `base.d * (1/2)` |
+| Sixteenth | 1/4 | `base.d * (1/4)` |
+| Dotted quarter | 3/2 | `base.d * (3/2)` |
 
-`beat(x)` is one beat of `x` in seconds — that is, `60 / tempo(x)`. It is what the note-length
-buttons in the note widget write for you. The full table, including dotted values, is on
+`base.d` is the BaseNote's duration, the time unit: one beat, if you count in beats. It is what the
+note-length buttons in the note widget write for you. The full table, including dotted values, is on
 [duration](/reference/properties/duration#standard-note-values).
 
 ### Property shortnames
 
-| Property | Accepted spellings | Saved as |
-|---|---|---|
-| frequency | `f`, `freq`, `frequency` | `f` |
-| startTime | `t`, `s`, `start`, `startTime` | `t` |
-| duration | `d`, `dur`, `duration` | `d` |
-| tempo | `tempo` | `tempo` |
-| beatsPerMeasure | `bpm`, `beatsPerMeasure` | `bpm` |
-| measureLength | `ml`, `measureLength` | `ml` |
+| Group | Property | Accepted spellings | Saved as |
+|---|---|---|---|
+| Language | frequency | `f`, `freq`, `frequency` | `f` |
+| Language | startTime | `t`, `s`, `start`, `startTime` | `t` |
+| Language | duration | `d`, `dur`, `duration` | `d` |
+| Interpretation | amplitude | `a`, `amp`, `amplitude` | `a` |
+| Interpretation | attack | `attack`, `atk` | `attack` |
+| Interpretation | release | `release`, `rel` | `release` |
 
 ### Keyboard shortcuts
 
@@ -109,27 +118,30 @@ they are what the file format and the evaluator agree on.
 
 ### Variable indices
 
-| Index | Property |
-|---|---|
-| 0 | startTime |
-| 1 | duration |
-| 2 | frequency |
-| 3 | tempo |
-| 4 | beatsPerMeasure |
-| 5 | measureLength |
+| Index | Variable | Group |
+|---|---|---|
+| 0 | startTime | language |
+| 1 | duration | language |
+| 2 | frequency | language |
+| 3 | amplitude | interpretation |
+| 4 | attack | interpretation |
+| 5 | release | interpretation |
+
+Indices 3 and up are the interpretation variables (`FIRST_INTERPRETATION_VAR` in
+`src/binary-note.js`), and only those fall back to the BaseNote when unset.
 
 ### Corruption flags
 
-A bitmask, one bit per property, recording which of a note's values came out irrational.
+A bitmask, one bit per property, recording which of a note's values are tempered or approximate (an irrational power, a `~` number, a fallback).
 
 | Flag | Property |
 |---|---|
 | `0x01` | startTime |
 | `0x02` | duration |
 | `0x04` | frequency |
-| `0x08` | tempo |
-| `0x10` | beatsPerMeasure |
-| `0x20` | measureLength |
+| `0x08` | amplitude |
+| `0x10` | attack |
+| `0x20` | release |
 
 ### Bytecode opcodes
 
@@ -145,26 +157,26 @@ A bitmask, one bit per property, recording which of a note's values came out irr
 | `DIV` | `0x13` | Pop 2, push quotient |
 | `NEG` | `0x14` | Pop 1, push negation |
 | `POW` | `0x15` | Pop base and exponent, push the power; may set a corruption flag |
-| `FIND_TEMPO` | `0x20` | Defined, **never emitted** |
-| `FIND_MEASURE` | `0x21` | Defined, **never emitted** |
+| `FIND_TEMPO` | `0x20` | Retired with the tempo variable; not reused |
+| `FIND_MEASURE` | `0x21` | Retired with the measure-length variable; not reused |
 | `FIND_INSTRUMENT` | `0x22` | Defined, **never emitted**, not implemented in the evaluator |
 | `DUP` | `0x30` | Defined, **never emitted** |
 | `SWAP` | `0x31` | Defined, **never emitted** |
 
-`tempo(x)` and `measure(x)` compile to a plain property load, not to `FIND_TEMPO` /
-`FIND_MEASURE`. `beat(x)` compiles to `LOAD_CONST 60`, a tempo load, then `DIV`.
+The language has no functions, so nothing compiles to a call. A reference such as `base.d` is a
+plain `LOAD_BASE` of variable index 1.
 
 ### Fallbacks and limits
 
 | Thing | Value |
 |---|---|
-| Value used when a reference cannot be resolved | startTime 0, duration 1, frequency 440, tempo 60, beatsPerMeasure 4, measureLength 4 |
+| Value used when a reference cannot be resolved | startTime 0, duration 1, frequency 440, amplitude 1, attack 0, release 0 |
 | Division by zero at evaluation time | Result 1, plus a console warning; the property is flagged corrupted (crosshatch) |
-| An expression neither compiler can parse | Compile error — `console.error` plus a thrown message naming both parser failures; validators return `valid: false`; on a file load the note's property is left unset |
+| An expression the compiler cannot parse | Compile error — `console.error` plus a thrown message; validators return `valid: false`; on a file load the note's property is left unset |
 | Decimal → fraction | Exact as written — the digits over the matching power of ten, reduced (`0.333333` is `333333/1000000`) |
 | Constant fits `LOAD_CONST` when both parts are within | −2 147 483 648 to 2 147 483 647 (bigger constants use `LOAD_CONST_BIG`, exact at any size) |
 | Note id in a reference | 0 – 65 535, enforced when the expression compiles |
-| Exact `^` caps | Integer exponent ≤ 65 536 and result ≤ ~1 Mbit per component; past either, the value is approximated and flagged corrupted |
+| Exact `^` caps | Integer exponent ≤ 65 536 and result ≤ ~1 Mbit per component; past either, the value is approximate and flagged corrupted |
 | Maximum expression length accepted on import | 10 000 characters |
 | Compiled-expression cache | 4 000 entries, least-recently-used eviction |
 
