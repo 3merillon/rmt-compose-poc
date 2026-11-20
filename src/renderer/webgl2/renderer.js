@@ -448,12 +448,12 @@ export class RendererAdapter {
     const M = items.length;
     this.tailCount = M;
     if (!M || !this.gl || !this.tailPosSizeBuffer) return;
-    const pos = new Float32Array(M * 4), col = new Float32Array(M * 4), lvl = new Float32Array(M);
+    const pos = new Float32Array(M * 4), col = new Float32Array(M * 4), lvl = new Float32Array(M * 2);
     for (let i = 0; i < M; i++) {
       const t = items[i], o = i * 4;
       pos[o] = t.x; pos[o + 1] = t.y; pos[o + 2] = Math.max(0.0001, t.w); pos[o + 3] = Math.max(0.0001, t.h);
       col[o] = t.color[0]; col[o + 1] = t.color[1]; col[o + 2] = t.color[2]; col[o + 3] = t.color[3];
-      lvl[i] = t.level;
+      lvl[i * 2] = t.level; lvl[i * 2 + 1] = t.under || 0;
     }
     const gl = this.gl;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.tailPosSizeBuffer); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.DYNAMIC_DRAW);
@@ -804,6 +804,7 @@ export class RendererAdapter {
     const tails = [];
     // Instruments resolved during this pass, by note id (see Module.findInstrument).
     const instrumentMemo = new Map();
+    const tailUnder = Math.max(0, this._config?.note?.roundedCornerPxAtZoom1 ?? 6.0);
     // Latest end time across playable notes, accumulated here for free because this loop
     // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
     // re-derive it with a second full pass over module.notes (~31ms at 100k notes).
@@ -909,7 +910,11 @@ export class RendererAdapter {
             const e = this._envelopeSharesFor(module, note, durSec, atk, rel, freqVal, instrumentMemo);
             if (e) {
               if (inside) env = e;
-              if (showTails && e[4] > 0) tails.push({ x: x + w, y, w: w * e[4], h, color, level: e[5] });
+              // The tail starts under the note, one corner radius in (the radius is in
+              // world units along x: rectBorderFS scales it by the same px-per-unit as
+              // the note), so the note's rounded corners sit over it instead of leaving
+              // a notch between the note and its tail.
+              if (showTails && e[4] > 0) tails.push({ x: x + w, y, w: w * e[4], h, color, level: e[5], under: Math.min(tailUnder, w * 0.5) });
             }
           }
         }
@@ -2124,7 +2129,7 @@ export class RendererAdapter {
       layout(location=0) in vec2 a_unit;
       layout(location=1) in vec4 a_posSize;    // (x, y, w, h) world: from the note's end, as tall as the note
       layout(location=2) in vec4 a_color;
-      layout(location=3) in float a_level;     // gain at the note-off, share of the peak
+      layout(location=3) in vec2 a_level;      // (gain at the note-off as a share of the peak, world units it starts under the note)
       uniform mat3 u_matrix;
       uniform vec2 u_viewport;
       uniform vec2 u_offset;
@@ -2133,14 +2138,21 @@ export class RendererAdapter {
       out vec2 v_uv;
       out float v_heightCss;
       out float v_level;
+      out float v_t;                           // 0 at the note's end, 1 at silence
+      out float v_tailPx;                      // the tail's length, CSS px
+      out float v_underPx;                     // how far it starts under the note, CSS px
       void main() {
-        vec2 worldPos = a_posSize.xy + a_unit * a_posSize.zw;
+        float under = a_level.y;
+        vec2 worldPos = vec2(a_posSize.x - under, a_posSize.y) + a_unit * vec2(a_posSize.z + under, a_posSize.w);
+        v_t = (a_unit.x * (a_posSize.z + under) - under) / a_posSize.z;
         vec2 l = (u_matrix * vec3(worldPos, 1.0)).xy - u_offset;
         gl_Position = vec4((l.x / u_viewport.x) * 2.0 - 1.0, 1.0 - (l.y / u_viewport.y) * 2.0, 0.0, 1.0);
         v_color = a_color;
         v_uv = a_unit;
         v_heightCss = a_posSize.w * u_scale.y;
-        v_level = a_level;
+        v_level = a_level.x;
+        v_tailPx = a_posSize.z * u_scale.x;
+        v_underPx = under * u_scale.x;
       }
     `;
     const tailFS = `#version 300 es
@@ -2149,12 +2161,23 @@ export class RendererAdapter {
       in vec2 v_uv;
       in float v_heightCss;
       in float v_level;
+      in float v_t;
+      in float v_tailPx;
+      in float v_underPx;
       out vec4 outColor;
       void main() {
+        // Under the note only its rounded corners' cut-outs are drawn: the note's
+        // body (translucent) must not be tinted by the tail beneath it.
+        float dxPx = v_t * v_tailPx;
+        if (dxPx < 0.0) {
+          float r = v_underPx, halfH = 0.5 * v_heightCss;
+          vec2 q = vec2(dxPx + r, abs(v_uv.y - 0.5) * v_heightCss - (halfH - r));
+          if (!(q.y > 0.0 && length(q) > r - 0.5)) discard;
+        }
         // The release falls exponentially from the note-off level to -80 dB: a
         // straight line in dB, drawn on the body's scale (full at 0 dB, nothing at -48).
         float startDb = 8.685889638 * log(max(v_level, 1e-4));
-        float db = mix(startDb, -80.0, clamp(v_uv.x, 0.0, 1.0));
+        float db = mix(startDb, -80.0, clamp(v_t, 0.0, 1.0));   // level held under the note's corner
         float level = clamp(1.0 + db / 48.0, 0.0, 1.0);
         float dy = abs(v_uv.y - 0.5) * v_heightCss - level * 0.5 * v_heightCss;
         float band = 1.0 - smoothstep(-0.75, 0.75, dy);
@@ -2826,9 +2849,9 @@ export class RendererAdapter {
     gl.vertexAttribDivisor(2, 1);
     this.tailLevelBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.tailLevelBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, 4, gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, 2 * 4, gl.DYNAMIC_DRAW);
     gl.enableVertexAttribArray(3);
-    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribPointer(3, 2, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(3, 1);
     gl.bindVertexArray(this.rectVAO); // back to the rects for the setup below
 
