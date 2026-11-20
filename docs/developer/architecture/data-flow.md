@@ -77,7 +77,7 @@ in the middle of `chain-1000` ran 501 walks over 125,000 notes. Both engines do 
 ## 3. Evaluation
 
 `Module.evaluateModule()` (`src/module.js:676`) delegates to
-`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1039`):
+`IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1057`):
 
 ```
 evaluateDirty()
@@ -90,7 +90,7 @@ evaluateDirty()
 ```
 
 **The order is per variable, on the evaluator, not the graph.** The dirty set is a set of *notes*;
-inside it, `evaluateVariables()` (`binary-evaluator.js:676`) walks depth-first from every variable
+inside it, `evaluateVariables()` (`binary-evaluator.js:693`) walks depth-first from every variable
 and evaluates whatever it reads first. Each variable is one node: `[1].f` may read `[2].f` while
 `[2].t` reads `[1].t` and `[1].d`, and a note's own variables may read each other in any direction.
 What a variable reads comes straight from its bytecode, `base.x` included. Notes start in ascending
@@ -98,7 +98,7 @@ id, so the order is deterministic. On a true cycle — a variable that reads its
 throw: it `console.error`s `Dependency cycle detected!` with the loop named, and evaluates the
 members in a fixed order against defaults.
 
-`evaluateVariable()` (`binary-evaluator.js:819`) evaluates one expression into the note's record
+`evaluateVariable()` (`binary-evaluator.js:836`) evaluates one expression into the note's record
 and ORs a corruption bit for that property when its expression made an irrational `^` result or an approximation. Irrational values stay exact (`record.exact`); see [Exact Values](/developer/core/symbolic-power).
 
 A cache entry is:
@@ -114,7 +114,8 @@ length.
 
 ::: warning A gotcha in the cache
 Pooled fractions are never cached — `evaluateVariable()` copies each result into a fresh
-`new Fraction(...)` first, because the pool is rewound at the start of the next batch.
+`new Fraction(...)` first, because the pool is rewound before the next variable of a pass and at the
+start of the next batch.
 :::
 
 An unresolvable reference does **not** throw. `LOAD_REF` falls back to the BaseNote for the three

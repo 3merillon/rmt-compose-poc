@@ -82,6 +82,17 @@ export function exactValue(rec, name) {
 const own = (v) => (v.kind === undefined ? new Fraction(v.s * v.n, v.d) : v);
 
 /**
+ * The most Fractions the pool keeps. A pass of evaluateDirty() resets the pool
+ * before each variable (see _poolPerVariable), so it needs only what one
+ * expression takes; this bounds callers of evaluate() outside a pass. An
+ * unbounded pool reset once per pass grew to the pass's size and kept it:
+ * 2,097,149 Fractions, each holding its last BigInts, after evaluating 100,000
+ * notes. Past the cap a Fraction is made and not kept: never handed out twice,
+ * so it is as safe as a pooled one.
+ */
+const POOL_MAX = 4096;
+
+/**
  * Fraction object pool to reduce GC pressure
  */
 class FractionPool {
@@ -103,15 +114,16 @@ class FractionPool {
    * @param {bigint|number} d
    */
   alloc(n = 0n, d = 1n) {
-    if (this.index >= this.pool.length) {
-      // Expand pool if needed
-      const newSize = this.pool.length * 2;
+    if (this.index >= this.pool.length && this.pool.length < POOL_MAX) {
+      // Expand pool if needed, up to POOL_MAX
+      const newSize = Math.min(this.pool.length * 2, POOL_MAX);
       for (let i = this.pool.length; i < newSize; i++) {
         this.pool.push(new Fraction(0));
       }
     }
 
-    const f = this.pool[this.index++];
+    const f = this.index < this.pool.length ? this.pool[this.index] : new Fraction(0);
+    this.index++;
     let nn = typeof n === 'bigint' ? n : BigInt(n);
     let dd = typeof d === 'bigint' ? d : BigInt(d);
     if (dd < 0n) {
@@ -176,6 +188,11 @@ export class BinaryEvaluator {
 
     // Fraction pool for allocation-free evaluation
     this.pool = new FractionPool(256);
+    // True for the length of a pass of IncrementalEvaluator.evaluateDirty(),
+    // which begins with a reset of the pool anyway: evaluateVariable() then
+    // resets it before each variable, because it copies its value out of the
+    // pool before it returns and nothing else of the pass keeps a pooled one
+    this._poolPerVariable = false;
 
     // Generation counter for cache management
     this.generation = 0;
@@ -821,6 +838,7 @@ export class BinaryEvaluator {
 
     if (expr !== null) {
       try {
+        if (this._poolPerVariable) this.pool.reset();
         const pooledValue = this.evaluate(expr, evalCache);
         // IMPORTANT: Create a NEW Fraction for caching, not the pooled one!
         // Pooled fractions get reused when pool.reset() is called, which would
@@ -1071,7 +1089,14 @@ export class IncrementalEvaluator {
       records.push(record);
     }
 
-    this.evaluator.reportProblems(this.evaluator.evaluateVariables(notes, records, this.cache));
+    let cycles;
+    this.evaluator._poolPerVariable = true;
+    try {
+      cycles = this.evaluator.evaluateVariables(notes, records, this.cache);
+    } finally {
+      this.evaluator._poolPerVariable = false;
+    }
+    this.evaluator.reportProblems(cycles);
 
     this.dirty.clear();
     return this.cache;
