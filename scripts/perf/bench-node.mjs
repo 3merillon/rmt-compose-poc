@@ -11,6 +11,9 @@
  *   node scripts/perf/bench-node.mjs chain-1000         # one module
  *   node scripts/perf/bench-node.mjs --wasm             # WASM evaluator path
  *   node scripts/perf/bench-node.mjs chain-1000 --wasm
+ *   node scripts/perf/bench-node.mjs chain-1000 --runs 5   # five times the samples
+ *
+ * scripts/perf/bench-pairs.mjs runs both engines back to back and compares them.
  */
 
 import { readFileSync } from 'node:fs';
@@ -23,7 +26,12 @@ const perfDir = join(here, '..', '..', 'public', 'modules', 'perf');
 
 const args = process.argv.slice(2);
 const useWasm = args.includes('--wasm');
-const targetArg = args.find((a) => !a.startsWith('--'));
+const asJson = args.includes('--json'); // one JSON line per module, for bench-pairs.mjs
+const runsAt = args.indexOf('--runs');
+const RUNS = runsAt >= 0 ? Math.max(1, Number(args[runsAt + 1]) || 1) : 1;
+const targetArg = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--runs');
+// JavaScript unless --wasm (the adapter reads this when module.js imports it)
+process.env.RMT_EVALUATOR = useWasm ? 'wasm' : 'js';
 
 const { Module } = await import('../../src/module.js');
 
@@ -86,7 +94,7 @@ async function bench(name) {
   // 1) Full re-evaluation (everything dirty).
   {
     const samples = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 8 * RUNS; i++) {
       mod._incrementalEvaluator.invalidateAll();
       mod._dirtyNotes.add(0);
       samples.push(timed(() => mod.evaluateModule()));
@@ -99,7 +107,7 @@ async function bench(name) {
     const original = midNote.variables.startTimeString;
     const alt = `(${original}) + base.d / 8`;
     const samples = [];
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 20 * RUNS; i++) {
       const expr = i % 2 === 0 ? alt : original;
       samples.push(timed(() => {
         midNote.setVariable('startTimeString', expr);
@@ -114,7 +122,7 @@ async function bench(name) {
   // 3) Base-note frequency edit (dirties every dependent).
   {
     const samples = [];
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 10 * RUNS; i++) {
       const freq = i % 2 === 0 ? '441' : '440';
       samples.push(timed(() => {
         mod.baseNote.setVariable('frequencyString', freq);
@@ -126,12 +134,16 @@ async function bench(name) {
     results['base-note edit'] = stats(samples);
   }
 
+  if (asJson) {
+    console.log(JSON.stringify({ name, notes: noteIds.length, evaluator: mod._binaryEvaluator?.constructor?.name, results }));
+    return;
+  }
   console.log(`\n=== ${name} (${noteIds.length} notes) — evaluator: ${mod._binaryEvaluator?.constructor?.name} ===`);
   console.table(results);
 }
 
-const targets = process.argv[2]
-  ? [process.argv[2]]
+const targets = targetArg
+  ? [targetArg]
   : ['chain-1000', 'fan-1000', 'lattice-1000', 'chords-dense', 'comma-chain-400'];
 
 for (const t of targets) {

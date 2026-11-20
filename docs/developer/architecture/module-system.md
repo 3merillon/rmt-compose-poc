@@ -292,7 +292,7 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 4. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
    `evaluateModule()` does that.
 
-Ids are guarded (`src/module.js:860-872`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
+Ids are guarded (`src/module.js:869-881`): non-integer, `< 0` or `> 65535` ids (the `u16` ceiling of
 `LOAD_REF`) are skipped with a `[RMT Security] Invalid note ID` warning, and `__proto__` /
 `constructor` / `prototype` are blocked outright as prototype-pollution vectors.
 

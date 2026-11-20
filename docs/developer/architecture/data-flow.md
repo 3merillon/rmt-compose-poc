@@ -126,7 +126,7 @@ into `DependencyGraph.setCorruptionFlags()` — scoped to the dirty set, not all
 ::: warning Which evaluator actually runs
 Always the JS `BinaryEvaluator` / `IncrementalEvaluator`. The WASM evaluator is disabled until the
 Rust core is ported to the new variable layout: `WASM_MATCHES_VARIABLE_LAYOUT` is `false`, so
-`isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:109-113`) and `?evaluator=wasm`
+`isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:111-115`) and `?evaluator=wasm`
 is ignored with a console warning.
 :::
 

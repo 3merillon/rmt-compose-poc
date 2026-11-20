@@ -112,6 +112,14 @@ function compareRecords(label, js, wasm) {
   const ids = new Set([...Object.keys(js.notes), ...Object.keys(wasm.notes)].map(Number));
   const jsCache = js.getEvaluationCache();
   const wasmCache = wasm.getEvaluationCache();
+  // The caches as Maps: the same size, the same notes, iterated in the same order
+  if (jsCache.size !== wasmCache.size) fail(`${label}: cache size JS ${jsCache.size}, WASM ${wasmCache.size}`);
+  const jsKeys = [...jsCache.keys()].join(',');
+  const wasmKeys = [...wasmCache.keys()].join(',');
+  if (jsKeys !== wasmKeys) fail(`${label}: cache keys differ
+      JS:   ${jsKeys.slice(0, 200)}
+      WASM: ${wasmKeys.slice(0, 200)}`);
+  if ([...wasmCache.entries()].length !== wasmCache.size) fail(`${label}: WASM cache entries() does not cover its size`);
   for (const id of ids) {
     compared++;
     const a = jsCache.get(id) || null;

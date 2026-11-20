@@ -899,9 +899,16 @@ impl PersistentEvaluator {
     /// per variable (kind, a, b). An empty array when the note has no record.
     #[wasm_bindgen(js_name = readNote)]
     pub fn read_note(&self, note_id: u32) -> Vec<f64> {
-        let Some(record) = self.records.get(note_id) else { return Vec::new() };
-
         let mut out = Vec::with_capacity(2 + 3 * VAR_COUNT);
+        self.write_note(note_id, &mut out);
+        out
+    }
+}
+
+impl PersistentEvaluator {
+    /// readNote() into `out`; nothing for a note without a record
+    fn write_note(&self, note_id: u32, out: &mut Vec<f64>) {
+        let Some(record) = self.records.get(note_id) else { return };
         out.push(record.corruption_flags as f64);
         out.push(record.approx_flags as f64);
         for value in &record.values {
@@ -916,6 +923,46 @@ impl PersistentEvaluator {
                     None => out.extend([KIND_APPROX_BIG, 0.0, 0.0]),
                 },
                 Some(Value::Irr(_)) => out.extend([KIND_IRRATIONAL, 0.0, 0.0]),
+            }
+        }
+    }
+}
+
+#[wasm_bindgen]
+impl PersistentEvaluator {
+    /// The ids of every note that has a record, ascending
+    #[wasm_bindgen(js_name = cachedIds)]
+    pub fn cached_ids(&self) -> Vec<u32> {
+        self.records
+            .records
+            .iter()
+            .enumerate()
+            .filter_map(|(id, record)| record.as_ref().map(|_| id as u32))
+            .collect()
+    }
+
+    /// The corruption flags of several notes, one per id; -1 for a note without a record
+    #[wasm_bindgen(js_name = readCorruptionFlags)]
+    pub fn read_corruption_flags(&self, note_ids: &[u32]) -> Vec<i32> {
+        note_ids
+            .iter()
+            .map(|&id| self.records.get(id).map_or(-1, |record| record.corruption_flags as i32))
+            .collect()
+    }
+
+    /// The records of several notes in one call: readNote() of each, one
+    /// after the other, every one 2 + 3 * VAR_COUNT long; a note without a
+    /// record is -1 followed by zeros.
+    #[wasm_bindgen(js_name = readNotes)]
+    pub fn read_notes(&self, note_ids: &[u32]) -> Vec<f64> {
+        let stride = 2 + 3 * VAR_COUNT;
+        let mut out = Vec::with_capacity(note_ids.len() * stride);
+        for &id in note_ids {
+            if self.records.get(id).is_some() {
+                self.write_note(id, &mut out);
+            } else {
+                out.push(-1.0);
+                out.resize(out.len() + stride - 1, 0.0);
             }
         }
         out
@@ -1173,6 +1220,22 @@ mod tests {
         assert_eq!(text(&evaluator, 1, Var::Frequency), "none");
         assert_eq!(evaluator.problems.failures.len(), 1);
         assert_eq!(evaluator.problems.failures[0].0, pack(1, Var::Frequency));
+    }
+
+    #[test]
+    fn test_bulk_reads_match_single_reads() {
+        let evaluator = evaluated(vec![
+            base_263(),
+            note(1, &[(Var::Frequency, then(&[constant(2, 1), constant(1, 12)], Op::Pow))]),
+        ]);
+        assert_eq!(evaluator.read_corruption_flags(&[1, 0, 9]), vec![1 << Var::Frequency as i32, 0, -1]);
+        let bulk = evaluator.read_notes(&[0, 9, 1]);
+        let stride = 2 + 3 * VAR_COUNT;
+        assert_eq!(bulk.len(), 3 * stride);
+        assert_eq!(&bulk[0..stride], evaluator.read_note(0).as_slice());
+        assert_eq!(bulk[stride], -1.0);
+        assert!(bulk[stride + 1..2 * stride].iter().all(|&x| x == 0.0));
+        assert_eq!(&bulk[2 * stride..], evaluator.read_note(1).as_slice());
     }
 
     fn packed(id: u32, expressions: &[(u8, Vec<u8>)]) -> Vec<u8> {

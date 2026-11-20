@@ -243,7 +243,7 @@ It does **not** throw, and the loop still gets values. Because the order inside 
 Cycles are meant to be prevented upstream, by `validateExpression()` in `src/modals/validation.js`, which uses the same per-variable rule — see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable).
 
 ::: info The WASM path still orders whole notes
-The Rust evaluator evaluates a note's expressions in the old fixed order and with the old variable layout, and both WASM incremental evaluators sort **notes** with the Kahn algorithm this page used to describe (`WasmIncrementalEvaluator.topoSort()`, `src/wasm/evaluator-adapter.js:248`). Nothing of this section has been ported, which is one reason the WASM evaluator is disabled.
+The Rust evaluator evaluates a note's expressions in the old fixed order and with the old variable layout, and both WASM incremental evaluators sort **notes** with the Kahn algorithm this page used to describe (`WasmIncrementalEvaluator.topoSort()`, `src/wasm/evaluator-adapter.js:282`). Nothing of this section has been ported, which is one reason the WASM evaluator is disabled.
 :::
 
 ## From corruption flag to pixels
@@ -254,7 +254,7 @@ This is the whole point of tracking corruption, and it crosses four files:
 POW produces an irrational, or ~ / a fallback an approximation
   → BinaryEvaluator._lastEvalWasCorrupted = true          binary-evaluator.js:557
   → evaluateVariable ORs the property's bit into corruptionFlags   :830
-  → Module._updateCorruptionFlags() pushes it into the graph   module.js:684-707
+  → Module._updateCorruptionFlags() pushes it into the graph   module.js:684-716
       → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1746
   → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:1015-1062
       0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
@@ -295,7 +295,7 @@ Two costs matter now. **Depth** decides how much of the module a commit touches 
 | Fraction backing | `fraction.js@5.3.4` — `n`/`d`/`s` are **BigInt**, arbitrary precision | `node_modules/fraction.js` |
 | POW exponent cap | integer exponent ≤ **65536**, result ≤ **~1 Mbit** per component; beyond, approximate | `src/value/exact.js:33-34` |
 | Note id in bytecode | `u16` → max **65535** | `binary-note.js:129` |
-| Note id accepted anywhere | integer `0 … 65535` — enforced by the loader **and the DSL parser** (and by the converter of the retired method-chain syntax) | `module.js:861`, `dsl/parser.js:284` |
+| Note id accepted anywhere | integer `0 … 65535` — enforced by the loader **and the DSL parser** (and by the converter of the retired method-chain syntax) | `module.js:870`, `dsl/parser.js:284` |
 
 ::: tip Arbitrary precision, end to end
 fraction.js 5.x is BigInt-backed, so exact rational arithmetic survives **any depth** of module tree: a 200-note `(3/2)` chain evaluates to its exact 98-digit numerator, and `(81/80)^400` is exact (see the `comma-chain-400` stress shape). `scripts/test-exactness.mjs` (part of `npm test`) locks this in: compile → evaluate → decompile → save → load → re-evaluate must reproduce every digit. Irrational powers are exact too (`2^(7/12)` stays that power). The only approximations are the *marked* ones — a `~` number, the documented fallbacks of the exact algebra, a division by zero — and the float boundary `toNumber()` where values leave for GL, Web Audio, and display.

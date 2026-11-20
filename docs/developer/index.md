@@ -26,7 +26,7 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 
 ::: warning The WASM evaluator is disabled
 The `rmt-core` WASM binary is **not fetched** on any page load — `initWasm()` returns early because
-`isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:109-113`): the Rust core still
+`isEvaluatorHotSwapEnabled()` is `false` (`src/wasm/evaluator-adapter.js:111-115`): the Rust core still
 has the old variable layout, so `WASM_MATCHES_VARIABLE_LAYOUT` is `false` and `?evaluator=wasm` is
 ignored with a console warning. Everything you experience in the app runs on the **JavaScript**
 evaluator. See [WASM Overview](/developer/wasm/overview).

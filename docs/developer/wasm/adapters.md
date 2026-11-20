@@ -80,7 +80,7 @@ and the layout flag is `false`. The two branches under it are what the table wou
 `true`: a browser then needs `?evaluator=wasm`, and headless Node always passes.
 
 ```javascript
-// src/wasm/evaluator-adapter.js:109-113
+// src/wasm/evaluator-adapter.js:111-115
 export function isEvaluatorHotSwapEnabled() {
   if (FORCE_JS_EVALUATOR) return false;
   if (typeof window === 'undefined') return true; // headless tests/benches
@@ -145,8 +145,8 @@ and hands the object to `PersistentEvaluator.registerNote(id, expressions)`, whe
 `serde-wasm-bindgen` deserializes it.
 
 ::: danger This is the hang site
-`WasmPersistentEvaluatorWrapper.registerNote` (`evaluator-adapter.js:469`), called from
-`WasmIncrementalEvaluator.evaluateDirty` (`evaluator-adapter.js:321`), is where the browser locks up
+`WasmPersistentEvaluatorWrapper.registerNote` (`evaluator-adapter.js:509`), called from
+`WasmIncrementalEvaluator.evaluateDirty` (`evaluator-adapter.js:355`), is where the browser locks up
 after an `invalidateAll()`. The JS side of that call is straightforward; the loop is inside the Rust
 binary.
 :::
@@ -185,7 +185,7 @@ its cache in JS. Same interface where it matters: `evaluate(expr, evalCache)`,
 `evaluateNote(note, evalCache)`, `invalidate`, `invalidateAll`, `getCachedValue`, `getPoolStats`.
 
 It can only evaluate a whole note at a time, so it cannot be driven by the JS evaluator's
-per-variable order. `WasmNoteOrderIncrementalEvaluator` (`evaluator-adapter.js:248`) pairs it with
+per-variable order. `WasmNoteOrderIncrementalEvaluator` (`evaluator-adapter.js:282`) pairs it with
 the per-note Kahn sort instead: the JS incremental evaluator's dirty tracking, `WasmIncrementalEvaluator`'s
 `topoSort()`, then one `evaluateNote()` per note.
 

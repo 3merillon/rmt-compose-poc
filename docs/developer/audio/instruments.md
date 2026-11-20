@@ -507,7 +507,7 @@ sounds (a live tempo change, a loop switched off) restores the release of the vo
 
 ## Instrument inheritance
 
-A note usually carries no instrument of its own. `Module.findInstrument(note, memo)` (`module.js:775`)
+A note usually carries no instrument of its own. `Module.findInstrument(note, memo)` (`module.js:784`)
 calls `instrumentOf()` in `src/players.js`, which resolves one in this order. A **player** is a line of
 notes, each starting where the previous one ends.
 

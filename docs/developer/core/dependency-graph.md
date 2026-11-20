@@ -233,7 +233,7 @@ The graph owns this and nothing else does. A property is *corrupted* when its ow
 | `getAllFrequencyDependencies(id)` | transitive frequency ancestors | `:1857` |
 | `clearCorruptionFlags(id)` | delete | `:1802` |
 
-Flags arrive from `Module._updateCorruptionFlags()` after each evaluation (`src/module.js:684-707`), scoped to the dirty set.
+Flags arrive from `Module._updateCorruptionFlags()` after each evaluation (`src/module.js:684-716`), scoped to the dirty set.
 
 ### How the renderer consumes it
 

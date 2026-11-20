@@ -691,9 +691,18 @@ export class Module {
     }
 
     try {
+      const ids = noteIds !== null ? noteIds : Object.keys(this.notes);
+      // The WASM cache gives every flag in one call, without building records
+      if (typeof cache.corruptionFlagsOf === 'function') {
+        const numericIds = ids.map(Number);
+        const flags = cache.corruptionFlagsOf(numericIds);
+        for (let i = 0; i < numericIds.length; i++) {
+          if (flags[i] >= 0) this._dependencyGraph.setCorruptionFlags(numericIds[i], flags[i]);
+        }
+        return;
+      }
       // Fetch per-id from cache (rather than iterating cache.entries()) so
       // both regular Maps and lazy WASM cache proxies are handled correctly.
-      const ids = noteIds !== null ? noteIds : Object.keys(this.notes);
       for (const id of ids) {
         const noteId = Number(id);
         const result = cache.get(noteId);

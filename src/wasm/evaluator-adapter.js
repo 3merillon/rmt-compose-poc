@@ -75,7 +75,7 @@ const KIND_APPROX_BIG = 5;   // approximate, too large for numbers: readValueTex
 const REQUIRED_CORE_METHODS = [
   'registerNotes', 'removeNote', 'invalidateAll', 'evaluateDirty',
   'takeCycles', 'takeUnresolved', 'takeFailures', 'takeDivisionsByZero',
-  'hasCachedNote', 'readNote', 'readValueText',
+  'hasCachedNote', 'readNote', 'readNotes', 'readValueText', 'readCorruptionFlags', 'cachedIds',
 ];
 
 /**
@@ -90,11 +90,13 @@ const REQUIRED_CORE_METHODS = [
  * @returns {Fraction}
  */
 function reducedFraction(numerator, denominator) {
-  const fraction = new Fraction(0); // s = 1n, n = 0n, d = 1n
+  // As fraction.js makes its own results (newFraction): same fields, same order
+  const fraction = Object.create(Fraction.prototype);
   if (numerator < 0n) {
     fraction.s = -1n;
     fraction.n = -numerator;
   } else {
+    fraction.s = 1n;
     fraction.n = numerator;
   }
   fraction.d = denominator;
@@ -167,6 +169,8 @@ class LazyWasmCacheProxy {
   constructor(evaluatorWrapper) {
     this._evaluator = evaluatorWrapper;
     this._localCache = new Map();
+    // Records set here that the core did not have (none in practice)
+    this._localOnly = 0;
   }
 
   get(noteId) {
@@ -175,16 +179,18 @@ class LazyWasmCacheProxy {
       return this._localCache.get(noteId);
     }
 
-    // Fetch from WASM
+    // Fetch from WASM; a note without a record is undefined, as in a Map
     const result = this._evaluator.getEvaluatedNote(noteId);
     if (result) {
       this._localCache.set(noteId, result);
+      return result;
     }
-    return result;
+    return undefined;
   }
 
   set(noteId, value) {
     // Store locally - WASM cache is the source of truth
+    if (!this._localCache.has(noteId) && !this._evaluator.hasCachedNote(noteId)) this._localOnly++;
     this._localCache.set(noteId, value);
   }
 
@@ -193,42 +199,70 @@ class LazyWasmCacheProxy {
   }
 
   /**
+   * The corruption flags of several notes in one call, without building
+   * their records (Module._updateCorruptionFlags reads only these)
+   * @param {Array<number>} noteIds
+   * @returns {Int32Array} One per id; -1 for a note without a record
+   */
+  corruptionFlagsOf(noteIds) {
+    return this._evaluator.readCorruptionFlags(noteIds);
+  }
+
+  /**
    * Drop a note's values. Module.removeNote() calls this when a note is gone,
    * so WASM has to forget the note as well: left registered, whatever still
    * references it would go on reading its last values instead of defaults.
    */
   delete(noteId) {
+    if (this._localOnly > 0 && this._localCache.has(noteId) && !this._evaluator.hasCachedNote(Number(noteId))) this._localOnly--;
     this._localCache.delete(noteId);
     this._evaluator.removeNote(Number(noteId));
   }
 
   clear() {
     this._localCache.clear();
+    this._localOnly = 0;
   }
 
   get size() {
-    // Return WASM cache size
-    return this._evaluator.evaluator.cacheSize || 0;
+    return this._localOnly === 0 ? this._evaluator.evaluator.cacheSize : this._ids().length;
   }
 
+  /**
+   * Every note id with a record: the core's, ascending (the order in which a
+   * JS evaluation cache first receives them), then any set here only
+   * @returns {Array<number>}
+   */
+  _ids() {
+    const ids = Array.from(this._evaluator.evaluator.cachedIds());
+    if (this._localOnly > 0) {
+      const inCore = new Set(ids);
+      for (const key of this._localCache.keys()) {
+        if (!inCore.has(key)) ids.push(key);
+      }
+    }
+    return ids;
+  }
+
+  // Iteration covers every record, as a Map's does, not only the ones read so far
+
   *entries() {
-    // Yield cached entries - note: this only yields what's been accessed
-    // Full iteration would require getting all IDs from WASM
-    for (const [key, value] of this._localCache) {
-      yield [key, value];
+    for (const id of this._ids()) {
+      const value = this.get(id);
+      if (value !== undefined) yield [id, value];
     }
   }
 
   *keys() {
-    for (const key of this._localCache.keys()) {
-      yield key;
-    }
+    yield* this._ids();
   }
 
   *values() {
-    for (const value of this._localCache.values()) {
-      yield value;
-    }
+    for (const [, value] of this.entries()) yield value;
+  }
+
+  forEach(callback, thisArg) {
+    for (const [id, value] of this.entries()) callback.call(thisArg, value, id, this);
   }
 
   [Symbol.iterator]() {
@@ -392,6 +426,11 @@ class WasmPersistentEvaluatorWrapper {
     // fraction.js records of the notes read so far (lazy conversion from WASM)
     this._jsCache = new Map();
 
+    // The last batch, until its records are read: the first read fetches
+    // them all in one call (whoever reads one record after an evaluation
+    // reads them all, the renderer first)
+    this._unread = null;
+
     // Track which notes have been registered
     this._registeredNotes = new Set();
 
@@ -410,6 +449,7 @@ class WasmPersistentEvaluatorWrapper {
   invalidateAll() {
     this.evaluator.invalidateAll();
     this._jsCache.clear();
+    this._unread = null;
     this._registeredNotes.clear();
     this.generation++;
   }
@@ -514,6 +554,7 @@ class WasmPersistentEvaluatorWrapper {
     for (let i = 0; i < ids.length; i++) {
       this._jsCache.delete(ids[i]);
     }
+    this._unread = ids.length > 1 ? ids : null;
 
     if (this.evaluator.hasProblems) {
       this._reportProblems();
@@ -575,17 +616,43 @@ class WasmPersistentEvaluatorWrapper {
    * @returns {Object|null} Evaluated values with Fraction.js objects
    */
   getEvaluatedNote(noteId) {
-    const cached = this._jsCache.get(noteId);
+    let cached = this._jsCache.get(noteId);
     if (cached !== undefined) {
       return cached;
+    }
+    if (this._unread !== null) {
+      this._readBatch();
+      cached = this._jsCache.get(noteId);
+      if (cached !== undefined) return cached;
     }
 
     const packed = this.evaluator.readNote(noteId);
     if (packed.length === 0) return null;
 
-    const record = this._toRecord(noteId, packed);
+    const record = this._toRecord(noteId, packed, 0);
     this._jsCache.set(noteId, record);
     return record;
+  }
+
+  /** Read every record of the last batch in one call */
+  _readBatch() {
+    const ids = this._unread;
+    this._unread = null;
+    const packed = this.evaluator.readNotes(ids);
+    const stride = 2 + 3 * VARIABLE_NAMES.length;
+    for (let i = 0, at = 0; i < ids.length; i++, at += stride) {
+      if (packed[at] < 0 || this._jsCache.has(ids[i])) continue; // no record, or already read
+      this._jsCache.set(ids[i], this._toRecord(ids[i], packed, at));
+    }
+  }
+
+  /**
+   * The corruption flags of several notes
+   * @param {Array<number>|Uint32Array} noteIds
+   * @returns {Int32Array}
+   */
+  readCorruptionFlags(noteIds) {
+    return this.evaluator.readCorruptionFlags(noteIds instanceof Uint32Array ? noteIds : Uint32Array.from(noteIds));
   }
 
   /**
@@ -633,9 +700,10 @@ class WasmPersistentEvaluatorWrapper {
    *
    * @param {number} noteId
    * @param {Float64Array} packed - The two flag sets, then (kind, a, b) per variable
+   * @param {number} start - Where the note's record starts in `packed`
    * @returns {Object}
    */
-  _toRecord(noteId, packed) {
+  _toRecord(noteId, packed, start) {
     const record = {
       startTime: null,
       duration: null,
@@ -643,15 +711,13 @@ class WasmPersistentEvaluatorWrapper {
       amplitude: null,
       attack: null,
       release: null,
-      corruptionFlags: packed[0],
-      approxFlags: packed[1],
+      corruptionFlags: packed[start],
+      approxFlags: packed[start + 1],
       exact: null,
     };
 
-    // A core built with fewer variables than this side knows simply leaves the rest null
-    const count = Math.min(VARIABLE_NAMES.length, (packed.length - 2) / 3);
-    for (let varIndex = 0; varIndex < count; varIndex++) {
-      const at = 2 + 3 * varIndex;
+    for (let varIndex = 0; varIndex < VARIABLE_NAMES.length; varIndex++) {
+      const at = start + 2 + 3 * varIndex;
       const name = VARIABLE_NAMES[varIndex];
       switch (packed[at]) {
         case KIND_SMALL:

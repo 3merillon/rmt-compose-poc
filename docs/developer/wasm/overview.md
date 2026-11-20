@@ -246,7 +246,7 @@ __rmtPerf.measureEval(1)
 ```
 $func198
   ← $persistentevaluator_registerNote          (WASM)
-  ← WasmPersistentEvaluatorWrapper.registerNote (src/wasm/evaluator-adapter.js:469)
+  ← WasmPersistentEvaluatorWrapper.registerNote (src/wasm/evaluator-adapter.js:509)
   ← WasmIncrementalEvaluator.evaluateDirty      (rust/src/evaluator.rs:905)
 ```
 
