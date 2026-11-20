@@ -539,9 +539,47 @@ node scripts/perf/converge.mjs
 Note ids go up to 16,777,215 (`MAX_NOTE_ID`, `src/binary-note.js`); the loader refuses ids above it,
 and references above 65535 compile to `LOAD_REF_WIDE`. The UI's import paths (Load Module, library
 upload, Load UI, Copy to Modules) accept up to 250,000 notes, and Load Module files up to 64 MB
-(`MAX_MODULE_NOTES`, `MAX_MODULE_BYTES` in `src/limits.js`). Memory is what limits a module: about
-8 KB of JavaScript heap per loaded note. Measured in Node, 100,000 notes take about 0.8 GB and load
-in about 3 s, 300,000 about 2.3 GB, and a tab's heap stops near 4 GB.
+(`MAX_MODULE_NOTES`, `MAX_MODULE_BYTES` in `src/limits.js`).
+
+A loaded note costs about 2.4 KB of JavaScript heap in Edge (the whole app: module, graph,
+evaluation records, renderer, undo history) and about 3 KB in Node (the data model alone, without
+pointer compression). It was about 6.6 KB and 8.9 KB. Measured on `voices-*` modules after load and
+a full GC, per note at 100,000 notes:
+
+| Holder, before | Node | Edge | Now |
+|---|---|---|---|
+| The fraction pool's high-water mark: 2,097,149 Fractions kept after one pass | 1,976 B | 1,082 B | a few slots ([the fraction pool](/developer/core/binary-evaluator#the-fraction-pool)) |
+| Three unset expressions per note, each with its own buffers | 1,848 B | 1,226 B | one shared `EMPTY_EXPRESSION` |
+| Compiled expressions at the capacity they were compiled in (64 bytes, 16 ids) | 1,190 B | 825 B | at their size (`clone()`) |
+| A `note.variables` Proxy, a `Map` and three wrappers per note, made by the end-time loops | — | 654 B | `hasExpression()`; one shared handler |
+| A `Set` per note in each of the graph's nine maps | 861 B | 429 B | `IdSet` ([space](/developer/core/dependency-graph#space)) |
+
+Evaluation got faster with it: a full evaluation of `voices-100000` in Node went from 344 to 221 ms
+(p50). What is left, per note in Edge at 20,000 notes: the notes and their expressions about
+1,100 B, the graph about 500 B, the renderer about 330 B, the evaluation records about 240 B, and
+a whole-module string each for the undo history and the autosave's last write (about 155 B each).
+
+In headless Edge, on `voices-*` modules (the module handed to the autosave and the page reloaded,
+or, at 500,000 notes and up, served as the default module; an edit is `__rmtPerf.measureCommit(1)`,
+an octave step through the whole commit; before this pass in parentheses):
+
+| Notes | Heap after load | Load | An edit |
+|---|---|---|---|
+| 100,000 | 240 MB | 9 s (12 s) | 0.6 s |
+| 250,000 | 559 MB (1,475 MB) | 23 s (31 s) | 1.4 s (1.7 to 4.3 s) |
+| 500,000 | 1,093 MB | 31 s | 3.9 s |
+| 1,000,000 | about 2,300 MB, before a GC | 63 s | — |
+
+So memory is no longer the first limit: a million notes load within a tab's heap (about 4 GB).
+Two limits come before it:
+
+- **The autosave.** Chromium refuses an IndexedDB value larger than 133,169,152 bytes (127 MB), and
+  the autosave keeps the module as one string. `voices-500000` (79 million characters) is saved and
+  read back in 0.65 s; `voices-1000000` (158 million) is refused, and so is the localStorage
+  fallback (`QuotaExceededError`), so that session would not survive a reload. A module whose text
+  holds any character above U+00FF is stored at two bytes per character, which halves the size it
+  can reach.
+- **Time.** An edit costs about 6 to 8 µs per note of the module, and a load about 60 to 90 µs.
 
 The autosave keeps the whole module in IndexedDB (`src/store/autosave.js`), far past what
 localStorage could hold: `voices-100000` (15.5 million characters as JSON) is saved and restored
