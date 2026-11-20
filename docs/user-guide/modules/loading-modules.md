@@ -80,7 +80,7 @@ See [Module Bar](/user-guide/interface/module-bar) for dragging, reordering and 
 
 ## Find a module in the library
 
-The library ships 80 modules across six sections — Intervals (46), Chords (11), Progressions (8), Melodies (7), Scale Systems (6) and Custom (2). Scrolling for one is slow.
+The library ships 81 modules across six sections — Intervals (46), Chords (11), Progressions (8), Melodies (7), Scale Systems (6) and Custom (3). Scrolling for one is slow.
 
 Click the **magnifier** at the left of the module bar's toolbar. A search field unfolds; type into it and the library filters live. A module matches if your text appears in its **name**, **ratio**, **family**, **cents**, **tags**, or its file path — so `3-limit`, `701`, `fifth` and `3/2` all find the Perfect 5th.
 
@@ -154,5 +154,5 @@ Open the browser console. The failures that do not surface in the UI all log the
 - [Saving Modules](/user-guide/modules/saving-modules) — export, Save UI, and getting your work into the library
 - [Module Format](/user-guide/modules/module-format) — what is actually in the file
 - [Module Bar](/user-guide/interface/module-bar) — organizing the library
-- [The Module Library](/user-guide/modules/module-library) — what the 80 shipped modules are and how they are built
+- [The Module Library](/user-guide/modules/module-library) — what the 81 shipped modules are and how they are built
 - [Creating Modules](/user-guide/modules/creating-modules) — designing a module that drops well

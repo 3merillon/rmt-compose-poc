@@ -264,7 +264,7 @@ Note 2 is a major third above note 1 — defined against *note 1*, not against t
 
 ### The module library
 
-The [module bar](/user-guide/interface/module-bar) under the top bar ships **80 modules** in six sections:
+The [module bar](/user-guide/interface/module-bar) under the top bar ships **81 modules** in six sections:
 
 | Section | Count | Contents |
 |---------|-------|----------|
@@ -273,7 +273,7 @@ The [module bar](/user-guide/interface/module-bar) under the top bar ships **80 
 | **Progressions** | 8 | Four progressions (V7–I, ii–V–I, I–IV–V–I, I–vi–IV–V) and four cadences |
 | **Melodies** | 7 | Public-domain tunes: Ode to Joy, Twinkle Twinkle, Frère Jacques, Amazing Grace, Greensleeves, Bach Minuet in G, Scarborough Fair |
 | **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 2 | Where your own modules land. Ships with `canon base` and `canon melody`. |
+| **Custom** | 3 | Where your own modules land. Ships with the canon per tonos: `canon` (the whole piece), `canon base` and `canon melody`. |
 
 Every module in the library is **relational and self-contained** — no expression refers to anything outside its own file. That is what lets you **drag a module onto any note** and have it re-root there: its `base.f` and `base.t` references become that note's frequency and start time, and the internal structure survives intact. Its `base.d` stays `base.d`: the module keeps its rhythm in time units and plays at your workspace's pace, whatever the length of the note you drop it on. Drop the ii–V–I onto a note a fourth up and you get the same progression, a fourth up.
 

@@ -876,6 +876,14 @@
       "label": "Custom",
       "items": [
         {
+          "file": "custom/canon.json",
+          "name": "canon",
+          "family": "melody",
+          "tags": [
+            "canon"
+          ]
+        },
+        {
           "file": "custom/canon base.json",
           "name": "canon base",
           "family": "melody",

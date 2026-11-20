@@ -1,6 +1,6 @@
 ---
 title: Building a Module Library
-description: How the shipped 80-module library is organised, how to add your own modules with Copy to Modules or uploads, and how to back up the layout.
+description: How the shipped 81-module library is organised, how to add your own modules with Copy to Modules or uploads, and how to back up the layout.
 ---
 
 # Building a Module Library
@@ -10,7 +10,7 @@ editable, and the fastest way to add to it is to select some notes and press one
 
 ## What ships
 
-**80 modules in six sections.**
+**81 modules in six sections.**
 
 | Section | Modules | What's in it |
 |---|---|---|
@@ -19,7 +19,7 @@ editable, and the fastest way to add to it is to select some notes and press one
 | **Progressions** | 8 | ii–V–I, I–IV–V–I, I–vi–IV–V, V7–I, plus four cadences |
 | **Melodies** | 7 | Ode to Joy, Twinkle Twinkle, Frère Jacques, Amazing Grace, Greensleeves, Bach Minuet in G, Scarborough Fair |
 | **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 2 | `canon base` and `canon melody` — and where your own modules land |
+| **Custom** | 3 | `canon`, `canon base` and `canon melody` — and where your own modules land |
 
 ![The module bar showing coloured module tiles grouped into labelled sections](/img/module-library-icons.png)
 
