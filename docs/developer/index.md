@@ -21,16 +21,7 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 | **WebGL2** | The workspace. A hard requirement — `player.js` probes for a context and, without one, never constructs the `Workspace`. There is no DOM fallback renderer. |
 | **Web Audio API** | Synthesis, sample playback, the reverb/limiter signal graph. |
 | **fraction.js 5.3.4** | Exact rational arithmetic. BigInt-backed — arbitrary precision, at any magnitude and depth. |
-| **Rust → WASM** | An alternative evaluator core that ships in the bundle. The default in a browser; `?evaluator=js` keeps JavaScript. |
 | **VitePress** | This documentation site (`docs/`, deployed separately). |
-
-::: info The WASM evaluator is the default
-The `rmt-core` WASM binary is fetched at boot (294 KB, about 115 KB gzipped) and each `Module`
-hot-swaps to it when it is ready, unless the URL has `?evaluator=js`
-(`isEvaluatorHotSwapEnabled()`, `src/wasm/evaluator-adapter.js:122-124`). Until then, and if the
-core fails to load, the **JavaScript** evaluator runs. See
-[WASM Overview](/developer/wasm/overview).
-:::
 
 ## The layers
 
@@ -58,8 +49,6 @@ core fails to load, the **JavaScript** evaluator runs. See
 ├──────────────────────────────────────────────────────────────────────┤
 │ State                                                                │
 │  store/app-state.js · store/history.js · utils/event-bus.js          │
-├──────────────────────────────────────────────────────────────────────┤
-│ wasm/  (Rust evaluator core — the default; JavaScript until it loads)      │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -98,12 +87,6 @@ core fails to load, the **JavaScript** evaluator runs. See
 - **[Performance](/developer/performance)** — the benchmark harness and the measured numbers
 - **[Theming](/developer/theming)** — presets, tokens, and how they reach the GL canvas
 
-### WASM
-
-- **[WASM Overview](/developer/wasm/overview)** — what ships, which evaluator runs, how it is checked, how fast
-- **[Building WASM](/developer/wasm/building)** — `wasm-pack`, `sync-wasm.mjs`, committed artifacts
-- **[JS/WASM Adapters](/developer/wasm/adapters)** — the evaluator bridge
-
 ### API reference
 
 - **[Module Class](/developer/api/module)**
@@ -123,7 +106,7 @@ core fails to load, the **JavaScript** evaluator runs. See
 
 | File | Purpose |
 |---|---|
-| `src/main.js` | Entry point (`index.html` loads this). Registers instruments, boots WASM, modals, menu, settings. |
+| `src/main.js` | Entry point (`index.html` loads this). Registers instruments, modals, menu, settings. |
 | `src/player.js` | The orchestrator: transport, selection, drag/resize commits, undo wiring, scale controls. ~6.6k lines. |
 | `src/module.js` | `Module` — notes, dependency registration, evaluation, JSON load/save, reindexing. |
 | `src/note.js` | `Note` — six `BinaryExpression`s plus `color` / `instrument` / `measure`; `EXPRESSION_VARS`, `isMeasureNote()`. |

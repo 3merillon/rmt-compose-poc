@@ -128,7 +128,7 @@ class FractionPool {
   /**
    * Create a Fraction from an existing Fraction (copy).
    * Tolerates duck-typed {s,n,d} values with Number fields (e.g. from the
-   * WASM adapter) by coercing them to BigInt.
+   * older callers) by coercing them to BigInt.
    */
   allocFrom(frac) {
     if (typeof frac.n === 'bigint') {
@@ -995,7 +995,7 @@ export class IncrementalEvaluator {
   /**
    * Mark a note as dirty WITHOUT re-registration/invalidating its bytecode.
    * Use for dependents whose values changed but bytecode didn't.
-   * (Parity with WasmIncrementalEvaluator.markDirtyOnly — module.js calls this
+   * (module.js calls this
    * for baseNote dependents and batch updates; without it those notes were
    * silently never re-evaluated on the JS path.)
    */

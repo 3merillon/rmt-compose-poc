@@ -179,11 +179,6 @@ holds its labels. The note stays centred on its pitch line.
 Amplitude `1` — and so every note of a module that sets none — draws exactly as before. Silences
 are never scaled. The exact value is in the widget row.
 
-::: info The WASM evaluator is the default
-The Rust evaluator (the default in a browser; `?evaluator=js` keeps JavaScript) has the same six
-variables, and `amplitude` inherits from the BaseNote there too.
-:::
-
 ## See also
 
 - [frequency](/reference/properties/frequency)

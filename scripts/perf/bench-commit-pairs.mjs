@@ -9,7 +9,7 @@
  *
  * Usage (e.g. v2 HEAD on 3221, a branch on 3220):
  *   node scripts/perf/bench-commit-pairs.mjs [--before http://localhost:3221] [--after http://localhost:3220]
- *        [--module voices-20000] [--engine js|wasm] [--pairs 5] [--iter 10]
+ *        [--module voices-20000] [--pairs 5] [--iter 10]
  */
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
@@ -21,12 +21,11 @@ const flag = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] 
 const BEFORE = flag('--before', 'http://localhost:3221');
 const AFTER = flag('--after', 'http://localhost:3220');
 const MODULE = flag('--module', 'voices-20000');
-const ENGINE = flag('--engine', 'js');
 const PAIRS = Number(flag('--pairs', 5));
 const ITER = flag('--iter', '10');
 
 function run(url) {
-  const out = spawnSync(process.execPath, [join(here, 'profile-commit.mjs'), '--url', url, '--module', MODULE, '--engine', ENGINE, '--iter', ITER, '--no-profile', '--json'], { encoding: 'utf8' });
+  const out = spawnSync(process.execPath, [join(here, 'profile-commit.mjs'), '--url', url, '--module', MODULE, '--iter', ITER, '--no-profile', '--json'], { encoding: 'utf8' });
   const line = out.stdout.trim().split('\n').pop();
   try { return JSON.parse(line); } catch { throw new Error(`${url}: ${out.stderr || out.stdout}`); }
 }

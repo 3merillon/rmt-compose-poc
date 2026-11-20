@@ -12,9 +12,6 @@ import { modals } from './modals/index.js';
 import { audioEngine } from './player/audio-engine.js';
 import './store/history.js';
 
-// WASM module initialization
-import { initWasm, isWasmAvailable, getWasmVersion } from './wasm/index.js';
-import { WASM_CONFIG } from './wasm/config.js';
 
  // Globals are exposed via registerGlobals below to centralize window.* writes
 
@@ -38,7 +35,7 @@ try {
 } catch {}
 
 // Publish --app-width / --app-height before anything lays out. Not inside initApp():
-// that awaits the WASM load, and the chrome would spend those frames sized against
+// that awaits the menu's import, and the chrome would spend those frames sized against
 // the wrong viewport.
 try { initViewport(); } catch (e) {}
 // Every number field gets the app's own up/down arrows (the native ones cannot be styled).
@@ -77,18 +74,6 @@ try {
  // Import and initialize the legacy modules
 // These will be loaded as regular scripts since they're too complex to fully convert immediately
 async function initApp() {
-    // Initialize WASM module (non-blocking)
-    try {
-        const wasmLoaded = await initWasm();
-        if (wasmLoaded) {
-            console.log(`RMT Core WASM v${getWasmVersion()} initialized`);
-        } else if (WASM_CONFIG.debug) {
-            console.log('WASM not available, using JavaScript fallback');
-        }
-    } catch (e) {
-        console.warn('WASM initialization failed:', e);
-    }
-
     // Initialize stack click functionality
     initStackClick();
 

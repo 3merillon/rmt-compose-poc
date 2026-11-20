@@ -15,7 +15,7 @@ by opening a pull request you agree that your contribution ships under it.
 3. **Fork the repository.**
 
 Read [Development Setup](/developer/contributing/setup) first if you have not run the app yet — the
-Node version requirement bites, and `npm run build` needs Rust.
+Node version requirement bites.
 
 ## 1. Branch
 
@@ -65,14 +65,8 @@ There is no unit-test suite. "Run the tests" means this.
 ### Always: a production bundle
 
 ```bash
-npx vite build
+npm run build
 ```
-
-::: warning Do not use `npm run build` unless you have Rust
-`npm run build` is `npm run wasm:build && vite build` — it shells out to `wasm-pack` and fails
-without a Rust toolchain. `npx vite build` is what the deploy actually runs, and it is the check you
-want.
-:::
 
 ### Always: the app, in a browser
 
@@ -176,7 +170,7 @@ What this changes and why.
 
 ## Testing
 - `npm test` — pass
-- `npx vite build` — pass
+- `npm run build` — pass
 - Manual: <the paths you exercised, in which browsers>
 - Perf (renderer changes only): before/after numbers, visual-regress result
 
@@ -187,7 +181,7 @@ Closes #123
 ### Checklist
 
 - [ ] `npm test` passes
-- [ ] `npx vite build` succeeds
+- [ ] `npm run build` succeeds
 - [ ] No new console errors or warnings
 - [ ] Tested in a Chromium browser and in Firefox
 - [ ] **Touch tested** if the change goes anywhere near interaction — the app has a substantial touch

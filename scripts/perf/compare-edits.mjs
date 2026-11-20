@@ -16,7 +16,7 @@
  *
  * Usage (two dev servers, e.g. v2 HEAD on 3221 and a branch on 3220):
  *   node scripts/perf/compare-edits.mjs [--before http://localhost:3221] [--after http://localhost:3220]
- *        [--module voices-5000|defaultModule|chain-1000|...] [--engine js|wasm]
+ *        [--module voices-5000|defaultModule|chain-1000|...]
  */
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
@@ -29,7 +29,6 @@ const flag = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] 
 const BEFORE = flag('--before', 'http://localhost:3221');
 const AFTER = flag('--after', 'http://localhost:3220');
 const MODULE = flag('--module', 'voices-5000');
-const ENGINE = flag('--engine', 'js');
 
 const file = MODULE === 'defaultModule'
   ? join(here, '..', '..', 'public', 'modules', 'defaultModule.json')
@@ -42,12 +41,8 @@ async function run(browser, base) {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.addInitScript(() => { try { localStorage.clear(); } catch {} });
   await page.route('**/modules/defaultModule.json', (r) => r.fulfill({ status: 200, contentType: 'application/json', body }));
-  await page.goto(`${base}/?perf=1&evaluator=${ENGINE}`, { waitUntil: 'load' });
-  await page.waitForFunction((engine) => {
-    const P = window.__rmtPerf;
-    if (!P || !(window.__rmtRenderer?.instanceCount > 0)) return false;
-    try { const n = P.info().evaluator || ''; return engine === 'wasm' ? /wasm/i.test(n) : !/wasm/i.test(n); } catch { return false; }
-  }, ENGINE, { timeout: 300_000 });
+  await page.goto(`${base}/?perf=1`, { waitUntil: 'load' });
+  await page.waitForFunction(() => !!(window.__rmtPerf && window.__rmtRenderer?.instanceCount > 0), null, { timeout: 300_000 });
   await page.waitForTimeout(1000);
 
   const steps = await page.evaluate(async () => {
@@ -126,7 +121,7 @@ const after = await run(browser, AFTER);
 await browser.close();
 
 let failures = 0;
-console.log(`${MODULE}, ${ENGINE}: ${BEFORE} (before) vs ${AFTER} (after)`);
+console.log(`${MODULE}: ${BEFORE} (before) vs ${AFTER} (after)`);
 for (let i = 0; i < Math.max(before.steps.length, after.steps.length); i++) {
   const x = before.steps[i], y = after.steps[i];
   const diffs = [];

@@ -246,15 +246,6 @@ export default defineConfig({
           ]
         },
         {
-          text: 'WASM',
-          collapsed: false,
-          items: [
-            { text: 'WASM Overview', link: '/developer/wasm/overview' },
-            { text: 'Building WASM', link: '/developer/wasm/building' },
-            { text: 'JS/WASM Adapters', link: '/developer/wasm/adapters' }
-          ]
-        },
-        {
           text: 'API Reference',
           collapsed: false,
           items: [

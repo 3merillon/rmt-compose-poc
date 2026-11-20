@@ -6,8 +6,7 @@
  * that to LOAD_REF_WIDE (4 bytes); MAX_NOTE_ID (src/binary-note.js) is the
  * largest id a note can have. These checks hold the compiler, the decompiler,
  * the dependency lists, the parser, the loader and the evaluation to that, on
- * a module of 70,000 notes as well. scripts/test-wasm-parity.mjs runs this
- * file on the WASM evaluator too.
+ * a module of 70,000 notes as well.
  */
 const { compileDSL, decompileToDSL } = await import('../src/dsl/index.js');
 const { OP, MAX_NOTE_ID } = await import('../src/binary-note.js');

@@ -246,23 +246,19 @@ src/
 ├── theme/                      # presets.js, theme-manager.js
 ├── store/                      # app-state.js, history.js
 ├── utils/                      # event-bus, simplify, panel-stack, viewport, validators…
-├── dev/perf-harness.js         # window.__rmtPerf — loaded only with ?perf
-└── wasm/                       # evaluator adapter + committed rmt_core artifacts
+└── dev/perf-harness.js         # window.__rmtPerf — loaded only with ?perf
 ```
 
 ## Extension points
 
 ### Adding an opcode
 
-An opcode is only real once **all four** of these know about it:
+An opcode is only real once **all three** of these know about it:
 
 1. `src/binary-note.js` — add it to `OP`.
 2. `src/binary-evaluator.js` — implement it in the VM switch.
 3. `src/dsl/` — give it a surface. `lexer.js` / `parser.js` if it needs new syntax,
    `compiler.js` to emit it, `decompiler.js` to read it back.
-4. `rust/src/bytecode.rs` and `rust/src/evaluator.rs` — the WASM evaluator has its own opcode
-   switch. Skip this and the opcode breaks under `?evaluator=wasm`; the parity test
-   (`scripts/test-wasm-parity.mjs`) will fail.
 
 ::: info Three opcodes exist but are dead
 `FIND_INSTRUMENT` (0x22), `DUP` (0x30) and `SWAP` (0x31) are defined in `OP`. `DUP` and `SWAP` are
@@ -292,7 +288,7 @@ There is no serializer to update. The touch-points are:
 3. `src/module.js` — `createModuleJSON()` and `reindexModule()` both read `EXPRESSION_VARS`, so
    the property round-trips to JSON and has its references rewritten without a second list.
    `noteJSONText()` (behind `createModuleJSONString()`) reads the six by name for speed: with any
-   other list (`KEEPS_NOTE_TEXT`, `src/module.js:66`) it keeps nothing and the text stays right but
+   other list (`KEEPS_NOTE_TEXT`, `src/module.js:65`) it keeps nothing and the text stays right but
    every note is serialized on every edit, so give it the new variable too.
 4. `src/dsl/constants.js` — `PropertyMap` (input aliases) and `PropertyShortNames` (what the
    decompiler prints); then `varNameToIndex()` in `src/dsl/compiler.js`. (The converters in
@@ -310,7 +306,6 @@ There is no serializer to update. The touch-points are:
    are still checked before they are converted) and `EXPR_KEYS` in `scripts/validate-modules.mjs`. A key
    missing from them is not refused; its expression simply goes unchecked on upload and in `npm test`.
 7. The renderer and the note widget, if it is visible.
-8. `rust/src/` — the Rust evaluator keeps its own table of variables.
 
 ## See also
 

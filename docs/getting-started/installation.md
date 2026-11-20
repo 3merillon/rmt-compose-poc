@@ -1,11 +1,11 @@
 ---
 title: Installation
-description: Run RMT Compose from the hosted app or locally with Node 20.19+, build it for production, and rebuild the Rust/WASM core.
+description: Run RMT Compose from the hosted app or locally with Node 20.19+, and build it for production.
 ---
 
 # Installation
 
-This page gets you a running copy of RMT Compose — hosted or local — plus the production build, the module-library validator, and the optional Rust/WASM rebuild. If you only want to use the app, the first section is all you need.
+This page gets you a running copy of RMT Compose — hosted or local — plus the production build and the module-library validator. If you only want to use the app, the first section is all you need.
 
 ## Hosted app
 
@@ -20,8 +20,6 @@ Nothing to install. Everything runs client-side in the browser.
 - **Node.js 20.19+ or 22.12+** — from [nodejs.org](https://nodejs.org/). The project uses Vite 7, whose `engines` field is `^20.19.0 || >=22.12.0`. **Node 18 will not run the dev server.**
 - **Git** — to clone the repository
 - **A WebGL2 browser** — Chrome, Firefox, Edge or Safari
-
-Rust is **not** required to run or develop the app. It is only needed to rebuild the WebAssembly core; see [Rebuilding the WASM core](#rebuilding-the-wasm-core).
 
 ### Steps
 
@@ -48,25 +46,11 @@ Vite listens on **`http://localhost:3000`** and opens your browser automatically
 
 ## Production build
 
-There are two build paths, and the difference matters.
-
-**Without Rust** — this is what the production deploy actually runs:
-
 ```bash
-npx vite build
+npm run build      # = vite build
 ```
 
-**With Rust** — rebuilds the WebAssembly core first, then bundles:
-
-```bash
-npm run build      # = npm run wasm:build && vite build
-```
-
-::: warning `npm run build` needs Rust
-`npm run build` chains `wasm:build`, which shells out to `wasm-pack`. Without Rust and `wasm-pack` on your `PATH` it fails at the first step. If you have not touched the Rust crate, use `npx vite build` — the committed WebAssembly artifacts in `src/wasm/` are the ones that ship anyway.
-:::
-
-Either way, output lands in `dist/`. Serve it locally with:
+Output lands in `dist/`. Serve it locally with:
 
 ```bash
 npm run preview
@@ -103,48 +87,14 @@ npm run docs:dev
 
 VitePress serves the site in `docs/`. `npm run docs:build` and `npm run docs:preview` do what you'd expect.
 
-## Rebuilding the WASM core
-
-The repository contains a Rust crate (`rust/`, package `rmt-core` v0.1.0) that compiles to WebAssembly and implements the expression evaluator a second time. **Its build artifacts are committed** to `src/wasm/` — that committed copy is what the app imports and what the production deploy ships. `rust/pkg/` (the raw `wasm-pack` output) is gitignored.
-
-You only need this if you change the Rust source.
-
-### Prerequisites
-
-- **Rust** — from [rustup.rs](https://rustup.rs/)
-- **wasm-pack** — `cargo install wasm-pack`
-
-### Build and sync
-
-```bash
-npm run wasm:build
-```
-
-That runs `wasm-pack build --target web --out-dir pkg` inside `rust/`, then runs `scripts/sync-wasm.mjs`, which copies `rmt_core.js` and `rmt_core_bg.wasm` from `rust/pkg/` into `src/wasm/`.
-
-**Commit the updated `src/wasm/rmt_core.js` and `src/wasm/rmt_core_bg.wasm`.** If you don't, the deploy keeps shipping the old binary, silently.
-
-If you built the crate by hand, run the sync step alone:
-
-```bash
-npm run wasm:sync
-```
-
-::: info The WASM evaluator is the default
-On a page load the Rust core is fetched (294 KB, about 115 KB gzipped) and each module hot-swaps from the JavaScript evaluator to Rust when the core is ready. `?evaluator=js` keeps JavaScript and skips the fetch. If the core fails to load, JavaScript stays. After changing the Rust or the JavaScript evaluator, run `npm test`: the parity test must pass. See [WASM Overview](/developer/wasm/overview).
-:::
-
 ## All npm scripts
 
 | Script | What it does |
 |---|---|
 | `npm run dev` | Vite dev server on port 3000; opens the browser |
-| `npx vite build` | Production build to `dist/` **without** Rust — what the deploy runs |
-| `npm run build` | `wasm:build` then `vite build`. **Requires Rust + wasm-pack** |
+| `npm run build` | Production build to `dist/` (`vite build`) — what the deploy runs |
 | `npm run preview` | Serve the built `dist/` (Vite's default preview port, 4173) |
 | `npm test` | Validate every module in the library manifest |
-| `npm run wasm:build` | Rebuild the Rust crate and sync artifacts into `src/wasm/` |
-| `npm run wasm:sync` | Copy `rust/pkg/` → `src/wasm/` only |
 | `npm run gen:intervals` | Regenerate the 46 interval modules and patch the manifest |
 | `npm run perf:gen` | Generate stress modules into `public/modules/perf/` |
 | `npm run perf:bench` | Headless Node evaluation benchmark |
@@ -168,7 +118,7 @@ RMT Compose requires **WebGL2** — without it, the workspace canvas does not in
 | Safari | 15+ |
 | Edge | 79+ |
 
-Any browser released in the last several years qualifies. WebAssembly support is not required for the app to work.
+Any browser released in the last several years qualifies.
 
 ## Troubleshooting
 
@@ -177,10 +127,6 @@ Any browser released in the last several years qualifies. WebAssembly support is
 - Check your Node version: `node --version`. It must be **20.19+ or 22.12+**. Node 18 fails on Vite 7.
 - Reinstall dependencies: delete `node_modules` and run `npm install` again.
 - Check whether something else is already on port 3000.
-
-### `npm run build` fails with "wasm-pack: command not found"
-
-You don't have the Rust toolchain, and you probably don't need it. Run `npx vite build` instead — it uses the committed WebAssembly artifacts.
 
 ### "WebGL2 not available"
 

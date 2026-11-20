@@ -1,6 +1,6 @@
 ---
 title: Build & Deploy
-description: Every npm script and what it really does, the committed WASM artifacts Vercel ships, and the two separate Vercel projects behind rmt.world and docs.rmt.world.
+description: Every npm script and what it really does, what the Vite build produces, and the two separate Vercel projects behind rmt.world and docs.rmt.world.
 ---
 
 # Build & Deploy
@@ -15,8 +15,7 @@ RMT Compose is a plain [Vite](https://vite.dev) ES-module app — no framework, 
 | Node | **20.19+ or 22.12+**. `package.json` declares no `engines` field, but Vite 7.1.12's own `engines` is `^20.19.0 \|\| >=22.12.0`. Node 18 will not run it. |
 | Runtime dependency | `fraction.js` `^5.3.4` (BigInt-backed) — the only one |
 | devDependencies | `playwright`, `pngjs`, `vite`, `vitepress` |
-| Browser | **WebGL2** is a hard requirement — the workspace does not initialise without it. WASM support is not required. |
-| Rust + wasm-pack | Optional. Only for rebuilding the crate — see [Building WASM](/developer/wasm/building) |
+| Browser | **WebGL2** is a hard requirement — the workspace does not initialise without it. |
 | ffmpeg | Optional. Only for `npm run samples:build` |
 
 ```bash
@@ -28,17 +27,15 @@ The dev server port (**3000**) and auto-open are set in `vite.config.js`.
 
 ## The scripts
 
-All 13, and what each one really does.
+All 11, and what each one really does.
 
 | Script | Command | What it does |
 |---|---|---|
 | `dev` | `vite` | Dev server on port 3000, auto-opens the browser |
-| `build` | `npm run wasm:build && vite build` | Full build. **Requires Rust + wasm-pack.** Vercel does *not* use this |
+| `build` | `vite build` | Production bundle into `dist/`. The same command Vercel runs |
 | `preview` | `vite preview` | Serves the built `dist/` on Vite's default preview port (4173) |
 | `test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-variable-deps.mjs && node scripts/test-amplitude.mjs && node scripts/test-midi-export.mjs && node scripts/test-relational-time.mjs` | **Not a unit-test runner.** Validates every library module, proves arbitrary-precision exactness end to end, then checks per-variable evaluation order and cycle detection, the amplitude variable, the MIDI export and relational time (the conversion of old-model modules, against `scripts/fixtures/old-time-oracle.json`) |
 | `gen:intervals` | `node scripts/gen-interval-catalog.mjs` | Regenerates `public/modules/intervals/` and patches the `intervals` section of `library.json` |
-| `wasm:build` | `cd rust && wasm-pack build --target web --out-dir pkg && cd .. && node scripts/sync-wasm.mjs` | Builds the Rust crate, then copies the artifacts into `src/wasm/` |
-| `wasm:sync` | `node scripts/sync-wasm.mjs` | The copy step alone |
 | `perf:gen` | `node scripts/perf/generate-stress-module.mjs` | Writes stress modules to `public/modules/perf/` |
 | `perf:bench` | `node scripts/perf/bench-node.mjs` | Headless Node evaluation benchmark |
 | `samples:build` | `node scripts/build-samples.mjs` | Rebuilds the piano and violin multisamples. **Needs ffmpeg and network access** |
@@ -46,14 +43,9 @@ All 13, and what each one really does.
 | `docs:build` | `vitepress build docs` | Builds the docs |
 | `docs:preview` | `vitepress preview docs` | Previews the built docs |
 
-::: warning `npm run build` is not the command for a fresh contributor
-It chains `wasm:build`, which needs a Rust toolchain. To produce a production bundle without Rust,
-run **`npx vite build`** — byte for byte what Vercel runs.
-:::
-
 ::: warning `npm test` is not a test suite
-There is no Jest and no Vitest anywhere in this repo. `npm test` runs six scripts and exits
-non-zero if any fails: `scripts/validate-modules.mjs`, which validates every module referenced
+There is no Jest and no Vitest anywhere in this repo. `npm test` runs the 20 scripts listed
+under `test` in `package.json` and exits non-zero if any fails. Among them: `scripts/validate-modules.mjs`, which validates every module referenced
 by `public/modules/library.json`; `scripts/test-exactness.mjs`, which proves exact rational
 arithmetic survives a 200-note `(3/2)` chain (checked against native BigInt) and that a ~98-digit
 `LOAD_CONST_BIG` literal round-trips digit-exact; `scripts/test-variable-deps.mjs`, which
@@ -79,7 +71,6 @@ Run these with `node` directly.
 | `scripts/migrate-modules.mjs` | Converts module JSON files (a file or a folder) to relational time in place, with the same conversion the app applies on load; `--dry-run` reports without writing |
 | `scripts/check-doc-citations.mjs` | Prints every source line citation in the docs beside the line it names now, so stale `file.js:N` citations can be found after a `src/` edit |
 | `scripts/shift-doc-citations.py` | Re-points the docs' `file.js:N` citations (and bare `` `:N` `` ones after a cited file on the same line) after a `src/` edit, by mapping each cited line of the file at a given commit to the same line now: `python scripts/shift-doc-citations.py . v2 src/player.js` |
-| `scripts/perf/test-wasm-swap.mjs` | Headless end-to-end test of the WASM evaluator hot-swap, and that three concurrent `initWasm()` calls fetch the module once. Part of `npm test` |
 | `scripts/perf/bench-render.mjs`, `bench-drag.mjs`, `bench-hover.mjs`, `bench-pick.mjs`, `bench-marquee.mjs`, `profile-sync.mjs`, `converge.mjs`, `who-dirties.mjs` | Playwright render/interaction benchmarks. They drive a **running** dev server |
 | `scripts/perf/visual-regress.mjs` | Playwright pixel-diff regression harness (`--capture` / `--compare`) |
 
@@ -92,7 +83,7 @@ See [Performance](/developer/performance) for how to use them.
 
 ## What the Vite build produces
 
-`npx vite build` on the current commit:
+`npm run build` (`vite build`) on the current commit:
 
 | Chunk | Raw | Gzip |
 |---|---|---|
@@ -100,11 +91,9 @@ See [Performance](/developer/performance) for how to use them.
 | `renderer-*.js` | 346.71 kB | 80.87 kB |
 | `dsl-*.js` | 25.87 kB | 8.20 kB |
 | `settings-panel-*.js` (async) | 29.40 kB | 10.13 kB |
-| `rmt_core-*.js` (WASM glue) | 12.73 kB | 3.99 kB |
 | `instruments-*.js` | 14.20 kB | 4.73 kB |
 | `perf-harness-*.js` (async, `?perf` only) | 5.97 kB | 2.33 kB |
 | `vendor-*.js` (fraction.js) | 6.81 kB | 2.48 kB |
-| `rmt_core_bg-*.wasm` | 294.19 kB | 114.80 kB |
 | `index.html` | 8.91 kB | 3.00 kB |
 
 Output goes to `dist/` (gitignored). `publicDir: 'public'` is copied verbatim, so `modules/`,
@@ -129,36 +118,9 @@ purpose, so they can never be duplicated across chunks. `id` is normalised to fo
 matching works on Windows.
 
 Two chunks come from dynamic imports rather than the `manualChunks` rules. `settings-panel-*.js` is
-`import()`ed during `initApp()` (`src/main.js:117`), so it is out of the entry bundle but still
+`import()`ed during `initApp()` (`src/main.js:102`), so it is out of the entry bundle but still
 fetched on every boot. `perf-harness-*.js` is genuinely conditional — it is only ever downloaded with
-`?perf` in the URL (`src/main.js:138`).
-
-::: info `optimizeDeps.exclude: ['rmt-core']` is vestigial
-`rmt-core` is not an npm dependency — the WASM glue is imported by relative path. The exclusion
-matches nothing. Harmless, but do not read it as evidence of a package.
-:::
-
-## The committed WASM artifacts
-
-This is the one non-obvious thing about the build.
-
-```
-rust/pkg/                    ← wasm-pack output. GITIGNORED.
-  └── (copied by scripts/sync-wasm.mjs)
-       ↓
-src/wasm/rmt_core.js         ← COMMITTED. 31,204 bytes.
-src/wasm/rmt_core_bg.wasm    ← COMMITTED. 294,191 bytes.
-```
-
-Vercel's build command is plain `vite build`. It never runs `wasm-pack`, and the build image has no
-Rust toolchain. **The committed `src/wasm/` files are what gets bundled and shipped.** After any
-change under `rust/`, run `npm run wasm:build` and commit the two synced files, or the deploy keeps
-serving the old binary with no warning.
-
-The binary ships in the bundle and is **loaded on every page load** (294 KB, about 115 KB gzipped; from the browser cache after the first visit),
-unless the URL has `?evaluator=js`. The default evaluator is WASM; JavaScript runs until the core is
-ready and stays if it fails to load (see
-[Which evaluator runs](/developer/wasm/overview#which-evaluator-runs)).
+`?perf` in the URL (`src/main.js:123`).
 
 ## Deploys
 
@@ -174,8 +136,7 @@ Two Vercel projects, one repo.
 | `buildCommand` | **`vite build`** | `npm run build` → `vitepress build` |
 | `outputDirectory` | `dist` | `.vitepress/dist` |
 
-The app's `buildCommand` deliberately overrides `npm run build` with bare `vite build` — that is what
-skips `wasm:build` and consumes the committed artifacts instead.
+The app's `buildCommand` is `vite build`, the same as `npm run build`.
 
 `docs/` has its own `package.json` and its own `package-lock.json`, and its scripts (`dev`, `build`,
 `preview`) call `vitepress` with **no path argument**, because Vercel's root directory is already
@@ -189,36 +150,32 @@ skips `wasm:build` and consumes the committed artifacts instead.
 ::: warning A dead link fails the docs build
 `ignoreDeadLinks: false`. One broken root-relative link and `npm run docs:build` exits non-zero,
 naming the file. Write cross-links without the `.md` extension
-(`/developer/wasm/overview`, not `/developer/wasm/overview.md`), and run `npm run docs:build` before
+(`/developer/performance`, not `/developer/performance.md`), and run `npm run docs:build` before
 you push.
 :::
 
 ## Release checklist
 
 1. `npm test` — the module library still validates.
-2. If you touched `rust/`: `npm run wasm:build`, then commit `src/wasm/rmt_core.js` and
-   `src/wasm/rmt_core_bg.wasm`.
-3. `npx vite build` — reproduces the Vercel build locally, without Rust.
-4. `npm run preview` — sanity-check the bundle.
-5. If you touched the renderer: measure and pixel-diff. See [Performance](/developer/performance) —
+2. `npm run build` — the same `vite build` Vercel runs.
+3. `npm run preview` — sanity-check the bundle.
+4. If you touched the renderer: measure and pixel-diff. See [Performance](/developer/performance) —
    `visual-regress.mjs` defaults to a 300-pixel tolerance (MSAA resolution is not bit-deterministic
    across runs, so a 0-pixel gate would be permanently red).
    Set `PW_CHANNEL=msedge` for `visual-regress.mjs`, `bench-render.mjs` and `converge.mjs` where
    Playwright's own Chromium is not installed. `HUB_ID=<id>` pins the note the `selected-*` scenes
    select: the automatic pick (most related notes) can change between builds when counts tie.
-6. If you touched the docs: `npm run docs:build`.
+5. If you touched the docs: `npm run docs:build`.
 
 ## Licensing
 
-The project is **MIT** (`LICENSE.md`, and `license = "MIT"` in `rust/Cargo.toml`). Third-party
+The project is **MIT** (`LICENSE.md`). Third-party
 components, per `THIRD_PARTY_NOTICES.md`: fraction.js (MIT), the VSCO-2 Community Edition sample sets
 (CC0), Roboto Mono (Apache-2.0).
 
 ## See also
 
 - [Development Setup](/developer/contributing/setup) — clone, install, run
-- [Building WASM](/developer/wasm/building) — the Rust crate and the sync step
-- [WASM Overview](/developer/wasm/overview) — the WASM evaluator, how it is checked, how fast it is
 - [Performance](/developer/performance) — the benchmark and pixel-diff harness
 - [Code Style](/developer/contributing/code-style)
 - [Pull Requests](/developer/contributing/pull-requests)

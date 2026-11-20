@@ -2,18 +2,13 @@
 /**
  * Headless perf baseline runner.
  *
- * Measures the JS evaluation path (Node has no WASM artifact wiring by
- * default and no renderer, so this benchmarks module evaluation only —
- * use the in-browser harness (?perf=1) for WASM + renderer.sync numbers).
+ * Measures module evaluation in Node (no renderer; use the in-browser
+ * harness, ?perf=1, for renderer.sync and end-to-end commits).
  *
  * Usage:
- *   node scripts/perf/bench-node.mjs                    # all stress modules (JS path)
+ *   node scripts/perf/bench-node.mjs                    # all stress modules
  *   node scripts/perf/bench-node.mjs chain-1000         # one module
- *   node scripts/perf/bench-node.mjs --wasm             # WASM evaluator path
- *   node scripts/perf/bench-node.mjs chain-1000 --wasm
  *   node scripts/perf/bench-node.mjs chain-1000 --runs 5   # five times the samples
- *
- * scripts/perf/bench-pairs.mjs runs both engines back to back and compares them.
  */
 
 import { readFileSync } from 'node:fs';
@@ -25,34 +20,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const perfDir = join(here, '..', '..', 'public', 'modules', 'perf');
 
 const args = process.argv.slice(2);
-const useWasm = args.includes('--wasm');
 const asJson = args.includes('--json'); // one JSON line per module, for bench-pairs.mjs
 const runsAt = args.indexOf('--runs');
 const RUNS = runsAt >= 0 ? Math.max(1, Number(args[runsAt + 1]) || 1) : 1;
 const targetArg = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--runs');
-// JavaScript unless --wasm (the adapter reads this when module.js imports it)
-process.env.RMT_EVALUATOR = useWasm ? 'wasm' : 'js';
 
 const { Module } = await import('../../src/module.js');
-
-if (useWasm) {
-  // Node's fetch can't load file:// URLs (wasm-bindgen init uses one) — shim it.
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async (url, ...rest) => {
-    const u = String(url);
-    if (u.startsWith('file://') && u.endsWith('.wasm')) {
-      const buf = readFileSync(fileURLToPath(u));
-      return new Response(buf, { headers: { 'content-type': 'application/wasm' } });
-    }
-    return realFetch(url, ...rest);
-  };
-  const { initWasm } = await import('../../src/wasm/index.js');
-  const ok = await initWasm();
-  if (!ok) {
-    console.error('WASM failed to initialize; aborting --wasm bench');
-    process.exit(1);
-  }
-}
 
 function percentile(sorted, p) {
   const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));

@@ -1,6 +1,6 @@
 ---
 title: Module System
-description: The Module class in RMT Compose — construction, notes, dependency queries, evaluation, JSON load and save, reindexing, and the WASM hot-swap.
+description: The Module class in RMT Compose — construction, notes, dependency queries, evaluation, JSON load and save, and reindexing.
 ---
 
 # Module System
@@ -31,7 +31,7 @@ module.notes.get(5)      // ❌ TypeError — notes is not a Map
 
 ### BaseNote defaults
 
-With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js:156-169`):
+With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js:141-154`):
 
 | Property | Stored expression | Evaluates to |
 |---|---|---|
@@ -169,7 +169,7 @@ module.markNotesDirtyBatch(noteIds) // many notes, one pass
 `markNoteDirty()` re-registers the note, calls `invalidate()` on the incremental evaluator (its
 bytecode may have changed), then marks every transitive dependent with **`markDirtyOnly()`** — they
 need re-evaluating but must not be re-registered. A note already reached by a walk of the same dirty
-cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js:305`), so callers
+cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js:253`), so callers
 that mark a note and then each dependent cost one walk. If the note *is* the BaseNote, every
 `baseNoteDependents` entry is marked too.
 
@@ -294,7 +294,7 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 4. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
    `evaluateModule()` does that.
 
-Ids are guarded (`src/module.js:954-966`): non-integer, `< 0` or `> 16777215` ids (`MAX_NOTE_ID`, the
+Ids are guarded (`src/module.js:902-914`): non-integer, `< 0` or `> 16777215` ids (`MAX_NOTE_ID`, the
 largest id a note can have) are skipped with a `[RMT Security] Invalid note ID` warning, and `__proto__` /
 `constructor` / `prototype` are blocked outright as prototype-pollution vectors.
 
@@ -386,25 +386,6 @@ process. It is cleared by the exported `invalidateModuleEndTimeCache()`, which `
 fires (via `player:invalidateModuleEndTimeCache`) on every expression change. If you ever hold two
 `Module` instances at once — `exportOrderedModule()` transiently does — they share this memo.
 :::
-
-## The WASM hot-swap
-
-WASM init is async and normally loses the race against `Module` construction, which used to strand
-every module on the JS evaluator for the whole session. The constructor therefore registers an
-`onWasmReady` callback holding a `WeakRef(this)`, and `_upgradeEvaluators()` (`src/module.js:215`)
-atomically swaps `_binaryEvaluator` and `_incrementalEvaluator` for the WASM versions, clears the
-evaluation cache, and marks everything dirty so the next evaluation runs on the new engine.
-
-::: info It runs unless `?evaluator=js`
-The registration is gated on `isEvaluatorHotSwapEnabled()`, which is `true` in a browser unless the
-URL has `?evaluator=js` (`src/wasm/evaluator-adapter.js:122-124`). With `?evaluator=js`,
-`_upgradeEvaluators()` is never called and the module stays on the JavaScript evaluator, as it does
-if the core fails to load. `WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:46`) is
-`true`; set to `false`, it turns the swap off everywhere.
-:::
-
-The practical consequence for anyone holding an evaluator reference: it can be **replaced between
-synchronous operations**, and so can the whole `_evaluationCache`. Do not cache them.
 
 ## Threading
 

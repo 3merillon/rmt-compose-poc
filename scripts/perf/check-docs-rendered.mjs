@@ -14,7 +14,6 @@ const PAGES = [
   '/reference/expressions/syntax',
   '/developer/performance',
   '/developer/audio/audio-graph',
-  '/developer/wasm/overview',
 ];
 
 const browser = await chromium.launch({ headless: true });

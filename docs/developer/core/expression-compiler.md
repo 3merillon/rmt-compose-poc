@@ -22,7 +22,7 @@ An expression relates a note to other notes through **six variables** (`VAR`, se
 
 ## Entry point
 
-`ExpressionCompiler.compile(textExpr)` (`src/expression-compiler.js:45`) is the app's door in. `Note._setExpression()`, the validators and the editor all use the module-level singleton `compiler` (`src/expression-compiler.js:85`).
+`ExpressionCompiler.compile(textExpr)` (`src/expression-compiler.js:45`) is the app's door in. `Note._setExpression()`, the validators and the editor all use the module-level singleton `compiler` (`src/expression-compiler.js:79`).
 
 1. **Cache probe.** On a hit the key is deleted and re-inserted (an LRU touch) and a **clone** is returned.
 2. **Retired syntax.** Text that carries a method-chain marker (`new Fraction(`, `module.`, `.getVariable(`, `.mul(` …, or a bare variable name such as `frequency`; `isLegacyExpression()`, `src/migrate/legacy-syntax.js:57`) is refused (`src/expression-compiler.js:53`) with `The method-chain syntax was retired; write expressions in the DSL, e.g. [3].f * (3/2). In the DSL this reads: …`, the last sentence giving the converter's DSL form of what was typed when it has one. Loaded modules never reach this: they were converted before compiling.
@@ -191,7 +191,7 @@ Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.js` kee
 
 - `parseLegacy()` (`src/migrate/legacy-syntax.js:89`), a strict recursive-descent parser for exactly the old building blocks (`new Fraction(a[, b])` with decimal arguments, bare decimals, `module.baseNote.getVariable('x')`, `module.getNoteById(N).getVariable('x')`, a bare variable name, parentheses, `.mul .div .add .sub .pow`), which builds a DSL syntax tree;
 - `legacyToDSL()` (`src/migrate/legacy-syntax.js:227`), which compiles that tree, decompiles it to DSL text, compiles the text again and refuses unless both give the same bytecode;
-- `migrateSyntax()` (`src/migrate/legacy-syntax.js:261`), which converts every expression of a module object and is called by `Module.loadFromJSON()` (`src/module.js:930`) right after `migrateTimeModel()`. `scripts/migrate-modules.mjs` applies both conversions to files in place.
+- `migrateSyntax()` (`src/migrate/legacy-syntax.js:261`), which converts every expression of a module object and is called by `Module.loadFromJSON()` (`src/module.js:878`) right after `migrateTimeModel()`. `scripts/migrate-modules.mjs` applies both conversions to files in place.
 
 **It refuses rather than guesses.** The old compiler was a string splitter that read a chain correctly only when its methods came in the order `.pow`, then `.mul`/`.div`, then `.add`/`.sub` (`RANK`, `src/migrate/legacy-syntax.js:48`). It silently dropped a `.mul()` or `.div()` that followed an `.add()` (`a.add(b).mul(c)` evaluated as `a + b`), a `.pow()` that followed a `.mul()`, and every `.neg()`. For those the text and the old engine disagree, so the converter throws a `SyntaxMigrationError`, and `migrateSyntax()` adds the note and variable: the module does not load rather than load with a value nobody wrote. A note id above 16777215, an unknown variable (`'tempo'`), a quoted fraction (`new Fraction('1/3')`) and a division by zero are refused too.
 

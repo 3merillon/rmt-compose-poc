@@ -32,7 +32,7 @@ Once the app is open, the **gear** in the top bar opens the [Settings panel](/us
 
 ## Read these in order
 
-1. **[Installation](/getting-started/installation)** — run it locally, build it, and rebuild the Rust/WASM core
+1. **[Installation](/getting-started/installation)** — run it locally and build it
 2. **[Your First Composition](/getting-started/first-composition)** — three notes, played, saved, in five minutes
 3. **[Core Concepts](/getting-started/concepts)** — ratios, the BaseNote, expressions, dependencies and modules
 

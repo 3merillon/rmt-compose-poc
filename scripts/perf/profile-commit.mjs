@@ -14,7 +14,7 @@
  *
  * Usage:
  *   node scripts/perf/profile-commit.mjs [--url http://localhost:3220] [--module voices-20000]
- *        [--engine js|wasm] [--iter 10] [--no-profile] [--json]
+ *        [--iter 10] [--no-profile] [--json]
  */
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
@@ -26,7 +26,6 @@ const argv = process.argv.slice(2);
 const flag = (n, d) => { const i = argv.indexOf(n); return i >= 0 ? argv[i + 1] : d; };
 const URL_BASE = flag('--url', 'http://localhost:3220');
 const MODULE = flag('--module', 'voices-20000');
-const ENGINE = flag('--engine', 'js');
 const ITER = Number(flag('--iter', 10));
 const PROFILE = !argv.includes('--no-profile');
 const JSON_OUT = argv.includes('--json');
@@ -42,15 +41,8 @@ page.on('pageerror', (e) => errors.push(e.message));
 await page.addInitScript(() => { try { localStorage.clear(); } catch {} });
 await page.route('**/modules/defaultModule.json', (r) => r.fulfill({ status: 200, contentType: 'application/json', body }));
 
-await page.goto(`${URL_BASE}/?perf=1&evaluator=${ENGINE}`, { waitUntil: 'load' });
-await page.waitForFunction((engine) => {
-  const P = window.__rmtPerf;
-  if (!P || !(window.__rmtRenderer?.instanceCount > 0)) return false;
-  try {
-    const name = P.info().evaluator || '';
-    return engine === 'wasm' ? /wasm/i.test(name) : !/wasm/i.test(name);
-  } catch { return false; }
-}, ENGINE, { timeout: 300_000 });
+await page.goto(`${URL_BASE}/?perf=1`, { waitUntil: 'load' });
+await page.waitForFunction(() => !!(window.__rmtPerf && window.__rmtRenderer?.instanceCount > 0), null, { timeout: 300_000 });
 await page.waitForTimeout(1500);
 const info = await page.evaluate(() => window.__rmtPerf.info());
 
@@ -108,7 +100,7 @@ if (PROFILE) {
 await browser.close();
 
 if (JSON_OUT) {
-  console.log(JSON.stringify({ module: MODULE, engine: ENGINE, ...info, commit: timed, self: selfRows, total: totalRows, errors }));
+  console.log(JSON.stringify({ module: MODULE, ...info, commit: timed, self: selfRows, total: totalRows, errors }));
 } else {
   console.log(`\n${MODULE} (${info.notes} notes, ${info.evaluator}) — commit p50 ${timed['p50 (ms)']} ms, min ${timed['min (ms)']}, p95 ${timed['p95 (ms)']} (${timed.runs} commits)`);
   if (PROFILE) {

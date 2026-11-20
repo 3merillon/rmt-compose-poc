@@ -105,7 +105,6 @@ The 100k figure is about **rendering**, not editing: `sync()` is the remaining b
 
 - **Node.js 20.19+ or 22.12+** (Vite 7's requirement)
 - A modern browser with **WebGL2** — the workspace does not initialize without it
-- (Optional) Rust + `wasm-pack`, only if you want to rebuild the WASM artifacts
 
 ## Quick Start
 
@@ -119,11 +118,9 @@ Vite serves on **http://localhost:3000** and opens a browser.
 Build and preview a production bundle:
 
 ```bash
-npx vite build      # what the Vercel deploy runs
+npm run build      # vite build, what the Vercel deploy runs
 npm run preview
 ```
-
-> `npm run build` is `npm run wasm:build && vite build` and therefore **requires Rust + `wasm-pack` on PATH**. Contributors without a Rust toolchain should run `npx vite build` directly — the WASM artifacts are committed.
 
 Other scripts:
 
@@ -134,21 +131,6 @@ Other scripts:
 | `npm run perf:gen` / `npm run perf:bench` | Generate stress modules; benchmark evaluation in Node |
 | `npm run samples:build` | Rebuilds the piano/violin samples from VSCO-2 CE (needs `ffmpeg` + network) |
 | `npm run docs:dev` / `docs:build` / `docs:preview` | The VitePress docs site in `docs/` |
-| `npm run wasm:build` / `wasm:sync` | See below |
-
-### WASM (the default evaluator in a browser)
-
-A Rust core (`rust/`, crate `rmt-core`) compiles to WebAssembly and implements the evaluator a second time, with the same exact values and the same per-variable order. **In a browser the default is the Rust evaluator.** At boot the 294 KB binary (about 115 KB gzipped) is fetched, and each module starts on JavaScript and hot-swaps to Rust when it is ready. `?evaluator=js` keeps JavaScript and skips the fetch; if the core fails to load, JavaScript stays. In Node the JavaScript evaluator runs unless a script calls `initWasm()`, sets `RMT_EVALUATOR=wasm`, or runs with `node --import ./scripts/wasm-node.mjs <script>`.
-
-`scripts/test-wasm-parity.mjs` (part of `npm test`) compares the two engines exactly on every library module and 400 fuzz modules, and runs ten evaluation suites whole on WASM. After changing either engine, run `npm test`. `WASM_MATCHES_VARIABLE_LAYOUT` in `src/wasm/evaluator-adapter.js` is a kill switch: set to `false`, JavaScript runs everywhere and `?evaluator=wasm` is ignored with a console warning. Speed and limits: [WASM Overview](docs/developer/wasm/overview.md).
-
-To rebuild the artifacts (they are **committed** to `src/wasm/`, which is what the app and the Vercel deploy actually use):
-
-```bash
-npm run wasm:build      # wasm-pack build + sync into src/wasm/
-```
-
-If you built the crate by hand, sync with `npm run wasm:sync` and commit the updated `src/wasm/rmt_core*` files.
 
 ## Controls and Workflow
 
@@ -391,10 +373,6 @@ Example — chain notes up the 12-TET scale:
 - `src/midi/midi-export.js` — module → Standard MIDI File (pure function; also runs in Node)
 - `src/instruments/` — synth + multisample instruments
 
-### WASM core
-- `rust/` — the `rmt-core` Rust crate
-- `src/wasm/` — committed build artifacts + the evaluator adapter
-
 ### Assets and tooling
 - `public/modules/library.json` — the v2 library manifest
 - `public/modules/` — the 79 shipped modules, plus `defaultModule.json`
@@ -404,7 +382,6 @@ Example — chain notes up the 12-TET scale:
 ## Browser Support and Fallbacks
 
 - **WebGL2 is required.** If a WebGL2 context cannot be created, the workspace will not initialize.
-- WASM support is *not* required — if the core fails to load, the JS evaluator stays, and `?evaluator=js` skips the fetch.
 
 ## Learn More
 

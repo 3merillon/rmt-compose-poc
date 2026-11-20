@@ -53,7 +53,7 @@ once. A group move does the same per mover.
 
 ## 2. The module marks dirty
 
-`Module.markNoteDirty(noteId)` (`src/module.js:290`):
+`Module.markNoteDirty(noteId)` (`src/module.js:238`):
 
 1. Adds the id to `_dirtyNotes`.
 2. `_registerNoteDependencies(note)` — re-scans the note's bytecode and rewrites its rows in the
@@ -71,12 +71,12 @@ once. A group move does the same per mover.
 
 Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a
 walk of the same dirty cycle now only re-registers its own bytecode (`Module._dirtyClosed`,
-`src/module.js:305`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
+`src/module.js:253`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
 in the middle of `chain-1000` ran 501 walks over 125,000 notes. Both engines do this.
 
 ## 3. Evaluation
 
-`Module.evaluateModule()` (`src/module.js:728`) delegates to
+`Module.evaluateModule()` (`src/module.js:676`) delegates to
 `IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1039`):
 
 ```
@@ -127,13 +127,6 @@ variable's value, not a stand-in, and reading it is reported only when the note 
 
 Finally, `Module._updateCorruptionFlags(cache, dirtyIds)` pushes each result's `corruptionFlags`
 into `DependencyGraph.setCorruptionFlags()` — scoped to the dirty set, not all notes.
-
-::: info Which evaluator runs
-In a browser the Rust core is the default. A `Module` usually exists before the core is ready, so it
-starts on the JS `BinaryEvaluator` / `IncrementalEvaluator` and hot-swaps to Rust when the binary
-is ready: `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:122-124`) is the gate.
-`?evaluator=js` keeps JavaScript and skips the fetch. Both evaluators produce the same records. See [WASM Overview](/developer/wasm/overview).
-:::
 
 ## 4. Rendering
 
@@ -229,7 +222,7 @@ Note 1's frequency changes
 ```
 
 For *visualisation* — the coloured dependency lines and rings — the module asks a different question.
-`module.getDependentsByProperty(noteId)` (`src/module.js:503`) returns
+`module.getDependentsByProperty(noteId)` (`src/module.js:451`) returns
 
 ```javascript
 { frequency: [...], startTime: [...], duration: [...] }
@@ -321,7 +314,7 @@ beside it (key `unloadable`) before the autosave replaces it, and the default mo
 ```
 any committing edit
   → captureSnapshot(label)              player.js:5650
-      → module.createModuleJSONString() → snapshotStr   module.js:1045
+      → module.createModuleJSONString() → snapshotStr   module.js:993
           (= JSON.stringify(createModuleJSON()); only the notes that changed are serialized again)
       → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshotStr })
       → eventBus.emit('history:capture',     { label, snapshotStr })

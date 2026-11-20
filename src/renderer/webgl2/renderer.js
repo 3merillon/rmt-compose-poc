@@ -1318,7 +1318,7 @@ export class RendererAdapter {
               this._noteFracDenStrs[i] = label.den;
             }
           } else {
-            // No exact value at hand (e.g. the WASM path): the float ratio, as before
+            // No exact value at hand: the float ratio, as before
             const pair = approxFrac(fnum / baseValNum);
             this._noteFracNumStrs[i] = pair[0];
             this._noteFracDenStrs[i] = pair[1];

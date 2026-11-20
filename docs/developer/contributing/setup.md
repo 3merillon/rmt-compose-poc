@@ -1,6 +1,6 @@
 ---
 title: Development Setup
-description: Clone, install and run RMT Compose — the real Node version, every npm script, the dev-only URL flags, the WASM rebuild path and the perf harness.
+description: Clone, install and run RMT Compose — the real Node version, every npm script, the dev-only URL flags and the perf harness.
 ---
 
 # Development Setup
@@ -26,7 +26,6 @@ Optional, and only for specific tasks:
 
 | Tool | Needed for |
 |---|---|
-| **Rust** (via [rustup](https://rustup.rs/)) + **wasm-pack** | Rebuilding the WASM core (`npm run wasm:build`). The built artifacts are committed, so you do **not** need Rust to run or bundle the app. |
 | **ffmpeg** on `PATH` | `npm run samples:build` only — rebuilding the bundled piano/violin sample packs. |
 
 ## Quick start
@@ -48,26 +47,17 @@ The everyday commands:
 | Script | Runs | Notes |
 |---|---|---|
 | `npm run dev` | `vite` | Dev server, port 3000, auto-opens. |
-| `npm test` | `node scripts/validate-modules.mjs && node scripts/test-exactness.mjs && node scripts/test-variable-deps.mjs && node scripts/test-amplitude.mjs && node scripts/test-midi-export.mjs` | Validates every shipped library module, proves exact arithmetic end to end, then checks per-variable evaluation order, the amplitude variable and the MIDI export. The repo's only automated check. |
-| `npm run build` | `npm run wasm:build && vite build` | **Requires Rust + wasm-pack.** Use `npx vite build` to bundle without Rust — see the warning below. |
+| `npm test` | The 20 test scripts listed under `test` in `package.json`, one after the other | Validates every shipped library module, proves exact arithmetic end to end, then checks per-variable evaluation order, the amplitude variable and the MIDI export. The repo's only automated check. |
+| `npm run build` | `vite build` | The production bundle, into `dist/`. |
 | `npm run perf:gen` / `npm run perf:bench` | `scripts/perf/…` | Generate the stress modules; run the headless evaluation benchmark. |
 | `npm run docs:dev` / `npm run docs:build` | `vitepress` | This documentation site. |
 
-The full 13-script inventory — the WASM build chain, the module and sample generators, the preview
+The full 11-script inventory — the module and sample generators, the preview
 servers — is in [Build & Deploy](/developer/contributing/build-and-deploy#the-scripts).
-
-::: warning `npm run build` shells out to wasm-pack
-`"build": "npm run wasm:build && vite build"`. Without Rust and `wasm-pack` on your `PATH` it fails
-at the first step, before Vite ever runs.
-
-**To bundle the app without Rust, run `npx vite build`.** That is exactly what the production deploy
-does — `vercel.json` overrides the build command to plain `vite build` and consumes the *committed*
-WASM artifacts in `src/wasm/`.
-:::
 
 ### `npm test`
 
-There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs six scripts.
+There is no unit-test framework in this repo — no vitest, no jest. `npm test` runs the 20 scripts listed under `test` in `package.json`.
 The first, `scripts/validate-modules.mjs`, walks every item in the v2 manifest
 `public/modules/library.json` and checks five things per module:
 
@@ -201,11 +191,8 @@ rmt-compose-poc/
 │   ├── theme/              # presets, theme-manager
 │   ├── store/              # app-state, history (undo/redo)
 │   ├── dev/                # perf-harness (loaded only with ?perf)
-│   ├── wasm/               # WASM loader, config, evaluator adapter,
-│   │                       #   + the COMMITTED rmt_core.js / rmt_core_bg.wasm
 │   └── utils/              # event-bus, simplify, validators
-├── rust/                   # the rmt-core crate (Cargo.toml, src/*.rs)
-├── scripts/                # validate-modules, generators, sync-wasm, perf/
+├── scripts/                # validate-modules, generators, perf/
 ├── public/
 │   ├── modules/            # library.json (v2 manifest) + the 81 shipped modules
 │   ├── samples/            # CC0 multisampled piano + violin
@@ -227,8 +214,6 @@ None of these has UI. They are read from the URL query string or `localStorage`.
 |---|---|
 | `?perf` (any value, e.g. `?perf=1`) | Loads `src/dev/perf-harness.js` and exposes `window.__rmtPerf`, `window.__rmtRenderer`, `window.__rmtWorkspace`. The harness is a separate lazily-fetched chunk — it never downloads without this flag. |
 | `?atlas=0` / `?atlas=1` | Force the glyph atlas off/on. Default on. Also settable via the `rmt:atlas` localStorage key. |
-| `?evaluator=js` | Keep the JavaScript evaluator and skip the WASM fetch entirely. See below. |
-| `?evaluator=wasm` | Ask for the default (the Rust/WASM evaluator) explicitly. Ignored with a console warning if `WASM_MATCHES_VARIABLE_LAYOUT` is `false`. See below. |
 
 The autosaved composition is in IndexedDB: database `rmt-compose`, store `autosave`, key `module`
 (and `unloadable`, a saved session that could not be loaded; the default module opens instead). See
@@ -237,46 +222,6 @@ autosave used to be) opens first and is moved there; to start from the default m
 localStorage keys the app uses: `rmt:settings:v1` (the settings store), `ui-state` (the
 module-library layout), `rmt:atlas`; `rmt:moduleSnapshot:v1` only as above, or as the autosave's
 fallback when IndexedDB is not available.
-
-## WebAssembly
-
-The Rust crate in `rust/` (`rmt-core` 0.1.0, MIT) compiles to WASM and provides an *alternative*
-evaluator, held to the JavaScript one by a parity test. You do not need it to develop:
-
-- `src/wasm/rmt_core.js` and `src/wasm/rmt_core_bg.wasm` (about 294 KB) are **committed build
-  artifacts**. They are what the app imports and what the deploy ships. `rust/pkg/` is gitignored.
-- In a browser the default is the **WASM** evaluator. At boot `initWasm()` fetches and instantiates
-  the binary (about 115 KB gzipped). Each `Module` usually exists before the core is ready, so it
-  starts on JavaScript and hot-swaps to WASM when the core is ready
-  (`Module._upgradeEvaluators`, `src/module.js:215`). Both give the same records.
-- `?evaluator=js` keeps the JavaScript evaluator and skips the fetch. If the core fails to load,
-  JavaScript stays (`WASM_CONFIG.fallbackOnError`).
-- In Node (tests, benches) the JavaScript evaluator runs unless a script calls `initWasm()`, sets
-  `RMT_EVALUATOR=wasm`, or runs with `node --import ./scripts/wasm-node.mjs <script>`.
-  `RMT_EVALUATOR=js` forces JavaScript. `npm test` runs its suites on JavaScript, and
-  `scripts/test-wasm-parity.mjs` (part of `npm test`) runs both engines and compares them exactly.
-
-::: info WASM is the default
-`WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:46`) is
-`true`; it is a kill switch. Set to `false`, the JavaScript evaluator runs everywhere, and
-`?evaluator=wasm` is ignored with a console warning. See [WASM Overview](/developer/wasm/overview).
-:::
-
-After changing either engine, run `npm test`: `scripts/test-wasm-parity.mjs` compares them exactly
-and must pass.
-
-Rebuilding the core, if you touched `rust/src/`:
-
-```bash
-npm run wasm:build   # wasm-pack build --target web --out-dir pkg, then sync-wasm.mjs
-```
-
-`scripts/sync-wasm.mjs` copies exactly two files — `rmt_core.js` and `rmt_core_bg.wasm` — from
-`rust/pkg/` into `src/wasm/`. **Commit them.** If you skip the sync step, the app keeps loading the
-previous binary and your Rust change silently does nothing.
-
-The `WASM_CONFIG` flags in `src/wasm/config.js` are the JS-side switches: `useEvaluator`,
-`fallbackOnError`, `logPerformance` and `debug`.
 
 ## Performance and visual-regression harness
 
@@ -344,12 +289,8 @@ The app and the docs are two independent Vercel projects built from one repo.
 | | App | Docs |
 |---|---|---|
 | Config | `vercel.json` (repo root) | `docs/vercel.json` (Vercel root dir = `docs/`) |
-| Build command | `vite build` — **not** `npm run build` | `npm run build` (→ `vitepress build`) |
+| Build command | `vite build` | `npm run build` (→ `vitepress build`) |
 | Output | `dist/` | `.vitepress/dist` |
-
-The root build command deliberately skips `wasm:build`: Vercel's image has no Rust toolchain, so the
-deploy consumes the committed `src/wasm/` artifacts. The consequence is worth internalising — **a
-stale committed artifact ships silently.**
 
 ## Troubleshooting
 
@@ -361,10 +302,6 @@ code regression you introduced. It is not: a fresh server with the same code wor
 
 Kill every Vite server (watch for strays left on 3000/3001/3002 by earlier sessions) and start one
 fresh before you verify anything in a browser.
-
-### `wasm-pack: command not found` from `npm run build`
-
-Expected. Use `npx vite build`, or install Rust and wasm-pack. See the warning above.
 
 ### `WebGL2 not available` in the console
 
@@ -383,8 +320,6 @@ The repo has **no ESLint config, no Prettier config, and no `lint` or `format` s
 machine-enforced. Do not point a formatter at this codebase — it will reflow files that no one asked
 you to touch. Read [Code Style](/developer/contributing/code-style) and match the file you are in.
 
-`rust-analyzer` is worth installing if you work in `rust/`. `cargo fmt` is the Rust convention here.
-
 ## See also
 
 - [Code Style](/developer/contributing/code-style) — the conventions, including how code writes
@@ -392,4 +327,3 @@ you to touch. Read [Code Style](/developer/contributing/code-style) and match th
 - [Pull Requests](/developer/contributing/pull-requests) — what to run before you submit
 - [System Architecture](/developer/architecture/overview) — how the pieces fit
 - [Performance](/developer/performance) — the harness and the measured numbers
-- [Building WASM](/developer/wasm/building) — the Rust crate in detail

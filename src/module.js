@@ -5,8 +5,7 @@ import { migrateSyntax } from './migrate/legacy-syntax.js';
 import { toNumber } from './utils/fraction-num.js';
 import { DependencyGraph } from './dependency-graph.js';
 import { inheritsFromBase } from './variable-deps.js';
-import { createEvaluator, createIncrementalEvaluator, isWasmBackedEvaluator, isEvaluatorHotSwapEnabled } from './wasm/evaluator-adapter.js';
-import { onWasmReady } from './wasm/index.js';
+import { BinaryEvaluator, IncrementalEvaluator } from './binary-evaluator.js';
 import { compiler } from './expression-compiler.js';
 import { compare as compareExact } from './value/exact.js';
 import { MAX_NOTE_ID } from './binary-note.js';
@@ -120,30 +119,16 @@ export class Module {
     this.nextId = 1;
 
     // Binary evaluation infrastructure
-    // Uses WASM evaluator when available, falls back to JS automatically
     this._dependencyGraph = new DependencyGraph();
     // Bumped whenever the graph is cleared/rebuilt so cached per-note
     // registration keys (see _registerNoteDependencies) can't go stale.
     this._depsRegGeneration = 0;
-    this._binaryEvaluator = createEvaluator(this);
-    this._incrementalEvaluator = createIncrementalEvaluator(
+    this._binaryEvaluator = new BinaryEvaluator(this);
+    this._incrementalEvaluator = new IncrementalEvaluator(
       this, // Module reference (we use notes Map interface)
       this._dependencyGraph,
       this._binaryEvaluator
     );
-
-    // WASM init is async and usually loses the race against module creation,
-    // which used to strand every module on the JS fallback for the whole
-    // session. Hot-swap to the WASM evaluator once it becomes available.
-    // The default in a browser; ?evaluator=js turns it off (evaluator-adapter.js).
-    // WeakRef so replaced/discarded modules don't leak via the callback.
-    if (isEvaluatorHotSwapEnabled() && !isWasmBackedEvaluator(this._binaryEvaluator)) {
-      const ref = new WeakRef(this);
-      onWasmReady(() => {
-        const mod = ref.deref();
-        if (mod) mod._upgradeEvaluators();
-      });
-    }
 
     // Evaluation cache (Map<noteId, {startTime, duration, ...}>)
     this._evaluationCache = new Map();
@@ -203,43 +188,6 @@ export class Module {
 
     // Mark all dirty for initial evaluation
     this._dirtyNotes.add(0);
-  }
-
-  /**
-   * Swap the JS fallback evaluator for the WASM one after async WASM init.
-   * Safe to call at any time between synchronous operations: evaluator refs
-   * are replaced atomically and everything is marked dirty, so the next
-   * evaluateModule() fully re-evaluates on the new engine (values are
-   * identical, so visuals never go stale in between).
-   */
-  _upgradeEvaluators() {
-    try {
-      if (isWasmBackedEvaluator(this._binaryEvaluator)) return; // already upgraded
-      const nextEvaluator = createEvaluator(this);
-      if (!isWasmBackedEvaluator(nextEvaluator)) return; // forced JS or WASM unusable
-      const nextIncremental = createIncrementalEvaluator(
-        this,
-        this._dependencyGraph,
-        nextEvaluator
-      );
-
-      this._binaryEvaluator = nextEvaluator;
-      this._incrementalEvaluator = nextIncremental;
-      this._evaluationCache = new Map();
-      this._incrementalEvaluator.invalidateAll();
-      for (const id of Object.keys(this.notes)) {
-        this._dirtyNotes.add(Number(id));
-      }
-
-      // Warm the new engine off the critical path so the first user action
-      // after the swap doesn't pay the full re-evaluation cost.
-      if (typeof window !== 'undefined') {
-        const warm = () => { try { this.evaluateModule(); } catch {} };
-        (window.requestIdleCallback || ((cb) => setTimeout(cb, 0)))(warm);
-      }
-    } catch (e) {
-      console.warn('WASM evaluator upgrade failed; staying on JS fallback:', e);
-    }
   }
 
   /**
@@ -369,7 +317,7 @@ export class Module {
     }
 
     // CRITICAL: Also add transitive dependencies (notes that the dirty notes depend on)
-    // This ensures that when invalidateAll() clears the WASM cache,
+    // This ensures that when invalidateAll() clears the evaluation cache,
     // dependency notes are also re-evaluated before their dependents.
     // Without this, frequency chains break because the dependency's frequency
     // isn't in the cache when the dependent note tries to load it.

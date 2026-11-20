@@ -53,7 +53,7 @@ const index = (dir) => {
     else if (/\.(js|mjs|rs)$/.test(f)) byBase.set(f, byBase.has(f) ? null : rel);
   }
 };
-['src', 'rust/src', 'scripts'].forEach(index);
+['src', 'scripts'].forEach(index);
 
 // --only a.js,b.js: list only citations into those files (by base name)
 const onlyArg = process.argv.find(a => a.startsWith('--only='));

@@ -59,7 +59,7 @@ Note `[1]` in `hub-5000` has **4,999 direct dependents**. Over 216 sampled frame
 Before the allocation work described [below](#mid-drag-gc-hitches), the same drag ran at p99 32 ms
 with periodic multi-frame GC hitches all the way through.
 
-### Evaluation — `npm run perf:bench` (Node, JS `BinaryEvaluator`)
+### Evaluation — `npm run perf:bench` (Node, `BinaryEvaluator`)
 
 Measured on the BigInt-backed evaluator (fraction.js 5.x):
 
@@ -356,7 +356,7 @@ Three parts of it used to cost the size of the whole module, whatever the edit c
 - **The snapshot.** The history and the autosave took `JSON.stringify(createModuleJSON())`, and the
   note widget's edits stringified the object twice. They now take `createModuleJSONString()`: the
   same text, with each note's text kept and made again only when its fields read differently
-  (`src/module.js:1045`).
+  (`src/module.js:993`).
 - **`toNumber()`.** It wrote both BigInts of a fraction out in decimal to count their digits, for
   every value `sync()` reads. A comparison with 10^300 decides the same (`src/utils/fraction-num.js:90`).
 
@@ -367,12 +367,10 @@ autosave, both history stacks and the renderer's instance buffers at every step.
 Headless Edge, `bench-commit-pairs.mjs`, the median of the commit p50s over 5 back-to-back pairs
 (the server that goes first alternates):
 
-| Module | Engine | Before | After | Before / after |
-|---|---|---|---|---|
-| `voices-20000` | JS | 44.7 ms | 26.1 ms | 1.71x |
-| `voices-20000` | WASM | 44.3 ms | 25.5 ms | 1.74x |
-| `chain-1000` | JS | 3.4 ms | 2.2 ms | 1.55x |
-| `chain-1000` | WASM | 3.2 ms | 2.3 ms | 1.39x |
+| Module | Before | After | Before / after |
+|---|---|---|---|
+| `voices-20000` | 44.7 ms | 26.1 ms | 1.71x |
+| `chain-1000` | 3.4 ms | 2.2 ms | 1.55x |
 
 What still costs the module's size, at 20,000 notes (`profile-commit.mjs`): `sync()` about 15 ms,
 since it rebuilds every instance on every commit (see
@@ -386,10 +384,9 @@ edit (`src/store/autosave.js`), and only the latest: edits within one frame make
 characters of `voices-100000`, which `localStorage` could not hold at all. The same pairs, before
 (v2 with the `localStorage` autosave) and after:
 
-| Module | Engine | Before | After | Before / after |
-|---|---|---|---|---|
-| `voices-20000` | JS | 29.0 ms | 18.1 ms | 1.60x |
-| `voices-20000` | WASM | 27.8 ms | 16.8 ms | 1.65x |
+| Module | Before | After | Before / after |
+|---|---|---|---|
+| `voices-20000` | 29.0 ms | 18.1 ms | 1.60x |
 
 `measureCommit()` runs its edits in one task, so their writes make one after the last frame and the
 "after" column holds none of them. In the app each edit is its own task and is written once, after
@@ -412,8 +409,8 @@ chunk and are never duplicated.
 
 The chunk-by-chunk byte sizes of a production build are in
 [Build & Deploy](/developer/contributing/build-and-deploy#what-the-vite-build-produces). The
-headline: the entry chunk is ~111 kB gzipped, the renderer ~54 kB, and the WASM
-binary 115 kB.
+headline: the entry chunk is ~111 kB gzipped, the renderer ~54 kB, and the vendor chunk
+(fraction.js) is small.
 
 ## The benchmark harness
 
@@ -454,7 +451,7 @@ npm run perf:bench                       # all five evaluation stress shapes
 node scripts/perf/bench-node.mjs chain-1000   # just one
 ```
 
-This measures **evaluation only** — Node has no renderer. It runs the JS evaluator.
+This measures **evaluation only** — Node has no renderer. It runs the evaluator.
 
 ### In-browser harness: `?perf`
 
@@ -493,7 +490,7 @@ for `npm run perf:render`.
 | `bench-hover.mjs` | Real mouse movement → end-to-end hover/pick + redraw frame times |
 | `bench-pick.mjs` | `pickAt` / `pickStackAt` / `hitTestSubRegion` ms per call |
 | `profile-sync.mjs` | V8 CPU profile of `sync()` by function self-time |
-| `profile-commit.mjs` | One commit (`measureCommit`) timed, then CPU-profiled: self and total time per function. `--engine js\|wasm`; reads the module from disk |
+| `profile-commit.mjs` | One commit (`measureCommit`) timed, then CPU-profiled: self and total time per function. Reads\|wasm`; reads the module from disk |
 | `bench-commit-pairs.mjs` | The commit on two servers (`--before`, `--after`), back to back in alternating pairs |
 | `compare-edits.mjs` | The same edits, undos and redos on two servers: autosave, history stacks and instance buffers compared at every step |
 | `check-autosave.mjs` | The IndexedDB autosave in the app: the move from `localStorage`, one write per frame of edits, reloads, undo, the fallback without IndexedDB, and a module too large for `localStorage` |
@@ -536,7 +533,31 @@ node scripts/perf/converge.mjs
 | **GPU picking** | **Not shipped.** `picking.js` is a self-described scaffold: no ID pass is ever drawn, `begin()`/`end()` have zero call sites, and `Workspace.pickAt` tries `pickAllAt()` first (which always exists), so the GPU branch is unreachable. All picking is CPU-side. |
 | **Measure-triangle outline batching** | Intentionally skipped — bounded by measure count M ≪ N. |
 | **Spatial index for picking** | Not warranted by measurement. |
-| **WASM evaluator** | The **default** in a browser; `?evaluator=js` keeps JavaScript. It is faster at evaluation (1.15x to 6.4x in Node, more on fractions of hundreds of digits), but an end-to-end commit costs the same on both engines. Every number on this page is the JS evaluator unless it says otherwise. See [WASM overview](/developer/wasm/overview#speed). |
+
+## Limits
+
+Note ids go up to 16,777,215 (`MAX_NOTE_ID`, `src/binary-note.js`); the loader refuses ids above it,
+and references above 65535 compile to `LOAD_REF_WIDE`. The UI's import paths (Load Module, library
+upload, Load UI, Copy to Modules) accept up to 250,000 notes, and Load Module files up to 64 MB
+(`MAX_MODULE_NOTES`, `MAX_MODULE_BYTES` in `src/limits.js`). Memory is what limits a module: about
+8 KB of JavaScript heap per loaded note. Measured in Node, 100,000 notes take about 0.8 GB and load
+in about 3 s, 300,000 about 2.3 GB, and a tab's heap stops near 4 GB.
+
+The autosave keeps the whole module in IndexedDB (`src/store/autosave.js`), far past what
+localStorage could hold: `voices-100000` (15.5 million characters as JSON) is saved and restored
+(`scripts/perf/check-autosave.mjs`). It used to be
+`localStorage`, which holds about 5 MB per origin, and from a few tens of thousands of notes every
+edit logged `[RMT] Autosave failed (history capture): QuotaExceededError …`.
+
+## History
+
+A Rust/WebAssembly evaluator (the crate `rmt-core`) existed for a time. In Phase D it was ported to
+exact parity with the JavaScript evaluator and measured. It evaluated faster (about 1.15 to 2.1x on
+small fractions, 5 to 6x on fractions of hundreds of digits; level with JavaScript on a first
+evaluation of 300,000 notes), but an edit in the app cost the same on either engine, because
+evaluation had become a small part of an edit; the memory that limits module size is in JavaScript
+objects either way; and two engines doubled every change to evaluation. It was removed. The last
+commit that has it is `a092ad5` in the git history.
 
 ## See also
 

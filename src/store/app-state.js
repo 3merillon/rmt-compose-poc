@@ -1,12 +1,6 @@
 // Centralized app state to retire window.* globals
 import { audioEngine } from '../player/audio-engine.js';
 import { eventBus } from '../utils/event-bus.js';
-import { initWasm } from '../wasm/index.js';
-
-// Eagerly initialize WASM for faster first-play performance
-initWasm().catch(() => {
-  // Silently fail - JS fallback will be used
-});
 
 let moduleRef = null;
 let evaluatedNotesRef = null;
