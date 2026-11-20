@@ -430,6 +430,26 @@ export class BinaryExpression {
 }
 
 /**
+ * The expression of a variable a note does not have: one instance that every
+ * unset variable shares (src/note.js). A note used to make all six of its
+ * expressions up front, each with a 64-byte bytecode buffer and a 16-entry
+ * dependency list, and most notes set three: about 1.8 KB per note in Node.
+ *
+ * Frozen, so that a write to it throws instead of reaching every note. An
+ * expression that belongs to a note is replaced (setVariable, compile), never
+ * written in place; a clone of this one is an ordinary, writable expression.
+ */
+export const EMPTY_EXPRESSION = (() => {
+  const e = new BinaryExpression(0);
+  e.dependencies = new Uint32Array(0);
+  e._varRefs = Object.freeze([]); // what getVariableRefs() returns, without writing
+  e._varRefsLength = 0;
+  Object.freeze(e.bytecode);
+  Object.freeze(e.dependencies);
+  return Object.freeze(e);
+})();
+
+/**
  * Binary note storage
  * Stores all note parameters as binary expressions
  */

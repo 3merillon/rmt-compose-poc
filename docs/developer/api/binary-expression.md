@@ -29,7 +29,9 @@ const expr = new BinaryExpression(initialSize = 64)
 ```
 
 Creates an empty expression with a 64-byte bytecode buffer (it doubles as needed). You rarely
-build one by hand — the compilers do it.
+build one by hand — the compilers do it. A note's unset variables share one frozen empty
+expression, `EMPTY_EXPRESSION` (`src/binary-note.js:442-450`); its `clone()` is an ordinary, writable
+one.
 
 ## Properties
 

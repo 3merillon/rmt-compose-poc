@@ -162,7 +162,7 @@ The evaluator decodes the variable-length BigInts straight into a pooled BigInt-
 
 ## `BinaryExpression`
 
-`binary-note.js:95-438`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
+`binary-note.js:95-430`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
 
 | Field | Type | Notes |
 |---|---|---|

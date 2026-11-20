@@ -215,7 +215,7 @@ What a variable reads comes from `src/variable-deps.js`, the one place that stat
 
 | A variable reads… | Resolved by |
 |---|---|
-| every `LOAD_REF` / `LOAD_BASE` in its bytecode, `base.x` being note 0 | `BinaryExpression.getVariableRefs()` (`binary-note.js:332`), decoded once per expression |
+| every `LOAD_REF` / `LOAD_BASE` in its bytecode, `base.x` being note 0 | `BinaryExpression.getVariableRefs()` (`binary-note.js:324`), decoded once per expression |
 | the BaseNote's variable instead, when the reference is to an `amplitude`, `attack` or `release` the named note does not define (indices `>= FIRST_INTERPRETATION_VAR`) | `resolveVariableRef()` (`variable-deps.js:81`) |
 | nothing schedulable, when no note defines it — `evaluate()` falls back to the default and reports it | — |
 

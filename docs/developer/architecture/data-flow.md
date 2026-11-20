@@ -26,10 +26,10 @@ Save clicked
   → validateExpression()            src/modals/validation.js:6
   → simplify (simplifyDSL)          src/utils/simplify.js:66
   → Note.setVariable('frequencyString', text)
-      → Note._setExpression()       src/note.js:308
+      → Note._setExpression()       src/note.js:309
           → compiler.compile(text)   → BinaryExpression
           → note._depsEpoch++
-          → Note._notifyChange()    src/note.js:352
+          → Note._notifyChange()    src/note.js:353
               → module.markNoteDirty(note.id)
               → eventBus.emit('player:invalidateModuleEndTimeCache')
 ```
@@ -250,14 +250,14 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 
 | Event | Emitted by | Does |
 |---|---|---|
-| `workspace:noteMoveCommit` | `note.js:357` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
+| `workspace:noteMoveCommit` | `note.js:358` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
 | `workspace:noteResizeCommit` | `workspace.js:1756` | `{noteId, newDurationSec}` |
 | `workspace:measureResizeCommit` | `workspace.js:1765` | `{measureId, newStartSec}` |
 | `workspace:groupMoveCommit` | `workspace.js:1737` | `{ids, deltaSec}` → clamps the batch so it can't cross the BaseNote, then commits each mover. |
 | `workspace:marqueeCommit` | `workspace.js:1727` | `{ids, additive}` → sets the multi-selection. |
 | `workspace:multiSelectToggle` | `workspace.js:2072` | `{id}` — shift-click / long-press adds or removes one note. |
 | `player:octaveChange` | note widget arrows, GL arrow regions | `{noteId, direction}` → multiplies the frequency expression by the arrow interval. |
-| `player:invalidateModuleEndTimeCache` | `note.js:357` | Any expression change. |
+| `player:invalidateModuleEndTimeCache` | `note.js:358` | Any expression change. |
 | `player:importModuleAtTarget` | `menu-bar.js` | `{targetNoteId, moduleData, clientX, clientY}` |
 | `player:selectNote`, `player:requestPause` | various | Selection and transport. |
 | `history:capture` / `seedIfEmpty` / `undo` / `redo` / `requestRestore` / `stackChanged` | everywhere an edit commits | Undo. `player.js` also listens to `history:capture` to write the autosave. |

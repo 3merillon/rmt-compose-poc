@@ -112,12 +112,12 @@ _registerNoteDependencies(note) {
 ```
 
 ::: tip Re-registration is skipped when dependencies cannot have changed
-Dependencies derive purely from a note's compiled expressions. If the note's id, its expression epoch (`Note._depsEpoch`, declared at `src/note.js:103` and bumped on every expression mutation — `src/note.js:298`, `src/note.js:311`, `src/note.js:326`, `src/note.js:343`) and the graph generation are all unchanged, the note is already registered identically.
+Dependencies derive purely from a note's compiled expressions. If the note's id, its expression epoch (`Note._depsEpoch`, declared at `src/note.js:104` and bumped on every expression mutation — `src/note.js:299`, `src/note.js:312`, `src/note.js:327`, `src/note.js:344`) and the graph generation are all unchanged, the note is already registered identically.
 
 This matters because `markNoteDirty()` calls this for **every** marked note — on an interval-arrow change that is every dependent in the closure. The skip avoids rewriting up to 22 maps per untouched note.
 :::
 
-The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:255`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`src/binary-note.js:332`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
+The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:254`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`src/binary-note.js:324`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
 
 `_updateDependencies()` (`:439-493`) diffs old against new, patches the inverse index, and **bumps `_corruptionEpoch` if the dependency set actually changed** — because changing a note's dependencies can change whether *other* notes render as transitively corrupted, even if no corruption flag moved.
 

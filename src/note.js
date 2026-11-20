@@ -1,5 +1,5 @@
 import { eventBus } from './utils/event-bus.js';
-import { BinaryExpression } from './binary-note.js';
+import { BinaryExpression, EMPTY_EXPRESSION } from './binary-note.js';
 import { compiler, decompiler } from './expression-compiler.js';
 
 /**
@@ -73,14 +73,15 @@ export class Note {
     this.module = null;
     this.lastModifiedTime = Date.now();
 
-    // Expression storage (BinaryExpression objects)
+    // Expression storage (BinaryExpression objects). A variable the note does
+    // not have holds the shared EMPTY_EXPRESSION; setting it replaces that.
     this.expressions = {
-      startTime: new BinaryExpression(),
-      duration: new BinaryExpression(),
-      frequency: new BinaryExpression(),
-      amplitude: new BinaryExpression(),
-      attack: new BinaryExpression(),
-      release: new BinaryExpression(),
+      startTime: EMPTY_EXPRESSION,
+      duration: EMPTY_EXPRESSION,
+      frequency: EMPTY_EXPRESSION,
+      amplitude: EMPTY_EXPRESSION,
+      attack: EMPTY_EXPRESSION,
+      release: EMPTY_EXPRESSION,
     };
 
     // Non-expression properties.
@@ -339,7 +340,7 @@ export class Note {
   clearExpression(name) {
     const expr = this.expressions[name];
     if (!expr || expr.isEmpty()) return false;
-    this.expressions[name] = new BinaryExpression();
+    this.expressions[name] = EMPTY_EXPRESSION;
     this._depsEpoch++;
     this.lastModifiedTime = Date.now();
     this._notifyChange();
