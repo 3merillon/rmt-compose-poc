@@ -21,9 +21,12 @@ export class SquareInstrument extends SynthInstrument {
         super(audioContext);
         this.name = 'square-wave';
         this.waveType = 'square';
-        // 3-osc unison (±4¢) + a pitch-tracked lowpass to tame the harshness.
-        this.unisonCount = 3;
-        this.detuneCents = 4;
+        // One oscillator at exactly the written pitch (until 20 November 2026 a
+        // 3-oscillator unison at ±4 cents, which made every note beat by itself and
+        // hid whether a chord's partials stand still; the owner: "remove it, one
+        // oscillator"), and a pitch-tracked lowpass to tame the harshness.
+        this.unisonCount = 1;
+        this.detuneCents = 0;
         this.filterTrackMul = 12;
         this.filterQ = 0.7;
     }
@@ -38,8 +41,9 @@ export class SawtoothInstrument extends SynthInstrument {
         super(audioContext);
         this.name = 'sawtooth-wave';
         this.waveType = 'sawtooth';
-        this.unisonCount = 3;
-        this.detuneCents = 4;
+        // One oscillator, exactly the written pitch (see square-wave)
+        this.unisonCount = 1;
+        this.detuneCents = 0;
         this.filterTrackMul = 10;
         this.filterQ = 0.7;
     }
@@ -97,47 +101,77 @@ export class OrganInstrument extends SynthInstrument {
     }
 }
 
+/**
+ * A struck bar. Its spectrum is the one it always had (partials 1, 4 and 10
+ * strong: the bar's modes, tuned to the note, two octaves up and a pure major
+ * third above that), but the modes now decay at their own rates, as a struck
+ * bar's do: partial 4 three times and partials 10–15 six times as fast as the
+ * fundamental (whose decay is the envelope's t60). So a long note starts bright
+ * and settles on its fundamental. Three oscillators at the same frequency, each
+ * through a PeriodicWave holding its group of partials, started together (in
+ * phase), scaled so that at the strike their sum is exactly the old wave.
+ */
 export class VibraphoneInstrument extends SynthInstrument {
     constructor(audioContext) {
         super(audioContext);
         this.name = 'vibraphone';
         this.articulation = 'struck';   // one bar per pitch: struck again, it is damped first
-        this.periodicWave = this.createVibraphoneWave();
+        this.createVibraphoneWaves();
     }
 
-    createVibraphoneWave() {
-        const harmonicCount = 16;
-        const real = new Float32Array(harmonicCount);
-        const imag = new Float32Array(harmonicCount);
+    createVibraphoneWaves() {
+        const N = 16;
+        const real = new Float32Array(N), imag = new Float32Array(N);
+        const amp = [0, 0.6, 0.1, 0.05, 0.8, 0.05, 0.03, 0.02, 0.01, 0.01, 0.4, 0.1, 0.05, 0.03, 0.02, 0.01];
+        for (let n = 1; n < N; n++) real[n] = amp[n];
+        imag[1] = 0.002; imag[4] = 0.004; imag[10] = 0.003;
+        // The browser scales a PeriodicWave to a peak of 1; do it once by hand, for
+        // the whole sum, so the three groups add up to that same wave.
+        let peak = 0;
+        for (let i = 0; i < 2048; i++) {
+            const th = (2 * Math.PI * i) / 2048;
+            let v = 0;
+            for (let n = 1; n < N; n++) v += real[n] * Math.cos(n * th) + imag[n] * Math.sin(n * th);
+            peak = Math.max(peak, Math.abs(v));
+        }
+        const k = peak > 0 ? 1 / peak : 1;
+        const group = (pick) => {
+            const r = new Float32Array(N), im = new Float32Array(N);
+            for (let n = 1; n < N; n++) if (pick(n)) { r[n] = real[n] * k; im[n] = imag[n] * k; }
+            return this.audioContext.createPeriodicWave(r, im, { disableNormalization: true });
+        };
+        this.waveBody = group((n) => n !== 4 && n < 10);   // the fundamental and its neighbours
+        this.waveMode4 = group((n) => n === 4);             // the bar's second mode
+        this.waveMode10 = group((n) => n >= 10);            // its third mode and above
+        this.periodicWave = this.waveBody;
+    }
 
-        real[0] = 0;
-        real[1] = 0.6;
-        real[2] = 0.1;
-        real[3] = 0.05;
-        real[4] = 0.8;
-        real[5] = 0.05;
-        real[6] = 0.03;
-        real[7] = 0.02;
-        real[8] = 0.01;
-        real[9] = 0.01;
-        real[10] = 0.4;
-        real[11] = 0.1;
-        real[12] = 0.05;
-        real[13] = 0.03;
-        real[14] = 0.02;
-        real[15] = 0.01;
+    t60For(frequency) { return byPitch(frequency, [65, 6], [2000, 2]); }
 
-        imag[1] = 0.002;
-        imag[4] = 0.004;
-        imag[10] = 0.003;
-
-        return this.audioContext.createPeriodicWave(real, imag, { disableNormalization: false });
+    createOscillator(frequency) {
+        const ctx = this.audioContext;
+        const make = (wave) => { const o = ctx.createOscillator(); o.setPeriodicWave(wave); o.frequency.value = frequency; return o; };
+        const body = make(this.waveBody), m4 = make(this.waveMode4), m10 = make(this.waveMode10);
+        const g4 = ctx.createGain(), g10 = ctx.createGain(), out = ctx.createGain();
+        body.connect(out); m4.connect(g4); g4.connect(out); m10.connect(g10); g10.connect(out);
+        const t60 = this.t60For(frequency);
+        // Beyond the envelope's decay (t60), partial 4 falls a further 6/t60 decades a
+        // second (3× the rate in all) and partials 10–15 a further 15/t60 (6×), from the
+        // strike, until they are 140 dB down.
+        const decay = (g, extra, when) => {
+            try {
+                g.gain.cancelScheduledValues(when);
+                g.gain.setValueAtTime(1, when);
+                g.gain.exponentialRampToValueAtTime(1e-7, when + (7 * t60) / extra);
+            } catch {}
+        };
+        return makeVoice([body, m4, m10], out, frequency, (when) => { decay(g4, 6, when); decay(g10, 15, when); });
     }
 
     // A struck bar: no sustain, a natural decay (longer for the low bars) until
     // the note-off, then a soft damper.
     getEnvelopeSettings(duration, frequency) {
-        return { attack: 0.002, t60: byPitch(frequency, [65, 6], [2000, 2]), release: 0.4 };
+        return { attack: 0.002, t60: this.t60For(frequency), release: 0.4 };
     }
 }
 

@@ -12,11 +12,11 @@ of this page is detail.
 | Name (the exact registered string) | Kind | How it is built |
 |---|---|---|
 | `sine-wave` | synth | single sine oscillator — the **default** |
-| `square-wave` | synth | square, 3-osc unison at ±4 ¢, pitch-tracked lowpass at 12× |
-| `sawtooth-wave` | synth | sawtooth, 3-osc unison at ±4 ¢, pitch-tracked lowpass at 10× |
+| `square-wave` | synth | square, one oscillator, pitch-tracked lowpass at 12× |
+| `sawtooth-wave` | synth | sawtooth, one oscillator, pitch-tracked lowpass at 10× |
 | `triangle-wave` | synth | single triangle oscillator |
 | `organ` | synth | single oscillator with a **10-harmonic `PeriodicWave`** |
-| `vibraphone` | synth | single oscillator with a **16-harmonic `PeriodicWave`** |
+| `vibraphone` | synth | three oscillators at the note's frequency, each a `PeriodicWave` of one group of its 16 harmonics, the upper modes decaying faster |
 | `fm-epiano` | synth | **2-operator FM** — sine carrier, sine modulator, decaying index |
 | `harmonium` | synth | single oscillator, `PeriodicWave` with **every partial 1–16**, full level to the note-off |
 | `harmonium-soft` | synth | the same class with a lower knee, a lower level and a slower envelope |
@@ -171,11 +171,11 @@ All times are in seconds; sustain is a fraction of the peak.
 | Instrument | Wave | Unison | Detune | Filter (mul / Q) | Attack | Decay / sustain | Release |
 |---|---|---|---|---|---|---|---|
 | `sine-wave` | sine | 1 | — | — | 0.015 | none (full level) | 0.1 |
-| `square-wave` | square | 3 | ±4 ¢ | 12× / 0.7 | 0.008 | 0.25 s to 0.7 | 0.1 |
-| `sawtooth-wave` | sawtooth | 3 | ±4 ¢ | 10× / 0.7 | 0.008 | 0.25 s to 0.7 | 0.1 |
+| `square-wave` | square | 1 | — | 12× / 0.7 | 0.008 | 0.25 s to 0.7 | 0.1 |
+| `sawtooth-wave` | sawtooth | 1 | — | 10× / 0.7 | 0.008 | 0.25 s to 0.7 | 0.1 |
 | `triangle-wave` | triangle | 1 | — | — | 0.015 | none (full level) | 0.12 |
 | `organ` | periodic (10 harm.) | 1 | — | — | 0.03 | none (full level) | 0.06 |
-| `vibraphone` | periodic (16 harm.) | 1 | — | — | 0.002 | `t60` from 6 s at 65 Hz to 2 s at 2000 Hz | 0.4 |
+| `vibraphone` | periodic (16 harm., in three groups) | 3 (same pitch) | — | — | 0.002 | `t60` from 6 s at 65 Hz to 2 s at 2000 Hz; partial 4 at 3×, partials 10–15 at 6× that rate | 0.4 |
 | `fm-epiano` | 2-op FM | — | — | — | 0.002 | `t60` from 5 s at 65 Hz to 1.5 s at 2000 Hz | 0.25 |
 | `harmonium` | periodic (16 harm.) | 1 | — | — | 0.03 | none (full level) | 0.08 |
 | `harmonium-soft` | periodic (16 harm.) | 1 | — | — | 0.06 | none (full level) | 0.12 |
@@ -197,8 +197,8 @@ export class SquareInstrument extends SynthInstrument {
     super(audioContext);
     this.name = 'square-wave';
     this.waveType = 'square';
-    this.unisonCount = 3;      // 3 detuned oscillators
-    this.detuneCents = 4;      // edges land at ±4 cents
+    this.unisonCount = 1;      // one oscillator at exactly the written pitch
+    this.detuneCents = 0;      // (a ±4-cent, 3-oscillator unison until 20 November 2026)
     this.filterTrackMul = 12;  // lowpass at 12 × the note frequency
     this.filterQ = 0.7;
   }
@@ -219,7 +219,7 @@ export class SquareInstrument extends SynthInstrument {
 | `filterQ` | `0.7` | Q of that filter. |
 
 `fm-epiano` is the one synth that overrides `createOscillator()` outright
-(`synth-instruments.js:167`): a sine carrier, a sine modulator at a 1:1 ratio, and a `modGain` whose
+(`synth-instruments.js:201`): a sine carrier, a sine modulator at a 1:1 ratio, and a `modGain` whose
 value is `index × modFreq` feeding `carrier.frequency`. The index decays exponentially from **4** to
 **0.6** over **0.28 s**, scheduled inside the voice's `start()` so it locks to the note's absolute
 start.
@@ -227,7 +227,7 @@ start.
 ### The harmonic voices
 
 `harmonium` and `harmonium-soft` are two three-line subclasses of `HarmonicVoice`
-(`synth-instruments.js:242`), a `SynthInstrument` that is deliberately **not** exported in the
+(`synth-instruments.js:276`), a `SynthInstrument` that is deliberately **not** exported in the
 `SynthInstruments` map, so it is never registered itself. They exist to make the difference between
 a pure and a tempered interval as salient as it can be: two notes a ratio `p/q` apart share a
 partial (the `p`-th of the lower is the `q`-th of the upper), which stands still when the interval
@@ -509,8 +509,8 @@ export class MyInstrument extends SynthInstrument {
     super(audioContext);
     this.name = 'my-instrument';       // registry key, lowercased
     this.waveType = 'sawtooth';
-    this.unisonCount = 2;
-    this.detuneCents = 7;
+    // unisonCount / detuneCents exist, but no built-in voice uses them: a detuned
+    // unison makes a single note beat and hides whether a chord is pure
     this.filterTrackMul = 8;
   }
 

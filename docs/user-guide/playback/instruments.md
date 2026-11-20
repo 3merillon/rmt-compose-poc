@@ -16,11 +16,11 @@ The app shows these names exactly as written.
 | Name | Kind | Character |
 |---|---|---|
 | `sine-wave` | synth | A single sine. Pure, no harmonics. The default. |
-| `square-wave` | synth | Square, thickened by a 3-oscillator unison and tamed by a lowpass that tracks the pitch |
-| `sawtooth-wave` | synth | Sawtooth, same unison and lowpass treatment, slightly darker filter |
+| `square-wave` | synth | Square, one oscillator, tamed by a lowpass that tracks the pitch |
+| `sawtooth-wave` | synth | Sawtooth, one oscillator, the same lowpass treatment with a slightly darker filter |
 | `triangle-wave` | synth | A single triangle. Soft, flute-like. |
 | `organ` | synth | A 10-harmonic wave held at full level, with a short release |
-| `vibraphone` | synth | A 16-harmonic wave struck at once and left to die away, longer for low notes than for high ones; the note's end damps it. Bell-like. |
+| `vibraphone` | synth | A struck bar: 16 harmonics, bright at the strike, its upper modes dying first so a long note settles on its fundamental; longer for low notes than for high ones; the note's end damps it. Bell-like. |
 | `fm-epiano` | synth | A 2-operator FM electric piano — bright, percussive attack settling into a mellow Rhodes-like tine |
 | `harmonium` | synth | A steady reed-organ voice with every harmonic from the 1st to the 16th. Made for hearing pure intervals. |
 | `harmonium-soft` | synth | The same voice, darker, quieter and slower to speak. A bed under a tune. |
@@ -158,9 +158,9 @@ The harmonium voices are overridden the same way. See [attack and release](/refe
 
 `sine-wave` and `triangle-wave` are one oscillator each — a pure sine, and a triangle with a gentler harmonic series.
 
-`square-wave` and `sawtooth-wave` are **not** bare waveforms. Each is three oscillators detuned by up to ±4 cents (a slight chorusing thickness) behind a lowpass filter whose cutoff tracks the note: 12× the note's frequency for square, 10× for sawtooth. The raw square/sawtooth harmonic series is still underneath, but the top of it is rolled off, which is why they sound rounder than a textbook oscillator.
+`square-wave` and `sawtooth-wave` are one oscillator each at exactly the written pitch, behind a lowpass filter whose cutoff tracks the note: 12× the note's frequency for square, 10× for sawtooth. (Until 20 November 2026 each was three oscillators detuned by up to ±4 cents, which made even a single note beat.) The raw square/sawtooth harmonic series is still underneath, but the top of it is rolled off, which is why they sound rounder than a textbook oscillator.
 
-`organ` and `vibraphone` are custom harmonic waves — 10 and 16 partials respectively. The organ holds its level until the note's end and then lets go quickly; the vibraphone is struck at once and decays on its own, so a long note is not held level, and the end of the note damps it.
+`organ` and `vibraphone` are custom harmonic waves — 10 and 16 partials respectively. The organ holds its level until the note's end and then lets go quickly; the vibraphone is struck at once and decays on its own, its partial 4 three times and its partials 10–15 six times as fast as its fundamental, so a long note is not held level and mellows as it rings, and the end of the note damps it.
 
 `fm-epiano` is 2-operator FM: a sine carrier frequency-modulated by another sine at the same pitch. The modulation index starts high and falls over the first quarter-second, which is the bright ping-then-mellow of an electric piano tine.
 
@@ -173,7 +173,7 @@ Two notes a ratio `p/q` apart share an overtone: the `p`-th harmonic of the lowe
 | | `harmonium` / `harmonium-soft` | The other synth voices |
 |---|---|---|
 | Harmonics | **Every one from the 1st to the 16th** | `sine-wave` has one; `organ` has no 2nd and no 7th; `triangle-wave` and `square-wave` have only the odd ones |
-| Steadiness | One oscillator. No unison, no detune, no vibrato | `square-wave` and `sawtooth-wave` detune three oscillators by ±4 cents, which makes even a single note waver |
+| Steadiness | One oscillator. No unison, no detune, no vibrato | Also one oscillator each, steady; the vibraphone's and fm-epiano's partials change as they decay |
 | Attack and release | **Fixed times**: 30 ms and 80 ms (`harmonium`), 60 ms and 120 ms (`harmonium-soft`), unless a note sets its own [attack and release](#attack-and-release) | Times in seconds too, each its own (see the table above); the release rings after the note's end |
 | Between them | Full level, held | Some hold full level; `square-wave` and `sawtooth-wave` fall to a lower level, `vibraphone` and `fm-epiano` decay on their own |
 

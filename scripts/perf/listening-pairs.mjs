@@ -102,6 +102,28 @@ SHEETS['phase-i-5'] = {
       predict: 'The same twice.' },
   ],
 };
+SHEETS['phase-i-6'] = {
+  title: 'Phase I, step 6: the synth voices',
+  intro: 'Each file plays a passage twice: first as before this step, a second of silence, then as now. Same notes, same pure ratios of 263 Hz, reverb and limiter on. ' +
+    'What changes: square-wave and sawtooth-wave play one oscillator at the written pitch instead of three at -4, 0 and +4 cents; the vibraphone\'s upper modes (partials 4 and 10) now fade faster than its fundamental.',
+  passages: [
+    { name: 'Square wave, a held pure triad (3 s)', instrument: 'square-wave', notes: chord([[1, 1], [5, 4], [3, 2]], 0, 3),
+      change: 'Before: every note three oscillators 4 cents apart, beating by themselves. Now: one oscillator each.',
+      predict: 'Now: the chord stands still, thinner; before: a slow shimmer even though the chord is pure.' },
+    { name: 'Sawtooth, a held pure triad (3 s)', instrument: 'sawtooth-wave', notes: chord([[1, 1], [5, 4], [3, 2]], 0, 3),
+      change: 'The same change. Measured: the partial a pure major third shares now swings 0.006 dB through the chord (a tempered third: 20.9 dB).',
+      predict: 'Now: still and buzzy, the purity plain; before: a chorus.' },
+    { name: 'Sawtooth, a melody', instrument: 'sawtooth-wave', notes: seq([[1, 1], [9, 8], [5, 4], [3, 2], [5, 4], [1, 1]], 0.4),
+      change: 'One oscillator instead of three.',
+      predict: 'Now: plainer, more like a reed; before: fatter.' },
+    { name: 'Vibraphone, notes of 2 s', instrument: 'vibraphone', notes: seq([[1, 1], [5, 4], [3, 2]], 2),
+      change: 'Before: the same spectrum from strike to end. Now: bright at the strike, settling on the fundamental.',
+      predict: 'Now: more like a struck bar, the metallic ring dying first; before: a steady organ-like tone fading out.' },
+    { name: 'Vibraphone, a held pure triad (4 s)', instrument: 'vibraphone', notes: chord([[1, 1], [5, 4], [3, 2]], 0, 4),
+      change: 'The same: the upper modes fade first.',
+      predict: 'Now: the chord mellows as it rings.' },
+  ],
+};
 const sheet = SHEETS[SHEET];
 if (!sheet) { console.error(`unknown sheet ${SHEET}`); process.exit(2); }
 
