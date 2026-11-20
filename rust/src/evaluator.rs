@@ -23,9 +23,10 @@
 //! (ids are 16-bit in the bytecode).
 
 use crate::bytecode::{
-    read_big_int_signed, read_big_int_unsigned, read_i32, read_u16, Op, Var, FIRST_INTERPRETATION_VAR, VAR_COUNT,
+    read_big_int_signed, read_big_int_unsigned, read_i32, read_u16, read_u32, Op, Var, FIRST_INTERPRETATION_VAR, VAR_COUNT,
     VAR_ORDER,
 };
+use crate::by_id::ById;
 use crate::exact::{self, Value};
 use crate::rational::Q;
 use crate::variable_deps::{find_cycle, note_of, pack, resolve, var_of, NoteExpressions, NoteStore, VarRef, VAR_BITS};
@@ -52,14 +53,13 @@ pub struct NoteRecord {
 /// Every evaluated note's record, by id
 #[derive(Default)]
 struct Records {
-    records: Vec<Option<NoteRecord>>,
-    count: usize,
+    records: ById<NoteRecord>,
 }
 
 impl Records {
     #[inline]
     fn get(&self, note_id: u32) -> Option<&NoteRecord> {
-        self.records.get(note_id as usize).and_then(|r| r.as_ref())
+        self.records.get(note_id)
     }
 
     #[inline]
@@ -67,41 +67,26 @@ impl Records {
         self.get(note_id).and_then(|r| r.values[var.index()].as_ref())
     }
 
-    /// Give a note a blank record, keeping the allocation of its old one
-    fn blank(&mut self, note_id: u32) -> &mut NoteRecord {
-        let at = note_id as usize;
-        if at >= self.records.len() {
-            self.records.resize_with(at + 1, || None);
-        }
-        let slot = &mut self.records[at];
-        match slot {
-            Some(record) => {
-                *record = NoteRecord::default();
-            }
-            None => {
-                *slot = Some(NoteRecord::default());
-                self.count += 1;
-            }
-        }
-        slot.as_mut().unwrap()
+    /// Give a note a blank record
+    fn blank(&mut self, note_id: u32) {
+        *self.records.get_or_insert_with(note_id, NoteRecord::default) = NoteRecord::default();
     }
 
     #[inline]
     fn get_mut(&mut self, note_id: u32) -> Option<&mut NoteRecord> {
-        self.records.get_mut(note_id as usize).and_then(|r| r.as_mut())
+        self.records.get_mut(note_id)
     }
 
     fn remove(&mut self, note_id: u32) {
-        if let Some(slot) = self.records.get_mut(note_id as usize) {
-            if slot.take().is_some() {
-                self.count -= 1;
-            }
-        }
+        self.records.remove(note_id);
     }
 
     fn clear(&mut self) {
         self.records.clear();
-        self.count = 0;
+    }
+
+    fn len(&self) -> usize {
+        self.records.len()
     }
 }
 
@@ -260,6 +245,15 @@ fn interpret(stack: &mut Vec<Value>, bytecode: &[u8], source: &Source, log: &mut
                 push(stack, value)?;
             }
 
+            Some(Op::LoadRefWide) => {
+                need(bytecode, pc, 5)?;
+                let note_id = read_u32(bytecode, pc);
+                let var_byte = bytecode[pc + 4];
+                pc += 5;
+                let value = source.load(note_id, var_byte, log);
+                push(stack, value)?;
+            }
+
             Some(Op::LoadBase) => {
                 need(bytecode, pc, 1)?;
                 let var_byte = bytecode[pc];
@@ -406,8 +400,8 @@ impl Problems {
 /// Reusable buffers of the walk, so that a batch allocates nothing it kept before
 #[derive(Default)]
 struct Scratch {
-    /// By note id: 1 + the note's position in the batch, 0 when outside it
-    position: Vec<u32>,
+    /// By note id: the note's position in the batch, for the notes inside it
+    position: ById<u32>,
     reached: Vec<u32>,
     lowest: Vec<u32>,
     is_open: Vec<bool>,
@@ -437,16 +431,13 @@ struct Walk<'a> {
     ids: &'a [u32],
     notes: &'a NoteStore,
     batch: Vec<&'a NoteExpressions>,
-    position: &'a [u32],
+    position: &'a ById<u32>,
 }
 
 impl Walk<'_> {
     #[inline]
     fn position(&self, note_id: u32) -> Option<usize> {
-        match self.position.get(note_id as usize) {
-            Some(&p) if p > 0 => Some(p as usize - 1),
-            _ => None,
-        }
+        self.position.get(note_id).map(|&p| p as usize)
     }
 }
 
@@ -763,12 +754,9 @@ impl PersistentEvaluator {
         // Every note of the batch gets a blank record up front. From here on a
         // variable can read only what this batch has computed or what a clean
         // note holds, never the value a batch note had before.
-        if scratch.position.len() < notes.capacity() {
-            scratch.position.resize(notes.capacity(), 0);
-        }
         for (position, &id) in ids.iter().enumerate() {
             records.blank(id);
-            scratch.position[id as usize] = position as u32 + 1;
+            scratch.position.insert(id, position as u32);
         }
 
         let position = std::mem::take(&mut scratch.position);
@@ -783,7 +771,7 @@ impl PersistentEvaluator {
         }
         scratch.position = position;
         for &id in &ids {
-            scratch.position[id as usize] = 0;
+            scratch.position.remove(id);
         }
 
         *generation += 1;
@@ -889,7 +877,7 @@ impl PersistentEvaluator {
 
     #[wasm_bindgen(getter, js_name = cacheSize)]
     pub fn cache_size(&self) -> usize {
-        self.records.count
+        self.records.len()
     }
 
     #[wasm_bindgen(getter)]
@@ -1181,6 +1169,28 @@ mod tests {
             }
             other => panic!("not rational: {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_note_ids_beyond_65535() {
+        use crate::bytecode::build::load_ref_wide;
+        let top = 16_777_215u32;
+        let evaluator = evaluated(vec![
+            base_263(),
+            note(70_000, &[(Var::Frequency, then(&[load_base(Var::Frequency), constant(3, 2)], Op::Mul))]),
+            note(top, &[(Var::Frequency, then(&[load_ref_wide(70_000, Var::Frequency), constant(2, 1)], Op::Mul))]),
+            note(5, &[(Var::Frequency, load_ref_wide(top, Var::Frequency))]),
+        ]);
+        assert_eq!(text(&evaluator, 70_000, Var::Frequency), "(789/2)");
+        assert_eq!(text(&evaluator, top, Var::Frequency), "789");
+        assert_eq!(text(&evaluator, 5, Var::Frequency), "789");
+        assert!(evaluator.problems.is_empty());
+        // a cycle through wide references is found and named
+        let cyclic = evaluated(vec![
+            note(100_000, &[(Var::Frequency, load_ref_wide(200_000, Var::Frequency))]),
+            note(200_000, &[(Var::Frequency, load_ref_wide(100_000, Var::Frequency))]),
+        ]);
+        assert_eq!(cyclic.problems.cycles, vec![2, pack(100_000, Var::Frequency), pack(200_000, Var::Frequency)]);
     }
 
     #[test]

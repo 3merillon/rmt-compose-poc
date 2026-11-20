@@ -7,6 +7,8 @@
 /**
  * Base class for DSL errors
  */
+import { MAX_NOTE_ID } from '../binary-note.js';
+
 export class DSLError extends Error {
   /**
    * @param {string} message - Error message
@@ -144,7 +146,7 @@ export const ErrorMessages = {
    * @returns {string}
    */
   invalidNoteId(value) {
-    return `Invalid note ID '${value}'. Note IDs must be integers between 0 and 65535`;
+    return `Invalid note ID '${value}'. Note IDs must be integers between 0 and ${MAX_NOTE_ID}`;
   },
 
   /**

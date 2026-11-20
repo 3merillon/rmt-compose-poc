@@ -153,7 +153,7 @@ console.log('\nOne syntax: the converter');
     ["new Fraction('1/3')", /unexpected/],
     ["[1].f.mul(new Fraction(3, 2))", /unexpected/],
     ["new Fraction(1, 0)", /division by zero/],
-    ["module.getNoteById(70000).getVariable('frequency')", /out of range/],
+    ["module.getNoteById(16777216).getVariable('frequency')", /out of range/],
   ];
   for (const [src, msg] of refuses) {
     try {

@@ -131,8 +131,15 @@ export class DSLCompiler {
       this.expr.writeByte(varIndex);
       this.expr.referencesBase = true;
     } else {
-      this.expr.writeByte(OP.LOAD_REF);
-      this.expr.writeUint16(node.noteId);
+      // Two bytes of note id while they suffice, so every module whose ids
+      // fit compiles to the same bytecode as before LOAD_REF_WIDE existed
+      if (node.noteId > 0xFFFF) {
+        this.expr.writeByte(OP.LOAD_REF_WIDE);
+        this.expr.writeUint32(node.noteId);
+      } else {
+        this.expr.writeByte(OP.LOAD_REF);
+        this.expr.writeUint16(node.noteId);
+      }
       this.expr.writeByte(varIndex);
       this.expr.addDependency(node.noteId);
     }

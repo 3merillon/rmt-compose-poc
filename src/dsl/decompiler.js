@@ -61,9 +61,16 @@ export class DSLDecompiler {
           break;
         }
 
-        case OP.LOAD_REF: {
-          const noteId = this.readUint16(bytecode, pc);
-          pc += 2;
+        case OP.LOAD_REF:
+        case OP.LOAD_REF_WIDE: {
+          let noteId;
+          if (op === OP.LOAD_REF) {
+            noteId = this.readUint16(bytecode, pc);
+            pc += 2;
+          } else {
+            noteId = ((bytecode[pc] << 24) | (bytecode[pc + 1] << 16) | (bytecode[pc + 2] << 8) | bytecode[pc + 3]) >>> 0;
+            pc += 4;
+          }
           const varIdx = bytecode[pc++];
           const prop = this.varIndexToShortName(varIdx);
           this.push(`[${noteId}].${prop}`, Precedence.ATOMIC);

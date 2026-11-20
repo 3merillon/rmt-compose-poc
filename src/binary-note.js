@@ -5,12 +5,22 @@
  * that enables fast evaluation without runtime compilation via new Function().
  */
 
+/**
+ * The largest note id. A reference to a note up to 65535 is LOAD_REF (a
+ * 2-byte id); above that it is LOAD_REF_WIDE (4 bytes). The limit itself is
+ * the renderer's: picking draws each note's id in 24 bits of colour
+ * (src/renderer/webgl2/picking.js), and 2^24 - 1 is also the largest integer
+ * a float32 vertex attribute holds exactly.
+ */
+export const MAX_NOTE_ID = 0xFFFFFF;
+
 // Instruction opcodes (1 byte)
 export const OP = {
   // Load operations
   LOAD_CONST:     0x01,  // Push Fraction constant: [num_hi, num_lo, num_lo2, num_lo3, den_hi, den_lo, den_lo2, den_lo3]
   LOAD_REF:       0x02,  // Push note reference: [noteId_hi, noteId_lo, varIndex]
   LOAD_BASE:      0x03,  // Push baseNote variable: [varIndex]
+  LOAD_REF_WIDE:  0x05,  // Push note reference to a note id above 65535: [noteId (4 bytes, big-endian), varIndex]
   LOAD_CONST_BIG: 0x04,  // Push BigInt Fraction: [sign(1), num_len(2), num_bytes(n), den_len(2), den_bytes(n)]
 
   // Arithmetic operations
@@ -89,7 +99,7 @@ export class BinaryExpression {
     this.length = 0;
 
     // Explicit dependency list (note IDs this expression references)
-    this.dependencies = new Uint16Array(16);
+    this.dependencies = new Uint32Array(16);
     this.depCount = 0;
 
     // Original text expression (for JSON round-trip)
@@ -129,6 +139,17 @@ export class BinaryExpression {
   writeUint16(value) {
     this.ensureCapacity(2);
     this.bytecode[this.length++] = (value >> 8) & 0xFF;
+    this.bytecode[this.length++] = value & 0xFF;
+  }
+
+  /**
+   * Write a 32-bit unsigned integer (big-endian)
+   */
+  writeUint32(value) {
+    this.ensureCapacity(4);
+    this.bytecode[this.length++] = (value >>> 24) & 0xFF;
+    this.bytecode[this.length++] = (value >>> 16) & 0xFF;
+    this.bytecode[this.length++] = (value >>> 8) & 0xFF;
     this.bytecode[this.length++] = value & 0xFF;
   }
 
@@ -207,7 +228,7 @@ export class BinaryExpression {
 
     // Expand if needed
     if (this.depCount >= this.dependencies.length) {
-      const newDeps = new Uint16Array(this.dependencies.length * 2);
+      const newDeps = new Uint32Array(this.dependencies.length * 2);
       newDeps.set(this.dependencies);
       this.dependencies = newDeps;
     }
@@ -256,10 +277,17 @@ export class BinaryExpression {
           break;
         }
 
-        case OP.LOAD_REF: {
-          // [noteId_hi, noteId_lo, varIndex]
-          const noteId = (bytecode[pc] << 8) | bytecode[pc + 1];
-          pc += 2;
+        case OP.LOAD_REF:
+        case OP.LOAD_REF_WIDE: {
+          // [noteId (2 or 4 bytes), varIndex]
+          let noteId;
+          if (op === OP.LOAD_REF) {
+            noteId = (bytecode[pc] << 8) | bytecode[pc + 1];
+            pc += 2;
+          } else {
+            noteId = ((bytecode[pc] << 24) | (bytecode[pc + 1] << 16) | (bytecode[pc + 2] << 8) | bytecode[pc + 3]) >>> 0;
+            pc += 4;
+          }
           const varIdx = bytecode[pc++];
 
           if (!deps.has(noteId)) {
@@ -328,6 +356,13 @@ export class BinaryExpression {
           break;
         }
 
+        case OP.LOAD_REF_WIDE: {
+          const noteId = ((bytecode[pc] << 24) | (bytecode[pc + 1] << 16) | (bytecode[pc + 2] << 8) | bytecode[pc + 3]) >>> 0;
+          addRef((noteId << 3) | bytecode[pc + 4]);
+          pc += 5;
+          break;
+        }
+
         case OP.LOAD_BASE:
           addRef(bytecode[pc++]); // note 0
           break;
@@ -384,7 +419,7 @@ export class BinaryExpression {
     // at the default 16. Grow the copy's array when this expression tracks
     // more (17+ distinct note refs), or .set() throws RangeError.
     if (this.depCount > copy.dependencies.length) {
-      copy.dependencies = new Uint16Array(this.depCount);
+      copy.dependencies = new Uint32Array(this.depCount);
     }
     copy.dependencies.set(this.dependencies.subarray(0, this.depCount));
     copy.depCount = this.depCount;

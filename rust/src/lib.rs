@@ -10,6 +10,7 @@
 
 use wasm_bindgen::prelude::*;
 
+pub mod by_id;
 pub mod rational;
 pub mod exact;
 pub mod bytecode;

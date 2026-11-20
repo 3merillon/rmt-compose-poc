@@ -236,6 +236,16 @@ export class BinaryEvaluator {
   }
 
   /**
+   * Read a 32-bit unsigned integer from bytecode (big-endian)
+   */
+  readUint32(bytecode, offset) {
+    return ((bytecode[offset] << 24) |
+            (bytecode[offset + 1] << 16) |
+            (bytecode[offset + 2] << 8) |
+            bytecode[offset + 3]) >>> 0;
+  }
+
+  /**
    * Read a 32-bit signed integer from bytecode (big-endian)
    */
   readInt32(bytecode, offset) {
@@ -425,10 +435,17 @@ export class BinaryEvaluator {
           break;
         }
 
-        case OP.LOAD_REF: {
-          // Read note ID and variable index
-          const noteId = this.readUint16(bytecode, pc);
-          pc += 2;
+        case OP.LOAD_REF:
+        case OP.LOAD_REF_WIDE: {
+          // Read note ID (2 bytes, or 4 above 65535) and variable index
+          let noteId;
+          if (op === OP.LOAD_REF) {
+            noteId = this.readUint16(bytecode, pc);
+            pc += 2;
+          } else {
+            noteId = this.readUint32(bytecode, pc);
+            pc += 4;
+          }
           const varIdx = bytecode[pc++];
 
           // Look up in evaluation cache

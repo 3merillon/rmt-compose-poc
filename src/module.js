@@ -9,6 +9,7 @@ import { createEvaluator, createIncrementalEvaluator, isWasmBackedEvaluator, isE
 import { onWasmReady } from './wasm/index.js';
 import { compiler } from './expression-compiler.js';
 import { compare as compareExact } from './value/exact.js';
+import { MAX_NOTE_ID } from './binary-note.js';
 import { instrumentOf, playerOf, migrateInstrumentRule, INSTRUMENT_RULE } from './players.js';
 
 let memoizedModuleEndTime = null;
@@ -949,10 +950,10 @@ export class Module {
       const variables = {};
 
       // SECURITY: Validate note ID to prevent prototype pollution and invalid values.
-      // Cap at 65535: LOAD_REF encodes note ids as u16, so anything larger would
-      // silently truncate (e.g. [70000] binding to note 4464).
-      if (isNaN(noteId) || !Number.isInteger(noteId) || noteId < 0 || noteId > 65535) {
-        console.warn(`[RMT Security] Invalid note ID: ${noteData.id} (must be 0-65535), skipping`);
+      // Cap at MAX_NOTE_ID (src/binary-note.js), the largest id a note can have:
+      // a larger one is skipped, never truncated to another note.
+      if (isNaN(noteId) || !Number.isInteger(noteId) || noteId < 0 || noteId > MAX_NOTE_ID) {
+        console.warn(`[RMT Security] Invalid note ID: ${noteData.id} (must be 0-${MAX_NOTE_ID}), skipping`);
         continue;
       }
 

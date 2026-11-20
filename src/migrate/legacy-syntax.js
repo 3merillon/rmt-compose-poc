@@ -31,6 +31,7 @@ import { createFractionLiteral, createNoteReference, createBinaryOp, createUnary
 import { compile as compileAST } from '../dsl/compiler.js';
 import { compileDSL, decompileToDSL } from '../dsl/index.js';
 import { decimalStringToBigFraction } from '../utils/fraction-num.js';
+import { MAX_NOTE_ID } from '../binary-note.js';
 
 export class SyntaxMigrationError extends Error {
   constructor(message) {
@@ -164,7 +165,7 @@ function parseLegacy(src) {
       const idTok = eat('num');
       if (!/^\d+$/.test(idTok.v)) throw new SyntaxMigrationError(`note id "${idTok.v}" is not an integer`);
       const id = Number(idTok.v);
-      if (id > 65535) throw new SyntaxMigrationError(`note id ${id} out of range (max 65535)`);
+      if (id > MAX_NOTE_ID) throw new SyntaxMigrationError(`note id ${id} out of range (max ${MAX_NOTE_ID})`);
       eat(')');
       eat('.'); eat('id', 'getVariable'); eat('(');
       const v = variable();

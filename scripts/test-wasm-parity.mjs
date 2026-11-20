@@ -14,7 +14,8 @@
  *     (scripts/fixtures/old-time, the modules old-time-oracle.json was made
  *     from, legacy-syntax): a full evaluation, a commit in the middle, a
  *     BaseNote edit, a note removed.
- *  2. Fuzz: seeded random modules over the exact algebra (tempered powers,
+ *  2. Fuzz: seeded random modules, numbered from 1, across 65535 and just
+ *     under MAX_NOTE_ID, over the exact algebra (tempered powers,
  *     sums of radicals, roots of negatives, `~`, division by zero and by sums,
  *     big constants, inherited interpretation variables, cycles), each with an
  *     edit.
@@ -264,12 +265,16 @@ const CONSTANTS = [
 const EXPONENTS = ['2', '3', '1/2', '1/3', '7/12', '-1', '-1/2', '2/3', '0', '1/12', '5', '-2/3'];
 const REF_VARS = ['f', 't', 'd', 'a', 'attack', 'release'];
 
-function fuzzModule(random, count) {
+// Where a fuzz module numbers its notes: from 1, across 65535 (two-byte and
+// four-byte references side by side), and just under MAX_NOTE_ID
+const ID_OFFSETS = [0, 65530, 16777200];
+
+function fuzzModule(random, count, offset = 0) {
   const pick = (list) => list[Math.floor(random() * list.length)];
   const ref = () => {
     const id = Math.floor(random() * (count + 2)); // sometimes a note that does not exist
     const v = random() < 0.7 ? pick(['f', 't', 'd']) : pick(REF_VARS);
-    return id === 0 ? `base.${v}` : `[${id}].${v}`;
+    return id === 0 ? `base.${v}` : `[${offset + id}].${v}`;
   };
   const expr = (depth) => {
     const r = random();
@@ -285,7 +290,7 @@ function fuzzModule(random, count) {
   if (random() < 0.3) baseNote.release = pick(['1/5', 'base.attack * 2']);
   const notes = [];
   for (let id = 1; id <= count; id++) {
-    const note = { id };
+    const note = { id: offset + id };
     const kind = pick(['note', 'note', 'note', 'reference', 'silence', 'bar', 'marker', 'key']);
     const depth = 1 + Math.floor(random() * 3);
     if (kind === 'note' || kind === 'reference' || kind === 'key') note.frequency = expr(depth);
@@ -305,17 +310,18 @@ function fuzzModule(random, count) {
   const before = failures;
   for (let i = 0; i < FUZZ_MODULES; i++) {
     const count = 3 + Math.floor(random() * 10);
-    const json = fuzzModule(random, count);
+    const offset = ID_OFFSETS[i % ID_OFFSETS.length];
+    const json = fuzzModule(random, count, offset);
     const label = `fuzz #${i}`;
     try {
       const { js, wasm } = await pair(json);
       await evaluateAndCompare(label, js, wasm);
       // An edit: one note's frequency or start rewritten
-      const id = 1 + Math.floor(random() * count);
+      const id = offset + 1 + Math.floor(random() * count);
       const field = random() < 0.5 ? 'frequencyString' : 'startTimeString';
-      const replacement = `[${1 + Math.floor(random() * count)}].f * 3/2`;
+      const replacement = `[${offset + 1 + Math.floor(random() * count)}].f * 3/2`;
       if (js.getNoteById(id)?.variables[field]) {
-        await edit(`${label} edit [${id}]`, js, wasm, (m) => m.getNoteById(id).setVariable(field, field === 'frequencyString' ? replacement : `[${id === 1 ? 2 : 1}].t + 1`));
+        await edit(`${label} edit [${id}]`, js, wasm, (m) => m.getNoteById(id).setVariable(field, field === 'frequencyString' ? replacement : `[${id === offset + 1 ? offset + 2 : offset + 1}].t + 1`));
       }
     } catch (e) {
       fail(`${label}: ${e.message}`);
@@ -332,6 +338,7 @@ function fuzzModule(random, count) {
 const SUITES = [
   'scripts/test-variable-deps.mjs',
   'scripts/test-dirty-marking.mjs',
+  'scripts/test-note-ids.mjs',
   'scripts/test-relational-time.mjs',
   'scripts/test-exact-values.mjs',
   'scripts/test-exactness.mjs',

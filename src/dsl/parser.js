@@ -20,6 +20,7 @@
 import { TokenType, PropertyMap, RetiredTimeFunctions, RetiredTimeProperties, isPropertyName, getCanonicalPropertyName } from './constants.js';
 import { DSLParseError, ErrorMessages } from './errors.js';
 import { decimalStringToBigFraction } from '../utils/fraction-num.js';
+import { MAX_NOTE_ID } from '../binary-note.js';
 import {
   NodeType,
   createNumberLiteral,
@@ -279,9 +280,8 @@ export class DSLParser {
     const idToken = this.advance();
     const noteId = parseInt(idToken.value, 10);
 
-    // 65535 cap matches the u16 note-id field LOAD_REF writes — anything
-    // larger would silently truncate to a different note.
-    if (!Number.isInteger(noteId) || noteId < 0 || noteId > 65535) {
+    // MAX_NOTE_ID (src/binary-note.js), the largest id a note can have
+    if (!Number.isInteger(noteId) || noteId < 0 || noteId > MAX_NOTE_ID) {
       throw new DSLParseError(
         ErrorMessages.invalidNoteId(idToken.value),
         idToken

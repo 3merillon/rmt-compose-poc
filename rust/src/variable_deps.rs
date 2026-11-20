@@ -8,7 +8,8 @@
 //! A variable is addressed as one packed integer, `(noteId << 3) | varIndex`,
 //! as on the JavaScript side.
 
-use crate::bytecode::{read_u16, Op, Var, VAR_COUNT};
+use crate::by_id::ById;
+use crate::bytecode::{read_u16, read_u32, Op, Var, VAR_COUNT};
 use std::collections::HashSet;
 
 /// `(noteId << 3) | varIndex`
@@ -73,6 +74,17 @@ pub fn expression_refs(bytecode: &[u8]) -> Vec<VarRef> {
                     add(pack(note_id, var));
                 }
                 pc += 3;
+            }
+
+            Some(Op::LoadRefWide) => {
+                if pc + 5 > len {
+                    return refs;
+                }
+                let note_id = read_u32(bytecode, pc);
+                if let Some(var) = Var::from_byte(bytecode[pc + 4]) {
+                    add(pack(note_id, var));
+                }
+                pc += 5;
             }
 
             Some(Op::LoadBase) => {
@@ -149,56 +161,38 @@ impl NoteExpressions {
 /// Every registered note, by id
 #[derive(Default)]
 pub struct NoteStore {
-    notes: Vec<Option<NoteExpressions>>,
-    count: usize,
+    notes: ById<NoteExpressions>,
 }
 
 impl NoteStore {
     #[inline]
     pub fn get(&self, note_id: u32) -> Option<&NoteExpressions> {
-        self.notes.get(note_id as usize).and_then(|note| note.as_ref())
+        self.notes.get(note_id)
     }
 
     #[inline]
     pub fn contains(&self, note_id: u32) -> bool {
-        self.get(note_id).is_some()
+        self.notes.contains(note_id)
     }
 
     pub fn insert(&mut self, note: NoteExpressions) {
-        let at = note.id() as usize;
-        if at >= self.notes.len() {
-            self.notes.resize_with(at + 1, || None);
-        }
-        if self.notes[at].is_none() {
-            self.count += 1;
-        }
-        self.notes[at] = Some(note);
+        self.notes.insert(note.id(), note);
     }
 
     pub fn remove(&mut self, note_id: u32) {
-        if let Some(slot) = self.notes.get_mut(note_id as usize) {
-            if slot.take().is_some() {
-                self.count -= 1;
-            }
-        }
+        self.notes.remove(note_id);
     }
 
     pub fn clear(&mut self) {
         self.notes.clear();
-        self.count = 0;
     }
 
     pub fn len(&self) -> usize {
-        self.count
+        self.notes.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.count == 0
-    }
-
-    /// One past the largest id the store has room for
-    pub fn capacity(&self) -> usize {
-        self.notes.len()
+        self.notes.is_empty()
     }
 }
 
@@ -316,6 +310,15 @@ mod tests {
         let mut bytecode = vec![Op::LoadConstBig as u8, 0, 0, 2, 0x02, 0x02, 0, 1, 0x02];
         bytecode.extend(load_ref(7, Var::Duration));
         assert_eq!(expression_refs(&bytecode), vec![pack(7, Var::Duration)]);
+    }
+
+    #[test]
+    fn test_wide_references_above_65535() {
+        use crate::bytecode::build::load_ref_wide;
+        let bytecode = then(&[load_ref_wide(70_000, Var::Frequency), load_ref(3, Var::StartTime)], Op::Add);
+        assert_eq!(expression_refs(&bytecode), vec![pack(70_000, Var::Frequency), pack(3, Var::StartTime)]);
+        assert_eq!(note_of(pack(16_777_215, Var::Release)), 16_777_215);
+        assert!(expression_refs(&[Op::LoadRefWide as u8, 0, 1, 0x11]).is_empty());
     }
 
     #[test]

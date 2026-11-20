@@ -13,6 +13,7 @@ pub enum Op {
     LoadConst = 0x01,      // Push Fraction constant: [num_hi, num_lo, num_lo2, num_lo3, den_hi, den_lo, den_lo2, den_lo3]
     LoadRef = 0x02,        // Push note reference: [noteId_hi, noteId_lo, varIndex]
     LoadBase = 0x03,       // Push baseNote variable: [varIndex]
+    LoadRefWide = 0x05,    // Push note reference to a note id above 65535: [noteId (4 bytes, big-endian), varIndex]
     LoadConstBig = 0x04,   // Push BigInt Fraction: [sign(1), num_len(2), num_bytes(n), den_len(2), den_bytes(n)]
 
     // Arithmetic operations
@@ -41,6 +42,7 @@ impl Op {
             0x02 => Some(Op::LoadRef),
             0x03 => Some(Op::LoadBase),
             0x04 => Some(Op::LoadConstBig),
+            0x05 => Some(Op::LoadRefWide),
             0x10 => Some(Op::Add),
             0x11 => Some(Op::Sub),
             0x12 => Some(Op::Mul),
@@ -159,6 +161,11 @@ pub fn read_u16(bytecode: &[u8], offset: usize) -> u16 {
 
 /// Read a 32-bit signed integer from bytecode (big-endian)
 #[inline]
+pub fn read_u32(bytecode: &[u8], offset: usize) -> u32 {
+    u32::from_be_bytes([bytecode[offset], bytecode[offset + 1], bytecode[offset + 2], bytecode[offset + 3]])
+}
+
+#[inline]
 pub fn read_i32(bytecode: &[u8], offset: usize) -> i32 {
     ((bytecode[offset] as i32) << 24)
         | ((bytecode[offset + 1] as i32) << 16)
@@ -236,6 +243,14 @@ pub(crate) mod build {
     /// `[note].var`
     pub fn load_ref(note_id: u16, var: Var) -> Vec<u8> {
         vec![Op::LoadRef as u8, (note_id >> 8) as u8, note_id as u8, var as u8]
+    }
+
+    /// A reference to a note id above 65535, as the compiler writes it
+    pub fn load_ref_wide(note_id: u32, var: Var) -> Vec<u8> {
+        let mut bytecode = vec![Op::LoadRefWide as u8];
+        bytecode.extend(note_id.to_be_bytes());
+        bytecode.push(var as u8);
+        bytecode
     }
 
     /// `base.var`

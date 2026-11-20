@@ -7,6 +7,7 @@ import { pointerOf } from '../utils/draggable-widget.js';
 import { viewportHeight } from '../utils/viewport.js';
 import { history } from '../store/history.js';
 import { EXPRESSION_VARS } from '../note.js';
+import { MAX_NOTE_ID } from '../binary-note.js';
 
 // JSON keys of the old time model (tempo, beats per measure, measure length)
 const RETIRED_TIME_KEYS = ['tempo', 'beatsPerMeasure', 'measureLength'];
@@ -1551,9 +1552,9 @@ const menuAPI = (function() {
                 continue;
             }
             const noteId = parseInt(note.id, 10);
-            // 65535 matches the u16 note-id field in LOAD_REF — the same cap
-            // the JSON loader and both expression parsers enforce.
-            if (isNaN(noteId) || noteId < 0 || noteId > 65535) {
+            // MAX_NOTE_ID (src/binary-note.js): the same cap the JSON loader
+            // and both expression parsers enforce.
+            if (isNaN(noteId) || noteId < 0 || noteId > MAX_NOTE_ID) {
                 errors.push(`notes[${i}]: invalid id ${note.id}`);
                 continue;
             }
