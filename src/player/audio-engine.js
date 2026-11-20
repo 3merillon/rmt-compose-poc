@@ -19,9 +19,10 @@ const SEAM_EPS = 1e-6;
 // A voice whose envelope could not be computed is stopped this long after its
 // note's end (the length every voice had before the release followed the note-off).
 const FALLBACK_TAIL = 0.15;
-// At most this many voices sound at once. Above it the quietest voice already
-// past its note-off is faded out over STEAL_FADE; a voice before its note-off is
-// never stolen (design/phase-i-instruments.md §9).
+// At most this many voices sound at once (the default of Settings → Audio → Most
+// voices at once, audio.maxVoices, which the graph holds as maxVoices). Above it
+// the quietest voice already past its note-off is faded out over STEAL_FADE; a
+// voice before its note-off is never stolen (design/phase-i-instruments.md §9).
 export const MAX_VOICES = 256;
 const STEAL_FADE = 0.015;
 const EPS_GAIN = 0.0001; // the envelope's floor (instrument-manager.js EPS)
@@ -750,10 +751,11 @@ export class AudioEngine {
    * fade starts from the level it has there. A voice before its note-off is left.
    */
   _makeRoomAt(at) {
+    const limit = (this.graph && this.graph.maxVoices > 0) ? this.graph.maxVoices : MAX_VOICES;
     let sounding = 0;
     // A voice already being stolen no longer counts: it is fading out.
     for (const e of this.activeOscillators) if (!e.stolen && e.startTime <= at && e.endTime > at) sounding++;
-    while (sounding >= MAX_VOICES) {
+    while (sounding >= limit) {
       let victim = null;
       for (const e of this.activeOscillators) {
         if (!(e.offTime <= at && e.endTime > at + STEAL_FADE) || !e.levelAt || e.stolen) continue;

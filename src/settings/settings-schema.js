@@ -63,6 +63,9 @@ export function scaleStep(lo, hi) {
  * Factory for a fresh defaults object (never share a mutable reference).
  * @returns {object}
  */
+/** The voice limits Settings → Audio offers (audio.maxVoices). */
+export const VOICE_LIMITS = [128, 256, 512, 1024, 2048, 4096];
+
 export function defaultSettings() {
   return {
     version: SETTINGS_VERSION,
@@ -102,6 +105,9 @@ export function defaultSettings() {
       // intervals. The module itself is never touched. Off is the app's
       // behavior before the setting existed.
       tempered: { enabled: false },
+      // At most this many voices sound at once; above it the quietest voice
+      // already ringing after its note's end fades out (audio-engine.js).
+      maxVoices: 256,
       reverb: {
         // On by default (user decision 2026-07-12): a touch of room ambience is
         // the nicer out-of-box sound. Stereo stays off; limiter stays on.
@@ -226,6 +232,7 @@ export function validateSettings(raw, prev) {
   d.audio.masterVolume = clampNum(au.masterVolume, 0, 1, d.audio.masterVolume);
   d.audio.defaultInstrument = typeof au.defaultInstrument === 'string' ? au.defaultInstrument : d.audio.defaultInstrument;
   d.audio.tempered.enabled = asBool(tp.enabled, d.audio.tempered.enabled);
+  d.audio.maxVoices = VOICE_LIMITS.includes(Number(au.maxVoices)) ? Number(au.maxVoices) : d.audio.maxVoices;
   d.audio.reverb.enabled = asBool(rv.enabled, d.audio.reverb.enabled);
   d.audio.reverb.roomSize = clampNum(rv.roomSize, 0, 1, d.audio.reverb.roomSize);
   d.audio.reverb.decaySec = clampNum(rv.decaySec, 0.1, 12, d.audio.reverb.decaySec);

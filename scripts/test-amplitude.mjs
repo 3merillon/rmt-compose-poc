@@ -201,5 +201,15 @@ console.log('\nEnvelope display: Settings > Appearance > Envelope inside notes, 
     'I6 it sits beside appearance.note (which a theme preset replaces), not inside it');
 }
 
+// --- J: the voice limit -----------------------------------------------------------
+console.log('\nVoice limit: Settings > Audio > Most voices at once\n');
+{
+  const { defaultSettings, validateSettings, VOICE_LIMITS } = await import('../src/settings/settings-schema.js');
+  const v = (x) => validateSettings({ audio: { maxVoices: x } }).audio.maxVoices;
+  check(defaultSettings().audio.maxVoices === 256, 'J1 256 by default');
+  check(VOICE_LIMITS.every((n) => v(n) === n) && v('1024') === 1024, 'J2 every offered limit survives validation (a number or its string)');
+  check(v(300) === 256 && v(-1) === 256 && v('lots') === 256, 'J3 anything else falls back to 256');
+}
+
 console.log(`\n${failures ? `${failures} failure(s).` : 'All amplitude checks passed.'}`);
 process.exit(failures ? 1 : 0);

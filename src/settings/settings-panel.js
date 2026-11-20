@@ -23,7 +23,7 @@
  */
 
 import { settingsStore } from './settings-store.js';
-import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep, TEMPO_HARD_MIN, TEMPO_HARD_MAX } from './settings-schema.js';
+import { SCALE_HARD_MIN, SCALE_HARD_MAX, scaleStep, TEMPO_HARD_MIN, TEMPO_HARD_MAX, VOICE_LIMITS } from './settings-schema.js';
 import { THEME_PRESETS, getPreset } from '../theme/presets.js';
 import { eventBus } from '../utils/event-bus.js';
 import { showConfirmation } from '../utils/confirm-dialog.js';
@@ -420,6 +420,16 @@ function buildAudioTab(container) {
   }));
 
   container.appendChild(row('Default instrument', select('audio.defaultInstrument', INSTRUMENTS)));
+
+  {
+    // Stored as a number, so not the generic select() (which stores the option's string).
+    const sel = el('select', 'rmt-set-select');
+    for (const n of VOICE_LIMITS) { const o = el('option', null, String(n)); o.value = String(n); sel.appendChild(o); }
+    sel.value = String(settingsStore.get('audio.maxVoices'));
+    sel.addEventListener('change', () => settingsStore.set('audio.maxVoices', Number(sel.value)));
+    addSync(sel, () => { sel.value = String(settingsStore.get('audio.maxVoices')); });
+    container.appendChild(row('Most voices at once', sel, 'Above it, the quietest note already ringing after its end fades out first; a note is never cut before its end. Each voice costs processor time: one core plays about 2,000 sine, organ or harmonium voices, 1,700 piano or violin, 600–700 square, sawtooth or fm-epiano (measured on one computer).'));
+  }
 
   container.appendChild(el('div', 'rmt-set-subhead', 'Pure / Tempered'));
   container.appendChild(row('Play tempered (12-TET)', toggle('audio.tempered.enabled'), 'Plays each note on the nearest key of a keyboard tuned from the BaseNote, to compare with the pure intervals. The module is not changed.'));

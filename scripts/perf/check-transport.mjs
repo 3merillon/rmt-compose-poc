@@ -115,7 +115,7 @@ await click('#stopButton');
 // 8. The voice limit: 300 overlapping piano notes in their release.
 const lim = await page.evaluate(async () => {
   const ae = window.__ae;
-  const { MAX_VOICES } = await import('/src/player/audio-engine.js');
+  const MAX_VOICES = ae.graph.maxVoices;
   ae.voiceStats.stolen = 0;
   const now = ae.audioContext.currentTime + 0.2;
   for (let i = 0; i < 300; i++) {

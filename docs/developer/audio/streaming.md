@@ -11,7 +11,7 @@ ten-second one.
 
 ::: warning There is no `StreamingScheduler` class
 Do not go looking for one. The scheduler is a **closure** — `const pump = () => {…}` — over a mutable
-state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:336-442`). There is no
+state object, defined inside `AudioEngine.play()` (`src/player/audio-engine.js:337-443`). There is no
 scheduler file, no scheduler object, and no `scheduler.debug` flag.
 :::
 
@@ -129,14 +129,14 @@ and quits (and for a module shorter than the lookahead, it quits immediately).
 
 | Constant | Value | Scope |
 |---|---|---|
-| `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:344`) |
-| `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:345`) — not `SCHEDULE_INTERVAL` |
+| `LOOKAHEAD` | **2.0 s** | local inside `play()` (`:345`) |
+| `BATCH_INTERVAL` | **100 ms** | local inside `play()` (`:346`) — not `SCHEDULE_INTERVAL` |
 | `FALLBACK_TAIL` | **0.15 s** | module-level (`:21`); the voice's tail past the note only if its envelope cannot be computed |
 | `MIN_LOOP_PERIOD` | **0.05 s** | module-level (`:12`) |
 | `MAX_CYCLES_PER_BATCH` | **64** | module-level (`:16`) |
 | `SEAM_EPS` | **1e-6** | module-level (`:18`) |
 | `DECLICK_FADE` | **0.02 s** | module-level (`:8`) |
-| `RATE_CHANGE_LEAD` | **0.05 s** | module-level (`:30`): how far ahead of the clock a tempo change takes effect |
+| `RATE_CHANGE_LEAD` | **0.05 s** | module-level (`:31`): how far ahead of the clock a tempo change takes effect |
 
 There is no `MIN_NOTE_DURATION`. Short notes are handled by the envelope's attack/release floors and
 its 1 ms duration floor — see
@@ -241,7 +241,7 @@ rate from a clock instant on. `scoreAt(c)` and `clockAt(s)` are the only things 
 playhead ask of it, so a tempo curve (an accelerando drawn over time) can later replace a segment's
 linear law by its integral without touching either.
 
-`setRate(rate)` (`src/player/audio-engine.js:557`) does four things:
+`setRate(rate)` (`src/player/audio-engine.js:558`) does four things:
 
 1. **Splits the map** `RATE_CHANGE_LEAD` (50 ms) ahead of the clock (`TimeMap.setRate`,
    `time-map.js:61`). Everything before that instant keeps the times it had, so the playhead does not
@@ -258,7 +258,7 @@ pair of notes one score interval apart; the clock gap across it is the same as i
 `getLoopEndTime()` recomputes the final seam's clock time from the map, so a tempo change after a
 disarm moves it too, and the playhead stops where the sound does.
 
-**The playhead** follows `scoreElapsed()` (`:540`), the score time through the same map, plus the
+**The playhead** follows `scoreElapsed()` (`:541`), the score time through the same map, plus the
 time the playback started from. It no longer derives its position from `ctx.currentTime` directly.
 
 **Commit tempo** (`commitLiveTempo()`, `src/player.js:3814`) writes the rate into the piece. The live

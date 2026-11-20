@@ -80,6 +80,8 @@ export class AudioGraph {
 
     // --- tempered playback (read by the engine as each voice is scheduled) ---
     this.temperedEnabled = !!(s.tempered && s.tempered.enabled);
+    // The voice limit the engine keeps (Settings > Audio > Most voices at once).
+    this.maxVoices = Number(s.maxVoices) > 0 ? Number(s.maxVoices) : 256;
 
     // --- per-instrument buses (created lazily) -----------------------------
     /** @type {Map<string,{bus:GainNode,send:GainNode}>} */
@@ -195,6 +197,8 @@ export class AudioGraph {
 
     // Tempered playback (likewise: newly-scheduled voices).
     this.temperedEnabled = !!(s.tempered && s.tempered.enabled);
+    // The voice limit the engine keeps (Settings > Audio > Most voices at once).
+    this.maxVoices = Number(s.maxVoices) > 0 ? Number(s.maxVoices) : 256;
 
     // Reverb enable + wet + pre-delay (all live params, no IR regen).
     this._reverbEnabled = !!rv.enabled;
