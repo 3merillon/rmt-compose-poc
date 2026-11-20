@@ -164,7 +164,7 @@ The drag path uses the narrower startTime traversals directly: `getAllStartTimeO
 | `getChildrenTreeByAllProperties(id)` | `{edgesByProperty: {frequency: [], startTime: [], duration: []}, maxDepth}` — all three in one traversal. **Not** the same shape as above: the edges are bucketed by originating property, not flat | `:1607` |
 | `getMeasureChain(measureId, isMeasure, getStartTime, isChainLink?)` | `[{id, startSec}]` — the linear measure chain, earliest to latest, O(chain length) | `:1917` |
 
-`getMeasureChain()` is live: `src/player.js:5317` and `src/renderer/webgl2/workspace.js:2478` both use it.
+`getMeasureChain()` is live: `src/player.js:5333` and `src/renderer/webgl2/workspace.js:2478` both use it.
 
 ### Structural
 

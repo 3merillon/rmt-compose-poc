@@ -19,6 +19,15 @@ What comes out of the speakers is more than the notes. Every voice runs through 
 
 So a fresh module already has a little room around it. If you want the raw, dry sound, turn reverb off.
 
+## When playback ends
+
+A note's end is a note-off: its sound rings briefly after it, as a key lifted or a bow leaving the string
+(see [Instruments](/user-guide/playback/instruments)). When the playhead reaches the end of the module,
+the last notes therefore ring out to silence instead of being cut. **Stop**, **Pause** and a new
+**Play** still silence everything at once. When a loop is switched off, the last pass ends the same
+way. At most 256 voices sound at once; beyond that, the quietest note already ringing after its end
+fades out first.
+
 ## Where the controls are
 
 Click the **gear** in the [top bar](/user-guide/interface/top-bar) and choose the **Audio** tab. The panel is not modal — leave it open and keep composing; every change applies immediately, during playback.

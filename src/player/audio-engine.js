@@ -19,6 +19,12 @@ const SEAM_EPS = 1e-6;
 // A voice whose envelope could not be computed is stopped this long after its
 // note's end (the length every voice had before the release followed the note-off).
 const FALLBACK_TAIL = 0.15;
+// At most this many voices sound at once. Above it the quietest voice already
+// past its note-off is faded out over STEAL_FADE; a voice before its note-off is
+// never stolen (design/phase-i-instruments.md §9).
+export const MAX_VOICES = 256;
+const STEAL_FADE = 0.015;
+const EPS_GAIN = 0.0001; // the envelope's floor (instrument-manager.js EPS)
 // A live tempo change takes effect this far ahead of the audio clock, so no voice
 // is ever rescheduled into the past (the pump runs on a 100 ms timer).
 const RATE_CHANGE_LEAD = 0.05; // seconds
@@ -59,6 +65,8 @@ export class AudioEngine {
     // Track currently scheduled/playing voices for pause/stop.
     /** @type {Set<{voice:any,gainNode:GainNode,panner:StereoPannerNode|null}>} */
     this.activeOscillators = new Set();
+    // Voices in flight at most, and voices stolen to stay under MAX_VOICES.
+    this.voiceStats = { peak: 0, stolen: 0 };
 
     // Streaming playback state
     this._streamingState = null;
@@ -661,12 +669,15 @@ export class AudioEngine {
     // lives for `length` seconds, the note and its tail.
     const shape = { attack: noteData.attack ?? null, release: noteData.release ?? null };
     let length = duration + FALLBACK_TAIL;
+    let times = null;
     try {
       this.instrumentManager.applyEnvelope(noteData.instrument, gainNode, start, duration, peak, shape, frequency);
       length = this.instrumentManager.voiceLength(noteData.instrument, duration, shape, frequency);
+      times = this.instrumentManager.envelopeTimesFor(noteData.instrument, duration, shape, frequency);
     } catch (e) {
       console.warn('applyEnvelope failed', e);
     }
+    this._makeRoomAt(start);
 
     // Pitch-driven stereo pan (only when enabled and supported).
     let panner = null;
@@ -699,8 +710,19 @@ export class AudioEngine {
     // holds voices from two passes at once (the outgoing pass's release tails overlap
     // the incoming pass's attacks), so "which pass is this voice in" can only be
     // answered from its own scheduled time.
-    const entry = { voice, gainNode, panner, startTime: start, scoreStart: timing ? timing.scoreStart : null };
+    const entry = {
+      voice, gainNode, panner, startTime: start, scoreStart: timing ? timing.scoreStart : null, noteId: noteData.id,
+      // The note-off and the end of the tail (absolute ctx time), and the gain at a
+      // time in the release: what _makeRoomAt needs to steal it without a step.
+      offTime: start + (times ? times.off : duration), endTime: start + length,
+      levelAt: times ? (x) => {
+        const p = Math.max(EPS_GAIN, peak), atOff = Math.max(EPS_GAIN, p * times.levelAtEnd);
+        const k = Math.min(1, Math.max(0, (x - start - times.off) / times.release));
+        return atOff * Math.pow(EPS_GAIN / atOff, k);
+      } : null,
+    };
     this.activeOscillators.add(entry);
+    if (this.activeOscillators.size > this.voiceStats.peak) this.voiceStats.peak = this.activeOscillators.size;
 
     const cleanup = () => {
       if (!this.activeOscillators.has(entry)) return;
@@ -717,6 +739,48 @@ export class AudioEngine {
     } catch {}
     const ms = Math.max(0, (start + length - ctx.currentTime) * 1000) + 60;
     setTimeout(() => { if (!ended) cleanup(); }, ms);
+  }
+
+  /**
+   * Keep the voices sounding at `at` under MAX_VOICES: while there are as many as
+   * that, fade out the one whose note-off is the longest past (the furthest into
+   * its release, so the quietest), from `at` over STEAL_FADE. Its gain follows its
+   * own release up to `at` (the exponential is rebuilt through that point), so the
+   * fade starts from the level it has there. A voice before its note-off is left.
+   */
+  _makeRoomAt(at) {
+    let sounding = 0;
+    // A voice already being stolen no longer counts: it is fading out.
+    for (const e of this.activeOscillators) if (!e.stolen && e.startTime <= at && e.endTime > at) sounding++;
+    while (sounding >= MAX_VOICES) {
+      let victim = null;
+      for (const e of this.activeOscillators) {
+        if (!(e.offTime <= at && e.endTime > at + STEAL_FADE) || !e.levelAt || e.stolen) continue;
+        if (!victim || e.offTime < victim.offTime) victim = e;
+      }
+      if (!victim) return;
+      victim.stolen = true;
+      try {
+        const g = victim.gainNode.gain;
+        g.cancelScheduledValues(at);
+        g.exponentialRampToValueAtTime(victim.levelAt(at), at);
+        g.linearRampToValueAtTime(0, at + STEAL_FADE);
+        victim.voice.stop(at + STEAL_FADE + 0.005);
+        victim.endTime = at + STEAL_FADE + 0.005;
+      } catch {}
+      this.voiceStats.stolen++;
+      sounding--;
+    }
+  }
+
+  /**
+   * The playback reached its end (the module's end, or the final seam of a loop
+   * that was switched off): stop scheduling, but let the voices already sounding
+   * ring out their releases. Each stops itself at the end of its tail. A new
+   * play(), stopAll() or pauseFade() still cuts them.
+   */
+  finish() {
+    this._stopStreaming();
   }
 
   /**

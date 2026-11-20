@@ -326,7 +326,7 @@ notes. See [Picking](/developer/rendering/picking).
 - Snapshots are stored as **minified JSON strings**, not parsed object graphs (~3–5× less retained
   heap). Each restore `JSON.parse`s fresh, giving the same isolation the old deep-clone did.
 - The old 2–3× per-action serialize was deduped: `captureSnapshot` serializes **once** and shares one
-  `snapshotStr` between the history capture and the localStorage autosave (`player.js:4857-4858`).
+  `snapshotStr` between the history capture and the localStorage autosave (`player.js:4873-4874`).
 - Two caps, both in `_enforceCaps()` (`history.js:35-43`): a count cap of **50** entries and a byte
   cap of **12 MB**. The byte cap drops oldest but always keeps **≥ 2** entries, so undo survives even
   one enormous snapshot.

@@ -2939,14 +2939,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                         // The mode was switched off mid-pass; this is that pass's end.
                         // Park at the module end and stop, exactly like a normal finish.
                         playheadTime = moduleEndTime;
-                        stop(false);
+                        stop(false, true);
                         return;
                     }
                     playheadTime = elapsed <= 0 ? 0 : elapsed % loopPeriod;
                 } else {
                     playheadTime = Math.min(elapsed, moduleEndTime);
                     if (playheadTime >= moduleEndTime) {
-                        stop(false);
+                        // The end: the last notes' releases ring out (Phase I).
+                        stop(false, true);
                         return;
                     }
                 }
@@ -3520,6 +3521,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     function play(fromTime = null) {
         if (isPlaying) {
             stop(false);
+        } else {
+            // Tails still ringing from the playback that reached its end: a new
+            // play cuts them (with the declick fade), as Stop does.
+            try { audioEngine.stopAll(); } catch {}
         }
         if (fromTime === null) {
             fromTime = playheadTime;
@@ -3613,7 +3618,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         updatePlayIcon();
     }
 
-    function stop(resetPlayhead = true) {
+    /**
+     * @param {boolean} [resetPlayhead] false for a seek or play()'s own restart
+     * @param {boolean} [ringOut] the playback reached its end: stop scheduling but
+     *   let the sounding notes' releases ring out (a note's end is a note-off)
+     */
+    function stop(resetPlayhead = true, ringOut = false) {
         // Above the early-out below: a real stop must disarm the mode even when the
         // transport is already parked at 0, or the Stop button stops being an escape
         // hatch out of loop mode. resetPlayhead === false means a seek or play()'s own
@@ -3626,6 +3636,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         loopEndAudioTime = null;
 
         if (!isPlaying && !isPaused && playheadTime === 0) {
+            // Nothing is playing, but tails may still ring: Stop cuts them.
+            try { audioEngine.stopAll(); } catch {}
             updatePlayIcon();
             return;
         }
@@ -3641,8 +3653,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
         updatePlayIcon();
 
-        try { audioEngine.stopAll(); } catch {}
-        cleanupAudio();
+        if (ringOut) {
+            try { audioEngine.finish(); } catch {}
+        } else {
+            try { audioEngine.stopAll(); } catch {}
+            cleanupAudio();
+        }
 
         updatePlayhead();
     }

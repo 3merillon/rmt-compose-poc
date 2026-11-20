@@ -322,6 +322,13 @@ export class InstrumentManager {
         instrument.applyEnvelope(gainNode, startTime, duration, initialVolume, shape, frequency);
     }
 
+    /** The envelope times (envelopeTimes) a note of this instrument sounds with. */
+    envelopeTimesFor(instrumentName, duration, shape = null, frequency = null) {
+        const instrument = this.getInstrument(instrumentName);
+        const env = instrument && instrument.getEnvelopeSettings ? instrument.getEnvelopeSettings(duration, frequency) : {};
+        return envelopeTimes(env, duration, shape);
+    }
+
     /**
      * Seconds from a note's start until its voice is silent and may be stopped:
      * its length, its release after the note-off, and a margin.
