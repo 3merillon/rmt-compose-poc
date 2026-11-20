@@ -17,7 +17,7 @@ the owner has heard it.
 | D3 | Release shares above 1 (a tail longer than the note) | Allow up to 4, like amplitude. Today the clamp is [0, 1]. §2.2 |
 | D4 | Tails at the module's end | They ring out. Reaching the end parks the playhead and stops scheduling but does not cut sound; Stop, Pause and a new Play still cut, as today. §2.3 |
 | D5 | Envelopes in seconds where the instrument is physical | Yes: the values in §3. Ratios only where you write them yourself (the per-note shares). |
-| D6 | Who plays a note (the player rule) | Line first: own instrument → line predecessor (`[p].t + [p].d`, rests allowed) → copied line → today's rule. §4 |
+| D6 | Who plays a note (the player rule) | Inheritance by start time (revised 20 November after your question): own instrument → line predecessor (`[p].t + [p].d`, through rests and silences) → copied line → the note the start is written from → the BaseNote. Frequency no longer decides. §4 |
 | D7 | Does time adjacency alone (no relation) make a line? | No. §4.3 |
 | D8 | Group INSTRUMENT row | Two buttons, "Each note its own player" and "One player". §4.5 |
 | D9 | Line playing per instrument | Violin slurred within a line; piano struck note by note; sustained synths join by overlap. §5 |
@@ -172,12 +172,24 @@ theme inherits from the BaseNote, and setting the instrument of its first note c
 A **player** is a line: notes joined by the relation "starts where the previous one ends". A note's instrument:
 
 1. its own `instrument`, if it sets one: it starts a new player, and the line goes on from it with that instrument;
-2. else, if its start is written from the end of a sounding note p (`[p].t + [p].d`, or that plus a rest,
-   `[p].t + [p].d + base.d * k`): p's player and instrument;
+2. else, if its start is written from the end of a note or a silence p (`[p].t + [p].d`, or that plus a rest,
+   `[p].t + [p].d + base.d * k`): p's player and instrument. A silence carries the player's instrument through it, so a
+   player can have a silence in its score;
 3. else, if it is a copy of a note k of a line (start `[k].t + X`, frequency `r * [k].f`) and the copy of k's predecessor
    exists (written from it with the same `X`): that copy's player. A copy of a line is a line: a canon voice, a voice in
    parallel;
-4. else it starts a player, and takes its instrument as today: the frequency parent's, then the BaseNote's, then the default.
+4. else it starts a player, and takes the instrument of the note its start time is written from (`[k].t + …`; a
+   measure bar does not count), else the BaseNote's, else the default.
+
+**Revised after the owner's question (20 November): "shouldn't it be inheritance that chooses the instrument? As in a
+player can have a silence in his score? ... unless they inherit from start time".** The first draft fell back on
+today's rule in step 4 (the instrument of the note the frequency reads). Time says who plays; pitch does not: a bass
+note tuned from the melody is still the bass, and a voice entering a fifth above another is not that other voice. So the
+instrument is now inherited along the start time everywhere, and the frequency plays no part. Measured on the library
+(all modules but the 65,535-note stress file, 35,071 sounding notes): no note changes instrument under this rule either,
+and the canon keeps its three players. The trade: a voice whose entry is written from another voice's note (`[k].t + …`
+without being its copy) takes that voice's instrument until it is given its own. In the canon that is the second bass,
+whose first note is written from note 10.
 
 Rests are in because a phrase with a breath is one player: the canon's theme has two rests and its first bass two.
 Copies are in because of how you wrote the canon: the second bass is the first one, note by note, four time units later
@@ -189,8 +201,8 @@ and a fifth higher (`[k].t + base.d * 4`, `(3/2) * [k].f`), so editing the first
   (22 follows, 2 rests); the first bass, 70 notes from note 10 (67 follows, 2 rests); the second bass, 58 notes from
   note 24 (57 copies). Setting note 9's instrument changes the whole theme; note 10's, the first bass; note 24's, the
   second. Without rule 3 the second bass would be 58 one-note players; without rests the theme would be three players.
-- One correction to the brief: with no instrument set anywhere, the second bass's first note (24) reads `[10].f`, so by
-  rule 4 it takes the first bass's instrument. Two players, one instrument, until you set note 24.
+- One correction to the brief: with no instrument set anywhere, the second bass's first note (24) is written from
+  note 10 (`[10].t + base.d * 4`), so by rule 4 it takes the first bass's instrument. Two players, one instrument, until you set note 24.
 - Melodies: one player each (amazing-grace 32, bach-minuet 16, frere-jacques 32, greensleeves 19 through its rest,
   ode-to-joy 15, scarborough-fair 15, twinkle 14). Scale systems BP-13, Mixed-Base, TET-12/19/31: one player each.
   Chords, progressions, intervals, tesla and the perf modules: one player per note (nothing in them is written from
