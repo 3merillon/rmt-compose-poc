@@ -457,7 +457,7 @@ fn evaluate_variable(
     let reader = pack(note_id, var);
 
     log.clear();
-    let outcome = interpret(stack, &expression.bytecode, &Source { notes: walk.notes, records }, log);
+    let outcome = interpret(stack, expression.bytecode, &Source { notes: walk.notes, records }, log);
     problems.divisions_by_zero += log.divisions_by_zero;
     match outcome {
         Ok(value) => {
@@ -705,9 +705,19 @@ impl PersistentEvaluator {
         let mut parsed: Vec<NoteExpressions> = Vec::new();
         let mut at = 0;
         while at < packed.len() {
-            let mut note = NoteExpressions::new(read_u32(at)?);
+            let id = read_u32(at)?;
             let expression_count = *packed.get(at + 4).ok_or_else(truncated)?;
             at += 5;
+
+            // The note's bytecode, all expressions together, sized before it is copied
+            let mut total = 0;
+            let mut scan = at;
+            for _ in 0..expression_count {
+                let length = read_u32(scan + 1)? as usize;
+                total += length;
+                scan += 5 + length;
+            }
+            let mut note = NoteExpressions::with_capacity(id, total, expression_count as usize * 2);
 
             for _ in 0..expression_count {
                 let var_index = *packed.get(at).ok_or_else(truncated)?;

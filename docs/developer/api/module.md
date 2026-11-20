@@ -563,7 +563,7 @@ an idle callback.
 
 ::: info WASM is the default
 In a browser the hot-swap is armed unless the URL has `?evaluator=js`
-(`isEvaluatorHotSwapEnabled()`, `src/wasm/evaluator-adapter.js:114-116`). A `Module` usually exists
+(`isEvaluatorHotSwapEnabled()`, `src/wasm/evaluator-adapter.js:122-124`). A `Module` usually exists
 before the core is ready, so it starts on the JS evaluator and swaps to WASM when the core loads.
 If the core fails to load, the JS evaluator stays. `WASM_MATCHES_VARIABLE_LAYOUT`
 (`src/wasm/evaluator-adapter.js:46`) is `true`; set to `false`, it turns the WASM evaluator off

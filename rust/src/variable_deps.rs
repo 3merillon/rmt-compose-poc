@@ -106,22 +106,36 @@ pub fn expression_refs(bytecode: &[u8]) -> Vec<VarRef> {
 }
 
 /// One variable's compiled expression and what it reads
-#[derive(Clone)]
-pub struct Expression {
-    pub bytecode: Box<[u8]>,
-    pub refs: Box<[VarRef]>,
+#[derive(Clone, Copy)]
+pub struct Expression<'a> {
+    pub bytecode: &'a [u8],
+    pub refs: &'a [VarRef],
 }
 
-/// The expressions of one note, one per variable it defines
-#[derive(Clone)]
+/// Where one variable's expression sits in its note's two buffers
+#[derive(Clone, Copy, Default)]
+struct Span {
+    bytes: (u32, u32),
+    refs: (u32, u32),
+}
+
+/// The expressions of one note, one per variable it defines.
+///
+/// A note's bytecode, and what each expression reads, live in two buffers,
+/// not one allocation per expression: a module of 300,000 notes is then
+/// 600,000 allocations instead of 1.8 million, and WebAssembly memory grows
+/// in fewer, larger steps.
+#[derive(Clone, Default)]
 pub struct NoteExpressions {
     id: u32,
-    expressions: [Option<Expression>; VAR_COUNT],
+    bytes: Vec<u8>,
+    refs: Vec<VarRef>,
+    spans: [Option<Span>; VAR_COUNT],
 }
 
 impl NoteExpressions {
     pub fn new(id: u32) -> Self {
-        NoteExpressions { id, expressions: Default::default() }
+        NoteExpressions { id, ..Default::default() }
     }
 
     pub fn id(&self) -> u32 {
@@ -130,33 +144,63 @@ impl NoteExpressions {
 
     /// Set one variable's expression; empty bytecode means none
     pub fn set(&mut self, var: Var, bytecode: &[u8]) {
-        self.expressions[var.index()] = if bytecode.is_empty() {
-            None
-        } else {
-            Some(Expression { bytecode: bytecode.into(), refs: expression_refs(bytecode).into() })
-        };
+        if self.spans[var.index()].is_some() {
+            // Replacing an expression (the unit tests do): rebuild the buffers without it
+            let mut rebuilt = NoteExpressions::new(self.id);
+            for other in VARIABLES_IN_ORDER {
+                if other != var {
+                    if let Some(expression) = self.expression(other) {
+                        rebuilt.append(other, expression.bytecode);
+                    }
+                }
+            }
+            *self = rebuilt;
+        }
+        if !bytecode.is_empty() {
+            self.append(var, bytecode);
+        }
+    }
+
+    fn append(&mut self, var: Var, bytecode: &[u8]) {
+        let bytes = (self.bytes.len() as u32, (self.bytes.len() + bytecode.len()) as u32);
+        self.bytes.extend_from_slice(bytecode);
+        let refs_start = self.refs.len() as u32;
+        self.refs.extend(expression_refs(bytecode));
+        self.spans[var.index()] = Some(Span { bytes, refs: (refs_start, self.refs.len() as u32) });
+    }
+
+    /// A note whose buffers will hold this much
+    pub fn with_capacity(id: u32, bytes: usize, refs: usize) -> Self {
+        NoteExpressions { id, bytes: Vec::with_capacity(bytes), refs: Vec::with_capacity(refs), ..Default::default() }
     }
 
     #[inline]
-    pub fn expression(&self, var: Var) -> Option<&Expression> {
-        self.expressions[var.index()].as_ref()
+    pub fn expression(&self, var: Var) -> Option<Expression<'_>> {
+        let span = self.spans[var.index()]?;
+        Some(Expression {
+            bytecode: &self.bytes[span.bytes.0 as usize..span.bytes.1 as usize],
+            refs: &self.refs[span.refs.0 as usize..span.refs.1 as usize],
+        })
     }
 
     /// Whether the note has its own expression for the variable (definesVariable)
     #[inline]
     pub fn defines(&self, var: Var) -> bool {
-        self.expressions[var.index()].is_some()
+        self.spans[var.index()].is_some()
     }
 
     /// What the variable reads (getVariableRefs); nothing when it is not defined
     #[inline]
     pub fn refs(&self, var: Var) -> &[VarRef] {
-        match &self.expressions[var.index()] {
-            Some(expression) => &expression.refs,
+        match self.spans[var.index()] {
+            Some(span) => &self.refs[span.refs.0 as usize..span.refs.1 as usize],
             None => &[],
         }
     }
 }
+
+/// Every variable, in index order
+const VARIABLES_IN_ORDER: [Var; VAR_COUNT] = [Var::StartTime, Var::Duration, Var::Frequency, Var::Amplitude, Var::Attack, Var::Release];
 
 /// Every registered note, by id
 #[derive(Default)]
@@ -417,6 +461,21 @@ mod tests {
             find_cycle(&notes, pack(0, Var::Release)),
             Some(vec![pack(0, Var::Release), pack(0, Var::Attack)])
         );
+    }
+
+    #[test]
+    fn test_a_note_keeps_its_expressions_in_two_buffers() {
+        let mut n = note(9, &[(Var::Frequency, load_ref(2, Var::Frequency)), (Var::StartTime, load_base(Var::StartTime))]);
+        assert_eq!(n.expression(Var::Frequency).unwrap().bytecode, load_ref(2, Var::Frequency).as_slice());
+        assert_eq!(n.refs(Var::StartTime), &[pack(0, Var::StartTime)]);
+        // replacing one leaves the other whole
+        n.set(Var::Frequency, &load_ref(3, Var::Duration));
+        assert_eq!(n.refs(Var::Frequency), &[pack(3, Var::Duration)]);
+        assert_eq!(n.expression(Var::StartTime).unwrap().bytecode, load_base(Var::StartTime).as_slice());
+        // and an empty one removes it
+        n.set(Var::Frequency, &[]);
+        assert!(!n.defines(Var::Frequency) && n.defines(Var::StartTime));
+        assert!(n.refs(Var::Frequency).is_empty());
     }
 
     #[test]

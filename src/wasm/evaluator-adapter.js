@@ -64,6 +64,14 @@ for (let index = 0; VAR_NAMES[index] !== undefined; index++) {
   VARIABLE_NAMES.push(VAR_NAMES[index]);
 }
 
+// Notes registered, and records read back, per call into the core. Large
+// modules cross the boundary in pieces of this size through one reused
+// buffer: a single call for 300,000 notes allocated tens of megabytes at
+// once on both sides, and V8 answered each such allocation with a full
+// garbage collection of a heap of gigabytes (seconds, where the work itself
+// takes tens of milliseconds).
+const NOTES_PER_CALL = 4096;
+
 // What PersistentEvaluator.readNote() says about one value (rust/src/evaluator.rs)
 const KIND_SMALL = 1;        // rational: signed numerator, denominator
 const KIND_BIG = 2;          // rational too large for numbers: readValueText()
@@ -379,45 +387,59 @@ class WasmPersistentEvaluatorWrapper {
    * @param {Array<Object>} notes
    */
   registerNotes(notes) {
-    if (notes.length === 0) return;
-
     // Per note: u32 id, u8 expression count, then per expression
-    // u8 variable index, u32 length, bytecode (integers little-endian)
-    let packed = this._packed;
-    let view = new DataView(packed.buffer);
-    let at = 0;
-    const reserve = (size) => {
-      if (at + size <= packed.length) return;
-      const grown = new Uint8Array(Math.max(packed.length * 2, at + size));
-      grown.set(packed.subarray(0, at));
-      packed = this._packed = grown;
-      view = new DataView(packed.buffer);
-    };
+    // u8 variable index, u32 length, bytecode (integers little-endian);
+    // NOTES_PER_CALL notes per call
+    for (let from = 0; from < notes.length; from += NOTES_PER_CALL) {
+      const to = Math.min(notes.length, from + NOTES_PER_CALL);
+      let packed = this._packed;
+      let at = 0;
 
-    for (const note of notes) {
-      reserve(5);
-      view.setUint32(at, note.id, true);
-      const countAt = at + 4;
-      at += 5;
+      for (let i = from; i < to; i++) {
+        const note = notes[i];
+        if (at + 5 > packed.length) packed = this._growPacked(at, 5);
+        const id = note.id;
+        packed[at] = id & 0xFF;
+        packed[at + 1] = (id >>> 8) & 0xFF;
+        packed[at + 2] = (id >>> 16) & 0xFF;
+        packed[at + 3] = (id >>> 24) & 0xFF;
+        const countAt = at + 4;
+        at += 5;
 
-      let count = 0;
-      for (let varIndex = 0; varIndex < VARIABLE_NAMES.length; varIndex++) {
-        const expr = getVariableExpression(note, varIndex);
-        if (expr === null) continue;
-        reserve(5 + expr.length);
-        packed[at] = varIndex;
-        view.setUint32(at + 1, expr.length, true);
-        packed.set(expr.bytecode.subarray(0, expr.length), at + 5);
-        at += 5 + expr.length;
-        count++;
+        let count = 0;
+        for (let varIndex = 0; varIndex < VARIABLE_NAMES.length; varIndex++) {
+          const expr = getVariableExpression(note, varIndex);
+          if (expr === null) continue;
+          const length = expr.length;
+          if (at + 5 + length > packed.length) packed = this._growPacked(at, 5 + length);
+          packed[at] = varIndex;
+          packed[at + 1] = length & 0xFF;
+          packed[at + 2] = (length >>> 8) & 0xFF;
+          packed[at + 3] = (length >>> 16) & 0xFF;
+          packed[at + 4] = (length >>> 24) & 0xFF;
+          // Byte by byte: an expression is a few dozen bytes, and a subarray
+          // view per expression is an allocation per expression
+          const bytecode = expr.bytecode;
+          for (let b = 0; b < length; b++) packed[at + 5 + b] = bytecode[b];
+          at += 5 + length;
+          count++;
+        }
+        packed[countAt] = count;
       }
-      packed[countAt] = count;
-    }
 
-    this.evaluator.registerNotes(packed.subarray(0, at));
-    for (const note of notes) {
-      this._registeredNotes.add(note.id);
+      this.evaluator.registerNotes(packed.subarray(0, at));
+      for (let i = from; i < to; i++) {
+        this._registeredNotes.add(notes[i].id);
+      }
     }
+  }
+
+  /** The packing buffer, grown so that `size` more bytes fit after `at` */
+  _growPacked(at, size) {
+    const grown = new Uint8Array(Math.max(this._packed.length * 2, at + size));
+    grown.set(this._packed.subarray(0, at));
+    this._packed = grown;
+    return grown;
   }
 
   /**
@@ -543,11 +565,13 @@ class WasmPersistentEvaluatorWrapper {
    * @param {function(number, Object)} put - Receives each note that has a record
    */
   readRecords(noteIds, put) {
-    if (noteIds.length === 0) return;
-    const packed = this.evaluator.readNotes(noteIds);
     const stride = 2 + 3 * VARIABLE_NAMES.length;
-    for (let i = 0, at = 0; i < noteIds.length; i++, at += stride) {
-      if (packed[at] >= 0) put(noteIds[i], this._toRecord(noteIds[i], packed, at));
+    for (let from = 0; from < noteIds.length; from += NOTES_PER_CALL) {
+      const ids = noteIds.subarray(from, Math.min(noteIds.length, from + NOTES_PER_CALL));
+      const packed = this.evaluator.readNotes(ids);
+      for (let i = 0, at = 0; i < ids.length; i++, at += stride) {
+        if (packed[at] >= 0) put(ids[i], this._toRecord(ids[i], packed, at));
+      }
     }
   }
 

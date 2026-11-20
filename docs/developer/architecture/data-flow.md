@@ -131,7 +131,7 @@ into `DependencyGraph.setCorruptionFlags()` — scoped to the dirty set, not all
 ::: info Which evaluator runs
 In a browser the Rust core is the default. A `Module` usually exists before the core is ready, so it
 starts on the JS `BinaryEvaluator` / `IncrementalEvaluator` and hot-swaps to Rust when the binary
-is ready: `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:114-116`) is the gate.
+is ready: `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:122-124`) is the gate.
 `?evaluator=js` keeps JavaScript and skips the fetch. Both evaluators produce the same records. See [WASM Overview](/developer/wasm/overview).
 :::
 

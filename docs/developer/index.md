@@ -27,7 +27,7 @@ The project is licensed **MIT** (`LICENSE.md`). Contributions are welcome.
 ::: info The WASM evaluator is the default
 The `rmt-core` WASM binary is fetched at boot (294 KB, about 115 KB gzipped) and each `Module`
 hot-swaps to it when it is ready, unless the URL has `?evaluator=js`
-(`isEvaluatorHotSwapEnabled()`, `src/wasm/evaluator-adapter.js:114-116`). Until then, and if the
+(`isEvaluatorHotSwapEnabled()`, `src/wasm/evaluator-adapter.js:122-124`). Until then, and if the
 core fails to load, the **JavaScript** evaluator runs. See
 [WASM Overview](/developer/wasm/overview).
 :::

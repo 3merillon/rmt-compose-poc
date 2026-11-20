@@ -397,7 +397,7 @@ evaluation cache, and marks everything dirty so the next evaluation runs on the 
 
 ::: info It runs unless `?evaluator=js`
 The registration is gated on `isEvaluatorHotSwapEnabled()`, which is `true` in a browser unless the
-URL has `?evaluator=js` (`src/wasm/evaluator-adapter.js:114-116`). With `?evaluator=js`,
+URL has `?evaluator=js` (`src/wasm/evaluator-adapter.js:122-124`). With `?evaluator=js`,
 `_upgradeEvaluators()` is never called and the module stays on the JavaScript evaluator, as it does
 if the core fails to load. `WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:46`) is
 `true`; set to `false`, it turns the swap off everywhere.

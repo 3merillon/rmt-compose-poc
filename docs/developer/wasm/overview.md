@@ -28,7 +28,7 @@ runs unless a script opts in (see [Running Node scripts on WASM](#running-node-s
 | Node, `RMT_EVALUATOR=js` | forced | JavaScript |
 | Node, `RMT_EVALUATOR=wasm` | opt-in | WASM, once the script has called `initWasm()` |
 
-The gate is `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:114-116`). It also
+The gate is `isEvaluatorHotSwapEnabled()` (`src/wasm/evaluator-adapter.js:122-124`). It also
 checks `WASM_MATCHES_VARIABLE_LAYOUT` (`src/wasm/evaluator-adapter.js:46`), which is `true`. That
 constant is a kill switch: set it to `false` and the WASM evaluator is off everywhere, even with
 `?evaluator=wasm` (the browser prints a console warning saying so). Use it if a change to one
@@ -199,9 +199,15 @@ Note ids go up to 16,777,215 (`MAX_NOTE_ID`); the loader refuses ids above it. T
 paths (Load Module, library upload, Load UI, Copy to Modules) accept up to 250,000 notes, and Load
 Module files up to 64 MB (`src/limits.js`). Memory is what limits a module: about 8 KB of
 JavaScript heap per loaded note today. Measured in Node, 100,000 notes take about 0.8 GB and load
-in about 3 s, 300,000 about 2.3 GB, and a tab's heap stops near 4 GB. Above 100,000 notes the WASM
-path also falls behind JavaScript on a full evaluation (300,000 notes: 4.2 s against 1.5 s), because
-registering the bytecode grows faster than the module.
+in about 3 s, 300,000 about 2.3 GB, and a tab's heap stops near 4 GB.
+
+The first full evaluation after a load, Node, JavaScript against WASM: 100,000 notes 0.50 s against
+0.38 s, 300,000 notes 1.5 s against 1.6 to 1.7 s, 1,000,000 notes 10 s against 34 s; repeated
+evaluations of 300,000 notes take about 0.5 s on WASM. Notes and records cross into the core 4,096
+at a time through one reused buffer, and each note's bytecode sits in two buffers in Rust: one
+handover of a whole module allocated tens of megabytes at once, and V8 answered with full garbage
+collections of a heap of gigabytes (300,000 notes took 4.2 to 5 s then). What remains at a million
+notes is garbage collection in an 8 GB heap: the memory per note again.
 
 The autosave keeps the whole module in IndexedDB (`src/store/autosave.js`), far past what
 localStorage could hold: `voices-100000` (15.5 million characters as JSON) is saved and restored

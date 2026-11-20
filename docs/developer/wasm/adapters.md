@@ -68,7 +68,7 @@ It only *permits* the WASM evaluator; the actual gate is `isEvaluatorHotSwapEnab
 | Node | `wasm` | `true` | WASM, once the script has called `initWasm()` |
 
 ```javascript
-// src/wasm/evaluator-adapter.js:114-116
+// src/wasm/evaluator-adapter.js:122-124
 export function isEvaluatorHotSwapEnabled() {
   return !FORCE_JS_EVALUATOR;
 }
@@ -95,7 +95,7 @@ const evaluator   = createEvaluator(module);
 const incremental = createIncrementalEvaluator(module, dependencyGraph, evaluator);
 ```
 
-`createEvaluator(module)` (`src/wasm/evaluator-adapter.js:132`) resolves in this order:
+`createEvaluator(module)` (`src/wasm/evaluator-adapter.js:140`) resolves in this order:
 
 1. the gate is closed, or `useEvaluator: false`, or WASM not loaded: `JSBinaryEvaluator`
 2. otherwise `WasmPersistentEvaluatorWrapper`
@@ -103,7 +103,7 @@ const incremental = createIncrementalEvaluator(module, dependencyGraph, evaluato
 
 The wrapper's constructor refuses a binary older than its adapter: it checks that
 `PersistentEvaluator` has every method in `REQUIRED_CORE_METHODS`
-(`src/wasm/evaluator-adapter.js:76-80`) and throws, naming `npm run wasm:build`, if not.
+(`src/wasm/evaluator-adapter.js:84-88`) and throws, naming `npm run wasm:build`, if not.
 
 `createIncrementalEvaluator(module, graph, evaluator)` returns a `WasmIncrementalEvaluator` when the
 base evaluator is a `WasmPersistentEvaluatorWrapper`, and `JSIncrementalEvaluator` otherwise.
@@ -126,7 +126,7 @@ What the adapter calls on the Rust class (`rust/src/evaluator.rs:666`):
 | `readNotes(ids)` | The same for several notes, one after another. A missing note is `-1` then zeros |
 | `readValueText(id, var)` | Hexadecimal text `n/d` with the sign on `n`. For an irrational, its terms `c*b^p/q*...;c*...` |
 
-The kinds (`src/wasm/evaluator-adapter.js:68-72`):
+The kinds (`src/wasm/evaluator-adapter.js:76-80`):
 
 | Kind | Meaning | `a`, `b` |
 |---|---|---|
@@ -141,7 +141,7 @@ The kinds (`src/wasm/evaluator-adapter.js:68-72`):
 
 ### WasmPersistentEvaluatorWrapper
 
-`src/wasm/evaluator-adapter.js:343`. Wraps `wasm.PersistentEvaluator`. Compiled expressions go to
+`src/wasm/evaluator-adapter.js:351`. Wraps `wasm.PersistentEvaluator`. Compiled expressions go to
 WASM once per note; evaluated values live there; each batch's records come back as `fraction.js`
 values in one call.
 
@@ -149,11 +149,11 @@ values in one call.
 |---|---|
 | `setModule(module)` | Rebind and invalidate everything |
 | `invalidateAll()` | Drop all values and registrations |
-| `registerNotes(notes)` / `registerNote(note)` | Pack the notes' bytecode and register it, one call |
+| `registerNotes(notes)` / `registerNote(note)` | Pack the notes' bytecode and register it, one call per 4,096 notes (`NOTES_PER_CALL`) through one reused buffer |
 | `isRegistered(id)` / `unregisterNote(id)` | Registration bookkeeping (JS side) |
 | `removeNote(id)` / `clearValues()` | Forward to the core |
 | `evaluateDirty(ids)` | **One** WASM call for the whole batch; then reports problems |
-| `readRecords(ids, put)` | **One** WASM call that reads the batch's records |
+| `readRecords(ids, put)` | Read the batch's records, one WASM call per 4,096 notes |
 | `getEvaluatedNote(id)` / `getCachedValue(id, varIndex)` | Read one note or one value |
 | `evaluateNote(note)` | Register and evaluate one note |
 | `evaluate(expr)` | Not available: warns and returns 0. Single expressions are not evaluated on the WASM path |
@@ -161,9 +161,9 @@ values in one call.
 Problems are not printed by Rust. After each batch the wrapper reads the cycles, unresolved
 references, failures and divisions by zero from the core, and reports them through a JavaScript
 `BinaryEvaluator`'s `reportProblems`, so the messages are word for word the JavaScript ones
-(`src/wasm/evaluator-adapter.js:486-518`).
+(`src/wasm/evaluator-adapter.js:508-540`).
 
-`_toRecord()` (`src/wasm/evaluator-adapter.js:602`) turns the numbers into a record of the same shape
+`_toRecord()` (`src/wasm/evaluator-adapter.js:626`) turns the numbers into a record of the same shape
 as the JavaScript evaluator's (`createEvaluationRecord`): a `fraction.js` value per variable,
 `corruptionFlags`, `approxFlags`, and `exact`, which holds the exact value of each variable that is
 not rational. For an irrational, it is an `Irrational` built with `irrationalFromCanonicalTerms`
@@ -172,7 +172,7 @@ it is an `Approx`.
 
 ### WasmIncrementalEvaluator
 
-`src/wasm/evaluator-adapter.js:211`. Dirty tracking in JavaScript, one WASM call per batch, then one
+`src/wasm/evaluator-adapter.js:219`. Dirty tracking in JavaScript, one WASM call per batch, then one
 call reading the batch's records.
 
 `evaluateDirty()` (no arguments; it reads its own dirty set):
@@ -190,7 +190,7 @@ dirty-without-unregister form.
 
 ### WasmEvaluationCache
 
-`src/wasm/evaluator-adapter.js:174`. A `Map` subclass holding `noteId` to record, filled right after
+`src/wasm/evaluator-adapter.js:182`. A `Map` subclass holding `noteId` to record, filled right after
 each batch. `get`, `has`, `size` and iteration are a plain `Map`'s, identical to the JavaScript
 evaluator's cache, including order. Only `delete()` and `clear()` also reach the core, because the
 core holds the values that evaluation reads.
