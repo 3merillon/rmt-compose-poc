@@ -20,7 +20,8 @@
       "lowHz": 0,
       "highHz": 40.03,
       "url": "C1.m4a",
-      "tuneCents": -29.3
+      "tuneCents": -29.3,
+      "decayT60": 8.1
     },
     {
       "root": "G1",
@@ -28,7 +29,8 @@
       "lowHz": 40.03,
       "highHz": 56.611,
       "url": "G1.m4a",
-      "tuneCents": -18.4
+      "tuneCents": -18.4,
+      "decayT60": 8
     },
     {
       "root": "C2",
@@ -36,7 +38,8 @@
       "lowHz": 56.611,
       "highHz": 80.061,
       "url": "C2.m4a",
-      "tuneCents": -13.9
+      "tuneCents": -13.9,
+      "decayT60": 8.2
     },
     {
       "root": "G2",
@@ -44,7 +47,8 @@
       "lowHz": 80.061,
       "highHz": 113.223,
       "url": "G2.m4a",
-      "tuneCents": -5.3
+      "tuneCents": -5.3,
+      "decayT60": 6.9
     },
     {
       "root": "C3",
@@ -52,7 +56,8 @@
       "lowHz": 113.223,
       "highHz": 160.122,
       "url": "C3.m4a",
-      "tuneCents": -2.5
+      "tuneCents": -2.5,
+      "decayT60": 7.7
     },
     {
       "root": "G3",
@@ -60,7 +65,8 @@
       "lowHz": 160.122,
       "highHz": 226.447,
       "url": "G3.m4a",
-      "tuneCents": -4.5
+      "tuneCents": -4.5,
+      "decayT60": 5.9
     },
     {
       "root": "C4",
@@ -68,7 +74,8 @@
       "lowHz": 226.447,
       "highHz": 320.244,
       "url": "C4.m4a",
-      "tuneCents": -4.8
+      "tuneCents": -4.8,
+      "decayT60": 7.1
     },
     {
       "root": "G4",
@@ -76,7 +83,8 @@
       "lowHz": 320.244,
       "highHz": 452.893,
       "url": "G4.m4a",
-      "tuneCents": -3.7
+      "tuneCents": -3.7,
+      "decayT60": 5.6
     },
     {
       "root": "C5",
@@ -84,7 +92,8 @@
       "lowHz": 452.893,
       "highHz": 640.487,
       "url": "C5.m4a",
-      "tuneCents": -0.3
+      "tuneCents": -0.3,
+      "decayT60": 5.6
     },
     {
       "root": "G5",
@@ -92,7 +101,8 @@
       "lowHz": 640.487,
       "highHz": 905.786,
       "url": "G5.m4a",
-      "tuneCents": -1.2
+      "tuneCents": -1.2,
+      "decayT60": 4.4
     },
     {
       "root": "C6",
@@ -100,7 +110,8 @@
       "lowHz": 905.786,
       "highHz": 1280.975,
       "url": "C6.m4a",
-      "tuneCents": 6.5
+      "tuneCents": 6.5,
+      "decayT60": 4.6
     },
     {
       "root": "G6",
@@ -108,7 +119,8 @@
       "lowHz": 1280.975,
       "highHz": 1811.572,
       "url": "G6.m4a",
-      "tuneCents": 1.7
+      "tuneCents": 1.7,
+      "decayT60": 4.2
     },
     {
       "root": "C7",
@@ -116,7 +128,8 @@
       "lowHz": 1811.572,
       "highHz": 2561.95,
       "url": "C7.m4a",
-      "tuneCents": 12.3
+      "tuneCents": 12.3,
+      "decayT60": 3.3
     },
     {
       "root": "G7",
@@ -124,7 +137,8 @@
       "lowHz": 2561.95,
       "highHz": 20000,
       "url": "G7.m4a",
-      "tuneCents": 3.5
+      "tuneCents": 3.5,
+      "decayT60": 3
     }
   ]
 }

@@ -146,6 +146,21 @@ SHEETS['phase-i-7a'] = {
       predict: 'Now: a truer octave, still moving with the vibrato.' },
   ],
 };
+SHEETS['phase-i-7b'] = {
+  title: 'Phase I, step 7b: the piano\'s whole decay',
+  intro: 'Each file plays a passage twice: first with the recordings cut at 3.5 s (before), a second of silence, then with the whole recordings (now). Same notes, pure ratios of 263 Hz, reverb and limiter on.',
+  passages: [
+    { name: 'Piano, a held pure triad over a low octave (7 s)', instrument: 'piano', notes: chord([[1, 2], [1, 1], [5, 4], [3, 2]], 0, 7),
+      change: 'Before: the chord stopped at about 3.4 s and the rest of the 7 s was silent. Now: it dies away for the whole 7 s, then the dampers.',
+      predict: 'Now: a piano chord ringing out; before: cut off half way.' },
+    { name: 'Piano, a low C held 8 s (65.75 Hz)', instrument: 'piano', notes: [[[1, 4], 0, 8]],
+      change: 'The bass string rings its full decay.',
+      predict: 'Now: a long, slowly fading bass; before: silence after 3.5 s.' },
+    { name: 'Piano, a melody with long notes (2–5 s)', instrument: 'piano', notes: [[[1, 1], 0, 2], [[5, 4], 2, 2], [[3, 2], 4, 5], [[2, 1], 9, 3]],
+      change: 'The 5 s note no longer goes silent before its end.',
+      predict: 'Now: every note lasts as written.' },
+  ],
+};
 const sheet = SHEETS[SHEET];
 if (!sheet) { console.error(`unknown sheet ${SHEET}`); process.exit(2); }
 

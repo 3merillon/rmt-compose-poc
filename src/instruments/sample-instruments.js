@@ -30,7 +30,8 @@ export class PianoInstrument extends MultisampleInstrument {
     const release = frequency > PIANO_UNDAMPED_HZ
       ? PIANO_UNDAMPED_RING
       : byPitch(frequency, [32.703, 0.3], [1046.5, 0.1]);
-    return { attack: 0.002, release };
+    const drawT60 = super.getEnvelopeSettings(duration, frequency).drawT60;
+    return drawT60 ? { attack: 0.002, release, drawT60 } : { attack: 0.002, release };
   }
 }
 

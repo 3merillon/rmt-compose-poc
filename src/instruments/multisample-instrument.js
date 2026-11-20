@@ -72,6 +72,8 @@ export class MultisampleInstrument {
         .map((z) => ({
           root: z.root || null,
           rootHz: +z.rootHz,
+          // How fast the recording dies away (s to fall 60 dB; measured, for the drawing)
+          decayT60: isFinite(z.decayT60) && +z.decayT60 > 0 ? +z.decayT60 : null,
           // The pitch the recording actually has (rootHz corrected by its measured tuneCents)
           playedHz: +z.rootHz * Math.pow(2, (isFinite(z.tuneCents) ? +z.tuneCents : 0) / 1200),
           lowHz: isFinite(z.lowHz) ? +z.lowHz : 0,
@@ -204,7 +206,12 @@ export class MultisampleInstrument {
   getEnvelopeSettings(duration, frequency) {
     const e = this.envelope || {};
     const sec = (v, d) => (v != null && isFinite(v) && v >= 0 ? +v : d);
-    return { attack: sec(e.attack, 0.005), release: sec(e.release, 0.12) };
+    // drawT60: the recording's own decay, which the workspace draws; the audio does
+    // not apply it (the recording already decays).
+    const z = isFinite(frequency) && frequency > 0 ? this._zoneFor(frequency) : null;
+    const env = { attack: sec(e.attack, 0.005), release: sec(e.release, 0.12) };
+    if (z && z.decayT60) env.drawT60 = z.decayT60 * (z.playedHz ? z.playedHz / frequency : 1);
+    return env;
   }
 
   applyEnvelope(gainNode, startTime, duration, initialVolume = 1.0, shape = null, frequency = null) {

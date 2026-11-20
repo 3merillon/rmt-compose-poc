@@ -170,7 +170,9 @@ export function envelopeLength(env = {}, duration, shape = null) {
  * @returns {{attack:number, decay:number, sustain:number, release:number}}
  */
 export function envelopeShares(env = {}, duration, shape = null) {
-  const t = envelopeTimes(env, duration, shape);
+  // A recording that dies away by itself (env.drawT60: the piano's measured decay)
+  // is drawn dying away; the audio's envelope does not apply it twice.
+  const t = envelopeTimes(env.drawT60 > 0 && !(env.t60 > 0) ? { ...env, t60: env.drawT60 } : env, duration, shape);
   const body = t.off - t.attack;
   let decay = 0, sustain = 1;
   if (t.t60 > 0 || (t.decay > 0 && t.decay > body)) { decay = body; sustain = t.levelAtEnd; }

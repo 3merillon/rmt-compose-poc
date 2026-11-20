@@ -49,7 +49,7 @@ oscillators (a unison stack, an FM carrier + modulator) plus a filter, and the e
 identically. A bare `OscillatorNode` also satisfies this shape natively, which is why the
 multisample fallback can just return one.
 
-Build one with `makeVoice()` (`instrument-manager.js:200`):
+Build one with `makeVoice()` (`instrument-manager.js:202`):
 
 ```javascript
 export function makeVoice(sources, output, frequency, onStart)
@@ -140,7 +140,7 @@ length. Nothing else has to fit. The release is not squeezed into the note, beca
 `shape` is `{ attack, release }`, the note's `attack` and `release` variables (its own, else the
 BaseNote's), each a **share of the note's own duration** (`1/8` is an eighth of it) or `null`. A given
 value replaces the instrument's `attack` or `release` for that note; a `null` leaves the instrument's
-time. `noteShape()` (`instrument-manager.js:188`) clamps the attack to 0 to 1 and the release to 0 to
+time. `noteShape()` (`instrument-manager.js:190`) clamps the attack to 0 to 1 and the release to 0 to
 `MAX_RELEASE_SHARE` (4, `instrument-manager.js:26`); a value that is not a finite number is `null`.
 `envelopeTimes()` (`instrument-manager.js:105`) turns the shares into seconds:
 
@@ -189,7 +189,7 @@ manifest's `gainDb`, `harmonium` by a `level` of 0.6 and `harmonium-soft` by 0.4
 
 ## SynthInstrument
 
-`instrument-manager.js:222`. Subclasses set fields; the base class builds the voice.
+`instrument-manager.js:224`. Subclasses set fields; the base class builds the voice.
 
 ```javascript
 export class SquareInstrument extends SynthInstrument {
@@ -406,19 +406,30 @@ Rebuild them with **`npm run samples:build`** (`scripts/build-samples.mjs`). It 
 PATH** and network access, lists the VSCO-2 GitHub tree, picks one file per root note, and transcodes:
 
 ```
+# violin (tail: { maxSeconds: 3.5 })
 ffmpeg -ac 1 -t 3.5 \
-  -af silenceremove=start_periods=1:start_threshold=-45dB,afade=t=out:st=3.4:d=0.1 \
+  -af silenceremove=start_periods=1:start_threshold=-45dB,afade=t=out:st=3.40:d=0.1 \
+  -c:a aac -b:a 96k -movflags +faststart
+# piano (tail: { maxSeconds: 20, endThresholdDb: -66 }): the whole decay
+ffmpeg -ac 1 -t 20 \
+  -af silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-66dB,areverse,afade=t=out:st=19.90:d=0.1 \
   -c:a aac -b:a 96k -movflags +faststart
 ```
+
+`--only piano` (or `--only violin`) rebuilds one instrument. Then run `node scripts/tune-samples.mjs`, which
+writes each zone's `tuneCents` and, for the piano, `decayT60`: the recording's average fall over its first 3 s,
+as seconds per 60 dB (8 s in the bass to 3 s at the top). The audio does not use `decayT60` (the recording decays
+by itself); `getEnvelopeSettings()` hands it to the drawing as `drawT60`, so a long piano note is drawn dying
+away as it sounds.
 
 Zone boundaries are the **geometric mean** of adjacent roots. The output is committed; the sources
 are not.
 
 ::: danger No sample looping
-Every source sample is capped at **3.5 s** (with a 0.1 s tail fade from 3.4 s). A held note longer
-than its sample plays the sample out and is then **silent for the rest of its duration**. This bites
-long sustained `violin` notes hardest. There is no loop-point support — `zones[].loop` is reserved
-and unread.
+The piano's recordings run until they have decayed (19 s at C1 down to 2 s at G7), so a piano note
+sounds for as long as it is held. The violin's are capped at **3.5 s** (with a 0.1 s tail fade from
+3.4 s): a violin note held longer plays its sample out and is then **silent for the rest of its
+duration**. There is no loop-point support — `zones[].loop` is reserved and unread.
 :::
 
 ## Registration
@@ -429,7 +440,7 @@ audioEngine.registerInstruments(SynthInstruments, SampleInstruments);
 ```
 
 which calls `instrumentManager.registerBuiltInInstruments(SynthInstruments, SampleInstruments)`
-(`instrument-manager.js:302`). It instantiates every class value in both maps, passing the
+(`instrument-manager.js:304`). It instantiates every class value in both maps, passing the
 `AudioContext` to the constructor.
 
 The single-instrument entry point is **`registerInstrument(instrument)`** — not `register()` — and it
@@ -441,7 +452,7 @@ instrumentManager.getAvailableInstruments();  // registered keys, in registratio
 ```
 
 ::: warning Two different defaults, both spelled `sine-wave`
-`InstrumentManager.defaultInstrument` (`instrument-manager.js:299`) is a **hardcoded** unknown-name fallback. It never
+`InstrumentManager.defaultInstrument` (`instrument-manager.js:301`) is a **hardcoded** unknown-name fallback. It never
 follows the settings system. `module.js`'s `_defaultInstrumentName` is the **inheritance** fallback,
 and it *does* follow `audio.defaultInstrument`.
 

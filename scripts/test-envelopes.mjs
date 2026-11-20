@@ -132,7 +132,14 @@ for (const name of names) {
     check(near(sh.attack * T.dur, T.attack) && P.events.some((e) => e.type === 'lin' && near(e.time, t0 + T.attack) && near(e.value, p)), `${tag}: drawn attack is not the scheduled one`);
     check(near(sh.release * T.dur, T.release), `${tag}: drawn release ${sh.release * T.dur} is not ${T.release}`);
     const bodyEnd = t0 + T.attack + sh.decay * T.dur;
-    check(near(P.at(bodyEnd), Math.max(EPS, p * sh.sustain), 1e-6), `${tag}: drawn level ${sh.sustain} is not the scheduled ${P.at(bodyEnd) / p}`);
+    if (env.drawT60 > 0) {
+      // A recording that decays by itself (the piano): the gain holds, and the drawing shows the recording's
+      // measured decay on top of it, exactly that exponential
+      const want = Math.pow(10, (-3 * (T.off - T.attack)) / env.drawT60);
+      check(near(P.at(bodyEnd), p, 1e-6) && near(sh.sustain, want, 1e-9), `${tag}: drawn level ${sh.sustain} is not the recording's decay ${want}`);
+    } else {
+      check(near(P.at(bodyEnd), Math.max(EPS, p * sh.sustain), 1e-6), `${tag}: drawn level ${sh.sustain} is not the scheduled ${P.at(bodyEnd) / p}`);
+    }
     // G2: envelopeGainAt (what a damper, a slur or a stolen voice fades from) is the scheduled gain
     let worst = 0;
     for (let i = 1; i <= 60; i++) {

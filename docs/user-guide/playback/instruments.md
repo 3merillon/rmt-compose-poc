@@ -209,7 +209,7 @@ Only a small manifest is fetched when the app starts. The audio itself is fetche
 If a zone hasn't finished decoding, or the fetch failed, that note falls back to a **plain sine tone** for that playback. It still sounds; it is not sampled. If a piano suddenly sounds like a test tone, that's what happened — play it again.
 
 ::: warning Long held notes go silent
-Sampled notes do not loop. Every source sample is capped at **3.5 seconds**. A `piano` or `violin` note held longer than that plays its sample out and is then **silent for the rest of its duration**. It bites hardest on long sustained violin notes — use a synth voice for drones.
+Sampled notes do not loop. The piano's recordings run their whole decay (19 s in the bass, 2 s at the top), so a held piano note dies away as a piano does, for as long as it is held. The violin's are capped at **3.5 seconds**: a violin note held longer plays its sample out and is then **silent for the rest of its duration** — use a synth voice for drones.
 :::
 
 ## Mixing instruments

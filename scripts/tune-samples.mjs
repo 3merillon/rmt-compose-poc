@@ -18,6 +18,10 @@
  *   node scripts/tune-samples.mjs --check    # measure what the corrected instrument plays (should be ~0 cents)
  *   node scripts/tune-samples.mjs --dry      # measure and print, write nothing
  * Run again after scripts/build-samples.mjs (which writes the manifests without it).
+ *
+ * For the piano it also measures how fast each recording dies away (`decayT60`, seconds to fall 60 dB, from the
+ * slope of its level between 0.4 and 3 s): not for the sound (the recording decays by itself), for the drawing,
+ * so the workspace draws a piano note fading as it is heard.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
@@ -129,18 +133,30 @@ function measureZone(z, harmonic) {
   }
   const used = found.filter((q) => q.amp > maxAmp * 10 ** (-45 / 20));
   const f1 = Math.sqrt(a + b);
-  return { root: z.root, rootHz: z.rootHz, cents: 1200 * Math.log2(f1 / z.rootHz), B: b / a, partials: used.length, strongest: used.length ? used.reduce((m, q) => (q.amp > m.amp ? q : m)).n : 0 };
+  // How fast it dies away, on average over what one sees of a note: from its peak to 3 s later (or to near its
+  // end), the fall in dB of the 50 ms level, as seconds per 60 dB. (A string falls fast and then slowly; a
+  // fit from 0.4 s on missed the fast part and read the top string, 2 s long, as ringing 12 s.)
+  let t60 = null;
+  if (!harmonic) {
+    const Wd = Math.round(0.05 * SR);
+    const lvl = (i) => { let s2 = 0; for (let j = 0; j < Wd && i + j < x.length; j++) s2 += x[i + j] ** 2; return 10 * Math.log10(Math.max(s2 / Wd, 1e-20)); };
+    const end = Math.min(x.length - Wd, peakI + Math.round(3 * SR), Math.round((z.seconds - 0.15) * SR));
+    const T = (end - peakI) / SR;
+    const fall = lvl(Math.max(0, peakI - Math.round(Wd / 2))) - lvl(end);
+    if (T > 0.3 && fall > 1) t60 = (60 * T) / fall;
+  }
+  return { root: z.root, rootHz: z.rootHz, cents: 1200 * Math.log2(f1 / z.rootHz), B: b / a, partials: used.length, strongest: used.length ? used.reduce((m, q) => (q.amp > m.amp ? q : m)).n : 0, t60 };
 }
 
 let worst = 0;
 for (const name of INSTRUMENTS) {
   const zones = await zonesOf(name);
   console.log(`\n== ${name} ${CHECK ? '(as the corrected instrument plays each root)' : '(as recorded)'}`);
-  console.log('  zone   root Hz     cents     B        partials  strongest');
+  console.log('  zone   root Hz     cents     B        partials  strongest  t60 (s)');
   const results = zones.map((z) => measureZone(z, HARMONIC.has(name)));
   for (const r of results) {
     worst = Math.max(worst, Math.abs(r.cents));
-    console.log(`  ${r.root.padEnd(5)} ${r.rootHz.toFixed(3).padStart(9)}  ${r.cents.toFixed(2).padStart(7)}  ${r.B.toExponential(1).padStart(8)}   ${String(r.partials).padStart(3)}        ${r.strongest}`);
+    console.log(`  ${r.root.padEnd(5)} ${r.rootHz.toFixed(3).padStart(9)}  ${r.cents.toFixed(2).padStart(7)}  ${r.B.toExponential(1).padStart(8)}   ${String(r.partials).padStart(3)}        ${String(r.strongest).padStart(2)}      ${r.t60 ? r.t60.toFixed(1) : '-'}`);
   }
   if (!DRY) {
     const file = join(ROOT, 'public', 'samples', name, 'manifest.json');
@@ -148,6 +164,7 @@ for (const name of INSTRUMENTS) {
     for (const z of m.zones) {
       const r = results.find((q) => q.root === z.root);
       if (r) z.tuneCents = Math.round(r.cents * 10) / 10;
+      if (r && r.t60) z.decayT60 = Math.round(r.t60 * 10) / 10; else delete z.decayT60;
     }
     writeFileSync(file, JSON.stringify(m, null, 2) + '\n');
     console.log(`  written tuneCents into ${file}`);
