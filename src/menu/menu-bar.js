@@ -8,6 +8,7 @@ import { viewportHeight } from '../utils/viewport.js';
 import { history } from '../store/history.js';
 import { EXPRESSION_VARS } from '../note.js';
 import { MAX_NOTE_ID } from '../binary-note.js';
+import { MAX_MODULE_NOTES } from '../limits.js';
 
 // JSON keys of the old time model (tempo, beats per measure, measure length)
 const RETIRED_TIME_KEYS = ['tempo', 'beatsPerMeasure', 'measureLength'];
@@ -1522,8 +1523,9 @@ const menuAPI = (function() {
         if (!Array.isArray(data.notes)) {
             return { valid: false, errors: ['Module must have a notes array'] };
         }
-        if (data.notes.length > 10000) {
-            return { valid: false, errors: ['Module exceeds maximum note count (10000)'] };
+        // src/limits.js: memory, not ids, limits a module
+        if (data.notes.length > MAX_MODULE_NOTES) {
+            return { valid: false, errors: [`Module exceeds maximum note count (${MAX_MODULE_NOTES})`] };
         }
 
         // Validate baseNote expressions

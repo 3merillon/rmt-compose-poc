@@ -159,7 +159,7 @@ Two more things happen on a successful drop:
 
 ### Upload a file
 
-Click the dashed **`+`** tile at the end of any section and pick a `.json` file. It is validated before it is accepted — bad expressions, duplicate note ids or more than 10 000 notes are rejected with the reason. On success the tile appears in that section and the file is stored in your browser, so it survives a reload.
+Click the dashed **`+`** tile at the end of any section and pick a `.json` file. It is validated before it is accepted — bad expressions, duplicate note ids or more than 250 000 notes are rejected with the reason. On success the tile appears in that section and the file is stored in your browser, so it survives a reload. The browser keeps about 5 MB for the whole library: a larger module stays for the session only, and the console logs that it could not be saved.
 
 ### Copy a selection into the library
 

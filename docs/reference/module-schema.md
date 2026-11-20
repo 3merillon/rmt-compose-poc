@@ -226,7 +226,7 @@ Different entry points apply different checks. This is the exhaustive picture.
 
 | Entry point | Size cap | Structure | Expressions | Colors |
 |---|---|---|---|---|
-| **Load Module** (file → workspace) | 3 MB | depth ≤ 20, ≤ 10 000 notes | — | — |
+| **Load Module** (file → workspace) | 64 MB | depth ≤ 20, ≤ 250 000 notes | — | — |
 | **Library upload** (the `+` placeholder in the module bar) | — | full | checked | checked |
 | **Load UI** import | — | full, per embedded module | checked | checked |
 | **Copy to Modules** (group selection → library) | — | full | checked | checked |
@@ -236,16 +236,16 @@ Hard limits, wherever a module is read:
 
 | Limit | Value |
 |---|---|
-| Max file size (Load Module) | **3 MB** |
-| Max notes | **10 000** |
+| Max file size (Load Module) | **64 MB** (`MAX_MODULE_BYTES`, `src/limits.js`) |
+| Max notes | **250 000** (`MAX_MODULE_NOTES`, `src/limits.js`) |
 | Max JSON nesting depth (Load Module) | **20** |
 | Valid note id | integer, **0 – 16 777 215** (`MAX_NOTE_ID`) |
 | Max expression length | **10 000 characters** |
 | Note ids blocked outright | `__proto__`, `constructor`, `prototype` |
 
-Toasts you can hit on load: `Module file too large (max 3MB)`, `Invalid module file structure`, `Module loaded successfully`.
+Toasts you can hit on load: `Module file too large (max 64 MB)`, `Invalid module file structure`, `Module loaded successfully`.
 
-The id ceiling is 2^24 − 1. The renderer's picking draws each note's id in 24 bits of colour, and 2^24 − 1 is also the largest integer a float32 vertex attribute holds exactly. The loader rejects (and skips) any note whose id is above 16 777 215, and both expression parsers enforce the same range at compile time — `[16777216].f` is a parse error (`Note IDs must be integers between 0 and 16777215`), not a silently truncated reference to a different note.
+The note limit is memory, not ids: a loaded note costs about 8 KB of JavaScript heap today, and a tab's heap stops near 4 GB (100 000 notes take about 0.8 GB and load in about 3 s). The id ceiling is 2^24 − 1. The renderer's picking draws each note's id in 24 bits of colour, and 2^24 − 1 is also the largest integer a float32 vertex attribute holds exactly. The loader rejects (and skips) any note whose id is above 16 777 215, and both expression parsers enforce the same range at compile time — `[16777216].f` is a parse error (`Note IDs must be integers between 0 and 16777215`), not a silently truncated reference to a different note.
 
 Expression strings are additionally screened for dangerous-looking patterns (`eval(`, `Function(`, `fetch(`, `document.`, `window.`, `__proto__`, `<script`, `javascript:`, …) at the library-upload and Load-UI entry points. Malformed expressions are caught by the compiler itself, which throws instead of guessing (see above).
 

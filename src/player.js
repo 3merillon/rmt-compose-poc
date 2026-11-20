@@ -30,6 +30,7 @@ import { toNumber } from './utils/fraction-num.js';
 import { planMidi, encodeMidi } from './midi/midi-export.js';
 import { snapTempo } from './player/time-map.js';
 import { tempoSliderBounds } from './settings/settings-schema.js';
+import { MAX_MODULE_NOTES, MAX_MODULE_BYTES } from './limits.js';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
@@ -4488,8 +4489,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     /**
      * SECURITY: Validate module JSON structure to prevent DoS attacks
      * Checks for reasonable limits on depth, array sizes, and required structure
+     * (MAX_MODULE_NOTES, src/limits.js).
      */
-    function validateModuleStructure(data, maxDepth = 20, maxArraySize = 10000) {
+    function validateModuleStructure(data, maxDepth = 20, maxArraySize = MAX_MODULE_NOTES) {
         // Check basic structure requirements
         if (typeof data !== 'object' || data === null) {
             console.error('[RMT Security] Module data must be an object');
@@ -4555,10 +4557,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
     function loadModule(file) {
         try {
-            // SECURITY: Enforce file size limit to prevent DoS
-            const MAX_MODULE_SIZE = 3 * 1024 * 1024; // 3MB
+            // SECURITY: Enforce file size limit to prevent DoS (src/limits.js)
+            const MAX_MODULE_SIZE = MAX_MODULE_BYTES;
             if (file.size > MAX_MODULE_SIZE) {
-                notify('Module file too large (max 3MB)', 'error');
+                notify(`Module file too large (max ${MAX_MODULE_SIZE / (1024 * 1024)} MB)`, 'error');
                 console.error('[RMT Security] Module file exceeds maximum size:', file.size);
                 return;
             }

@@ -215,8 +215,8 @@ Nothing is added to the BaseNote on the way out: the file holds the expressions 
 
 | Limit | Value |
 |---|---|
-| Max file size (**Load Module**) | 3 MB |
-| Max notes | 10 000 |
+| Max file size (**Load Module**) | 64 MB |
+| Max notes | 250 000 |
 | Max JSON nesting depth (**Load Module**) | 20 |
 | Valid note id | integer, 0 – 16 777 215 |
 | Max expression length | 10 000 characters |
@@ -230,7 +230,7 @@ Different entry points run different checks. This trips people up, so it is wort
 
 | Entry point | Size | Structure | Expressions | Colors |
 |---|---|---|---|---|
-| **Load Module** (file → workspace) | 3 MB | depth ≤ 20, ≤ 10 000 notes | not checked | not checked |
+| **Load Module** (file → workspace) | 64 MB | depth ≤ 20, ≤ 250 000 notes | not checked | not checked |
 | **Library upload** (the `+` tile in the module bar) | — | full | checked | checked |
 | **Load UI** import | — | full, per embedded module | checked | checked |
 | **Copy to Modules** | — | full | checked | checked |

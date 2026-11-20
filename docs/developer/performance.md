@@ -85,7 +85,7 @@ properly idle)"*, and `bench-render.mjs` reports **0/100 idle frames redrawn** a
 notes.
 
 This does **not** mean rAF is descheduled. Both loops still tick every frame — the renderer's
-(`renderer.js:593-597`) and the player's (`player.js:1877-1897`, which updates the DOM playhead and
+(`renderer.js:593-597`) and the player's (`player.js:1878-1898`, which updates the DOM playhead and
 measure-bar transforms). What is gated is the *body* of `_render()`:
 
 ```javascript
@@ -326,7 +326,7 @@ notes. See [Picking](/developer/rendering/picking).
 - Snapshots are stored as **minified JSON strings**, not parsed object graphs (~3–5× less retained
   heap). Each restore `JSON.parse`s fresh, giving the same isolation the old deep-clone did.
 - One text per action, shared: `captureSnapshot` and the note widget's edits hand one `snapshotStr`
-  to both the history capture and the localStorage autosave (`player.js:4943-4944`). It comes from
+  to both the history capture and the localStorage autosave (`player.js:4945-4946`). It comes from
   `Module.createModuleJSONString()`, which serializes again only the notes an edit changed (see
   [The commit](#the-commit-what-an-edit-costs)).
 - Two caps, both in `_enforceCaps()` (`history.js:35-43`): a count cap of **50** entries and a byte

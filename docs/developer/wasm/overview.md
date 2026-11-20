@@ -195,11 +195,13 @@ check and the snapshot text now cost what the edit changed. See
 
 ## Limits
 
-Note ids go up to 16,777,215 (`MAX_NOTE_ID`). The loader refuses ids above it, and `voices-100000`
-loads all 100,001 notes when it is the module the page opens (the perf harness serves it so). The
-import paths of the UI are tighter: **Load Module** refuses a file over 3 MB or with more than
-10,000 notes (`src/player.js`, `validateModuleStructure`), and library upload, Load UI and Copy to
-Modules refuse more than 10,000 notes (`src/menu/menu-bar.js`).
+Note ids go up to 16,777,215 (`MAX_NOTE_ID`); the loader refuses ids above it. The UI's import
+paths (Load Module, library upload, Load UI, Copy to Modules) accept up to 250,000 notes, and Load
+Module files up to 64 MB (`src/limits.js`). Memory is what limits a module: about 8 KB of
+JavaScript heap per loaded note today. Measured in Node, 100,000 notes take about 0.8 GB and load
+in about 3 s, 300,000 about 2.3 GB, and a tab's heap stops near 4 GB. Above 100,000 notes the WASM
+path also falls behind JavaScript on a full evaluation (300,000 notes: 4.2 s against 1.5 s), because
+registering the bytecode grows faster than the module.
 
 The autosave writes the whole module to `localStorage`, which holds about 5 MB per origin. A module
 of a few tens of thousands of notes exceeds it (`voices-100000` is about 15 MB as JSON), and every

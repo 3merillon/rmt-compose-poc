@@ -111,12 +111,12 @@ Loading a module from a **file** enforces:
 
 | Condition | Toast |
 |---|---|
-| File larger than **3 MB** | `Module file too large (max 3MB)` |
-| Not an object, or no `baseNote` object, or `notes` is not an array, or more than **10 000** notes, or JSON nested deeper than **20** levels | `Invalid module file structure` |
+| File larger than **64 MB** | `Module file too large (max 64 MB)` |
+| Not an object, or no `baseNote` object, or `notes` is not an array, or more than **250 000** notes, or JSON nested deeper than **20** levels | `Invalid module file structure` |
 | The module passes those checks but fails to build (for example, it has no `notes` key at all) | A red banner: `Error loading module: <message>` |
 | **The file is not valid JSON** | A red toast: `Error loading module: <message>` |
 
-**Library uploads**, **Load UI** imports and **Copy to Modules** run a *different*, stricter check — not an additional one. It does not enforce the 3 MB cap or the nesting limit, but it does what the file path never does: every expression string is screened for dangerous-looking patterns and must compile, note ids must be unique and within `0 … 16777215`, and every `color` must be on the colour whitelist. For an entry-point-by-entry-point table of who checks what, see [Module Format](/user-guide/modules/module-format#what-is-checked-and-where).
+**Library uploads**, **Load UI** imports and **Copy to Modules** run a *different*, stricter check — not an additional one. It does not enforce the 64 MB cap or the nesting limit, but it does what the file path never does: every expression string is screened for dangerous-looking patterns and must compile, note ids must be unique and within `0 … 16777215`, and every `color` must be on the colour whitelist. For an entry-point-by-entry-point table of who checks what, see [Module Format](/user-guide/modules/module-format#what-is-checked-and-where).
 
 ::: warning Loading a file does not check its expressions
 The **Load Module from file…** path checks size and shape only. A malformed expression does not stop the load: the compiler refuses it with a `console.error` and the affected property is left **unset**, so the note falls back to its defaults rather than loading at a silent zero. Likewise, a reference to a note that does not exist (`[99].f`) and a dependency cycle both load without an error message. If a load "succeeded" but the result looks wrong, open the browser console.
@@ -126,7 +126,9 @@ The **Load Module from file…** path checks size and shape only. A malformed ex
 
 ### The module would not load
 
-- **`Module file too large (max 3MB)`** — the hard cap. Split the module.
+- **`[RMT] Autosave failed (history capture): QuotaExceededError` in the console** — the module is larger than the browser keeps for the autosave (about 5 MB of text, a few tens of thousands of notes). It loads and plays, but a reload will not bring it back: save it to a file.
+
+- **`Module file too large (max 64 MB)`** — the hard cap. Split the module.
 - **`Invalid module file structure`** — most often a missing `baseNote` object or a `notes` key that is not an array. Note that a file with *no* `notes` key passes this check and then fails in the loader with a red `Error loading module: data.notes is not iterable` banner. Always include `notes`.
 - **`Invalid module: …`** on an upload — the expression or color validator rejected something. The toast names the first three problems; the full list is in the browser console.
 
