@@ -33,7 +33,7 @@ getDependents(noteId) {
 
 ## The indexes
 
-`DependencyGraph`'s constructor (`src/dependency-graph.js:12-75`) builds **22 index maps and sets**, plus a corruption map and an epoch counter — 23 `Map`/`Set` fields in all. They fall into four groups.
+`DependencyGraph`'s constructor (`src/dependency-graph.js:124-187`) builds **22 index maps and sets**, plus a corruption map and an epoch counter — 23 `Map`/`Set` fields in all. They fall into four groups.
 
 ### 1. All-property (any expression → any expression)
 
@@ -83,7 +83,7 @@ Each is `Map<dependencyId, Set<dependentId>>`.
 
 Consumers simulate the edge instead. `Module.getDependentNotes(0)` unions `getAllDependents(0)` with `getBaseNoteDependents()` (`src/module.js:424-437`) — one level deep, which is what the UI wants.
 
-Re-evaluation needs more than that, and gets it from `getEvaluationDependents(id)` (`:780`): the transitive closure over `dependents` that, whenever it reaches note 0, continues into `baseNoteDependents` **and** `implicitBaseDependents` and on through everything that reads those. Before it existed, a BaseNote edit dirtied only the notes that wrote `base` themselves; a note defined purely against another note (`[1].f * (5/4)`) kept its old value.
+Re-evaluation needs more than that, and gets it from `getEvaluationDependents(id)` (`:892`): the transitive closure over `dependents` that, whenever it reaches note 0, continues into `baseNoteDependents` **and** `implicitBaseDependents` and on through everything that reads those. Before it existed, a BaseNote edit dirtied only the notes that wrote `base` themselves; a note defined purely against another note (`[1].f * (5/4)`) kept its old value.
 
 `implicitBaseDependents` covers the one way a note depends on the BaseNote without naming it (`inheritsFromBase()`, `src/variable-deps.js:96`): a reference to another note's `amplitude`, `attack` or `release` (`[5].a`, `[5].attack`), which inherits the BaseNote's when note 5 has none of its own. Only the interpretation variables (indices from `FIRST_INTERPRETATION_VAR`) inherit; a reference to `[5].t`, `[5].d` or `[5].f` never reaches the BaseNote unless it is written. A measure bar is an ordinary note and no longer inherits anything: there is no computed measure length, and no tempo or beats-per-measure for it to follow.
 
@@ -119,7 +119,7 @@ This matters because `markNoteDirty()` calls this for **every** marked note — 
 
 The bytecode scan that finds the references lives on the expression, not the graph: `BinaryExpression.getPropertyDependencies()` (`src/binary-note.js:263`) walks the bytecode for `LOAD_REF` instructions and returns `Map<noteId, Set<varIndex>>`. `getDependencySet()` returns the flat id set. A third scan, `getVariableRefs()` (`src/binary-note.js:333`), returns every (note, variable) pair *including* `base.x` reads; it is what evaluation order and cycle checks are built on, and it is cached per expression.
 
-`_updateDependencies()` (`:439-493`) diffs old against new, patches the inverse index, and **bumps `_corruptionEpoch` if the dependency set actually changed** — because changing a note's dependencies can change whether *other* notes render as transitively corrupted, even if no corruption flag moved.
+`_updateDependencies()` (`:551-605`) diffs old against new, patches the inverse index, and **bumps `_corruptionEpoch` if the dependency set actually changed** — because changing a note's dependencies can change whether *other* notes render as transitively corrupted, even if no corruption flag moved.
 
 ## Query surface
 
@@ -129,12 +129,12 @@ These are the real method names.
 
 | Method | Returns | Line |
 |---|---|---|
-| `getDependencies(id)` | `Set` — direct, O(1) | `:708` |
-| `getDependents(id)` | `Set` — direct, O(1) | `:719` |
-| `getAllDependents(id)` | `Set` — transitive closure (BFS); stops at the BaseNote | `:730` |
-| `getEvaluationDependents(id)` | `Set` — transitive closure that crosses the BaseNote: everything to re-evaluate when `id` changes | `:780` |
-| `getAllDependencies(id)` | `Set` — transitive, upward | `:1331` |
-| `getBaseNoteDependents()` | `Set` | `:1360` |
+| `getDependencies(id)` | `IdSet` (or an empty `Set`) — direct, O(1) | `:820` |
+| `getDependents(id)` | `IdSet` (or an empty `Set`) — direct, O(1) | `:831` |
+| `getAllDependents(id)` | `Set` — transitive closure (BFS); stops at the BaseNote | `:842` |
+| `getEvaluationDependents(id)` | `Set` — transitive closure that crosses the BaseNote: everything to re-evaluate when `id` changes | `:892` |
+| `getAllDependencies(id)` | `Set` — transitive, upward | `:1443` |
+| `getBaseNoteDependents()` | `Set` | `:1472` |
 
 `Module.getDirectDependencies(id)` and `Module.getDependentNotes(id)` wrap these and return **Arrays**, not Sets (`src/module.js:416`, `src/module.js:424`).
 
@@ -144,9 +144,9 @@ These back the property-coloured dependency lines and the drag preview. Each is 
 
 | Method | Answers | Line |
 |---|---|---|
-| `getAllAffectedByFrequencyChange(id)` | everything that moves if this note's **frequency** changes | `:1030` |
-| `getAllAffectedByStartTimeChange(id)` | …its **startTime** changes | `:1245` |
-| `getAllAffectedByDurationChange(id)` | …its **duration** changes | `:1159` |
+| `getAllAffectedByFrequencyChange(id)` | everything that moves if this note's **frequency** changes | `:1142` |
+| `getAllAffectedByStartTimeChange(id)` | …its **startTime** changes | `:1357` |
+| `getAllAffectedByDurationChange(id)` | …its **duration** changes | `:1271` |
 
 `Module.getDependentsByProperty(id)` (`src/module.js:451`) calls all three and returns `{frequency: [], startTime: [], duration: []}` — which is exactly what the renderer colours:
 
@@ -154,15 +154,15 @@ These back the property-coloured dependency lines and the drag preview. Each is 
 
 Thicker lines are what the selected note **depends on**; thinner lines are what **depends on it**.
 
-The drag path uses the narrower startTime traversals directly: `getAllStartTimeOnStartTimeDependents(id)` (`:886`), `getAllStartTimeOnDurationDependents(id)` (`:917`), `getAllStartTimeOnFrequencyDependents(id)` (`:977`). A note whose *frequency* references the dragged note does not move when you drag it, and these are how that is known.
+The drag path uses the narrower startTime traversals directly: `getAllStartTimeOnStartTimeDependents(id)` (`:998`), `getAllStartTimeOnDurationDependents(id)` (`:1029`), `getAllStartTimeOnFrequencyDependents(id)` (`:1089`). A note whose *frequency* references the dragged note does not move when you drag it, and these are how that is known.
 
 ### Trees and chains
 
 | Method | Returns | Line |
 |---|---|---|
-| `getChildrenTreeByProperty(id, property)` | `{edges: [{parentId, childId, depth}], maxDepth}` — `property` is `'frequency' \| 'startTime' \| 'duration'` | `:1496` |
-| `getChildrenTreeByAllProperties(id)` | `{edgesByProperty: {frequency: [], startTime: [], duration: []}, maxDepth}` — all three in one traversal. **Not** the same shape as above: the edges are bucketed by originating property, not flat | `:1607` |
-| `getMeasureChain(measureId, isMeasure, getStartTime, isChainLink?)` | `[{id, startSec}]` — the linear measure chain, earliest to latest, O(chain length) | `:1917` |
+| `getChildrenTreeByProperty(id, property)` | `{edges: [{parentId, childId, depth}], maxDepth}` — `property` is `'frequency' \| 'startTime' \| 'duration'` | `:1608` |
+| `getChildrenTreeByAllProperties(id)` | `{edgesByProperty: {frequency: [], startTime: [], duration: []}, maxDepth}` — all three in one traversal. **Not** the same shape as above: the edges are bucketed by originating property, not flat | `:1719` |
+| `getMeasureChain(measureId, isMeasure, getStartTime, isChainLink?)` | `[{id, startSec}]` — the linear measure chain, earliest to latest, O(chain length) | `:2029` |
 
 `getMeasureChain()` is live: `src/player.js:5411` and `src/renderer/webgl2/workspace.js:2478` both use it.
 
@@ -170,13 +170,13 @@ The drag path uses the narrower startTime traversals directly: `getAllStartTimeO
 
 | Method | Returns | Line |
 |---|---|---|
-| `hasDependencyPath(source, target)` | boolean — BFS up the forward index | `:1371` |
-| `detectCycles()` | `Array<Array<id>>` — recursive DFS | `:1400` |
-| `getEvaluationOrder(noteIds)` | `Array<id>` — Kahn topological sort | `:1443` |
-| `removeNote(id)` | — unlinks the note from every index | `:500` |
-| `clear()` | — empties every index | `:1710` |
-| `stats()` | `{noteCount, totalDependencies, avgDependencies, maxDependencies, maxDependents, baseNoteDependents, corruptedNotes}` | `:1881` |
-| `debug()` | console dump | `:1997` |
+| `hasDependencyPath(source, target)` | boolean — BFS up the forward index | `:1483` |
+| `detectCycles()` | `Array<Array<id>>` — recursive DFS | `:1512` |
+| `getEvaluationOrder(noteIds)` | `Array<id>` — Kahn topological sort | `:1555` |
+| `removeNote(id)` | — unlinks the note from every index | `:612` |
+| `clear()` | — empties every index | `:1822` |
+| `stats()` | `{noteCount, totalDependencies, avgDependencies, maxDependencies, maxDependents, baseNoteDependents, corruptedNotes}` | `:1993` |
+| `debug()` | console dump | `:2109` |
 
 ::: warning `getEvaluationOrder`, `detectCycles` and `hasDependencyPath` have no callers in the app
 They are API surface, and they work on **whole notes**. **Evaluation does not use them**, and neither does the cycle guard — both work per variable, below.
@@ -223,15 +223,15 @@ The graph owns this and nothing else does. A property is *corrupted* when its ow
 
 | Method | Effect | Line |
 |---|---|---|
-| `setCorruptionFlags(id, flags)` | stores the u8 bitmask. **Bumps `_corruptionEpoch` only if the value changed**; a `0` deletes the entry. | `:1746` |
-| `getCorruptionFlags(id)` | u8, `0` if clean | `:1763` |
-| `getCorruptionEpoch()` | number | `:1771` |
-| `isNoteCorrupted(id)` | any bit set | `:1781` |
-| `isPropertyCorrupted(id, flag)` | e.g. `flag = 0x04` for frequency | `:1792` |
-| `getCorruptedNotes()` | `Set<id>` — usually empty | `:1811` |
-| `isFrequencyTransitivelyCorrupted(id)` | direct check, then BFS **up** the frequency chain | `:1828` |
-| `getAllFrequencyDependencies(id)` | transitive frequency ancestors | `:1857` |
-| `clearCorruptionFlags(id)` | delete | `:1802` |
+| `setCorruptionFlags(id, flags)` | stores the u8 bitmask. **Bumps `_corruptionEpoch` only if the value changed**; a `0` deletes the entry. | `:1858` |
+| `getCorruptionFlags(id)` | u8, `0` if clean | `:1875` |
+| `getCorruptionEpoch()` | number | `:1883` |
+| `isNoteCorrupted(id)` | any bit set | `:1893` |
+| `isPropertyCorrupted(id, flag)` | e.g. `flag = 0x04` for frequency | `:1904` |
+| `getCorruptedNotes()` | `Set<id>` — usually empty | `:1923` |
+| `isFrequencyTransitivelyCorrupted(id)` | direct check, then BFS **up** the frequency chain | `:1940` |
+| `getAllFrequencyDependencies(id)` | transitive frequency ancestors | `:1969` |
+| `clearCorruptionFlags(id)` | delete | `:1914` |
 
 Flags arrive from `Module._updateCorruptionFlags()` after each evaluation (`src/module.js:726-749`), scoped to the dirty set.
 
@@ -250,7 +250,18 @@ There is no single multiplier. The graph keeps:
 - **9** property-pair inverse maps
 - **1** corruption map
 
-22 indexes, plus the corruption map. An edge is recorded in the all-property pair **and** in each per-property structure it belongs to **and** in the relevant property-pair map. The honest source is `stats()` (`:1881`) — call it on a real module rather than trusting a constant factor.
+22 indexes, plus the corruption map. An edge is recorded in the all-property pair **and** in each per-property structure it belongs to **and** in the relevant property-pair map. The honest source is `stats()` (`:1993`) — call it on a real module rather than trusting a constant factor.
+
+The value of every per-note entry in these maps is an `IdSet` (`:23-118`), not a `Set`. It does what a
+`Set` does — `size`, `has`, `add`, `delete`, `clear`, iteration in insertion order, `forEach`, `values`,
+`keys`, `entries` — and keeps up to two ids in its own fields, becoming a `Set` from the third on.
+Most entries hold one or two ids, for which a `Set` costs 152 B in Node (76 B in Edge) and an
+`IdSet` 56 B (28 B); with nine such maps per note in a typical module, the graph went from about
+1,770 to about 910 B per note in Node on `voices-100000`. The forward maps keep an entry, possibly
+empty, for every registered note: `dependencies.size` is the count of registered notes that
+`getEvaluationDependents()` stops at. Iterating an `IdSet` that holds its ids inline walks a copy of
+them; the graph never changes an `IdSet` while iterating it, and neither should a caller — treat
+what `getDependencies()` and `getDependents()` return as read-only, as before.
 
 ## See also
 

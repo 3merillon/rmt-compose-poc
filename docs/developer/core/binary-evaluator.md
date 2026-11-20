@@ -254,7 +254,7 @@ POW produces an irrational, or ~ / a fallback an approximation
   → BinaryEvaluator._lastEvalWasCorrupted = true          binary-evaluator.js:591
   → evaluateVariable ORs the property's bit into corruptionFlags   :830
   → Module._updateCorruptionFlags() pushes it into the graph   module.js:726-749
-      → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1746
+      → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1858
   → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:1015-1062
       0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
   → the note widget names the kind: exact form, or ≈ for approximate   variable-controls.js:113

@@ -5,6 +5,118 @@
  * replacing the O(n) regex-based scanning in the original implementation.
  */
 
+/** Set's equality (SameValueZero) */
+const sameValueZero = (x, y) => x === y || (x !== x && y !== y);
+
+/**
+ * A set of note ids, the value of every per-note entry in the graph's maps.
+ * It does what a Set does (size, has, add, delete, clear, iteration in
+ * insertion order, forEach, values, keys, entries), and keeps up to two ids in
+ * its own fields, becoming a Set from the third on. Most entries hold one or
+ * two ids, for which a Set costs 152 B in Node (76 B in Edge) and this 56 B
+ * (28 B): nine such maps per note made the graph the largest holder of memory
+ * after the notes themselves.
+ *
+ * Iteration over the inline ids walks a copy of them; the graph never changes
+ * an IdSet while iterating that same IdSet.
+ */
+export class IdSet {
+  constructor() {
+    this._a = undefined;
+    this._b = undefined;
+    this._n = 0;      // ids held in _a, _b (0-2); unused once _big is set
+    this._big = null; // a Set, from the third id on
+  }
+
+  /** An IdSet of what `iterable` holds, in its order. */
+  static from(iterable) {
+    const s = new IdSet();
+    for (const v of iterable) s.add(v);
+    return s;
+  }
+
+  get size() {
+    return this._big !== null ? this._big.size : this._n;
+  }
+
+  has(v) {
+    if (this._big !== null) return this._big.has(v);
+    return (this._n > 0 && sameValueZero(this._a, v)) || (this._n > 1 && sameValueZero(this._b, v));
+  }
+
+  add(v) {
+    if (this._big !== null) {
+      this._big.add(v);
+    } else if (!this.has(v)) {
+      if (this._n === 0) {
+        this._a = v;
+        this._n = 1;
+      } else if (this._n === 1) {
+        this._b = v;
+        this._n = 2;
+      } else {
+        this._big = new Set([this._a, this._b, v]);
+        this._a = undefined;
+        this._b = undefined;
+        this._n = 0;
+      }
+    }
+    return this;
+  }
+
+  delete(v) {
+    if (this._big !== null) return this._big.delete(v);
+    if (this._n > 0 && sameValueZero(this._a, v)) {
+      this._a = this._b;
+      this._b = undefined;
+      this._n--;
+      return true;
+    }
+    if (this._n > 1 && sameValueZero(this._b, v)) {
+      this._b = undefined;
+      this._n = 1;
+      return true;
+    }
+    return false;
+  }
+
+  clear() {
+    this._a = undefined;
+    this._b = undefined;
+    this._n = 0;
+    this._big = null;
+  }
+
+  values() {
+    if (this._big !== null) return this._big.values();
+    const n = this._n;
+    return (n === 0 ? [] : n === 1 ? [this._a] : [this._a, this._b]).values();
+  }
+
+  keys() {
+    return this.values();
+  }
+
+  [Symbol.iterator]() {
+    return this.values();
+  }
+
+  entries() {
+    if (this._big !== null) return this._big.entries();
+    const n = this._n;
+    return (n === 0 ? [] : n === 1 ? [[this._a, this._a]] : [[this._a, this._a], [this._b, this._b]]).values();
+  }
+
+  forEach(callback, thisArg) {
+    for (const v of this.values()) callback.call(thisArg, v, v, this);
+  }
+
+  /** What JSON.stringify gives for a Set */
+  toJSON() {
+    return {};
+  }
+}
+
 /**
  * Dependency graph with bidirectional indexing
  */
@@ -143,7 +255,7 @@ export class DependencyGraph {
 
       if (shouldHave && !currentlyHas) {
         if (!depSet) {
-          depSet = new Set();
+          depSet = new IdSet();
           propMap.set(depNoteId, depSet);
         }
         depSet.add(noteId);
@@ -194,14 +306,14 @@ export class DependencyGraph {
     for (const newDep of newDeps) {
       if (!oldDeps.has(newDep)) {
         if (!this.startTimeDependents.has(newDep)) {
-          this.startTimeDependents.set(newDep, new Set());
+          this.startTimeDependents.set(newDep, new IdSet());
         }
         this.startTimeDependents.get(newDep).add(noteId);
       }
     }
 
     // Update forward index
-    this.startTimeDependencies.set(noteId, newDeps);
+    this.startTimeDependencies.set(noteId, IdSet.from(newDeps));
 
     // Track baseNote references
     if (referencesBase) {
@@ -256,14 +368,14 @@ export class DependencyGraph {
     for (const newDep of newDeps) {
       if (!oldDeps.has(newDep)) {
         if (!this.frequencyDependents.has(newDep)) {
-          this.frequencyDependents.set(newDep, new Set());
+          this.frequencyDependents.set(newDep, new IdSet());
         }
         this.frequencyDependents.get(newDep).add(noteId);
       }
     }
 
     // Update forward index
-    this.frequencyDependencies.set(noteId, newDeps);
+    this.frequencyDependencies.set(noteId, IdSet.from(newDeps));
 
     // Track baseNote references
     if (referencesBase) {
@@ -295,7 +407,7 @@ export class DependencyGraph {
 
       if (shouldHave && !currentlyHas) {
         if (!depSet) {
-          depSet = new Set();
+          depSet = new IdSet();
           propMap.set(depNoteId, depSet);
         }
         depSet.add(noteId);
@@ -367,14 +479,14 @@ export class DependencyGraph {
     for (const newDep of newDeps) {
       if (!oldDeps.has(newDep)) {
         if (!this.durationDependents.has(newDep)) {
-          this.durationDependents.set(newDep, new Set());
+          this.durationDependents.set(newDep, new IdSet());
         }
         this.durationDependents.get(newDep).add(noteId);
       }
     }
 
     // Update forward index
-    this.durationDependencies.set(noteId, newDeps);
+    this.durationDependencies.set(noteId, IdSet.from(newDeps));
 
     // Track baseNote references
     if (referencesBase) {
@@ -406,7 +518,7 @@ export class DependencyGraph {
 
       if (shouldHave && !currentlyHas) {
         if (!depSet) {
-          depSet = new Set();
+          depSet = new IdSet();
           propMap.set(depNoteId, depSet);
         }
         depSet.add(noteId);
@@ -468,14 +580,14 @@ export class DependencyGraph {
     for (const newDep of newDeps) {
       if (!oldDeps.has(newDep)) {
         if (!this.dependents.has(newDep)) {
-          this.dependents.set(newDep, new Set());
+          this.dependents.set(newDep, new IdSet());
         }
         this.dependents.get(newDep).add(noteId);
       }
     }
 
     // Update forward index
-    this.dependencies.set(noteId, newDeps);
+    this.dependencies.set(noteId, IdSet.from(newDeps));
 
     // Track baseNote references
     if (referencesBase) {
