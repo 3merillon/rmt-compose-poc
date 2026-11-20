@@ -538,7 +538,7 @@ node scripts/perf/converge.mjs
 
 Note ids go up to 16,777,215 (`MAX_NOTE_ID`, `src/binary-note.js`); the loader refuses ids above it,
 and references above 65535 compile to `LOAD_REF_WIDE`. The UI's import paths (Load Module, library
-upload, Load UI, Copy to Modules) accept up to 250,000 notes, and Load Module files up to 64 MB
+upload, Load UI, Copy to Modules) accept up to 500,000 notes, and Load Module files up to 120 MB
 (`MAX_MODULE_NOTES`, `MAX_MODULE_BYTES` in `src/limits.js`).
 
 A loaded note costs about 2.4 KB of JavaScript heap in Edge (the whole app: module, graph,
@@ -580,6 +580,10 @@ Two limits come before it:
   holds any character above U+00FF is stored at two bytes per character, which halves the size it
   can reach.
 - **Time.** An edit costs about 6 to 8 µs per note of the module, and a load about 60 to 90 µs.
+
+The import limits sit below both: 500,000 notes take about 1.1 GB and save as about 79 million
+characters, and a Load Module file of at most 120 MB keeps its text under the 127 MB the autosave can
+write (as long as it holds no character above U+00FF).
 
 The autosave keeps the whole module in IndexedDB (`src/store/autosave.js`), far past what
 localStorage could hold: `voices-100000` (15.5 million characters as JSON) is saved and restored

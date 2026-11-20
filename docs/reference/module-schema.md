@@ -226,7 +226,7 @@ Different entry points apply different checks. This is the exhaustive picture.
 
 | Entry point | Size cap | Structure | Expressions | Colors |
 |---|---|---|---|---|
-| **Load Module** (file → workspace) | 64 MB | depth ≤ 20, ≤ 250 000 notes | — | — |
+| **Load Module** (file → workspace) | 120 MB | depth ≤ 20, ≤ 500 000 notes | — | — |
 | **Library upload** (the `+` placeholder in the module bar) | — | full | checked | checked |
 | **Load UI** import | — | full, per embedded module | checked | checked |
 | **Copy to Modules** (group selection → library) | — | full | checked | checked |
@@ -236,14 +236,14 @@ Hard limits, wherever a module is read:
 
 | Limit | Value |
 |---|---|
-| Max file size (Load Module) | **64 MB** (`MAX_MODULE_BYTES`, `src/limits.js`) |
-| Max notes | **250 000** (`MAX_MODULE_NOTES`, `src/limits.js`) |
+| Max file size (Load Module) | **120 MB** (`MAX_MODULE_BYTES`, `src/limits.js`) |
+| Max notes | **500 000** (`MAX_MODULE_NOTES`, `src/limits.js`) |
 | Max JSON nesting depth (Load Module) | **20** |
 | Valid note id | integer, **0 – 16 777 215** (`MAX_NOTE_ID`) |
 | Max expression length | **10 000 characters** |
 | Note ids blocked outright | `__proto__`, `constructor`, `prototype` |
 
-Toasts you can hit on load: `Module file too large (max 64 MB)`, `Invalid module file structure`, `Module loaded successfully`.
+Toasts you can hit on load: `Module file too large (max 120 MB)`, `Invalid module file structure`, `Module loaded successfully`.
 
 The note limit is not the ids: a loaded note costs about 2.4 KB of JavaScript heap in the browser, and a tab's heap stops near 4 GB (100 000 notes take about 240 MB). What limits a module first, the autosave and the time an edit takes, is in [Limits](/developer/performance#limits). The id ceiling is 2^24 − 1. The renderer's picking draws each note's id in 24 bits of colour, and 2^24 − 1 is also the largest integer a float32 vertex attribute holds exactly. The loader rejects (and skips) any note whose id is above 16 777 215, and both expression parsers enforce the same range at compile time — `[16777216].f` is a parse error (`Note IDs must be integers between 0 and 16777215`), not a silently truncated reference to a different note.
 

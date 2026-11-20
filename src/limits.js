@@ -10,7 +10,12 @@
  * a character above U+00FF), and the time an edit takes (about 4 s at
  * 500,000 notes). See "Limits" in docs/developer/performance.md.
  */
-export const MAX_MODULE_NOTES = 250000;
+export const MAX_MODULE_NOTES = 500000;
 
-/** About 160 bytes of JSON per note of a typical module, with room to spare */
-export const MAX_MODULE_BYTES = 64 * 1024 * 1024;
+/**
+ * About 160 bytes of JSON per note of a typical module, with room to spare.
+ * Below 127 MB, so that the module's text stays within one IndexedDB value
+ * when the autosave writes it (one byte per character, unless the text holds
+ * one above U+00FF)
+ */
+export const MAX_MODULE_BYTES = 120 * 1024 * 1024;
