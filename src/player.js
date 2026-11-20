@@ -9,6 +9,7 @@ import { eventBus } from './utils/event-bus.js';
 import { audioEngine } from './player/audio-engine.js';
 import { setModule, setEvaluatedNotes } from './store/app-state.js';
 import { moduleSnapshot } from './store/history.js';
+import { saveModuleText, saveModuleTextNow, loadSavedModuleText, clearSavedModule, keepUnloadable } from './store/autosave.js';
 import { multiplyExpressionByFraction } from './utils/simplify.js';
 import { Workspace, startParentIdFromRaw, measureChainLinkParentId } from './renderer/webgl2/workspace.js';
 import { isMeasureNote, EXPRESSION_VARS } from './note.js';
@@ -514,13 +515,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 wakeLock = null;
             }
             // Persist current module snapshot when tab becomes hidden to ensure reliability
+            // (written now, not after a frame: a hidden tab may be discarded)
             try {
-              const snap = (myModule && typeof myModule.createModuleJSON === 'function')
-                ? myModule.createModuleJSON()
-                : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
-              if (snap) {
-                localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
-              }
+              const text = liveModuleText();
+              if (text != null) saveModuleTextNow(text, 'visibilitychange');
             } catch (e) {
               // A silent failure here means the autosave quietly stops
               console.error('[RMT] Autosave failed (visibilitychange):', e);
@@ -889,18 +887,22 @@ document.addEventListener('DOMContentLoaded', async function() {
         }, 0);
     }
   
-    // Load last session from localStorage if available; otherwise load default module
+    // Load the last session if there is one (src/store/autosave.js: IndexedDB, or a
+    // module left in localStorage); otherwise load the default module
     let savedSnapshot = null;
+    let saved = null;
     try {
-      savedSnapshot = JSON.parse(localStorage.getItem('rmt:moduleSnapshot:v1') || 'null');
+      saved = await loadSavedModuleText();
+      savedSnapshot = saved ? JSON.parse(saved.text) : null;
       // Validate the snapshot has proper expression strings (not legacy function format)
       if (savedSnapshot && savedSnapshot.baseNote) {
         const testExpr = savedSnapshot.baseNote.frequency || savedSnapshot.baseNote.duration;
         // Check if any expression contains legacy function wrapper patterns
         if (testExpr && (typeof testExpr !== 'string' || testExpr.includes('newFunc') || testExpr.includes('__evalExpr'))) {
           console.warn('[RMT] Detected legacy localStorage snapshot format, clearing...');
-          localStorage.removeItem('rmt:moduleSnapshot:v1');
+          await clearSavedModule();
           savedSnapshot = null;
+          saved = null;
         }
       }
     } catch {
@@ -910,13 +912,15 @@ document.addEventListener('DOMContentLoaded', async function() {
     let myModule;
     try {
       myModule = await Module.loadFromJSON(savedSnapshot || 'modules/defaultModule.json');
+      // A session found in localStorage moves to IndexedDB now, edited or not
+      if (saved && saved.source === 'localStorage') saveModuleTextNow(saved.text, 'migration');
     } catch (e) {
       if (!savedSnapshot) throw e;
       // The last session could not be loaded (for instance a module of the old
       // time model the conversion refuses). Keep it under its own key before
       // the autosave replaces the snapshot, and start from the default module.
-      try { localStorage.setItem('rmt:moduleSnapshot:v1:unloadable', JSON.stringify(savedSnapshot)); } catch {}
-      console.error('[RMT] The last session could not be loaded and was kept as rmt:moduleSnapshot:v1:unloadable: ' + (e && e.message));
+      const keptIn = await keepUnloadable(saved.text);
+      console.error(`[RMT] The last session could not be loaded and was kept${keptIn ? ' in ' + keptIn : ' nowhere (no storage)'}: ` + (e && e.message));
       myModule = await Module.loadFromJSON('modules/defaultModule.json');
     }
     console.log('[RMT] Loaded Module with binary expression system');
@@ -4943,7 +4947,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       eventBus.on('history:capture', ({ snapshot, snapshotStr }) => {
         try {
           const s = (typeof snapshotStr === 'string') ? snapshotStr : JSON.stringify(snapshot);
-          localStorage.setItem('rmt:moduleSnapshot:v1', s);
+          // Written after the frame that shows the edit (src/store/autosave.js)
+          saveModuleText(s, 'history capture');
         } catch (e) {
           console.error('[RMT] Autosave failed (history capture):', e);
         }
@@ -5632,6 +5637,16 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
 /* ===== History Integration (Undo/Redo) ===== */
 
+// The module as the autosave keeps it: the text of createModuleJSON()
+// (createModuleJSONString makes it without serializing every note again)
+function liveModuleText() {
+  if (myModule && typeof myModule.createModuleJSONString === 'function') return myModule.createModuleJSONString();
+  const snap = (myModule && typeof myModule.createModuleJSON === 'function')
+    ? myModule.createModuleJSON()
+    : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
+  return snap ? JSON.stringify(snap) : null;
+}
+
 function captureSnapshot(label = 'Change') {
   // The module's JSON text, made without serializing every note again
   // (Module.createModuleJSONString: the same text as JSON.stringify of
@@ -5674,12 +5689,8 @@ function captureSnapshot(label = 'Change') {
 try {
   window.addEventListener('beforeunload', () => {
     try {
-      const snap = (myModule && typeof myModule.createModuleJSON === 'function')
-        ? myModule.createModuleJSON()
-        : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
-      if (snap) {
-        localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
-      }
+      const text = liveModuleText();
+      if (text != null) saveModuleTextNow(text, 'beforeunload');
     } catch (e) {
       console.error('[RMT] Autosave failed (beforeunload):', e);
     }
@@ -5763,12 +5774,8 @@ try {
 
       // Persist restored state so reloads resume exactly where the user left
       try {
-        const snap = (myModule && typeof myModule.createModuleJSON === 'function')
-          ? myModule.createModuleJSON()
-          : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
-        if (snap) {
-          localStorage.setItem('rmt:moduleSnapshot:v1', JSON.stringify(snap));
-        }
+        const text = liveModuleText();
+        if (text != null) saveModuleText(text, 'post-restore');
       } catch (e) {
         console.error('[RMT] Autosave failed (post-restore):', e);
       }

@@ -6,7 +6,8 @@
  * Runs one sequence of edits (octave steps, a move, a resize, a group move,
  * undo, redo) through the app's own event bus on each server, in headless
  * Edge, and after every step records SHA-256 digests of:
- *   - the autosave (localStorage rmt:moduleSnapshot:v1),
+ *   - the autosave (src/store/autosave.js where the server has it, after its
+ *     write has landed; else localStorage rmt:moduleSnapshot:v1),
  *   - the undo and redo stacks (each entry's label and snapshot text),
  *   - what the renderer holds for drawing (instance positions, colours, flags,
  *     corruption, envelopes, note labels, instance count, module end).
@@ -51,6 +52,12 @@ async function run(browser, base) {
 
   const steps = await page.evaluate(async () => {
     const { history } = await import('/src/store/history.js');
+    let A = null;
+    try { A = await import('/src/store/autosave.js'); } catch {}
+    const readSaved = async () => {
+      if (A && typeof A.readSavedModuleText === 'function') { await A.whenSaved(); return (await A.readSavedModuleText()) || ''; }
+      return localStorage.getItem('rmt:moduleSnapshot:v1') || '';
+    };
     const P = window.__rmtPerf, r = window.__rmtRenderer;
     const enc = new TextEncoder();
     const digest = async (data) => {
@@ -87,7 +94,7 @@ async function run(browser, base) {
     for (const [label, act] of plan) {
       act();
       await settle();
-      const saved = localStorage.getItem('rmt:moduleSnapshot:v1') || '';
+      const saved = await readSaved();
       const fresh = JSON.stringify(mod().createModuleJSON());
       const R = window.__rmtRenderer;
       const labels = [(R._noteFracNumStrs || []).join('|'), (R._noteFracDenStrs || []).join('|')].join('#');
