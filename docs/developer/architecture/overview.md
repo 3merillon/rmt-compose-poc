@@ -180,21 +180,16 @@ Headless Chromium, 1600×900, fast Windows desktop. 60 fps budget = 16.6 ms.
 
 Three things do the work:
 
-**One draw per visual class, not per note.** Note bodies are a single
-`gl.drawArraysInstanced(TRIANGLE_FAN, 0, 4, N)` for the entire score
-(`renderer.js:3121`). So are the silence rings, the octave guides, the measure bars, the dependency
-link-lines and every glyph. `renderer.js` holds 53 `drawArraysInstanced` call sites in total — one
-*per pass*, not per note (the one exception is `_drawRingIdxList`, which still loops per instance
-while a drag is active). The GPU is not the bottleneck; CPU-side per-note work is.
+The renderer batches note bodies and overlays in draw order. For large scores a tree bounds continuous runs of slots along the time axis. The body pass draws the runs that intersect the viewport (`renderer.js:3195`). Each draw includes the original instance offset in its depth calculation. Measure bars, dependency lines and glyphs use their own instanced passes.
 
 **An idle canvas issues zero draw calls.** The rAF loop always ticks, but `_render()` early-returns
-on `!this.needsRedraw` (`renderer.js:3028`). Two change-guards make that gate real: `setPlayhead()`
-returns early when the time did not move (`renderer.js:1489`), and `updateViewportBasis()` returns
-early on an unchanged camera basis (`renderer.js:643-647`). Without them, `player.js`'s own rAF loop
+on `!this.needsRedraw` (`renderer.js:3100`). Two change-guards make that gate real: `setPlayhead()`
+returns early when the time did not move (`renderer.js:1491`), and `updateViewportBasis()` returns
+early on an unchanged camera basis (`renderer.js:644-648`). Without them, `player.js`'s own rAF loop
 kept the scene permanently dirty.
 
 **Viewport culling on the overlay pass.** The per-note loop that emits pull tabs, arrows, fraction
-dividers and text is culled against the viewport (`renderer.js:7209-7240`). This is what makes 100k
+dividers and text is culled against the viewport (`renderer.js:7290-7321`). This is what makes 100k
 notes tractable — without it, overlay cost scaled with the size of the *module* rather than with
 what is on screen.
 

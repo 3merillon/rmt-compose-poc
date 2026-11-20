@@ -1,3 +1,4 @@
+import { InstanceRanges } from './instance-ranges.js';
 import { defaultRendererConfig, normalizeRendererConfig, deepMerge } from './renderer-config.js';
 import { toNumber } from '../../utils/fraction-num.js';
 import { noteLabel, LINE_LABEL } from './note-label.js';
@@ -1336,6 +1337,7 @@ export class RendererAdapter {
     }
 
     this.instanceCount = N;
+    this._rangeIndex = N >= 512 ? new InstanceRanges(this.posSize) : null;
     this._syncTails();
 
     // Upload to GPU
@@ -1843,6 +1845,7 @@ export class RendererAdapter {
       uniform vec2 u_offset;                   // canvas top-left in page CSS px
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance (negative brings closer)
+      uniform int u_instanceBase;
       uniform vec2 u_dragOffset;               // (dx, dw) in world units for dragging
 
       out vec4 v_color;
@@ -1860,7 +1863,7 @@ export class RendererAdapter {
         // Convert to NDC
         float ndcX = (local.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (local.y / u_viewport.y) * 2.0; // invert Y
-        float ndcZ = u_layerBase + float(gl_InstanceID) * u_layerStep;
+        float ndcZ = u_layerBase + float(u_instanceBase + gl_InstanceID) * u_layerStep;
         gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);
         v_color = a_color;
         v_css = local;
@@ -1966,6 +1969,7 @@ export class RendererAdapter {
       uniform vec2 u_offset;                   // canvas top-left in page CSS px
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance
+      uniform int u_instanceBase;
       uniform vec2 u_scale;                    // (px per world unit X, px per world unit Y)
       uniform vec2 u_dragOffset;               // (dx, dw) in world units for dragging
 
@@ -1989,7 +1993,7 @@ export class RendererAdapter {
 
         float ndcX = (localCss.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (localCss.y / u_viewport.y) * 2.0;
-        float ndcZ = u_layerBase + float(gl_InstanceID) * u_layerStep;
+        float ndcZ = u_layerBase + float(u_instanceBase + gl_InstanceID) * u_layerStep;
         gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);
         v_color = a_color;
         v_css = localCss;
@@ -2468,6 +2472,7 @@ export class RendererAdapter {
       uniform vec2 u_offset;                   // canvas top-left in page CSS px
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance
+      uniform int u_instanceBase;
       uniform vec2 u_scale;                    // (px per world X, px per world Y)
       uniform vec2 u_dragOffset;               // (dx, dw) in world units for dragging/resizing
 
@@ -2487,7 +2492,7 @@ export class RendererAdapter {
 
         float ndcX = (localCss.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (localCss.y / u_viewport.y) * 2.0;
-        float ndcZ = u_layerBase + float(gl_InstanceID) * u_layerStep;
+        float ndcZ = u_layerBase + float(u_instanceBase + gl_InstanceID) * u_layerStep;
         gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);
         v_uv = a_unit;
         v_noteSize = sizeAdjusted * u_scale;
@@ -2570,6 +2575,7 @@ export class RendererAdapter {
       uniform vec2  u_offset;                  // canvas top-left in page CSS px
       uniform float u_layerBase;               // depth base
       uniform float u_layerStep;               // depth step per instance
+      uniform int u_instanceBase;
       uniform vec2  u_scale;                   // (px per world X, px per world Y)
       uniform vec2  u_dragOffset;              // (dx, dw) in world units for dragging
 
@@ -2589,7 +2595,7 @@ export class RendererAdapter {
 
         float ndcX = (localCss.x / u_viewport.x) * 2.0 - 1.0;
         float ndcY = 1.0 - (localCss.y / u_viewport.y) * 2.0;
-        float ndcZ = u_layerBase + float(gl_InstanceID) * u_layerStep;
+        float ndcZ = u_layerBase + float(u_instanceBase + gl_InstanceID) * u_layerStep;
         gl_Position = vec4(ndcX, ndcY, ndcZ, 1.0);
 
         v_uv = a_unit;
@@ -3020,6 +3026,72 @@ export class RendererAdapter {
     gl.depthMask(true);
   }
 
+  // Compute ranges once for all body and overlay passes of this frame.
+  _updateVisibleInstances(vpW) {
+    const ranges = this._nextVisibleRanges || [];
+    const old = this._visibleRanges || [];
+    const m = this.matrix;
+    if (!this._rangeIndex || m[1] !== 0 || m[3] !== 0 || !(m[0] > 0)) {
+      ranges.length = 0;
+      ranges.push(0, this.instanceCount);
+    } else {
+      const x0 = (this.canvasOffset.x - m[6]) / m[0];
+      const x1 = x0 + vpW / m[0];
+      // Include the overlay's CSS padding and Float32 shader roundoff at large
+      // coordinates. During previews either the origin or the width can move.
+      const pad = 4 / m[0] + Math.max(Math.abs(x0), Math.abs(x1)) * 1e-6
+        + 2 * (Math.abs(this._dragOffsetX || 0) + Math.abs(this._dragOffsetW || 0));
+      this._rangeIndex.collect(x0 - pad, x1 + pad, ranges);
+    }
+    if (ranges.length !== old.length || ranges.some((v, i) => v !== old[i])) {
+      this._lastTabEpoch = this._lastArrowEpoch = -1;
+    }
+    this._nextVisibleRanges = old;
+    this._visibleRanges = ranges;
+  }
+
+  _uploadVisibleRegions(data) {
+    const gl = this.gl;
+    for (let j = 0; j < this._visibleRanges.length; j += 2) {
+      const start = this._visibleRanges[j], end = this._visibleRanges[j + 1];
+      if (end > start) gl.bufferSubData(gl.ARRAY_BUFFER, start * 16, data, start * 4, (end - start) * 4);
+    }
+  }
+
+  _drawVisibleInstances(program, regionBuffer = null) {
+    const gl = this.gl, ranges = this._visibleRanges;
+    if (ranges.length === 2 && ranges[0] === 0 && ranges[1] === this.instanceCount) {
+      gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+      return;
+    }
+    if (!ranges.length) return;
+    const uniforms = this._instanceBaseUniforms || (this._instanceBaseUniforms = new WeakMap());
+    if (!uniforms.has(program)) uniforms.set(program, gl.getUniformLocation(program, 'u_instanceBase'));
+    const base = uniforms.get(program);
+    const pointer = (loc, buffer, size, first) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 0, first * size * 4);
+    };
+    const bind = first => {
+      pointer(1, this.rectInstancePosSizeBuffer, 4, first);
+      pointer(2, this.rectInstanceColorBuffer, 4, first);
+      if (regionBuffer) pointer(4, regionBuffer, 4, first);
+      pointer(5, this.rectInstanceFlagsBuffer, 1, first);
+      pointer(6, this.rectInstanceDragFlagsBuffer, 1, first);
+      pointer(7, this.rectInstanceCorruptionBuffer, 1, first);
+      pointer(8, this.rectInstanceEnvBuffer, 4, first);
+      gl.uniform1i(base, first);
+    };
+    for (let j = 0; j < ranges.length; j += 2) {
+      const first = ranges[j];
+      bind(first);
+      gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, ranges[j + 1] - first);
+    }
+    bind(0);
+  }
+
+
+
   _render() {
     const gl = this.gl;
     const canvas = this.canvas;
@@ -3049,6 +3121,8 @@ export class RendererAdapter {
     // Update canvas offset for proper coordinate transformation
     this.canvasOffset = { x: rectCss.left, y: rectCss.top };
     
+
+    this._updateVisibleInstances(vpW);
 
     // Tails first, under the note bodies: a note that follows paints over the tail
     // of the one before. Hidden while a drag previews new positions (they return
@@ -3118,7 +3192,7 @@ export class RendererAdapter {
 
       // Upload per-instance flags (silence mask) is handled during sync() to avoid per-frame uploads
  
-      gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+      this._drawVisibleInstances(prog);
       gl.bindVertexArray(null);
 
       // Second pass for borders is no longer needed because border is integrated
@@ -3881,6 +3955,7 @@ export class RendererAdapter {
       const h  = this.posSize[base + 3];
  
       // Update CPU-side cache
+      this._rangeIndex = null; // direct geometry preview; rebuilt on sync
       this.posSize[base + 0] = xw;
       this.posSize[base + 2] = ww;
  
@@ -3938,6 +4013,7 @@ export class RendererAdapter {
         const xw = startSec * this._cfgSX() * xScale;
         const ww = durationSec * this._cfgSX() * xScale;
 
+        this._rangeIndex = null;
         // Write back only x and w; y/h remain unchanged
         this.posSize[base + 0] = xw;
         this.posSize[base + 2] = ww;
@@ -5355,7 +5431,9 @@ export class RendererAdapter {
               try {
                 const Ninst = Math.max(0, this.instanceCount | 0);
                 const denom = this._cfgSX() * (this.currentXScaleFactor || 1.0);
-                for (let i = 0; i < Ninst; i++) {
+                if (this._rangeIndex && denom > 0 && Number.isFinite(this._rangeIndex.right[1])) {
+                  endFromNotes = Math.max(0, this._rangeIndex.right[1] / denom);
+                } else for (let i = 0; i < Ninst; i++) {
                   const o = i * 4;
                   const endSec = ((this.posSize[o + 0] || 0) + (this.posSize[o + 2] || 0)) / denom;
                   if (isFinite(endSec)) endFromNotes = Math.max(endFromNotes, endSec);
@@ -5541,7 +5619,9 @@ const e = startSec + addDx + durSec;
         let endFromNotes = 0;
         const Ninst = Math.max(0, this.instanceCount | 0);
         const denom = this._cfgSX() * (this.currentXScaleFactor || 1.0);
-        for (let i = 0; i < Ninst; i++) {
+        if (this._rangeIndex && denom > 0 && Number.isFinite(this._rangeIndex.right[1])) {
+          endFromNotes = Math.max(0, this._rangeIndex.right[1] / denom);
+        } else for (let i = 0; i < Ninst; i++) {
           const o = i * 4;
           const endSec = ((this.posSize[o + 0] || 0) + (this.posSize[o + 2] || 0)) / denom;
           if (isFinite(endSec)) endFromNotes = Math.max(endFromNotes, endSec);
@@ -6670,6 +6750,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
       const vpW = Math.max(1, rectCss.width);
       const vpH = Math.max(1, rectCss.height);
 
+      const ranges = this._visibleRanges;
       const m = this.matrix;
       const off = this.canvasOffset || { x: 0, y: 0 };
 
@@ -6713,7 +6794,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
           _dividerRegions = neededLen ? new Float32Array(neededLen) : null;
           _anyDivider = false; // must rebuild flags for the new buffer
         }
-        if (!_silenceEraseRegions || _silenceEraseRegions.length !== neededLen) {
+        if (this.enableSilenceEraseBands && (!_silenceEraseRegions || _silenceEraseRegions.length !== neededLen)) {
           _silenceEraseRegions = neededLen ? new Float32Array(neededLen) : null;
           _anySilenceErase = false; // must rebuild flags for the new buffer
         }
@@ -6743,7 +6824,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
               ? this._tabInnerRegions : new Float32Array(N * 4);
 
             const borderCss = Math.max(1, Math.round(1.0 * (this.xScalePxPerWU || 1.0)));
-            for (let i = 0; i < N; i++) {
+            for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
               const o = i * 4;
               const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
               const hCss = this.posSize[o + 3] * (this.yScalePxPerWU || 1.0);
@@ -6777,10 +6858,10 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             if (glUp) {
               glUp.bindVertexArray(this.rectVAO);
               glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
-              glUp.bufferData(glUp.ARRAY_BUFFER, this._tabRegions, glUp.DYNAMIC_DRAW);
+              this._uploadVisibleRegions(this._tabRegions);
               if (this.rectInstanceTabInnerBuffer) {
                 glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabInnerBuffer);
-                glUp.bufferData(glUp.ARRAY_BUFFER, this._tabInnerRegions, glUp.DYNAMIC_DRAW);
+                this._uploadVisibleRegions(this._tabInnerRegions);
               }
               glUp.bindBuffer(glUp.ARRAY_BUFFER, null);
               glUp.bindVertexArray(null);
@@ -6793,7 +6874,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             // Resize preview: update only flagged instances to avoid O(N) work every frame
             const borderCss = Math.max(1, Math.round(1.0 * (this.xScalePxPerWU || 1.0)));
             const Nloc = this.instanceCount;
-            for (let i = 0; i < Nloc; i++) {
+            for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
               if (this._dragFlags[i] !== 1.0) continue;
               const o = i * 4;
               const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
@@ -6822,10 +6903,10 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             if (glUp) {
               glUp.bindVertexArray(this.rectVAO);
               glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
-              glUp.bufferData(glUp.ARRAY_BUFFER, this._tabRegions, glUp.DYNAMIC_DRAW);
+              this._uploadVisibleRegions(this._tabRegions);
               if (this.rectInstanceTabInnerBuffer) {
                 glUp.bindBuffer(glUp.ARRAY_BUFFER, this.rectInstanceTabInnerBuffer);
-                glUp.bufferData(glUp.ARRAY_BUFFER, this._tabInnerRegions, glUp.DYNAMIC_DRAW);
+                this._uploadVisibleRegions(this._tabInnerRegions);
               }
               glUp.bindBuffer(glUp.ARRAY_BUFFER, null);
               glUp.bindVertexArray(null);
@@ -6875,7 +6956,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
           // Point attribute 4 to primary buffer, then draw
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceTabRegionBuffer);
 
           // Pass 2: inner vertical bar (stronger)
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.6);
@@ -6886,9 +6967,9 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
           } else {
             // Fallback: re-upload inner to primary buffer if secondary not available
             gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
-            gl.bufferData(gl.ARRAY_BUFFER, this._tabInnerRegions, gl.DYNAMIC_DRAW);
+            this._uploadVisibleRegions(this._tabInnerRegions);
           }
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceTabInnerBuffer || this.rectInstanceTabRegionBuffer);
 
           // Restore attribute 4 to primary buffer for consistency
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
@@ -6962,7 +7043,7 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
             const borderCssExact = (this.xScalePxPerWU || 1.0);
             const epsCss = 0.5;
 
-            for (let i = 0; i < N; i++) {
+            for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
               const o = i * 4;
               const wCss = this.posSize[o + 2] * (this.xScalePxPerWU || 1.0);
               const hCss = this.posSize[o + 3] * (this.yScalePxPerWU || 1.0);
@@ -7058,19 +7139,19 @@ if (uMask) gl.uniform1f(uMask, movingSel ? 1.0 : 0.0);
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.15);
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowRegionBuffer);
           if (mustUploadArrow) {
-            gl.bufferData(gl.ARRAY_BUFFER, this._arrowUpRegions, gl.DYNAMIC_DRAW);
+            this._uploadVisibleRegions(this._arrowUpRegions);
           }
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, N);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceArrowRegionBuffer);
 
           // Lower half (same tint to avoid seam brightness mismatch)
           if (uCol) gl.uniform4f(uCol, 1.0, 1.0, 1.0, 0.15);
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceArrowDownRegionBuffer);
           if (mustUploadArrow) {
-            gl.bufferData(gl.ARRAY_BUFFER, this._arrowDownRegions, gl.DYNAMIC_DRAW);
+            this._uploadVisibleRegions(this._arrowDownRegions);
           }
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, N);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceArrowDownRegionBuffer);
 
           // Mark successful upload epoch to prevent redundant buffer traffic next frames
           if (mustUploadArrow) {
@@ -7220,7 +7301,7 @@ try {
       const cullPadX = 2 + (this._dragActive
         ? Math.abs((m[0] || 0) * (this._dragOffsetX || 0)) + Math.abs((m[0] || 0) * (this._dragOffsetW || 0))
         : 0);
-      for (let i = 0; i < this.instanceCount; i++) {
+      for (let range = 0; range < ranges.length; range += 2) for (let i = ranges[range]; i < ranges[range + 1]; i++) {
         const o = i * 4;
         const so = i * 2;
 
@@ -7803,9 +7884,9 @@ try {
 
           gl.bindVertexArray(this.rectVAO);
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDividerRegionBuffer);
-          gl.bufferData(gl.ARRAY_BUFFER, this._silenceEraseRegions, gl.DYNAMIC_DRAW);
+          this._uploadVisibleRegions(this._silenceEraseRegions);
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceDividerRegionBuffer);
 
           // Restore attribute 4 to primary buffer
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
@@ -7860,9 +7941,9 @@ try {
 
           gl.bindVertexArray(this.rectVAO);
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceDividerRegionBuffer);
-          gl.bufferData(gl.ARRAY_BUFFER, _dividerRegions, gl.DYNAMIC_DRAW);
+          this._uploadVisibleRegions(_dividerRegions);
           gl.vertexAttribPointer(4, 4, gl.FLOAT, false, 0, 0);
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+          this._drawVisibleInstances(this.tabMaskProgram, this.rectInstanceDividerRegionBuffer);
 
           // Restore attribute 4 to primary buffer
           gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstanceTabRegionBuffer);
@@ -7937,7 +8018,7 @@ try {
 
           gl.bindVertexArray(this.rectVAO);
           // Uses the existing per-instance attributes (posSize, flags)
-          gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.instanceCount);
+          this._drawVisibleInstances(this.silenceDashRingProgram);
           gl.bindVertexArray(null);
         }
       } catch {}

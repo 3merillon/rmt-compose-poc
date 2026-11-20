@@ -175,7 +175,7 @@ They are not interchangeable.
 
 ### `renderer.setConfig(partial)` — geometry and the playhead
 
-`src/renderer/webgl2/renderer.js:339`. Deep-merges a partial into `this._config` (via `normalizeRendererConfig`) and sets
+`src/renderer/webgl2/renderer.js:340`. Deep-merges a partial into `this._config` (via `normalizeRendererConfig`) and sets
 `needsRedraw`. The theme manager sends note geometry and the playhead colour, because the playhead is
 already config-driven:
 
@@ -192,7 +192,7 @@ renderer.setConfig({
 
 ### `renderer.setThemeColors(colors)` — structural GL colours
 
-`renderer.js:354`. Takes **hex strings**, converts to RGBA float arrays, and stores them on
+`renderer.js:355`. Takes **hex strings**, converts to RGBA float arrays, and stores them on
 `this._themeColors`. It also clears `_octaveLabelCache` and bumps `_colorEpoch` **and** `_viewEpoch`,
 because canvas-textured labels are cached by string key with no colour in the key — without the
 invalidation they would keep rendering in the old accent.
@@ -208,7 +208,7 @@ renderer.setThemeColors({
 Reads go through accessors with baked fallbacks matching the pre-theme literals —
 `_accentRgba()`, `_noteBorderRgba()`, `_measureBarRgb()`, `_selectionRingRgba()`,
 `_hoverRingRgba()`, `_depFrequencyRgba()` / `_depStartTimeRgba()` / `_depDurationRgba()`,
-`_noteTextRgba()` / `_noteTextHex()` (`renderer.js:387-401`) — so the renderer draws correctly
+`_noteTextRgba()` / `_noteTextHex()` (`renderer.js:388-402`) — so the renderer draws correctly
 even if `setThemeColors` was never called.
 
 | Method | Input | Effect | Triggers a re-sync? |
@@ -238,26 +238,26 @@ actually costs.
 
 | GL element | Token | Source |
 |---|---|---|
-| Note body **border** (every note, not just the base) | `noteBorder` | `renderer.js:3080` |
-| Silence dashed ring | `noteBorder` | `renderer.js:7671`, `:7905` |
-| BaseNote circle fill | `accent` | `renderer.js:5694` |
-| BaseNote circle border | `noteBorder` | `renderer.js:5695` |
-| Octave / base guide lines | `accent` (alpha 0.9 primary, 0.35 secondary) | `renderer.js:9281`, `:9729` |
-| Note ID labels | `accent` | `renderer.js:7306-7311` |
-| BaseNote fraction label | `accent` | `renderer.js:6414` |
-| Octave-guide + measure-triangle ID labels | `accent` | `renderer.js:8051`, `:8104` |
-| Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:5333` |
-| Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5519` |
-| Playhead line | `playhead`, via `config.playhead.color` | `renderer.js:3410` |
-| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:11208-11213` |
-| Selected-note ring | `selectionRing` | `renderer.js:3289` |
-| Selected-note fill wash | `selectionRing` @ 0.12 | `renderer.js:3246` |
-| Multi-select group ring | `selectionRing`, 4 px (`selection.multiRingThicknessPxAtZoom1 ?? 4.0`) | `renderer.js:1748-1755` |
-| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5715`, `:6351` |
-| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3364`, `:5798`, `:6323` |
-| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:3144-3146`, `:5747-5749` |
-| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:6296-6312` |
-| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:5972-6046`, `:6484-6551`, `:7368`, `:7459` |
+| Note body **border** (every note, not just the base) | `noteBorder` | `renderer.js:3154` |
+| Silence dashed ring | `noteBorder` | `renderer.js:7752`, `:7986` |
+| BaseNote circle fill | `accent` | `renderer.js:5774` |
+| BaseNote circle border | `noteBorder` | `renderer.js:5775` |
+| Octave / base guide lines | `accent` (alpha 0.9 primary, 0.35 secondary) | `renderer.js:9362`, `:9810` |
+| Note ID labels | `accent` | `renderer.js:7387-7392` |
+| BaseNote fraction label | `accent` | `renderer.js:6494` |
+| Octave-guide + measure-triangle ID labels | `accent` | `renderer.js:8132`, `:8185` |
+| Measure bars — dashed interior | `measureBar` @ alpha 0.35 | `renderer.js:5409` |
+| Measure bars — solid start/end | `measureBar` @ alpha 0.8 | `renderer.js:5597` |
+| Playhead line | `playhead`, via `config.playhead.color` | `renderer.js:3484` |
+| Marquee rectangle (multi-select drag) | `accent` — deliberately *not* `selectionRing`: classic-orange's ring token is white, and the marquee has always drawn orange | `renderer.js:11289-11294` |
+| Selected-note ring | `selectionRing` | `renderer.js:3363` |
+| Selected-note fill wash | `selectionRing` @ 0.12 | `renderer.js:3320` |
+| Multi-select group ring | `selectionRing`, 4 px (`selection.multiRingThicknessPxAtZoom1 ?? 4.0`) | `renderer.js:1750-1757` |
+| Selected BaseNote ring / selected measure-triangle outline | `selectionRing` | `renderer.js:5795`, `:6431` |
+| Hover ring — notes, BaseNote, measure triangles | `hoverRing` | `renderer.js:3438`, `:5878`, `:6403` |
+| Dependency-highlight rings **and** dependency link lines | `depFrequency` / `depStartTime` / `depDuration` | `renderer.js:3218-3220`, `:5827-5829` |
+| Measure-triangle outlines (dep-coloured states) | `depStartTime` / `depDuration` | `renderer.js:6376-6392` |
+| On-note fraction digits, "silence", ▲/▼ glyphs, BaseNote fraction | `textPrimary` (stored as `noteText`) | `renderer.js:6052-6126`, `:6564-6631`, `:7449`, `:7540` |
 | Note height / border px / corner px | `appearance.note.*` | `theme-manager.js:156-163` |
 
 ### What is baked and cannot be themed
@@ -282,13 +282,13 @@ The hover ring is a worked example of the full path (it is wired this way today)
      looks right before JS boots. If you need `rgba(...)` forms, add a `setRgb(...)` line in
      `_applyCssVars`.
    - *GL* → pass it through `_applyRenderer`'s `setThemeColors({ ... })` call
-     (`theme-manager.js:170-179`), accept it in `setThemeColors` (`renderer.js:354`) with a baked
+     (`theme-manager.js:170-179`), accept it in `setThemeColors` (`renderer.js:355`) with a baked
      fallback matching today's literal, and add an accessor next to `_accentRgba()` /
-     `_noteBorderRgba()` (`renderer.js:388-391`).
+     `_noteBorderRgba()` (`renderer.js:389-392`).
 
 3. **Make the draw path read the accessor** instead of the literal. For the hover ring that is
    `const hr = this._hoverRingRgba(); gl.uniform4f(uCol, hr[0], hr[1], hr[2], a)`
-   (`renderer.js:3364`), keeping the existing alpha logic.
+   (`renderer.js:3438`), keeping the existing alpha logic.
 
 4. **Add a picker** — one entry in `COLOR_TOKEN_GROUPS` (`settings-panel.js:45-58`):
 

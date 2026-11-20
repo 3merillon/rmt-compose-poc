@@ -306,7 +306,7 @@ fresh before you verify anything in a browser.
 ### `WebGL2 not available` in the console
 
 The renderer logs this and bails out when `canvas.getContext('webgl2')` returns `null`
-(`src/renderer/webgl2/renderer.js:526`). Update the browser, enable hardware acceleration, check GPU
+(`src/renderer/webgl2/renderer.js:527`). Update the browser, enable hardware acceleration, check GPU
 drivers. There is no fallback renderer — the workspace does not initialise without WebGL2.
 
 ### The port is taken
