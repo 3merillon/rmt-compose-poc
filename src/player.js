@@ -2793,7 +2793,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             evaluatedNotes = myModule.evaluateModule();
             setEvaluatedNotes(evaluatedNotes);
             updateVisualNotes(evaluatedNotes);
-            try { captureSnapshot(`Octave ${direction} Note ${noteId}`); } catch {}
+            try { captureSnapshot(`Octave ${direction} Note ${noteId}`, true); } catch {}
 
             // Do not change selection on octave click. Refresh modal only if the edited note is currently selected.
             try {
@@ -5188,7 +5188,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           updateVisualNotes(evaluatedNotes);
           createMeasureBars();
           invalidateModuleEndTimeCache();
-          try { captureSnapshot("Move Note " + noteId); } catch {}
+          try { captureSnapshot("Move Note " + noteId, true); } catch {}
           // Keep existing selection; sync renderer selection ordering without changing it
           try { syncRendererSelection(); } catch {}
           refreshNoteWidgetForSelection();
@@ -5275,7 +5275,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           updateVisualNotes(evaluatedNotes);
           createMeasureBars();
           invalidateModuleEndTimeCache();
-          try { captureSnapshot(`Move ${S.size} Notes`); } catch {}
+          try { captureSnapshot(`Move ${S.size} Notes`, true); } catch {}
           try { syncRendererSelection(); } catch {}
           try { syncMultiSelection(); } catch {}
           refreshNoteWidgetForSelection();
@@ -5326,7 +5326,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
           updateVisualNotes(evaluatedNotes);
           createMeasureBars();
           invalidateModuleEndTimeCache();
-          try { captureSnapshot("Resize Note " + noteId); } catch {}
+          try { captureSnapshot("Resize Note " + noteId, true); } catch {}
           // Keep existing selection; sync renderer selection ordering without changing it
           try { syncRendererSelection(); } catch {}
           // Refresh variable modal if visible and selection exists (fallback to document.body when DOM anchor hidden in GL-only mode)
@@ -5600,7 +5600,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
          updateVisualNotes(evaluatedNotes);
          createMeasureBars();
          invalidateModuleEndTimeCache();
-         try { captureSnapshot("Resize Measure " + measureId); } catch {}
+         try { captureSnapshot("Resize Measure " + measureId, true); } catch {}
  
          // Keep selection ordering in GL in sync
          try { syncRendererSelection(); } catch {}
@@ -5648,42 +5648,11 @@ function liveModuleText() {
   return snap ? JSON.stringify(snap) : null;
 }
 
-function captureSnapshot(label = 'Change') {
-  // The module's JSON text, made without serializing every note again
-  // (Module.createModuleJSONString: the same text as JSON.stringify of
-  // createModuleJSON()). Undo history and the autosave both take the string.
-  let text = null;
-  try {
-    if (myModule && typeof myModule.createModuleJSONString === 'function') text = myModule.createModuleJSONString();
-  } catch (e) {
-    text = null; // serialized below as before, which reports what failed
-  }
-  if (text != null) {
-    try {
-      // Ensure a baseline exists so the very first user action (color edit, drag) can be undone independently
-      try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshotStr: text }); } catch {}
-      eventBus.emit('history:capture', { label, snapshotStr: text });
-    } catch (e) {}
-    return;
-  }
-  try {
-    const snap = myModule && typeof myModule.createModuleJSON === 'function'
-      ? myModule.createModuleJSON()
-      : (typeof createModuleJSON === 'function' ? createModuleJSON() : null);
-    if (snap) {
-      // Serialize once and share the string with both the history store and the
-      // localStorage autosave (Phase 8 dedupe: previously each captured module was
-      // JSON.stringify'd 2-3x per user action).
-      let snapStr = null;
-      try { snapStr = JSON.stringify(snap); } catch (e) {
-        // One failed stringify silently kills BOTH undo capture and autosave
-        console.error('[RMT] Snapshot serialization failed:', e);
-      }
-      // Ensure a baseline exists so the very first user action (color edit, drag) can be undone independently
-      try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap, snapshotStr: snapStr }); } catch {}
-      eventBus.emit('history:capture', { label, snapshot: snap, snapshotStr: snapStr });
-    }
-  } catch (e) {}
+function captureSnapshot(label = 'Change', tracked = false) {
+  if (!myModule) return;
+  const snap = moduleSnapshot(myModule, tracked);
+  eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap });
+  eventBus.emit('history:capture', { label, ...snap });
 }
 
 // Persist snapshot on page unload to guarantee persistence without tab switching
@@ -5735,7 +5704,8 @@ try {
 
 // Handle restores from HistoryManager
 try {
-  eventBus.on('history:requestRestore', async ({ snapshot, source, label }) => {
+  eventBus.on('history:requestRestore', async (request) => {
+    const { version, source, label } = request;
     try { eventBus.emit('player:requestPause'); } catch {}
     let center = null;
     try {
@@ -5751,7 +5721,8 @@ try {
     try { cleanupCurrentModule(); } catch {}
 
     try {
-      const newModule = await Module.loadFromJSON(snapshot);
+      const patched = myModule.restoreHistoryVersion(version);
+      const newModule = patched ? myModule : await Module.loadFromJSON(request.snapshot);
       myModule = newModule;
       setModule(newModule, { skipBackgroundEval: true });
 
@@ -5775,7 +5746,16 @@ try {
 
       // Persist restored state so reloads resume exactly where the user left
       try {
-        const text = liveModuleText();
+        let text;
+        if (patched) text = version.text;
+        else {
+          const snap = moduleSnapshot(myModule);
+          text = snap.snapshotStr ?? JSON.stringify(snap.snapshot);
+          if (version && text === version.text) {
+            myModule._historyOrigin = version.origin;
+            myModule._historyVersion = version;
+          }
+        }
         if (text != null) saveModuleText(text, 'post-restore');
       } catch (e) {
         console.error('[RMT] Autosave failed (post-restore):', e);

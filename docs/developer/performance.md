@@ -364,23 +364,29 @@ notes. See [Picking](/developer/rendering/picking).
 
 `src/store/history.js`.
 
-- Snapshots are stored as **minified JSON strings**, not parsed object graphs (~3–5× less retained
-  heap). Each restore `JSON.parse`s fresh, giving the same isolation the old deep-clone did.
-- One text per action, shared: `captureSnapshot` and the note widget's edits hand one `snapshotStr`
-  to both the history capture and the autosave (`player.js:4950-4952`). It comes from
-  `Module.createModuleJSONString()`, which serializes again only the notes an edit changed (see
-  [The commit](#the-commit-what-an-edit-costs)).
+- Each history entry keeps the canonical minified module text. The history manager and autosave
+  share that string. Editor checkpoints also retain 128-ID pages of note text and row offsets.
+  A move, resize or octave step serializes its changed rows, then joins the shared page texts
+  in ID order. The public serializer still checks direct writes to exposed note fields.
 - Two caps, both in `_enforceCaps()` (`history.js:35-43`): a count cap of **50** entries and a byte
   cap of **12 MB**. The byte cap drops oldest but always keeps **≥ 2** entries, so undo survives even
   one enormous snapshot.
 - `canUndo()` is `_undo.length > 1` — the bottom entry is the "Initial" seed. Any new capture clears
   the redo stack.
-- Restore goes through the proven `loadFromJSON` path. Events: `history:capture`,
-  `history:seedIfEmpty`, `history:undo`, `history:redo`, `history:requestRestore`,
-  `history:stackChanged`.
+- Restoring two versions of the same canonically ordered score compares shared pages by identity.
+  Changed records go through the note constructor and the usual dependency invalidation.
+  Structural edits, different variable references, unscoped edits and noncanonical state use
+  the full loader to reestablish graph insertion order. History consumers can still request
+  an independently parsed snapshot.
 
-Full reverse-patch undo was considered and **declined**: it does not reduce the dominant per-undo
-cost (recompile + re-evaluate) and it would add the most delicate correctness surface in the app.
+For an octave edit on `voices-*`, the paired Edge run timed the restore event
+through two animation callbacks. The heap is decimal MB after initial load and GC.
+
+| Notes | Undo before → after | Redo before → after | Loaded heap before → after |
+|---|---:|---:|---:|
+| 100,000 | 1.95 → 0.21 s | 1.94 → 0.21 s | 235 → 213 MB |
+| 250,000 | 6.92 → 0.58 s | 5.67 → 0.61 s | 536 → 479 MB |
+| 500,000 | 10.62 → 1.36 s | 11.31 → 1.30 s | 1,056 → 943 MB |
 
 ## The commit: what an edit costs
 
@@ -394,10 +400,9 @@ Three parts of it used to cost the size of the whole module, whatever the edit c
   only reads the notes the expression references and the BaseNote, so the records are now built
   when first read (`noteRecords()`, `src/utils/simplify.js:118`): the same records, for the same
   ids. The simplifiers share the check.
-- **The snapshot.** The history and the autosave took `JSON.stringify(createModuleJSON())`, and the
-  note widget's edits stringified the object twice. They now take `createModuleJSONString()`: the
-  same text, with each note's text kept and made again only when its fields read differently
-  (`src/module.js:996`).
+- **The snapshot.** History and autosave use canonical note text. The usual workspace edits
+  serialize the changed rows. The general save API checks all fields (`src/module.js:1007`).
+
 - **`toNumber()`.** It wrote both BigInts of a fraction out in decimal to count their digits, for
   every value `sync()` reads. A comparison with 10^300 decides the same (`src/utils/fraction-num.js:90`).
 
@@ -413,7 +418,7 @@ Headless Edge, `bench-commit-pairs.mjs`, the median of the commit p50s over 5 ba
 | `voices-20000` | 44.7 ms | 26.1 ms | 1.71x |
 | `chain-1000` | 3.4 ms | 2.2 ms | 1.55x |
 
-What still costs the module's size, at 20,000 notes (`profile-commit.mjs`): `sync()` about 15 ms,
+In the earlier field-caching implementation, at 20,000 notes (`profile-commit.mjs`): `sync()` about 15 ms,
 since it rebuilds every instance on every commit (see
 [Deferred](#deferred-and-not-shipped)); and `createModuleJSONString()` about 4 ms, since it still
 reads every note's fields to find the ones that changed.
@@ -570,7 +575,7 @@ node scripts/perf/converge.mjs
 | Item | Status |
 |---|---|
 | **Incremental `sync()`** (stable slots / `bufferSubData` bookkeeping) | **Deferred.** This is the real remaining bottleneck — `sync()` is 63 ms p50 at 100k notes, so editing a module that size is not interactive. |
-| **Reverse-patch undo history** | **Declined.** Poor risk/reward; it does not reduce the dominant per-undo recompile+eval cost. Undo restores via a full `loadFromJSON`. |
+| **Structural undo** | Ordinary expression edits share history pages and restore changed records. Undo across a topology change still uses the full loader. |
 | **GPU picking** | **Not shipped.** `picking.js` is a self-described scaffold: no ID pass is ever drawn, `begin()`/`end()` have zero call sites, and `Workspace.pickAt` tries `pickAllAt()` first (which always exists), so the GPU branch is unreachable. All picking is CPU-side. |
 | **Measure-triangle outline batching** | Intentionally skipped — bounded by measure count M ≪ N. |
 | **Spatial index for picking** | Not warranted by measurement. |

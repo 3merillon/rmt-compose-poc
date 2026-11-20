@@ -1,3 +1,4 @@
+import { snapshotPages, changedRows } from './store/snapshot-pages.js';
 import Fraction from 'fraction.js';
 import { Note, EXPRESSION_VARS, isMeasureNote } from './note.js';
 import { migrateTimeModel } from './migrate/relational-time.js';
@@ -589,6 +590,8 @@ export class Module {
    * Add a new note
    */
   addNote(variables = {}) {
+    this._historyIds = null;
+    this._canPatchHistory = false;
     const id = this.nextId++;
     const note = new Note(id, variables);
     note.module = this;
@@ -608,6 +611,8 @@ export class Module {
    * Remove a note
    */
   removeNote(id) {
+    this._historyIds = null;
+    this._canPatchHistory = false;
     const numId = Number(id);
     // Warn about dependents left dangling: a LOAD_REF to a removed note pushes
     // hardcoded evaluator defaults (frequency 440, startTime 0, duration 1)
@@ -649,6 +654,8 @@ export class Module {
    * evaluation order until the page is reloaded.
    */
   clearAllNotes() {
+    this._historyIds = null;
+    this._canPatchHistory = false;
     for (const id of Object.keys(this.notes)) {
       if (Number(id) !== 0) {
         delete this.notes[id];
@@ -892,6 +899,8 @@ export class Module {
 
     const moduleInstance = new Module(baseVars);
 
+    let previousId = 0;
+    moduleInstance._canPatchHistory = true;
     // Load notes
     // SECURITY: Blocked note IDs that could cause prototype pollution
     const blockedNoteIds = ['__proto__', 'constructor', 'prototype'];
@@ -919,6 +928,8 @@ export class Module {
         variables[key] = value;
       }
 
+      if (noteId <= previousId) moduleInstance._canPatchHistory = false;
+      previousId = noteId;
       const note = new Note(noteId, variables);
       note.module = moduleInstance;
       moduleInstance.notes[noteId] = note;
@@ -1011,6 +1022,101 @@ export class Module {
       (tail === '{}' ? '' : ',' + tail.slice(1, -1)) + '}';
   }
 
+  // The editor knows which mutations it just committed. Imports, deletes and
+  // captures from arbitrary callers take a complete checkpoint instead. Public
+  // createModuleJSONString() also accepts direct edits to the exposed fields.
+  historySnapshot(tracked = false) {
+    const prior = this._historyVersion;
+    const partial = tracked && prior && this._historyIds && !this._untrackedProperties;
+    let ids;
+    if (partial) {
+      ids = this._historyIds;
+    } else {
+      const keys = Object.keys(this.notes);
+      ids = keys.map(Number);
+      // Directly aliased note objects and nonstandard keys are accepted by the
+      // general serializer. They cannot be addressed by id in a page.
+      if (ids.some((id, i) => !Number.isSafeInteger(id) || id < 0 ||
+          String(id) !== keys[i] || this.notes[id]?.id !== id)) {
+        this._historyVersion = null;
+        this._canPatchHistory = false;
+        return { snapshotStr: this.createModuleJSONString() };
+      }
+      if (prior) this._canPatchHistory = false;
+      this._untrackedProperties = false;
+    }
+    const base = this.baseNote.properties;
+    if (!this.baseNote.hasExpression('frequency') || !this.baseNote.hasExpression('duration') ||
+        !this.baseNote.hasExpression('startTime') || base.measure || (base.color !== null && !base.color) ||
+        (base.instrument !== null && !base.instrument) || (base.repeat !== undefined && !base.repeat)) {
+      this._canPatchHistory = false;
+    }
+    const row = id => {
+      const note = this.notes[id];
+      if (!note) return undefined;
+      const { color, instrument, measure } = note.properties;
+      if (!isPrimitive(color) || !isPrimitive(instrument) || !isPrimitive(measure)) this._untrackedProperties = true;
+      if (note.parentId !== undefined || note.properties.repeat !== undefined ||
+          (color !== null && !color) || (instrument !== null && !instrument)) this._canPatchHistory = false;
+      return JSON.stringify(noteJSON(note));
+    };
+    const version = snapshotPages(partial ? prior : null, ids, row,
+      JSON.stringify(this._baseNoteJSON()), JSON.stringify(INSTRUMENT_RULE));
+    version.origin = this._historyOrigin || (this._historyOrigin = Symbol());
+    this._historyVersion = version;
+    this._historyIds = new Set();
+    return { snapshotStr: version.text, version };
+  }
+
+  // A fresh load establishes graph insertion order. Keep it for expression
+  // edits that read the same variables. A rewire or structural edit uses the
+  // loader on the next restore, which reestablishes that order from the text.
+  noteExpressionChanged(id, previous, next) {
+    if (!this._historyIds) return;
+    this._historyIds.add(id);
+    if (!this._canPatchHistory || previous === next) return;
+    if (!previous?.getVariableRefs || !next?.getVariableRefs) {
+      this._canPatchHistory = false;
+      return;
+    }
+    const a = previous.getVariableRefs(), b = next.getVariableRefs();
+    if (id === 0 || previous.isEmpty() !== next.isEmpty() ||
+        previous.referencesBase !== next.referencesBase || previous.depCount !== next.depCount ||
+        a.length !== b.length || a.some((v, i) => v !== b[i])) this._canPatchHistory = false;
+    for (let i = 0; i < previous.depCount; i++) {
+      if (previous.dependencies[i] !== next.dependencies[i] ||
+          (previous.referencesBase && previous.dependencies[i] === 0)) this._canPatchHistory = false;
+    }
+  }
+
+  restoreHistoryVersion(target) {
+    if (!target || target.origin !== this._historyOrigin || !this._canPatchHistory || !this._historyVersion || this._historyIds?.size ||
+        this._untrackedProperties || target.baseText !== this._historyVersion.baseText) return false;
+    const changes = changedRows(this._historyVersion, target);
+    const replacements = [];
+    for (const { id, from, to } of changes) {
+      if (!from || !to) return false;
+      const current = this.notes[id];
+      if (!current) return false;
+      const replacement = new Note(id, JSON.parse(to));
+      // A redo may cross a previous full restore into a different topology.
+      for (const name of EXPRESSION_VARS) {
+        this.noteExpressionChanged(id, current.expressions[name], replacement.expressions[name]);
+      }
+      if (!this._canPatchHistory) return false;
+      replacements.push(replacement);
+    }
+    for (const note of replacements) {
+      note.module = this;
+      this.notes[note.id] = note;
+      this.markNoteDirty(note.id);
+    }
+    this._historyIds.clear();
+    this._historyVersion = target;
+    invalidateModuleEndTimeCache();
+    return true;
+  }
+
   /** The BaseNote as saved in the module JSON. */
   _baseNoteJSON() {
     const baseObj = {};
@@ -1030,6 +1136,8 @@ export class Module {
    * Reindex module (renumber notes in order)
    */
   reindexModule() {
+    this._historyIds = null;
+    this._canPatchHistory = false;
     const baseNote = this.baseNote;
 
     // Separate measures and regular notes

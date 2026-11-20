@@ -61,7 +61,7 @@ class HistoryManager {
     this._emitStackChanged();
   }
 
-  capture({ label = 'Change', snapshot, snapshotStr }) {
+  capture({ label = 'Change', snapshot, snapshotStr, version }) {
     // Ignore invalid input or captures triggered during restore
     if (this._isRestoring) return;
     if (snapshot == null && snapshotStr == null) return;
@@ -76,7 +76,7 @@ class HistoryManager {
     const str = (typeof snapshotStr === 'string') ? snapshotStr : this._serialize(snapshot);
     if (str == null) return;
 
-    this._undo.push({ label: String(label || 'Change'), snapshot: str });
+    this._undo.push({ label: String(label || 'Change'), snapshot: str, version });
     this._enforceCaps();
 
     // Any new capture invalidates/clears the redo stack
@@ -96,11 +96,14 @@ class HistoryManager {
 
     const prev = this._undo[this._undo.length - 1];
     if (!prev) return;
+    let parsed;
+    const deserialize = () => this._deserialize(prev.snapshot);
 
     this._isRestoring = true;
     try {
       eventBus.emit('history:requestRestore', {
-        snapshot: this._deserialize(prev.snapshot),
+        version: prev.version,
+        get snapshot() { return parsed ??= deserialize(); },
         source: 'undo',
         label: current.label
       });
@@ -118,11 +121,14 @@ class HistoryManager {
 
     // Pushing onto undo to make it the new "current"
     this._undo.push(next);
+    let parsed;
+    const deserialize = () => this._deserialize(next.snapshot);
 
     this._isRestoring = true;
     try {
       eventBus.emit('history:requestRestore', {
-        snapshot: this._deserialize(next.snapshot),
+        version: next.version,
+        get snapshot() { return parsed ??= deserialize(); },
         source: 'redo',
         label: next.label
       });
@@ -132,11 +138,11 @@ class HistoryManager {
     }
   }
 
-  seedIfEmpty({ label = 'Initial', snapshot, snapshotStr }) {
+  seedIfEmpty({ label = 'Initial', snapshot, snapshotStr, version }) {
     if (this._undo.length === 0 && (snapshot != null || snapshotStr != null)) {
       const str = (typeof snapshotStr === 'string') ? snapshotStr : this._serialize(snapshot);
       if (str == null) return;
-      this._undo.push({ label: String(label || 'Initial'), snapshot: str });
+      this._undo.push({ label: String(label || 'Initial'), snapshot: str, version });
       this._emitStackChanged();
     }
   }
@@ -174,8 +180,9 @@ export const history = new HistoryManager();
  * again). Should that fail, the object as { snapshot }, so that the history and
  * the autosave report the failure as they always have.
  */
-export function moduleSnapshot(module) {
+export function moduleSnapshot(module, tracked = false) {
   try {
+    if (typeof module?.historySnapshot === 'function') return module.historySnapshot(tracked);
     if (module && typeof module.createModuleJSONString === 'function') {
       return { snapshotStr: module.createModuleJSONString() };
     }
@@ -191,7 +198,7 @@ try {
       // snapshotStr (pre-serialized) is optional and preferred when present (dedupe).
       if (!payload || (payload.snapshot == null && payload.snapshotStr == null)) return;
       const label = payload.label || 'Change';
-      history.capture({ label, snapshot: payload.snapshot, snapshotStr: payload.snapshotStr });
+      history.capture({ label, snapshot: payload.snapshot, snapshotStr: payload.snapshotStr, version: payload.version });
     } catch (e) {
       // ignore
     }
@@ -201,7 +208,7 @@ try {
     try {
       if (!payload || (payload.snapshot == null && payload.snapshotStr == null)) return;
       const label = payload.label || 'Initial';
-      history.seedIfEmpty({ label, snapshot: payload.snapshot, snapshotStr: payload.snapshotStr });
+      history.seedIfEmpty({ label, snapshot: payload.snapshot, snapshotStr: payload.snapshotStr, version: payload.version });
     } catch (e) {
       // ignore
     }

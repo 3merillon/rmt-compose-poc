@@ -26,10 +26,10 @@ Save clicked
   → validateExpression()            src/modals/validation.js:6
   → simplify (simplifyDSL)          src/utils/simplify.js:66
   → Note.setVariable('frequencyString', text)
-      → Note._setExpression()       src/note.js:309
+      → Note._setExpression()       src/note.js:314
           → compiler.compile(text)   → BinaryExpression
           → note._depsEpoch++
-          → Note._notifyChange()    src/note.js:353
+          → Note._notifyChange()    src/note.js:358
               → module.markNoteDirty(note.id)
               → eventBus.emit('player:invalidateModuleEndTimeCache')
 ```
@@ -53,7 +53,7 @@ once. A group move does the same per mover.
 
 ## 2. The module marks dirty
 
-`Module.markNoteDirty(noteId)` (`src/module.js:241`):
+`Module.markNoteDirty(noteId)` (`src/module.js:242`):
 
 1. Adds the id to `_dirtyNotes`.
 2. `_registerNoteDependencies(note)` — re-scans the note's bytecode and rewrites its rows in the
@@ -71,12 +71,12 @@ once. A group move does the same per mover.
 
 Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a
 walk of the same dirty cycle now only re-registers its own bytecode (`Module._dirtyClosed`,
-`src/module.js:256`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
+`src/module.js:257`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
 in the middle of `chain-1000` ran 501 walks over 125,000 notes. Both engines do this.
 
 ## 3. Evaluation
 
-`Module.evaluateModule()` (`src/module.js:679`) delegates to
+`Module.evaluateModule()` (`src/module.js:686`) delegates to
 `IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1057`):
 
 ```
@@ -223,7 +223,7 @@ Note 1's frequency changes
 ```
 
 For *visualisation* — the coloured dependency lines and rings — the module asks a different question.
-`module.getDependentsByProperty(noteId)` (`src/module.js:454`) returns
+`module.getDependentsByProperty(noteId)` (`src/module.js:455`) returns
 
 ```javascript
 { frequency: [...], startTime: [...], duration: [...] }
@@ -250,14 +250,14 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 
 | Event | Emitted by | Does |
 |---|---|---|
-| `workspace:noteMoveCommit` | `note.js:358` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
+| `workspace:noteMoveCommit` | `note.js:364` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
 | `workspace:noteResizeCommit` | `workspace.js:1756` | `{noteId, newDurationSec}` |
 | `workspace:measureResizeCommit` | `workspace.js:1765` | `{measureId, newStartSec}` |
 | `workspace:groupMoveCommit` | `workspace.js:1737` | `{ids, deltaSec}` → clamps the batch so it can't cross the BaseNote, then commits each mover. |
 | `workspace:marqueeCommit` | `workspace.js:1727` | `{ids, additive}` → sets the multi-selection. |
 | `workspace:multiSelectToggle` | `workspace.js:2072` | `{id}` — shift-click / long-press adds or removes one note. |
 | `player:octaveChange` | note widget arrows, GL arrow regions | `{noteId, direction}` → multiplies the frequency expression by the arrow interval. |
-| `player:invalidateModuleEndTimeCache` | `note.js:358` | Any expression change. |
+| `player:invalidateModuleEndTimeCache` | `note.js:364` | Any expression change. |
 | `player:importModuleAtTarget` | `menu-bar.js` | `{targetNoteId, moduleData, clientX, clientY}` |
 | `player:selectNote`, `player:requestPause` | various | Selection and transport. |
 | `history:capture` / `seedIfEmpty` / `undo` / `redo` / `requestRestore` / `stackChanged` | everywhere an edit commits | Undo. `player.js` also listens to `history:capture` to write the autosave. |
@@ -314,9 +314,9 @@ beside it (key `unloadable`) before the autosave replaces it, and the default mo
 
 ```
 any committing edit
-  → captureSnapshot(label)              player.js:5651
-      → module.createModuleJSONString() → snapshotStr   module.js:996
-          (= JSON.stringify(createModuleJSON()); only the notes that changed are serialized again)
+  → captureSnapshot(label, tracked)     player.js:5651
+      → module.historySnapshot(tracked) → snapshotStr, version   module.js:1028
+          (= JSON.stringify(createModuleJSON()); tracked edits serialize the changed rows)
       → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshotStr })
       → eventBus.emit('history:capture',     { label, snapshotStr })
           → HistoryManager stores the STRING (≈3–5× less retained heap than an object graph)
@@ -326,10 +326,9 @@ any committing edit
           (IndexedDB, after the frame that shows the edit; the latest text only)
 ```
 
-Undo emits `history:requestRestore`, and `player.js` rebuilds the module with the proven
-`Module.loadFromJSON` path. Reverse-patch history was considered and declined: it does not reduce the
-dominant per-undo recompile-and-evaluate cost, and it is the most delicate correctness surface in the
-app.
+Undo emits `history:requestRestore`. For compatible versions the player restores the changed note
+records and evaluates their dependents. Structural changes and unscoped edits use
+`Module.loadFromJSON` to rebuild the full module.
 
 ## See also
 

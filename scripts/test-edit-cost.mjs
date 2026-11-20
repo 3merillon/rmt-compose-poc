@@ -144,6 +144,32 @@ const modules = [];
   check(same(m), 'after the BaseNote edited');
 }
 
+{
+  const ids = [1, 127, 129, 511];
+  const m = await load({ baseNote: {}, notes: ids.map(id => ({
+    id, startTime: 'base.t', duration: 'base.d', frequency: 'base.f'
+  })) });
+  const initial = m.historySnapshot();
+  m.batchSetExpressions([{ noteId: 129, varName: 'frequency', expr: '2^(1/12) * base.f' }]);
+  m.getNoteById(1).setVariable('color', 'rgba(12,34,56,1)');
+  const edited = m.historySnapshot(true);
+  check(edited.snapshotStr === JSON.stringify(m.createModuleJSON()), 'batch and property edits preserve canonical text across sparse history pages');
+  for (const state of [initial, edited]) {
+    check(m.restoreHistoryVersion(state.version), 'restore a compatible history version');
+    const reference = await load(JSON.parse(state.snapshotStr));
+    m.evaluateModule();
+    check(m.createModuleJSONString() === reference.createModuleJSONString() &&
+      ids.every(id => X.equals(m.notes[id].getExactVariable('frequency'), reference.notes[id].getExactVariable('frequency'))),
+      'patched text and exact frequencies match a fresh load');
+  }
+  m.notes[129].setVariable('frequency', '[1].f');
+  m.historySnapshot(true);
+  check(!m.restoreHistoryVersion(initial.version), 'a changed variable dependency asks for a full restore');
+  delete m.notes[127];
+  m.notes[511].properties.instrument = 'triangle';
+  check(m.historySnapshot().snapshotStr === m.createModuleJSONString(), 'unscoped checkpoints include direct field writes and removed notes');
+}
+
 console.log('\nChecked rewrites: the same verdict as a check that reads every note');
 // The check as it was: a record of every note of the module, built up front.
 function evaluateEager(expr, moduleInstance) {

@@ -81,7 +81,7 @@ Each is `Map<dependencyId, Set<dependentId>>`.
 
 `base.f` sets `BinaryExpression.referencesBase` and lands the note in `baseNoteDependents`. It **never** appears in `dependencies` or `dependents` as an edge to note 0 — that would make the BaseNote depend on itself, and the BaseNote *is* note 0 (`emitNoteReference()`, `src/dsl/compiler.js:126`).
 
-Consumers simulate the edge instead. `Module.getDependentNotes(0)` unions `getAllDependents(0)` with `getBaseNoteDependents()` (`src/module.js:427-440`) — one level deep, which is what the UI wants.
+Consumers simulate the edge instead. `Module.getDependentNotes(0)` unions `getAllDependents(0)` with `getBaseNoteDependents()` (`src/module.js:428-441`) — one level deep, which is what the UI wants.
 
 Re-evaluation needs more than that, and gets it from `getEvaluationDependents(id)` (`:892`): the transitive closure over `dependents` that, whenever it reaches note 0, continues into `baseNoteDependents` **and** `implicitBaseDependents` and on through everything that reads those. Before it existed, a BaseNote edit dirtied only the notes that wrote `base` themselves; a note defined purely against another note (`[1].f * (5/4)`) kept its old value.
 
@@ -93,7 +93,7 @@ Any diagram showing note 0 as a graph edge target is wrong.
 
 ## Registration
 
-The graph does not build itself. It has no `buildFromModule()`. **The module drives registration**, one note at a time, from `Module._registerNoteDependencies(note)` (`src/module.js:202-236`) — which takes a **Note object**, not an id:
+The graph does not build itself. It has no `buildFromModule()`. **The module drives registration**, one note at a time, from `Module._registerNoteDependencies(note)` (`src/module.js:203-237`) — which takes a **Note object**, not an id:
 
 ```javascript
 _registerNoteDependencies(note) {
@@ -113,7 +113,7 @@ _registerNoteDependencies(note) {
 ```
 
 ::: tip Re-registration is skipped when dependencies cannot have changed
-Dependencies derive purely from a note's compiled expressions. If the note's id, its expression epoch (`Note._depsEpoch`, declared at `src/note.js:104` and bumped on every expression mutation — `src/note.js:299`, `src/note.js:312`, `src/note.js:327`, `src/note.js:344`) and the graph generation are all unchanged, the note is already registered identically.
+Dependencies derive purely from a note's compiled expressions. If the note's id, its expression epoch (`Note._depsEpoch`, declared at `src/note.js:104` and bumped on every expression mutation — `src/note.js:299`, `src/note.js:317`, `src/note.js:332`, `src/note.js:349`) and the graph generation are all unchanged, the note is already registered identically.
 
 This matters because `markNoteDirty()` calls this for **every** marked note — on an interval-arrow change that is every dependent in the closure. The skip avoids rewriting up to 22 maps per untouched note.
 :::
@@ -137,7 +137,7 @@ These are the real method names.
 | `getAllDependencies(id)` | `Set` — transitive, upward | `:1443` |
 | `getBaseNoteDependents()` | `Set` | `:1472` |
 
-`Module.getDirectDependencies(id)` and `Module.getDependentNotes(id)` wrap these and return **Arrays**, not Sets (`src/module.js:419`, `src/module.js:427`).
+`Module.getDirectDependencies(id)` and `Module.getDependentNotes(id)` wrap these and return **Arrays**, not Sets (`src/module.js:420`, `src/module.js:428`).
 
 ### Property-scoped traversals
 
@@ -149,7 +149,7 @@ These back the property-coloured dependency lines and the drag preview. Each is 
 | `getAllAffectedByStartTimeChange(id)` | …its **startTime** changes | `:1357` |
 | `getAllAffectedByDurationChange(id)` | …its **duration** changes | `:1271` |
 
-`Module.getDependentsByProperty(id)` (`src/module.js:454`) calls all three and returns `{frequency: [], startTime: [], duration: []}` — which is exactly what the renderer colours:
+`Module.getDependentsByProperty(id)` (`src/module.js:455`) calls all three and returns `{frequency: [], startTime: [], duration: []}` — which is exactly what the renderer colours:
 
 ![Dependency lines radiating from a selected note, coloured by property: orange for frequency, teal for startTime, purple for duration](/img/dependency-lines.png)
 
@@ -234,7 +234,7 @@ The graph owns this and nothing else does. A property is *corrupted* when its ow
 | `getAllFrequencyDependencies(id)` | transitive frequency ancestors | `:1969` |
 | `clearCorruptionFlags(id)` | delete | `:1914` |
 
-Flags arrive from `Module._updateCorruptionFlags()` after each evaluation (`src/module.js:729-752`), scoped to the dirty set.
+Flags arrive from `Module._updateCorruptionFlags()` after each evaluation (`src/module.js:736-759`), scoped to the dirty set.
 
 ### How the renderer consumes it
 

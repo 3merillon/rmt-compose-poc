@@ -295,7 +295,7 @@ export class Note {
           console.warn(`Failed to extract expression from function for ${name}:`, e);
         }
       } else if (value instanceof BinaryExpression) {
-        this.expressions[name] = value;
+        this._replaceExpression(name, value);
         this._depsEpoch++;
         this._notifyChange();
       }
@@ -303,12 +303,17 @@ export class Note {
     }
   }
 
+  _replaceExpression(name, next) {
+    this.module?.noteExpressionChanged?.(this.id, this.expressions[name], next);
+    this.expressions[name] = next;
+  }
+
   /**
    * Internal: Set expression from text
    */
   _setExpression(name, exprText) {
     try {
-      this.expressions[name] = compiler.compile(exprText, name);
+      this._replaceExpression(name, compiler.compile(exprText, name));
       this._depsEpoch++;
       this._notifyChange();
     } catch (e) {
@@ -323,7 +328,7 @@ export class Note {
    */
   _setExpressionSilent(name, exprText) {
     try {
-      this.expressions[name] = compiler.compile(exprText, name);
+      this._replaceExpression(name, compiler.compile(exprText, name));
       this._depsEpoch++;
       this.lastModifiedTime = Date.now();
     } catch (e) {
@@ -340,7 +345,7 @@ export class Note {
   clearExpression(name) {
     const expr = this.expressions[name];
     if (!expr || expr.isEmpty()) return false;
-    this.expressions[name] = EMPTY_EXPRESSION;
+    this._replaceExpression(name, EMPTY_EXPRESSION);
     this._depsEpoch++;
     this.lastModifiedTime = Date.now();
     this._notifyChange();
@@ -351,6 +356,7 @@ export class Note {
    * Internal: Notify module of change
    */
   _notifyChange() {
+    this.module?._historyIds?.add(this.id);
     if (this.module && typeof this.module.markNoteDirty === 'function') {
       this.module.markNoteDirty(this.id);
     }
