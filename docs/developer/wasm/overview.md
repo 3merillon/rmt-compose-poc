@@ -188,9 +188,9 @@ On `comma-chain-400` JavaScript takes about 160 ms and WASM 25 to 31 ms.
 
 **End to end.** A commit (an octave change: expression rewrite, dirty marking, evaluation,
 renderer sync, history snapshot) costs the same on both engines: `chain-1000` about 2.2 ms (11 ms
-before the dirty-marking change), `voices-20000` about 26 ms. Evaluation is a small part of it. At
-20,000 notes what remains is renderer sync and the autosave's `localStorage` write; the rewrite
-check and the snapshot text now cost what the edit changed. See
+before the dirty-marking change), `voices-20000` 17 to 18 ms. Evaluation is a small part of it. At
+20,000 notes what remains is renderer sync; the rewrite check and the snapshot text now cost what
+the edit changed, and the autosave is written after the edit's frame. See
 [Performance](/developer/performance#the-commit-what-an-edit-costs).
 
 ## Limits
@@ -203,9 +203,11 @@ in about 3 s, 300,000 about 2.3 GB, and a tab's heap stops near 4 GB. Above 100,
 path also falls behind JavaScript on a full evaluation (300,000 notes: 4.2 s against 1.5 s), because
 registering the bytecode grows faster than the module.
 
-The autosave writes the whole module to `localStorage`, which holds about 5 MB per origin. A module
-of a few tens of thousands of notes exceeds it (`voices-100000` is about 15 MB as JSON), and every
-edit then logs `[RMT] Autosave failed (history capture): QuotaExceededError …`.
+The autosave keeps the whole module in IndexedDB (`src/store/autosave.js`), far past what
+localStorage could hold: `voices-100000` (15.5 million characters as JSON) is saved and restored
+(`scripts/perf/check-autosave.mjs`). It used to be
+`localStorage`, which holds about 5 MB per origin, and from a few tens of thousands of notes every
+edit logged `[RMT] Autosave failed (history capture): QuotaExceededError …`.
 
 ## See also
 

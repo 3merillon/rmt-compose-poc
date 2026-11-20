@@ -471,7 +471,7 @@ plus `window.__rmtRenderer` / `window.__rmtWorkspace`. `main.js` `await import()
 | `report()` | eval + commit + sync + redraw, as a `console.table` |
 
 ::: warning `loadStress()` overwrites your work
-It writes the stress module into the `rmt:moduleSnapshot:v1` boot key and reloads. Call
+It makes the stress module the autosave and reloads. Call
 `restoreDefault()` to get the default module back. Do not run it in a session you care about.
 :::
 

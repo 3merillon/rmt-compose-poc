@@ -47,7 +47,7 @@ property with `note.setVariable(name + 'String', expr)` and then calls `markNote
 
 ::: info Drag and resize do not use the batch path
 A move commit writes each moved note individually with `n.setVariable('startTimeString', raw)` inside
-`commitNoteStartGL()` (`src/player.js:4964`), then runs the dependent-retarget passes, then evaluates
+`commitNoteStartGL()` (`src/player.js:4969`), then runs the dependent-retarget passes, then evaluates
 once. A group move does the same per mover.
 :::
 
@@ -179,7 +179,7 @@ draws. When nothing changed, `_render()` returns immediately and the frame costs
 `player.js` calls `sync()` on every commit. A drag does **not** call it: the workspace previews the
 gesture through the renderer's preview setters (`setDragOffsetPreview()` shifts moving notes on the
 GPU), and `sync()` runs once, on the drop. `player.js`'s rAF loop still carries a `tempOverrides`
-re-sync branch (`player.js:1885`), but nothing assigns `glTempOverrides` today, so it never fires.
+re-sync branch (`player.js:1889`), but nothing assigns `glTempOverrides` today, so it never fires.
 See [WebGL2 Renderer](/developer/rendering/webgl2-renderer).
 
 ## 5. Audio playback
@@ -266,10 +266,10 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 | `player:invalidateModuleEndTimeCache` | `note.js:357` | Any expression change. |
 | `player:importModuleAtTarget` | `menu-bar.js` | `{targetNoteId, moduleData, clientX, clientY}` |
 | `player:selectNote`, `player:requestPause` | various | Selection and transport. |
-| `history:capture` / `seedIfEmpty` / `undo` / `redo` / `requestRestore` / `stackChanged` | everywhere an edit commits | Undo. `player.js` also listens to `history:capture` to write the localStorage autosave. |
+| `history:capture` / `seedIfEmpty` / `undo` / `redo` / `requestRestore` / `stackChanged` | everywhere an edit commits | Undo. `player.js` also listens to `history:capture` to write the autosave. |
 | `settings:changed` / `settings:loaded` / `settings:panelToggled` | `settings-store.js`, `settings-panel.js` | `{path, value, settings}` |
 | `modals:show` / `requestRefresh` / `cleared` / `init` | modals | Widget lifecycle. |
-| `audio:masterVolumeInput` | `player.js:4301` | Live echo from the transport slider so the Settings panel tracks it mid-drag. |
+| `audio:masterVolumeInput` | `player.js:4305` | Live echo from the transport slider so the Settings panel tracks it mid-drag. |
 
 ## Settings → runtime
 
@@ -310,15 +310,17 @@ in the current form untouched. A module of the old time model (tempo, beats per 
 on the JSON text; either conversion refuses (`TimeMigrationError`, `SyntaxMigrationError`) rather
 than guess. See [Module System](/developer/architecture/module-system#loading-old-modules).
 
-At startup `src/player.js` loads the saved session (`rmt:moduleSnapshot:v1`) or
-`modules/defaultModule.json`. If the saved session cannot be loaded, it is kept under
-`rmt:moduleSnapshot:v1:unloadable` before the autosave replaces it, and the default module opens.
+At startup `src/player.js` loads the saved session (`loadSavedModuleText()`,
+`src/store/autosave.js:171`) or `modules/defaultModule.json`. The session is in IndexedDB; one found in
+localStorage under `rmt:moduleSnapshot:v1` (saved before the autosave moved, or put there by a
+script) opens first and is moved to IndexedDB. If the saved session cannot be loaded, it is kept
+beside it (key `unloadable`) before the autosave replaces it, and the default module opens.
 
 ## History
 
 ```
 any committing edit
-  → captureSnapshot(label)              player.js:5635
+  → captureSnapshot(label)              player.js:5650
       → module.createModuleJSONString() → snapshotStr   module.js:1045
           (= JSON.stringify(createModuleJSON()); only the notes that changed are serialized again)
       → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshotStr })
@@ -326,7 +328,8 @@ any committing edit
           → HistoryManager stores the STRING (≈3–5× less retained heap than an object graph)
           → clears the redo stack
           → _enforceCaps(): 50 entries / 12 MB, never below 2
-      → player.js also writes snapshotStr to localStorage rmt:moduleSnapshot:v1
+      → player.js hands snapshotStr to the autosave                    autosave.js:128
+          (IndexedDB, after the frame that shows the edit; the latest text only)
 ```
 
 Undo emits `history:requestRestore`, and `player.js` rebuilds the module with the proven

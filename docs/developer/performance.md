@@ -85,7 +85,7 @@ properly idle)"*, and `bench-render.mjs` reports **0/100 idle frames redrawn** a
 notes.
 
 This does **not** mean rAF is descheduled. Both loops still tick every frame — the renderer's
-(`renderer.js:593-597`) and the player's (`player.js:1878-1898`, which updates the DOM playhead and
+(`renderer.js:593-597`) and the player's (`player.js:1882-1902`, which updates the DOM playhead and
 measure-bar transforms). What is gated is the *body* of `_render()`:
 
 ```javascript
@@ -326,7 +326,7 @@ notes. See [Picking](/developer/rendering/picking).
 - Snapshots are stored as **minified JSON strings**, not parsed object graphs (~3–5× less retained
   heap). Each restore `JSON.parse`s fresh, giving the same isolation the old deep-clone did.
 - One text per action, shared: `captureSnapshot` and the note widget's edits hand one `snapshotStr`
-  to both the history capture and the localStorage autosave (`player.js:4945-4946`). It comes from
+  to both the history capture and the autosave (`player.js:4949-4951`). It comes from
   `Module.createModuleJSONString()`, which serializes again only the notes an edit changed (see
   [The commit](#the-commit-what-an-edit-costs)).
 - Two caps, both in `_enforceCaps()` (`history.js:35-43`): a count cap of **50** entries and a byte
@@ -376,9 +376,24 @@ Headless Edge, `bench-commit-pairs.mjs`, the median of the commit p50s over 5 ba
 
 What still costs the module's size, at 20,000 notes (`profile-commit.mjs`): `sync()` about 15 ms,
 since it rebuilds every instance on every commit (see
-[Deferred](#deferred-and-not-shipped)); the autosave's `localStorage.setItem` about 9 ms, since it
-stores the whole module text (3 MB) by design; and `createModuleJSONString()` about 4 ms, since it
-still reads every note's fields to find the ones that changed.
+[Deferred](#deferred-and-not-shipped)); and `createModuleJSONString()` about 4 ms, since it still
+reads every note's fields to find the ones that changed.
+
+The autosave's `localStorage.setItem` (about 9 ms at 20,000 notes, the whole 3 MB text, written
+synchronously) is out of the edit too. The text now goes to IndexedDB after the frame that shows the
+edit (`src/store/autosave.js`), and only the latest: edits within one frame make one write. Only
+`put()`'s copy of the text runs on the main thread, after the frame: 19 ms for the 15.5 million
+characters of `voices-100000`, which `localStorage` could not hold at all. The same pairs, before
+(v2 with the `localStorage` autosave) and after:
+
+| Module | Engine | Before | After | Before / after |
+|---|---|---|---|---|
+| `voices-20000` | JS | 29.0 ms | 18.1 ms | 1.60x |
+| `voices-20000` | WASM | 27.8 ms | 16.8 ms | 1.65x |
+
+`measureCommit()` runs its edits in one task, so their writes make one after the last frame and the
+"after" column holds none of them. In the app each edit is its own task and is written once, after
+its own frame. `scripts/perf/check-autosave.mjs` checks the store in the running app.
 
 ## Bundle splitting
 
@@ -450,8 +465,8 @@ chunk that is never downloaded otherwise) and exposes `window.__rmtPerf`, plus
 
 | Method | Does |
 |---|---|
-| `loadStress(name)` | Fetches `modules/perf/<name>.json`, writes it to the `rmt:moduleSnapshot:v1` boot key, **reloads the page** |
-| `restoreDefault()` | Clears that key, reloads → default module |
+| `loadStress(name)` | Fetches `modules/perf/<name>.json`, makes it the autosave (`replaceSavedModule()`), **reloads the page** |
+| `restoreDefault()` | Clears the autosave, reloads → default module |
 | `measureEval(n = 10)` | `invalidateAll()` + a full `evaluateModule()` |
 | `measureCommit(n = 10, noteId?)` | True end-to-end commit: emits `player:octaveChange` up+down (expression rewrite → dirty marking → evaluate → renderer sync → history snapshot) |
 | `measureSync(n = 20, selId?)` | Times `renderer.sync()` in isolation |
@@ -462,7 +477,7 @@ chunk that is never downloaded otherwise) and exposes `window.__rmtPerf`, plus
 | `report()` | Runs eval + commit + sync + redraw, prints a `console.table` |
 
 ::: danger `loadStress()` replaces your stored composition.
-It overwrites the `rmt:moduleSnapshot:v1` localStorage key and reloads. If you run it in a session
+It overwrites the autosave and reloads. If you run it in a session
 where you were actually composing, that work is gone unless you call `restoreDefault()`.
 :::
 
@@ -481,6 +496,7 @@ for `npm run perf:render`.
 | `profile-commit.mjs` | One commit (`measureCommit`) timed, then CPU-profiled: self and total time per function. `--engine js\|wasm`; reads the module from disk |
 | `bench-commit-pairs.mjs` | The commit on two servers (`--before`, `--after`), back to back in alternating pairs |
 | `compare-edits.mjs` | The same edits, undos and redos on two servers: autosave, history stacks and instance buffers compared at every step |
+| `check-autosave.mjs` | The IndexedDB autosave in the app: the move from `localStorage`, one write per frame of edits, reloads, undo, the fallback without IndexedDB, and a module too large for `localStorage` |
 | `who-dirties.mjs` | Traps writes to `needsRedraw` and reports the call sites during ~100 idle frames |
 | `converge.mjs` | Proves **one** redraw produces the final image |
 | `visual-regress.mjs` | `--capture` / `--compare`: 11 scenes × 3 modules, pixel-diffed |

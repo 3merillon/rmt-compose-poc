@@ -68,7 +68,7 @@ Files saved by this version use `duration` on the BaseNote and the `measure` fla
 
 For the **composition**: sort of, and you should not rely on it.
 
-The current module is written to your browser's `localStorage` (key `rmt:moduleSnapshot:v1`) on every undoable edit, when you switch tabs, and when you close the page. On the next visit the app resumes that snapshot instead of the default module. There is no "unsaved changes" prompt, no named projects, and no autosave indicator — the app picks up where you left off.
+The current module is written to your browser's storage (IndexedDB) after every undoable edit, when you switch tabs, and when you close the page, whatever its size. On the next visit the app resumes that snapshot instead of the default module. There is no "unsaved changes" prompt, no named projects, and no autosave indicator — the app picks up where you left off.
 
 That is a **session restore, not a backup.** It lives in one browser profile, and clearing site data destroys it. Save real work to a file.
 

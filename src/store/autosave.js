@@ -95,7 +95,7 @@ function dropLegacy() {
 }
 
 function write(text, context) {
-  if (held) return;
+  if (held) { settle(); return; }
   lastStarted = text;
   inFlight++;
   idbPut(MODULE_KEY, text)

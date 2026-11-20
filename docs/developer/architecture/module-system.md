@@ -336,9 +336,9 @@ orders the old compiler did not read as written (a `.mul()` after an `.add()`, a
 
 ### Boot fallback
 
-At startup `src/player.js` loads the saved session (`rmt:moduleSnapshot:v1`) with
+At startup `src/player.js` loads the saved session (`src/store/autosave.js`) with
 `Module.loadFromJSON()`. If that throws and a saved session existed (for instance a module of the old
-model that the converter refuses), the session is copied to `rmt:moduleSnapshot:v1:unloadable` before the
+model that the converter refuses), the session is kept beside it (key `unloadable`) before the
 autosave can replace it, an error is logged, and `modules/defaultModule.json` opens instead. If the
 default module itself fails to load, the error propagates.
 

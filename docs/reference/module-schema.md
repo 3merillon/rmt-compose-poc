@@ -309,10 +309,11 @@ Do not confuse the two. A `ui-state.json` will not load as a module, and a `modu
 
 ## Where the app keeps things between sessions
 
-| `localStorage` key | Contents |
+| Where | Contents |
 |---|---|
-| `rmt:moduleSnapshot:v1` | The current composition, in module-JSON shape. Written on every undoable edit, on tab-hide, and on unload. Loaded on boot instead of the default module. |
-| `rmt:moduleSnapshot:v1:unloadable` | A saved session that could not be loaded is kept here, and the default module opens. |
+| IndexedDB `rmt-compose`, store `autosave`, key `module` | The current composition, as module-JSON text. Written after every undoable edit, on tab-hide, and on unload. Loaded on boot instead of the default module. |
+| IndexedDB `rmt-compose`, store `autosave`, key `unloadable` | A saved session that could not be loaded is kept here, and the default module opens. |
+| `localStorage` key `rmt:moduleSnapshot:v1` | Where the composition was kept before. A module found there opens first and is moved to IndexedDB. Also the fallback when IndexedDB is not available. |
 | `ui-state` | The library layout (the `Save UI` payload). |
 | `rmt:settings:v1` | The [settings tree](/reference/settings-reference). |
 

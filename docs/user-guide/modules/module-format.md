@@ -320,7 +320,7 @@ It uses the same conversion as the app, keeps line endings and indentation, and 
 The conversion goes one way. A module saved from this version carries `duration` on the BaseNote and `"measure": true` on its bars, and the published editor on `main` does not read them. Keep a copy of any file you still need there.
 :::
 
-If a saved session cannot be loaded at startup, the app keeps it in `localStorage` under `rmt:moduleSnapshot:v1:unloadable` and opens the default module.
+If a saved session cannot be loaded at startup, the app keeps it beside the autosave (IndexedDB `rmt-compose`, store `autosave`, key `unloadable`) and opens the default module.
 
 ## See also
 

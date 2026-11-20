@@ -230,9 +230,13 @@ None of these has UI. They are read from the URL query string or `localStorage`.
 | `?evaluator=js` | Keep the JavaScript evaluator and skip the WASM fetch entirely. See below. |
 | `?evaluator=wasm` | Ask for the default (the Rust/WASM evaluator) explicitly. Ignored with a console warning if `WASM_MATCHES_VARIABLE_LAYOUT` is `false`. See below. |
 
-localStorage keys the app uses: `rmt:moduleSnapshot:v1` (the autosaved composition),
-`rmt:moduleSnapshot:v1:unloadable` (a saved session that could not be loaded; the default module opens
-instead), `rmt:settings:v1` (the settings store), `ui-state` (the module-library layout), `rmt:atlas`.
+The autosaved composition is in IndexedDB: database `rmt-compose`, store `autosave`, key `module`
+(and `unloadable`, a saved session that could not be loaded; the default module opens instead). See
+`src/store/autosave.js`. A module put in localStorage under `rmt:moduleSnapshot:v1` (where the
+autosave used to be) opens first and is moved there; to start from the default module, clear both.
+localStorage keys the app uses: `rmt:settings:v1` (the settings store), `ui-state` (the
+module-library layout), `rmt:atlas`; `rmt:moduleSnapshot:v1` only as above, or as the autosave's
+fallback when IndexedDB is not available.
 
 ## WebAssembly
 
@@ -315,8 +319,8 @@ In the browser, `?perf=1` exposes `window.__rmtPerf` with `measureEval()`, `meas
 `measureSync()`, `measureRedraw()`, `profileFrame()`, `pickHubNoteId()` and `report()`.
 
 ::: warning `__rmtPerf.loadStress()` overwrites your work
-It writes the stress module into `rmt:moduleSnapshot:v1` — the same key that autosaves your
-composition — and reloads the page. Run `__rmtPerf.restoreDefault()` to get back to the default
+It writes the stress module into the autosave, where your composition is kept, and reloads the
+page. Run `__rmtPerf.restoreDefault()` to get back to the default
 module. Do not run it in a session you care about.
 :::
 
