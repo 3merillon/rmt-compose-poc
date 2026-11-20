@@ -30,16 +30,16 @@ const expr = new BinaryExpression(initialSize = 64)
 
 Creates an empty expression with a 64-byte bytecode buffer (it doubles as needed). You rarely
 build one by hand — the compilers do it. A note's unset variables share one frozen empty
-expression, `EMPTY_EXPRESSION` (`src/binary-note.js:442-450`); its `clone()` is an ordinary, writable
+expression, `EMPTY_EXPRESSION` (`src/binary-note.js:458-466`); its `clone()` is an ordinary, writable
 one.
 
 ## Properties
 
 | Property | Type | Notes |
 |---|---|---|
-| `bytecode` | `Uint8Array` | The instruction stream. Capacity, not content — read only the first `length` bytes. |
+| `bytecode` | `Uint8Array` | The instruction stream. Capacity, not content — read only the first `length` bytes. In a clone (every expression a note holds) the two are equal. |
 | `length` | `number` | Bytes actually used. |
-| `dependencies` | `Uint32Array` | Note ids referenced by `LOAD_REF` and `LOAD_REF_WIDE`. Initial capacity 16, doubles. |
+| `dependencies` | `Uint32Array` or `Array` | Note ids referenced by `LOAD_REF` and `LOAD_REF_WIDE`. A `Uint32Array` while compiling (initial capacity 16, doubles); an exact-size `Array` in a clone, the shared frozen empty one when there are none. Read entries below `depCount` by index. |
 | `depCount` | `number` | Entries used in `dependencies`. |
 | `sourceText` | `string` | The original text, verbatim and untrimmed. `''` for a synthesised expression. |
 | `referencesBase` | `boolean` | True when the expression contains a `LOAD_BASE`. |
@@ -76,9 +76,11 @@ const copy = expr.clone()
 
 Deep copy. `ExpressionCompiler.compile()` always hands back a clone, never the cached instance.
 
-The clone's `dependencies` array starts at the default capacity of 16 but is regrown from
-`this.depCount` when the original tracks more — an expression referencing 17 or more distinct
-notes clones (and therefore compiles) correctly.
+A clone is at its size (`src/binary-note.js:431-445`): `bytecode` holds exactly `length` bytes and
+`dependencies` exactly `depCount` ids, as an `Array`. A 64-byte buffer and a 16-entry `Uint32Array`
+per expression cost about 530 B in Node for what is mostly a dozen bytes and one id. Writing to a
+clone grows it as it would any expression (`ensureCapacity()`, `addDependency()`, which grows from
+an empty list too).
 
 ### addDependency()
 
@@ -122,7 +124,8 @@ expr.getVariableRefs()  // → number[]
 Every (note, variable) the expression reads, in order of first appearance, each packed as
 `(noteId << 3) | varIndex`. Unlike `getPropertyDependencies()` it **includes BaseNote reads**, as
 note 0: `(3/2) * [2].f + base.t` gives `[(2 << 3) | 2, 0]`. Evaluation order and cycle checks are
-built on it. The array is decoded once and cached on the expression — treat it as read-only.
+built on it. The array is decoded once and cached on the expression, at its size (an expression with no reads
+shares one frozen empty array) — treat it as read-only.
 
 ### Writer methods
 
@@ -209,7 +212,8 @@ is used only when the numerator or denominator falls outside the i32 range
 
 `LOAD_REF` encodes the id as a `u16`, for ids up to 65535. `LOAD_REF_WIDE` encodes it as a `u32`,
 for ids 65536 to 16,777,215. The DSL compiler writes the 2-byte form whenever the id fits, so a
-module whose ids fit compiles to the same bytecode as before. `dependencies` is a `Uint32Array`.
+module whose ids fit compiles to the same bytecode as before. `dependencies` holds the ids as
+numbers, up to `MAX_NOTE_ID`.
 
 `MAX_NOTE_ID` (`0xFFFFFF`, 16,777,215, exported from `src/binary-note.js`) is the largest id a note
 can have. The renderer's picking draws each id in 24 bits of colour, and 2^24 − 1 is also the

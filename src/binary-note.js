@@ -88,18 +88,27 @@ export function getCorruptionFlag(varIndex) {
   return 1 << varIndex;
 }
 
+/** The empty dependency and reference list that expressions share; frozen, never written. */
+const EMPTY_LIST = Object.freeze([]);
+
 /**
  * Binary expression storage
  * Stores bytecode instructions and explicit dependency list
  */
 export class BinaryExpression {
-  constructor(initialSize = 64) {
+  /**
+   * @param {number} [initialSize=64] - bytecode capacity in bytes
+   * @param {ArrayLike<number>|null} [dependencies] - the dependency list to
+   *   start from (clone() passes an exact-size one); a Uint32Array(16) if none
+   */
+  constructor(initialSize = 64, dependencies = null) {
     // Instruction bytecode buffer
     this.bytecode = new Uint8Array(initialSize);
     this.length = 0;
 
-    // Explicit dependency list (note IDs this expression references)
-    this.dependencies = new Uint32Array(16);
+    // Explicit dependency list (note IDs this expression references): a
+    // Uint32Array while compiling, an exact-size Array in a clone
+    this.dependencies = dependencies || new Uint32Array(16);
     this.depCount = 0;
 
     // Original text expression (for JSON round-trip)
@@ -226,9 +235,9 @@ export class BinaryExpression {
       if (this.dependencies[i] === noteId) return;
     }
 
-    // Expand if needed
+    // Expand if needed (a clone's list is exact-size, possibly empty)
     if (this.depCount >= this.dependencies.length) {
-      const newDeps = new Uint32Array(this.dependencies.length * 2);
+      const newDeps = new Uint32Array(Math.max(16, this.dependencies.length * 2));
       newDeps.set(this.dependencies);
       this.dependencies = newDeps;
     }
@@ -373,9 +382,11 @@ export class BinaryExpression {
       }
     }
 
-    this._varRefs = refs;
+    // Kept at its size: an array grown by push() holds 17 slots for one ref
+    const kept = refs.length === 0 ? EMPTY_LIST : refs.slice();
+    this._varRefs = kept;
     this._varRefsLength = len;
-    return refs;
+    return kept;
   }
 
   /**
@@ -409,20 +420,25 @@ export class BinaryExpression {
   }
 
   /**
-   * Clone this expression
+   * Clone this expression, at its size: the bytecode buffer holds exactly
+   * `length` bytes and the dependency list exactly `depCount` ids (an Array;
+   * the shared EMPTY_LIST when there are none). Every expression a note holds
+   * is a clone (the compiler's cache hands out clones), and a 64-byte buffer
+   * with a 16-entry Uint32Array cost about 530 B per expression in Node for
+   * what is mostly a dozen bytes and one id. Writing to a clone grows it as
+   * it would any expression (ensureCapacity, addDependency).
    */
   clone() {
-    const copy = new BinaryExpression(this.bytecode.length);
+    const n = this.depCount;
+    let deps = EMPTY_LIST;
+    if (n > 0) {
+      deps = new Array(n);
+      for (let i = 0; i < n; i++) deps[i] = this.dependencies[i];
+    }
+    const copy = new BinaryExpression(this.length, deps);
     copy.bytecode.set(this.bytecode.subarray(0, this.length));
     copy.length = this.length;
-    // The constructor arg only sizes the bytecode buffer; dependencies start
-    // at the default 16. Grow the copy's array when this expression tracks
-    // more (17+ distinct note refs), or .set() throws RangeError.
-    if (this.depCount > copy.dependencies.length) {
-      copy.dependencies = new Uint32Array(this.depCount);
-    }
-    copy.dependencies.set(this.dependencies.subarray(0, this.depCount));
-    copy.depCount = this.depCount;
+    copy.depCount = n;
     copy.sourceText = this.sourceText;
     copy.referencesBase = this.referencesBase;
     return copy;
@@ -442,7 +458,7 @@ export class BinaryExpression {
 export const EMPTY_EXPRESSION = (() => {
   const e = new BinaryExpression(0);
   e.dependencies = new Uint32Array(0);
-  e._varRefs = Object.freeze([]); // what getVariableRefs() returns, without writing
+  e._varRefs = EMPTY_LIST; // what getVariableRefs() returns, without writing
   e._varRefsLength = 0;
   Object.freeze(e.bytecode);
   Object.freeze(e.dependencies);
