@@ -126,7 +126,7 @@ The **Load Module from file…** path checks size and shape only. A malformed ex
 
 ### The module would not load
 
-- **`[RMT] Autosave failed (history capture): QuotaExceededError` in the console** — the module is larger than the browser keeps for the autosave (about 5 MB of text, a few tens of thousands of notes). It loads and plays, but a reload will not bring it back: save it to a file.
+- **`[RMT] Autosave failed (…)` in the console** — the browser refused to store the module. The autosave keeps it in IndexedDB, which holds far more than any module the app opens; this means the disk is full, or the browser offers no IndexedDB (some private modes), where the autosave falls back to `localStorage` and its 5 MB or so. The module loads and plays, but a reload will not bring it back: save it to a file.
 
 - **`Module file too large (max 64 MB)`** — the hard cap. Split the module.
 - **`Invalid module file structure`** — most often a missing `baseNote` object or a `notes` key that is not an array. Note that a file with *no* `notes` key passes this check and then fails in the loader with a red `Error loading module: data.notes is not iterable` banner. Always include `notes`.
