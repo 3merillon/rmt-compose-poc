@@ -17,9 +17,11 @@ import Fraction from 'fraction.js';
 
 // --- fetch shim for file:// wasm loading in Node ---
 const realFetch = globalThis.fetch;
+let wasmFetches = 0;
 globalThis.fetch = async (url, ...args) => {
   const u = String(url);
   if (u.startsWith('file://') && u.endsWith('.wasm')) {
+    wasmFetches++;
     const buf = readFileSync(fileURLToPath(u));
     return new Response(buf, { headers: { 'content-type': 'application/wasm' } });
   }
@@ -50,9 +52,14 @@ const jsSamples = [1, 250, 500, 750, 1000].map((id) => ({
   t: jsCache.get(id).startTime.toFraction()
 }));
 
-// 2) Complete WASM init -> onWasmReady fires -> hot-swap.
-const wasmLoaded = await initWasm();
+// 2) Complete WASM init -> onWasmReady fires -> hot-swap. Three callers at
+// once, as at boot (main.js, store/app-state.js, the auto-init): they must
+// share one initialization, or the last instance replaces the first under
+// the objects made on it.
+const inits = [initWasm(), initWasm(), initWasm()];
+const wasmLoaded = (await Promise.all(inits)).every(Boolean);
 check('WASM initialized', wasmLoaded && isWasmAvailable());
+check('three concurrent initWasm() calls fetch the module once', wasmFetches === 1, `${wasmFetches} fetch(es)`);
 
 // onWasmReady callbacks run on a microtask; give them a tick.
 await new Promise((r) => setTimeout(r, 0));

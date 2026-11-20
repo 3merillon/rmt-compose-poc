@@ -38,24 +38,33 @@ export function onWasmReady(cb) {
   readyCallbacks.push(cb);
 }
 
+// The one initialization in flight or done. Three callers start it at boot
+// (main.js, store/app-state.js and the auto-init below), in the same tick.
+// Each used to run its own: wasm-bindgen's init checks for an instance only
+// before its first await, so all three fetched and instantiated the module,
+// and the last to finish replaced the instance under objects made on an
+// earlier one ("recursive use of an object", or a hang).
+let initPromise = null;
+
 /**
- * Initialize the WASM module
+ * Initialize the WASM module. Every call shares one initialization.
  * @returns {Promise<boolean>} True if WASM loaded successfully
  */
-export async function initWasm() {
-  if (wasmInitialized) {
-    return wasmModule !== null;
+export function initWasm() {
+  if (initPromise === null) {
+    // The WASM evaluator is opt-in (?evaluator=wasm — see evaluator-adapter.js).
+    // Without the opt-in nothing consumes the module, so skip the 384 KB
+    // fetch+instantiate entirely. Headless Node (benches/tests) has no window
+    // and passes the gate.
+    if (!isEvaluatorHotSwapEnabled()) {
+      return Promise.resolve(false);
+    }
+    initPromise = loadWasm();
   }
+  return initPromise;
+}
 
-  // The WASM evaluator is opt-in (?evaluator=wasm — see evaluator-adapter.js).
-  // Without the opt-in nothing consumes the module, so skip the 384 KB
-  // fetch+instantiate entirely. Every boot-time caller (main.js,
-  // store/app-state.js and the auto-init below) funnels through here.
-  // Headless Node (benches/tests) has no window and passes the gate.
-  if (!isEvaluatorHotSwapEnabled()) {
-    return false;
-  }
-
+async function loadWasm() {
   try {
     // Dynamic import of the WASM module
     // This path will be resolved by Vite
