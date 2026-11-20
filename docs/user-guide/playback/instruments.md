@@ -150,7 +150,7 @@ Each instrument's times, in seconds:
 | `harmonium` | 0.03 | held at full level | 0.08 |
 | `harmonium-soft` | 0.06 | held at full level | 0.12 |
 | `piano` | 0.002 | held (the recording carries its own decay) | 0.30 at C1 down to 0.10 at C6, so the bass is damped more slowly; 1.5 above F#6, where a piano has no dampers |
-| `violin` | 0.005 | held (the recording carries its own bowing, and stops after 3.5 s) | 0.12 |
+| `violin` | 0.005 | held (the recording carries its own bowing; a long note repeats a stretch of it) | 0.12 |
 
 The harmonium voices are overridden the same way. See [attack and release](/reference/properties/attack-release) for the exact rules.
 
@@ -208,8 +208,8 @@ Only a small manifest is fetched when the app starts. The audio itself is fetche
 
 If a zone hasn't finished decoding, or the fetch failed, that note falls back to a **plain sine tone** for that playback. It still sounds; it is not sampled. If a piano suddenly sounds like a test tone, that's what happened — play it again.
 
-::: warning Long held notes go silent
-Sampled notes do not loop. The piano's recordings run their whole decay (19 s in the bass, 2 s at the top), so a held piano note dies away as a piano does, for as long as it is held. The violin's are capped at **3.5 seconds**: a violin note held longer plays its sample out and is then **silent for the rest of its duration** — use a synth voice for drones.
+::: tip Long held notes
+The piano's recordings run their whole decay (19 s in the bass, 2 s at the top), so a held piano note dies away as a piano does, for as long as it is held. The violin's recordings are 3.5 seconds long; a violin note held longer repeats a 1 to 2 second stretch of its held sound, blended so the repeat makes no click. It lasts as long as written. The vibrato is the recording's own, so on a very long note it repeats with the stretch.
 :::
 
 ## Mixing instruments

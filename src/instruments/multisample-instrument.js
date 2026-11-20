@@ -35,6 +35,39 @@
 
 import { applyVoiceEnvelope, envelopeLength } from './instrument-manager.js';
 
+/** The crossfade length baked before a loop's end (seconds). */
+export const LOOP_XFADE = 0.12;
+
+/**
+ * Make a recording's loop seamless: the LOOP_XFADE seconds before its end are
+ * blended into the same length before its start, so when playback jumps from the
+ * end back to the start the sound continues from where it would have been. The
+ * blend keeps the level: its gains a, b satisfy a² + b² + 2abc = 1, where c is the
+ * correlation of the two stretches (equal power when they are unrelated, equal gain
+ * when they are alike, as loop points chosen for a match tend to be). Done once,
+ * on the decoded buffer: nothing is re-encoded, and a decoder that shifts the
+ * samples slightly only moves the seam, never opens it.
+ * @param {AudioBuffer} buf
+ * @param {{start:number, end:number}} loop seconds
+ */
+export function bakeLoopCrossfade(buf, loop) {
+  const sr = buf.sampleRate, L = Math.round(LOOP_XFADE * sr);
+  const s = Math.round(loop.start * sr), e = Math.round(loop.end * sr);
+  if (!(s - L >= 0 && e <= buf.length && e - L > s)) return false;
+  for (let c = 0; c < buf.numberOfChannels; c++) {
+    const x = buf.getChannelData(c);
+    let xy = 0, xx = 0, yy = 0;
+    for (let i = 0; i < L; i++) { const p = x[e - L + i], q = x[s - L + i]; xy += p * q; xx += p * p; yy += q * q; }
+    const corr = Math.max(0, xy / Math.sqrt(xx * yy + 1e-30));
+    for (let i = 0; i < L; i++) {
+      const w = (i + 1) / L, a0 = Math.cos((Math.PI / 2) * w), b0 = Math.sin((Math.PI / 2) * w);
+      const k = 1 / Math.sqrt(1 + 2 * a0 * b0 * corr);
+      x[e - L + i] = (x[e - L + i] * a0 + x[s - L + i] * b0) * k;
+    }
+  }
+  return true;
+}
+
 export class MultisampleInstrument {
   /**
    * @param {AudioContext} audioContext
@@ -72,6 +105,8 @@ export class MultisampleInstrument {
         .map((z) => ({
           root: z.root || null,
           rootHz: +z.rootHz,
+          // A loop (seconds into the recording) repeated while a note is held: the violin's
+          loop: z.loop && isFinite(z.loop.start) && isFinite(z.loop.end) && z.loop.end > z.loop.start + 0.2 ? { start: +z.loop.start, end: +z.loop.end } : null,
           // How fast the recording dies away (s to fall 60 dB; measured, for the drawing)
           decayT60: isFinite(z.decayT60) && +z.decayT60 > 0 ? +z.decayT60 : null,
           // The pitch the recording actually has (rootHz corrected by its measured tuneCents)
@@ -120,6 +155,7 @@ export class MultisampleInstrument {
         if (!res.ok) throw new Error(`zone ${res.status}`);
         const arr = await res.arrayBuffer();
         const buf = await this.audioContext.decodeAudioData(arr);
+        if (zone.loop) bakeLoopCrossfade(buf, zone.loop);
         zone.buffer = buf;
         return buf;
       } catch (e) {
@@ -181,6 +217,13 @@ export class MultisampleInstrument {
       filter.Q.value = 0.5;
     }
     source.connect(filter);
+    // A held note repeats the recording's loop (scripts/tune-samples.mjs found it, and
+    // _decodeZone blended its end into its start), so it lasts as long as written
+    if (zone.loop) {
+      source.loop = true;
+      source.loopStart = zone.loop.start;
+      source.loopEnd = zone.loop.end;
+    }
 
     return {
       frequency: { value: frequency },

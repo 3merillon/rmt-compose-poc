@@ -385,8 +385,8 @@ damper that follows pitch, `byPitch(f, [32.703 Hz, 0.30 s], [1046.5 Hz, 0.10 s])
 therefore never used; its `attack` is.
 
 `displayName` and `license` are parsed and never rendered anywhere in the app. `zones[].tuneCents` is the
-recording's measured pitch against `rootHz` (above). `zones[].loop` and `zones[].velLayers[]` are reserved and not
-even parsed.
+recording's measured pitch against `rootHz` (above). `zones[].loop` is a loop in the recording (below).
+`zones[].velLayers[]` is reserved and not even parsed.
 
 ### The shipped samples
 
@@ -420,17 +420,38 @@ ffmpeg -ac 1 -t 20 \
 writes each zone's `tuneCents` and, for the piano, `decayT60`: the recording's average fall over its first 3 s,
 as seconds per 60 dB (8 s in the bass to 3 s at the top). The audio does not use `decayT60` (the recording decays
 by itself); `getEnvelopeSettings()` hands it to the drawing as `drawT60`, so a long piano note is drawn dying
-away as it sounds.
+away as it sounds. For the violin it writes each zone's `loop` (below).
 
 Zone boundaries are the **geometric mean** of adjacent roots. The output is committed; the sources
 are not.
 
-::: danger No sample looping
+### Loops: the violin holds its notes
+
 The piano's recordings run until they have decayed (19 s at C1 down to 2 s at G7), so a piano note
-sounds for as long as it is held. The violin's are capped at **3.5 s** (with a 0.1 s tail fade from
-3.4 s): a violin note held longer plays its sample out and is then **silent for the rest of its
-duration**. There is no loop-point support — `zones[].loop` is reserved and unread.
-:::
+sounds for as long as it is held, and its zones have no loop. The violin's recordings are cut at
+**3.5 s** (with a 0.1 s fade from 3.4 s), so each violin zone carries a loop,
+`"loop": { "start": 1.13398, "end": 2.735 }` (seconds into the recording), and a violin note
+held past the loop's end repeats it for as long as it is held.
+
+- **Where the loop is.** `scripts/tune-samples.mjs` searches the held part of each recording: the
+  start between 0.8 and 1.6 s (after the bow's attack), the end between 2.6 and 3.25 s (before the
+  fade). It picks the pair whose preceding 30 ms match best, by waveform correlation less a cost for
+  any level difference. The loops are 1.1 to 2.1 s long, correlations 0.78 (E6) to 0.98 (C4),
+  level steps under 0.25 dB.
+- **The seam.** `_decodeZone()` passes each decoded buffer to `bakeLoopCrossfade()`. It blends the
+  `LOOP_XFADE` (0.12 s) before the loop's end into the same length before its start, so at the jump
+  back the sound continues from where it would have been. The gains keep the level:
+  a² + b² + 2abc = 1, with c the correlation of the two stretches. That is equal power when they are
+  unrelated and equal gain when they are alike. Nothing is re-encoded.
+- **Playback.** `createOscillator()` sets `source.loop`, `loopStart` and `loopEnd` on the voice's
+  `AudioBufferSourceNode`; the engine stops the voice after its release, as for every instrument.
+- **The vibrato** is the recording's own, and it repeats with the loop (the owner's decision:
+  keep it).
+- **Checked by** `scripts/test-loops.mjs` (in `npm test`: the bake, the level, the manifests) and
+  `scripts/perf/check-violin-loops.mjs`. The second renders a 10 s note on every zone at rate 1 and
+  9/8 and checks three things: the note lasts (no 20 ms frame more than 12 dB under its median); the
+  seams are level (no step larger than 99% of the recording's own frame-to-frame flicker); and the
+  seams make no click.
 
 ## Registration
 

@@ -161,6 +161,52 @@ SHEETS['phase-i-7b'] = {
       predict: 'Now: every note lasts as written.' },
   ],
 };
+SHEETS['phase-i-7c'] = {
+  title: 'Phase I, step 7c: the violin holds its long notes',
+  intro: 'Each file plays a passage twice: first as before this step (each recording ends at about 3.4 s, so a longer note fell silent), a second of silence, then as now. Same notes, pure ratios of 263 Hz, reverb and limiter on. ' +
+    'What changes: each violin recording has a loop, a stretch of its held sound (1.1 to 2.1 s long) that repeats for as long as the note is held, its end blended into its start so the jump back makes no click. The vibrato is the recording\'s own and is kept.',
+  passages: [
+    { name: 'Violin, middle C held 8 s (263 Hz)', instrument: 'violin', notes: [[[1, 1], 0, 8]],
+      change: 'The C4 recording loops from 1.13 s to 2.74 s: after its first 2.7 s the note repeats that 1.6 s stretch. Before: silence from about 3.4 s.',
+      predict: 'Now: one bow held for the whole 8 s, no click and no dip at the seams; if anything gives the loop away it will be the vibrato and bow pressure repeating every 1.6 s, not a break. Before: the note stops half way.' },
+    { name: 'Violin, a pure fifth held 8 s (526 and 789 Hz)', instrument: 'violin', notes: chord([[2, 1], [3, 1]], 0, 8),
+      change: 'C5 (a 2.04 s loop) against G5 (1.54 s, the least well matched loop of all, correlation 0.84): the two loops have different lengths, so their seams never coincide.',
+      predict: 'Now: the fifth stands for 8 s at 3/2, wavering only with the two vibratos; before: both stop at about 3.4 s.' },
+    { name: 'Violin, a slow line (2, 2, 5 and 3 s notes)', instrument: 'violin', line: true, notes: [[[1, 1], 0, 2], [[5, 4], 2, 2], [[3, 2], 4, 5], [[2, 1], 9, 3]],
+      change: 'One player, slurred (step 5). The 5 s G is the note that used to go silent before its end.',
+      predict: 'Now: every note lasts as written and the line stays joined; before: a gap of nearly two seconds before the high C.' },
+    { name: 'Violin, a high E held 6 s (1315 Hz)', instrument: 'violin', notes: [[[5, 1], 0, 6]],
+      change: 'The E6 recording has the hardest loop to match (correlation 0.78; its bow changes the most), so this is where a seam would show first.',
+      predict: 'Now: held, perhaps with a faint regular pulse every 1.3 s; before: silent after about 3.4 s.' },
+  ],
+};
+// Variant sheets: the same code, two versions of a passage taken from a module (take 1 = notes, take 2 = notesB)
+if (SHEET === 'canon-63') {
+  const { Module } = await import('../../src/module.js');
+  const { isMeasureNote } = await import('../../src/note.js');
+  const m = await Module.loadFromJSON(JSON.parse(readFileSync('public/modules/defaultModule.json', 'utf8')));
+  m.evaluateModule();
+  const base = m.baseNote.getVariable('frequency');
+  const T0 = 6.0, T1 = 10.8;
+  const win = Object.values(m.notes).filter((n) => n.id && !isMeasureNote(n) && n.getExpressionSource('frequency'))
+    .map((n) => ({ id: n.id, t: n.getVariable('startTime').valueOf(), d: n.getVariable('duration').valueOf(), r: n.getVariable('frequency').div(base) }))
+    .filter((n) => n.t >= T0 - 1e-9 && n.t < T1);
+  const asNotes = (swap) => win.map((n) => { const r = swap[n.id] || [Number(n.r.n), Number(n.r.d)]; return [r, +(n.t - T0).toFixed(3), +n.d.toFixed(3)]; });
+  const v1 = { 63: [135, 256], 81: [405, 512] }, v2 = { 63: [8, 15], 81: [4, 5] };
+  SHEETS['canon-63'] = {
+    title: 'Canon, note 63 (the first bass\'s C♯) and its copy, note 81',
+    intro: 'The canon from 6 s to 10.8 s, on its own instrument (sine), twice in each file: first as written, a second of silence, then with one change. ' +
+      'Note 63 is the C♯ of the first bass\'s climb C → C♯ → D (at 1.5 s in the file); note 81, the second bass\'s copy of it a fifth higher (G → G♯ → A, at 3.9 s), changes with it.',
+    passages: [
+      { name: 'C♯ = 135/256, the leading tone to D (D · 15/16)', instrument: 'sine-wave', notes: asNotes({}), notesB: asNotes(v1),
+        change: 'As written 25/48: the climb steps 71 then 133 cents, and the C♯ makes 144/125 with the E♭ and 36/25 with the G above it. Now 135/256: 92 then 112 cents (a pure 16/15 into D); against the G a 64/45 diminished fifth. Note 81 becomes 405/512.',
+        predict: 'Second: an even climb, the C♯ leaning into D; still a tense chord (it is a diminished sonority), but no longer a note that sounds like a mistuned C.' },
+      { name: 'C♯ = 8/15, a D♭', instrument: 'sine-wave', notes: asNotes({}), notesB: asNotes(v2),
+        change: 'Now 8/15: 112 then 92 cents; with the E♭ and the G it is the plain chord 16 : 36 : 45. Note 81 becomes 4/5 (an A♭).',
+        predict: 'Second: the smoothest chord of the three, but the bass rises a large step and then a small one: a D♭ colour rather than a passing C♯.' },
+    ],
+  };
+}
 const sheet = SHEETS[SHEET];
 if (!sheet) { console.error(`unknown sheet ${SHEET}`); process.exit(2); }
 
@@ -286,7 +332,9 @@ for (const p of sheet.passages) {
   const seconds = end + 2.2;
   const takes = [];
   for (const side of [before, now]) {
-    const r = await side.page.evaluate(renderInPage, { notes, base: [B, 1], seconds, sampleRate: SR });
+    // A variant passage: the second take plays its own notes (same code)
+    const theseNotes = side === now && p.notesB ? toEngineNotes({ ...p, notes: p.notesB }) : notes;
+    const r = await side.page.evaluate(renderInPage, { notes: theseNotes, base: [B, 1], seconds, sampleRate: SR });
     // From the playback's start (t0, the engine's 0.1 s lead-in) to the end of the render.
     const from = Math.round(r.t0 * SR);
     const ch = r.pcm.map((c) => f32(c).subarray(from));

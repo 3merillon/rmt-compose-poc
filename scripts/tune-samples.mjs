@@ -22,6 +22,12 @@
  * For the piano it also measures how fast each recording dies away (`decayT60`, seconds to fall 60 dB, from the
  * slope of its level between 0.4 and 3 s): not for the sound (the recording decays by itself), for the drawing,
  * so the workspace draws a piano note fading as it is heard.
+ *
+ * For the violin it finds a loop (`loop: { start, end }`, seconds): a stretch of the held sound whose end matches
+ * its start (the 30 ms before each, by waveform correlation and level), searched between 0.8–1.6 s and 2.6–3.25 s
+ * (the recordings fade out from 3.4 s). The instrument repeats it for as long as a note is held, after blending
+ * the 120 ms before the loop's end into the 120 ms before its start when the recording is decoded, so the jump
+ * back is seamless. The vibrato is kept (the owner: "we can leave the vibrato for violin").
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { extname, join, resolve, sep } from 'node:path';
@@ -148,12 +154,50 @@ function measureZone(z, harmonic) {
   return { root: z.root, rootHz: z.rootHz, cents: 1200 * Math.log2(f1 / z.rootHz), B: b / a, partials: used.length, strongest: used.length ? used.reduce((m, q) => (q.amp > m.amp ? q : m)).n : 0, t60 };
 }
 
+// The best loop of a held recording: the end e and start s whose preceding 30 ms match best.
+function findLoop(x) {
+  const W = Math.round(0.03 * SR);
+  const win = (i) => x.subarray(i - W, i);
+  const energy = (a) => { let e = 0; for (let k = 0; k < a.length; k++) e += a[k] * a[k]; return e; };
+  let best = null;
+  for (let e = Math.round(3.25 * SR); e >= Math.round(2.6 * SR); e -= Math.round(0.005 * SR)) {
+    if (e > x.length) continue;
+    const B = win(e), eb = energy(B);
+    for (let s = Math.round(0.8 * SR); s <= Math.round(1.6 * SR); s += Math.round(0.002 * SR)) {
+      const A = win(s);
+      let ab = 0; for (let k = 0; k < W; k++) ab += A[k] * B[k];
+      const ea = energy(A);
+      const c = ab / Math.sqrt(ea * eb + 1e-20);
+      const levelDb = Math.abs(10 * Math.log10((ea + 1e-20) / (eb + 1e-20)));
+      const score = c - levelDb / 6;   // a 1 dB level step costs as much as 0.17 of correlation
+      if (!best || score > best.score) best = { s, e, c, levelDb, score };
+    }
+  }
+  // Refine the start sample by sample around the best
+  const B = win(best.e), eb = energy(B);
+  for (let s = best.s - Math.round(0.002 * SR); s <= best.s + Math.round(0.002 * SR); s++) {
+    const A = win(s); let ab = 0; for (let k = 0; k < W; k++) ab += A[k] * B[k];
+    const ea = energy(A), c = ab / Math.sqrt(ea * eb + 1e-20), levelDb = Math.abs(10 * Math.log10((ea + 1e-20) / (eb + 1e-20)));
+    const score = c - levelDb / 6;
+    if (score > best.score) best = { s, e: best.e, c, levelDb, score };
+  }
+  return { start: best.s / SR, end: best.e / SR, correlation: best.c, levelDb: best.levelDb };
+}
+
 let worst = 0;
 for (const name of INSTRUMENTS) {
   const zones = await zonesOf(name);
   console.log(`\n== ${name} ${CHECK ? '(as the corrected instrument plays each root)' : '(as recorded)'}`);
   console.log('  zone   root Hz     cents     B        partials  strongest  t60 (s)');
   const results = zones.map((z) => measureZone(z, HARMONIC.has(name)));
+  // The violin's loops (from the recording as decoded, not from --check's resampled render)
+  if (name === 'violin' && !CHECK) {
+    for (let i = 0; i < zones.length; i++) {
+      results[i].loop = findLoop(f32(zones[i].pcm));
+      const L = results[i].loop;
+      console.log(`  loop ${zones[i].root.padEnd(4)} ${L.start.toFixed(4)}–${L.end.toFixed(4)} s (${(L.end - L.start).toFixed(2)} s)  correlation ${L.correlation.toFixed(3)}  level step ${L.levelDb.toFixed(2)} dB`);
+    }
+  }
   for (const r of results) {
     worst = Math.max(worst, Math.abs(r.cents));
     console.log(`  ${r.root.padEnd(5)} ${r.rootHz.toFixed(3).padStart(9)}  ${r.cents.toFixed(2).padStart(7)}  ${r.B.toExponential(1).padStart(8)}   ${String(r.partials).padStart(3)}        ${String(r.strongest).padStart(2)}      ${r.t60 ? r.t60.toFixed(1) : '-'}`);
@@ -165,6 +209,7 @@ for (const name of INSTRUMENTS) {
       const r = results.find((q) => q.root === z.root);
       if (r) z.tuneCents = Math.round(r.cents * 10) / 10;
       if (r && r.t60) z.decayT60 = Math.round(r.t60 * 10) / 10; else delete z.decayT60;
+      if (r && r.loop) z.loop = { start: +r.loop.start.toFixed(5), end: +r.loop.end.toFixed(5) };
     }
     writeFileSync(file, JSON.stringify(m, null, 2) + '\n');
     console.log(`  written tuneCents into ${file}`);
