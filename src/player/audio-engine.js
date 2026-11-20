@@ -169,9 +169,10 @@ export class AudioEngine {
 
         // Cache instrument lookups
         const instrumentCache = new Map();
+        const instrumentMemo = new Map(); // shared by every lookup: each chain is walked once
         const getInstrument = (note) => {
           if (!instrumentCache.has(note.id)) {
-            instrumentCache.set(note.id, module.findInstrument(note).toLowerCase());
+            instrumentCache.set(note.id, module.findInstrument(note, instrumentMemo).toLowerCase());
           }
           return instrumentCache.get(note.id);
         };

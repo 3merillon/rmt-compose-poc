@@ -93,16 +93,23 @@ base.release * (1/2)    # half the piece's release
 ## In the editor
 
 The editor draws the envelope inside each note. When a note, or the BaseNote, sets an `attack` or a
-`release`, the note body shows a band about its centre line whose height follows the gain the note
-sounds with:
+`release` (or for every sounding note, with Settings → Appearance → **Envelope inside notes** at
+*Every note*), the note body shows a band about its centre line whose height follows the loudness the
+note sounds with, on a decibel scale: full height at the peak, nothing at 48 dB below it. On that scale
+an exponential fall is a straight line, so:
 
-- the attack ramps up from a point;
-- the instrument's decay, or natural decay, falls to the level the sound has at the note's end;
+- the attack rises from nothing (steeply at first: half the gain is already −6 dB);
+- the instrument's decay, or its natural decay (vibraphone, fm-epiano), falls in a straight line to the
+  level the sound has at the note's end;
 - the hold runs level.
 
-The release is **not drawn yet**: it sounds after the note's end, outside the note's rectangle, and
-the editor draws no tail past the end (a later step). The band is drawn with a release of zero, so
-the note's right edge is where the key is lifted, not where the sound is silent.
+The note's right edge is where the key is lifted. The release rings after it, and with **Tails after
+the note's end** on, the editor draws it there: the band continues past the note, in the note's colour
+at reduced strength and without a border, falling in a straight line from the level at the note's end
+to silence (−80 dB; the band reaches nothing at −48 dB). A tail is display only. Picking, hover,
+the marquee, drags, resizes, snapping to a note's end, dependency lines, the module's end time and the
+playhead all use the note's written rectangle; tails are hidden while a drag previews new positions.
+A recording's own decay (the piano's, the violin's) is not drawn yet: their band holds level.
 
 The note's full colour is inside the band; outside it the colour is dimmed (alpha × 0.3). The shape
 comes from the same function as playback, `envelopeShares` and `envelopeTimes` in

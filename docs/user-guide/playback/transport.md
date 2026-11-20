@@ -39,6 +39,8 @@ The play icon has three states:
 
 Reverb tails are not cut short by Stop — the reverb ring-out is what you hear decaying afterwards.
 
+When playback reaches the end of the module by itself, the last notes are not cut: a note's end is a note-off, and their releases ring out to silence. Stop, Pause and a new Play silence them at once.
+
 ## Move the playhead
 
 **Click an empty part of the workspace background.** The playhead jumps to that point in time, clamped to the module. This is the only way to start from the middle of a piece: seek, then press Play.

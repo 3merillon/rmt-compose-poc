@@ -91,7 +91,7 @@ instrument is cheaper than one per voice. Do not describe them as a mixing desk.
 | `attack` | **0.003 s** |
 | `release` | **0.25 s** |
 
-Default **ON** (`audio.limiter.enabled`, `settings-schema.js:115`).
+Default **ON** (`audio.limiter.enabled`, `settings-schema.js:119`).
 
 ::: danger These are not the old numbers
 Earlier documentation described a compressor at `threshold −24 / knee 30 / ratio 12`. That was
@@ -114,10 +114,10 @@ left-to-right**: three octaves above the BaseNote is hard right, three below is 
 BaseNote itself is dead centre. It returns `0` if either frequency is non-positive.
 
 **Width is not applied here.** The caller multiplies by `graph.stereoWidth`
-(`audio-engine.js:687`). The split is deliberate: `panPos` is baked once, at
+(`audio-engine.js:688`). The split is deliberate: `panPos` is baked once, at
 `preparePlayback` time, while the enable flag and width are read when the voice is *scheduled*.
 
-Stereo defaults **OFF** (`audio.stereo.enabled`, `settings-schema.js:112`). Out of the box, playback
+Stereo defaults **OFF** (`audio.stereo.enabled`, `settings-schema.js:116`). Out of the box, playback
 is centred.
 
 ## Master volume

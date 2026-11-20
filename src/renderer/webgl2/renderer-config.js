@@ -29,9 +29,11 @@ export const defaultRendererConfig = {
     centerAnchorWU: 10,
     roundedCornerPxAtZoom1: 6,
     borderPxAtZoom1: 1,
-    // Draw the envelope inside every sounding note (Settings > Appearance), not
-    // only in notes that set an attack or a release.
-    showAllEnvelopes: false
+    // Which notes draw their envelope inside them (Settings > Appearance >
+    // "Envelope inside notes"): 'own' = the notes that set an attack or a release,
+    // 'all', 'none'. And whether each note's release is drawn past its end.
+    envelopeMode: 'own',
+    showTails: false
   },
 
   // Base note glyph circle (world-space size)

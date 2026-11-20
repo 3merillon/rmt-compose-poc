@@ -76,10 +76,14 @@ export function defaultSettings() {
         borderPxAtZoom1: 1,
         roundedCornerPxAtZoom1: 6,
       },
-      // Draw every sounding note's envelope inside it, not only the notes that
-      // set an attack or a release (or inherit one from the BaseNote). Off is
-      // the app's behavior before the setting existed.
-      showEnvelopes: false,
+      // Which notes draw the envelope they sound with inside them: 'own' the notes
+      // that set an attack or a release (or inherit one from the BaseNote), 'all'
+      // every sounding note, 'none' no note. 'own' is the app's behavior before the
+      // setting existed. (Replaces the boolean `showEnvelopes`: true reads as 'all'.)
+      envelopes: 'own',
+      // Draw each note's release past its end: what rings after the note-off.
+      // Display only; off by default.
+      showTails: false,
     },
     arrows: {
       enabled: true,
@@ -198,7 +202,10 @@ export function validateSettings(raw, prev) {
   d.appearance.note.heightWU = clampNum(an.heightWU, 8, 60, d.appearance.note.heightWU);
   d.appearance.note.borderPxAtZoom1 = clampNum(an.borderPxAtZoom1, 0, 6, d.appearance.note.borderPxAtZoom1);
   d.appearance.note.roundedCornerPxAtZoom1 = clampNum(an.roundedCornerPxAtZoom1, 0, 20, d.appearance.note.roundedCornerPxAtZoom1);
-  d.appearance.showEnvelopes = asBool(a.showEnvelopes, d.appearance.showEnvelopes);
+  d.appearance.envelopes = ['own', 'all', 'none'].includes(a.envelopes)
+    ? a.envelopes
+    : (a.showEnvelopes === true ? 'all' : d.appearance.envelopes);
+  d.appearance.showTails = asBool(a.showTails, d.appearance.showTails);
 
   const ar = src.arrows || {};
   const prevAr = (prev && prev.arrows) || {};

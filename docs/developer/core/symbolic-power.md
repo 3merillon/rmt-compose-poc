@@ -81,7 +81,7 @@ POW makes an irrational, or ~ / a fallback makes an approximation
   → evaluateVariable() ORs the variable's bit into corruptionFlags   binary-evaluator.js:830
   → Module._updateCorruptionFlags()                                  module.js:683
       → DependencyGraph.setCorruptionFlags(id, flags)                dependency-graph.js:1746
-  → RendererAdapter.sync() → a_corruptionType per note               renderer.js:944
+  → RendererAdapter.sync() → a_corruptionType per note               renderer.js:1000
   → the shader hatches the note
 ```
 

@@ -423,21 +423,63 @@ export class RendererAdapter {
   // audio engine uses (envelopeShares in instrument-manager.js): the note's own
   // attack and release, the instrument's envelope (in seconds, some following the
   // pitch) for what it leaves unset, the anti-click floors. Returns [attack, decay,
-  // level, release] or null. The release sounds AFTER the note's end, so inside
-  // the note there is none to draw: the band holds the level the body reaches
-  // until the end (release share 0).
-  _envelopeSharesFor(module, note, durSec, attack, release, freq) {
+  // level, release, tail, levelAtEnd] or null. The release sounds AFTER the note's
+  // end, so inside the note there is none to draw (release share 0): the band holds
+  // the level the body reaches until the end. `tail` is that release as a share of
+  // the duration (drawn past the end when tails are on), starting from `levelAtEnd`.
+  _envelopeSharesFor(module, note, durSec, attack, release, freq, memo = null) {
     try {
       const shape = { attack: attack ? toNumber(attack, null) : null, release: release ? toNumber(release, null) : null };
       let env = {};
       const im = getInstrumentManager();
       if (im && typeof im.getInstrument === 'function') {
-        const inst = im.getInstrument(String(module.findInstrument(note) || '').toLowerCase());
+        const inst = im.getInstrument(String(module.findInstrument(note, memo) || '').toLowerCase());
         if (inst && typeof inst.getEnvelopeSettings === 'function') env = inst.getEnvelopeSettings(durSec, Number(freq)) || {};
       }
       const s = envelopeShares(env, durSec, shape);
-      return [s.attack, s.decay, s.sustain, 0];
+      return [s.attack, s.decay, s.sustain, 0, s.release, s.sustain];
     } catch { return null; }
+  }
+
+  // The tails sync() collected, into their instance buffers. Nothing to do (and
+  // nothing uploaded) when tails are off: tailCount 0 skips the pass entirely.
+  _syncTails() {
+    const items = this._tailItems || [];
+    const M = items.length;
+    this.tailCount = M;
+    if (!M || !this.gl || !this.tailPosSizeBuffer) return;
+    const pos = new Float32Array(M * 4), col = new Float32Array(M * 4), lvl = new Float32Array(M);
+    for (let i = 0; i < M; i++) {
+      const t = items[i], o = i * 4;
+      pos[o] = t.x; pos[o + 1] = t.y; pos[o + 2] = Math.max(0.0001, t.w); pos[o + 3] = Math.max(0.0001, t.h);
+      col[o] = t.color[0]; col[o + 1] = t.color[1]; col[o + 2] = t.color[2]; col[o + 3] = t.color[3];
+      lvl[i] = t.level;
+    }
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailPosSizeBuffer); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailColorBuffer); gl.bufferData(gl.ARRAY_BUFFER, col, gl.DYNAMIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailLevelBuffer); gl.bufferData(gl.ARRAY_BUFFER, lvl, gl.DYNAMIC_DRAW);
+  }
+
+  _drawTails(vpW, vpH) {
+    const gl = this.gl, prog = this.tailProgram;
+    if (!this._uniforms) this._uniforms = {};
+    const U = this._uniforms.tail || (this._uniforms.tail = {
+      u_matrix: gl.getUniformLocation(prog, 'u_matrix'), u_viewport: gl.getUniformLocation(prog, 'u_viewport'),
+      u_offset: gl.getUniformLocation(prog, 'u_offset'), u_scale: gl.getUniformLocation(prog, 'u_scale'),
+    });
+    gl.useProgram(prog);
+    gl.uniformMatrix3fv(U.u_matrix, false, this.matrix);
+    gl.uniform2f(U.u_viewport, vpW, vpH);
+    gl.uniform2f(U.u_offset, this.canvasOffset?.x || 0, this.canvasOffset?.y || 0);
+    gl.uniform2f(U.u_scale, this.xScalePxPerWU || 1.0, this.yScalePxPerWU || 1.0);
+    gl.disable(gl.DEPTH_TEST);
+    gl.depthMask(false);
+    gl.bindVertexArray(this.tailVAO);
+    gl.drawArraysInstanced(gl.TRIANGLE_FAN, 0, 4, this.tailCount);
+    gl.bindVertexArray(null);
+    gl.depthMask(true);
+    gl.enable(gl.DEPTH_TEST);
   }
 
   init(containerEl) {
@@ -754,8 +796,14 @@ export class RendererAdapter {
     // And its attack and release, which a note without its own inherits.
     const baseAttack = baseEvForAmp ? baseEvForAmp.attack : null;
     const baseRelease = baseEvForAmp ? baseEvForAmp.release : null;
-    // Settings > Appearance > "Show every envelope": the band in every sounding note.
-    const showAllEnvelopes = this._config?.note?.showAllEnvelopes === true;
+    // Settings > Appearance > "Envelope inside notes": 'own' (the notes that set an
+    // attack or a release), 'all', 'none'; and "Tails after the note's end".
+    const envMode = this._config?.note?.envelopeMode || 'own';
+    const showTails = this._config?.note?.showTails === true;
+    // The tails to draw past the notes' ends (display only; see _drawTails).
+    const tails = [];
+    // Instruments resolved during this pass, by note id (see Module.findInstrument).
+    const instrumentMemo = new Map();
     // Latest end time across playable notes, accumulated here for free because this loop
     // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
     // re-derive it with a second full pass over module.notes (~31ms at 100k notes).
@@ -848,15 +896,22 @@ export class RendererAdapter {
         const baseColor = this._resolveColor(ev, note, module);
         const color = isSilence ? [0.0, 0.0, 0.0, 0.75] : baseColor;
 
-        // The envelope a note sounds with, drawn inside it (see rectBorderFS) when
-        // the note or the BaseNote sets an attack or a release, or for every note
-        // when Settings > Appearance > "Show every envelope" is on. Otherwise null,
-        // and the note draws exactly as before.
+        // The envelope a note sounds with, drawn inside it (see rectBorderFS) as the
+        // "Envelope inside notes" setting says: by default when the note or the
+        // BaseNote sets an attack or a release. Otherwise null, and the note draws
+        // exactly as before. Its tail, past its end, when tails are on.
         let env = null;
         if (!isSilence) {
           const atk = (ev && ev.attack) || baseAttack;
           const rel = (ev && ev.release) || baseRelease;
-          if (atk || rel || showAllEnvelopes) env = this._envelopeSharesFor(module, note, durSec, atk, rel, freqVal);
+          const inside = envMode === 'all' || (envMode === 'own' && !!(atk || rel));
+          if (inside || showTails) {
+            const e = this._envelopeSharesFor(module, note, durSec, atk, rel, freqVal, instrumentMemo);
+            if (e) {
+              if (inside) env = e;
+              if (showTails && e[4] > 0) tails.push({ x: x + w, y, w: w * e[4], h, color, level: e[5] });
+            }
+          }
         }
 
         // Carry freqVal so the fraction-label pass below does not have to look the note up in
@@ -870,6 +925,7 @@ export class RendererAdapter {
     }
     this._maxNoteEndSec = maxNoteEndSec;
     this._refLines = refLines;
+    this._tailItems = tails;
 
     // PERFORMANCE: Instead of O(n log n) sort, use O(1) swap to move selected note to end
     // This avoids full buffer reallocation on every selection change
@@ -1265,6 +1321,7 @@ export class RendererAdapter {
     }
 
     this.instanceCount = N;
+    this._syncTails();
 
     // Upload to GPU
     if (this.gl && this.rectInstancePosSizeBuffer && this.rectInstanceColorBuffer) {
@@ -1948,6 +2005,11 @@ export class RendererAdapter {
 
       out vec4 outColor;
 
+      // Loudness: a gain in dB, and the band height that shows it (full at 0 dB,
+      // nothing at -48 dB). An exponential fall is a straight line on this scale.
+      float toDb(float g) { return 8.685889638 * log(max(g, 1e-4)); }
+      float dbHeight(float g) { return clamp(1.0 + toDb(g) / 48.0, 0.0, 1.0); }
+
       // Signed distance to rounded rectangle with half-size b and corner radius r.
       // Negative inside, positive outside, zero at the boundary.
       float sdRoundRect(vec2 p, vec2 b, float r) {
@@ -2028,11 +2090,13 @@ export class RendererAdapter {
           float dec = v_env.y;
           float sus = v_env.z;
           float rel = max(v_env.w, 1e-5);
+          // The curve that sounds, on the dB scale: a linear rise in gain, an
+          // exponential decay (straight in dB) to the level held to the note's end.
           float level;
-          if (x < atk) level = x / atk;
-          else if (x < atk + dec) level = mix(1.0, sus, (x - atk) / max(dec, 1e-5));
-          else if (x < 1.0 - rel) level = sus;
-          else level = sus * clamp((1.0 - x) / rel, 0.0, 1.0);
+          if (x < atk) level = dbHeight(x / atk);
+          else if (x < atk + dec) level = clamp(1.0 + mix(0.0, toDb(sus), (x - atk) / max(dec, 1e-5)) / 48.0, 0.0, 1.0);
+          else if (x < 1.0 - rel) level = dbHeight(sus);
+          else level = dbHeight(sus) * clamp((1.0 - x) / rel, 0.0, 1.0);
           float halfBand = level * he.y;
           float dy = abs(p.y) - halfBand;           // CSS px outside the band (negative inside)
           float band = 1.0 - smoothstep(-0.75, 0.75, dy);
@@ -2051,6 +2115,55 @@ export class RendererAdapter {
       }
     `;
     this.rectBorderProgram = this._createProgram(rectBorderVS, rectBorderFS);
+
+    // Tails (Phase I): the release that rings after a note's end, drawn past it as
+    // the note's envelope band continuing to silence. Display only: nothing picks,
+    // snaps or drags by it.
+    const tailVS = `#version 300 es
+      precision highp float;
+      layout(location=0) in vec2 a_unit;
+      layout(location=1) in vec4 a_posSize;    // (x, y, w, h) world: from the note's end, as tall as the note
+      layout(location=2) in vec4 a_color;
+      layout(location=3) in float a_level;     // gain at the note-off, share of the peak
+      uniform mat3 u_matrix;
+      uniform vec2 u_viewport;
+      uniform vec2 u_offset;
+      uniform vec2 u_scale;
+      out vec4 v_color;
+      out vec2 v_uv;
+      out float v_heightCss;
+      out float v_level;
+      void main() {
+        vec2 worldPos = a_posSize.xy + a_unit * a_posSize.zw;
+        vec2 l = (u_matrix * vec3(worldPos, 1.0)).xy - u_offset;
+        gl_Position = vec4((l.x / u_viewport.x) * 2.0 - 1.0, 1.0 - (l.y / u_viewport.y) * 2.0, 0.0, 1.0);
+        v_color = a_color;
+        v_uv = a_unit;
+        v_heightCss = a_posSize.w * u_scale.y;
+        v_level = a_level;
+      }
+    `;
+    const tailFS = `#version 300 es
+      precision highp float;
+      in vec4 v_color;
+      in vec2 v_uv;
+      in float v_heightCss;
+      in float v_level;
+      out vec4 outColor;
+      void main() {
+        // The release falls exponentially from the note-off level to -80 dB: a
+        // straight line in dB, drawn on the body's scale (full at 0 dB, nothing at -48).
+        float startDb = 8.685889638 * log(max(v_level, 1e-4));
+        float db = mix(startDb, -80.0, clamp(v_uv.x, 0.0, 1.0));
+        float level = clamp(1.0 + db / 48.0, 0.0, 1.0);
+        float dy = abs(v_uv.y - 0.5) * v_heightCss - level * 0.5 * v_heightCss;
+        float band = 1.0 - smoothstep(-0.75, 0.75, dy);
+        float a = v_color.a * 0.45 * band;
+        if (a <= 0.004) discard;
+        outColor = vec4(v_color.rgb, a);
+      }
+    `;
+    this.tailProgram = this._createProgram(tailVS, tailFS);
     // Cache uniform locations for rectBorderProgram to avoid per-frame getUniformLocation calls
     try {
       if (!this._uniforms) this._uniforms = {};
@@ -2692,6 +2805,33 @@ export class RendererAdapter {
     gl.vertexAttribPointer(8, 4, gl.FLOAT, false, 0, 0);
     gl.vertexAttribDivisor(8, 1); // per-instance
 
+    // ========== Tails (Phase I) ==========
+    // Their own VAO and instance buffers (filled by _syncTails), on the rects' unit quad.
+    this.tailVAO = gl.createVertexArray();
+    gl.bindVertexArray(this.tailVAO);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.rectUnitBuffer);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    this.tailPosSizeBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailPosSizeBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(1, 1);
+    this.tailColorBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailColorBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4 * 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(2);
+    gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(2, 1);
+    this.tailLevelBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.tailLevelBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, 4, gl.DYNAMIC_DRAW);
+    gl.enableVertexAttribArray(3);
+    gl.vertexAttribPointer(3, 1, gl.FLOAT, false, 0, 0);
+    gl.vertexAttribDivisor(3, 1);
+    gl.bindVertexArray(this.rectVAO); // back to the rects for the setup below
+
     // Dedicated buffer for single-instance draws (avoid corrupting shared per-instance buffer)
     this._singlePosSizeBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this._singlePosSizeBuffer);
@@ -2876,6 +3016,11 @@ export class RendererAdapter {
     // Update canvas offset for proper coordinate transformation
     this.canvasOffset = { x: rectCss.left, y: rectCss.top };
     
+
+    // Tails first, under the note bodies: a note that follows paints over the tail
+    // of the one before. Hidden while a drag previews new positions (they return
+    // when it is committed and the notes are synced).
+    if (this.tailCount > 0 && this.tailProgram && this.tailVAO && !this._dragActive) this._drawTails(vpW, vpH);
 
     // Draw notes as simple rectangles with flat colors (clipped to rounded rect)
     if (this.instanceCount > 0) {

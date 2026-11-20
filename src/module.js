@@ -762,8 +762,25 @@ export class Module {
   /**
    * Find instrument for a note
    */
-  findInstrument(note) {
+  /**
+   * @param {object} note
+   * @param {Map<number,string>} [memo] instruments already resolved in this pass,
+   *   by note id: a caller resolving many notes passes one Map, so a long chain is
+   *   walked once rather than once per note on it.
+   */
+  findInstrument(note, memo = null) {
     if (!note) return 'sine-wave';
+    if (memo) {
+      const hit = memo.get(note.id);
+      if (hit !== undefined) return hit;
+      const r = this._findInstrument(note, memo);
+      memo.set(note.id, r);
+      return r;
+    }
+    return this._findInstrument(note, null);
+  }
+
+  _findInstrument(note, memo) {
     if (!note.hasExpression('frequency') && !note.getVariable('frequency')) {
       return _defaultInstrumentName;
     }
@@ -781,11 +798,11 @@ export class Module {
       if (dslNoteRef) {
         const parentId = parseInt(dslNoteRef[1], 10);
         const parentNote = this.getNoteById(parentId);
-        if (parentNote) return this.findInstrument(parentNote);
+        if (parentNote) return this.findInstrument(parentNote, memo);
       }
 
       if (freqSource.includes('base.f')) {
-        return this.findInstrument(this.baseNote);
+        return this.findInstrument(this.baseNote, memo);
       }
     }
 

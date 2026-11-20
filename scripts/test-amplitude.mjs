@@ -184,16 +184,21 @@ console.log('\nAmplitude: clamp at the audio boundary\n');
 }
 
 // --- I: the envelope display setting -----------------------------------------------
-console.log('\nEnvelope display: Settings > Appearance > Show every envelope\n');
+console.log('\nEnvelope display: Settings > Appearance > Envelope inside notes, Tails after the note\'s end\n');
 {
   const { defaultSettings, validateSettings } = await import('../src/settings/settings-schema.js');
   const { defaultRendererConfig } = await import('../src/renderer/webgl2/renderer-config.js');
-  check(defaultSettings().appearance.showEnvelopes === false, 'I1 off by default (the app as it was)');
-  check(defaultRendererConfig.note.showAllEnvelopes === false, 'I2 the renderer config defaults to off too');
-  check(validateSettings({ appearance: { showEnvelopes: true } }).appearance.showEnvelopes === true, 'I3 on survives validation');
-  check(validateSettings({ appearance: { showEnvelopes: 'yes' } }).appearance.showEnvelopes === false, 'I4 a non-boolean falls back to off');
-  check(validateSettings({ appearance: { showEnvelopes: true, note: { heightWU: 30 } } }).appearance.showEnvelopes === true,
-    'I5 it sits beside appearance.note (which a theme preset replaces), not inside it');
+  const v = (a) => validateSettings({ appearance: a }).appearance;
+  check(defaultSettings().appearance.envelopes === 'own' && defaultSettings().appearance.showTails === false,
+    'I1 by default only notes that set attack or release draw it, and no tails (the app as it was)');
+  check(defaultRendererConfig.note.envelopeMode === 'own' && defaultRendererConfig.note.showTails === false, 'I2 the renderer config defaults the same');
+  check(v({ envelopes: 'all' }).envelopes === 'all' && v({ envelopes: 'none' }).envelopes === 'none' && v({ showTails: true }).showTails === true,
+    'I3 every choice survives validation');
+  check(v({ envelopes: 'some' }).envelopes === 'own' && v({ showTails: 'yes' }).showTails === false, 'I4 anything else falls back to the default');
+  check(v({ showEnvelopes: true }).envelopes === 'all' && v({ showEnvelopes: false }).envelopes === 'own',
+    'I5 the old "Show every envelope" switch carries over: on reads as Every note');
+  check(v({ envelopes: 'all', note: { heightWU: 30 } }).envelopes === 'all',
+    'I6 it sits beside appearance.note (which a theme preset replaces), not inside it');
 }
 
 console.log(`\n${failures ? `${failures} failure(s).` : 'All amplitude checks passed.'}`);
