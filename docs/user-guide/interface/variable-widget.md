@@ -247,6 +247,10 @@ Measures have no instrument row. See [Instruments](/user-guide/playback/instrume
 
 The BaseNote's row follows the same rules: with nothing pinned it reads **`Inherited: <name>`**, where the name is whatever **Settings → Audio → Default instrument** is set to — the same instrument playback uses.
 
+## Repeat
+
+The BaseNote's widget has a **`REPEAT`** row: the frequency the BaseNote takes on the next repeat of a loop (long-press Play), written as a relation, for example `(9/8) * base.f`. `Evaluated:` shows the ratio from one repeat to the next, `(9/8) each repeat (203.9¢)`, or `none: repeats as written`. Save an empty `Raw:` to remove it. A value that does not evaluate is refused with an error and the old one is kept. The same value appears as **Transpose each repeat by** in Settings → Audio → Loop. While such a loop plays, every frequency the widget shows is that of the pass being heard, marked `(repeat k)`. See [loop playback](/user-guide/playback/transport#rising-or-falling-each-time-round).
+
 ## Add Note / Silence
 
 This is how notes are created. There is no double-click-to-create in the workspace.
@@ -337,7 +341,7 @@ For a note, a silence or a measure, the **`DELETE NOTE`** section offers two but
 
 ### Clean Slate
 
-On the **BaseNote** the section becomes **`DELETE ALL NOTES`** with a single button: **`Clean Slate`**. It deletes every note in the module except the BaseNote. The confirmation button reads `Yes, Clean Slate`.
+On the **BaseNote** the section becomes **`DELETE ALL NOTES`** with a single button: **`Clean Slate`**. It deletes every note in the module except the BaseNote, and removes the BaseNote's [repeat](#repeat), so a new composition repeats as written. The confirmation button reads `Yes, Clean Slate`.
 
 ::: tip
 Clean Slate is undoable, and the confirmation dialog says so — it captures an undo snapshot like everything else, so `Ctrl/Cmd + Z` brings your notes back.

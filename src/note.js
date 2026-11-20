@@ -177,7 +177,7 @@ export class Note {
       }
 
       // Handle non-expression properties
-      if (key === 'color' || key === 'instrument') {
+      if (key === 'color' || key === 'instrument' || key === 'repeat') {
         this.properties[key] = value;
       } else if (key === 'measure') {
         this.properties.measure = value === true;
@@ -193,6 +193,7 @@ export class Note {
     // Handle non-expression properties
     if (name === 'color') return this.properties.color;
     if (name === 'instrument') return this.properties.instrument;
+    if (name === 'repeat') return this.properties.repeat;
     if (name === 'measure') return this.properties.measure;
 
     // Handle *String requests - return source text
@@ -247,6 +248,13 @@ export class Note {
     }
     if (name === 'instrument') {
       this.properties.instrument = value;
+      this._notifyChange();
+      return;
+    }
+    // The BaseNote's repeat: the frequency it takes on the next repeat of a loop,
+    // as an expression of the module, kept as text (src/player/display-transpose.js)
+    if (name === 'repeat') {
+      this.properties.repeat = value || null;
       this._notifyChange();
       return;
     }
@@ -399,6 +407,7 @@ export class Note {
     // Add properties
     if (this.properties.color) result.color = this.properties.color;
     if (this.properties.instrument) result.instrument = this.properties.instrument;
+    if (this.properties.repeat) result.repeat = this.properties.repeat;
     if (this.properties.measure) result.measure = true;
 
     return result;
@@ -420,6 +429,7 @@ export class Note {
     // Add properties
     if (this.properties.color) obj.color = this.properties.color;
     if (this.properties.instrument) obj.instrument = this.properties.instrument;
+    if (this.properties.repeat) obj.repeat = this.properties.repeat;
     if (this.properties.measure) obj.measure = true;
 
     return obj;

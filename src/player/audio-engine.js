@@ -3,8 +3,7 @@ import { InstrumentManager } from '../instruments/instrument-manager.js';
 import { AudioGraph } from './audio-graph.js';
 import { amplitudeToGain } from './amplitude.js';
 import { TimeMap, clampRate } from './time-map.js';
-import { passFactor } from './loop-transpose.js';
-import { settingsStore } from '../settings/settings-store.js';
+import { passTransposition } from './display-transpose.js';
 
 // Short enough to read as instant, long enough that the cut is not a step.
 const DECLICK_FADE = 0.02; // seconds
@@ -341,7 +340,7 @@ export class AudioEngine {
    * @param {{initialVolume?:number, loop?:{period:number,notes:Array,firstCycleAudioLength?:number}|null}} options
    * @returns {number} baseStartTime
    */
-  play(noteDataList, { initialVolume = this.INITIAL_VOLUME, loop = null } = {}) {
+  play(noteDataList, { initialVolume = this.INITIAL_VOLUME, loop = null, transpose = null } = {}) {
     const baseStartTime = this.audioContext.currentTime + 0.1;
 
     // Stop any existing streaming
@@ -364,10 +363,12 @@ export class AudioEngine {
       map: new TimeMap(this.rate),
       nextIndex: 0,
       cycle: 0,           // 0 = the initial (possibly partial) pass
-      // Loop transposition (Settings > Audio > Loop), read once per playback: pass k
-      // sounds at passFactor(ratio, k, fold) times the written frequencies.
-      loopRatio: (() => { try { return settingsStore.get('audio.loop.transpose'); } catch { return null; } })(),
-      loopFold: (() => { try { return settingsStore.get('audio.loop.fold') !== false; } catch { return true; } })(),
+      // Repeat transposition, fixed for this playback: pass c sounds at
+      // passTransposition(ratio, passOffset + c, fold) times the written frequencies
+      // (exact; see display-transpose.js). The player hands it in: the module's own
+      // repeat (its BaseNote's `repeat`) and the fold preference; without it, none.
+      ...this._transposeState(transpose),
+      passFactors: new Map(),
       cycleStart: 0,      // rel-time at which `list`'s pass begins
       // Loop fields, installed by _applyLoop().
       looping: false,
@@ -382,6 +383,7 @@ export class AudioEngine {
     this._streamingState = s;
 
     if (loop) this._applyLoop(s, loop);
+    this._prepareTransposed(s, noteDataList);
 
     const pump = () => {
       if (this._streamingState !== s || s.stopped) return;
@@ -418,7 +420,7 @@ export class AudioEngine {
             const start = s.baseStartTime + startClock;
             // passStartTime keeps its contract (passStartTime + noteData.startTime is
             // the note's absolute start) at any rate.
-            const transpose = s.looping || s.cycle > 0 ? passFactor(s.loopRatio, s.cycle, s.loopFold) : 1;
+            const transpose = this._passFactor(s, s.cycle);
             this._scheduleNote(noteData, start - noteData.startTime, s.initialVolume, { duration, scoreStart: at, transpose });
           }
           s.nextIndex++;
@@ -485,19 +487,46 @@ export class AudioEngine {
     s.firstLen = firstLen;
     s.cutRel = null;
     s.loopEndTime = null;
-    // Transposed passes reach pitches the first pass did not prepare: decode every
-    // zone of the sampled instruments the loop uses now, during the first pass, so
-    // no note of a later pass falls back to a sine while its zone loads.
-    if (s.loopRatio && s.loopRatio.n !== s.loopRatio.d) {
-      const names = new Set(notes.map((n) => n && n.instrument).filter(Boolean));
-      for (const name of names) {
-        try {
-          const inst = this.instrumentManager.getInstrument(name);
-          if (inst && typeof inst.prepare === 'function' && Array.isArray(inst.zones)) inst.prepare(inst.zones.map((z) => z.rootHz));
-        } catch {}
-      }
-    }
+    this._prepareTransposed(s, notes);
     return true;
+  }
+
+  /** The transposition fields of a streaming state, from play()'s `transpose` or the setting. */
+  _transposeState(transpose) {
+    if (transpose) {
+      return { transposeRatio: transpose.ratio || null, transposeFold: transpose.fold !== false, passOffset: Math.max(0, transpose.offset | 0) };
+    }
+    // Without one, no transposition: a repeat belongs to the module (its BaseNote's
+    // `repeat`), which the player reads; nothing app-wide is imposed.
+    return { transposeRatio: null, transposeFold: true, passOffset: 0 };
+  }
+
+  /** The factor every written frequency of pass `cycle` of this playback is multiplied by. */
+  _passFactor(s, cycle) {
+    if (!s.transposeRatio) return 1;
+    const pass = s.passOffset + cycle;
+    if (pass === 0) return 1;
+    let f = s.passFactors.get(pass);
+    if (f === undefined) {
+      try { f = toNumber(passTransposition(s.transposeRatio, pass, s.transposeFold), 1); } catch { f = 1; }
+      if (!(f > 0)) f = 1;
+      s.passFactors.set(pass, f);
+    }
+    return f;
+  }
+
+  // A transposed pass reaches pitches its notes' preparation did not: decode every
+  // zone of the sampled instruments these notes use, so no note of a later pass
+  // falls back to a sine while its zone loads.
+  _prepareTransposed(s, notes) {
+    if (!s.transposeRatio || !Array.isArray(notes)) return;
+    const names = new Set(notes.map((n) => n && n.instrument).filter(Boolean));
+    for (const name of names) {
+      try {
+        const inst = this.instrumentManager.getInstrument(name);
+        if (inst && typeof inst.prepare === 'function' && Array.isArray(inst.zones)) inst.prepare(inst.zones.map((z) => z.rootHz));
+      } catch {}
+    }
   }
 
   /**

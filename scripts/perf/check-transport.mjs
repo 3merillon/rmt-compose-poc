@@ -136,18 +136,19 @@ check(`the voice limit holds (${lim.max})`, lim.worst <= lim.max && lim.stolen >
 // 9. Loop transposition: every pass a 9/8 above the one before, folded into one octave.
 const lt = await page.evaluate(async () => {
   const ae = window.__ae, mod = window.__rmtPerf.getModuleRef();
-  const { settingsStore } = await import('/src/settings/settings-store.js');
-  settingsStore.set('audio.loop.transpose', { n: 9, d: 8 }); settingsStore.set('audio.loop.fold', true);
+  const DT = await import('/src/player/display-transpose.js');
+  DT.setModuleRepeat(mod, '(9/8) * base.f');
+  const ratio = DT.moduleRepeatRatio(mod);
   const list = await ae.preparePlayback(mod, 0);
   const end = mod.getModuleEndTime();
   const seen = new Map(); // noteId@pass -> frequency
-  ae.play(list, { initialVolume: 0.2, loop: { period: end, notes: list, firstCycleAudioLength: end } });
+  ae.play(list, { initialVolume: 0.2, loop: { period: end, notes: list, firstCycleAudioLength: end }, transpose: { ratio, fold: true, offset: 0 } });
   for (let i = 0; i < 14; i++) {
     await window.__wait(0.5);
     for (const e of ae.activeOscillators) { const pass = Math.round((e.scoreStart - (list.find((n) => n.id === e.noteId)?.startTime || 0)) / end); seen.set(`${e.noteId}@${pass}`, e.frequency); }
   }
   ae.stopAll();
-  settingsStore.set('audio.loop.transpose', { n: 1, d: 1 });
+  DT.setModuleRepeat(mod, null);
   const out = [];
   for (const [key, f] of seen) { const [id, pass] = key.split('@').map(Number); const f0 = list.find((n) => n.id === id).frequency; out.push([id, pass, f / f0]); }
   return out;
@@ -157,6 +158,28 @@ const bad = lt.filter(([, pass, r]) => Math.abs(r - want(pass)) > 1e-9 * want(pa
 const passes = new Set(lt.map(([, p]) => p));
 check('loop transposition 9/8: each pass a whole tone above the last, folded into an octave', lt.length > 0 && bad.length === 0 && passes.size >= 6,
   `${lt.length} voices over passes ${[...passes].sort((a, b) => a - b).join(',')}; pass 6 at ${(lt.find(([, p]) => p === 6) || [0, 0, NaN])[2].toFixed?.(6)} (531441/524288 = ${(531441 / 524288).toFixed(6)})${bad.length ? '; wrong: ' + JSON.stringify(bad.slice(0, 3)) : ''}`);
+
+// 10. The same through the player and on screen: a module that repeats 9/8, looped with Shift+click on Play.
+await page.evaluate(async () => { const DT = await import('/src/player/display-transpose.js'); DT.setModuleRepeat(window.__rmtPerf.getModuleRef(), '(9/8) * base.f'); });
+const label = () => page.evaluate(() => `${window.__rmtRenderer._baseFracNum}/${window.__rmtRenderer._baseFracDen}`);
+const written = await label();
+await page.click('#playPauseBtn', { modifiers: ['Shift'] });
+await wait(1.55);  // into pass 1 (the module lasts 1 s, after the 0.1 s lead-in)
+const pass1 = await label();
+await page.evaluate(async () => { const { eventBus } = await import('/src/utils/event-bus.js'); eventBus.emit('modals:requestRefresh', { note: window.__rmtPerf.getModuleRef().getNoteById(1), measureId: null }); });
+await wait(0.15);
+const widget = await page.evaluate(() => (document.querySelector('.note-widget')?.innerText || '').replace(/\s+/g, ' '));
+await wait(1.0);   // into pass 2
+const pass2 = await label();
+await page.click('#playPauseBtn'); await wait(0.5);            // pause
+const paused = await label();
+await page.click('#stopButton'); await wait(0.2);              // stop
+const stopped = await label();
+check('on screen, the BaseNote shows each pass: 263, then 2367/8, then 21303/64', written === '263/1' && pass1 === '2367/8' && pass2 === '21303/64',
+  `written ${written}, pass 1 ${pass1}, pass 2 ${pass2}`);
+check('the note widget shows the pass being heard', /repeat [12]/.test(widget), widget.match(/FREQUENCY[^A-Z]*?Evaluated:[^R]*?(repeat \d)?/)?.[0]?.slice(0, 80) || widget.slice(0, 80));
+check('Pause keeps the pass on screen; Stop returns to the module as written', paused === pass2 && stopped === '263/1', `paused ${paused}, stopped ${stopped}`);
+await page.evaluate(async () => { const DT = await import('/src/player/display-transpose.js'); DT.setModuleRepeat(window.__rmtPerf.getModuleRef(), null); });
 
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 await page.evaluate(() => { localStorage.removeItem('rmt:moduleSnapshot:v1'); });

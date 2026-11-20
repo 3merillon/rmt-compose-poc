@@ -1,4 +1,6 @@
 import Fraction from 'fraction.js';
+import { getDisplayTransposition, shownFrequency, moduleRepeatRatio } from '../player/display-transpose.js';
+import { isRational, shadow as shadowOf, toText as exactText, toNumber as exactNumber } from '../value/exact.js';
 import { createVariableControls, createMeasureDurationRow } from './variable-controls.js';
 import { createAddNoteSection, createAddMeasureSection } from './note-creation.js';
 import { createEvaluateSection, createDeleteSection, createSelectSection } from './note-actions.js';
@@ -397,6 +399,20 @@ function collectVariables(note, measureId, moduleInstance) {
         };
     }
 
+    // The BaseNote's REPEAT row: the frequency it takes on the next repeat of a loop
+    // (display-transpose.js), shown as the ratio from one pass to the next.
+    if (note && note === module.baseNote) {
+        let rr = null;
+        try { rr = moduleRepeatRatio(module); } catch {}
+        const cents = (v) => (1200 * Math.log2(exactNumber(v))).toFixed(1);
+        variables.repeat = {
+            evaluated: rr ? `${exactText(rr)} each repeat (${cents(rr)}¢)` : 'none: repeats as written',
+            raw: note.properties.repeat || '',
+            isCorrupted: !!(rr && !isRational(rr)),
+            isRepeat: true
+        };
+    }
+
     // The exact value of each evaluated row (src/value/exact.js), for the
     // display: an irrational value is shown in its exact form, ≈ only marks an
     // approximation.
@@ -408,6 +424,22 @@ function collectVariables(note, measureId, moduleInstance) {
             const from = (row.isInherited && owner !== module.baseNote) ? module.baseNote : owner;
             try { row.exact = from.getExactVariable(name); } catch { /* display only */ }
         }
+    }
+
+    // A transposed loop pass (display-transpose.js): frequencies show the pass being
+    // heard, the written value times its factor, exact. The module is not touched.
+    const shown = getDisplayTransposition();
+    if (shown.factor && variables.frequency && !variables.frequency.isDefault) {
+        const row = variables.frequency;
+        try {
+            const base = row.exact != null ? row.exact : row.evaluated;
+            if (base != null) {
+                const v = shownFrequency(base);
+                row.exact = v;
+                row.evaluated = isRational(v) ? v : shadowOf(v);
+                row.transposedPass = shown.pass;
+            }
+        } catch { /* display only */ }
     }
 
     return variables;
@@ -1052,6 +1084,11 @@ export function init() {
     try {
         eventBus.on('modals:requestRefresh', ({ note, measureId, clickedElement }) => {
             showNoteVariables(note, clickedElement, measureId ?? null);
+        });
+        // A transposed loop moved to another pass: the open widget shows its values.
+        eventBus.on('display:transposition', () => {
+            if (!currentSelectedNote || !domCache.noteWidget || !domCache.noteWidget.classList.contains('visible')) return;
+            try { showNoteVariables(currentSelectedNote, null, currentMeasureId ?? null); } catch {}
         });
     } catch {}
     // The widget bakes its ▲/▼ octave buttons (and their ratio tooltips) from the

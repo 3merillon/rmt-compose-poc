@@ -52,7 +52,7 @@ A plain `Map` keyed on the raw expression text, used as an **LRU**: when it is f
 | `src/dsl/index.js` | `compileDSL`, `decompileToDSL`, `validateDSL` | the public API |
 | `src/dsl/simplify.js` | `simplifyDSL`, `scaleDSL` | DSL-native canonicaliser (see [Exact Values](/developer/core/symbolic-power#the-simplifier)) |
 
-`compileDSL('')` returns bytecode for the constant `0/1` rather than throwing (`src/dsl/index.js:26-34`).
+`compileDSL('')` returns bytecode for the constant `0/1` rather than throwing (`src/dsl/index.js:28-36`).
 
 ### Properties
 
@@ -160,7 +160,7 @@ The evaluator decodes the variable-length BigInts straight into a pooled BigInt-
 
 ## `BinaryExpression`
 
-`binary-note.js:85-395`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
+`binary-note.js:85-403`. `new BinaryExpression(initialSize = 64)` — the constructor takes a **byte count**, not a buffer.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -201,7 +201,7 @@ Its compiler and its simplifier were removed. `src/migrate/legacy-syntax.js` kee
 
 The DSL decompiler (`src/dsl/decompiler.js`) is a stack machine over the bytecode that re-emits DSL, inserting parentheses from the `Precedence` table, printing fractions as `(n/d)` and integers bare. Constants come out of the bytecode as BigInts and are stringified directly (`pushConst`, `src/dsl/decompiler.js:193-199`), so a big constant is printed **digit-exact** — it used to be coerced through `Number()`, which rounded and could emit unparseable scientific notation. It prints every `LOAD_REF` / `LOAD_BASE` as a property access (`[N].d`, `base.f`) and reconstructs nothing else: with no functions in the language there is nothing to fold back into a helper.
 
-The note widget's `Raw:` box shows the decompiled DSL of the note's bytecode (`convertToDSLDisplay()`, `src/modals/variable-controls.js:165`).
+The note widget's `Raw:` box shows the decompiled DSL of the note's bytecode (`convertToDSLDisplay()`, `src/modals/variable-controls.js:171`).
 
 ### Round-trip is lossy in specific, harmless ways
 
@@ -225,12 +225,12 @@ The compiler refuses garbage by throwing, but validation is still a separate gat
 | Gate | Where | What it does |
 |---|---|---|
 | UI edits | `validateExpression()`, `src/modals/validation.js:6` | refuses the retired syntax with its DSL form, then `validateDSL()`, `compileDSL()` to prove it yields bytecode, then the self-reference and cycle check on that bytecode — per (note, variable), see [Dependency Graph](/developer/core/dependency-graph#cycles-are-checked-per-variable) |
-| DSL syntax | `validateDSL()`, `src/dsl/index.js:69` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
+| DSL syntax | `validateDSL()`, `src/dsl/index.js:71` | tokenize + parse; returns `{valid, error}` with `error` = the `DSLError.userMessage` |
 | JSON import | `validateExpressionSyntax()`, `src/utils/safe-expression-validator.js:26` | rejects strings over 10 000 chars and a blocklist (`eval(`, `Function(`, `import(`, `document.`, `__proto__`, `<script`, …), then proves the string compiles — a compiler throw comes back as `{valid: false, error}` |
 
 Nothing anywhere calls `eval()` or `new Function()` on an expression.
 
-The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.js:215-230`, `src/modals/variable-controls.js:964`). The user-grade error strings in `src/dsl/errors.js` are what the user actually reads.
+The `Save` handler catches validation errors and shows them **inline**: `showError()` prints the message in red under the Save button and gives the raw input a red border, cleared on the next edit or save attempt (`src/modals/variable-controls.js:221-236`, `src/modals/variable-controls.js:990`). The user-grade error strings in `src/dsl/errors.js` are what the user actually reads.
 
 ## Worked example
 

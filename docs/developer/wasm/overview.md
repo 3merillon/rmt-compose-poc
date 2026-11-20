@@ -30,9 +30,9 @@ feature. The JS path carries the app on its own: a full re-evaluation of the 100
 
 | Step | Where | Effect |
 |---|---|---|
-| `initWasm()` is called eagerly at import time | `src/store/app-state.js:6` | **Returns `false` early**: `isEvaluatorHotSwapEnabled()` is false while the layout flag is false — no fetch |
+| `initWasm()` is called eagerly at import time | `src/store/app-state.js:7` | **Returns `false` early**: `isEvaluatorHotSwapEnabled()` is false while the layout flag is false — no fetch |
 | `initWasm()` is `await`ed during `initApp()` | `src/main.js:82` | Same early-out |
-| `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:135-144` | Same call, same gate, deduped by a `wasmInitialized` guard |
+| `setTimeout(() => initWasm(), 0)` auto-init | `src/wasm/index.js:137-146` | Same call, same gate, deduped by a `wasmInitialized` guard |
 | `Module` constructor registers a hot-swap callback | `src/module.js:67-73` | **Never**: `isEvaluatorHotSwapEnabled()` is false everywhere |
 | Evaluation | `src/binary-evaluator.js` | JS |
 

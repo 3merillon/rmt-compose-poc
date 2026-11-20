@@ -60,7 +60,7 @@ module.notes  // { [id: number]: Note } — a plain object, not a Map
 
 Keyed by note id, and it **includes the BaseNote at key `0`**. `module.notes.get(1)` throws;
 use `module.getNoteById(1)`. Iterating with `Object.values(module.notes)` yields the BaseNote
-too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:937`).
+too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:938`).
 
 ### baseNote
 
@@ -147,7 +147,7 @@ The same thing for many notes in one pass: it registers dependencies once, colle
 **and** the transitive dependencies of the marked notes, then invalidates the incremental
 evaluator selectively rather than wholesale. Collecting the *dependencies* matters — without them
 an imported note's parent may not be in the cache when the child evaluates. The module-import path
-(`src/player.js:1821`) uses it after grafting a library module onto a target note.
+(`src/player.js:1833`) uses it after grafting a library module onto a target note.
 
 ### batchSetExpressions()
 
@@ -160,7 +160,7 @@ module.batchSetExpressions([
 
 Compiles all the expressions with per-note notifications suppressed, re-registers dependencies
 once, then calls `markNotesDirtyBatch()`. The widget's **Evaluate Module** action
-(`src/modals/index.js:778`) rewrites every note in the composition through this in one pass.
+(`src/modals/index.js:810`) rewrites every note in the composition through this in one pass.
 
 ::: danger The keys are `varName` and `expr`
 Not `property` and `expression`. The update objects are destructured as
@@ -390,7 +390,7 @@ The optional second argument is a `Map` memo, shared by a caller that resolves m
 per note on it.
 
 That default is a module-scoped value, not a constant: `player.js` calls `setDefaultInstrument()`
-whenever the `audio.defaultInstrument` setting changes (`src/player.js:1033-1048`). This is the
+whenever the `audio.defaultInstrument` setting changes (`src/player.js:1045-1060`). This is the
 bridge between the Settings panel and note timbre.
 
 ```javascript

@@ -5,6 +5,8 @@ import { parseCssColor } from '../../utils/css-color.js';
 import { amplitudeToGain } from '../../player/amplitude.js';
 import { isMeasureNote } from '../../note.js';
 import { envelopeShares } from '../../instruments/instrument-manager.js';
+import { getDisplayTransposition } from '../../player/display-transpose.js';
+import * as X from '../../value/exact.js';
 import { getInstrumentManager } from '../../store/app-state.js';
 /**
  * WebGL2 RendererAdapter
@@ -767,9 +769,17 @@ export class RendererAdapter {
         }
       };
 
-      // Prefer evaluated base frequency, fall back to raw baseNote variable
+      // Prefer evaluated base frequency, fall back to raw baseNote variable.
+      // During a transposed loop the circle shows the BaseNote of the pass being
+      // heard (display only; a rational factor: an irrational one leaves it written,
+      // the note widget shows that exact value).
       const baseEv = getEv(0)?.frequency;
-      coerceFrom(baseEv);
+      const shown = getDisplayTransposition();
+      if (shown.factor && X.isRational(shown.factor) && this._baseFreqExact && X.isRational(this._baseFreqExact)) {
+        coerceFrom(X.mul(this._baseFreqExact, shown.factor));
+      } else {
+        coerceFrom(baseEv);
+      }
       if (!assigned) {
         const bf = module?.baseNote?.getVariable?.('frequency');
         coerceFrom(bf);

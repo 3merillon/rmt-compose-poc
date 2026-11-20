@@ -33,6 +33,10 @@ import {
   MIN_BUFFER,
 } from '../utils/draggable-widget.js';
 import { raisePanel } from '../utils/panel-stack.js';
+import { getModule } from '../store/app-state.js';
+import { moduleRepeatRatio, setModuleRepeat, repeatExprForRatio } from '../player/display-transpose.js';
+import { validateLoopRatio } from '../player/loop-transpose.js';
+import { isRational as isRationalValue, toText as exactTextOf } from '../value/exact.js';
 import { viewportWidth, viewportHeight } from '../utils/viewport.js';
 
 // Themeable color tokens exposed as individual pickers (key + friendly label),
@@ -434,27 +438,48 @@ function buildAudioTab(container) {
   {
     // Loop (long-press Play): each repeat transposed by a ratio, like the arrow ratio editor.
     container.appendChild(el('div', 'rmt-set-subhead', 'Loop (long-press Play)'));
-    const cur = settingsStore.get('audio.loop.transpose');
+    // Not a setting: the current module's own repeat (its BaseNote's `repeat`),
+    // saved with it; Clean Slate and a new composition start at 1/1.
     const wrap = el('div', 'rmt-set-ratio');
-    const nIn = el('input'); nIn.type = 'number'; nIn.min = 1; nIn.className = 'rmt-set-number'; nIn.value = cur.n;
-    const dIn = el('input'); dIn.type = 'number'; dIn.min = 1; dIn.className = 'rmt-set-number'; dIn.value = cur.d;
-    const centsOut = el('span', 'rmt-set-cents', `${cents(cur.n, cur.d).toFixed(1)}¢`);
+    const nIn = el('input'); nIn.type = 'number'; nIn.min = 1; nIn.className = 'rmt-set-number';
+    const dIn = el('input'); dIn.type = 'number'; dIn.min = 1; dIn.className = 'rmt-set-number';
+    const centsOut = el('span', 'rmt-set-cents', '');
+    const show = () => {
+      const m = getModule();
+      let r = null;
+      try { r = m ? moduleRepeatRatio(m) : null; } catch {}
+      if (!r) { nIn.value = 1; dIn.value = 1; centsOut.textContent = '0.0¢'; nIn.disabled = dIn.disabled = false; return; }
+      if (isRationalValue(r)) {
+        if (nIn !== document.activeElement) nIn.value = String(r.n);
+        if (dIn !== document.activeElement) dIn.value = String(r.d);
+        centsOut.textContent = `${(1200 * Math.log2(Number(r.n) / Number(r.d))).toFixed(1)}¢`;
+        nIn.disabled = dIn.disabled = false;
+      } else {
+        // An irrational repeat (a tempered step) is written in the BaseNote's REPEAT row
+        nIn.value = ''; dIn.value = '';
+        nIn.disabled = dIn.disabled = true;
+        centsOut.textContent = `${exactTextOf(r)} (BaseNote)`;
+      }
+    };
     const commit = () => {
-      settingsStore.set('audio.loop.transpose', { n: parseInt(nIn.value, 10), d: parseInt(dIn.value, 10) });
-      const v = settingsStore.get('audio.loop.transpose');
-      nIn.value = v.n; dIn.value = v.d;
-      centsOut.textContent = `${cents(v.n, v.d).toFixed(1)}¢`;
+      const m = getModule();
+      if (!m) return;
+      const v = validateLoopRatio({ n: parseInt(nIn.value, 10), d: parseInt(dIn.value, 10) }, { n: 1, d: 1 });
+      setModuleRepeat(m, repeatExprForRatio(v.n, v.d));
+      try {
+        const snap = m.createModuleJSON();
+        eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap });
+        eventBus.emit('history:capture', { label: v.n === v.d ? 'Repeat as written' : `Repeat ${v.n}/${v.d}`, snapshot: snap });
+      } catch {}
+      show();
     };
     nIn.addEventListener('change', commit);
     dIn.addEventListener('change', commit);
-    addSync(null, () => {
-      const v = settingsStore.get('audio.loop.transpose');
-      if (nIn !== document.activeElement) nIn.value = v.n;
-      if (dIn !== document.activeElement) dIn.value = v.d;
-      centsOut.textContent = `${cents(v.n, v.d).toFixed(1)}¢`;
-    });
+    show();
+    disposers.push(eventBus.on('module:repeatChanged', show));
+    disposers.push(eventBus.on('history:restored', show));
     wrap.append(nIn, el('span', 'rmt-set-ratio-slash', '/'), dIn, centsOut);
-    container.appendChild(row('Transpose each repeat by', wrap, 'Each time the loop comes round it sounds this ratio higher than the time before: 9/8 plays Bach\'s Canon per tonos as written. 1/1 repeats it unchanged. Takes effect at the next Play.'));
+    container.appendChild(row('Transpose each repeat by', wrap, 'This module\'s own value (its BaseNote\'s repeat), saved with it: each time the loop comes round it sounds this ratio higher than the time before. 9/8 plays Bach\'s Canon per tonos as written; 1/1 repeats it unchanged. Clean Slate and a new composition start at 1/1. Takes effect at the next Play.'));
     container.appendChild(row('Keep within an octave', toggle('audio.loop.fold'), 'Six pure whole tones are an octave and a comma, so a rise never comes home: on, the repeats drop an octave each time they pass one, and the loop can go on for ever; off, they keep climbing.'));
   }
 

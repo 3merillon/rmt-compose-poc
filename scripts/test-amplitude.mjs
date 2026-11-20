@@ -215,23 +215,15 @@ console.log('\nVoice limit: Settings > Audio > Most voices at once\n');
 console.log('\nLoop transposition: Settings > Audio > Loop\n');
 {
   const { defaultSettings, validateSettings } = await import('../src/settings/settings-schema.js');
-  const { passFactor, validateLoopRatio } = await import('../src/player/loop-transpose.js');
+  const { validateLoopRatio } = await import('../src/player/loop-transpose.js');
   const d = defaultSettings().audio.loop;
-  check(d.transpose.n === 1 && d.transpose.d === 1 && d.fold === true, 'K1 off by default (1/1), kept within an octave');
-  const v = (t) => validateSettings({ audio: { loop: { transpose: t } } }).audio.loop.transpose;
-  check(v({ n: 9, d: 8 }).n === 9 && v({ n: 18, d: 16 }).n === 9 && v({ n: 18, d: 16 }).d === 8, 'K2 a ratio survives validation, reduced (18/16 is 9/8)');
-  check(v({ n: 0, d: 8 }).n === 1 && v({ n: 40, d: 1 }).n === 1 && v({ n: 1.5, d: 1 }).n === 1 && v('9/8').n === 1, 'K3 anything else falls back to 1/1');
+  check(d.fold === true && d.transpose === undefined, 'K1 Settings keep only the fold (on); the transposition belongs to the module');
+  check(validateSettings({ audio: { loop: { transpose: { n: 9, d: 8 } } } }).audio.loop.transpose === undefined,
+    'K2 an old stored transposition is not carried into the settings');
+  check(validateLoopRatio({ n: 18, d: 16 }).n === 9 && validateLoopRatio({ n: 18, d: 16 }).d === 8 && validateLoopRatio({ n: 0, d: 8 }).n === 1,
+    'K3 the ratio editor reduces 18/16 to 9/8 and refuses 0/8');
   check(validateLoopRatio({ n: 1, d: 1 }).n === 1, 'K4 1/1 is allowed (no transposition)');
-  const r = { n: 9, d: 8 };
-  const near = (a, b) => Math.abs(a - b) <= 1e-12 * Math.max(a, b);
-  check(passFactor(r, 0, true) === 1 && near(passFactor(r, 1, true), 9 / 8) && near(passFactor(r, 5, false), (9 / 8) ** 5),
-    'K5 pass 0 as written, pass 1 a 9/8 higher, pass 5 (9/8)^5');
-  check(near(passFactor(r, 6, true), 531441 / 524288) && near(passFactor(r, 6, false), 531441 / 262144),
-    'K6 six passes: folded, a Pythagorean comma above the start; unfolded, an octave and a comma');
-  check(near(passFactor(r, 6000, true), 2 ** ((6000 * Math.log2(9 / 8)) % 1)) && passFactor(r, 6000, true) >= 1 && passFactor(r, 6000, true) < 2,
-    'K7 folded, any pass stays within one octave');
-  const down = passFactor({ n: 8, d: 9 }, 6, true);
-  check(down > 0.5 && down <= 1, 'K8 a falling ratio folds into (1/2, 1]');
+  console.log('  (the pass factors and the module\'s own repeat: scripts/test-repeat.mjs)');
 }
 
 console.log(`\n${failures ? `${failures} failure(s).` : 'All amplitude checks passed.'}`);

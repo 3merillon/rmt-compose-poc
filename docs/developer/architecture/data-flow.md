@@ -26,10 +26,10 @@ Save clicked
   → validateExpression()            src/modals/validation.js:6
   → simplify (simplifyDSL)          src/utils/simplify.js:66
   → Note.setVariable('frequencyString', text)
-      → Note._setExpression()       src/note.js:297
+      → Note._setExpression()       src/note.js:305
           → compiler.compile(text)   → BinaryExpression
           → note._depsEpoch++
-          → Note._notifyChange()    src/note.js:341
+          → Note._notifyChange()    src/note.js:349
               → module.markNoteDirty(note.id)
               → eventBus.emit('player:invalidateModuleEndTimeCache')
 ```
@@ -41,13 +41,13 @@ form), and returns a **clone** of the cached `BinaryExpression`.
 There is a silent path too: **`Module.batchSetExpressions(updates)`** takes
 `[{ noteId, varName, expr }]`, applies every change through `_setExpressionSilent()` (no per-note
 notification), re-registers dependencies once, and marks everything dirty in one pass. Its one caller
-is **Evaluate Module** (`evaluateEntireModule()`, `src/modals/index.js:778`). **Evaluate to
-BaseNote** does *not* use it: `evaluateNoteToBaseNote()` (`src/modals/index.js:726`) writes each
+is **Evaluate Module** (`evaluateEntireModule()`, `src/modals/index.js:810`). **Evaluate to
+BaseNote** does *not* use it: `evaluateNoteToBaseNote()` (`src/modals/index.js:758`) writes each
 property with `note.setVariable(name + 'String', expr)` and then calls `markNoteDirty()`.
 
 ::: info Drag and resize do not use the batch path
 A move commit writes each moved note individually with `n.setVariable('startTimeString', raw)` inside
-`commitNoteStartGL()` (`src/player.js:4899`), then runs the dependent-retarget passes, then evaluates
+`commitNoteStartGL()` (`src/player.js:4960`), then runs the dependent-retarget passes, then evaluates
 once. A group move does the same per mover.
 :::
 
@@ -132,7 +132,7 @@ is ignored with a console warning.
 
 ## 4. Rendering
 
-`RendererAdapter.sync()` (`renderer.js:679`) is the CPU rebuild:
+`RendererAdapter.sync()` (`renderer.js:681`) is the CPU rebuild:
 
 ```javascript
 renderer.sync({
@@ -158,7 +158,7 @@ depend on?" for every note (a transitive BFS per note — O(N²) on deep chains)
 question: *i* transitively depends on a corrupt note **iff** *i* is a transitive dependent of one. So
 a single multi-source BFS over the `dependents` graph, seeded by the (usually empty) corrupt set,
 answers it for all notes at once in O(N+E) — and is a complete no-op when nothing is corrupt
-(`renderer.js:1005-1052`).
+(`renderer.js:1015-1062`).
 
 The result lands in `_corruptionType`, a `Float32Array` bound to vertex attribute 7:
 
@@ -174,7 +174,7 @@ draws. When nothing changed, `_render()` returns immediately and the frame costs
 `player.js` calls `sync()` on every commit. A drag does **not** call it: the workspace previews the
 gesture through the renderer's preview setters (`setDragOffsetPreview()` shifts moving notes on the
 GPU), and `sync()` runs once, on the drop. `player.js`'s rAF loop still carries a `tempOverrides`
-re-sync branch (`player.js:1870`), but nothing assigns `glTempOverrides` today, so it never fires.
+re-sync branch (`player.js:1882`), but nothing assigns `glTempOverrides` today, so it never fires.
 See [WebGL2 Renderer](/developer/rendering/webgl2-renderer).
 
 ## 5. Audio playback
@@ -243,7 +243,7 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 | Evaluation cache | `Map<noteId, result>` on the module and the incremental evaluator | Invalidated per note when marked dirty. |
 | Module end time | A **module-level** `let` in `src/module.js`, not a per-instance field | Cleared by `invalidateModuleEndTimeCache()`, emitted on every expression change. |
 | Renderer instance arrays | `RendererAdapter` | Rebuilt wholesale on every `sync()`. No per-note tracking. |
-| Children-tree (drag preview) | `renderer.js:10488`, keyed `anchorId\|_posEpoch\|_sceneEpoch` | Survives a drag (which changes neither key), invalidated by any real edit. |
+| Children-tree (drag preview) | `renderer.js:10498`, keyed `anchorId\|_posEpoch\|_sceneEpoch` | Survives a drag (which changes neither key), invalidated by any real edit. |
 
 ## Events
 
@@ -251,20 +251,20 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 
 | Event | Emitted by | Does |
 |---|---|---|
-| `workspace:noteMoveCommit` | `note.js:346` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
+| `workspace:noteMoveCommit` | `note.js:354` | `{noteId, newStartSec}` → rewrite startTime, retarget violated dependents, evaluate, sync, snapshot. |
 | `workspace:noteResizeCommit` | `workspace.js:1756` | `{noteId, newDurationSec}` |
 | `workspace:measureResizeCommit` | `workspace.js:1765` | `{measureId, newStartSec}` |
 | `workspace:groupMoveCommit` | `workspace.js:1737` | `{ids, deltaSec}` → clamps the batch so it can't cross the BaseNote, then commits each mover. |
 | `workspace:marqueeCommit` | `workspace.js:1727` | `{ids, additive}` → sets the multi-selection. |
 | `workspace:multiSelectToggle` | `workspace.js:2072` | `{id}` — shift-click / long-press adds or removes one note. |
 | `player:octaveChange` | note widget arrows, GL arrow regions | `{noteId, direction}` → multiplies the frequency expression by the arrow interval. |
-| `player:invalidateModuleEndTimeCache` | `note.js:346` | Any expression change. |
+| `player:invalidateModuleEndTimeCache` | `note.js:354` | Any expression change. |
 | `player:importModuleAtTarget` | `menu-bar.js` | `{targetNoteId, moduleData, clientX, clientY}` |
 | `player:selectNote`, `player:requestPause` | various | Selection and transport. |
 | `history:capture` / `seedIfEmpty` / `undo` / `redo` / `requestRestore` / `stackChanged` | everywhere an edit commits | Undo. `player.js` also listens to `history:capture` to write the localStorage autosave. |
 | `settings:changed` / `settings:loaded` / `settings:panelToggled` | `settings-store.js`, `settings-panel.js` | `{path, value, settings}` |
 | `modals:show` / `requestRefresh` / `cleared` / `init` | modals | Widget lifecycle. |
-| `audio:masterVolumeInput` | `player.js:4237` | Live echo from the transport slider so the Settings panel tracks it mid-drag. |
+| `audio:masterVolumeInput` | `player.js:4298` | Live echo from the transport slider so the Settings panel tracks it mid-drag. |
 
 ## Settings → runtime
 
@@ -313,7 +313,7 @@ At startup `src/player.js` loads the saved session (`rmt:moduleSnapshot:v1`) or
 
 ```
 any committing edit
-  → captureSnapshot(label)              player.js:5570
+  → captureSnapshot(label)              player.js:5631
       → module.createModuleJSON()
       → JSON.stringify once → snapshotStr   (shared, not serialized twice)
       → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot, snapshotStr })

@@ -212,7 +212,7 @@ What a variable reads comes from `src/variable-deps.js`, the one place that stat
 
 | A variable reads… | Resolved by |
 |---|---|
-| every `LOAD_REF` / `LOAD_BASE` in its bytecode, `base.x` being note 0 | `BinaryExpression.getVariableRefs()` (`binary-note.js:296`), decoded once per expression |
+| every `LOAD_REF` / `LOAD_BASE` in its bytecode, `base.x` being note 0 | `BinaryExpression.getVariableRefs()` (`binary-note.js:304`), decoded once per expression |
 | the BaseNote's variable instead, when the reference is to an `amplitude`, `attack` or `release` the named note does not define (indices `>= FIRST_INTERPRETATION_VAR`) | `resolveVariableRef()` (`variable-deps.js:81`) |
 | nothing schedulable, when no note defines it — `evaluate()` falls back to the default and reports it | — |
 
@@ -256,9 +256,9 @@ POW produces an irrational, or ~ / a fallback an approximation
   → evaluateVariable ORs the property's bit into corruptionFlags   :830
   → Module._updateCorruptionFlags() pushes it into the graph   module.js:684-707
       → DependencyGraph.setCorruptionFlags(noteId, flags)      dependency-graph.js:1746
-  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:1005-1052
+  → RendererAdapter.sync() derives a_corruptionType per note   renderer.js:1015-1062
       0 = clean · 1 = transitive (single diagonal hatch) · 2 = direct (crosshatch)
-  → the note widget names the kind: exact form, or ≈ for approximate   variable-controls.js:111
+  → the note widget names the kind: exact form, or ≈ for approximate   variable-controls.js:112
 ```
 
 `_updateCorruptionFlags` is scoped to the dirty set, not all notes.

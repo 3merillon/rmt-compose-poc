@@ -96,7 +96,7 @@ export class Module {
     // Merge defaults with provided variables (convert functions to strings if needed)
     const finalVars = { ...defaultBaseNoteVariables };
     for (const [key, value] of Object.entries(baseNoteVariables)) {
-      if (key === 'color' || key === 'instrument') {
+      if (key === 'color' || key === 'instrument' || key === 'repeat') {
         finalVars[key] = value;
       } else if (key.endsWith('String')) {
         // Use the string value directly
@@ -929,6 +929,7 @@ export class Module {
     }
     if (this.baseNote.properties.color) baseObj.color = this.baseNote.properties.color;
     if (this.baseNote.properties.instrument) baseObj.instrument = this.baseNote.properties.instrument;
+    if (this.baseNote.properties.repeat) baseObj.repeat = this.baseNote.properties.repeat;
     moduleObj.baseNote = baseObj;
 
     // Export notes

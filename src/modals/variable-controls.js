@@ -1,6 +1,7 @@
 // Modularized variable controls for the Modals panel
 // Creates a single "variable row" for a given key/value pair
 // API: createVariableControls(key, value, note, measureId, externalFunctions)
+import { setModuleRepeat, moduleRepeatRatio } from '../player/display-transpose.js';
 import { validateExpression } from './validation.js';
 import { eventBus } from '../utils/event-bus.js';
 import Fraction from 'fraction.js';
@@ -138,6 +139,11 @@ function buildEvaluatedDiv(value) {
         displayValue = String(ev);
       }
     }
+  }
+
+  // A transposed loop pass: say so beside the value (display-transpose.js)
+  if (Number.isInteger(value?.transposedPass) && value.transposedPass > 0) {
+    displayValue += ` (repeat ${value.transposedPass})`;
   }
 
   // SECURITY: Escape displayValue to prevent XSS
@@ -842,6 +848,8 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         }
       } else if (key === 'attack' || key === 'release') {
         variableValueDiv.appendChild(makeHint("A share of the note's duration, e.g. 1/8", true));
+      } else if (key === 'repeat') {
+        variableValueDiv.appendChild(makeHint('The frequency the BaseNote takes on the next repeat of a loop, e.g. (9/8) * base.f. Empty: none.', true));
       }
     } catch {}
 
@@ -853,6 +861,24 @@ export function createVariableControls(key, value, note, measureId, externalFunc
         pauseIfPlaying();
         const moduleInstance = getModule();
         const currentNoteId = measureId !== null && measureId !== undefined ? measureId : note.id;
+        // The BaseNote's repeat: a relation kept as text, checked by evaluating it
+        if (key === 'repeat') {
+          const text = String(rawInput.value ?? '').trim();
+          const prev = note.properties.repeat || null;
+          setModuleRepeat(moduleInstance, text || null);
+          if (text && !moduleRepeatRatio(moduleInstance)) {
+            setModuleRepeat(moduleInstance, prev);
+            showError('Not a repeat: write the frequency the BaseNote takes on the next repeat, for example (9/8) * base.f');
+            return;
+          }
+          try {
+            const snap = getModule().createModuleJSON();
+            try { eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshot: snap }); } catch {}
+            eventBus.emit('history:capture', { label: text ? `Repeat ${text}` : 'Repeat as written', snapshot: snap });
+          } catch {}
+          refreshModals(note, null);
+          return;
+        }
         if (key === 'color') {
           const newColor = validateColorInput(rawInput.value);
           if (!newColor) {

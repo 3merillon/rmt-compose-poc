@@ -1,4 +1,7 @@
 import Fraction from 'fraction.js';
+import { getDisplayTransposition, setDisplayTransposition, clearDisplayTransposition, passTransposition, moduleRepeatRatio, setModuleRepeat } from './player/display-transpose.js';
+import { equals as X_equals } from './value/exact.js';
+const X_isOne = (v) => { try { return X_equals(v, new Fraction(1)); } catch { return false; } };
 import { Module, invalidateModuleEndTimeCache as invalidateModuleEndTimeCacheGlobal, setDefaultInstrument } from './module.js';
 import { modals } from './modals/index.js';
 import { updateStackClickSelectedNote } from './stack-click.js';
@@ -78,6 +81,12 @@ document.addEventListener('DOMContentLoaded', async function() {
     let isLoopDisarming = false; // toggled off; the engine is finishing the current pass
     let loopEndAudioTime = null; // absolute audioContext time that final pass ends
     let loopPeriod = 0;          // frozen getModuleEndTime() for the active playback; 0 = don't wrap
+    // Repeat transposition (the module's BaseNote `repeat`, else Settings > Audio > Loop):
+    // the pass this playback started in (kept across Pause and seeks, 0 after Stop),
+    // the ratio and fold it plays with, and the pass on screen.
+    let loopPassOffset = 0;
+    let playTranspose = null;    // { ratio, fold, offset } of the playback in flight, or null
+    let shownPass = 0;
     let playbackBaseTime = 0;    // baseStartTime of the active playback (to arm mid-play)
     let playbackFromTime = 0;    // score time the active playback started from (the playhead is this + engine.scoreElapsed())
 
@@ -608,6 +617,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         // the old composition's edges alive, and a module dropped onto the
         // fresh slate reused those ids — jumbling evaluation order until reload.
         myModule.clearAllNotes();
+        // A new composition does not repeat transposed (the owner: "every new
+        // composition doesn't have it").
+        try { setModuleRepeat(myModule, null); } catch {}
 
         evaluatedNotes = myModule.evaluateModule();
         setEvaluatedNotes(evaluatedNotes);
@@ -2947,6 +2959,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                         return;
                     }
                     playheadTime = elapsed <= 0 ? 0 : elapsed % loopPeriod;
+                    if (playTranspose) showPass(playTranspose.offset + (elapsed <= 0 ? 0 : Math.floor(elapsed / loopPeriod)));
                 } else {
                     playheadTime = Math.min(elapsed, moduleEndTime);
                     if (playheadTime >= moduleEndTime) {
@@ -3525,7 +3538,48 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         return audioEngine.preparePlayback(myModule, fromTime);
     }
 
+    // The ratio from one repeat to the next: the module's own (its BaseNote's
+    // `repeat`); null when it sets none. Folding is a listening preference (Settings).
+    function repeatTranspose(offset) {
+        let ratio = null;
+        try { ratio = moduleRepeatRatio(myModule); } catch {}
+        if (!ratio || (X_isOne(ratio))) return null;
+        return { ratio, fold: settingsStore.get('audio.loop.fold') !== false, offset: Math.max(0, offset | 0) };
+    }
+
+    // The pass being heard, on screen: every absolute value times its factor.
+    function showPass(pass) {
+        if (!playTranspose || pass === shownPass) return;
+        shownPass = pass;
+        const factor = pass > 0 ? passTransposition(playTranspose.ratio, pass, playTranspose.fold) : null;
+        setDisplayTransposition(pass, factor);
+        try { updateVisualNotes(evaluatedNotes); } catch {}
+    }
+
+    function resetPasses() {
+        loopPassOffset = 0;
+        playTranspose = null;
+        shownPass = 0;
+        if (getDisplayTransposition().factor) {
+            clearDisplayTransposition();
+            try { updateVisualNotes(evaluatedNotes); } catch {}
+        }
+    }
+
+    // The pass the playback in flight is in now (for a seek or a restart).
+    function currentPass() {
+        if (!playTranspose) return loopPassOffset;
+        if (loopPeriod > 0) {
+            const se = audioEngine.scoreElapsed();
+            const elapsed = se == null ? 0 : playbackFromTime + se;
+            return playTranspose.offset + (elapsed <= 0 ? 0 : Math.floor(elapsed / loopPeriod));
+        }
+        return playTranspose.offset;
+    }
+
     function play(fromTime = null) {
+        // A restart or a seek mid-loop continues in the key being heard.
+        if (isPlaying) loopPassOffset = currentPass();
         if (isPlaying) {
             stop(false);
         } else {
@@ -3559,7 +3613,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     ? { period: endTime, notes: loopNotes, firstCycleAudioLength: endTime - fromTime }
                     : null;
 
-                const baseStartTime = audioEngine.play(preparedNotes, { initialVolume: INITIAL_VOLUME, loop });
+                playTranspose = repeatTranspose(loopPassOffset);
+                const baseStartTime = audioEngine.play(preparedNotes, { initialVolume: INITIAL_VOLUME, loop, transpose: playTranspose });
+                shownPass = -1;
+                if (playTranspose) showPass(playTranspose.offset); else if (getDisplayTransposition().factor) resetPasses();
 
                 isPlaying = true;
                 isPaused = false;
@@ -3595,6 +3652,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         const currentPauseTime = audioContext.currentTime - currentTime;
         const se = audioEngine.scoreElapsed();
         let pos = se == null ? currentPauseTime + totalPausedTime : playbackFromTime + se;
+        // Pause keeps the pass being heard: Play resumes in that key.
+        if (playTranspose) loopPassOffset = playTranspose.offset + (loopPeriod > 0 && pos > 0 ? Math.floor(pos / loopPeriod) : 0);
         // Wrap into the module. After the first pass this clock runs past the module
         // end, and play() treats a fromTime >= end as "start over" — so pausing on
         // pass 3 and hitting play would silently jump to 0 instead of resuming.
@@ -3642,6 +3701,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         isLoopDisarming = false;
         loopEndAudioTime = null;
 
+        // Stop (and the end of playback) returns the display to the module as written.
+        if (resetPlayhead || ringOut) resetPasses();
         if (!isPlaying && !isPaused && playheadTime === 0) {
             // Nothing is playing, but tails may still ring: Stop cuts them.
             try { audioEngine.stopAll(); } catch {}

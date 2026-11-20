@@ -29,7 +29,6 @@ Five sections, one per panel tab. A tab's id is also its section name.
 | `audio.masterVolume` | number | `1` | 0 – 1, step 0.01 | Master volume (and the transport slider) |
 | `audio.defaultInstrument` | string | `'sine-wave'` | the eleven [instrument names](#instrument-names) | Default instrument |
 | `audio.maxVoices` | number | `256` | `128`, `256`, `512`, `1024`, `2048`, `4096` | Most voices at once |
-| `audio.loop.transpose` | `{ n, d }` | `{ n: 1, d: 1 }` | whole numbers 1 – 10⁶, n/d between 1/16 and 16, reduced | Transpose each repeat by |
 | `audio.loop.fold` | boolean | `true` | — | Keep within an octave |
 | `audio.tempered.enabled` | boolean | **`false`** | — | Play tempered (12-TET) |
 | `audio.reverb.enabled` | boolean | **`true`** | — | Enable reverb |
@@ -145,7 +144,7 @@ In **Independent up/down** mode a **Down interval (ratio)** row renders below th
 |---|---|---|---|---|
 | **Master volume** | slider, `%` | 0 – 1, step 0.01 | 100% | — |
 | **Default instrument** | dropdown | eleven names | `sine-wave` | — |
-| **Transpose each repeat by** | ratio editor (n / d, with cents) | 1/16 – 16 | 1/1 | "Each time the loop comes round it sounds this ratio higher than the time before: 9/8 plays Bach's Canon per tonos as written. 1/1 repeats it unchanged. Takes effect at the next Play." |
+| **Transpose each repeat by** | ratio editor (n / d, with cents) | 1/16 – 16 | the module's | Not a setting: the current module's own repeat (its BaseNote's `repeat`), saved with the module, written as `(n/d) * base.f` (1/1 removes it). Clean Slate and a new composition start at 1/1. A tempered repeat is shown here and edited in the BaseNote's REPEAT row. |
 | **Keep within an octave** | toggle | on / off | on | "Six pure whole tones are an octave and a comma, so a rise never comes home: on, the repeats drop an octave each time they pass one, and the loop can go on for ever; off, they keep climbing." |
 | **Most voices at once** | dropdown | 128 / 256 / 512 / 1024 / 2048 / 4096 | 256 | "Above it, the quietest note already ringing after its end fades out first; a note is never cut before its end. Each voice costs processor time: one core plays about 2,000 sine, organ or harmonium voices, 1,700 piano or violin, 600–700 square, sawtooth or fm-epiano (measured on one computer)." |
 | *Pure / Tempered* | | | | |

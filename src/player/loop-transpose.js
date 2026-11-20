@@ -11,6 +11,10 @@
  * `fold`, the transposition is kept within one octave: a rising ratio in [1, 2),
  * a falling one in (1/2, 1]. Every note of a pass is scaled by the same factor,
  * so the ratios inside a pass stay exactly as written.
+ *
+ * The factors themselves are exact: passTransposition() in display-transpose.js,
+ * shared by the audio and the display. A module may set its own repeat (the
+ * BaseNote's `repeat`), which wins over this setting.
  */
 
 const gcd = (a, b) => { while (b) [a, b] = [b, a % b]; return a; };
@@ -28,17 +32,4 @@ export function validateLoopRatio(raw, fallback = { n: 1, d: 1 }) {
   if (!(r >= 1 / 16 && r <= 16)) return { ...fallback };
   const g = gcd(n, d);
   return { n: n / g, d: d / g };
-}
-
-/**
- * The factor every frequency of loop pass `pass` is multiplied by.
- * @param {{n:number, d:number}} ratio
- * @param {number} pass 0 = the first pass (as written)
- * @param {boolean} fold keep it within one octave
- */
-export function passFactor(ratio, pass, fold) {
-  if (!ratio || !(pass > 0) || ratio.n === ratio.d) return 1;
-  let e = pass * Math.log2(ratio.n / ratio.d);
-  if (fold) e = ratio.n > ratio.d ? e - Math.floor(e) : e - Math.ceil(e);
-  return Math.pow(2, e);
 }
