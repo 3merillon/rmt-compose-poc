@@ -29,13 +29,17 @@ async function pointOfNote(page, id) {
   const point = await page.evaluate(id => {
     const w = window.__rmtWorkspace;
     const r = window.__rmtRenderer;
-    for (let y = 160; y < innerHeight - 20; y += 6) {
-      for (let x = 15; x < innerWidth - 15; x += 12) {
-        const hit = w.pickAt(x, y, 0);
-        if (hit?.id !== id || !document.elementFromPoint(x, y)?.closest('.myspaceapp')) continue;
-        if (hit.type === 'base' || r.hitTestSubRegion(x, y, hit)?.region === 'body') return { x, y };
-      }
+    let x, y;
+    if (id === 0) {
+      x = r._baseCircleCss.cx + r.canvasOffset.x;
+      y = r._baseCircleCss.cy + r.canvasOffset.y;
+    } else {
+      const i = r._noteIdToIndex.get(id) * 4;
+      x = r.matrix[0] * (r.posSize[i] + r.posSize[i + 2] / 2) + r.matrix[6];
+      y = r.matrix[4] * (r.posSize[i + 1] + r.posSize[i + 3] / 2) + r.matrix[7];
     }
+    const hit = w.pickAt(x, y, 0);
+    if (hit?.id === id && document.elementFromPoint(x, y)?.closest('.myspaceapp')) return { x, y };
   }, id);
   assert.ok(point, 'expected a visible target for note ' + id);
   return point;
@@ -53,6 +57,19 @@ async function copyPair(page) {
   await page.keyboard.up('Shift');
   await page.click('#group-widget [data-action="copy-to-modules"]');
   return page.locator('.icon[data-category="custom"][data-name="Selection (2 notes)"]');
+}
+
+async function dropTile(page, tile, id) {
+  const pull = await page.locator('.pull-tab').boundingBox();
+  await page.mouse.move(pull.x + pull.width / 2, pull.y + pull.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(pull.x + pull.width / 2, 280, { steps: 10 });
+  await page.mouse.up();
+  await tile.scrollIntoViewIfNeeded();
+  const target = await pointOfNote(page, id);
+  const canvas = page.locator('.myspaceapp');
+  const bounds = await canvas.boundingBox();
+  await tile.dragTo(canvas, { targetPosition: { x: target.x - bounds.x, y: target.y - bounds.y } });
 }
 
 for (const [name, baseFrequency, lastFrequency, editId] of [
@@ -113,21 +130,48 @@ test('library drop remaps a commented reference past a colliding host ID', async
     assert.match(copy.notes[1].frequency, /# phrase root\s+1\s*\]/);
     await page.click('[data-action="clear-selection"]');
 
-    const pull = await page.locator('.pull-tab').boundingBox();
-    await page.mouse.move(pull.x + pull.width / 2, pull.y + pull.height / 2);
-    await page.mouse.down();
-    await page.mouse.move(pull.x + pull.width / 2, 280, { steps: 10 });
-    await page.mouse.up();
-    await tile.scrollIntoViewIfNeeded();
-    const target = await pointOfNote(page, 0);
-    const canvas = page.locator('.myspaceapp');
-    const bounds = await canvas.boundingBox();
-    await tile.dragTo(canvas, { targetPosition: { x: target.x - bounds.x, y: target.y - bounds.y } });
+    await dropTile(page, tile, 0);
 
     await page.waitForFunction(() => window.__rmtWorkspace._module.notes[24]);
     assert.deepEqual(await pitches(page, [1, 23, 24]), [110, 330, 660]);
     const refs = await page.evaluate(() => [...window.__rmtWorkspace._module.notes[24].getAllDependencies()]);
     assert.deepEqual(refs, [23], 'the imported child reads the imported root');
+  } finally {
+    await page.close();
+  }
+});
+
+test('an End drop preserves pitch and duration expressions that read the first start', async () => {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const score = ids => page.evaluate(ids => ids.map(id => {
+    const note = window.__rmtWorkspace._module.notes[id];
+    return ['startTime', 'duration', 'frequency'].map(k => Number(note.getVariable(k).valueOf()));
+  }), ids);
+  try {
+    await page.goto(url + '/?perf=1');
+    await page.waitForFunction(() => window.__rmtRenderer?.instanceCount > 0);
+    const baseNote = { frequency: '330', startTime: '0', duration: '1' };
+    await loadFile(page, { baseNote, notes: [
+      { id: 21, startTime: '3', duration: '1', frequency: '330' },
+      { id: 22, startTime: '2 * [21].t', duration: '[21].t', frequency: '[21].t * 110' },
+    ] });
+    await page.mouse.move(720, 450);
+    await page.mouse.wheel(0, 800);
+    assert.deepEqual(await score([21, 22]), [[3, 1, 330], [6, 3, 330]]);
+    const tile = await copyPair(page);
+    await loadFile(page, await tile.evaluate(el => el.moduleData));
+    assert.deepEqual(await score([1, 2]), [[0, 1, 330], [3, 3, 330]]);
+
+    // Drop into a different score. The target starts at 8 and ends at 10.
+    await loadFile(page, { baseNote, notes: [
+      { id: 7, startTime: '8', duration: '2', frequency: '440' },
+    ] });
+    await page.mouse.move(720, 450);
+    await page.mouse.wheel(0, 600);
+    assert.equal(await page.locator('.library-drop-end-btn').getAttribute('aria-pressed'), 'true');
+    await dropTile(page, tile, 7);
+    await page.waitForFunction(() => window.__rmtWorkspace._module.notes[9]);
+    assert.deepEqual(await score([8, 9]), [[10, 1, 330], [13, 3, 330]]);
   } finally {
     await page.close();
   }
