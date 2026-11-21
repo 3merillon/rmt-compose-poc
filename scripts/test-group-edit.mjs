@@ -36,6 +36,15 @@ const sameSet = (a, b) => a.size === b.size && [...a].every((x) => b.has(x));
 const firstOf = (m, ids) => ids.slice().sort((a, b) => X.compare(ex(m, a, 'startTime'), ex(m, b, 'startTime')))[0];
 const lastOf = (m, ids) => ids.slice().sort((a, b) => X.compare(ex(m, b, 'startTime'), ex(m, a, 'startTime')))[0];
 
+{
+  const m = await load({ baseNote: { frequency: '1' }, notes: [
+    { id: 1, frequency: 'base.f', startTime: '0', duration: '1' },
+  ] });
+  const ratio = '9007199254740993/9007199254740992';
+  G.scaleGroup(m, [1], 'frequency', ratio);
+  check(X.equals(ex(m, 1, 'frequency'), new Fraction(ratio)), 'group scaling preserves a ratio above 2^53');
+}
+
 console.log('\nGroup editing: selecting by relation');
 {
   const m = await load();

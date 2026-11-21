@@ -263,7 +263,7 @@ export function scaleGroup(module, ids, varName, factorText) {
     let next;
     if (src) {
       next = ratio
-        ? multiplyExpressionByFraction(src, Number(ratio.n), Number(ratio.d), varName, module)
+        ? multiplyExpressionByFraction(src, ratio.n, ratio.d, varName, module)
         : `${factorExpr} * (${src})`;
     } else if (v >= FIRST_INTERPRETATION_VAR) {
       // No value of its own: it follows the BaseNote's, else the default

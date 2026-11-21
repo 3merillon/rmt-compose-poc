@@ -52,7 +52,7 @@ export function multiplyExpressionByFraction(expr, num, den, kind, moduleInstanc
   }
   // Fall back to an explicit multiplier, parenthesised so it applies to the
   // whole expression even when that expression is a sum.
-  const factorStr = den === 1 ? `${num}` : `(${num}/${den})`;
+  const factorStr = den === 1 || den === 1n ? `${num}` : `(${num}/${den})`;
   return `${factorStr} * (${expr})`;
 }
 
