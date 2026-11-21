@@ -1,6 +1,6 @@
 # RMT Compose v2 release review
 
-The documented source is `c21f71efc9c591a68e9bb431b8f8c54174ca3aa2` from `origin/v2`. The published-main comparison is `730364962280abb1881c37c5c14ff91a704f4b86`. The review branch is `codex/v2-docs-release`. It includes the End default for module drops (`07a325c`) and the group-copy fixes through `41ac83d`. The initial documentation review was recorded at `17fa2ff`. The regression results below cover the updated branch. The package version is still 1.0.0.
+The documented source is `c21f71efc9c591a68e9bb431b8f8c54174ca3aa2` from `origin/v2`. The published-main comparison is `730364962280abb1881c37c5c14ff91a704f4b86`. The review branch is `codex/v2-docs-release`. It includes the End default for module drops (`07a325c`) and the group-copy fixes through `41ac83d`. The initial documentation review was recorded at `17fa2ff`. The regression results below cover the updated branch. The application and documentation packages are version 2.0.0.
 
 - [Ranked changes since main](../docs/release-notes.md)
 - [Prompt for the subsequent TypeScript port](typescript-port-brief.md)
@@ -75,4 +75,4 @@ All four production browser cases passed. The third dropped a copied reference c
 
 The model tests cover exact and approximate anchors, expressions that read start times, live internal links, a BaseNote whose inputs are copied and ordered file export. Across 116 full and partial selections drawn from all 81 shipped library modules, all 2,936 defined per-note properties matched their source values after accounting for the new time origin. The existing five-note copy/drop round trip passed all 14 checks, and mixed note/measure drops passed all six Start/End and target combinations. [Model regressions](../scripts/test-group-copy.mjs)
 
-The published-main and v2 tips were fetched again at handoff. The proposed major release version is **2.0.0**. The version bump, merge and publication await the maintainer’s approval.
+The maintainer approved the merge of the reviewed branch into main and the **2.0.0** version bump. The TypeScript port starts from the merged JavaScript release. [TypeScript port brief](typescript-port-brief.md)

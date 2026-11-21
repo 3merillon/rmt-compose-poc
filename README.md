@@ -30,7 +30,7 @@ Select a blue bass note and look at the frequency, start and duration in its wid
 
 ## What changed in v2
 
-Hear the retuned canon and eight revoiced progressions, use a later pitch as a reference, and take the result into a DAW with pitch-bent MIDI. The [ranked release notes](docs/release-notes.md) cover the musical changes, editing, playback and large-score work since the published main version.
+Hear the retuned canon and eight revoiced progressions, use a later pitch as a reference, and take the result into a DAW with pitch-bent MIDI. The [ranked release notes](docs/release-notes.md) cover the musical changes, editing, playback and large-score work from the previous release to 2.0.0.
 
 ## Run locally
 

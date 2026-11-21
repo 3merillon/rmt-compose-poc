@@ -4,7 +4,17 @@ Port RMT Compose v2 and its first-party JavaScript tooling to strict TypeScript.
 
 ## Starting point
 
-Fetch origin in `C:\GitHub Projects\rmt-compose-v2`. Use the **approved, merged v2 release commit** on main as the comparison baseline. Record its SHA, version, lockfiles, Node and browser versions. If main still points at the earlier release, obtain the approved v2 commit before starting. Create a separate worktree and branch named `codex/v2-typescript-port`. Use separate baseline and candidate origins and browser profiles. Keep the composer’s Wi-Fi app on port 3000 available throughout.
+Start from the merged JavaScript release on `main` (RMT Compose 2.0.0). The prepared branch is `codex/v2-typescript-port` in `C:\GitHub Projects\rmt-compose-typescript-port`. Before the first edit, fetch `origin`, record the worktree’s starting HEAD as the comparison SHA, and verify that it is on the history of `origin/main`. Record the package version, lockfiles, Node version and browser versions alongside that SHA.
+
+To prepare the same layout on a fresh checkout where the branch and worktree do not yet exist, run this from the main repository:
+
+```powershell
+Set-Location 'C:\GitHub Projects\rmt-compose-poc'
+git fetch origin
+git worktree add --no-track -b codex/v2-typescript-port '..\rmt-compose-typescript-port' origin/main
+```
+
+Use a detached worktree at the recorded SHA for the JavaScript comparison. Start baseline and candidate servers only when needed, on separate free loopback ports with disposable browser profiles. Record their process IDs and stop them when the checks finish.
 
 ## Scope and checkpoints
 
