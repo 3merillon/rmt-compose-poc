@@ -5,7 +5,7 @@ description: The floating panel that opens when you click a note, silence, measu
 
 # Note Widget
 
-Click one thing in the workspace — a note, a silence, a measure bar's triangle, or the BaseNote circle — and the note widget opens on it. It is the only place in the app where you read and edit a note's **expressions**, and it is where you create new notes, transpose, change instruments, and delete.
+Click one thing in the workspace — a note, a silence, a measure bar's triangle, or the BaseNote circle — and the note widget opens on it. Here you can inspect an expression, change it, or create a new note that relates to the selected item.
 
 The widget fits itself to what you clicked. A measure bar shows two rows; the BaseNote shows its own set and a different delete button. Nothing is greyed out — sections that don't apply are simply not there.
 
@@ -16,6 +16,7 @@ The widget fits itself to what you clicked. A measure bar shows two rows; the Ba
 | Action | Result |
 |---|---|
 | Click a note | Opens, titled `Note [N] Variables` |
+| Click a reference or key-change line | Opens, titled `Reference [N] Variables` |
 | Click a silence | Opens, titled `Silence [N] Variables` |
 | Click a measure triangle | Opens, titled `Measure [N] Variables` |
 | Click the BaseNote circle | Opens, titled `BaseNote Variables` |
@@ -26,7 +27,7 @@ The widget fits itself to what you clicked. A measure bar shows two rows; the Ba
 Two things suppress it:
 
 - **The lock.** With the padlock (bottom-right of the screen) engaged, clicking a note does nothing at all, so the widget cannot be opened. The lock is off when the app starts.
-- **A multi-selection.** Select two or more notes and the note widget is dismissed in favour of the group widget. Drop back to one note and the note widget returns.
+- **A multi-selection.** On desktop a selection of two or more notes or measure triangles opens the group widget. Removing all but one opens that item’s own widget. On touch a long-press opens a one-item group. Tap empty canvas to leave group mode, then tap the item to inspect it.
 
 There is no keyboard shortcut that opens or closes it.
 
@@ -46,7 +47,7 @@ Almost every action rebuilds the widget's body. When the note being redrawn is t
 
 ## What each kind shows
 
-Rows appear in the order listed.
+The table lists the common controls. A reference line has a frequency, and a key change also has a start time. Select the line to inspect those expressions.
 
 | Section | BaseNote | Note | Silence | Measure |
 |---|---|---|---|---|
@@ -58,6 +59,7 @@ Rows appear in the order listed.
 | `RELEASE` | yes | yes | only if set | — |
 | `COLOR` | only if set | yes | yes | — |
 | `INSTRUMENT` | yes | yes | yes | — |
+| `REPEAT` | pitch ratio between loop passes | — | — | — |
 | Add measure | `ADD NEW MEASURE CHAIN` | — | — | `ADD MEASURE`, last in chain only |
 | `ADD NOTE / SILENCE / REFERENCE` | yes | yes | yes | — |
 | `EVALUATE` | `Evaluate Module` | `Liberate Dependencies`, `Evaluate to BaseNote` | same as note | `Evaluate to BaseNote` |
@@ -65,7 +67,7 @@ Rows appear in the order listed.
 
 The rules behind the table:
 
-- A **silence** is a note with a startTime and a duration but **no frequency**. That is the whole definition — it is why a silence has no `FREQUENCY` row and no transpose arrows.
+- A **silence** has a start time and duration and no frequency. It appears as a dashed rectangle. Its widget has no frequency row or transpose arrows.
 - A **measure bar** is a silent note with a startTime and a duration, no frequency, and the `measure` flag. Its duration row is labelled `duration (bar length)`.
 - The BaseNote has a `DURATION` row. Its value is the **time unit**, `base.d`; see [The BaseNote's duration](#the-basenotes-duration). There are no tempo or beats-per-measure rows, because neither is stored.
 - `Liberate Dependencies` is never offered on a measure bar or on the BaseNote.
@@ -89,7 +91,7 @@ The full grammar is in [Expressions](/user-guide/notes/expressions) and [Syntax 
 
 Typing in a `Raw:` field changes nothing. The `Save` button is **hidden until you type** — it appears on your first keystroke — and only pressing it commits the edit. Saving pauses playback, validates the expression, simplifies it, rewrites the note and everything downstream of it, redraws, and pushes an undo entry.
 
-Validation rejects an empty expression, an expression that references its own note, and an expression that would create a circular dependency. The one exception to the first rule is the `AMPLITUDE` row, where saving an empty field is how you remove the value — see [Amplitude](#amplitude).
+Validation checks cycles **per variable**. For example, on startup note 10 you can set its duration to `[10].t * 2`: its start already has an independent value. Setting its duration to `[10].d * 2` would read the very duration being defined. Using `[11].t` there also creates a cycle because note 11 starts when note 10 ends. Required expressions need a value. Clear amplitude, attack or release to resume inheritance, or clear the BaseNote’s repeat to repeat as written.
 
 When a save is rejected, the reason appears **inline**: the validator's message shows in red under the `Save` button and the `Raw:` field gets a red border. Both clear on your next keystroke or your next save attempt. (`COLOR` is the odd one out: an unparseable colour raises a browser alert telling you the accepted formats — hex, `rgb()`, `rgba()`, `hsl()`, `hsla()`, or a named colour.)
 
@@ -117,8 +119,8 @@ On the canvas the same notes are hatched, and the hatching tells you *which* kin
 
 | Hatching | Meaning |
 |---|---|
-| **Crosshatch** (both diagonals) | Directly corrupted — this note's own expression is tempered or approximate |
-| **Single diagonal hatch** | Transitively corrupted — it depends on a tempered or approximate note |
+| **Crosshatch** (both diagonals) | A property of this note directly uses a power or approximate operation |
+| **Single diagonal hatch** | Its dependency chain includes a marked expression |
 | None | A pure ratio |
 
 Nothing is lost: the note plays at the nearest double of the exact value and the expression you wrote is preserved verbatim.
@@ -132,7 +134,7 @@ At the right end of the `FREQUENCY` row's evaluated line are two buttons, **▲*
 - The BaseNote gets the arrows too. Silences and measures do not — they have no frequency.
 - Turn **Settings → Arrows → Show note arrows** off and the buttons are not rendered at all (and the ▲/▼ hit regions disappear from the notes in the workspace).
 - Change an arrow setting while the widget is open and it rebuilds immediately, so the buttons and tooltips can never go stale.
-- Each press captures its own undo entry. Clicking an arrow does not change the selection.
+- Each press captures its own undo entry. A widget arrow changes the displayed note. To transpose a group, use **Change → frequency**, enter the interval and press **×**.
 
 The multiplier is **folded into the expression's coefficient**, not stacked in front of it:
 
@@ -196,7 +198,7 @@ base.d * (7/2)    # three and a half units: seven eighth-notes
 
 Unlike a note's `DURATION`, this row has no note-length icon buttons: type the value, press `Save`.
 
-Bars are what a `[N].t` or `[N].d` reference resolves against in another note's expression (see [Expressions](/user-guide/notes/expressions)), and the triangles along the bottom of the [workspace](/user-guide/interface/workspace#measures) are the same objects you are editing here. Dragging a triangle changes the length of the previous bar; the dragged bar keeps its own.
+Bars are what a `[N].t` or `[N].d` reference resolves against in another note's expression (see [Expressions](/user-guide/notes/expressions)), and the triangles along the bottom of the [workspace](/user-guide/interface/workspace#measures) are the same objects you are editing here. Dragging the first triangle moves the start of the chain. Dragging a later triangle changes the preceding bar’s length. The dragged bar keeps its own length.
 
 ## Amplitude
 
@@ -259,7 +261,7 @@ The **`ADD NOTE / SILENCE / REFERENCE`** section is at the bottom of the widget 
 
 | Control | Options | Default |
 |---|---|---|
-| Kind | `Note` / `Silence` | `Note` |
+| Kind | `Note` / `Silence` / `Reference` / `Key change` | `Note` |
 | Position (not shown on the BaseNote) | `At Start` / `At End` | `At End` |
 | `Frequency` (hidden when `Silence` is chosen) | an expression | `[N].f` — the open note's frequency |
 | `Duration` | an expression | the open note's own duration expression |
@@ -273,7 +275,7 @@ Flipping between `At Start` and `At End` rewrites the Start Time field for you. 
 
 Each of the three fields carries a **live `Evaluated:` preview** that updates as you type, printing `Invalid` for an expression it cannot parse. This is the only live evaluation anywhere in the widget; every other field waits for `Save`.
 
-Choosing **`Silence`** hides the Frequency field. A silence *is* a note with no frequency — that is all "silence" means here.
+Choose **Silence** for a timed rest, **Reference** for a pitch line, or **Key change** for a pitch line that starts at a particular time. The form shows the fields the chosen kind needs.
 
 The new note inherits the open note's colour (or gets a random one if there isn't one), is selected immediately, and the widget re-opens on it so you can keep chaining.
 
@@ -299,8 +301,7 @@ change, move, copy or delete them together ([Selection & Group Editing](/user-gu
 `t`, `f`, `d` and `all` say which variable of the reading note is followed: its start, its
 frequency, its duration, or any. From the first note of a melody chained by start, `Dependents`
 `t` selects the melody. If nothing is related that way a message says so and the selection stays.
-The BaseNote has no `SELECT` section: everything depends on it. On a bar, the bars of its chain
-are left out (bars never join a group), and the notes that start from it are selected.
+The BaseNote has no `SELECT` section: everything depends on it. Try **Dependents → t** on the first measure triangle in the opening canon. The resulting group includes subsequent bars whose starts follow the chain, along with any notes whose starts read a selected item.
 
 ## Evaluate
 

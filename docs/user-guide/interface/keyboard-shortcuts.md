@@ -38,12 +38,12 @@ Shift is load-bearing in three places. On touch, a **long-press — 500 ms with 
 
 | Mouse / trackpad | Touch | Result |
 |---|---|---|
-| **Shift + drag** on empty canvas | **Long-press** empty canvas, then drag | Marquee-select notes |
-| **Shift + click** a note | **Long-press** a note | Toggle it in or out of the multi-selection |
+| **Shift + drag** from background, a note or a triangle | **Hold still**, then drag from any of those targets | Add intersecting note bodies and measure triangles to the group |
+| **Shift + click** a note or triangle | **Hold** the first item, lift, then **tap** items | Toggle a note or measure in or out of the group |
 | **Shift + click** the Play button | **Long-press** the Play button | Toggle [loop playback](/user-guide/interface/top-bar#loop-playback) |
 | `Ctrl`/`Cmd` **+ wheel** over the canvas | Two-finger pinch | Zoom the camera. The browser's page-zoom is suppressed app-wide, so `Ctrl` + wheel never resizes the page. Over the top bar or a panel it does nothing at all. |
 
-The long-press is non-committal on purpose: moving more than about 8 px, putting a second finger down, or lifting early all cancel it, so panning, pinch-zoom and ordinary note drags are untouched.
+A hold on an item toggles it before a subsequent marquee drag. Before the half-second threshold, moving more than about 8 px, putting a second finger down, or lifting early all cancel it, so panning, pinch-zoom and ordinary note drags are untouched.
 
 See [Multi-Note Selection](/user-guide/notes/selection) for what you can do with a group once you have one.
 

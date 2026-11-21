@@ -48,20 +48,19 @@ Closing the field (magnifier again, `Escape`, or blurring it while empty) always
 
 ## Getting your work into the library
 
-### The good way: Copy to Modules
+### Copy a selection to Modules
 
-1. **Select the notes.** Shift-drag a marquee across empty background (desktop), or long-press empty
-   space and drag (touch). Shift-click / long-press individual notes to toggle them in or out.
-2. Two or more notes selected → the **group widget** appears with the count.
+1. Hold **Shift** and drag from any point on the canvas, including a note. Cross note bodies and the triangle handles of measures you want to include. Shift-click an item to toggle it. On touch, hold still, then drag, or hold the first item and tap the others.
+2. Check the counts in the group widget. A mixed selection lists notes and measures separately.
 3. Press **Copy to Modules**.
 
-The selection is saved into the **Custom** section as `Selection (N notes)` (uniquified with a
+The selection is saved into the **Custom** section with a name such as `Selection (2 notes and 1 measure)` (uniquified with a
 trailing number if that name is taken), a toast confirms it, and the Custom section auto-expands if
 it was collapsed. The selection stays live — the action is non-destructive.
 
 What you get is a genuinely reusable module, not a snapshot:
 
-- The **earliest selected note becomes the root** and sits on the new module's BaseNote.
+- The earliest selected timed item starts at the new module’s time origin. Pitches keep their ratios to the source BaseNote.
 - Expressions that reference only notes *inside* the selection are copied **verbatim** (ids
   renumbered). So `[1].t + [1].d` stays `[1].t + [1].d` — internal branching survives.
 - Expressions that reached *outside* the selection would dangle, so they are rebuilt against the new
@@ -70,7 +69,9 @@ What you get is a genuinely reusable module, not a snapshot:
   they meant, and pitches survive as **ratios** — which is what lets the copy transpose correctly
   when you drop it on a different note.
 
-Drop the copy back onto the note it came from and it lands exactly on top of itself.
+Measures keep their flags, offsets, lengths and internal links. Choose **Start** or **End** in the library toolbar, then drag the copy onto a sounding note, the BaseNote or a measure triangle. Start aligns the earliest item with the target start. End aligns it with the end of a note or bar.
+
+For standalone copies with note references in the BaseNote or spaces inside bracketed IDs, see [copy portability](/user-guide/notes/selection#when-a-copy-will-be-opened-on-its-own).
 
 Per-note `color` and `instrument` are carried into the copied module too, along with the BaseNote's
 instrument — the copy keeps its look and its timbre, not just its pitch, timing and structure.
@@ -80,7 +81,7 @@ It writes to the library, not to your composition — so `Ctrl+Z` will not remov
 copy, delete its tile (the red **×** on the icon).
 :::
 
-### The other way: upload a file
+### Upload a file
 
 1. **+ menu** → **Save Module**. A file downloads, always named **`module.json`** — which is why you
    have to rename it.
@@ -111,7 +112,7 @@ its internal ids renumbered so nothing collides.
 |---|---|
 | A note | Imported and re-rooted onto that note's start and pitch; its durations stay in the workspace's time unit |
 | The BaseNote circle | Imported keeping its `base.*` anchors |
-| A measure bar | Start and duration anchor to the bar; **frequency stays on `base.f`** (a bar has no pitch) |
+| A measure bar | Timing starts at the chosen edge of the bar. Lengths expressed in `base.d` use the workspace time unit. Pitch anchors to the BaseNote. |
 | A silence | **Rejected** — *"Cannot drop onto a silence."* |
 | Empty background | **Rejected** — *"Drop onto a note or the BaseNote circle to import a module."* |
 
@@ -123,8 +124,7 @@ produces an error toast and does nothing. Modules are always imported *onto a ta
 ### Drop mode: Start / End
 
 The **Start / End drop-mode buttons** are the two arrow-against-a-bar icons in the library toolbar,
-just left of Undo/Redo. They work as a radio pair — exactly one is lit — and the default is
-**Start**.
+just left of Undo/Redo. They work as a radio pair — exactly one is lit — and a fresh library starts in **End** mode. A saved choice takes precedence.
 
 | Mode | Button | Effect on a note |
 |---|---|---|
@@ -134,7 +134,7 @@ just left of Undo/Redo. They work as a radio pair — exactly one is lit — and
 Start stacks (chords). End chains (scales, melodies). The choice is remembered across sessions.
 
 **Dropping on the BaseNote ignores the drop mode entirely.** The End adjustment only applies to a
-real note.
+sounding note or measure.
 
 An import is one undo entry (`Import Module at <id>`), and playback pauses first if it was running.
 

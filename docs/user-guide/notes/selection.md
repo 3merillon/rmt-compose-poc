@@ -79,7 +79,7 @@ With only measures selected, **Change** offers **duration**. With a mixed select
 | **Instrument** | The list of instruments and two buttons: **Each note its own player** sets the instrument on every selected note; **One player** sets it only on the notes that start the selection's lines and lets the others inherit it. Choosing *inherited* makes every selected note inherit again — see [Instruments](/user-guide/playback/instruments#several-notes-at-once) |
 | **Colour** | Gives every selected note a colour (`#ff8800`, `rgba(0,0,255,0.5)`, a colour name) |
 | **Copy to Modules** | Saves the selection to the library's Custom section. Non-destructive. |
-| **Delete all** | Deletes the selected notes, behind a confirmation |
+| **Delete all** | Deletes all selected notes and measures after confirmation |
 | **Clear selection** | Deselects everything |
 
 Pressing **Escape** clears the selection, but only while focus is already inside the widget (for
@@ -124,6 +124,12 @@ For a group of ordinary notes, the editor moves the roots of their start-time ch
 
 The right-hand resize tab and [▲/▼ arrows](/user-guide/notes/transposing) still edit one note. Use **Change → duration** to resize the group or **Change → frequency** to transpose its notes.
 
+### Try a mixed group in the opening canon
+
+Shift-click the first two blue bass notes and the first measure triangle. On touch, hold the first blue note, lift and tap the other two items. Check for **2 notes and 1 measure**. Under **Change**, choose **duration**, enter `2` and press **×**. The bar grows from 2.4 to 4.8 seconds and the two short bass notes from 0.15 to 0.30 seconds. Their following notes still read the ends of their predecessors. Undo to compare.
+
+To reuse the group, press **Copy to Modules** and find **Selection (2 notes and 1 measure)** in **Custom**. Drag the tile onto the orange BaseNote. The workspace gains two notes and a measure. Undo removes that import while leaving the tile available.
+
 ## Deleting a group
 
 Click **Delete all**. A confirmation appears, then:
@@ -142,7 +148,7 @@ that note on its own and use **Delete Dependencies** in the note widget. See
 
 ## Copy to Modules
 
-**Copy to Modules** exports the current selection as a self-contained module and drops it into the
+**Copy to Modules** saves the current selection as a module in the
 module library's **Custom** section.
 
 - The new icon includes the counts, for example **Selection (2 notes and 1 measure)**. Duplicate names get a numeric suffix.
@@ -156,13 +162,11 @@ module library's **Custom** section.
 
 ### What the exported module contains
 
-The copy is **rooted at its earliest selected timed item**, which lands exactly on the new module's
-BaseNote. Everything else keeps its offset from that note, so dropping the module somewhere else
-reproduces the layout verbatim.
+The copy is **rooted at its earliest selected timed item**, which starts at the new module’s time origin. Other timed items retain their offsets from that start. Pitches keep their ratios to the source BaseNote.
 
 Measures keep their bar handles, lengths, offsets and links inside the selection. A mixed phrase dropped on a measure takes its timing from that bar and its pitch from the BaseNote. **At End** places the phrase after the target bar or note.
 
-The tree survives the trip:
+The copy preserves the following relationships:
 
 - An expression is copied **as written** when every note it names travels with it. `[1].t + [1].d`
   stays `[1].t + [1].d`, with the ids renumbered `1..N` in time order.
@@ -194,8 +198,14 @@ carries a `baseNote` and each note's `duration` and `frequency`):
 }
 ```
 
-Drop that copy back on the note it came from and it lands on top of itself. See
+Choose **Start** and drop this example on its original root to align their starts. See
 [The Module Library](/user-guide/modules/module-library) for what you can do with it afterwards.
+
+### When a copy will be opened on its own
+
+For a portable copy, use compact IDs such as `[21].f` in expressions between the selected notes. The copy renumbers this spelling. Spaces inside the brackets, as in `[ 21 ].f`, can leave the old ID in the tile.
+
+Also check the BaseNote if its frequency or duration reads another note. The copy carries the BaseNote’s raw expression with the original ID. For example, a BaseNote reading `[20].f` at 330 Hz can reopen at 440 Hz when note 20 is absent. Give that BaseNote property its evaluated value before copying, then undo the edit in the source score. Ordinary library drops take their anchor from the destination.
 
 ## What clears a selection
 

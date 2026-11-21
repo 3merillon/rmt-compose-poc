@@ -54,13 +54,13 @@ If any field fails to parse, creation aborts and a browser alert tells you which
 
 ## By dropping a module
 
-A library module is dropped **onto an existing note or onto the BaseNote** — never onto empty canvas. The drop target becomes the anchor that the module's expressions are rewritten against, which is what lets the same module land at a different pitch and time every time you use it.
+A library module is dropped **onto a sounding note, a measure triangle or the BaseNote** — never onto empty canvas. The drop target becomes the anchor that the module's expressions are rewritten against, which is what lets the same module land at a different pitch and time every time you use it.
 
 1. Open the **module bar** and find the module you want.
-2. Set the drop mode with the ⇤ / ⇥ buttons next to Undo/Redo in the module bar's toolbar: ⇤ for **Start** (the default), ⇥ for **End**. With **End**, the module's start times get the target note's duration added, so the module lands *after* the target instead of on top of it.
-3. Drag the module icon onto a note or the BaseNote.
+2. Set the drop mode with the ⇤ / ⇥ buttons next to Undo/Redo in the module bar's toolbar: ⇤ for **Start**, ⇥ for **End** (the fresh-browser default). With **End**, the module's start times get the target note's duration added, so the module lands *after* the target instead of on top of it.
+3. Drag the icon onto the target. A measure supplies the time anchor and the BaseNote supplies its pitch anchor.
 
-Two targets are refused, each with an error toast:
+These surfaces cannot anchor an import:
 
 - **Empty canvas** — `Drop onto a note or the BaseNote circle to import a module.`
 - **A silence** — `Cannot drop onto a silence. Drop on a note or the BaseNote instead.`
@@ -70,7 +70,7 @@ See [Loading Modules](/user-guide/modules/loading-modules) for the full workflow
 
 ## From a phrase you already built
 
-Select several notes (shift-drag a marquee, or shift-click to add notes one at a time) and the group widget offers **`Copy to Modules`**. That saves the selection into the library's **Custom** section as a reusable module, keeping the dependency tree inside the selection intact. You can then drop it back onto any note.
+Select several notes (shift-drag a marquee, or shift-click to add notes one at a time) and the group widget offers **`Copy to Modules`**. That saves the selection into the library's **Custom** section as a reusable module, keeping the dependency tree inside the selection intact. Selected measure triangles are included too. Drop the copy onto a sounding note, measure triangle or the BaseNote.
 
 This is the fastest way to turn something you improvised into a building block. See [Selection & Group Editing](/user-guide/notes/selection).
 

@@ -5,7 +5,7 @@ description: The ▲/▼ arrows on a note transpose it by an interval you choose
 
 # Transposing with Arrows
 
-Every note with a frequency carries a narrow column on its **left inner edge**, split in half: a
+A sounding note with visible controls has a narrow column on its **left inner edge** with a
 **▲** in the upper half, a **▼** in the lower half. Click a half and the note's frequency
 expression is multiplied by an interval — up or down — and rewritten in place.
 
@@ -16,7 +16,7 @@ it defaults to the octave (×2 up, ×½ down).
 
 | | |
 |---|---|
-| **Where** | The left-hand column of the note. The column scales with zoom, so it stays clickable. |
+| **Where** | The left-hand column of the note. In a dense overview, select or hover the note to reveal its controls. |
 | **Gesture** | A single click or tap. Move more than ~4 px and it is treated as an abandoned drag — nothing happens. |
 | **Hover** | The half under the pointer brightens, and the cursor becomes a small up- or down-pointing triangle. |
 | **Selection** | Clicking an arrow does **not** change what is selected. |
@@ -24,14 +24,16 @@ it defaults to the octave (×2 up, ×½ down).
 | **Undo** | Each press is one undo step. |
 | **Locked notes** | The padlock (**Lock Notes**) makes the arrows inert, like everything else in the workspace. |
 
-Notes that depend on the transposed note re-evaluate and follow it automatically.
+Try the first blue bass note in the opening canon. Select note 10 and press **▲** in the widget’s frequency row. With the default octave, it rises from 131.5 Hz to 263 Hz. Its answering note follows because its pitch refers to note 10. Press **▼** to return to 131.5 Hz.
+
+**Settings → Appearance → Reduce detail above** controls when the renderer hides controls and labels on most notes. In that overview click a body to select it, then use its visible arrow or the frequency row.
 
 A thin dead zone runs along the note's exact midline and resolves to the note **body**, so a click
 at mid-height selects the note instead of transposing it by accident.
 
 **Silences have no arrows** — a silence has no frequency to multiply. The **BaseNote** is drawn as
 a circle and has no arrow column in the workspace, but you can still transpose it from the note
-widget (below), and the whole composition moves with it.
+widget (below), and every pitch derived from it follows.
 
 ### The arrows in the note widget
 
@@ -55,7 +57,7 @@ panel is not modal and every change applies immediately — no OK, no Apply.
 
 | Row | Control |
 |---|---|
-| **Show note arrows** | Turns the ▲/▼ arrows off entirely |
+| **Show note arrows** | Shows or hides note arrows in the workspace and widget |
 | **Arrow mode** | *Reciprocal (up ×r, down ÷r)* or *Independent up/down* |
 | **Up interval (ratio)** | Two number fields, `n` `/` `d`, with a live cents readout |
 | **Quick pick** | Six one-click intervals |
@@ -150,12 +152,9 @@ the factor, **and** must not change the note's corruption flag (its hatching). A
 falls back to an explicit multiplier wrapped around the whole expression, so the pitch is always
 right even when the expression cannot be tidied.
 
-::: tip One note at a time
-The arrows act on the single note you clicked. There is no group transposition — selecting several
-notes and pressing an arrow is not a thing (see
-[Selection & Group Editing](/user-guide/notes/selection)) — and there is no keyboard shortcut for
-transposition.
-:::
+### Transpose a group
+
+Select the notes, choose **Change → frequency**, enter an interval such as `3/2`, then press **×**. Notes that read another selected pitch follow that change once. In a mixed group, measure triangles keep their timing. [Selection & Group Editing](/user-guide/notes/selection)
 
 ## Turning the arrows off
 

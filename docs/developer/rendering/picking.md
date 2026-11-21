@@ -83,15 +83,13 @@ are hidden in the current overview returns `body`. Visible controls use the foll
 
 ### `pickRect(x0, y0, x1, y1)` — the marquee
 
-Shift-drag on desktop or a 500 ms long-press on a touch screen starts a marquee.
+The workspace tracks Shift + pointer movement even when the pointer starts over a note body or measure handle. A stationary Shift-click toggles one item. A 500 ms touch hold on an item toggles it and arms a marquee at the same origin. Subsequent taps toggle group members.
 
-- Selects by **intersection**, not containment — any overlap with the rectangle counts.
-- **AABB only.** No rounded-rect refinement: a rubber band that skims a corner should still catch the
-  note.
-- **The BaseNote (id 0) is structurally excluded** (`if (id === 0) continue`), and measure bars are
-  never returned. A measure's `startTime` is its link in the measure chain, so a group move could
-  neither re-anchor it (that reflows the grid under the whole score) nor leave it behind (the group
-  tears on drop).
+`pickRectIds()` returns the intersected IDs. `pickRect()` labels each result as `measure` or `note`.
+
+- **Measures.** `_measureRectHits()` tests the triangle in canvas CSS pixels. It compares the rectangle with the widest horizontal slice of the triangle within their vertical overlap. The dashed vertical bar line has no hit area. Ordered triangles allow a binary search for the first candidate.
+- **Notes and silences.** The renderer transforms the selection rectangle to world coordinates, queries candidate instance ranges, and checks rectangle overlap against each instance. Skimming a rounded corner still counts.
+- **BaseNote and reference lines.** Neither supplies a selectable rectangle or triangle. The note instance pass also excludes ID 0.
 
 See [Selection](/user-guide/notes/selection) for the gestures.
 

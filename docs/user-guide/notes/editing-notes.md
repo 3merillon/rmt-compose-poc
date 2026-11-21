@@ -19,7 +19,7 @@ Click the note. It gets an orange ring and the widget opens, titled `Note [7] Va
 - Click **empty background** to clear the selection, close the widget, and move the playhead.
 - If the **padlock** — the small lock button pinned to the bottom-right corner of the window — is engaged, clicking a note does nothing at all: the widget cannot be opened and nothing can be dragged. The padlock starts unlocked.
 
-Selecting **two or more** notes swaps the note widget for the group widget. See [Selection & Group Editing](/user-guide/notes/selection).
+Selecting two or more notes or measure triangles opens the group widget. A touch hold on a single item also opens it so you can add others by tapping. See [Selection & Group Editing](/user-guide/notes/selection).
 
 ## In the workspace
 
@@ -51,7 +51,7 @@ Every note carries a narrow column on its **left inner edge**, split into an upp
 They apply a **user-chosen ratio**, set in **Settings → Arrows**. The default is the octave — ▲ multiplies by `2/1`, ▼ by `1/2` — but set the up interval to `3/2` and ▲ transposes by a perfect fifth. The workspace glyphs are always `▲`/`▼`; they never show the ratio.
 :::
 
-- Arrows act on **one note** — the one you clicked. There is no group transpose and no keyboard shortcut.
+- Arrows act on **one note** — the one you clicked. For a group transpose, use **Change → frequency**, enter a ratio and click **×**.
 - **Silences have no arrows** (they have no frequency).
 - The **BaseNote** is drawn as a circle and has no workspace arrows, but the widget's ▲/▼ buttons work on it. Transposing the BaseNote transposes the whole composition.
 - Arrows can be **switched off entirely** in Settings → Arrows, which removes both the glyphs and their hit zones.
@@ -62,7 +62,7 @@ They apply a **user-chosen ratio**, set in **Settings → Arrows**. The default 
 
 Each property gets a row with an **`Evaluated:`** readout (what it currently works out to) and a **`Raw:`** field (the expression). The Raw field **always shows DSL**.
 
-If an expression is invalid, self-referencing, or would create a cycle, pressing `Save` refuses the edit and shows the reason **inline** — a red message under the Save button and a red border on the field, both cleared on your next keystroke. The field keeps your text so you can fix it. (`color` is the exception: it pops an alert instead.)
+If an expression is invalid or would make a variable depend on itself (directly or through other variables), pressing `Save` refuses the edit and shows the reason **inline** — a red message under the Save button and a red border on the field, both cleared on your next keystroke. The field keeps your text so you can fix it. (`color` is the exception: it pops an alert instead.)
 
 ### Frequency
 

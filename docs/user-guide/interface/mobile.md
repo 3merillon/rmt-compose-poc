@@ -18,26 +18,21 @@ Touch is a first-class path, not a retrofit. Every target on a note — the body
 | **One-finger drag on empty background** | Pan the view. |
 | **Two fingers** | Pinch-zoom, and drag the pinch centre to pan at the same time. |
 | **Tap empty background** | Move the playhead there, and clear the selection. |
-| **Tap a note, a measure triangle or the BaseNote circle** | Select it and open the [note widget](/user-guide/interface/variable-widget). |
+| **Tap a note, triangle or the BaseNote outside group mode** | Select it and open the [note widget](/user-guide/interface/variable-widget). |
 | **Tap the same spot again** | Cycle down through whatever is stacked under your finger. |
 | **Drag a note's body** | Move it in time. |
 | **Drag a note's right-hand pull tab** | Resize it — change its duration. |
 | **Tap a note's ▲ or ▼ arrow** | Transpose it by the arrow interval (default: an octave). |
-| **Drag a measure-bar triangle** | Change the previous bar's length; the bars after it follow. |
-| **Long-press empty background** | Start a marquee selection. |
-| **Long-press a note** | Add it to, or remove it from, the multi-selection. |
-| **Drag a note that is already in the selection** | Move the whole group. |
+| **Drag a single measure-bar triangle** | Move the first bar’s start, or change the preceding bar’s length when dragging a later bar. |
+| **Hold still, then drag** | Draw a selection rectangle from the background, a note or a measure triangle. |
+| **Hold a note or triangle, then lift** | Toggle that item and enter group mode. Tap additional items to add or remove them. |
+| **Drag a selected note body or triangle in a group of two or more** | Move the group in time. |
 
 ## Long-press is your Shift key
 
-There is no Shift on a phone, so the **long-press** takes its place: hold for **half a second**, without moving more than about 8 px.
+Hold still for half a second. On a note or triangle the hold toggles the item immediately. Lift to keep a one-item group, then tap more note bodies or triangles. To select a region instead, keep your finger down and drag across the items. A rectangle adds the notes and triangle handles it crosses to the current group. Crossing a dashed bar line alone leaves that measure out.
 
-- **On empty background** it starts a marquee — the same rubber-band rectangle that Shift+drag gives you on a desktop.
-- **On a note** it toggles that note in or out of the multi-selection — the same thing Shift+click does with a mouse.
-
-The long-press is non-committal, which is what makes it safe. Until the half second is up, the gesture is still an ordinary pan (on background) or an ordinary note drag (on a note). Moving too far, lifting early, or putting a second finger down all cancel it, and you get the pan or drag you would have got anyway. The app never takes a gesture away from you on a guess.
-
-Once the marquee has two or more notes in it, the group widget appears.
+A quick tap on empty canvas clears the group. Moving more than about 8 px before the hold fires starts the ordinary pan or drag.
 
 ::: tip A second finger always wins.
 Put a second finger down at any point and the gesture becomes a pinch-zoom. It cancels a pending note drag, cancels a marquee in progress, and hands the camera back. If a drag ever feels stuck, lift and put two fingers down.
@@ -88,8 +83,8 @@ If the icons are too small to hit comfortably, raise **Icon size** in [Settings 
 | Desktop | Mobile |
 |---|---|
 | Wheel / Ctrl+wheel zoom | Two-finger pinch |
-| Shift+drag to marquee | Long-press empty background |
-| Shift+click to add a note to the selection | Long-press the note |
+| Shift+drag to marquee | Hold still anywhere on the canvas, then drag |
+| Shift+click to toggle a note or measure | Hold the first item, then tap items to toggle them |
 | Hover ring and cursor hints show you what a region does | No hover — the regions are still there, they just cannot preview themselves |
 | `Ctrl/Cmd+Z` to undo, `Ctrl/Cmd+Y` or `Ctrl/Cmd+Shift+Z` to redo | Use the **Undo** and **Redo** entries in the "+" menu, or the buttons in the library toolbar |
 

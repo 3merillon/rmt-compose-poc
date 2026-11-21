@@ -26,7 +26,7 @@ The vertical axis is **logarithmic in frequency**, so an octave is the same dist
 
 ### Note labels
 
-Every note carries two labels:
+At full detail, sounding notes carry two labels. Above **Settings → Appearance → Reduce detail above** (1,536 visible notes by default), select or hover a note to see its labels, transpose arrows and resize tab.
 
 - `[N]` at the top-left — the note's **id**. This is the number you write in an expression: `[5].t`, `[5].f`.
 - A **fraction** in the middle — the note's frequency as a ratio of the base frequency.
@@ -46,7 +46,7 @@ The label on a note is its exact relation to the BaseNote: a pure ratio as its f
 | Mouse wheel | Zoom, centred on the pointer. |
 | `Ctrl`/`Cmd` + wheel | The same camera zoom. The browser's page-zoom is suppressed everywhere in the app, so this reflex never breaks the layout. A trackpad pinch arrives as `Ctrl` + wheel and zooms the camera too. |
 | Two-finger pinch (touch) | Zoom, and drag the pinch centre to pan at the same time. |
-| One-finger drag (touch) | Pan. |
+| One-finger drag on background (touch) | Pan. |
 
 Zoom is clamped between 0.1× and 10×.
 
@@ -126,7 +126,7 @@ See [Transposing with Arrows](/user-guide/notes/transposing).
 
 A measure bar is a note too — a silent one with a start time and a duration, flagged `measure` — and it takes part in the dependency graph. It is drawn as a dashed vertical line with a triangle, never as a rest rectangle.
 
-**You select and drag a measure bar by its triangle handle at the bottom of the screen, not by its line.** The line itself is not clickable. Dragging a single selected triangle changes the length of the **previous** bar; the dragged bar keeps its own length, and the bars after it follow because each starts where the one before ends.
+**You select and drag a measure bar by its triangle handle at the bottom of the screen, not by its line.** The line itself is not clickable. Dragging the first triangle in a chain changes that bar’s start. Dragging a later triangle changes the length of the **previous** bar. The dragged bar keeps its own length, and bars linked to its end follow.
 
 Other notes attach to a bar with `[N].t` and `[N].d` in their expressions. See [Working with Measures](/tutorials/intermediate/measures).
 
@@ -145,7 +145,7 @@ Select notes, silences and measure triangles together. A rectangle catches any n
 
 A new rectangle adds to an active group. On touch, a one-item group stays open so you can keep adding with taps. On desktop, a single remaining item opens its own widget. Shift-clicking empty background leaves the selection in place.
 
-The **group widget** shows separate counts for notes and measures. **Duration**, **Copy to Modules** and **Delete all** apply to both. Pitch, envelope, instrument and colour edits apply to notes. [Selection & Group Editing](/user-guide/notes/selection)
+The **group widget** shows separate counts for notes and measures. **Duration**, **Copy to Modules** and **Delete all** apply to both. Frequency, amplitude, attack, release, instrument and colour edits apply to notes. [Selection & Group Editing](/user-guide/notes/selection)
 
 ## Dependency highlights
 
