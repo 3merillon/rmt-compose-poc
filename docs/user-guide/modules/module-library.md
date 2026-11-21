@@ -65,21 +65,21 @@ This is where it gets interesting. Each chord's root is a **key change**: a note
 
 ```
 [1]  (9/8) * base.f      ← the ii root (a key change) — the only note that touches base
-[2]  [1].f               ← the root tone of ii
-[3]  (6/5) * [1].f       ← minor third of ii
-[4]  (3/2) * [1].f       ← fifth of ii
+[2]  (1/2) * [1].f       ← sounding root of ii, an octave below its key
+[3]  (3/5) * [1].f       ← minor third above the sounding root
+[4]  (3/4) * [1].f       ← fifth above the sounding root
 
 [5]  (4/3) * [1].f       ← the V root, a fourth above the ii root
-[6]  [5].f               ← the root tone of V
-[7]  (5/4) * [5].f       ← third of V
-[8]  (3/2) * [5].f       ← fifth of V
-[9]  (7/4) * [5].f       ← harmonic seventh of V
+[6]  (1/2) * [5].f       ← root of V in an inner voice
+[7]  (5/8) * [5].f       ← third of V
+[8]  (3/8) * [5].f       ← fifth of V in the bass
+[9]  (7/8) * [5].f       ← harmonic seventh of V on top
 
 [10] (2/3) * [5].f       ← the I root, a fifth below the V root
-[11] [10].f              ← the root tone of I
+[11] (1/2) * [10].f      ← lower tonic
 [12] (5/4) * [10].f      ← third of I
-[13] (3/2) * [10].f      ← fifth of I
-[14] 2 * [10].f          ← octave of I
+[13] (3/4) * [10].f      ← fifth of I
+[14] [10].f              ← upper tonic
 ```
 
 Read down the roots: note 1 comes from `base`. Note 5 comes from **note 1**. Note 10 comes from **note 5**. The roots move *by interval* — up a fourth, then down a fifth — exactly as a musician would describe the progression. In time, each root begins where the chord before it ends (`[2].t + [2].d`), and each chord's tones start with its root tone and last as long. Nothing in the module is in any key. The absolute pitches only exist once you drop it somewhere.
@@ -92,7 +92,10 @@ The **entire progression** goes with it. Every chord, every third, every seventh
 Now try retuning instead of transposing: open that same root and multiply its frequency by `81/80`, a syntonic comma. The whole progression shifts with it, still perfectly in tune with itself.
 :::
 
-Cadences work the same way, with two chords instead of three or four.
+Listen to the change from V7 to I. The bass steps down to the lower tonic. Above it,
+the dominant holds its pitch as the tonic's fifth, the leading tone rises to the upper
+tonic, and the harmonic seventh falls to the tonic third. These four lines come from
+choosing the octave of each sounding note independently of its chord's key change.
 
 ### Melodies and scales chain too
 
@@ -287,7 +290,7 @@ It is a harmonic series segment stretched over four octaves, not a scale in the 
 
 ## Custom — 3 modules
 
-**Custom** ships with the canon per tonos that opens the app: `canon`, the whole piece (8 bars, 153 notes, the same as the default module), then its two parts, `canon base`, the bass (70 notes), and `canon melody`, the theme (25 notes). In the full piece the bass plays twice, the second time a pure fifth higher and one bar later, every note `(3/2)` of the note it answers — drop `canon base` on a note, then again on a note a fifth above it and one bar later, to build it yourself. It is also where **Copy to Modules** files anything you build from a multi-note selection. Uploaded `.json` files land in whichever section's dashed **`+`** tile you clicked, so Custom is the obvious place to put them, not the only one.
+**Custom** includes the eight-bar canon per tonos that opens the app (153 notes), the leading bass `canon base` (70 notes), and the theme `canon melody` (25 notes). The answering bass enters one bar later. Of its 58 notes, 57 are exact fifths above the notes they answer. In bar 5, open the green A (library note 127, startup note 81). It takes its frequency from the following red E by a factor of 2/3. The held F takes its pitch from that A by a factor of 8/5. **Copy to Modules** also puts selections in Custom. Uploaded files go into whichever section’s **+** tile you choose.
 
 ## Where to go next
 

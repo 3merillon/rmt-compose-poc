@@ -34,7 +34,7 @@ The other entry in that dropdown restores the composition the app ships with.
 2. Confirm: *"This will reset the workspace to the default module. This action can be undone/redone via History. Proceed?"* → **Yes, Reset**.
 3. Toast: `Default module reset`. Undoable, like any other load.
 
-The default module is `public/modules/defaultModule.json`: the canon per tonos in three voices, 161 entries at 263 Hz with a BaseNote duration of 3/5 s (shown as 100 BPM): a chain of 8 measure bars, the theme, the bass, and the bass again a fifth higher and one bar later, each of its notes written as `(3/2) * [n].f` of the note it answers. It is not part of the module library and does not appear in the module bar.
+The default module, `public/modules/defaultModule.json`, opens the eight-bar canon per tonos at 263 Hz and 100 BPM. The second bass enters one bar after the first. It answers 57 notes at the fifth. In bar 5, startup note 81 takes its A from the following E. The full score is also available as **Custom → canon**.
 
 ## Drop a library module onto a note
 

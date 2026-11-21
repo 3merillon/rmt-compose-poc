@@ -15,28 +15,28 @@
       "id": 2,
       "startTime": "[1].t",
       "duration": "base.d * 2",
-      "frequency": "[1].f",
+      "frequency": "(1/2) * [1].f",
       "color": "rgba(128,128,128,0.7)"
     },
     {
       "id": 3,
       "startTime": "[2].t",
       "duration": "[2].d",
-      "frequency": "(5/4) * [1].f",
+      "frequency": "(5/8) * [1].f",
       "color": "rgba(0,200,80,0.7)"
     },
     {
       "id": 4,
       "startTime": "[2].t",
       "duration": "[2].d",
-      "frequency": "(3/2) * [1].f",
+      "frequency": "(3/8) * [1].f",
       "color": "rgba(220,60,60,0.7)"
     },
     {
       "id": 5,
       "startTime": "[2].t",
       "duration": "[2].d",
-      "frequency": "(7/4) * [1].f",
+      "frequency": "(7/8) * [1].f",
       "color": "rgba(70,120,230,0.7)"
     },
     {
@@ -49,7 +49,7 @@
       "id": 7,
       "startTime": "[6].t",
       "duration": "base.d * 2",
-      "frequency": "[6].f",
+      "frequency": "(1/2) * [6].f",
       "color": "rgba(128,128,128,0.7)"
     },
     {
@@ -63,14 +63,14 @@
       "id": 9,
       "startTime": "[7].t",
       "duration": "[7].d",
-      "frequency": "(3/2) * [6].f",
+      "frequency": "(3/4) * [6].f",
       "color": "rgba(220,60,60,0.7)"
     },
     {
       "id": 10,
       "startTime": "[7].t",
       "duration": "[7].d",
-      "frequency": "2 * [6].f",
+      "frequency": "[6].f",
       "color": "rgba(128,128,128,0.7)"
     }
   ]

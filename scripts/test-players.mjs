@@ -75,6 +75,45 @@ const canonJson = JSON.parse(readFileSync(join(modulesDir, 'defaultModule.json')
     'B3 note 24 decides the second bass alone');
 }
 
+// A delayed tonal answer may share its original's duration while tuning to
+// another voice. Verify its neighbours still belong to the same player.
+{
+  const m = await load(canonJson);
+  const note = id => m.getNoteById(id);
+  const frequency = id => note(id).getExactVariable('frequency');
+  check([79, 81, 85].every(id => m.findPlayer(note(id)).head === 24),
+    'The tonal answer and the notes on either side belong to the second bass');
+  note(83).setVariable('frequency', 'base.f');
+  m.evaluateModule();
+  check(frequency(81).equals(frequency(83).mul('2/3')) && frequency(72).equals(frequency(81).mul('8/5')),
+    'Changing the following E retunes the preceding A and held F');
+}
+
+{
+  const source = [
+    { id: 1, startTime: 'base.t', duration: 'base.d', frequency: 'base.f' },
+    { id: 2, startTime: '[1].t + [1].d', duration: 'base.d', frequency: 'base.f' },
+  ];
+  const copy = (id, k, offset, frequency) => ({
+    id, startTime: `[${k}].t${offset}`, duration: `[${k}].d`, frequency,
+  });
+  const delayed = ' + base.d * 4';
+  const notes = [...source, copy(3, 1, delayed, 'base.f'), copy(4, 1, delayed, '[1].f'),
+    copy(5, 2, delayed, '[2].f'), copy(6, 2, delayed, 'base.f')];
+  const play = async notes => load({ instrumentRule: INSTRUMENT_RULE, baseNote: {}, notes });
+  const m = await play(notes);
+  check(m.findPlayer(m.getNoteById(5)).prev === 4 && m.findPlayer(m.getNoteById(6)).prev == null,
+    'The pitch copy keeps precedence over a lower-ID rhythmic copy at the same offset');
+  notes[3].frequency = 'base.f';
+  const ambiguous = await play(notes);
+  check(ambiguous.findPlayer(ambiguous.getNoteById(5)).prev == null,
+    'Two rhythm-only candidates at one offset leave the previous player ambiguous');
+  for (const offset of ['', ' + 0']) {
+    const chord = await play([...source, copy(3, 1, offset, 'base.f'), copy(4, 2, offset, 'base.f')]);
+    check(chord.findPlayer(chord.getNoteById(4)).prev == null, 'Simultaneous chord tones keep separate players');
+  }
+}
+
 // ── C, D, E: small modules ──
 console.log('\nLines, silences, rests, chords, bars\n');
 {

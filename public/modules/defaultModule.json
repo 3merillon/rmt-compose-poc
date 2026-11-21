@@ -149,35 +149,35 @@
       "id": 65,
       "startTime": "[57].t + [57].d",
       "duration": "base.d * 2",
-      "frequency": "(45/32) * base.f",
+      "frequency": "(5/2) * [66].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 72,
       "startTime": "[65].t + [65].d",
       "duration": "base.d * 2",
-      "frequency": "(27/20) * base.f",
+      "frequency": "(8/5) * [81].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 83,
       "startTime": "[72].t + [72].d",
       "duration": "base.d * 2",
-      "frequency": "(5/4) * base.f",
+      "frequency": "(5/2) * [84].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 95,
       "startTime": "[83].t + [83].d",
       "duration": "base.d * 2",
-      "frequency": "(6/5) * base.f",
+      "frequency": "(8/5) * [100].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
       "id": 107,
       "startTime": "[95].t + [95].d",
       "duration": "base.d * (3/2)",
-      "frequency": "(9/8) * base.f",
+      "frequency": "(2/1) * [66].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
@@ -366,7 +366,7 @@
       "id": 59,
       "startTime": "[52].t + [52].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(27/40) * base.f",
+      "frequency": "(1/2) * [72].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
@@ -394,70 +394,70 @@
       "id": 63,
       "startTime": "[62].t + [62].d",
       "duration": "base.d * (1/2)",
-      "frequency": "(25/48) * base.f",
+      "frequency": "(15/16) * [66].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 66,
       "startTime": "[63].t + [63].d",
       "duration": "base.d",
-      "frequency": "(9/16) * base.f",
+      "frequency": "(3/4) * [46].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 71,
       "startTime": "[66].t + [66].d + base.d * (1/2)",
       "duration": "base.d * (1/2)",
-      "frequency": "(3/5) * base.f",
+      "frequency": "[52].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 73,
       "startTime": "[71].t + [71].d",
       "duration": "base.d * (1/2)",
-      "frequency": "(9/16) * base.f",
+      "frequency": "[66].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 75,
       "startTime": "[73].t + [73].d",
       "duration": "base.d * (1/2)",
-      "frequency": "(1/2) * base.f",
+      "frequency": "(3/8) * [72].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 78,
       "startTime": "[75].t + [75].d",
       "duration": "base.d * (1/2)",
-      "frequency": "(15/32) * base.f",
+      "frequency": "(15/16) * [80].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 80,
       "startTime": "[78].t + [78].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(1/2) * base.f",
+      "frequency": "[84].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 82,
       "startTime": "[80].t + [80].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(15/32) * base.f",
+      "frequency": "(15/16) * [84].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 84,
       "startTime": "[82].t + [82].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(1/2) * base.f",
+      "frequency": "(2/3) * [79].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 86,
       "startTime": "[84].t + [84].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(9/16) * base.f",
+      "frequency": "[66].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
@@ -471,14 +471,14 @@
       "id": 88,
       "startTime": "[87].t + [87].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(9/20) * base.f",
+      "frequency": "(3/8) * [95].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 89,
       "startTime": "[88].t + [88].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/12) * base.f",
+      "frequency": "(1/3) * [83].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
@@ -492,42 +492,42 @@
       "id": 92,
       "startTime": "[91].t + [91].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(5/12) * base.f",
+      "frequency": "[89].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 94,
       "startTime": "[92].t + [92].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(9/20) * base.f",
+      "frequency": "(1/2) * [93].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 96,
       "startTime": "[94].t + [94].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(81/160) * base.f",
+      "frequency": "(2/3) * [100].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 98,
       "startTime": "[96].t + [96].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(27/64) * base.f",
+      "frequency": "(1/2) * [97].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 99,
       "startTime": "[98].t + [98].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(9/20) * base.f",
+      "frequency": "(3/8) * [95].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 101,
       "startTime": "[99].t + [99].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(1/2) * base.f",
+      "frequency": "(2/3) * [100].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
@@ -548,7 +548,7 @@
       "id": 110,
       "startTime": "[104].t + [104].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(9/10) * base.f",
+      "frequency": "(4/5) * [107].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
@@ -562,7 +562,7 @@
       "id": 114,
       "startTime": "[112].t + [112].d",
       "duration": "base.d * (1/2)",
-      "frequency": "(9/10) * base.f",
+      "frequency": "(4/5) * [107].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
@@ -625,14 +625,14 @@
       "id": 138,
       "startTime": "[137].t + [137].d",
       "duration": "base.d * (1/2)",
-      "frequency": "(135/256) * base.f",
+      "frequency": "(15/16) * [142].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
       "id": 142,
       "startTime": "[138].t + [138].d",
       "duration": "base.d",
-      "frequency": "(9/16) * base.f",
+      "frequency": "(1/2) * [130].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
@@ -667,7 +667,7 @@
       "id": 161,
       "startTime": "[159].t + [159].d",
       "duration": "base.d * (1/4)",
-      "frequency": "(135/256) * base.f",
+      "frequency": "(15/16) * [163].f",
       "color": "rgba(0,0,255,0.5)"
     },
     {
@@ -884,7 +884,7 @@
       "id": 81,
       "startTime": "[63].t + base.d * 4",
       "duration": "[63].d",
-      "frequency": "(3/2) * [63].f",
+      "frequency": "(2/3) * [83].f",
       "color": "rgba(0,255,0,0.5)"
     },
     {

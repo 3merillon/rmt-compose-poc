@@ -3,17 +3,14 @@
  * Generate chords + progressions + cadences for the module library.
  *
  * THE SUBTREE RULE (RMT-native relational harmony):
- *   - Each chord is a subtree rooted at its chord ROOT note.
- *   - Chord tones reference the chord root:  frequency "(s/n) * [rootId].f".
- *   - Chord roots chain by functional intervals: the first root is expressed
- *     from base ("(r/n) * base.f"), every later root from the PREVIOUS root
- *     ("(r/n) * [prevRootId].f"). Only the first root touches base.
- *   => octave-shifting the first root retunes/transposes the whole progression,
- *      and the module imports cleanly onto both a note and the base note.
+ *   - Standalone chords take their pitches from base.
+ *   - In a progression the roots are silent key changes. Their frequencies
+ *     form a chain, and their starts follow the preceding sounding chord.
+ *   - A sounding tone takes its pitch class from its key and its octave from
+ *     the voicing written for the phrase. Moving the key carries every tone.
  *
- * A generation-time self-check resolves every note's exact frequency ratio
- * relative to base (BigInt fractions) and asserts the intended absolute root
- * pitches (e.g. V root = 3/2, I root = 1/1). Wrong ratio math fails the build.
+ * The generator checks each key's exact ratio to base. The library regression
+ * compares every sounding note with the recorded pitch, onset and duration.
  *
  * Usage:  node scripts/gen-chords-progressions.mjs
  */
@@ -72,53 +69,42 @@ function colonRatio(shape) {
   return ints.map((x) => (x / g).toString()).join(':');
 }
 
-const ratioFreq = (nd, ref) => (nd[0] === 1 && nd[1] === 1) ? `${ref}.f` : `(${nd[0]}/${nd[1]}) * ${ref}.f`;
-const rootFreq = (nd, ref) => (nd[0] === 1 && nd[1] === 1) ? `${ref}.f` : `(${nd[0]}/${nd[1]}) * ${ref}.f`;
+function frequency([n, d], ref, octave = 0) {
+  const ratio = F(n * 2 ** Math.max(octave, 0), d * 2 ** Math.max(-octave, 0));
+  if (ratio.n === ratio.d) return `${ref}.f`;
+  const factor = ratio.d === 1n ? String(ratio.n) : `(${fstr(ratio)})`;
+  return `${factor} * ${ref}.f`;
+}
 
-/**
- * Build the notes for a sequence of chords.
- * chords: [{ shapeKey, root:[n,d], beats }] — root of chord 0 is from base,
- *         roots of later chords are from the previous root.
- * Returns { notes, rootRatios } (rootRatios = absolute ratio-from-base per chord).
- */
 function buildChords(chords) {
   const notes = [];
-  let id = 1;
-  let prevRootId = null;
-  let prevRootRatio = F(1);
   const rootRatios = [];
-  chords.forEach((ch, ci) => {
-    const shape = SHAPES[ch.shapeKey];
-    const beats = ch.beats;
-    const rootId = id++;
-    const rootRatio = ci === 0 ? F(ch.root[0], ch.root[1]) : mul(F(ch.root[0], ch.root[1]), prevRootRatio);
+  let key = 'base';
+  let start = 'base.t';
+  let rootRatio = F(1);
+  for (const { shapeKey, root, beats, octaves } of chords) {
+    const shape = SHAPES[shapeKey];
+    rootRatio = mul(rootRatio, F(...root));
     rootRatios.push(rootRatio);
-
-    // root note
-    const rootRef = ci === 0 ? 'base' : `[${prevRootId}]`;
-    const startExpr = ci === 0 ? 'base.t' : `[${prevRootId}].t + base.d * ${chords[ci - 1].beats}`;
-    notes.push({
-      id: rootId,
-      startTime: startExpr,
-      duration: `base.d * ${beats}`,
-      frequency: rootFreq(ch.root, rootRef),
-      color: 'rgba(128,128,128,0.7)',
-    });
-
-    // chord tones (skip the root shape[0])
-    for (let k = 1; k < shape.length; k++) {
-      const toneId = id++;
-      notes.push({
-        id: toneId,
-        startTime: `[${rootId}].t`,
-        duration: `base.d * ${beats}`,
-        frequency: ratioFreq(shape[k], `[${rootId}]`),
-        color: toneColor(shape[k]),
-      });
+    if (chords.length > 1) {
+      if (octaves?.length !== shape.length) throw new Error(`Missing voicing for ${shapeKey}`);
+      const id = notes.length + 1;
+      notes.push({ id, startTime: start, frequency: frequency(root, key), color: 'rgba(150,150,150,0.5)' });
+      key = `[${id}]`;
+      start = `${key}.t`;
     }
-    prevRootId = rootId;
-    prevRootRatio = rootRatio;
-  });
+    const firstTone = `[${notes.length + 1}]`;
+    shape.forEach((tone, i) => {
+      notes.push({
+        id: notes.length + 1,
+        startTime: i === 0 ? start : `${firstTone}.t`,
+        duration: i === 0 ? `base.d * ${beats}` : `${firstTone}.d`,
+        frequency: frequency(tone, key, octaves?.[i]),
+        color: toneColor(tone),
+      });
+    });
+    start = `${firstTone}.t + ${firstTone}.d`;
+  }
   return { notes, rootRatios };
 }
 
@@ -159,74 +145,77 @@ for (const c of CHORDS) {
 
 // ============ PROGRESSIONS + CADENCES (root chains) ============
 // Each chord: { shapeKey, root:[n,d] (from base for i=0, else from prev root), beats }
+// Octaves displace the sounding root, third, fifth, then seventh or doubled root.
+// The V7 cadences put the fifth in the bass. It steps down to I while the
+// seventh falls to the third, the leading tone rises, and the dominant holds.
 // `expectRoots` lists the intended ABSOLUTE root ratios for the self-check.
 const PROGS = [
   {
     file: 'V7-I.json', name: 'V7 – I', tags: ['progression', 'dominant', 'authentic'],
     chords: [
-      { shapeKey: 'harm7', root: [3, 2], beats: 2 },   // V7 (root a fifth above tonic)
-      { shapeKey: 'majOct', root: [2, 3], beats: 2 },  // I  (back to tonic)
+      { shapeKey: 'harm7', root: [3, 2], beats: 2, octaves: [-1, -1, -2, -1] },
+      { shapeKey: 'majOct', root: [2, 3], beats: 2, octaves: [-1, 0, -1, -1] },
     ],
     expectRoots: ['3/2', '1/1'],
   },
   {
     file: 'ii-V-I.json', name: 'ii – V – I', tags: ['progression', 'cadential'],
     chords: [
-      { shapeKey: 'minor', root: [9, 8], beats: 2 },   // ii  (supertonic minor)
-      { shapeKey: 'harm7', root: [4, 3], beats: 2 },   // V7  (up a fourth -> 3/2)
-      { shapeKey: 'majOct', root: [2, 3], beats: 4 },  // I   (down a fifth -> 1/1)
+      { shapeKey: 'minor', root: [9, 8], beats: 2, octaves: [-1, -1, -1] },
+      { shapeKey: 'harm7', root: [4, 3], beats: 2, octaves: [-1, -1, -2, -1] },
+      { shapeKey: 'majOct', root: [2, 3], beats: 4, octaves: [-1, 0, -1, -1] },
     ],
     expectRoots: ['9/8', '3/2', '1/1'],
   },
   {
     file: 'I-IV-V-I.json', name: 'I – IV – V – I', tags: ['progression', 'primary'],
     chords: [
-      { shapeKey: 'major', root: [1, 1], beats: 2 },   // I
-      { shapeKey: 'major', root: [4, 3], beats: 2 },   // IV (up a fourth)
-      { shapeKey: 'major', root: [9, 8], beats: 2 },   // V  (up a tone -> 3/2)
-      { shapeKey: 'majOct', root: [2, 3], beats: 2 },  // I  (down a fifth -> 1/1)
+      { shapeKey: 'major', root: [1, 1], beats: 2, octaves: [0, 0, 0] },
+      { shapeKey: 'major', root: [4, 3], beats: 2, octaves: [0, 0, -1] },
+      { shapeKey: 'major', root: [9, 8], beats: 2, octaves: [0, -1, -1] },
+      { shapeKey: 'majOct', root: [2, 3], beats: 2, octaves: [0, 0, 0, 0] },
     ],
     expectRoots: ['1/1', '4/3', '3/2', '1/1'],
   },
   {
     file: 'I-vi-IV-V.json', name: 'I – vi – IV – V', tags: ['progression', 'doo-wop', '50s'],
     chords: [
-      { shapeKey: 'major', root: [1, 1], beats: 2 },   // I
-      { shapeKey: 'minor', root: [5, 3], beats: 2 },   // vi (up a major sixth)
-      { shapeKey: 'major', root: [4, 5], beats: 2 },   // IV (down a major third -> 4/3)
-      { shapeKey: 'major', root: [9, 8], beats: 2 },   // V  (up a tone -> 3/2)
+      { shapeKey: 'major', root: [1, 1], beats: 2, octaves: [0, 0, 0] },
+      { shapeKey: 'minor', root: [5, 3], beats: 2, octaves: [0, -1, -1] },
+      { shapeKey: 'major', root: [4, 5], beats: 2, octaves: [0, 0, -1] },
+      { shapeKey: 'major', root: [9, 8], beats: 2, octaves: [0, -1, -1] },
     ],
     expectRoots: ['1/1', '5/3', '4/3', '3/2'],
   },
   {
     file: 'authentic-cadence.json', name: 'Authentic (V–I)', tags: ['cadence', 'authentic', 'perfect'],
     chords: [
-      { shapeKey: 'major', root: [3, 2], beats: 2 },   // V
-      { shapeKey: 'majOct', root: [2, 3], beats: 2 },  // I
+      { shapeKey: 'major', root: [3, 2], beats: 2, octaves: [-1, -1, -1] },
+      { shapeKey: 'majOct', root: [2, 3], beats: 2, octaves: [-1, 0, -1, -1] },
     ],
     expectRoots: ['3/2', '1/1'],
   },
   {
     file: 'plagal-cadence.json', name: 'Plagal (IV–I)', tags: ['cadence', 'plagal', 'amen'],
     chords: [
-      { shapeKey: 'major', root: [4, 3], beats: 2 },   // IV
-      { shapeKey: 'majOct', root: [3, 4], beats: 2 },  // I (down a fourth -> 1/1)
+      { shapeKey: 'major', root: [4, 3], beats: 2, octaves: [-1, 0, -1] },
+      { shapeKey: 'majOct', root: [3, 4], beats: 2, octaves: [-1, -1, 0, -1] },
     ],
     expectRoots: ['4/3', '1/1'],
   },
   {
     file: 'deceptive-cadence.json', name: 'Deceptive (V–vi)', tags: ['cadence', 'deceptive', 'interrupted'],
     chords: [
-      { shapeKey: 'major', root: [3, 2], beats: 2 },   // V
-      { shapeKey: 'minor', root: [10, 9], beats: 2 },  // vi (up a minor tone -> 5/3)
+      { shapeKey: 'major', root: [3, 2], beats: 2, octaves: [-1, -1, -2] },
+      { shapeKey: 'minor', root: [10, 9], beats: 2, octaves: [-2, -1, -2] },
     ],
     expectRoots: ['3/2', '5/3'],
   },
   {
     file: 'half-cadence.json', name: 'Half (I–V)', tags: ['cadence', 'half', 'imperfect'],
     chords: [
-      { shapeKey: 'major', root: [1, 1], beats: 2 },   // I
-      { shapeKey: 'major', root: [3, 2], beats: 2 },   // V (ends on the dominant)
+      { shapeKey: 'major', root: [1, 1], beats: 2, octaves: [0, 0, -1] },
+      { shapeKey: 'major', root: [3, 2], beats: 2, octaves: [-1, -1, -1] },
     ],
     expectRoots: ['1/1', '3/2'],
   },

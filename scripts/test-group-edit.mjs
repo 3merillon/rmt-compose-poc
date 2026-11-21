@@ -2,8 +2,8 @@
 /**
  * Group editing (npm test): selecting notes by their relations, and Set / Scale /
  * Inherit on a selection (src/utils/group-edit.js). Run on the default module, the
- * canon: a theme whose notes are chained by start, a bass, and the bass again a
- * fifth higher and one bar later, every note of it read from the first bass.
+ * canon: a theme whose notes are chained by start and two basses a bar apart.
+ * Their frequency references can point to an earlier or later sounding note.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -60,14 +60,17 @@ console.log('\nGroup editing: Scale keeps the relations, and changes each note o
   const m = await load();
   const blue = ofColor(m, BLUE), green = ofColor(m, GREEN);
   const before = new Map([...blue, ...green].map((id) => [id, ex(m, id, 'frequency')]));
+  const answerAnchor = m.getNoteById(81).getExpressionSource('frequency');
   const r = G.scaleGroup(m, [...blue, ...green], 'frequency', '3/2');
   m.evaluateModule();
-  check(r.changed.length === blue.length && r.followed.length === green.length && r.skipped.length === 0,
-    `transposing both basses by 3/2: ${r.changed.length} roots scaled, ${r.followed.length} follow the note they answer, none skipped`);
+  check(r.changed.length === 47 && r.followed.length === 81 && r.skipped.length === 0,
+    `transposing both basses by 3/2: ${r.changed.length} roots scaled, ${r.followed.length} linked pitches follow, none skipped`);
   const wrong = [...before].filter(([id, f]) => !X.equals(ex(m, id, 'frequency'), X.mul(f, new Fraction(3, 2))));
   check(wrong.length === 0, `every note of both basses is exactly 3/2 higher, none twice (${wrong.length} wrong)`);
   const g = m.getNoteById(green[0]).getExpressionSource('frequency');
   check(/^\(3\/2\) \* \[\d+\]\.f$/.test(g), `the second bass is still written from the first: ${g}`);
+  check(r.followed.includes(81) && m.getNoteById(81).getExpressionSource('frequency') === answerAnchor,
+    'the A in bar 5 follows the later E through the group transposition');
 }
 {
   const m = await load();

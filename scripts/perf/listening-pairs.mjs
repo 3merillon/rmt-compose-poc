@@ -184,7 +184,9 @@ SHEETS['phase-i-7c'] = {
 if (SHEET === 'canon-63') {
   const { Module } = await import('../../src/module.js');
   const { isMeasureNote } = await import('../../src/note.js');
-  const m = await Module.loadFromJSON(JSON.parse(readFileSync('public/modules/defaultModule.json', 'utf8')));
+  // This historical sheet compares alternatives to the strict-fifth v2 score.
+  const previousCanon = execFileSync('git', ['show', '5435a94bbc8e3178653a62d103b6912b72db1950:public/modules/defaultModule.json'], { encoding: 'utf8' });
+  const m = await Module.loadFromJSON(JSON.parse(previousCanon));
   m.evaluateModule();
   const base = m.baseNote.getVariable('frequency');
   const T0 = 6.0, T1 = 10.8;

@@ -56,7 +56,7 @@
       "id": 8,
       "startTime": "[6].t",
       "duration": "[6].d",
-      "frequency": "(3/2) * [5].f",
+      "frequency": "(3/4) * [5].f",
       "color": "rgba(220,60,60,0.7)"
     },
     {
@@ -76,14 +76,14 @@
       "id": 11,
       "startTime": "[10].t",
       "duration": "[10].d",
-      "frequency": "(5/4) * [9].f",
+      "frequency": "(5/8) * [9].f",
       "color": "rgba(0,200,80,0.7)"
     },
     {
       "id": 12,
       "startTime": "[10].t",
       "duration": "[10].d",
-      "frequency": "(3/2) * [9].f",
+      "frequency": "(3/4) * [9].f",
       "color": "rgba(220,60,60,0.7)"
     },
     {

@@ -12,9 +12,9 @@
  *      goes on from it with that instrument;
  *   2. else, when its start is written from the end of a note or a silence p
  *      (`[p].t + [p].d`, or that plus a rest, `[p].t + [p].d + base.d * k`): p's;
- *   3. else, when it is a copy of a note k of a line (start `[k].t + X`, frequency
- *      `r * [k].f`) and the copy of k's predecessor exists (written from it with
- *      the same X): that copy's. A copy of a line is a line: a canon voice;
+ *   3. else, when it is a copy of a note k of a line and the copy of k's
+ *      predecessor exists at the same offset: that copy's. A delayed copy
+ *      may inherit its duration from k and take its pitch from another voice;
  *   4. else it starts a line, and takes the instrument of the note its start time
  *      is written from (a measure bar does not count), else the BaseNote's, else
  *      the default instrument.
@@ -24,10 +24,12 @@
  * part: a bass note tuned from the melody is still the bass.
  */
 import { isMeasureNote } from './note.js';
+import { compare } from './value/exact.js';
 
 const FOLLOW = /^\s*\[(\d+)\]\.t\s*\+\s*\[(\d+)\]\.d\s*(?:\+\s*(.+?))?\s*$/;
 const COPY_T = /^\s*\[(\d+)\]\.t\s*(?:\+\s*(.+?))?\s*$/;
 const COPY_F = /^\s*(?:.+\*\s*)?\[(\d+)\]\.f\s*$/;
+const COPY_D = /^\s*\[(\d+)\]\.d\s*$/;
 const START_REF = /\[(\d+)\]\.[td]\b/;
 
 /** Whether the saved module uses this rule (written by Module.createModuleJSON). */
@@ -42,6 +44,13 @@ function memoOf(memo) {
   const m = memo || new Map();
   if (!m.prev) m.prev = new Map();
   return m;
+}
+
+function copiesDelayedDuration(note, source, offset) {
+  if (!offset || COPY_D.exec(src(note, 'duration'))?.[1] !== String(source.id)) return false;
+  const start = note.getExactVariable('startTime');
+  const origin = source.getExactVariable('startTime');
+  return start != null && origin != null && compare(start, origin) > 0;
 }
 
 /**
@@ -62,31 +71,43 @@ export function linePredecessor(module, note, memo = null) {
     if (timed(p) && p !== note) res = p;
   }
   if (!res) {
-    const t = COPY_T.exec(start), fr = COPY_F.exec(src(note, 'frequency'));
-    if (t && fr && t[1] === fr[1]) {
+    const t = COPY_T.exec(start);
+    if (t) {
       const k = module.getNoteById(Number(t[1]));
-      const kp = timed(k) && k !== note ? linePredecessor(module, k, M) : null;
-      if (kp) res = copyOf(module, kp, norm(t[2]), note);
+      if (timed(k) && k !== note) {
+        const offset = norm(t[2]);
+        const pitchCopy = COPY_F.exec(src(note, 'frequency'))?.[1] === t[1];
+        if (pitchCopy || (copiesDelayedDuration(note, k, offset) && copyOf(module, k, offset) === note)) {
+          const kp = linePredecessor(module, k, M);
+          if (kp) res = copyOf(module, kp, offset, note);
+        }
+      }
     }
   }
   M.prev.set(note.id, res);
   return res;
 }
 
-// The note written as a copy of `k` with time offset X: start `[k].t + X`, frequency `r * [k].f`.
+// Find the copy of k with the same written time offset as its successor.
 function copyOf(module, k, X, except) {
   const graph = module._dependencyGraph;
   const ids = graph && typeof graph.getDependents === 'function' ? graph.getDependents(k.id) : Object.keys(module.notes).map(Number);
-  let best = null;
+  let best = null, rhythmCopy = null, rhythmCount = 0;
   for (const id of ids) {
     const d = module.getNoteById(Number(id));
     if (!d || d === except || !timed(d)) continue;
-    const dt = COPY_T.exec(src(d, 'startTime')), df = COPY_F.exec(src(d, 'frequency'));
-    if (dt && df && Number(dt[1]) === k.id && Number(df[1]) === k.id && norm(dt[2]) === X) {
+    const dt = COPY_T.exec(src(d, 'startTime'));
+    if (!dt || Number(dt[1]) !== k.id || norm(dt[2]) !== X) continue;
+    if (COPY_F.exec(src(d, 'frequency'))?.[1] === dt[1]) {
       if (!best || d.id < best.id) best = d;
+    } else if (copiesDelayedDuration(d, k, X)) {
+      rhythmCopy = d;
+      rhythmCount++;
     }
   }
-  return best;
+  // Earlier scores identify the answering line by its pitch copy. A tonal
+  // answer can bridge two such notes when its rhythmic copy is unambiguous.
+  return best || (rhythmCount === 1 ? rhythmCopy : null);
 }
 
 /**

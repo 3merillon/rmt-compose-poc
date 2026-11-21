@@ -5,10 +5,9 @@
  * scripts/fixtures/library-oracle.json holds, for every module of the library,
  * what it plays: the multiset of its sounding notes (exact start, duration and
  * frequency, irrational values in their exact form) and of its measure bars,
- * recorded before the library was rewritten to be native to v2 (Phase L). Each
- * module must still play exactly that: the rewrite changes how a module is
- * written (references for roots, chained times), never what it sounds, unless
- * the change is listed in INTENDED below with its reason.
+ * first recorded before the library was rewritten to be native to v2 (Phase L).
+ * The canon and the octave voicings of the progressions have since been revised.
+ * Every module must match its recorded notes and bars exactly.
  *
  *   node scripts/test-library.mjs            compare
  *   node scripts/test-library.mjs --record   write the oracle from the library as it is
@@ -25,8 +24,7 @@ const { Module } = await import('../src/module.js');
 const X = await import('../src/value/exact.js');
 const { noteKind } = await import('../src/note.js');
 
-// Modules whose sound changes on purpose: { 'path': 'reason' }
-const INTENDED = {};
+const recording = 'v2 library, including the November 2026 canon and progression voicings';
 
 const walk = (d, o = []) => {
   for (const f of readdirSync(d)) {
@@ -57,7 +55,7 @@ const files = walk(modulesDir).sort();
 if (process.argv.includes('--record')) {
   const out = {};
   for (const f of files) out[relative(modulesDir, f).replace(/\\/g, '/')] = await sounds(f);
-  writeFileSync(oracleFile, JSON.stringify({ recorded: 'v2 before Phase L (the library as converted to relational time and the DSL)', modules: out }, null, 1) + '\n');
+  writeFileSync(oracleFile, JSON.stringify({ recorded: recording, modules: out }, null, 1) + '\n');
   console.log(`${files.length} modules recorded`);
   process.exit(0);
 }
@@ -72,7 +70,6 @@ for (const f of files) {
   const got = await sounds(f);
   const eq = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
   if (eq(got.notes, want.notes) && eq(got.bars, want.bars)) { same++; notesChecked += got.notes.length; continue; }
-  if (INTENDED[key]) { console.log(`  · ${key}: changed on purpose (${INTENDED[key]})`); continue; }
   failures++;
   const missing = want.notes.filter((x) => !got.notes.includes(x)).slice(0, 2);
   const extra = got.notes.filter((x) => !want.notes.includes(x)).slice(0, 2);

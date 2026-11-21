@@ -107,7 +107,7 @@
       "id": 15,
       "startTime": "[14].t + [14].d",
       "duration": "base.d * 2",
-      "frequency": "(27/20) * base.f",
+      "frequency": "(16/15) * [16].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {
@@ -121,7 +121,7 @@
       "id": 17,
       "startTime": "[16].t + [16].d",
       "duration": "base.d * 2",
-      "frequency": "(6/5) * base.f",
+      "frequency": "(9/10) * [15].f",
       "color": "rgba(255,0,0,0.5)"
     },
     {

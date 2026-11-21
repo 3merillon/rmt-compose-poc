@@ -74,12 +74,12 @@ A **player** is a line: notes joined by the relation "starts where the previous 
 
 1. If the note sets an `instrument`, use it. The note starts a new player, and the line goes on from it with that instrument.
 2. Otherwise, if its start is written from the end of a note or a silence *p* (`[p].t + [p].d`, or that plus a rest such as `[p].t + [p].d + base.d * (1/2)`), use *p*'s instrument: the note is in *p*'s player. A silence carries the line, so a player can have a silence in his score.
-3. Otherwise, if the note is a copy of a note *k* of a line (start `[k].t + X`, frequency `r * [k].f`) and the copy of *k*'s predecessor exists (written from it with the same `X`), use that copy's instrument: a copy of a line is a line, a canon voice.
+3. A copy of a line uses the instrument of the preceding copy at the same written offset. The editor first looks for a matching pitch reference, such as `r * [k].f`. A delayed note can also take its pitch from another voice when it copies the source duration `[k].d` and has a unique rhythmic counterpart at that offset. This keeps the bar 5 A in the canon’s answering bass.
 4. Otherwise the note starts a line. It takes the instrument of the note its **start time** is written from (`[k].t …`; a measure bar does not count), else the BaseNote's, else **Settings → Audio → Default instrument**.
 
 The source is `src/players.js`, whose header states the same rule.
 
-In the shipped canon (the default module) this gives exactly three players: the theme (25 notes from note 9), the first bass (70 notes from note 10) and the second bass (58 notes from note 24, a note-by-note copy of the first). Setting note 9's instrument changes the whole theme; note 24's changes the second bass; note 10's changes the first bass, and also the second one while note 24 sets none, because note 24's start is written from note 10.
+In the shipped canon (the default module) this gives exactly three players: the theme (25 notes from note 9), the first bass (70 notes from note 10) and the second bass (58 notes from note 24, one bar after the first, with matching durations). Setting note 9's instrument changes the whole theme; note 24's changes the second bass; note 10's changes the first bass, and also the second one while note 24 sets none, because note 24's start is written from note 10.
 
 Three consequences worth knowing:
 
