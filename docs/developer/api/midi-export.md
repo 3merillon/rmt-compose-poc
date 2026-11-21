@@ -5,7 +5,7 @@ description: Reference for src/midi/midi-export.js — a pure function from a Mo
 
 # MIDI Export
 
-`src/midi/midi-export.js` turns a `Module` into a Standard MIDI File that keeps the module's tuning.
+`src/midi/midi-export.js` turns a `Module` into Standard MIDI File events with per-note pitch bends. Module JSON retains exact expressions and relationships.
 It is **pure** — module in, bytes out, no DOM and no Web Audio — so the same code runs behind the
 **Export MIDI** menu entry and in Node.
 
@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { Module } from './src/module.js'
 import { planMidi, encodeMidi } from './src/midi/midi-export.js'
 
-const module = await Module.loadFromJSON(JSON.parse(readFileSync('module.json', 'utf8')))
+const module = await Module.loadFromJSON(JSON.parse(readFileSync('public/modules/defaultModule.json', 'utf8')))
 
 const plan = planMidi(module)              // what the file will contain, as plain data
 writeFileSync('module.mid', encodeMidi(plan))
@@ -22,13 +22,13 @@ writeFileSync('module.mid', encodeMidi(plan))
 for (const warning of plan.report.warnings) console.warn(warning)
 ```
 
-What a user sees of this is in [Exporting MIDI](/user-guide/modules/exporting-midi).
+Run this example from the repository root. It writes `module.mid` in the current directory. The menu workflow is in [Exporting MIDI](/user-guide/modules/exporting-midi).
 
 ## The approach
 
-MIDI has 128 fixed keys and one pitch bend per channel. To carry an exact frequency, each note is
+MIDI has 128 fixed keys and one pitch bend per channel. To approximate the evaluated frequency, each note is
 written on its nearest 12-TET key with a 14-bit pitch bend for the remainder, and each sounding
-note gets a channel to itself.
+note gets a channel to itself. In the default layout the General MIDI program is `GM_PROGRAMS[instrument] ?? 0`. The map contains `harmonium` (20) and omits `harmonium-soft`, which uses 0, acoustic grand piano (program 1 in one-based lists).
 
 Which channels is the `layout` option. The default, `'general'`, is for ordinary General MIDI
 players: such a player merges all tracks onto one port, so the whole piece shares that port's
@@ -40,7 +40,7 @@ same channels, some notes land on channel 10 and sound as drums, and everything 
 
 Two decisions keep the file exact where it can be:
 
-- **Time is converted exactly, then rounded once.** `seconds × tempo ÷ 60 × ppq` is computed in
+- **Rational time is converted exactly, then rounded once.** `seconds × tempo ÷ 60 × ppq` is computed in
   BigInt fractions; a start and an end are each rounded to the nearest tick (ties upward) and a
   length is the difference of the two. Rounding the length separately would let two notes that
   touch in the module overlap or gap in the file.
@@ -133,11 +133,13 @@ the same bytes.
 
 `bendRange` trades resolution for compatibility. A bend has 16 384 steps across twice the range:
 
-| `bendRange` | One step | Worst pitch error |
+| `bendRange` | One step | Maximum rounding error inside the bend range |
 |---|---|---|
 | `2` | 0.0244 cent | 0.0122 cent |
 | `12` | 0.146 cent | 0.073 cent |
 | `48` | 0.586 cent | 0.293 cent |
+
+At the positive limit, the ideal bend value is 16384 but the largest MIDI value is 16383. A pitch at that boundary can differ by one full step. The report measures the actual error of each emitted pitch.
 
 `48` is what an MPE instrument is set to before it is told otherwise. Exporting with it suits an
 instrument whose range cannot be changed, at 24 times the pitch error.
@@ -210,6 +212,7 @@ MTrk  conductor
       FF 58  time signature              (omitted when there is none)
       FF 51  tempo, µs per quarter note
       FF 2F  end of track, at endTick
+```
 
 The note tracks below are the `'mpe'` layout. In `'general'` a note track holds its name, `FF 21 pp`
 when it is for a further port, RPN 0 on all fifteen channels, and per note `Cn pp` (program),

@@ -115,13 +115,13 @@ The note's full colour is inside the band; outside it the colour is dimmed (alph
 comes from the same function as playback, `envelopeShares` and `envelopeTimes` in
 `src/instruments/instrument-manager.js`, so the part that is drawn includes the instrument's own
 times for whatever the note leaves unset, the 3 ms floor, and the fit of the attack inside the note.
-A note with neither set, its own or the BaseNote's, is drawn as before, with no band. The
+With the default display setting, a note that has neither value of its own or through the BaseNote has no inner band. **Every note** also draws instrument defaults. The
 renderer side is `_envelopeSharesFor` and the envelope block in `rectBorderFS` in
 `src/renderer/webgl2/renderer.js`.
 
 ## Dependencies
 
-Referencing another note's `attack` or `release` creates a real dependency, as `[3].f` does. Evaluated values can be irrational: a power such as `2^(1/12)` in either is kept exact and flags the value corrupted (tempered, not a pure ratio), with the crosshatch and display described under [Corruption](/reference/glossary#corruption). The corruption flags are `0x10` for attack and `0x20` for release.
+Referencing another note's `attack` or `release` creates a real dependency, as `[3].f` does. An irrational share such as `2^(-1/12)` stays exact in the expression. The evaluated number is converted to seconds when the instrument envelope is scheduled.
 
 ## See also
 

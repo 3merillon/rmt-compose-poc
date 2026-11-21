@@ -1,13 +1,13 @@
 ---
 title: Exporting MIDI
-description: Export the workspace as a Standard MIDI File that keeps its exact tuning — what the file contains, what an instrument needs to play it in tune, and what is rounded.
+description: Export the workspace as a Standard MIDI File with per-note pitch bends — what the file contains, what an instrument needs to play it in tune, and what is rounded.
 ---
 
 # Exporting MIDI
 
 **Export MIDI** writes the composition as a Standard MIDI File, `module.mid`, for a DAW or a synthesizer.
 
-MIDI has 128 fixed keys; a module has exact frequencies. So the file carries the tuning itself: every note is written on its **nearest key together with a pitch bend** that puts it back on its exact frequency.
+A tuning between MIDI keys is exported as the **nearest available key plus a 14-bit pitch bend**. The bend approximates the evaluated pitch. Save the module JSON to retain its exact ratios, symbolic powers and editable dependencies.
 
 ::: warning It is a one-way export
 A MIDI file holds evaluated values — pitches, times, loudness. It does not hold the relationships between notes, and there is no MIDI import. Keep the `module.json` from [Save Module](/user-guide/modules/saving-modules); that file is the composition.
@@ -41,7 +41,7 @@ The whole piece shares the fifteen channels of one MIDI port: 1–9 and 11–16.
 
 ## Playing it
 
-The file is plain General MIDI plus pitch bends, so an ordinary player — a media player, a browser MIDI player, a sound card's synth — plays it as pitched instruments, in tune, with no setup. It relies on two things every General MIDI device has:
+Use a player that honors independent per-channel pitch bends and program changes. Check these two settings if a chord sounds different from the workspace:
 
 - **a pitch-bend range of 2 semitones.** That is the General MIDI default, and the file also sets it on every channel (RPN 0). A device left on another range plays every bend too wide or too narrow — if a file sounds wildly out of tune, this is the setting to check first.
 - **program changes.** Each instrument maps to a General MIDI program:
@@ -53,6 +53,7 @@ The file is plain General MIDI plus pitch bends, so an ordinary player — a med
 | `vibraphone` | 12 Vibraphone |
 | `organ` | 20 Church Organ |
 | `harmonium` | 21 Reed Organ |
+| `harmonium-soft` | 1 Acoustic Grand Piano (fallback) |
 | `violin` | 41 Violin |
 | `triangle-wave` | 74 Flute |
 | `sine-wave` | 80 Ocarina |
@@ -78,13 +79,13 @@ When the module has no measure bar, or the first bar's length cannot be written 
 
 ## What is rounded
 
-A module is exact; a MIDI file is a grid. This is all the rounding there is.
+The MIDI file stores evaluated events on finite pitch, time and velocity grids. The table assumes the default export settings.
 
 | | Rounded to | At worst |
 |---|---|---|
 | Start and end of a note | The nearest tick (960 per quarter note) | Half a tick — 0.3 ms at 100 BPM |
 | Length | The difference of the two rounded ends | One tick |
-| Pitch | One of 16 384 bend steps across ±2 semitones | 0.0122 cent |
+| Pitch | One of 16 384 bend steps across ±2 semitones | About 0.0122 cent for a nearest bend, up to one bend step (0.0244 cent) at the positive range limit |
 | Tempo | Whole microseconds per quarter note | 66 BPM is stored as 65.999993 |
 | Loudness | A velocity from 1 to 127 | See below |
 

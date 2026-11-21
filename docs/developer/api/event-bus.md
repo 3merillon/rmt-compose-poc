@@ -162,6 +162,15 @@ eventBus.on('settings:changed', ({ path }) => {
 | `modals:requestRefresh` | `{ note, measureId, clickedElement }` | `player.js` and the widget's own controls, after a commit | the widget — rebuilds itself in place |
 | `modals:init` | — | the widget, once | nothing today |
 
+### Toolbar, repeat and history restoration
+
+| Event | Payload | When it fires |
+|---|---|---|
+| `toolbar:built` | none | The menu bar has built its controls. The player refreshes the live tempo controls. |
+| `display:transposition` | `{ pass, factor }` | The displayed loop pass changes. A null factor means the written pitches. The player and open note widget refresh their displayed values. |
+| `module:repeatChanged` | `{ repeat }` | A module is installed or its repeat expression changes. The Audio settings show the new expression or null. |
+| `history:restored` | `{ source }` | The player finishes applying a history snapshot. The player and settings panel refresh the restored state. |
+
 ### audio
 
 | Event | Payload | Emitted by | Consumed by |

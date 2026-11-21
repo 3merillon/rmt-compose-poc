@@ -77,9 +77,7 @@ Silences and measure bars have no `amplitude` row: neither makes a sound.
 
 ## What it does to the sound
 
-Each note's envelope peaks at `0.2 × amplitude` (a sampled instrument's own gain trim still
-applies). Everything downstream — the master volume, the reverb send, the limiter — is unchanged
-and applies on top.
+The transport supplies an envelope peak of `0.2 × amplitude` before instrument-specific gain. Master volume, reverb and limiting affect the final signal.
 
 | `amplitude` | Level | Envelope peak |
 |---|---|---|
@@ -94,7 +92,7 @@ and applies on top.
 
 **Playback clamps amplitude to the range `0` to `4`.** Above `4` a note plays at `4`; at `0` it is
 silent and no voice is created for it; a negative amplitude has no meaning for a level and plays
-as `0`. The clamp is applied to the sound only. The module keeps the exact value, and an expression
+as `0`. Playback and MIDI velocity use the clamped value. The module keeps the exact value, and an expression
 that reads `[N].a` sees it unclamped.
 
 Loud notes add up. The limiter (**Settings → Audio**) is on by default and catches the peaks of a
