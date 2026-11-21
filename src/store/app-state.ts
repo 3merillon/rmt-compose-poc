@@ -1,11 +1,13 @@
+import type { Module } from '../module.ts';
+import type { EvaluationCache } from '../model-types.ts';
 // Centralized app state to retire window.* globals
-import { audioEngine } from '../player/audio-engine.js';
-import { eventBus } from '../utils/event-bus.js';
+import { audioEngine } from '../player/audio-engine.ts';
+import { eventBus } from '../utils/event-bus.ts';
 
-let moduleRef = null;
-let evaluatedNotesRef = null;
+let moduleRef: Module | null = null;
+let evaluatedNotesRef: EvaluationCache | null = null;
 
-export function setModule(moduleInstance, { skipBackgroundEval = false } = {}) {
+export function setModule(moduleInstance: Module | null, { skipBackgroundEval = false } = {}) {
   moduleRef = moduleInstance;
   // Settings > Audio > Loop shows the module's own repeat: tell it the module changed.
   try { eventBus.emit('module:repeatChanged', { repeat: moduleInstance?.baseNote?.properties?.repeat || null }); } catch {}
@@ -13,7 +15,7 @@ export function setModule(moduleInstance, { skipBackgroundEval = false } = {}) {
   // Skip when caller will immediately evaluate synchronously (undo/redo/load)
   if (!skipBackgroundEval && moduleInstance && typeof moduleInstance.evaluateModule === 'function') {
     // Use requestIdleCallback to evaluate during idle time, or setTimeout as fallback
-    const scheduleEvaluation = window.requestIdleCallback || ((cb) => setTimeout(cb, 0));
+    const scheduleEvaluation = window.requestIdleCallback || ((cb: () => void) => setTimeout(cb, 0));
     scheduleEvaluation(() => {
       try {
         moduleInstance.evaluateModule();
@@ -25,7 +27,7 @@ export function setModule(moduleInstance, { skipBackgroundEval = false } = {}) {
 }
 export function getModule() { return moduleRef; }
 
-export function setEvaluatedNotes(notes) { evaluatedNotesRef = notes; }
+export function setEvaluatedNotes(notes: EvaluationCache | null) { evaluatedNotesRef = notes; }
 export function getEvaluatedNotes() { return evaluatedNotesRef; }
 
 export function getInstrumentManager() {

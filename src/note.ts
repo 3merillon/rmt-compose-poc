@@ -1,12 +1,36 @@
-import { eventBus } from './utils/event-bus.js';
-import { BinaryExpression, EMPTY_EXPRESSION } from './binary-note.js';
-import { compiler, decompiler } from './expression-compiler.js';
+import type Fraction from 'fraction.js';
+import type { Module } from './module.ts';
+import type { ExpressionName, InputFields, ScoreFields, ScoreNote } from './model-types.ts';
+import type { ExactValue } from './value/exact.ts';
+
+interface NoteProperties { color: unknown; instrument: string | null; measure: boolean; repeat?: string | null }
+type NoteDescription = Partial<ScoreFields> & {
+  id?: number | string;
+  properties?: Pick<NoteProperties, 'measure'>;
+  hasExpression?: (name: ExpressionName) => boolean | undefined;
+};
+type VariablesProxy = Partial<Record<ExpressionName, () => Fraction | null>> &
+  Partial<Record<`${ExpressionName}String`, string | null>> & Partial<NoteProperties>;
+type VariablesTarget = { [NOTE_OF]: Note; [FNS_OF]?: Map<string, () => Fraction | null> };
+export interface SavedNoteText {
+  id: number; text: string; color: unknown; instrument: string | null; measure: boolean;
+  s0: string | null; s1: string | null; s2: string | null; s3: string | null;
+  s4: string | null; s5: string | null;
+}
+
+import { eventBus } from './utils/event-bus.ts';
+import { BinaryExpression, EMPTY_EXPRESSION } from './binary-note.ts';
+import { compiler, decompiler } from './expression-compiler.ts';
 
 /**
  * The evaluated variables of a note. The first three are the language (each a
  * relation to other notes); the last three interpret the note when it sounds.
  */
-export const EXPRESSION_VARS = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
+export const EXPRESSION_VARS: ExpressionName[] = ['startTime', 'duration', 'frequency', 'amplitude', 'attack', 'release'];
+
+export function isExpressionName(name: unknown): name is ExpressionName {
+  return typeof name === 'string' && (EXPRESSION_VARS as readonly string[]).includes(name);
+}
 
 /**
  * Whether a note is a measure bar: a silent note (a start and a duration, no
@@ -14,7 +38,7 @@ export const EXPRESSION_VARS = ['startTime', 'duration', 'frequency', 'amplitude
  * flag is display only; evaluation treats a bar like any other note. Accepts a
  * Note or a plain note object from JSON.
  */
-export function isMeasureNote(note) {
+export function isMeasureNote(note: NoteDescription | null | undefined) {
   if (!note || Number(note.id) === 0) return false;
   if (note.properties) return note.properties.measure === true;
   return note.measure === true;
@@ -38,11 +62,11 @@ export function isMeasureNote(note) {
  * Accepts a Note (asks hasExpression, which is cheap) or a plain JSON note.
  * Only 'note' sounds; references and the rest only relate.
  */
-export function noteKind(note) {
+export function noteKind(note: NoteDescription | null | undefined) {
   if (!note) return null;
   if (Number(note.id) === 0) return 'base';
   if (isMeasureNote(note)) return 'measure';
-  const has = (k) => (typeof note.hasExpression === 'function')
+  const has = (k: ExpressionName) => (typeof note.hasExpression === 'function')
     ? !!note.hasExpression(k)
     : (note[k] != null && String(note[k]).trim() !== '');
   const f = has('frequency'), t = has('startTime'), d = has('duration');
@@ -56,7 +80,7 @@ export function noteKind(note) {
 }
 
 /** A note with a frequency and no duration: it relates, it never sounds. */
-export function isReferenceNote(note) {
+export function isReferenceNote(note: NoteDescription | null | undefined) {
   const k = noteKind(note);
   return k === 'reference' || k === 'reference-from';
 }
@@ -68,7 +92,19 @@ export function isReferenceNote(note) {
  * through the module's binary evaluator.
  */
 export class Note {
-  constructor(id, variables = {}) {
+  declare id: number;
+  declare module: Module | null;
+  declare lastModifiedTime: number;
+  declare expressions: Record<ExpressionName, BinaryExpression> & Partial<Record<string, BinaryExpression>>;
+  declare properties: NoteProperties;
+  declare _depsEpoch: number;
+  declare _depsRegKey: string | number | null;
+  declare _depsRegModule: Module | null;
+  declare _savedJSON: SavedNoteText | null;
+  declare parentId: number | undefined;
+  declare _variablesProxy: VariablesProxy | undefined;
+
+  constructor(id: number, variables: InputFields = {}) {
     this.id = id;
     this.module = null;
     this.lastModifiedTime = Date.now();
@@ -120,9 +156,7 @@ export class Note {
    * Initialize note from a variables object
    * Handles both legacy format (*String properties, functions) and new format
    */
-  _initFromVariables(variables) {
-    const expressionVars = EXPRESSION_VARS;
-
+  _initFromVariables(variables: InputFields) {
     for (const [key, value] of Object.entries(variables)) {
       // A *String property is the source for its variable. When the plain key is
       // present too, that key's branch below reads it; when it comes ALONE (the
@@ -131,7 +165,7 @@ export class Note {
       // created from the form an empty one.
       if (key.endsWith('String')) {
         const base = key.slice(0, -6);
-        if (expressionVars.includes(base) && !(base in variables) && typeof value === 'string' && value.trim() !== '') {
+        if (isExpressionName(base) && !(base in variables) && typeof value === 'string' && value.trim() !== '') {
           try {
             this.expressions[base] = compiler.compile(value, base);
           } catch (e) {
@@ -142,7 +176,7 @@ export class Note {
       }
 
       // Handle expression variables
-      if (expressionVars.includes(key)) {
+      if (isExpressionName(key)) {
         const stringKey = key + 'String';
         let exprText = null;
 
@@ -181,8 +215,10 @@ export class Note {
       }
 
       // Handle non-expression properties
-      if (key === 'color' || key === 'instrument' || key === 'repeat') {
-        this.properties[key] = value;
+      if (key === 'color') {
+        this.properties.color = value;
+      } else if (key === 'instrument' || key === 'repeat') {
+        if (value === null || typeof value === 'string') this.properties[key] = value;
       } else if (key === 'measure') {
         this.properties.measure = value === true;
       }
@@ -193,7 +229,13 @@ export class Note {
    * Get the evaluated value of a variable
    * Uses the module's binary evaluator to compute the result
    */
-  getVariable(name) {
+  getVariable(name: ExpressionName): Fraction | null;
+  getVariable(name: 'instrument'): string | null;
+  getVariable(name: 'repeat'): string | null | undefined;
+  getVariable(name: 'measure'): boolean;
+  getVariable(name: `${string}String`): string | null;
+  getVariable(name: string): unknown;
+  getVariable(name: string): unknown {
     // Handle non-expression properties
     if (name === 'color') return this.properties.color;
     if (name === 'instrument') return this.properties.instrument;
@@ -211,8 +253,9 @@ export class Note {
       const cache = this.module.getEvaluationCache();
       if (cache) {
         const noteCache = cache.get(this.id);
-        if (noteCache && noteCache[name] !== undefined && noteCache[name] !== null) {
-          return noteCache[name];
+        if (noteCache) {
+          const value: unknown = Reflect.get(noteCache, name);
+          if (value != null) return value;
         }
       }
 
@@ -228,7 +271,7 @@ export class Note {
    * a Fraction when rational, else an Irrational or an Approx. getVariable()
    * returns a Fraction in every case (the nearest double when not rational).
    */
-  getExactVariable(name) {
+  getExactVariable(name: ExpressionName): ExactValue | null {
     const shadowValue = this.getVariable(name);
     if (shadowValue == null || !this.module) return shadowValue;
     const cache = this.module.getEvaluationCache();
@@ -241,7 +284,7 @@ export class Note {
    * Set a variable value
    * Compiles expression text to binary and triggers re-evaluation
    */
-  setVariable(name, value) {
+  setVariable(name: string, value: unknown) {
     this.lastModifiedTime = Date.now();
 
     // Handle non-expression properties
@@ -251,14 +294,15 @@ export class Note {
       return;
     }
     if (name === 'instrument') {
-      this.properties.instrument = value;
+      if (value === null || typeof value === 'string') this.properties.instrument = value;
       this._notifyChange();
       return;
     }
     // The BaseNote's repeat: the frequency it takes on the next repeat of a loop,
     // as an expression of the module, kept as text (src/player/display-transpose.js)
     if (name === 'repeat') {
-      this.properties.repeat = value || null;
+      if (typeof value === 'string') this.properties.repeat = value || null;
+      else if (!value) this.properties.repeat = null;
       this._notifyChange();
       return;
     }
@@ -278,8 +322,7 @@ export class Note {
     }
 
     // Handle expression variables
-    const expressionVars = EXPRESSION_VARS;
-    if (expressionVars.includes(name)) {
+    if (isExpressionName(name)) {
       if (typeof value === 'string') {
         // Expression text
         this._setExpression(name, value);
@@ -303,7 +346,7 @@ export class Note {
     }
   }
 
-  _replaceExpression(name, next) {
+  _replaceExpression(name: string, next: BinaryExpression) {
     this.module?.noteExpressionChanged?.(this.id, this.expressions[name], next);
     this.expressions[name] = next;
   }
@@ -311,7 +354,7 @@ export class Note {
   /**
    * Internal: Set expression from text
    */
-  _setExpression(name, exprText) {
+  _setExpression(name: string, exprText: string) {
     try {
       this._replaceExpression(name, compiler.compile(exprText, name));
       this._depsEpoch++;
@@ -326,7 +369,7 @@ export class Note {
    * Used by batch operations to avoid per-note overhead.
    * Caller is responsible for marking notes dirty.
    */
-  _setExpressionSilent(name, exprText) {
+  _setExpressionSilent(name: string, exprText: string) {
     try {
       this._replaceExpression(name, compiler.compile(exprText, name));
       this._depsEpoch++;
@@ -342,7 +385,7 @@ export class Note {
    * and the key is no longer written to the module JSON.
    * @returns {boolean} whether there was an expression to remove
    */
-  clearExpression(name) {
+  clearExpression(name: string) {
     const expr = this.expressions[name];
     if (!expr || expr.isEmpty()) return false;
     this._replaceExpression(name, EMPTY_EXPRESSION);
@@ -370,7 +413,7 @@ export class Note {
   /**
    * Get the source text of an expression
    */
-  getExpressionSource(name) {
+  getExpressionSource(name: string) {
     const expr = this.expressions[name];
     if (expr && !expr.isEmpty()) {
       return expr.sourceText || decompiler.decompile(expr);
@@ -381,14 +424,16 @@ export class Note {
   /**
    * Get the BinaryExpression for a variable
    */
-  getExpression(name) {
+  getExpression(name: ExpressionName): BinaryExpression;
+  getExpression(name: string): BinaryExpression | null;
+  getExpression(name: string): BinaryExpression | null {
     return this.expressions[name] || null;
   }
 
   /**
    * Check if note has a specific expression defined
    */
-  hasExpression(name) {
+  hasExpression(name: string) {
     const expr = this.expressions[name];
     return expr && !expr.isEmpty();
   }
@@ -398,7 +443,7 @@ export class Note {
    * Returns an object with all evaluated values
    */
   getAllVariables() {
-    const result = {};
+    const result: Record<string, unknown> = {};
 
     // Add evaluated expression values
     const expressionVars = EXPRESSION_VARS;
@@ -427,7 +472,7 @@ export class Note {
    * Convert note to JSON for serialization
    */
   toJSON() {
-    const obj = { id: this.id };
+    const obj: ScoreNote & Record<string, unknown> = { id: this.id };
 
     // Decompile expressions to text
     for (const [name, expr] of Object.entries(this.expressions)) {
@@ -449,7 +494,7 @@ export class Note {
    * Get all dependencies of this note (note IDs referenced in expressions)
    */
   getAllDependencies() {
-    const deps = new Set();
+    const deps = new Set<number>();
     for (const expr of Object.values(this.expressions)) {
       if (expr && expr.depCount > 0) {
         for (let i = 0; i < expr.depCount; i++) {
@@ -482,13 +527,14 @@ export class Note {
    * this getter is on hot paths (renderer sync, drag commit, retargeting)
    * and used to allocate a fresh Proxy on every single access.
    */
-  get variables() {
+  get variables(): VariablesProxy {
     if (this._variablesProxy) {
       return this._variablesProxy;
     }
     // One handler for every note; the target holds the note (and, once a
     // function is asked for, its function wrappers)
-    this._variablesProxy = new Proxy({ [NOTE_OF]: this }, VARIABLES_HANDLER);
+    // All public keys are synthesized by the traps instead of stored on the target.
+    this._variablesProxy = new Proxy<VariablesTarget>({ [NOTE_OF]: this }, VARIABLES_HANDLER) as VariablesProxy;
     return this._variablesProxy;
   }
 }
@@ -514,8 +560,7 @@ const VARIABLES_HANDLER = {
     }
     // Handle expression variables - return a function wrapper for legacy code
     // Only return a function if the expression actually exists
-    const expressionVars = EXPRESSION_VARS;
-    if (expressionVars.includes(prop)) {
+    if (isExpressionName(prop)) {
       // Check if this expression actually exists
       if (!note.hasExpression(prop)) {
         return undefined;
@@ -525,7 +570,7 @@ const VARIABLES_HANDLER = {
       // and try to extract the expression from it
       const varName = prop;
       let fnCache = target[FNS_OF];
-      if (!fnCache) fnCache = target[FNS_OF] = new Map();
+      if (!fnCache) fnCache = target[FNS_OF] = new Map<string, () => Fraction | null>();
       let fn = fnCache.get(varName);
       if (!fn) {
         fn = function() {
@@ -549,8 +594,8 @@ const VARIABLES_HANDLER = {
     if (prop === 'measure') return note.properties.measure || undefined;
     return undefined;
   },
-  set(target, prop, value) {
-    target[NOTE_OF].setVariable(prop, value);
+  set(target, prop, value: unknown) {
+    if (typeof prop === 'string') target[NOTE_OF].setVariable(prop, value);
     return true;
   },
   has(target, prop) {
@@ -561,11 +606,10 @@ const VARIABLES_HANDLER = {
     if (prop === 'measure') return note.properties.measure === true;
     if (typeof prop === 'string' && prop.endsWith('String')) {
       const baseName = prop.slice(0, -6);
-      return note.hasExpression(baseName);
+      return !!note.hasExpression(baseName);
     }
-    const expressionVars = EXPRESSION_VARS;
-    if (expressionVars.includes(prop)) {
-      return note.hasExpression(prop);
+    if (isExpressionName(prop)) {
+      return !!note.hasExpression(prop);
     }
     return false;
   },
@@ -586,10 +630,10 @@ const VARIABLES_HANDLER = {
   },
   getOwnPropertyDescriptor(target, prop) {
     // Required for Object.keys() to work with Proxy
-    const keys = this.ownKeys(target);
-    if (keys.includes(prop)) {
+    const keys = VARIABLES_HANDLER.ownKeys(target);
+    if (typeof prop === 'string' && keys.includes(prop)) {
       return { enumerable: true, configurable: true };
     }
     return undefined;
   }
-};
+} satisfies ProxyHandler<VariablesTarget>;

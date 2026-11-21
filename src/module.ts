@@ -1,17 +1,26 @@
-import { snapshotPages, changedRows } from './store/snapshot-pages.js';
+import type { BinaryExpression } from './binary-note.ts';
+import { isInputScore, type ExpressionName, type InputFields, type EvaluationCache, type Score, type ScoreFields, type ScoreNote } from './model-types.ts';
+import type { PagedSnapshot } from './store/snapshot-pages.ts';
+import type { RelationName } from './dependency-graph.ts';
+interface TimingSummary {
+  revision: number; generation: number; blocks: Map<number, number>;
+  measureIds: Set<number>; measures: Note[]; soundEnd: number; moduleEnd?: number;
+}
+export interface ExpressionUpdate {noteId: number; varName: string; expr: string}
+import { snapshotPages, changedRows } from './store/snapshot-pages.ts';
 import Fraction from 'fraction.js';
-import { Note, EXPRESSION_VARS, isMeasureNote } from './note.js';
-import { remapNoteIds } from './dsl/remap-note-ids.js';
-import { migrateTimeModel } from './migrate/relational-time.js';
-import { migrateSyntax } from './migrate/legacy-syntax.js';
-import { toNumber } from './utils/fraction-num.js';
-import { DependencyGraph } from './dependency-graph.js';
-import { inheritsFromBase } from './variable-deps.js';
-import { BinaryEvaluator, IncrementalEvaluator } from './binary-evaluator.js';
-import { compiler } from './expression-compiler.js';
-import { add as addExact, compare as compareExact, toNumber as exactToNumber } from './value/exact.js';
-import { MAX_NOTE_ID } from './binary-note.js';
-import { instrumentOf, playerOf, migrateInstrumentRule, INSTRUMENT_RULE } from './players.js';
+import { Note, EXPRESSION_VARS, isMeasureNote } from './note.ts';
+import { remapNoteIds } from './dsl/remap-note-ids.ts';
+import { migrateTimeModel } from './migrate/relational-time.ts';
+import { migrateSyntax } from './migrate/legacy-syntax.ts';
+import { toNumber } from './utils/fraction-num.ts';
+import { DependencyGraph } from './dependency-graph.ts';
+import { inheritsFromBase } from './variable-deps.ts';
+import { BinaryEvaluator, IncrementalEvaluator } from './binary-evaluator.ts';
+import { compiler } from './expression-compiler.ts';
+import { add as addExact, compare as compareExact, toNumber as exactToNumber } from './value/exact.ts';
+import { MAX_NOTE_ID } from './binary-note.ts';
+import { instrumentOf, playerOf, migrateInstrumentRule, INSTRUMENT_RULE } from './players.ts';
 
 // Explicit invalidations without a known evaluation invalidate all derived timing.
 let timingGeneration = 0;
@@ -28,7 +37,7 @@ export function invalidateModuleEndTimeCache() {
 // Defaults to 'sine-wave' → preserves pre-settings behavior.
 let _defaultInstrumentName = 'sine-wave';
 
-export function setDefaultInstrument(name) {
+export function setDefaultInstrument(name: unknown) {
   if (typeof name === 'string' && name) _defaultInstrumentName = name;
 }
 
@@ -44,11 +53,11 @@ export function getDefaultInstrument() {
  */
 // What markNoteDirty() hands the incremental evaluator for a note whose
 // dependents are already dirty
-const NO_DEPENDENTS = [];
+const NO_DEPENDENTS: readonly number[] = [];
 
 /** A note (not the BaseNote) as saved in the module JSON. */
-function noteJSON(note) {
-  const noteObj = { id: note.id };
+function noteJSON(note: Note): ScoreNote {
+  const noteObj: ScoreNote = { id: note.id };
   for (const name of EXPRESSION_VARS) {
     const source = note.getExpressionSource(name);
     if (source) {
@@ -65,16 +74,16 @@ function noteJSON(note) {
 // other list it keeps nothing and every note is serialized each time.
 const KEEPS_NOTE_TEXT = EXPRESSION_VARS.join() === 'startTime,duration,frequency,amplitude,attack,release';
 
-const isPrimitive = (v) => v === null || (typeof v !== 'object' && typeof v !== 'function');
+const isPrimitive = (v: unknown) => v === null || (typeof v !== 'object' && typeof v !== 'function');
 
 /**
  * What getExpressionSource() returns for this expression when that is decided by
  * fields alone: null when it is empty, else its source text. An expression with
  * bytecode and no source text is decompiled instead: '' says so.
  */
-const keptSource = (e) => (e && e.length !== 0 ? e.sourceText : null);
+const keptSource = (e: BinaryExpression | undefined) => (e && e.length !== 0 ? e.sourceText : null);
 /** Whether keptSource() gave what getExpressionSource() gives. */
-const byFields = (s) => s === null || (typeof s === 'string' && s !== '');
+const byFields = (s: string | null) => s === null || (typeof s === 'string' && s !== '');
 
 /**
  * { id, text }: JSON.stringify(noteJSON(note)). The note keeps it (note._savedJSON)
@@ -86,7 +95,7 @@ const byFields = (s) => s === null || (typeof s === 'string' && s !== '');
  * colour or instrument is an object (it could change in place) or with an
  * expression that has no source text (decompiled each time).
  */
-function noteJSONText(note) {
+function noteJSONText(note: Note) {
   const props = note.properties;
   const ex = note.expressions;
   const kept = note._savedJSON;
@@ -115,7 +124,27 @@ function noteJSONText(note) {
 }
 
 export class Module {
-  constructor(baseNoteVariables = {}) {
+  declare notes: Record<string, Note>;
+  declare nextId: number;
+  declare baseNote: Note;
+  declare _dependencyGraph: DependencyGraph;
+  declare _depsRegGeneration: number;
+  declare _binaryEvaluator: BinaryEvaluator;
+  declare _incrementalEvaluator: IncrementalEvaluator;
+  declare _evaluationCache: EvaluationCache;
+  declare _dirtyNotes: Set<number>;
+  declare _dirtyClosed: Set<number>;
+  declare _evaluationRevision: number;
+  declare _recentEvaluations: (number[] | null)[];
+  declare _evaluating: boolean;
+  declare _historyVersion: PagedSnapshot | null | undefined;
+  declare _historyOrigin: symbol | undefined;
+  declare _historyIds: Set<number> | null | undefined;
+  declare _canPatchHistory: boolean | undefined;
+  declare _untrackedProperties: boolean | undefined;
+  declare _timingSummary: TimingSummary | undefined;
+
+  constructor(baseNoteVariables: InputFields = {}) {
     this.notes = {};
     this.nextId = 1;
 
@@ -133,10 +162,10 @@ export class Module {
 
     // Evaluation cache (Map<noteId, {startTime, duration, ...}>)
     this._evaluationCache = new Map();
-    this._dirtyNotes = new Set();
+    this._dirtyNotes = new Set<number>();
     // Notes whose dependents markNoteDirty() has already marked dirty since
     // the last evaluation: marking one of them again needs no second walk
-    this._dirtyClosed = new Set();
+    this._dirtyClosed = new Set<number>();
     this._evaluationRevision = 0;
     this._recentEvaluations = [];
     this._evaluating = false; // reentrancy guard for evaluateModule()
@@ -158,7 +187,7 @@ export class Module {
     };
 
     // Merge defaults with provided variables (convert functions to strings if needed)
-    const finalVars = { ...defaultBaseNoteVariables };
+    const finalVars: InputFields = { ...defaultBaseNoteVariables };
     for (const [key, value] of Object.entries(baseNoteVariables)) {
       if (key === 'color' || key === 'instrument' || key === 'repeat') {
         finalVars[key] = value;
@@ -202,7 +231,7 @@ export class Module {
    * marked note (e.g., all dependents on an octave change), so the skip
    * avoids rewriting ~15 graph maps per untouched note.
    */
-  _registerNoteDependencies(note) {
+  _registerNoteDependencies(note: Note) {
     // A newly loaded note has generation and epoch zero. Its numeric id
     // already identifies that state, without retaining one string per note.
     const regKey = !this._depsRegGeneration && !note._depsEpoch
@@ -241,7 +270,7 @@ export class Module {
   /**
    * Mark a note as dirty (needs re-evaluation)
    */
-  markNoteDirty(noteId) {
+  markNoteDirty(noteId: number) {
     const numId = Number(noteId);
     this._dirtyNotes.add(numId);
 
@@ -294,8 +323,8 @@ export class Module {
    *
    * @param {Iterable<number>} noteIds - IDs of notes to mark dirty
    */
-  markNotesDirtyBatch(noteIds) {
-    const idsToProcess = new Set();
+  markNotesDirtyBatch(noteIds: Iterable<number>) {
+    const idsToProcess = new Set<number>();
     for (const id of noteIds) {
       idsToProcess.add(Number(id));
     }
@@ -313,7 +342,7 @@ export class Module {
 
     // For each note, add its dependents (notes that depend on it, also
     // through the base note)
-    const dependentsOf = new Map();
+    const dependentsOf = new Map<number, Set<number>>();
     for (const numId of idsToProcess) {
       const dependents = this._dependencyGraph.getEvaluationDependents(numId);
       dependentsOf.set(numId, dependents);
@@ -328,8 +357,8 @@ export class Module {
     // Without this, frequency chains break because the dependency's frequency
     // isn't in the cache when the dependent note tries to load it.
     // We need transitive closure because A->B->C means A needs both B and C.
-    const visited = new Set();
-    const addDependenciesRecursive = (noteId) => {
+    const visited = new Set<number>();
+    const addDependenciesRecursive = (noteId: number) => {
       if (visited.has(noteId)) return;
       visited.add(noteId);
       const dependencies = this._dependencyGraph.getDependencies(noteId);
@@ -372,10 +401,10 @@ export class Module {
    *
    * @param {Array<{noteId: number, varName: string, expr: string}>} updates - Array of expression updates
    */
-  batchSetExpressions(updates) {
+  batchSetExpressions(updates: readonly ExpressionUpdate[]) {
     if (!updates || updates.length === 0) return;
 
-    const affectedNoteIds = new Set();
+    const affectedNoteIds = new Set<number>();
 
     // Phase 1: Apply all expression changes silently (no per-note notifications)
     for (const { noteId, varName, expr } of updates) {
@@ -419,7 +448,7 @@ export class Module {
   /**
    * Get direct dependencies of a note (O(1) via dependency graph)
    */
-  getDirectDependencies(noteId) {
+  getDirectDependencies(noteId: number) {
     const deps = this._dependencyGraph.getDependencies(noteId);
     return Array.from(deps);
   }
@@ -427,7 +456,7 @@ export class Module {
   /**
    * Get all notes that depend on this note (O(d) via inverted index)
    */
-  getDependentNotes(noteId) {
+  getDependentNotes(noteId: number) {
     const deps = this._dependencyGraph.getAllDependents(noteId);
     const result = new Set(deps);
 
@@ -454,7 +483,7 @@ export class Module {
    * @param {number} noteId
    * @returns {{ frequency: number[], startTime: number[], duration: number[] }}
    */
-  getDependentsByProperty(noteId) {
+  getDependentsByProperty(noteId: number) {
     const graph = this._dependencyGraph;
     const numId = Number(noteId);
 
@@ -479,15 +508,15 @@ export class Module {
    * @param {number} noteId
    * @returns {{ frequency: number[], startTime: number[], duration: number[] }}
    */
-  getDirectDependenciesByProperty(noteId) {
+  getDirectDependenciesByProperty(noteId: number) {
     const graph = this._dependencyGraph;
     const numId = Number(noteId);
     const note = this.getNoteById(numId);
 
     // Get base arrays from dependency graph
-    const freqArr = Array.from(graph.frequencyDependencies.get(numId) || new Set());
-    const startArr = Array.from(graph.startTimeDependencies.get(numId) || new Set());
-    const durArr = Array.from(graph.durationDependencies.get(numId) || new Set());
+    const freqArr = Array.from(graph.frequencyDependencies.get(numId) || new Set<number>());
+    const startArr = Array.from(graph.startTimeDependencies.get(numId) || new Set<number>());
+    const durArr = Array.from(graph.durationDependencies.get(numId) || new Set<number>());
 
     // Include baseNote (0) if the expression references it
     // The referencesBase flag is tracked separately from the dependencies array
@@ -522,20 +551,20 @@ export class Module {
    * @param {string} property - 'frequency' | 'startTime' | 'duration'
    * @returns {number[]} - Array of note IDs from noteId back to baseNote/root (excluding noteId itself)
    */
-  getParentChainByProperty(noteId, property) {
+  getParentChainByProperty(noteId: number, property: RelationName) {
     const graph = this._dependencyGraph;
     const numId = Number(noteId);
-    const chain = [];
+    const chain: number[] = [];
     const visited = new Set([numId]);
     let current = numId;
 
     // Map property name to dependency map
-    const depMapName = `${property}Dependencies`;
+    const depMapName = `${property}Dependencies` as const;
     const depMap = graph[depMapName];
     if (!depMap) return chain;
 
     // Also check for baseNote references
-    const baseDepSetName = `${property}BaseNoteDependents`;
+    const baseDepSetName = `${property}BaseNoteDependents` as const;
     const baseDepSet = graph[baseDepSetName];
 
     while (true) {
@@ -575,7 +604,7 @@ export class Module {
    * @param {string} property - 'frequency' | 'startTime' | 'duration'
    * @returns {{ edges: Array<{parentId: number, childId: number, depth: number}>, maxDepth: number }}
    */
-  getChildrenTreeByProperty(noteId, property) {
+  getChildrenTreeByProperty(noteId: number, property: RelationName) {
     return this._dependencyGraph.getChildrenTreeByProperty(noteId, property);
   }
 
@@ -584,14 +613,14 @@ export class Module {
    * @param {number} noteId - The root note
    * @returns {{ edgesByProperty: { frequency: Array, startTime: Array, duration: Array }, maxDepth: number }}
    */
-  getChildrenTreeByAllProperties(noteId) {
+  getChildrenTreeByAllProperties(noteId: number) {
     return this._dependencyGraph.getChildrenTreeByAllProperties(noteId);
   }
 
   /**
    * Add a new note
    */
-  addNote(variables = {}) {
+  addNote(variables: InputFields = {}) {
     this._recordEvaluation(null);
     this._historyIds = null;
     this._canPatchHistory = false;
@@ -613,7 +642,7 @@ export class Module {
   /**
    * Remove a note
    */
-  removeNote(id) {
+  removeNote(id: number) {
     this._recordEvaluation(null);
     this._historyIds = null;
     this._canPatchHistory = false;
@@ -680,7 +709,7 @@ export class Module {
   /**
    * Get a note by ID
    */
-  getNoteById(id) {
+  getNoteById(id: number | string): Note | undefined {
     return this.notes[id];
   }
 
@@ -732,7 +761,7 @@ export class Module {
     return cache;
   }
 
-  _recordEvaluation(ids) {
+  _recordEvaluation(ids: number[] | null) {
     this._evaluationRevision++;
     // A missed large batch requires a full sync. Keep a short journal because
     // edits may evaluate more than once before the workspace next draws.
@@ -740,10 +769,10 @@ export class Module {
     if (this._recentEvaluations.length > 8) this._recentEvaluations.shift();
   }
 
-  evaluationChangesSince(revision) {
+  evaluationChangesSince(revision: number) {
     const count = this._evaluationRevision - revision;
     if (!Number.isInteger(count) || count < 0 || count > this._recentEvaluations.length) return null;
-    const ids = new Set();
+    const ids = new Set<number>();
     for (let i = this._recentEvaluations.length - count; i < this._recentEvaluations.length; i++) {
       const batch = this._recentEvaluations[i];
       if (!batch) return null;
@@ -758,7 +787,7 @@ export class Module {
    * @param {Array<number>|null} noteIds - IDs to update (null = all notes)
    * @private
    */
-  _updateCorruptionFlags(cache, noteIds = null) {
+  _updateCorruptionFlags(cache: EvaluationCache, noteIds: Iterable<number> | null = null) {
     if (!this._dependencyGraph || typeof this._dependencyGraph.setCorruptionFlags !== 'function') {
       return;
     }
@@ -797,12 +826,14 @@ export class Module {
   /**
    * Evaluate a specific note's variable (for on-demand evaluation)
    */
-  evaluateNoteVariable(noteId, varName) {
+  evaluateNoteVariable(noteId: number, varName: ExpressionName): Fraction | null;
+  evaluateNoteVariable(noteId: number, varName: string): unknown;
+  evaluateNoteVariable(noteId: number, varName: string): unknown {
     // Ensure evaluation is up to date
     const cache = this.getEvaluationCache();
     const noteCache = cache.get(noteId);
-    if (noteCache && noteCache[varName] !== undefined) {
-      return noteCache[varName];
+    if (noteCache && Object.hasOwn(noteCache, varName)) {
+      return noteCache[varName as keyof typeof noteCache];
     }
     return null;
   }
@@ -829,7 +860,7 @@ export class Module {
    * applies to `[id].a`, so playback, export and expressions agree.
    * @returns {Fraction} exact and unclamped — each consumer clamps for its medium
    */
-  findAmplitude(note) {
+  findAmplitude(note: Note) {
     if (note && note.id !== 0) {
       const own = note.getVariable('amplitude');
       if (own) return own;
@@ -849,7 +880,7 @@ export class Module {
    * @param {Map} [memo] resolved in this pass, by note id: a caller resolving many
    *   notes passes one Map, so each line is walked once rather than once per note
    */
-  findInstrument(note, memo = null) {
+  findInstrument(note: Note, memo: Parameters<typeof instrumentOf>[2] = null) {
     return instrumentOf(this, note, memo, _defaultInstrumentName);
   }
 
@@ -858,7 +889,7 @@ export class Module {
    * instrument) and the note it follows in the line (null for a first note).
    * @returns {{head:number, prev:number|null}}
    */
-  findPlayer(note, memo = null) {
+  findPlayer(note: Note, memo: Parameters<typeof playerOf>[2] = null) {
     return playerOf(this, note, memo);
   }
 
@@ -869,8 +900,8 @@ export class Module {
    * bars that follow. From the BaseNote, the first bar starts at `base.t` and
    * lasts four time units (`base.d * 4`).
    */
-  generateMeasures(fromNote, n) {
-    const notesArray = [];
+  generateMeasures(fromNote: Note | null | undefined, n: number) {
+    const notesArray: Note[] = [];
 
     for (let i = 0; i < n; i++) {
       const prevNote = (i === 0) ? fromNote : this.getNoteById(notesArray[i - 1].id);
@@ -889,15 +920,17 @@ export class Module {
   /**
    * Load module from JSON file or object
    */
-  static async loadFromJSON(source) {
-    let data;
+  static async loadFromJSON(source: unknown): Promise<Module> {
+    let input: unknown;
 
     if (typeof source === 'string') {
       const response = await fetch(source);
-      data = await response.json();
+      input = await response.json();
     } else {
-      data = source;
+      input = source;
     }
+    if (!isInputScore(input)) throw new TypeError("Expected a score with a baseNote object and a notes array of objects");
+    let data = input;
 
     // A module written for the old time model (tempo, beats per measure,
     // beat()/measure()) is converted first, exactly; see migrate/relational-time.js.
@@ -917,7 +950,7 @@ export class Module {
     }
 
     // Create base note variables from JSON
-    const baseVars = {};
+    const baseVars: InputFields = {};
     for (const [key, value] of Object.entries(data.baseNote)) {
       baseVars[key] = value;
     }
@@ -931,8 +964,8 @@ export class Module {
     const blockedNoteIds = ['__proto__', 'constructor', 'prototype'];
 
     for (const noteData of data.notes) {
-      const noteId = parseInt(noteData.id, 10);
-      const variables = {};
+      const noteId = parseInt(String(noteData.id), 10);
+      const variables: InputFields = {};
 
       // SECURITY: Validate note ID to prevent prototype pollution and invalid values.
       // Cap at MAX_NOTE_ID (src/binary-note.js), the largest id a note can have:
@@ -997,12 +1030,8 @@ export class Module {
    * Create JSON representation of module
    */
   createModuleJSON() {
-    const moduleObj = {};
+    const baseNote = this._baseNoteJSON();
 
-    // Export base note
-    moduleObj.baseNote = this._baseNoteJSON();
-
-    // Export notes
     const notesArray = [];
     for (const note of Object.values(this.notes)) {
       if (note.id === 0) continue;
@@ -1010,11 +1039,9 @@ export class Module {
     }
 
     notesArray.sort((a, b) => a.id - b.id);
-    moduleObj.notes = notesArray;
-    // Saved under the start-time instrument rule: loading it again migrates nothing.
-    moduleObj.instrumentRule = INSTRUMENT_RULE;
 
-    return moduleObj;
+    // Saved under the start-time instrument rule: loading it again migrates nothing.
+    return { baseNote, notes: notesArray, instrumentRule: INSTRUMENT_RULE } satisfies Score;
   }
 
   /**
@@ -1036,7 +1063,7 @@ export class Module {
       entries.push(noteJSONText(note));
     }
     entries.sort((a, b) => a.id - b.id);
-    const texts = new Array(entries.length);
+    const texts = new Array<string>(entries.length);
     for (let i = 0; i < entries.length; i++) texts[i] = entries[i].text;
 
     // The frame around the notes, with the same keys in the same order as
@@ -1050,12 +1077,12 @@ export class Module {
   // The editor knows which mutations it just committed. Imports, deletes and
   // captures from arbitrary callers take a complete checkpoint instead. Public
   // createModuleJSONString() also accepts direct edits to the exposed fields.
-  historySnapshot(tracked = false) {
+  historySnapshot(tracked: boolean | number[] = false) {
     const prior = this._historyVersion;
     const partial = tracked && prior && this._historyIds && !this._untrackedProperties;
     let ids;
     if (partial) {
-      ids = this._historyIds;
+      ids = this._historyIds!;
       // Some controls write a plain property and supply its ID at capture.
       if (Array.isArray(tracked)) for (const id of tracked) ids.add(Number(id));
     } else {
@@ -1078,7 +1105,7 @@ export class Module {
         (base.instrument !== null && !base.instrument) || (base.repeat !== undefined && !base.repeat)) {
       this._canPatchHistory = false;
     }
-    const row = id => {
+    const row = (id: number) => {
       const note = this.notes[id];
       if (!note) return undefined;
       const { color, instrument, measure } = note.properties;
@@ -1091,14 +1118,14 @@ export class Module {
       JSON.stringify(this._baseNoteJSON()), JSON.stringify(INSTRUMENT_RULE), !partial);
     version.origin = this._historyOrigin || (this._historyOrigin = Symbol());
     this._historyVersion = version;
-    this._historyIds = new Set();
+    this._historyIds = new Set<number>();
     return { snapshotStr: version.text, version };
   }
 
   // A fresh load establishes graph insertion order. Keep it for expression
   // edits that read the same variables. A rewire or structural edit uses the
   // loader on the next restore, which reestablishes that order from the text.
-  noteExpressionChanged(id, previous, next) {
+  noteExpressionChanged(id: number, previous: BinaryExpression | undefined, next: BinaryExpression | undefined) {
     if (!this._historyIds) return;
     this._historyIds.add(id);
     if (!this._canPatchHistory || previous === next) return;
@@ -1116,7 +1143,7 @@ export class Module {
     }
   }
 
-  restoreHistoryVersion(target) {
+  restoreHistoryVersion(target: PagedSnapshot | undefined | null) {
     if (!target || target.origin !== this._historyOrigin || !this._canPatchHistory || !this._historyVersion || this._historyIds?.size ||
         this._untrackedProperties || target.baseText !== this._historyVersion.baseText) return false;
     const changes = changedRows(this._historyVersion, target);
@@ -1138,14 +1165,14 @@ export class Module {
       this.notes[note.id] = note;
       this.markNoteDirty(note.id);
     }
-    this._historyIds.clear();
+    this._historyIds?.clear();
     this._historyVersion = target;
     return true;
   }
 
   /** The BaseNote as saved in the module JSON. */
   _baseNoteJSON() {
-    const baseObj = {};
+    const baseObj: ScoreFields = {};
     for (const name of EXPRESSION_VARS) {
       const source = this.baseNote.getExpressionSource(name);
       if (source) {
@@ -1185,7 +1212,7 @@ export class Module {
     // Sort by startTime — exact comparison (a valueOf() subtraction collapses
     // rationals that differ past double precision), with id tie-break so
     // export renumbering stays deterministic.
-    const sortByStartTime = (a, b) => {
+    const sortByStartTime = (a: Note, b: Note) => {
       const aStart = a.getExactVariable('startTime');
       const bStart = b.getExactVariable('startTime');
       if (!aStart || !bStart) return a.id - b.id;
@@ -1200,7 +1227,7 @@ export class Module {
     regularNotes.sort(sortByStartTime);
 
     // Build ID mapping
-    const newMapping = { 0: 0 };
+    const newMapping: Record<number, number> = { 0: 0 };
     let newId = 1;
 
     for (const note of measureNotes) {
@@ -1211,7 +1238,7 @@ export class Module {
     }
 
     // Track parent relationships
-    const parentRelationships = {};
+    const parentRelationships: Record<string, number> = {};
     for (const id in this.notes) {
       const note = this.notes[id];
       if (note.parentId !== undefined) {
@@ -1219,7 +1246,7 @@ export class Module {
       }
     }
 
-    const updateReferences = source => remapNoteIds(source, id => newMapping[id] ?? id);
+    const updateReferences = (source: string) => remapNoteIds(source, (id: number) => newMapping[id] ?? id)!;
 
     // The BaseNote keeps its identity across reindexing. Its frequency and
     // other fields may read ordinary notes whose IDs are about to change.
@@ -1239,7 +1266,7 @@ export class Module {
     }
 
     // Rebuild notes with new IDs
-    const newNotes = { 0: baseNote };
+    const newNotes: Record<string, Note> = { 0: baseNote };
 
     for (const oldId in this.notes) {
       if (Number(oldId) === 0) continue;
@@ -1248,7 +1275,7 @@ export class Module {
       const updatedId = newMapping[note.id];
 
       // Create new variables with updated references
-      const variables = {};
+      const variables: InputFields = {};
       const exprNames = EXPRESSION_VARS;
 
       for (const name of exprNames) {
@@ -1324,15 +1351,15 @@ export class Module {
 
   // One maximum per 128 note IDs. Sound ends use the same exact addition and
   // final conversion as the transport. Measure ties are resolved by each caller.
-  getTimingSummary() {
+  getTimingSummary(): TimingSummary {
     const blockSize = 128;
     const values = this.evaluateModule();
     const previous = this._timingSummary;
     if (previous?.revision === this._evaluationRevision && previous.generation === timingGeneration) return previous;
     const dirty = previous?.generation === timingGeneration ? this.evaluationChangesSince(previous.revision) : null;
-    const blocks = dirty ? previous.blocks : new Map();
-    const measureIds = dirty ? previous.measureIds : new Set();
-    const noteEnd = note => {
+    const blocks = dirty && previous ? previous.blocks : new Map<number, number>();
+    const measureIds = dirty && previous ? previous.measureIds : new Set<number>();
+    const noteEnd = (note: Note) => {
       if (!note.hasExpression('startTime') || !note.hasExpression('duration') || !note.hasExpression('frequency')) return 0;
       const record = note.module === this ? values.get(note.id) : null;
       const start = record?.startTime ?? note.getVariable('startTime');
@@ -1341,7 +1368,7 @@ export class Module {
       try { return toNumber(start.add(duration)); }
       catch { return toNumber(start) + toNumber(duration); }
     };
-    const visit = (id, block) => {
+    const visit = (id: number, block: number) => {
       const note = this.notes[id];
       if (!note) return;
       if (isMeasureNote(note)) measureIds.add(id);
@@ -1350,7 +1377,7 @@ export class Module {
       if (end > (blocks.get(block) || 0)) blocks.set(block, end);
     };
     if (dirty) {
-      const touched = new Set();
+      const touched = new Set<number>();
       for (const id of dirty) {
         touched.add(Math.floor(id / blockSize));
         measureIds.delete(id);

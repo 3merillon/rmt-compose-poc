@@ -1,13 +1,22 @@
-import { eventBus } from '../utils/event-bus.js';
-import { PagedSnapshot } from './snapshot-pages.js';
+import type { HistoryCapture } from '../utils/event-bus.ts';
+import type { Module } from '../module.ts';
+interface HistoryEntry { label: string; version?: PagedSnapshot; snapshot: string }
+import { eventBus } from '../utils/event-bus.ts';
+import { PagedSnapshot } from './snapshot-pages.ts';
 
 // The string supplied to autosave can become a flat, score-sized allocation.
 // Keep only the page version in history and assemble text for a full restore.
-function pagedEntry(label, version) {
+function pagedEntry(label: string, version: PagedSnapshot) {
   return { label, version, get snapshot() { return this.version.text; } };
 }
 
 class HistoryManager {
+  declare _maxSize: number;
+  declare _maxBytes: number;
+  declare _undo: HistoryEntry[];
+  declare _redo: HistoryEntry[];
+  declare _isRestoring: boolean;
+
   constructor(maxSize = 50) {
     this._maxSize = maxSize;
     // Budget history beyond the current paged checkpoint. Standalone strings
@@ -19,7 +28,7 @@ class HistoryManager {
   }
 
   // Serialize a snapshot object to a minified JSON string (with fallback).
-  _serialize(obj) {
+  _serialize(obj: unknown): string | null | undefined {
     if (typeof obj === 'string') return obj;
     try { return JSON.stringify(obj); } catch (e) {
       // A snapshot that cannot be stringified (e.g. a BigInt or Fraction leaked
@@ -30,12 +39,12 @@ class HistoryManager {
   }
   // Parse a stored snapshot string back to a fresh object (each restore gets its own
   // copy => same isolation the old deep-clone provided). Tolerates a raw object too.
-  _deserialize(str) {
-    if (str && typeof str === 'object') return str;
+  _deserialize(str: string | object): unknown {
+    if (typeof str === 'object') return str;
     try { return JSON.parse(str); } catch { return null; }
   }
 
-  _entry(label, snapshot, snapshotStr, version) {
+  _entry(label: string, snapshot: unknown, snapshotStr: string | undefined, version?: PagedSnapshot): HistoryEntry | null {
     if (version instanceof PagedSnapshot) return pagedEntry(label, version);
     const text = typeof snapshotStr === 'string' ? snapshotStr : this._serialize(snapshot);
     return text == null ? null : { label, version, snapshot: text };
@@ -47,8 +56,8 @@ class HistoryManager {
     const entries = this._undo;
     while (entries.length > this._maxSize) entries.shift();
     if (entries.length <= 2) return;
-    const versions = new Set();
-    const pages = new Set();
+    const versions = new Set<PagedSnapshot>();
+    const pages = new Set<object>();
     let bytes = 0;
     for (let i = entries.length - 1; i >= 0; i--) {
       const entry = entries[i];
@@ -75,7 +84,7 @@ class HistoryManager {
   }
 
   maxSize() { return this._maxSize; }
-  setMaxSize(n) { this._maxSize = Math.max(1, Number(n) || 50); }
+  setMaxSize(n: number) { this._maxSize = Math.max(1, Number(n) || 50); }
 
   canUndo() { return this._undo.length > 1; }
   canRedo() { return this._redo.length > 0; }
@@ -93,7 +102,7 @@ class HistoryManager {
     this._emitStackChanged();
   }
 
-  capture({ label = 'Change', snapshot, snapshotStr, version }) {
+  capture({ label = 'Change', snapshot, snapshotStr, version }: HistoryCapture) {
     // Ignore invalid input or captures triggered during restore
     if (this._isRestoring) return;
     if (snapshot == null && snapshotStr == null) return;
@@ -115,12 +124,12 @@ class HistoryManager {
     if (!this.canUndo()) return;
 
     // Move current (top) to redo, restore to previous
-    const current = this._undo.pop();
+    const current = this._undo.pop()!;
     this._redo.push(current);
 
     const prev = this._undo[this._undo.length - 1];
     if (!prev) return;
-    let parsed;
+    let parsed: unknown;
     const deserialize = () => this._deserialize(prev.snapshot);
 
     this._isRestoring = true;
@@ -145,7 +154,7 @@ class HistoryManager {
 
     // Pushing onto undo to make it the new "current"
     this._undo.push(next);
-    let parsed;
+    let parsed: unknown;
     const deserialize = () => this._deserialize(next.snapshot);
 
     this._isRestoring = true;
@@ -162,7 +171,7 @@ class HistoryManager {
     }
   }
 
-  seedIfEmpty({ label = 'Initial', snapshot, snapshotStr, version }) {
+  seedIfEmpty({ label = 'Initial', snapshot, snapshotStr, version }: HistoryCapture) {
     if (this._undo.length === 0 && (snapshot != null || snapshotStr != null)) {
       const entry = this._entry(String(label || 'Initial'), snapshot, snapshotStr, version);
       if (!entry) return;
@@ -184,7 +193,7 @@ class HistoryManager {
     }
   }
 
-  _deepClone(obj) {
+  _deepClone(obj: unknown): unknown {
     try {
       return JSON.parse(JSON.stringify(obj));
     } catch {
@@ -204,7 +213,7 @@ export const history = new HistoryManager();
  * again). Should that fail, the object as { snapshot }, so that the history and
  * the autosave report the failure as they always have.
  */
-export function moduleSnapshot(module, tracked = false) {
+export function moduleSnapshot(module: Pick<Module, 'createModuleJSON'> & Partial<Pick<Module, 'historySnapshot' | 'createModuleJSONString'>>, tracked: boolean | number[] = false): HistoryCapture {
   try {
     if (typeof module?.historySnapshot === 'function') return module.historySnapshot(tracked);
     if (module && typeof module.createModuleJSONString === 'function') {

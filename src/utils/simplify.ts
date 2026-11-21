@@ -1,3 +1,6 @@
+import type { Module } from '../module.ts';
+import type { Note } from '../note.ts';
+import type { BinaryExpression } from '../binary-note.ts';
 /**
  * Expression simplifier and octave-safe multiplier, with an evaluation check.
  *
@@ -8,36 +11,36 @@
  * is returned unchanged.
  */
 import Fraction from 'fraction.js';
-import { BinaryEvaluator } from '../binary-evaluator.js';
-import { compileDSL } from '../dsl/index.js';
-import { simplifyDSL, scaleDSL } from '../dsl/simplify.js';
-import { validateExpressionSyntax } from './safe-expression-validator.js';
-import * as X from '../value/exact.js';
+import { BinaryEvaluator } from '../binary-evaluator.ts';
+import { compileDSL } from '../dsl/index.ts';
+import { simplifyDSL, scaleDSL } from '../dsl/simplify.ts';
+import { validateExpressionSyntax } from './safe-expression-validator.ts';
+import * as X from '../value/exact.ts';
 
 // Memoization caches
-const __simplifyCache = new Map(); // key: kind + '|' + expr
-const __evalBinaryCache = new Map(); // compile cache for safe binary evaluation
+const __simplifyCache = new Map<string, string>(); // key: kind + '|' + expr
+const __evalBinaryCache = new Map<string, BinaryExpression>(); // compile cache for safe binary evaluation
 
 // =============== Public API ===============
 // `kind` is kept in the signatures for the callers; the DSL's canonical form
 // does not depend on it.
-export function simplifyGeneric(expr, kind, moduleInstance) {
+export function simplifyGeneric(expr: string, kind: string, moduleInstance: Module | null | undefined) {
   return _simplify(expr, kind, moduleInstance);
 }
 
-export function simplifyFrequency(expr, moduleInstance) {
+export function simplifyFrequency(expr: string, moduleInstance: Module | null | undefined) {
   return _simplify(expr, 'frequency', moduleInstance);
 }
 
-export function simplifyDuration(expr, moduleInstance) {
+export function simplifyDuration(expr: string, moduleInstance: Module | null | undefined) {
   return _simplify(expr, 'duration', moduleInstance);
 }
 
-export function simplifyStartTime(expr, moduleInstance) {
+export function simplifyStartTime(expr: string, moduleInstance: Module | null | undefined) {
   return _simplify(expr, 'startTime', moduleInstance);
 }
 
-export function multiplyExpressionByFraction(expr, num, den, kind, moduleInstance) {
+export function multiplyExpressionByFraction(expr: string, num: bigint | number, den: bigint | number, kind: string, moduleInstance: Module | null | undefined) {
   const scaled = scaleDSL(expr, num, den);
   // scaleDSL folds the factor into the expression's coefficient, so it can
   // genuinely get the value wrong. Check it: it must land on exactly
@@ -58,7 +61,7 @@ export function multiplyExpressionByFraction(expr, num, den, kind, moduleInstanc
 
 // =============== Internals ===============
 
-function _simplify(expr, kind, moduleInstance) {
+function _simplify(expr: string, kind: string, moduleInstance: Module | null | undefined) {
   try {
     const key = kind + '|' + expr;
     const cached = __simplifyCache.get(key);
@@ -81,7 +84,7 @@ function _simplify(expr, kind, moduleInstance) {
  * away — or introduced one — would silently repaint the note even though the value
  * still matched. Such a rewrite is rejected and the original is kept.
  */
-function safeEquivalent(oldExpr, newExpr, moduleInstance) {
+function safeEquivalent(oldExpr: string, newExpr: string, moduleInstance: Module | null | undefined) {
   try {
     const a = evaluateExpr(oldExpr, moduleInstance);
     const b = evaluateExpr(newExpr, moduleInstance);
@@ -95,7 +98,7 @@ function safeEquivalent(oldExpr, newExpr, moduleInstance) {
 }
 
 /** A note's exact values as the evaluator reads them from a record (recordValue). */
-function noteRecord(note) {
+function noteRecord(note: Note) {
   return {
     startTime: note.getExactVariable?.('startTime'),
     duration: note.getExactVariable?.('duration'),
@@ -115,13 +118,13 @@ function noteRecord(note) {
  * 20,000-note module: most of the step). What a record holds, and which ids
  * have one, are unchanged.
  */
-function noteRecords(moduleInstance) {
-  const records = new Map();
+function noteRecords(moduleInstance: Module | null | undefined) {
+  const records = new Map<number, ReturnType<typeof noteRecord> | undefined>();
   if (moduleInstance) {
     // Bring the evaluation up to date first, as building every record did
     try { moduleInstance.getEvaluationCache?.(); } catch {}
   }
-  const build = (id) => {
+  const build = (id: number) => {
     if (!moduleInstance) return undefined;
     const noteObj = (moduleInstance.notes || {})[id];
     if (noteObj) {
@@ -134,7 +137,7 @@ function noteRecords(moduleInstance) {
     return undefined;
   };
   return {
-    get(id) {
+    get(id: number) {
       if (records.has(id)) return records.get(id);
       const rec = build(id);
       records.set(id, rec);
@@ -151,7 +154,7 @@ function noteRecords(moduleInstance) {
  *   `corrupted` is true when the expression made an irrational value itself (what
  *   drives the crosshatch overlay).
  */
-function evaluateExpr(expr, moduleInstance) {
+function evaluateExpr(expr: string, moduleInstance: Module | null | undefined) {
   const validation = validateExpressionSyntax(expr);
   if (!validation.valid) {
     return null;

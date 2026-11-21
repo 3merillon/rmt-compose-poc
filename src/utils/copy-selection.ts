@@ -1,18 +1,26 @@
+import type { Note } from '../note.ts';
+import type { Module } from '../module.ts';
+import type { AstNode } from '../dsl/ast.ts';
+import type { BinaryExpression, ExpressionName } from '../binary-note.ts';
+import type { ScoreFields, ScoreNote } from '../model-types.ts';
+import type { ExactValue } from '../value/exact.ts';
 import Fraction from 'fraction.js';
-import { VAR } from '../binary-note.js';
-import { parse, tokenize } from '../dsl/index.js';
-import { getCanonicalPropertyName } from '../dsl/constants.js';
-import { remapNoteIds, rewriteNoteReferences } from '../dsl/remap-note-ids.js';
-import { EXPRESSION_VARS, isMeasureNote } from '../note.js';
-import { add, compare, div, equals, isRational, isZero, mul, sub } from '../value/exact.js';
-import { getVariableRefs } from '../variable-deps.js';
-import { valueFactor } from './value-expr.js';
+import { VAR } from '../binary-note.ts';
+import { parse, tokenize } from '../dsl/index.ts';
+import { getCanonicalPropertyName } from '../dsl/constants.ts';
+import { remapNoteIds, rewriteNoteReferences } from '../dsl/remap-note-ids.ts';
+import { EXPRESSION_VARS, isMeasureNote } from '../note.ts';
+import { add, compare, div, equals, isRational, isZero, mul, sub } from '../value/exact.ts';
+import { getVariableRefs } from '../variable-deps.ts';
+import { valueFactor } from './value-expr.ts';
+
+type CopiedFields = Omit<ScoreFields, ExpressionName> & Partial<Record<ExpressionName, string | null>>;
 
 const ZERO = new Fraction(0);
 
 // A self-contained sum such as [P].t + [P].d shifts by exactly one origin.
 // Leave these links in their ordinary form for editing and player inheritance.
-function startShift(node) {
+function startShift(node: AstNode): number {
   if (node.type === 'NoteReference') return Number(node.property === 'startTime' && node.noteId !== 'base' && node.noteId !== 0);
   if (node.type === 'UnaryOp') return -startShift(node.operand);
   if (node.type !== 'BinaryOp') return 0;
@@ -25,7 +33,7 @@ function startShift(node) {
 
 // A quotient by a symbolic sum can be approximate even when the original
 // value is exact. Keep a live factor only if it reconstructs the original.
-function scaledValue(value, anchor, ref) {
+function scaledValue(value: ExactValue, anchor: ExactValue | null, ref: string) {
   if (anchor != null && !isZero(anchor)) {
     if (equals(value, anchor)) return ref;
     const factor = div(value, anchor);
@@ -34,8 +42,9 @@ function scaledValue(value, anchor, ref) {
   return valueFactor(value);
 }
 
-function copiedExpression(note, key, lookup, origin, baseStart, sourceModule) {
+function copiedExpression(note: Note, key: ExpressionName, lookup: (id: number) => number | undefined, origin: ExactValue, baseStart: ExactValue, sourceModule: Module) {
   const source = note.getExpressionSource(key);
+  if (source == null) return null;
   const remapped = remapNoteIds(source, lookup);
   if (remapped == null) return null;
   const refs = note.getExpression(key).getVariableRefs();
@@ -53,7 +62,7 @@ function copiedExpression(note, key, lookup, origin, baseStart, sourceModule) {
   const translated = rewriteNoteReferences(source, (id, spelling, original) => {
     if (getCanonicalPropertyName(spelling) !== 'startTime') return lookup(id);
     if (id === 0) return valueFactor(baseStart);
-    const oldTime = sourceModule.getNoteById(id).getExactVariable('startTime');
+    const oldTime = sourceModule.getNoteById(id)?.getExactVariable('startTime');
     if (oldTime == null) return lookup(id);
     if (!equals(add(sub(oldTime, origin), origin), oldTime)) return valueFactor(oldTime);
     return '(' + remapNoteIds(original, lookup) + ' - base.t + ' + valueFactor(origin) + ')';
@@ -67,11 +76,11 @@ function copiedExpression(note, key, lookup, origin, baseStart, sourceModule) {
 // only while its inputs travel intact. In particular, an octave copied from
 // an omitted note is rebuilt against base.f; pointing base.f back at that
 // octave would create a cycle. Start times are rebased in the new score.
-function baseInputsTravel(module, expression, idMap) {
+function baseInputsTravel(module: Module, expression: BinaryExpression, idMap: ReadonlyMap<number, number>) {
   const pending = [...expression.getVariableRefs()];
-  const visited = new Set();
+  const visited = new Set<number>();
   while (pending.length) {
-    const ref = pending.pop();
+    const ref = pending.pop()!;
     if (visited.has(ref)) continue;
     visited.add(ref);
     const id = ref >> 3;
@@ -79,15 +88,15 @@ function baseInputsTravel(module, expression, idMap) {
     if (variable === VAR.START_TIME) return false;
     if (id === 0) continue; // Other BaseNote fields are checked independently.
     if (!idMap.has(id)) return false;
-    for (const next of getVariableRefs(module.getNoteById(id), variable)) pending.push(next);
+    for (const next of getVariableRefs(module.getNoteById(id)!, variable)) pending.push(next);
   }
   return true;
 }
 
 /** A standalone module rooted at the earliest selected timed item. */
-export function buildModuleFromSelection(module, ids) {
+export function buildModuleFromSelection(module: Module, ids: Iterable<number | string>) {
   const notes = Array.from(new Set(Array.from(ids, Number)), id => module.getNoteById(id))
-    .filter(note => note && note.id !== 0);
+    .filter((note): note is Note => !!note && note.id !== 0);
   if (!notes.length) return null;
 
   notes.sort((a, b) => {
@@ -98,17 +107,17 @@ export function buildModuleFromSelection(module, ids) {
   const firstTimed = notes.find(note => note.hasExpression('startTime'));
   const origin = firstTimed?.getExactVariable('startTime') ?? ZERO;
   const idMap = new Map(notes.map((note, i) => [note.id, i + 1]));
-  const lookup = id => id === 0 ? 0 : idMap.get(id);
+  const lookup = (id: number) => id === 0 ? 0 : idMap.get(id);
   const base = module.baseNote;
   const baseStart = base.getExactVariable('startTime') ?? ZERO;
   const unit = base.getExactVariable('duration') ?? module.getTimeUnit();
   const baseFrequency = base.getExactVariable('frequency');
   const baseAmplitude = base.getExactVariable('amplitude') ?? module.findAmplitude(base);
 
-  const baseNote = { startTime: '0' };
+  const baseNote: CopiedFields = { startTime: '0' };
   for (const key of EXPRESSION_VARS) {
     if (key === 'startTime' || !base.hasExpression(key)) continue;
-    const source = base.getExpressionSource(key);
+    const source = base.getExpressionSource(key)!;
     baseNote[key] = baseInputsTravel(module, base.getExpression(key), idMap)
       ? remapNoteIds(source, lookup)
       : valueFactor(base.getExactVariable(key));
@@ -116,7 +125,7 @@ export function buildModuleFromSelection(module, ids) {
   if (base.properties.instrument) baseNote.instrument = base.properties.instrument;
 
   const rows = notes.map(note => {
-    const row = { id: idMap.get(note.id) };
+    const row: CopiedFields & Pick<ScoreNote, 'id'> = { id: idMap.get(note.id)! };
     if (isMeasureNote(note)) row.measure = true;
     if (note.properties.color) row.color = note.properties.color;
     if (note.properties.instrument) row.instrument = note.properties.instrument;
@@ -129,7 +138,7 @@ export function buildModuleFromSelection(module, ids) {
         continue;
       }
 
-      const value = note.getExactVariable(key);
+      const value = note.getExactVariable(key)!;
       switch (key) {
         case 'startTime': {
           const offset = sub(value, origin);

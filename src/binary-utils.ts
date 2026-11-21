@@ -4,9 +4,10 @@
  * Helper functions for working with the binary expression system.
  */
 
-import Fraction from 'fraction.js';
-import { Module } from './module.js';
-import { compiler, decompiler } from './expression-compiler.js';
+interface Sample { label: string; time: number; ts: number }
+interface Stats { count: number; avg: number; min: number; max: number }
+import type { Module } from './module.ts';
+import { compiler, decompiler } from './expression-compiler.ts';
 
 /**
  * Get performance statistics for a module
@@ -14,7 +15,7 @@ import { compiler, decompiler } from './expression-compiler.js';
  * @param {Module} module
  * @returns {Object} - Statistics object
  */
-export function getModuleStats(module) {
+export function getModuleStats(module: Module) {
   const poolStats = module.getPoolStats ? module.getPoolStats() : null;
   const graphStats = module.getDependencyGraph ? module.getDependencyGraph().stats() : null;
 
@@ -32,7 +33,7 @@ export function getModuleStats(module) {
  * @param {string} varName - Variable name context
  * @returns {Object} - Compilation result with bytecode info
  */
-export function inspectExpression(expr, varName = null) {
+export function inspectExpression(expr: string, varName: string | null = null) {
   const binary = compiler.compile(expr, varName);
 
   return {
@@ -48,13 +49,13 @@ export function inspectExpression(expr, varName = null) {
  * Performance monitoring utilities
  */
 export const perfMonitor = {
-  _samples: [],
+  _samples: [] as Sample[],
   _maxSamples: 100,
 
   /**
    * Record an evaluation time sample
    */
-  record(label, timeMs) {
+  record(label: string, timeMs: number) {
     this._samples.push({ label, time: timeMs, ts: Date.now() });
     if (this._samples.length > this._maxSamples) {
       this._samples.shift();
@@ -64,7 +65,7 @@ export const perfMonitor = {
   /**
    * Get average time for a label
    */
-  getAverage(label) {
+  getAverage(label: string) {
     const matching = this._samples.filter(s => s.label === label);
     if (matching.length === 0) return 0;
     const sum = matching.reduce((a, b) => a + b.time, 0);
@@ -76,7 +77,7 @@ export const perfMonitor = {
    */
   getStats() {
     const labels = new Set(this._samples.map(s => s.label));
-    const stats = {};
+    const stats: Record<string, Stats> = {};
     for (const label of labels) {
       const matching = this._samples.filter(s => s.label === label);
       stats[label] = {
@@ -100,7 +101,7 @@ export const perfMonitor = {
 /**
  * Measure and record evaluation time
  */
-export function timedEvaluate(module, label = 'evaluate') {
+export function timedEvaluate(module: Module, label = 'evaluate') {
   const start = performance.now();
   const result = module.evaluateModule();
   const elapsed = performance.now() - start;

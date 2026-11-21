@@ -1,3 +1,10 @@
+import type { Module } from '../module.ts';
+import type { Note } from '../note.ts';
+import type { ExpressionNote } from '../model-types.ts';
+import type { FractionInput } from 'fraction.js';
+
+type SelectionIds = Iterable<number | string>;
+type GroupVariable = keyof typeof GROUP_VARS;
 /**
  * Group editing: selecting notes by their relations, and changing a variable
  * on many notes at once.
@@ -23,15 +30,15 @@
  * Nothing here touches the DOM; the caller re-evaluates and records the undo step.
  */
 import Fraction from 'fraction.js';
-import { linePredecessor } from '../players.js';
-import { VAR, FIRST_INTERPRETATION_VAR } from '../binary-note.js';
-import { getVariableRefs } from '../variable-deps.js';
-import { isMeasureNote } from '../note.js';
-import { multiplyExpressionByFraction, simplifyStartTime } from './simplify.js';
-import { BinaryEvaluator, recordValue } from '../binary-evaluator.js';
-import * as X from '../value/exact.js';
-import { timeUnitsExpr } from './value-expr.js';
-import { validateExpression } from '../modals/validation.js';
+import { linePredecessor } from '../players.ts';
+import { VAR, FIRST_INTERPRETATION_VAR } from '../binary-note.ts';
+import { getVariableRefs } from '../variable-deps.ts';
+import { isMeasureNote } from '../note.ts';
+import { multiplyExpressionByFraction, simplifyStartTime } from './simplify.ts';
+import { BinaryEvaluator, createEvaluationRecord, recordValue } from '../binary-evaluator.ts';
+import * as X from '../value/exact.ts';
+import { timeUnitsExpr } from './value-expr.ts';
+import { validateExpression } from '../modals/validation.ts';
 
 const ALL_VARS = [VAR.START_TIME, VAR.DURATION, VAR.FREQUENCY, VAR.AMPLITUDE, VAR.ATTACK, VAR.RELEASE];
 
@@ -55,11 +62,11 @@ export const GROUP_VARS = {
 /** The DSL short name of each, for `base.x`. */
 const SHORT = { amplitude: 'a', attack: 'attack', release: 'release', frequency: 'f', duration: 'd' };
 
-const notesOf = (module) => Object.values(module.notes || {});
+const notesOf = (module: Module) => Object.values(module.notes || {});
 
 /** The ids of the notes a note's chosen variables read (the BaseNote is id 0). */
-function readsOf(note, vars) {
-  const out = new Set();
+function readsOf(note: Note, vars: readonly number[]) {
+  const out = new Set<number>();
   for (const v of vars) {
     const refs = getVariableRefs(note, v);
     for (let i = 0; i < refs.length; i++) out.add(refs[i] >> 3);
@@ -77,17 +84,17 @@ function readsOf(note, vars) {
  * @param {'t'|'d'|'f'|'all'} which  the variable of the reading note that is followed
  * @returns {Set<number>}
  */
-export function relatedNoteIds(module, startId, direction, which = 'all') {
+export function relatedNoteIds(module: Module, startId: number, direction: 'dependents' | 'dependencies', which: keyof typeof RELATION_VARS = 'all') {
   const vars = RELATION_VARS[which];
   if (!vars) throw new Error(`unknown relation "${which}"`);
   const start = Number(startId);
-  const result = new Set();
+  const result = new Set<number>();
   const queue = [start];
   const seen = new Set([start]);
 
   if (direction === 'dependencies') {
     while (queue.length) {
-      const note = module.getNoteById(queue.shift());
+      const note = module.getNoteById(queue.shift()!);
       if (!note) continue;
       for (const id of readsOf(note, vars)) {
         if (seen.has(id)) continue;
@@ -100,16 +107,16 @@ export function relatedNoteIds(module, startId, direction, which = 'all') {
 
   if (direction !== 'dependents') throw new Error(`unknown direction "${direction}"`);
   // Inverse index, built once: id -> the notes whose chosen variables read it
-  const readers = new Map();
+  const readers = new Map<number, number[]>();
   for (const note of notesOf(module)) {
     if (Number(note.id) === 0) continue;
     for (const id of readsOf(note, vars)) {
       if (!readers.has(id)) readers.set(id, []);
-      readers.get(id).push(Number(note.id));
+      readers.get(id)!.push(Number(note.id));
     }
   }
   while (queue.length) {
-    for (const id of readers.get(queue.shift()) || []) {
+    for (const id of readers.get(queue.shift()!) || []) {
       if (seen.has(id)) continue;
       seen.add(id);
       result.add(id);
@@ -126,16 +133,16 @@ export function relatedNoteIds(module, startId, direction, which = 'all') {
  *
  * @returns {Set<number>}
  */
-export function followersFor(module, ids, varName) {
+export function followersFor(module: Module, ids: SelectionIds, varName: GroupVariable) {
   const v = GROUP_VARS[varName];
   const selected = new Set(editable(module, ids, varName).map(note => Number(note.id)));
-  const out = new Set();
+  const out = new Set<number>();
   for (const id of selected) {
     const queue = [id];
     const seen = new Set([id]);
     let follows = false;
     while (queue.length && !follows) {
-      const note = module.getNoteById(queue.shift());
+      const note = module.getNoteById(queue.shift()!);
       if (!note) continue;
       const refs = getVariableRefs(note, v);
       for (let i = 0; i < refs.length; i++) {
@@ -153,7 +160,7 @@ export function followersFor(module, ids, varName) {
 }
 
 /** Bars share the duration of ordinary notes but have no playback properties. */
-function editable(module, ids, varName) {
+function editable(module: Module, ids: SelectionIds, varName?: GroupVariable) {
   const out = [];
   for (const raw of new Set(Array.from(ids, Number))) {
     const note = module.getNoteById(raw);
@@ -167,16 +174,17 @@ function editable(module, ids, varName) {
  * in a private evaluation, so even an indirect or nonlinear dependency contributes
  * exactly what it would after the move. Add only the residual to each expression.
  */
-export function translateGroupStarts(module, ids, deltaSec) {
+export function translateGroupStarts(module: Module, ids: SelectionIds, deltaSec: FractionInput) {
   const timed = Array.from(new Set(ids), id => module.getNoteById(id))
-    .filter(n => n && n.id !== 0 && n.hasExpression('startTime'));
+    .filter((n): n is Note => !!n && n.id !== 0 && !!n.hasExpression('startTime'));
   if (!timed.length) return [];
   const zero = new Fraction(0);
   const baseStart = module.baseNote.getExactVariable('startTime');
-  let shift = new Fraction(deltaSec);
-  const targets = new Map();
+  let shift: X.ExactValue = new Fraction(deltaSec);
+  const targets = new Map<number, X.ExactValue>();
   for (const note of timed) {
     const start = note.getExactVariable('startTime');
+    if (!baseStart || !start) throw new Error('Cannot move a group with an unresolved start time');
     const minShift = X.sub(baseStart, start);
     if (X.compare(shift, minShift) < 0) shift = minShift;
     targets.set(note.id, start);
@@ -187,7 +195,7 @@ export function translateGroupStarts(module, ids, deltaSec) {
   // Re-evaluate the combined ancestor graph once. Missing expressions are left
   // alone by evaluateVariables, so dependents read the pinned starts below.
   const evaluation = new BinaryEvaluator(module);
-  const projected = new Map();
+  const projected = new Map<number, ReturnType<typeof createEvaluationRecord>>();
   const inputs = [];
   const records = [];
   const ancestors = new Set([0, ...targets.keys()]);
@@ -195,10 +203,10 @@ export function translateGroupStarts(module, ids, deltaSec) {
     const note = module.getNoteById(id);
     if (!note) continue;
     for (const parent of module.getDirectDependencies(id)) ancestors.add(parent);
-    const record = { exact: null };
-    let input = note;
+    const record = createEvaluationRecord();
+    let input: ExpressionNote = note;
     if (targets.has(id)) {
-      const target = targets.get(id);
+      const target = targets.get(id)!;
       record.startTime = X.shadow(target);
       if (!X.isRational(target)) record.exact = { startTime: target };
       input = { id, expressions: { ...note.expressions, startTime: null } };
@@ -212,10 +220,11 @@ export function translateGroupStarts(module, ids, deltaSec) {
   const unit = recordValue(projected.get(0), VAR.DURATION);
   const writes = [];
   for (const note of timed) {
-    const result = { exact: null };
+    const result = createEvaluationRecord();
     evaluation.evaluateVariable(note, VAR.START_TIME, result, projected);
     const expected = recordValue(result, VAR.START_TIME);
-    const residual = X.sub(targets.get(note.id), expected);
+    if (expected == null) throw new Error('Cannot move a note with an unresolved start time');
+    const residual = X.sub(targets.get(note.id)!, expected);
     const sign = X.compare(residual, zero);
     if (!sign) continue;
     const offset = timeUnitsExpr(sign < 0 ? X.neg(residual) : residual, unit);
@@ -228,7 +237,7 @@ export function translateGroupStarts(module, ids, deltaSec) {
 }
 
 /** "3/4", "0.75", "2" as an exact positive Fraction; null when it is not a plain number. */
-export function parseRatio(text) {
+export function parseRatio(text: unknown) {
   const s = String(text ?? '').trim();
   if (!/^\d+(\.\d+)?(\s*\/\s*\d+(\.\d+)?)?$/.test(s)) return null;
   try {
@@ -237,7 +246,7 @@ export function parseRatio(text) {
   } catch { return null; }
 }
 
-const ratioText = (r) => (r.d === 1n ? `${r.s * r.n}` : `(${r.s * r.n}/${r.d})`);
+const ratioText = (r: Fraction) => (r.d === 1n ? `${r.s * r.n}` : `(${r.s * r.n}/${r.d})`);
 
 /**
  * Multiply each root's value of `varName` by `factorText`: a plain ratio ("3/4")
@@ -246,7 +255,7 @@ const ratioText = (r) => (r.d === 1n ? `${r.s * r.n}` : `(${r.s * r.n}/${r.d})`)
  *
  * @returns {{ changed: number[], followed: number[], skipped: {id:number, reason:string}[] }}
  */
-export function scaleGroup(module, ids, varName, factorText) {
+export function scaleGroup(module: Module, ids: SelectionIds, varName: GroupVariable, factorText: string) {
   const v = GROUP_VARS[varName];
   if (v === undefined) throw new Error(`cannot scale "${varName}"`);
   const ratio = parseRatio(factorText);
@@ -255,7 +264,7 @@ export function scaleGroup(module, ids, varName, factorText) {
   const notes = editable(module, ids, varName);
   const followers = followersFor(module, notes.map((n) => n.id), varName);
   const changed = [], followed = [], skipped = [];
-  const writes = [];
+  const writes: [Note, string][] = [];
   for (const note of notes) {
     const id = Number(note.id);
     if (followers.has(id)) { followed.push(id); continue; }
@@ -276,7 +285,7 @@ export function scaleGroup(module, ids, varName, factorText) {
       continue;
     }
     try { validateExpression(module, id, next, varName); }
-    catch (e) { skipped.push({ id, reason: e.message }); continue; }
+    catch (e) { skipped.push({ id, reason: e instanceof Error ? e.message : String(e) }); continue; }
     writes.push([note, next]);
   }
   // Write after every new text is computed, so each was folded against the values as they were
@@ -288,22 +297,22 @@ export function scaleGroup(module, ids, varName, factorText) {
  * Write the same expression to `varName` of every selected note. A note for which
  * the expression would read itself (or close a loop) is skipped and reported.
  */
-export function setGroup(module, ids, varName, exprText) {
+export function setGroup(module: Module, ids: SelectionIds, varName: GroupVariable, exprText: string) {
   if (GROUP_VARS[varName] === undefined) throw new Error(`cannot set "${varName}"`);
   const text = String(exprText ?? '').trim();
   const changed = [], skipped = [];
-  const writes = [];
+  const writes: [Note, string][] = [];
   for (const note of editable(module, ids, varName)) {
     const id = Number(note.id);
     try { writes.push([note, validateExpression(module, id, text, varName)]); }
-    catch (e) { skipped.push({ id, reason: e.message }); }
+    catch (e) { skipped.push({ id, reason: e instanceof Error ? e.message : String(e) }); }
   }
   for (const [note, next] of writes) { note.setVariable(varName + 'String', next); changed.push(Number(note.id)); }
   return { changed, followed: [], skipped };
 }
 
 /** Remove the notes' own amplitude, attack or release, so each inherits again. */
-export function inheritGroup(module, ids, varName) {
+export function inheritGroup(module: Module, ids: SelectionIds, varName: GroupVariable) {
   const v = GROUP_VARS[varName];
   if (v === undefined || v < FIRST_INTERPRETATION_VAR) throw new Error(`"${varName}" does not inherit`);
   const changed = [], skipped = [];
@@ -321,11 +330,11 @@ export function inheritGroup(module, ids, varName) {
  * then inherit it along their lines. With null, every selected note inherits.
  * @returns {{changed:number[], followed:number[], skipped:object[], players:number}}
  */
-export function setGroupOnePlayer(module, ids, value) {
+export function setGroupOnePlayer(module: Module, ids: SelectionIds, value: string | null) {
   if (value == null) return { ...setGroupProperty(module, ids, 'instrument', null), players: 0 };
   const notes = editable(module, ids);
   const chosen = new Set(notes.map((n) => Number(n.id)));
-  const memo = new Map();
+  const memo = new Map<number, string>();
   const heads = notes.filter((n) => {
     const p = linePredecessor(module, n, memo);
     return !p || !chosen.has(Number(p.id));
@@ -342,7 +351,7 @@ export function setGroupOnePlayer(module, ids, value) {
 }
 
 /** Set (or, with null, remove) the instrument or the colour of every selected note. */
-export function setGroupProperty(module, ids, key, value) {
+export function setGroupProperty(module: Module, ids: SelectionIds, key: 'color' | 'instrument', value: string | null) {
   if (key !== 'instrument' && key !== 'color') throw new Error(`cannot set "${key}"`);
   const changed = [];
   for (const note of editable(module, ids)) {

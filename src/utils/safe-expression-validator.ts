@@ -1,3 +1,6 @@
+import type { Module } from '../module.ts';
+import type { Note } from '../note.ts';
+import type { ExpressionName } from '../model-types.ts';
 /**
  * Safe Expression Validator and Evaluator
  *
@@ -12,9 +15,9 @@
  */
 
 import Fraction from 'fraction.js';
-import { compiler } from '../expression-compiler.js';
-import { BinaryEvaluator } from '../binary-evaluator.js';
-import { findDependencyCycle } from '../variable-deps.js';
+import { compiler } from '../expression-compiler.ts';
+import { BinaryEvaluator } from '../binary-evaluator.ts';
+import { findDependencyCycle } from '../variable-deps.ts';
 
 /**
  * Validate that an expression string is safe to use.
@@ -23,7 +26,7 @@ import { findDependencyCycle } from '../variable-deps.js';
  * @param {string} expr - The expression to validate
  * @returns {{valid: boolean, error?: string}} - Validation result
  */
-export function validateExpressionSyntax(expr) {
+export function validateExpressionSyntax(expr: unknown): { valid: true } | { valid: false; error: string } {
     if (expr == null) {
         return { valid: false, error: 'Expression cannot be null or undefined' };
     }
@@ -71,7 +74,7 @@ export function validateExpressionSyntax(expr) {
         compiler.compile(exprStr);
         return { valid: true };
     } catch (e) {
-        return { valid: false, error: `Invalid expression: ${e.message}` };
+        return { valid: false, error: `Invalid expression: ${e instanceof Error ? e.message : String(e)}` };
     }
 }
 
@@ -84,7 +87,7 @@ export function validateExpressionSyntax(expr) {
  * @param {Map} [evalCache] - Optional pre-built evaluation cache
  * @returns {Fraction|null} - The evaluated result, or null if evaluation fails
  */
-export function evaluateExpressionSafe(expr, moduleInstance, evalCache = null) {
+export function evaluateExpressionSafe(expr: unknown, moduleInstance: Module | null | undefined, evalCache: Parameters<BinaryEvaluator['evaluate']>[1] = null): Fraction | null {
     if (!moduleInstance) {
         console.warn('evaluateExpressionSafe: No module instance provided');
         return null;
@@ -113,25 +116,9 @@ export function evaluateExpressionSafe(expr, moduleInstance, evalCache = null) {
         const evaluator = new BinaryEvaluator(moduleInstance);
         const result = evaluator.evaluate(binary, cache);
 
-        // Convert result to Fraction
-        if (result == null) {
-            return null;
-        }
-        if (result instanceof Fraction) {
-            return result;
-        }
-        if (typeof result.toFraction === 'function') {
-            // Exact either way: a Fraction-like toFraction() gives a Fraction or an 'n/d' string
-            const exact = result.toFraction();
-            return exact instanceof Fraction ? exact : new Fraction(exact);
-        }
-        if (typeof result.n === 'bigint' && typeof result.d === 'bigint') {
-            const sign = result.s != null && result.s < 0n ? -1n : 1n;
-            return new Fraction(sign * result.n, result.d);
-        }
-        return new Fraction(result);
+        return result;
     } catch (e) {
-        console.warn('evaluateExpressionSafe: Evaluation failed:', e.message);
+        console.warn('evaluateExpressionSafe: Evaluation failed:', e instanceof Error ? e.message : String(e));
         return null;
     }
 }
@@ -143,8 +130,8 @@ export function evaluateExpressionSafe(expr, moduleInstance, evalCache = null) {
  * @param {Object} moduleInstance - The module instance
  * @returns {Map} - Map from noteId to evaluated values object
  */
-export function buildEvaluationCache(moduleInstance) {
-    const cache = new Map();
+export function buildEvaluationCache(moduleInstance: Module | null | undefined) {
+    const cache = new Map<number, Record<ExpressionName, Fraction | null>>();
 
     if (!moduleInstance) {
         return cache;
@@ -197,7 +184,7 @@ export function buildEvaluationCache(moduleInstance) {
 /**
  * Safely get a variable from a note, returning null on error
  */
-function safeGetVariable(note, varName) {
+function safeGetVariable(note: Note, varName: ExpressionName) {
     try {
         if (note && typeof note.getVariable === 'function') {
             return note.getVariable(varName);
@@ -219,7 +206,7 @@ function safeGetVariable(note, varName) {
  * @returns {string} - The validated/normalized expression
  * @throws {Error} - If the expression is invalid
  */
-export function validateAndNormalizeExpression(expr, moduleInstance, noteId, variableType) {
+export function validateAndNormalizeExpression(expr: unknown, moduleInstance: Module | null, noteId: number | null | undefined, variableType: string) {
     const exprStr = String(expr).trim();
 
     // Validate syntax
@@ -264,7 +251,7 @@ export function validateAndNormalizeExpression(expr, moduleInstance, noteId, var
  * @param {*} value - The value to check
  * @returns {boolean} - True if it looks like a function expression
  */
-export function isLegacyFunctionExpression(value) {
+export function isLegacyFunctionExpression(value: unknown) {
     if (typeof value !== 'string') {
         return false;
     }
