@@ -22,7 +22,7 @@ import type { ExactValue } from '../value/exact.ts';
 import type { Module } from '../module.ts';
 import { compiler } from '../expression-compiler.ts';
 import { BinaryEvaluator } from '../binary-evaluator.ts';
-import { eventBus } from '../utils/event-bus.js';
+import { eventBus } from '../utils/event-bus.ts';
 
 let current: { pass: number; factor: ExactValue | null } = { pass: 0, factor: null };
 
