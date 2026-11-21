@@ -137,6 +137,8 @@ export class Module {
     // Notes whose dependents markNoteDirty() has already marked dirty since
     // the last evaluation: marking one of them again needs no second walk
     this._dirtyClosed = new Set();
+    this._evaluationRevision = 0;
+    this._recentEvaluations = [];
     this._evaluating = false; // reentrancy guard for evaluateModule()
 
     // Create base note with default values
@@ -590,6 +592,7 @@ export class Module {
    * Add a new note
    */
   addNote(variables = {}) {
+    this._recordEvaluation(null);
     this._historyIds = null;
     this._canPatchHistory = false;
     const id = this.nextId++;
@@ -611,6 +614,7 @@ export class Module {
    * Remove a note
    */
   removeNote(id) {
+    this._recordEvaluation(null);
     this._historyIds = null;
     this._canPatchHistory = false;
     const numId = Number(id);
@@ -720,11 +724,32 @@ export class Module {
     // Update corruption flags in dependency graph after evaluation
     // This enables visual tinting for notes with irrational values (TET scales)
     this._updateCorruptionFlags(cache, dirtyIds);
+    this._recordEvaluation(dirtyIds);
 
     this._dirtyNotes.clear();
     this._dirtyClosed.clear();
 
     return cache;
+  }
+
+  _recordEvaluation(ids) {
+    this._evaluationRevision++;
+    // A missed large batch requires a full sync. Keep a short journal because
+    // edits may evaluate more than once before the workspace next draws.
+    this._recentEvaluations.push(ids && ids.length <= 8192 ? ids : null);
+    if (this._recentEvaluations.length > 8) this._recentEvaluations.shift();
+  }
+
+  evaluationChangesSince(revision) {
+    const count = this._evaluationRevision - revision;
+    if (!Number.isInteger(count) || count < 0 || count > this._recentEvaluations.length) return null;
+    const ids = new Set();
+    for (let i = this._recentEvaluations.length - count; i < this._recentEvaluations.length; i++) {
+      const batch = this._recentEvaluations[i];
+      if (!batch) return null;
+      for (const id of batch) ids.add(id);
+    }
+    return ids;
   }
 
   /**
@@ -1136,6 +1161,7 @@ export class Module {
    * Reindex module (renumber notes in order)
    */
   reindexModule() {
+    this._recordEvaluation(null);
     this._historyIds = null;
     this._canPatchHistory = false;
     const baseNote = this.baseNote;
@@ -1276,6 +1302,7 @@ export class Module {
    * Invalidate all cached evaluations
    */
   invalidateAll() {
+    this._recordEvaluation(null);
     this._evaluationCache.clear();
     this._dirtyNotes.clear();
     this._dirtyClosed.clear();

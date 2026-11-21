@@ -53,7 +53,7 @@ once. A group move does the same per mover.
 
 ## 2. The module marks dirty
 
-`Module.markNoteDirty(noteId)` (`src/module.js:242`):
+`Module.markNoteDirty(noteId)` (`src/module.js:244`):
 
 1. Adds the id to `_dirtyNotes`.
 2. `_registerNoteDependencies(note)` — re-scans the note's bytecode and rewrites its rows in the
@@ -71,12 +71,12 @@ once. A group move does the same per mover.
 
 Callers (octave buttons, drags, modals) then mark each dependent again. A note already reached by a
 walk of the same dirty cycle now only re-registers its own bytecode (`Module._dirtyClosed`,
-`src/module.js:257`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
+`src/module.js:259`, cleared whenever the dirty set is), so a cycle costs one walk. Before, a commit
 in the middle of `chain-1000` ran 501 walks over 125,000 notes. Both engines do this.
 
 ## 3. Evaluation
 
-`Module.evaluateModule()` (`src/module.js:686`) delegates to
+`Module.evaluateModule()` (`src/module.js:690`) delegates to
 `IncrementalEvaluator.evaluateDirty()` (`src/binary-evaluator.js:1057`):
 
 ```
@@ -143,21 +143,14 @@ renderer.sync({
 })
 ```
 
-It rebuilds every instance array (posSize, colours, flags, silence masks, fraction label strings),
-rebuilds `_noteIdToIndex`, computes the corruption type per note, and uploads to the GPU.
-
-::: info There is no per-note dirty tracking in the renderer
-`sync()` reallocates and re-uploads **all N** instance arrays with
-`gl.bufferData(..., gl.DYNAMIC_DRAW)` every call. There are 151 `bufferData` calls in `renderer.js`
-against 4 `bufferSubData`. Making this incremental is the single biggest remaining perf item.
-:::
+A full sync builds the instance arrays, the slot map, labels and corruption flags. For a supported workspace edit, the renderer reads the evaluation change set, updates the affected slots and uploads the changed GPU ranges.
 
 The corruption scan is the one part that is genuinely clever. Rather than asking "what does note *i*
 depend on?" for every note (a transitive BFS per note — O(N²) on deep chains), it inverts the
 question: *i* transitively depends on a corrupt note **iff** *i* is a transitive dependent of one. So
 a single multi-source BFS over the `dependents` graph, seeded by the (usually empty) corrupt set,
 answers it for all notes at once in O(N+E) — and is a complete no-op when nothing is corrupt
-(`renderer.js:1016-1063`).
+(`renderer.js:1074-1121`).
 
 The result lands in `_corruptionType`, a `Float32Array` bound to vertex attribute 7:
 
@@ -223,7 +216,7 @@ Note 1's frequency changes
 ```
 
 For *visualisation* — the coloured dependency lines and rings — the module asks a different question.
-`module.getDependentsByProperty(noteId)` (`src/module.js:455`) returns
+`module.getDependentsByProperty(noteId)` (`src/module.js:457`) returns
 
 ```javascript
 { frequency: [...], startTime: [...], duration: [...] }
@@ -242,7 +235,7 @@ the colours are property-specific: orange = frequency, teal = startTime, purple 
 | Evaluation cache | `Map<noteId, result>` on the module and the incremental evaluator | Invalidated per note when marked dirty. |
 | Module end time | A **module-level** `let` in `src/module.js`, not a per-instance field | Cleared by `invalidateModuleEndTimeCache()`, emitted on every expression change. |
 | Renderer instance arrays | `RendererAdapter` | Rebuilt wholesale on every `sync()`. No per-note tracking. |
-| Children-tree (drag preview) | `renderer.js:10579`, keyed `anchorId\|_posEpoch\|_sceneEpoch` | Survives a drag (which changes neither key), invalidated by any real edit. |
+| Children-tree (drag preview) | `renderer.js:10670`, keyed `anchorId\|_posEpoch\|_sceneEpoch` | Survives a drag (which changes neither key), invalidated by any real edit. |
 
 ## Events
 
@@ -315,7 +308,7 @@ beside it (key `unloadable`) before the autosave replaces it, and the default mo
 ```
 any committing edit
   → captureSnapshot(label, tracked)     player.js:5651
-      → module.historySnapshot(tracked) → snapshotStr, version   module.js:1028
+      → module.historySnapshot(tracked) → snapshotStr, version   module.js:1053
           (= JSON.stringify(createModuleJSON()); tracked edits serialize the changed rows)
       → eventBus.emit('history:seedIfEmpty', { label: 'Initial', snapshotStr })
       → eventBus.emit('history:capture',     { label, snapshotStr })

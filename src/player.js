@@ -2792,7 +2792,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             } catch {}
             evaluatedNotes = myModule.evaluateModule();
             setEvaluatedNotes(evaluatedNotes);
-            updateVisualNotes(evaluatedNotes);
+            updateVisualNotes(evaluatedNotes, true);
             try { captureSnapshot(`Octave ${direction} Note ${noteId}`, true); } catch {}
 
             // Do not change selection on octave click. Refresh modal only if the edited note is currently selected.
@@ -3059,14 +3059,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         return newColor;
     }
     
-    function updateVisualNotes(nextEvaluated) {
+    function updateVisualNotes(nextEvaluated, incremental = false) {
         // GL-only: update evaluated notes and sync the workspace renderer. No DOM mirroring.
         evaluatedNotes = nextEvaluated;
         try { refreshTempoUI(); } catch {}
         if (glWorkspace) {
             try {
                 glWorkspace.sync({
-                    evaluatedNotes,
+                    incremental, evaluatedNotes,
                     module: myModule,
                     xScaleFactor,
                     yScaleFactor,
@@ -3081,11 +3081,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
     // Lightweight helper to re-sync GL renderer selection ordering without rebuilding DOM
-    function syncRendererSelection() {
+    function syncRendererSelection(incremental = true) {
         if (glWorkspace) {
             try {
                 glWorkspace.sync({
-                    evaluatedNotes,
+                    incremental, evaluatedNotes,
                     module: myModule,
                     xScaleFactor,
                     yScaleFactor,
@@ -4646,7 +4646,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         } catch {}
     }
 
-    function initializeModule() {
+    function initializeModule(incremental = false) {
         evaluatedNotes = myModule.evaluateModule();
         setEvaluatedNotes(evaluatedNotes);
         newNotes = Object.keys(evaluatedNotes)
@@ -4669,7 +4669,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         } catch {}
         updateTimingBoundaries();
         createMeasureBars();
-        updateVisualNotes(evaluatedNotes);
+        updateVisualNotes(evaluatedNotes, incremental);
         updatePlayhead();
     }
 
@@ -5185,7 +5185,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           evaluatedNotes = myModule.evaluateModule();
           setEvaluatedNotes(evaluatedNotes);
-          updateVisualNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes, true);
           createMeasureBars();
           invalidateModuleEndTimeCache();
           try { captureSnapshot("Move Note " + noteId, true); } catch {}
@@ -5272,7 +5272,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           evaluatedNotes = myModule.evaluateModule();
           setEvaluatedNotes(evaluatedNotes);
-          updateVisualNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes, true);
           createMeasureBars();
           invalidateModuleEndTimeCache();
           try { captureSnapshot(`Move ${S.size} Notes`, true); } catch {}
@@ -5323,7 +5323,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
           evaluatedNotes = myModule.evaluateModule();
           setEvaluatedNotes(evaluatedNotes);
-          updateVisualNotes(evaluatedNotes);
+          updateVisualNotes(evaluatedNotes, true);
           createMeasureBars();
           invalidateModuleEndTimeCache();
           try { captureSnapshot("Resize Note " + noteId, true); } catch {}
@@ -5727,7 +5727,7 @@ try {
       setModule(newModule, { skipBackgroundEval: true });
 
       // loadFromJSON already calls invalidateAll(), no need to mark dirty again
-      initializeModule();
+      initializeModule(patched);
       invalidateModuleEndTimeCache();
 
       if (center && glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {

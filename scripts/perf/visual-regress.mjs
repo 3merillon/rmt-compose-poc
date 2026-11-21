@@ -135,14 +135,22 @@ async function shootModule(browser, moduleName, dir) {
   if (process.env.HUB_ID) await page.addInitScript((id) => { window.__HUB_ID = id; }, Number(process.env.HUB_ID));
   if (process.env.ATLAS_CACHE_OFF) await page.addInitScript(() => { window.__ATLAS_CACHE_OFF = true; });
 
+  let body;
   if (moduleName !== 'defaultModule') {
     const res = await page.request.get(`${URL_BASE}/modules/perf/${moduleName}.json`);
     if (!res.ok()) throw new Error(`fetch ${moduleName}: ${res.status()}`);
-    const body = await res.text();
-    await page.route('**/modules/defaultModule.json', (r) =>
-      r.fulfill({ status: 200, contentType: 'application/json', body })
-    );
+    body = await res.text();
   }
+  // The first atlas can be rasterized before or after the webfont arrives.
+  // Compare the same font state on both servers, including the first draw.
+  await page.route('**/modules/defaultModule.json', async route => {
+    await page.evaluate(async () => {
+      await Promise.all([400, 700].map(weight => document.fonts.load(weight + ' 64px "Roboto Mono"', '0123456789[]')));
+      await document.fonts.ready;
+    });
+    if (body === undefined) return route.continue();
+    return route.fulfill({ status: 200, contentType: 'application/json', body });
+  });
 
   await page.goto(`${URL_BASE}/?perf=1`, { waitUntil: 'load' });
   await page.waitForFunction(

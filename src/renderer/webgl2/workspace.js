@@ -1885,7 +1885,7 @@ export class Workspace {
       try { this._module = payload && payload.module ? payload.module : this._module; } catch {}
       // Cache an authoritative snapshot (without tempOverrides) to restore after a cancel/no-op
       try {
-        const clone = { ...(payload || {}) };
+        const clone = { ...(payload || {}), incremental: true };
         if ('tempOverrides' in clone) clone.tempOverrides = null;
         this._lastSyncArgs = clone;
       } catch {}

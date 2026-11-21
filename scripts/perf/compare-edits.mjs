@@ -83,7 +83,10 @@ async function run(browser, base) {
       ['undo', () => P.emit('history:undo')],
       ['undo', () => P.emit('history:undo')],
       ['undo', () => P.emit('history:undo')],
-      ['redo', () => P.emit('history:redo')]
+      ['redo', () => P.emit('history:redo')],
+      ['select ' + a, () => P.emit('player:selectNote', { noteId: a })],
+      ['select ' + c, () => P.emit('player:selectNote', { noteId: c })],
+      ['select base', () => P.emit('player:selectNote', { noteId: 0 })]
     ];
     const settle = () => new Promise((res) => requestAnimationFrame(() => setTimeout(res, 50)));
     const out = [];
@@ -93,6 +96,19 @@ async function run(browser, base) {
       const saved = await readSaved();
       const fresh = JSON.stringify(mod().createModuleJSON());
       const R = window.__rmtRenderer;
+      // Read back the actual instance buffers. A correct CPU slot can still be
+      // stale on the GPU after a selection swap or a partial upload.
+      const gl = R.gl;
+      const previousBuffer = gl.getParameter(gl.ARRAY_BUFFER_BINDING);
+      const gpuDigests = [];
+      for (const buffer of [R.rectInstancePosSizeBuffer, R.rectInstanceColorBuffer,
+        R.rectInstanceFlagsBuffer, R.rectInstanceEnvBuffer, R.rectInstanceCorruptionBuffer]) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        const bytes = new Uint8Array(gl.getBufferParameter(gl.ARRAY_BUFFER, gl.BUFFER_SIZE));
+        gl.getBufferSubData(gl.ARRAY_BUFFER, 0, bytes);
+        gpuDigests.push(await digest(bytes));
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, previousBuffer);
       const labels = [(R._noteFracNumStrs || []).join('|'), (R._noteFracDenStrs || []).join('|')].join('#');
       // Cache insertion order can differ after an incremental evaluation.
       const records = [...P.getEvaluatedNotesRef()].sort(([a], [b]) => a - b);
@@ -107,6 +123,7 @@ async function run(browser, base) {
         undoCount: history._undo.length,
         redo: await digest(history._redo.map((e) => e.label + '\u0000' + e.snapshot).join('\u0001')),
         render: [
+          ...gpuDigests, await digest(R._instanceNoteIds),
           await digest(R.posSize), await digest(R.colors), await digest(R._instanceFlags),
           await digest(R._corruptionType), await digest(R._envShape),
           await digest(labels), await digest(R._noteLabelApprox || new Uint8Array(0)),

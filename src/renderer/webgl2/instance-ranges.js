@@ -22,6 +22,29 @@ export class InstanceRanges {
     }
   }
 
+  update(positions, slots) {
+    let previous = -1;
+    for (const i of slots) {
+      const block = Math.floor(i / BLOCK);
+      if (block === previous) continue;
+      previous = block;
+      let lo = Infinity, hi = -Infinity;
+      for (let k = block * BLOCK; k < Math.min(this.count, (block + 1) * BLOCK); k++) {
+        lo = Math.min(lo, positions[k * 4]);
+        hi = Math.max(hi, positions[k * 4] + positions[k * 4 + 2]);
+      }
+      let j = this.leaves + block;
+      while (this.left[j] !== lo || this.right[j] !== hi) {
+        this.left[j] = lo;
+        this.right[j] = hi;
+        j = Math.floor(j / 2);
+        if (!j) break;
+        lo = Math.min(this.left[j * 2], this.left[j * 2 + 1]);
+        hi = Math.max(this.right[j * 2], this.right[j * 2 + 1]);
+      }
+    }
+  }
+
   // Half-open ranges, merged when adjacent. Bounds may overlap across voices.
   collect(lo, hi, result) {
     result.length = 0;

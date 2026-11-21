@@ -79,9 +79,9 @@ The `CORRUPT` bitmask (`src/binary-note.js:73-80`) has a bit per variable (`0x01
 POW makes an irrational, or ~ / a fallback makes an approximation
   → BinaryEvaluator._lastEvalWasCorrupted = true
   → evaluateVariable() ORs the variable's bit into corruptionFlags   binary-evaluator.js:865
-  → Module._updateCorruptionFlags()                                  module.js:736
+  → Module._updateCorruptionFlags()                                  module.js:761
       → DependencyGraph.setCorruptionFlags(id, flags)                dependency-graph.js:1858
-  → RendererAdapter.sync() → a_corruptionType per note               renderer.js:1016
+  → RendererAdapter.sync() → a_corruptionType per note               renderer.js:1074
   → the shader hatches the note
 ```
 

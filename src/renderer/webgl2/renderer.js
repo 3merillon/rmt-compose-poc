@@ -679,8 +679,33 @@ export class RendererAdapter {
    *  evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId
    * }
    */
-  sync({ evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId = null, tempOverrides = null }) {
+  sync(args) {
+    this._syncInstances(args);
+  }
+
+  _syncInstances(args) {
+    const { evaluatedNotes, module, xScaleFactor, yScaleFactor, selectedNoteId = null, tempOverrides = null } = args;
     if (!module) return;
+    const partial = args.incremental && this._simpleInstances && this._moduleRef === module &&
+      this._syncConfig === this._config && this.currentXScaleFactor === (xScaleFactor || 1) &&
+      this.currentYScaleFactor === (yScaleFactor || 1) && !tempOverrides && !this._dragActive &&
+      !this._hasPreviewGeometry && evaluatedNotes === module._evaluationCache &&
+      !module._untrackedProperties && !module.getDependencyGraph().corruptionFlags.size
+      ? module.evaluationChangesSince(this._syncRevision) : null;
+    let dirty = partial && !partial.has(0) ? partial : null;
+    if (dirty && this._restoredDragIds) {
+      for (const id of this._restoredDragIds) dirty.add(id);
+    }
+    this._restoredDragIds = null;
+    if (dirty && selectedNoteId !== this._lastSelectedNoteId) {
+      for (const id of [this._lastSelectedNoteId, selectedNoteId, this._naturalLastId]) {
+        if (id != null && this._noteIdToIndex.has(id)) dirty.add(id);
+      }
+    }
+    if (dirty && [...dirty].some(id => !this._noteIdToIndex.has(id))) dirty = null;
+    this._syncRevision = module._evaluationRevision;
+    this._syncConfig = this._config;
+    this._hasPreviewGeometry = !!tempOverrides;
     this.currentXScaleFactor = xScaleFactor || 1.0;
     this.currentYScaleFactor = yScaleFactor || 1.0;
     // Playhead derives world X at draw-time using currentXScaleFactor
@@ -801,6 +826,7 @@ export class RendererAdapter {
 
     // Build list of visible notes (those with startTime and duration)
     const items = [];
+    let hasComplexBodies = false;
     // What a note without an amplitude of its own inherits: the BaseNote's.
     const baseEvForAmp = getEv(0);
     const baseHeightScale = (baseEvForAmp && baseEvForAmp.amplitude) ? this._amplitudeHeightScale(baseEvForAmp.amplitude) : 1;
@@ -819,12 +845,15 @@ export class RendererAdapter {
     // Latest end time across playable notes, accumulated here for free because this loop
     // already has each note's evaluated startTime/duration. _computeModuleEndTime used to
     // re-derive it with a second full pass over module.notes (~31ms at 100k notes).
-    let maxNoteEndSec = 0;
+    let maxNoteEndSec = dirty ? this._maxNoteEndSec : 0;
+    let maxId = dirty ? this._maxNoteEndId : null;
+    let lostMaximum = false;
     // Notes that only relate: a frequency and no duration (a tonic, a key, a root;
     // with a start, a key change from there on). Drawn as reference lines by
     // _renderReferenceLines, never as note bodies, never played.
     const refLines = [];
-    for (const idStr in module.notes) {
+    const sourceIds = dirty || Object.keys(module.notes);
+    for (const idStr of sourceIds) {
       const note = module.notes[idStr];
       if (!note) continue;
       // The BaseNote has a duration now (the time unit), but it never sounds and is not drawn as a note.
@@ -881,7 +910,8 @@ export class RendererAdapter {
         // notes that actually sound — same predicate _computeModuleEndTime used.
         if (note.hasExpression && note.hasExpression('frequency')) {
           const end = startTime + duration;
-          if (end > maxNoteEndSec) maxNoteEndSec = end;
+          if (dirty && note.id === this._maxNoteEndId && end < this._maxNoteEndSec) lostMaximum = true;
+          if (end > maxNoteEndSec) { maxNoteEndSec = end; maxId = note.id; }
         }
 
         // World coords with optional temp overrides (e.g., dragging/resizing)
@@ -934,18 +964,45 @@ export class RendererAdapter {
         // evaluatedNotes a second time and re-unwrap the Fraction.
         // The exact frequency (Fraction, or an exact Irrational / Approx) for the label
         const freqExact = ev ? (ev.exact?.frequency ?? ev.frequency ?? null) : null;
+        if (isSilence || env) hasComplexBodies = true;
         items.push({ id: note.id, x, y, w, h, color, isSilence, freqVal, freqExact, env });
       } catch {
         // Ignore malformed notes
       }
     }
+    // Complex scenes use the same full path as load. A changed maximum
+    // that moved earlier also requires finding the next latest note.
+    if (dirty && (items.length !== dirty.size || hasComplexBodies || lostMaximum)) {
+      return this._syncInstances({ ...args, incremental: false });
+    }
+    this._maxNoteEndId = maxId;
     this._maxNoteEndSec = maxNoteEndSec;
-    this._refLines = refLines;
-    this._tailItems = tails;
+    if (!dirty) {
+      this._refLines = refLines;
+      this._tailItems = tails;
+    }
 
     // PERFORMANCE: Instead of O(n log n) sort, use O(1) swap to move selected note to end
     // This avoids full buffer reallocation on every selection change
-    if (selectedNoteId != null) {
+    if (dirty) {
+      const swapWithLast = id => {
+        const index = this._noteIdToIndex.get(id), last = this.instanceCount - 1;
+        if (index == null || index === last) return;
+        const top = this._instanceNoteIds[last];
+        this._instanceNoteIds[index] = top;
+        this._instanceNoteIds[last] = id;
+        this._noteIdToIndex.set(top, index);
+        this._noteIdToIndex.set(id, last);
+      };
+      if (selectedNoteId !== this._lastSelectedNoteId) {
+        // Undo the previous selection swap, then apply the new one.
+        swapWithLast(this._naturalLastId);
+        swapWithLast(selectedNoteId);
+      }
+    } else {
+      this._naturalLastId = items.at(-1)?.id;
+    }
+    if (!dirty && selectedNoteId != null) {
       const selIdx = items.findIndex(it => it.id === selectedNoteId);
       if (selIdx >= 0 && selIdx < items.length - 1) {
         // Swap selected item with the last item (O(1) instead of O(n log n) sort)
@@ -957,7 +1014,7 @@ export class RendererAdapter {
     }
 
     // Allocate/resize typed arrays only when count changes
-    const N = items.length;
+    const N = dirty ? this.instanceCount : items.length;
     if (!this.posSize || this.posSize.length !== N * 4) {
       this.posSize = new Float32Array(N * 4);
       this.colors  = new Float32Array(N * 4);
@@ -972,8 +1029,9 @@ export class RendererAdapter {
     }
 
     // Fill arrays with reordered data
-    for (let i = 0; i < N; i++) {
-      const it = items[i];
+    for (let k = 0; k < items.length; k++) {
+      const it = items[k];
+      const i = dirty ? this._noteIdToIndex.get(it.id) : k;
       const o = i * 4;
       this.posSize[o + 0] = it.x;
       this.posSize[o + 1] = it.y;
@@ -1005,7 +1063,7 @@ export class RendererAdapter {
     }
  
     // Rebuild id->index map for fast per-instance updates
-    try {
+    if (!dirty) try {
       this._noteIdToIndex = new Map();
       for (let i = 0; i < N; i++) {
         const idVal = (items[i] && items[i].id != null) ? Number(items[i].id) : null;
@@ -1015,7 +1073,7 @@ export class RendererAdapter {
 
     // Compute corruption type for hatching display (0=none, 1=transitive, 2=direct)
     // Always reset to 0 first to avoid stale data
-    if (this._corruptionType) {
+    if (!dirty && this._corruptionType) {
       this._corruptionType.fill(0.0);
     }
     try {
@@ -1266,13 +1324,12 @@ export class RendererAdapter {
     } catch { this._relDepsIdx = null; this._relRdepsIdx = null; }
  
     // Compute per-note fraction label strings (relative to base) for overlay rendering.
-    // These arrays must stay freshly allocated: _lastNoteFracNumStrs keeps the previous one by
-    // reference to detect content changes, so reusing the array in place would compare it
-    // against itself and text would never be marked dirty.
-    this._noteFracNumStrs = new Array(N);
-    this._noteFracDenStrs = new Array(N);
+    // A full pass compares fresh arrays. A partial pass writes affected slots in place
+    // and invalidates the text cache explicitly.
+    if (!dirty) this._noteFracNumStrs = new Array(N);
+    if (!dirty) this._noteFracDenStrs = new Array(N);
     // 1 where the label is drawn with ≈: an approximate value, or an exact one too long to show
-    this._noteLabelApprox = new Uint8Array(N);
+    if (!dirty) this._noteLabelApprox = new Uint8Array(N);
     const baseValNum = (typeof this._baseFreqCache === 'number' ? this._baseFreqCache : 440.0);
     const baseExact = this._baseFreqExact;
     const fracCache = this._fracStrCache || (this._fracStrCache = new Map());
@@ -1291,14 +1348,16 @@ export class RendererAdapter {
       }
       return pair;
     };
-    for (let i = 0; i < N; i++) {
+    for (let k = 0; k < items.length; k++) {
+      const i = dirty ? this._noteIdToIndex.get(items[k].id) : k;
+      if (dirty) this._noteLabelApprox[i] = 0;
       try {
-        // items[i] is instance i (the selected-note swap above keeps them aligned), and its
+        // items[k] is instance i (the selected-note swap above keeps them aligned), and its
         // freqVal was already resolved in the note loop — including the raw-variable fallback
         // that avoids a transient "silence" label at initial load. Re-reading evaluatedNotes
         // here was a second Map lookup plus a Fraction unwrap for every note.
-        const fnum = items[i] ? items[i].freqVal : null;
-        const fex = items[i] ? items[i].freqExact : null;
+        const fnum = items[k].freqVal;
+        const fex = items[k].freqExact;
         if (fnum != null && isFinite(fnum) && baseValNum && isFinite(baseValNum) && baseValNum !== 0) {
           // The label states the note's exact relation to the BaseNote (note-label.js): a
           // pure ratio as its fraction, a tempered note as its power, ≈ only for an
@@ -1337,11 +1396,21 @@ export class RendererAdapter {
     }
 
     this.instanceCount = N;
-    this._rangeIndex = N >= 512 ? new InstanceRanges(this.posSize) : null;
+    if (dirty) {
+      const slots = [...dirty].map(id => this._noteIdToIndex.get(id)).sort((a, b) => a - b);
+      this._rangeIndex?.update(this.posSize, slots);
+      this._uploadChangedInstances(slots);
+    } else {
+      this._rangeIndex = N >= 512 ? new InstanceRanges(this.posSize) : null;
+      this._simpleInstances = typeof module.evaluationChangesSince === 'function' && evaluatedNotes instanceof Map &&
+        !tempOverrides && !showTails && !hasComplexBodies &&
+        !module.getDependencyGraph().corruptionFlags.size;
+    }
+    this._lastSyncWasPartial = !!dirty;
     this._syncTails();
 
     // Upload to GPU
-    if (this.gl && this.rectInstancePosSizeBuffer && this.rectInstanceColorBuffer) {
+    if (!dirty && this.gl && this.rectInstancePosSizeBuffer && this.rectInstanceColorBuffer) {
       const gl = this.gl;
  
       gl.bindBuffer(gl.ARRAY_BUFFER, this.rectInstancePosSizeBuffer);
@@ -1449,8 +1518,8 @@ export class RendererAdapter {
     const prevNum = this._lastNoteFracNumStrs;
     const prevDen = this._lastNoteFracDenStrs;
     const prevApx = this._lastNoteLabelApprox;
-    let contentChanged = false;
-    if (!prevNum || !prevDen || !prevApx || prevNum.length !== this._noteFracNumStrs.length || prevDen.length !== this._noteFracDenStrs.length) {
+    let contentChanged = !!dirty;
+    if (contentChanged || !prevNum || !prevDen || !prevApx || prevNum.length !== this._noteFracNumStrs.length || prevDen.length !== this._noteFracDenStrs.length) {
       contentChanged = true;
     } else {
       for (let i = 0; i < this._noteFracNumStrs.length; i++) {
@@ -3050,6 +3119,23 @@ export class RendererAdapter {
     this._visibleRanges = ranges;
   }
 
+  _uploadChangedInstances(slots) {
+    const gl = this.gl;
+    if (!gl || !slots.length) return;
+    const update = (buffer, array, width) => {
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      for (let k = 0; k < slots.length;) {
+        const first = slots[k++];
+        let end = first + 1;
+        while (k < slots.length && slots[k] === end) { end++; k++; }
+        gl.bufferSubData(gl.ARRAY_BUFFER, first * width * 4, array, first * width, (end - first) * width);
+      }
+    };
+    update(this.rectInstancePosSizeBuffer, this.posSize, 4);
+    update(this.rectInstanceColorBuffer, this.colors, 4);
+    gl.bindBuffer(gl.ARRAY_BUFFER, null);
+  }
+
   _uploadVisibleRegions(data) {
     const gl = this.gl;
     for (let j = 0; j < this._visibleRanges.length; j += 2) {
@@ -3955,6 +4041,7 @@ export class RendererAdapter {
       const h  = this.posSize[base + 3];
  
       // Update CPU-side cache
+      this._hasPreviewGeometry = true;
       this._rangeIndex = null; // direct geometry preview; rebuilt on sync
       this.posSize[base + 0] = xw;
       this.posSize[base + 2] = ww;
@@ -4013,6 +4100,7 @@ export class RendererAdapter {
         const xw = startSec * this._cfgSX() * xScale;
         const ww = durationSec * this._cfgSX() * xScale;
 
+        this._hasPreviewGeometry = true;
         this._rangeIndex = null;
         // Write back only x and w; y/h remain unchanged
         this.posSize[base + 0] = xw;
@@ -4325,6 +4413,8 @@ export class RendererAdapter {
           if (base + 3 < this.posSize.length) {
             this.posSize[base + 0] = orig.x;
             this.posSize[base + 2] = orig.w;
+            // A cancelled drag also restores the anchor on the next GPU sync.
+            (this._restoredDragIds ||= new Set()).add(this._instanceNoteIds[idx]);
           }
         }
         this._dragOriginalPos = null;
@@ -5133,7 +5223,7 @@ export class RendererAdapter {
       return Math.max(measureEnd, lastNoteEnd);
     };
 
-    proto._syncMeasureBars = function (module) {
+    proto._syncMeasureBars = function (module, knownMeasures = null) {
       if (!module) return;
 
       // Collect measure times. One classification pass, shared with the end-time computation
@@ -5141,7 +5231,8 @@ export class RendererAdapter {
       const times = [];
       times.push(0); // origin
 
-      const measureNotes = this._collectMeasureNotes(module);
+      const measureNotes = knownMeasures || this._collectMeasureNotes(module);
+      this._syncedMeasures = measureNotes;
       for (let i = 0; i < measureNotes.length; i++) {
         try {
           const st = measureNotes[i].getVariable('startTime');
@@ -9413,7 +9504,7 @@ try {
     const _origSync = proto.sync;
     proto.sync = function (args) {
       _origSync.call(this, args);
-      try { this._syncMeasureBars(args.module); } catch {}
+      try { this._syncMeasureBars(args.module, this._lastSyncWasPartial ? this._syncedMeasures : null); } catch {}
 
       // Cache selection context for octave guides (BaseNote vs selected note)
       try {
