@@ -39,6 +39,16 @@ const lastOf = (m, ids) => ids.slice().sort((a, b) => X.compare(ex(m, b, 'startT
 console.log('\nGroup editing: selecting by relation');
 {
   const m = await load();
+  const sameHighlights = Object.values(m.notes).every(note => {
+    const tree = m.getChildrenTreeByAllProperties(note.id);
+    const affected = m.getDependentsByProperty(note.id);
+    return ['frequency', 'startTime', 'duration'].every(prop => {
+      const edges = tree.edgesByProperty[prop];
+      return JSON.stringify(edges) === JSON.stringify(m.getChildrenTreeByProperty(note.id, prop).edges) &&
+        sameSet(new Set(edges.map(edge => edge.childId)), new Set(affected[prop]));
+    });
+  });
+  check(sameHighlights, 'one selection traversal gives the same ordered lines and highlighted notes as the individual property walks');
   const red = ofColor(m, RED), blue = ofColor(m, BLUE), green = ofColor(m, GREEN);
   const theme = new Set([firstOf(m, red), ...G.relatedNoteIds(m, firstOf(m, red), 'dependents', 't')]);
   check(sameSet(theme, new Set(red)), `the theme's first note and its dependents by t are the whole theme (${theme.size} of ${red.length} notes, nothing else)`);
