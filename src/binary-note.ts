@@ -104,6 +104,12 @@ Object.freeze(EMPTY_LIST);
  * Stores bytecode instructions and explicit dependency list
  */
 export class BinaryExpression {
+  declare bytecode: Uint8Array;
+  declare length: number;
+  declare depCount: number;
+  declare sourceText: string;
+  declare referencesBase: boolean;
+  declare _varRefsLength: number;
   /**
    * @param {number} [initialSize=64] - bytecode capacity in bytes
    * @param {ArrayLike<number>|null} [dependencies] - the dependency list to
@@ -479,6 +485,16 @@ export const EMPTY_EXPRESSION = (() => {
  * Stores all note parameters as binary expressions
  */
 export class BinaryNote {
+  declare id: NoteId;
+  declare color: string;
+  declare instrument: string;
+  declare _cacheGen: number;
+  declare startTime: BinaryExpression;
+  declare duration: BinaryExpression;
+  declare frequency: BinaryExpression;
+  declare amplitude: BinaryExpression;
+  declare attack: BinaryExpression;
+  declare release: BinaryExpression;
   declare _cachedStart: Fraction | null;
   declare _cachedDur: Fraction | null;
   declare _cachedFreq: Fraction | null;
@@ -639,6 +655,10 @@ export class BinaryNote {
  * Stores all notes in binary format with fast lookup
  */
 export class BinaryModule {
+  declare notes: Map<NoteId, BinaryNote>;
+  declare baseNote: BinaryNote;
+  declare _nextId: number;
+  declare _generation: number;
   constructor() {
     // Note storage: id -> BinaryNote
     this.notes = new Map<NoteId, BinaryNote>();

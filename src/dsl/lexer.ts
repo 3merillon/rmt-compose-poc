@@ -4,8 +4,18 @@
  * Converts DSL source string into a stream of tokens.
  */
 
-import { TokenType } from './constants.js';
-import { DSLLexerError, ErrorMessages } from './errors.js';
+import { TokenType } from './constants.ts';
+import { DSLLexerError, ErrorMessages } from './errors.ts';
+
+export type TokenKind = (typeof TokenType)[keyof typeof TokenType];
+export interface Token {
+  type: TokenKind;
+  value: string;
+  start: number;
+  end: number;
+  line: number;
+  column: number;
+}
 
 /**
  * Create a token
@@ -17,7 +27,7 @@ import { DSLLexerError, ErrorMessages } from './errors.js';
  * @param {number} column - Column number (1-indexed)
  * @returns {Object} Token object
  */
-function createToken(type, value, start, end, line, column) {
+function createToken(type: TokenKind, value: string, start: number, end: number, line: number, column: number): Token {
   return { type, value, start, end, line, column };
 }
 
@@ -25,10 +35,15 @@ function createToken(type, value, start, end, line, column) {
  * DSL Lexer class
  */
 export class DSLLexer {
+  declare source: string;
+  declare pos: number;
+  declare line: number;
+  declare column: number;
+  declare tokens: Token[];
   /**
    * @param {string} source - Source string to tokenize
    */
-  constructor(source) {
+  constructor(source: string) {
     this.source = source;
     this.pos = 0;
     this.line = 1;
@@ -186,7 +201,7 @@ export class DSLLexer {
    * @param {string} firstChar - First character already consumed
    * @returns {Object} Token
    */
-  scanNumber(start, startLine, startColumn, firstChar) {
+  scanNumber(start: number, startLine: number, startColumn: number, firstChar: string): Token {
     let value = firstChar;
 
     // Integer part
@@ -213,7 +228,7 @@ export class DSLLexer {
    * @param {string} firstChar - First character already consumed
    * @returns {Object} Token
    */
-  scanIdentifier(start, startLine, startColumn, firstChar) {
+  scanIdentifier(start: number, startLine: number, startColumn: number, firstChar: string): Token {
     let value = firstChar;
 
     while (!this.isAtEnd() && this.isAlphaNumeric(this.peek())) {
@@ -233,7 +248,7 @@ export class DSLLexer {
    * @param {string} char
    * @returns {boolean}
    */
-  isDigit(char) {
+  isDigit(char: string) {
     return char >= '0' && char <= '9';
   }
 
@@ -242,7 +257,7 @@ export class DSLLexer {
    * @param {string} char
    * @returns {boolean}
    */
-  isAlpha(char) {
+  isAlpha(char: string) {
     return (char >= 'a' && char <= 'z') ||
            (char >= 'A' && char <= 'Z') ||
            char === '_';
@@ -253,7 +268,7 @@ export class DSLLexer {
    * @param {string} char
    * @returns {boolean}
    */
-  isAlphaNumeric(char) {
+  isAlphaNumeric(char: string) {
     return this.isAlpha(char) || this.isDigit(char);
   }
 }
@@ -263,7 +278,7 @@ export class DSLLexer {
  * @param {string} source - Source string
  * @returns {Array} Array of tokens
  */
-export function tokenize(source) {
+export function tokenize(source: string) {
   const lexer = new DSLLexer(source);
   return lexer.tokenize();
 }

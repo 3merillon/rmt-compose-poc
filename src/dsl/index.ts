@@ -5,14 +5,14 @@
  * Provides functions for compiling, decompiling, and detecting DSL syntax.
  */
 
-import { BinaryExpression, OP } from '../binary-note.js';
-import { tokenize, DSLLexer } from './lexer.js';
-import { parse, DSLParser } from './parser.js';
-import { compile, DSLCompiler } from './compiler.js';
-import { decompile, DSLDecompiler } from './decompiler.js';
-import { DSLError, DSLLexerError, DSLParseError, DSLCompileError, ErrorMessages } from './errors.js';
-import { TokenType, PropertyMap, PropertyShortNames, getCanonicalPropertyName, getShortPropertyName } from './constants.js';
-import { NodeType, createNumberLiteral, createFractionLiteral, createNoteReference, createBinaryOp, createUnaryOp, collectDependencies, referencesBase, printAST } from './ast.js';
+import { BinaryExpression, OP } from '../binary-note.ts';
+import { tokenize, DSLLexer } from './lexer.ts';
+import { parse, DSLParser } from './parser.ts';
+import { compile, DSLCompiler } from './compiler.ts';
+import { decompile, DSLDecompiler } from './decompiler.ts';
+import { DSLError, DSLLexerError, DSLParseError, DSLCompileError, ErrorMessages } from './errors.ts';
+import { TokenType, PropertyMap, PropertyShortNames, getCanonicalPropertyName, getShortPropertyName } from './constants.ts';
+import { NodeType, createNumberLiteral, createFractionLiteral, createNoteReference, createBinaryOp, createUnaryOp, collectDependencies, referencesBase, printAST } from './ast.ts';
 
 /**
  * Compile a DSL expression string to BinaryExpression bytecode
@@ -21,7 +21,7 @@ import { NodeType, createNumberLiteral, createFractionLiteral, createNoteReferen
  * @returns {BinaryExpression} Compiled binary expression
  * @throws {DSLError} On syntax or compilation errors
  */
-export function compileDSL(source) {
+export function compileDSL(source: string) {
   const trimmed = (source || '').trim();
 
   if (!trimmed) {
@@ -52,7 +52,7 @@ export function compileDSL(source) {
  * @param {BinaryExpression} binary - Binary expression to decompile
  * @returns {string} DSL syntax string
  */
-export function decompileToDSL(binary) {
+export function decompileToDSL(binary: BinaryExpression | null | undefined) {
   if (!binary || binary.isEmpty()) {
     return '0';
   }
@@ -66,7 +66,7 @@ export function decompileToDSL(binary) {
  * @param {string} source - DSL expression string
  * @returns {{ valid: boolean, error?: string }} Validation result
  */
-export function validateDSL(source) {
+export function validateDSL(source: string): { valid: true } | { valid: false; error: string } {
   try {
     const trimmed = (source || '').trim();
     if (!trimmed) {
@@ -81,7 +81,7 @@ export function validateDSL(source) {
     if (e instanceof DSLError) {
       return { valid: false, error: e.userMessage };
     }
-    return { valid: false, error: e.message };
+    return { valid: false, error: e instanceof Error ? e.message : String(e) };
   }
 }
 

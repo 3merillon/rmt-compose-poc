@@ -1,3 +1,4 @@
+import type { BinaryExpression } from '../binary-note.ts';
 /**
  * DSL Decompiler
  *
@@ -7,13 +8,15 @@
  * - Round-trip preservation
  */
 
-import { OP, VAR } from '../binary-note.js';
-import { getShortPropertyName, Precedence } from './constants.js';
+import { OP, VAR } from '../binary-note.ts';
+import { getShortPropertyName, Precedence } from './constants.ts';
 
 /**
  * DSL Decompiler class
  */
 export class DSLDecompiler {
+  declare stack: string[];
+  declare precStack: number[];
   constructor() {
     // Stack for expression strings during decompilation
     this.stack = [];
@@ -26,7 +29,7 @@ export class DSLDecompiler {
    * @param {BinaryExpression} expr - The binary expression
    * @returns {string} DSL syntax
    */
-  decompile(expr) {
+  decompile(expr: BinaryExpression): string {
     if (expr.isEmpty()) {
       return '0';
     }
@@ -173,7 +176,7 @@ export class DSLDecompiler {
   /**
    * Push a value and its precedence onto the stack
    */
-  push(value, prec) {
+  push(value: string, prec: number): void {
     this.stack.push(value);
     this.precStack.push(prec);
   }
@@ -182,22 +185,23 @@ export class DSLDecompiler {
    * Pop a value and its precedence from the stack
    * @returns {[string, number]}
    */
-  pop() {
-    return [this.stack.pop(), this.precStack.pop()];
+  pop(): [string, number] {
+    // Compiler-produced operations pop matching operands and precedence entries.
+    return [this.stack.pop()!, this.precStack.pop()!];
   }
 
   /**
    * Peek at top of stack
    * @returns {[string, number]}
    */
-  peek() {
+  peek(): [string, number] {
     return [this.stack[this.stack.length - 1], this.precStack[this.precStack.length - 1]];
   }
 
   /**
    * Push a constant (number or fraction; components may be Number or BigInt)
    */
-  pushConst(num, den, prec = Precedence.ATOMIC) {
+  pushConst(num: bigint | number, den: bigint | number, prec = Precedence.ATOMIC): void {
     if (den === 1 || den === 1n) {
       this.push(String(num), prec);
     } else {
@@ -208,7 +212,7 @@ export class DSLDecompiler {
   /**
    * Wrap expression if its precedence is lower than required
    */
-  wrapIfLower(expr, exprPrec, required) {
+  wrapIfLower(expr: string, exprPrec: number, required: number): string {
     if (exprPrec < required) {
       return `(${expr})`;
     }
@@ -218,7 +222,7 @@ export class DSLDecompiler {
   /**
    * Wrap expression if its precedence is lower or equal (for right operand of left-assoc ops)
    */
-  wrapIfLowerOrEqual(expr, exprPrec, required) {
+  wrapIfLowerOrEqual(expr: string, exprPrec: number, required: number): string {
     if (exprPrec <= required) {
       return `(${expr})`;
     }
@@ -228,7 +232,7 @@ export class DSLDecompiler {
   /**
    * Convert variable index to short property name
    */
-  varIndexToShortName(idx) {
+  varIndexToShortName(idx: number) {
     switch (idx) {
       case VAR.START_TIME:
         return 't';
@@ -250,14 +254,14 @@ export class DSLDecompiler {
   /**
    * Read 16-bit unsigned integer (big-endian)
    */
-  readUint16(bytecode, offset) {
+  readUint16(bytecode: Uint8Array, offset: number) {
     return (bytecode[offset] << 8) | bytecode[offset + 1];
   }
 
   /**
    * Read 32-bit signed integer (big-endian)
    */
-  readInt32(bytecode, offset) {
+  readInt32(bytecode: Uint8Array, offset: number) {
     const val = (bytecode[offset] << 24) |
                 (bytecode[offset + 1] << 16) |
                 (bytecode[offset + 2] << 8) |
@@ -269,7 +273,7 @@ export class DSLDecompiler {
    * Read signed BigInt
    * @returns {{ value: bigint, bytesRead: number }}
    */
-  readBigIntSigned(bytecode, offset) {
+  readBigIntSigned(bytecode: Uint8Array, offset: number) {
     const sign = bytecode[offset];
     const { value: magnitude, bytesRead: magBytes } = this.readBigIntUnsigned(bytecode, offset + 1);
     const value = sign === 0x01 ? -magnitude : magnitude;
@@ -280,7 +284,7 @@ export class DSLDecompiler {
    * Read unsigned BigInt
    * @returns {{ value: bigint, bytesRead: number }}
    */
-  readBigIntUnsigned(bytecode, offset) {
+  readBigIntUnsigned(bytecode: Uint8Array, offset: number) {
     const len = (bytecode[offset] << 8) | bytecode[offset + 1];
     let value = 0n;
     for (let i = 0; i < len; i++) {
@@ -295,7 +299,7 @@ export class DSLDecompiler {
  * @param {BinaryExpression} expr - The binary expression
  * @returns {string} DSL syntax
  */
-export function decompile(expr) {
+export function decompile(expr: BinaryExpression) {
   const decompiler = new DSLDecompiler();
   return decompiler.decompile(expr);
 }

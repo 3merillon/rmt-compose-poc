@@ -1,5 +1,5 @@
-import { TokenType } from './constants.js';
-import { tokenize } from './lexer.js';
+import { TokenType } from './constants.ts';
+import { tokenize } from './lexer.ts';
 
 /**
  * Visit references in compiled DSL in source order. A numeric replacement
@@ -7,7 +7,9 @@ import { tokenize } from './lexer.js';
  * the whole reference (e.g. a drop at a target's end). Null rejects a source
  * whose reference cannot be carried across.
  */
-export function rewriteNoteReferences(source, replace) {
+type ReferenceReplacement = (id: number, property: string, original: string) => string | number | null | undefined;
+
+export function rewriteNoteReferences(source: string, replace: ReferenceReplacement) {
   if (!source || (!source.includes('[') && !source.includes('base'))) return source;
 
   const tokens = tokenize(source);
@@ -18,7 +20,7 @@ export function rewriteNoteReferences(source, replace) {
     if (first.type !== TokenType.LBRACKET && first.type !== TokenType.BASE) continue;
     const bracketed = first.type === TokenType.LBRACKET;
     const idToken = bracketed ? tokens[i + 1] : null;
-    const id = bracketed ? parseInt(idToken.value, 10) : 0;
+    const id = idToken ? parseInt(idToken.value, 10) : 0;
     const property = tokens[i + (bracketed ? 4 : 2)];
     const original = source.slice(first.start, property.end);
     const replacement = replace(id, property.value, original);
@@ -37,6 +39,6 @@ export function rewriteNoteReferences(source, replace) {
   return cursor ? output + source.slice(cursor) : source;
 }
 
-export function remapNoteIds(source, lookup) {
+export function remapNoteIds(source: string, lookup: ReferenceReplacement) {
   return source?.includes('[') ? rewriteNoteReferences(source, lookup) : source;
 }

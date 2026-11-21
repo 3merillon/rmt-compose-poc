@@ -1,3 +1,5 @@
+import type { AstNode, SignedLiteral } from './ast.ts';
+import type { Token, TokenKind } from './lexer.ts';
 /**
  * DSL Parser
  *
@@ -17,10 +19,10 @@
  * are refused with a message saying what to write instead.
  */
 
-import { TokenType, PropertyMap, RetiredTimeFunctions, RetiredTimeProperties, isPropertyName, getCanonicalPropertyName } from './constants.js';
-import { DSLParseError, ErrorMessages } from './errors.js';
-import { decimalStringToBigFraction } from '../utils/fraction-num.js';
-import { MAX_NOTE_ID } from '../binary-note.js';
+import { TokenType, PropertyMap, RetiredTimeFunctions, RetiredTimeProperties, isPropertyName, getCanonicalPropertyName } from './constants.ts';
+import { DSLParseError, ErrorMessages } from './errors.ts';
+import { decimalStringToBigFraction } from '../utils/fraction-num.ts';
+import { MAX_NOTE_ID } from '../binary-note.ts';
 import {
   NodeType,
   createNumberLiteral,
@@ -29,16 +31,18 @@ import {
   createNoteReference,
   createBinaryOp,
   createUnaryOp,
-} from './ast.js';
+} from './ast.ts';
 
 /**
  * DSL Parser class
  */
 export class DSLParser {
+  declare tokens: Token[];
+  declare current: number;
   /**
    * @param {Array} tokens - Array of tokens from lexer
    */
-  constructor(tokens) {
+  constructor(tokens: Token[]) {
     this.tokens = tokens;
     this.current = 0;
   }
@@ -47,7 +51,7 @@ export class DSLParser {
    * Parse tokens into AST
    * @returns {Object} Root AST node
    */
-  parse() {
+  parse(): AstNode {
     if (this.isAtEnd() || (this.tokens.length === 1 && this.peek().type === TokenType.EOF)) {
       throw new DSLParseError(ErrorMessages.emptyExpression());
     }
@@ -71,14 +75,14 @@ export class DSLParser {
   /**
    * expression -> additive
    */
-  expression() {
+  expression(): AstNode {
     return this.additive();
   }
 
   /**
    * additive -> multiplicative (('+' | '-') multiplicative)*
    */
-  additive() {
+  additive(): AstNode {
     let left = this.multiplicative();
 
     while (this.match(TokenType.PLUS, TokenType.MINUS)) {
@@ -93,7 +97,7 @@ export class DSLParser {
   /**
    * multiplicative -> unary (('*' | '/') unary)*
    */
-  multiplicative() {
+  multiplicative(): AstNode {
     let left = this.unary();
 
     while (this.match(TokenType.STAR, TokenType.SLASH)) {
@@ -108,7 +112,7 @@ export class DSLParser {
   /**
    * unary -> '-' unary | power
    */
-  unary() {
+  unary(): AstNode {
     if (this.match(TokenType.MINUS)) {
       const operand = this.unary();
       return createUnaryOp('-', operand);
@@ -121,7 +125,7 @@ export class DSLParser {
    * power -> primary ('^' unary)?
    * Right-associative: a^b^c = a^(b^c)
    */
-  power() {
+  power(): AstNode {
     const base = this.primary();
 
     if (this.match(TokenType.CARET)) {
@@ -135,7 +139,7 @@ export class DSLParser {
   /**
    * primary -> fraction | noteRef | '(' expression ')' | number
    */
-  primary() {
+  primary(): AstNode {
     // Try fraction literal: (num/den)
     if (this.check(TokenType.LPAREN)) {
       return this.fractionOrGrouped();
@@ -187,7 +191,7 @@ export class DSLParser {
       literal = this.numberLiteral(this.advance());
     } else if (this.check(TokenType.LPAREN)) {
       const node = this.fractionOrGrouped();
-      const isLit = (n) => n && (n.type === NodeType.NumberLiteral || n.type === NodeType.FractionLiteral ||
+      const isLit = (n: AstNode): n is SignedLiteral => n && (n.type === NodeType.NumberLiteral || n.type === NodeType.FractionLiteral ||
         (n.type === NodeType.UnaryOp && n.operator === '-' && isLit(n.operand)));
       if (isLit(node)) literal = node;
     }
@@ -200,7 +204,7 @@ export class DSLParser {
   /**
    * Parse either a fraction (1/2) or grouped expression (a + b)
    */
-  fractionOrGrouped() {
+  fractionOrGrouped(): AstNode {
     const lparen = this.advance(); // consume '('
 
     // Look ahead to see if this is a fraction: (number / number)
@@ -346,7 +350,7 @@ export class DSLParser {
    * @param {Object} token - NUMBER token
    * @returns {Object} AST node
    */
-  numberLiteral(token) {
+  numberLiteral(token: Token) {
     const frac = decimalStringToBigFraction(token.value);
     if (!frac) {
       throw new DSLParseError(
@@ -364,7 +368,7 @@ export class DSLParser {
   /**
    * Check if current token is of given type(s)
    */
-  check(type) {
+  check(type: TokenKind) {
     if (this.isAtEnd()) return false;
     return this.peek().type === type;
   }
@@ -372,7 +376,7 @@ export class DSLParser {
   /**
    * Advance if current token matches any of the given types
    */
-  match(...types) {
+  match(...types: TokenKind[]) {
     for (const type of types) {
       if (this.check(type)) {
         this.advance();
@@ -385,7 +389,7 @@ export class DSLParser {
   /**
    * Consume expected token or throw error
    */
-  consume(type, errorMessage) {
+  consume(type: TokenKind, errorMessage: string) {
     if (this.check(type)) {
       return this.advance();
     }
@@ -427,7 +431,7 @@ export class DSLParser {
  * @param {Array} tokens - Tokens from lexer
  * @returns {Object} Root AST node
  */
-export function parse(tokens) {
+export function parse(tokens: Token[]) {
   const parser = new DSLParser(tokens);
   return parser.parse();
 }

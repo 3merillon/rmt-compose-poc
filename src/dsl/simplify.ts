@@ -1,3 +1,4 @@
+import type { AstNode, BinaryOp, SignedLiteral } from './ast.ts';
 /**
  * DSL Expression Simplifier
  *
@@ -20,10 +21,10 @@
  * rewrite that moves the value or the corruption flag (see utils/simplify.js).
  */
 import Fraction from 'fraction.js';
-import { tokenize } from './lexer.js';
-import { parse } from './parser.js';
-import { NodeType } from './ast.js';
-import { getShortPropertyName } from './constants.js';
+import { tokenize } from './lexer.ts';
+import { parse } from './parser.ts';
+import { NodeType } from './ast.ts';
+import { getShortPropertyName } from './constants.ts';
 
 // Precedence levels of an emitted string, used to decide parenthesisation.
 // Mirrors the grammar in parser.js: the base of '^' must be a `primary`, so it
@@ -37,6 +38,11 @@ const PREC = {
 };
 
 /** Thrown when a construct cannot be canonicalised; the caller keeps the original. */
+interface Atom { key: string; str: string; prec: number }
+interface Factor extends Atom { exp: Fraction; order: number; isConst: boolean }
+interface Term { coeff: Fraction; coeffOrder: number; factors: Map<string, Factor> }
+interface Context { order: number }
+
 class Bail extends Error {}
 
 /**
@@ -46,7 +52,7 @@ class Bail extends Error {}
  * @param {string} expr - DSL expression
  * @returns {string} Simplified DSL expression
  */
-export function simplifyDSL(expr) {
+export function simplifyDSL(expr: string): string {
   return rewrite(expr, null) ?? expr;
 }
 
@@ -59,7 +65,7 @@ export function simplifyDSL(expr) {
  * @param {number} den - Factor denominator
  * @returns {string} Scaled DSL expression
  */
-export function scaleDSL(expr, num, den) {
+export function scaleDSL(expr: string, num: bigint | number, den: bigint | number): string {
   const factor = new Fraction(num, den);
   const scaled = rewrite(expr, factor);
   if (scaled !== null) return scaled;
@@ -73,7 +79,7 @@ export function scaleDSL(expr, num, den) {
  * Canonicalise `expr`, optionally scaling every term by `factor`.
  * Returns null when the expression cannot be canonicalised.
  */
-function rewrite(expr, factor) {
+function rewrite(expr: string, factor: Fraction | null): string | null {
   const source = (expr || '').trim();
   if (!source) return null;
 
@@ -114,7 +120,7 @@ function rewrite(expr, factor) {
 // becomes an opaque atom, which keeps `(1/2) * 2 * (a + b)` collapsing to `a + b`
 // without exploding the expression.
 
-function newTerm(coeff = new Fraction(1)) {
+function newTerm(coeff = new Fraction(1)): Term {
   return { coeff, coeffOrder: Infinity, factors: new Map() };
 }
 
@@ -124,7 +130,7 @@ function newTerm(coeff = new Fraction(1)) {
  * @param {{order: number}} ctx - Shared source-position counter
  * @returns {Array} Terms
  */
-function canonicalize(node, ctx) {
+function canonicalize(node: AstNode, ctx: Context): Term[] {
   switch (node.type) {
     case NodeType.NumberLiteral:
     case NodeType.FractionLiteral: {
@@ -158,7 +164,7 @@ function canonicalize(node, ctx) {
   }
 }
 
-function canonicalizeBinary(node, ctx) {
+function canonicalizeBinary(node: BinaryOp, ctx: Context): Term[] {
   const { operator: op } = node;
 
   if (op === '+' || op === '-') {
@@ -190,7 +196,7 @@ function canonicalizeBinary(node, ctx) {
  * is not corrupted), otherwise it becomes a power factor that merges with other
  * powers of the same base — never with the coefficient.
  */
-function canonicalizePow(node, ctx) {
+function canonicalizePow(node: BinaryOp, ctx: Context): Term {
   const exponent = collapse(canonicalize(node.right, ctx), ctx);
   // Only a rational exponent can be reasoned about symbolically.
   if (exponent.factors.size > 0) return termFromAtom(opaqueAtom(node), ctx);
@@ -239,7 +245,7 @@ function canonicalizePow(node, ctx) {
  * Reduce a sum to a single term. A multi-term sum becomes an opaque atom so we
  * never distribute a product over it.
  */
-function collapse(terms, ctx) {
+function collapse(terms: Term[], ctx: Context): Term {
   const grouped = group(terms);
   if (grouped.length === 0) return newTerm(new Fraction(0));
   if (grouped.length === 1) return grouped[0];
@@ -258,7 +264,7 @@ function collapse(terms, ctx) {
 }
 
 /** Multiply (or divide) two terms, merging like factors by adding exponents. */
-function mulTerms(a, b, invert) {
+function mulTerms(a: Term, b: Term, invert: boolean): Term {
   const term = newTerm(invert ? a.coeff.div(b.coeff) : a.coeff.mul(b.coeff));
   term.coeffOrder = Math.min(a.coeffOrder, b.coeffOrder);
 
@@ -271,7 +277,7 @@ function mulTerms(a, b, invert) {
   return term;
 }
 
-function mergeFactor(term, factor, exp) {
+function mergeFactor(term: Term, factor: Factor, exp: Fraction): void {
   const existing = term.factors.get(factor.key);
   if (existing) {
     existing.exp = existing.exp.add(exp);
@@ -288,7 +294,7 @@ function mergeFactor(term, factor, exp) {
  * a power term, exactly as the evaluator leaves it symbolic — and so stays
  * flagged as corrupted.
  */
-function normalizeFactors(term) {
+function normalizeFactors(term: Term): void {
   for (const [key, factor] of [...term.factors]) {
     if (factor.exp.equals(0)) {
       term.factors.delete(key);
@@ -303,8 +309,8 @@ function normalizeFactors(term) {
 }
 
 /** Sum terms that share the same factors, and drop the ones that cancelled to zero. */
-function group(terms) {
-  const groups = new Map();
+function group(terms: Term[]): Term[] {
+  const groups = new Map<string, Term>();
 
   for (const term of terms) {
     const signature = [...term.factors.values()]
@@ -325,7 +331,7 @@ function group(terms) {
 }
 
 /** base^exp as an exact rational, or null when irrational. Mirrors rationalPow in src/value/exact.js. */
-function tryRationalPow(base, exp) {
+function tryRationalPow(base: Fraction, exp: Fraction): Fraction | null {
   if (exp.equals(0)) return new Fraction(1);
   try {
     return base.pow(exp); // fraction.js returns null when the result is irrational
@@ -338,19 +344,19 @@ function tryRationalPow(base, exp) {
 // Atoms
 // ─────────────────────────────────────────────────────────────────
 
-function termFromAtom(atom, ctx) {
+function termFromAtom(atom: Atom, ctx: Context): Term {
   const term = newTerm();
   term.factors.set(atom.key, { ...atom, exp: new Fraction(1), order: ctx.order++, isConst: false });
   return term;
 }
 
-function atomFor(node) {
+function atomFor(node: AstNode): Atom {
   const str = printNode(node);
   return { key: str, str, prec: PREC.ATOMIC };
 }
 
 /** A subtree we refuse to reshape; kept verbatim. */
-function opaqueAtom(node) {
+function opaqueAtom(node: AstNode): Atom {
   const str = printNode(node);
   return { key: str, str, prec: precOf(node) };
 }
@@ -359,7 +365,7 @@ function opaqueAtom(node) {
 // Emission
 // ─────────────────────────────────────────────────────────────────
 
-function emitSum(terms) {
+function emitSum(terms: Term[]): string {
   if (terms.length === 0) return '0';
 
   // A lone term is the whole expression, so it never needs to be parenthesised
@@ -389,7 +395,7 @@ function emitSum(terms) {
  * factor shed its parentheses: as one term among others it must keep them, or a
  * preceding '-' would bind to just the sum's first term.
  */
-function emitTerm(term, isFirst, alone) {
+function emitTerm(term: Term, isFirst: boolean, alone: boolean): string {
   const coeff = isFirst ? term.coeff : term.coeff.abs();
   const factors = [...term.factors.values()];
   const numerators = factors.filter(f => f.exp.s >= 0).sort((a, b) => a.order - b.order);
@@ -416,7 +422,7 @@ function emitTerm(term, isFirst, alone) {
 }
 
 /** Emit `base` or `base^exp`; `exp` is always positive here. */
-function emitFactor(factor, exp) {
+function emitFactor(factor: Factor, exp: Fraction) {
   if (exp.equals(1)) return { str: factor.str, prec: factor.prec };
 
   // The base of '^' must be a primary (see the grammar), so anything below
@@ -425,21 +431,21 @@ function emitFactor(factor, exp) {
   return { str: `${base}^${emitConstant(exp)}`, prec: PREC.POWER };
 }
 
-function emitConstantAtom(frac) {
+function emitConstantAtom(frac: Fraction) {
   return { str: emitConstant(frac), prec: frac.s < 0 ? PREC.UNARY : PREC.ATOMIC };
 }
 
 /** Integers print bare; fractions print as `(n/d)`, which the lexer reads as one literal. */
-function emitConstant(frac) {
+function emitConstant(frac: Fraction): string {
   const n = frac.s * frac.n;
   return frac.d === 1n ? String(n) : `(${n}/${frac.d})`;
 }
 
-function inMul({ str, prec }) {
+function inMul({ str, prec }: Pick<Atom, 'str' | 'prec'>): string {
   return prec >= PREC.MULTIPLICATIVE ? str : `(${str})`;
 }
 
-function inDivisor({ str, prec }) {
+function inDivisor({ str, prec }: Pick<Atom, 'str' | 'prec'>): string {
   // '/' is left-associative, so its right operand must bind tighter than '*'.
   return prec > PREC.MULTIPLICATIVE ? str : `(${str})`;
 }
@@ -448,7 +454,7 @@ function inDivisor({ str, prec }) {
 // AST printer (verbatim re-emission of subtrees we do not reshape)
 // ─────────────────────────────────────────────────────────────────
 
-function precOf(node) {
+function precOf(node: AstNode): number {
   switch (node.type) {
     case NodeType.NumberLiteral:
     case NodeType.FractionLiteral:
@@ -467,7 +473,7 @@ function precOf(node) {
   }
 }
 
-function printNode(node) {
+function printNode(node: AstNode): string {
   switch (node.type) {
     case NodeType.NumberLiteral:
     case NodeType.FractionLiteral:
@@ -504,9 +510,10 @@ function printNode(node) {
  * An approximate literal as written: a measurement keeps its decimal form
  * (`~261.63`, not `~(26163/100)`) whenever the fraction is a finite decimal.
  */
-function approxLiteralText(lit) {
+function approxLiteralText(lit: SignedLiteral): string {
   const neg = lit.type === NodeType.UnaryOp;
   const node = neg ? lit.operand : lit;
+  if (node.type === NodeType.UnaryOp) throw new Bail(); // rewrite keeps the original nested negation
   let n = BigInt(node.numerator), d = BigInt(node.denominator);
   if (neg) n = -n;
   if (d < 0n) { n = -n; d = -d; }
@@ -525,7 +532,7 @@ function approxLiteralText(lit) {
   return `(${sign}${mag}/${d})`;
 }
 
-function wrap(node, required) {
+function wrap(node: AstNode, required: number): string {
   const str = printNode(node);
   return precOf(node) >= required ? str : `(${str})`;
 }

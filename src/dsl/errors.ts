@@ -1,3 +1,6 @@
+import type { AstNode } from './ast.ts';
+import type { Token } from './lexer.ts';
+type Position = Pick<Token, 'line' | 'column' | 'start'> & { end?: number };
 /**
  * DSL Error Classes
  *
@@ -7,14 +10,15 @@
 /**
  * Base class for DSL errors
  */
-import { MAX_NOTE_ID } from '../binary-note.js';
+import { MAX_NOTE_ID } from '../binary-note.ts';
 
 export class DSLError extends Error {
   /**
    * @param {string} message - Error message
    * @param {Object} [position] - Position info { line, column, start, end }
    */
-  constructor(message, position = null) {
+  declare position: Position | null;
+  constructor(message: string, position: Position | null = null) {
     super(message);
     this.name = 'DSLError';
     this.position = position;
@@ -36,7 +40,7 @@ export class DSLError extends Error {
    * @param {string} source - Original source string
    * @returns {string}
    */
-  formatWithContext(source) {
+  formatWithContext(source: string) {
     if (!this.position || !source) {
       return this.userMessage;
     }
@@ -61,7 +65,7 @@ export class DSLLexerError extends DSLError {
    * @param {string} message - Error message
    * @param {Object} position - Position info { line, column, start }
    */
-  constructor(message, position) {
+  constructor(message: string, position: Position) {
     super(message, position);
     this.name = 'DSLLexerError';
   }
@@ -75,7 +79,8 @@ export class DSLParseError extends DSLError {
    * @param {string} message - Error message
    * @param {Object} [token] - Token that caused the error
    */
-  constructor(message, token = null) {
+  declare token: Token | null;
+  constructor(message: string, token: Token | null = null) {
     const position = token ? {
       line: token.line,
       column: token.column,
@@ -96,7 +101,8 @@ export class DSLCompileError extends DSLError {
    * @param {string} message - Error message
    * @param {Object} [node] - AST node that caused the error
    */
-  constructor(message, node = null) {
+  declare node: AstNode | null;
+  constructor(message: string, node: AstNode | null = null) {
     super(message);
     this.name = 'DSLCompileError';
     this.node = node;
@@ -113,7 +119,7 @@ export const ErrorMessages = {
    * @param {number} column - Column position
    * @returns {string}
    */
-  unknownCharacter(char, column) {
+  unknownCharacter(char: string, column: number) {
     return `Unknown character '${char}' at column ${column}`;
   },
 
@@ -123,7 +129,7 @@ export const ErrorMessages = {
    * @param {string} [expected] - What was expected (optional)
    * @returns {string}
    */
-  unexpectedToken(found, expected = null) {
+  unexpectedToken(found: string, expected: string | null = null) {
     if (expected) {
       return `Unexpected '${found}', expected ${expected}`;
     }
@@ -135,7 +141,7 @@ export const ErrorMessages = {
    * @param {string} opener - The opening bracket
    * @returns {string}
    */
-  unclosedBracket(opener) {
+  unclosedBracket(opener: '(' | '[') {
     const closers = { '(': ')', '[': ']' };
     return `Missing '${closers[opener] || ')'}' to close '${opener}'`;
   },
@@ -145,7 +151,7 @@ export const ErrorMessages = {
    * @param {string} value - The invalid value
    * @returns {string}
    */
-  invalidNoteId(value) {
+  invalidNoteId(value: string) {
     return `Invalid note ID '${value}'. Note IDs must be integers between 0 and ${MAX_NOTE_ID}`;
   },
 
@@ -154,7 +160,7 @@ export const ErrorMessages = {
    * @param {string} name - The unknown property
    * @returns {string}
    */
-  unknownProperty(name) {
+  unknownProperty(name: string) {
     return `Unknown property '${name}'. Valid properties: f (frequency), t (startTime), d (duration), a (amplitude), attack, release`;
   },
 
@@ -163,7 +169,7 @@ export const ErrorMessages = {
    * @param {string} name - The unknown function
    * @returns {string}
    */
-  unknownHelper(name) {
+  unknownHelper(name: string) {
     return `Unknown function '${name}'. Expressions have no functions: write references such as [3].d or base.d`;
   },
 
@@ -176,7 +182,7 @@ export const ErrorMessages = {
     return "'~' marks a number as approximate: write it before a number, e.g. ~261.63, ~-3 or ~(3/2)";
   },
 
-  retiredTimeFunction(name) {
+  retiredTimeFunction(name: string) {
     if (name === 'beat') return `'beat()' was removed: the reference note's duration is the time unit, so write base.d for beat(base), or [N].d to relate to note N`;
     if (name === 'measure') return `'measure()' was removed: a measure bar is a silent note with a duration, so write [N].d for measure([N])`;
     return `'tempo()' was removed: tempo is no longer stored; durations relate to other durations (base.d is the time unit, 60 / base.d the tempo)`;
@@ -187,7 +193,7 @@ export const ErrorMessages = {
    * @param {string} name - tempo, bpm, ml, ...
    * @returns {string}
    */
-  retiredTimeProperty(name) {
+  retiredTimeProperty(name: string) {
     return `'.${name}' was removed: tempo, beats per measure and measure length are no longer stored. Relate durations instead (base.d is the time unit; a measure bar's length is its .d)`;
   },
 
@@ -220,7 +226,7 @@ export const ErrorMessages = {
    * @param {number} noteId - The note referencing itself
    * @returns {string}
    */
-  selfReference(noteId) {
+  selfReference(noteId: number) {
     return `Note ${noteId} cannot reference itself (circular dependency)`;
   },
 
@@ -237,7 +243,7 @@ export const ErrorMessages = {
    * @param {string} funcName - The function name
    * @returns {string}
    */
-  missingHelperArgument(funcName) {
+  missingHelperArgument(funcName: string) {
     return `Function '${funcName}()' requires a note reference argument`;
   },
 };

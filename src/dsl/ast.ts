@@ -20,7 +20,19 @@ export const NodeType = {
   BinaryOp: 'BinaryOp',                 // +, -, *, /, ^
   UnaryOp: 'UnaryOp',                   // - (negation)
 
-};
+} as const;
+
+export type BinaryOperator = '+' | '-' | '*' | '/' | '^';
+type Property = import('../binary-note.ts').ExpressionName;
+export interface NumberLiteral { type: 'NumberLiteral'; value: number; numerator: bigint; denominator: bigint }
+export interface FractionLiteral { type: 'FractionLiteral'; numerator: bigint; denominator: bigint }
+export interface NoteReference { type: 'NoteReference'; noteId: number | 'base'; property: Property }
+export interface BinaryOp { type: 'BinaryOp'; operator: BinaryOperator; left: AstNode; right: AstNode }
+export interface UnaryOp { type: 'UnaryOp'; operator: '-'; operand: AstNode }
+export type Literal = NumberLiteral | FractionLiteral;
+export type SignedLiteral = Literal | { type: 'UnaryOp'; operator: '-'; operand: SignedLiteral };
+export interface Approximate { type: 'Approximate'; literal: SignedLiteral }
+export type AstNode = Literal | Approximate | NoteReference | BinaryOp | UnaryOp;
 
 /**
  * Create a number literal node
@@ -29,7 +41,7 @@ export const NodeType = {
  * @param {number} denominator - Fraction denominator
  * @returns {Object} AST node
  */
-export function createNumberLiteral(value, numerator, denominator) {
+export function createNumberLiteral(value: number, numerator: bigint, denominator: bigint): NumberLiteral {
   return {
     type: NodeType.NumberLiteral,
     value,
@@ -50,14 +62,14 @@ export function createNumberLiteral(value, numerator, denominator) {
  * from it (src/value/exact.js).
  * @param {Object} literal - NumberLiteral or FractionLiteral, possibly negated (UnaryOp '-')
  */
-export function createApproximate(literal) {
+export function createApproximate(literal: SignedLiteral): Approximate {
   return {
     type: NodeType.Approximate,
     literal,
   };
 }
 
-export function createFractionLiteral(numerator, denominator) {
+export function createFractionLiteral(numerator: bigint, denominator: bigint): FractionLiteral {
   return {
     type: NodeType.FractionLiteral,
     numerator,
@@ -71,7 +83,7 @@ export function createFractionLiteral(numerator, denominator) {
  * @param {string} property - Canonical property name
  * @returns {Object} AST node
  */
-export function createNoteReference(noteId, property) {
+export function createNoteReference(noteId: number | 'base', property: Property): NoteReference {
   return {
     type: NodeType.NoteReference,
     noteId,
@@ -86,7 +98,7 @@ export function createNoteReference(noteId, property) {
  * @param {Object} right - Right operand AST node
  * @returns {Object} AST node
  */
-export function createBinaryOp(operator, left, right) {
+export function createBinaryOp(operator: BinaryOperator, left: AstNode, right: AstNode): BinaryOp {
   return {
     type: NodeType.BinaryOp,
     operator,
@@ -101,7 +113,9 @@ export function createBinaryOp(operator, left, right) {
  * @param {Object} operand - Operand AST node
  * @returns {Object} AST node
  */
-export function createUnaryOp(operator, operand) {
+export function createUnaryOp(operator: '-', operand: SignedLiteral): Extract<SignedLiteral, {type: 'UnaryOp'}>;
+export function createUnaryOp(operator: '-', operand: AstNode): UnaryOp;
+export function createUnaryOp(operator: '-', operand: AstNode): UnaryOp {
   return {
     type: NodeType.UnaryOp,
     operator,
@@ -115,7 +129,7 @@ export function createUnaryOp(operator, operand) {
  * @param {string} type - Node type to check
  * @returns {boolean}
  */
-export function isNodeType(node, type) {
+export function isNodeType(node: AstNode, type: AstNode['type']): boolean {
   return node && node.type === type;
 }
 
@@ -124,7 +138,7 @@ export function isNodeType(node, type) {
  * @param {Object} node - AST node
  * @returns {boolean}
  */
-export function isLiteral(node) {
+export function isLiteral(node: AstNode): node is Literal {
   return isNodeType(node, NodeType.NumberLiteral) ||
          isNodeType(node, NodeType.FractionLiteral);
 }
@@ -134,7 +148,7 @@ export function isLiteral(node) {
  * @param {Object} node - AST node
  * @returns {boolean}
  */
-export function isReference(node) {
+export function isReference(node: AstNode): node is NoteReference {
   return isNodeType(node, NodeType.NoteReference);
 }
 
@@ -143,7 +157,7 @@ export function isReference(node) {
  * @param {Object} node - AST node
  * @returns {boolean}
  */
-export function isOperation(node) {
+export function isOperation(node: AstNode): node is BinaryOp | UnaryOp {
   return isNodeType(node, NodeType.BinaryOp) ||
          isNodeType(node, NodeType.UnaryOp);
 }
@@ -153,7 +167,7 @@ export function isOperation(node) {
  * @param {Object} node - AST node
  * @returns {boolean}
  */
-export function referencesBase(node) {
+export function referencesBase(node: AstNode | null): boolean {
   if (!node) return false;
 
   switch (node.type) {
@@ -177,7 +191,7 @@ export function referencesBase(node) {
  * @param {Set} [deps] - Set to collect dependencies into
  * @returns {Set<number>} Set of note IDs (excluding 'base'/0)
  */
-export function collectDependencies(node, deps = new Set()) {
+export function collectDependencies(node: AstNode | null, deps = new Set<number>()) {
   if (!node) return deps;
 
   switch (node.type) {
@@ -206,7 +220,7 @@ export function collectDependencies(node, deps = new Set()) {
  * @param {number} [indent] - Indentation level
  * @returns {string}
  */
-export function printAST(node, indent = 0) {
+export function printAST(node: AstNode | null, indent = 0): string {
   const pad = '  '.repeat(indent);
 
   if (!node) return `${pad}(null)`;
@@ -238,6 +252,6 @@ export function printAST(node, indent = 0) {
       ].join('\n');
 
     default:
-      return `${pad}Unknown(${node.type})`;
+      return `${pad}Unknown(${(node as { type: unknown }).type})`;
   }
 }

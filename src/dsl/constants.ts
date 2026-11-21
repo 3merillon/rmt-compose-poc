@@ -35,7 +35,7 @@ export const TokenType = {
 
   // End of input
   EOF: 'EOF',
-};
+} as const;
 
 /**
  * Map short property names to canonical property names
@@ -68,12 +68,12 @@ export const PropertyMap = {
   'attack': 'attack',
   'rel': 'release',
   'release': 'release',
-};
+} as const;
 
 /**
  * Reverse map: canonical names to preferred short names (for decompiler)
  */
-export const PropertyShortNames = {
+export const PropertyShortNames: Readonly<Partial<Record<string, string>>> = {
   'frequency': 'f',
   'startTime': 't',
   'duration': 'd',
@@ -94,7 +94,7 @@ export const RetiredTimeProperties = ['tempo', 'bpm', 'beatsPerMeasure', 'ml', '
  * @param {string} name - The name to check
  * @returns {boolean}
  */
-export function isPropertyName(name) {
+export function isPropertyName(name: string): name is keyof typeof PropertyMap {
   return name in PropertyMap;
 }
 
@@ -104,8 +104,8 @@ export function isPropertyName(name) {
  * @param {string} name - Short or full property name
  * @returns {string|null} - Canonical name or null if invalid
  */
-export function getCanonicalPropertyName(name) {
-  return PropertyMap[name] || null;
+export function getCanonicalPropertyName(name: string) {
+  return isPropertyName(name) ? PropertyMap[name] : null;
 }
 
 /**
@@ -113,7 +113,7 @@ export function getCanonicalPropertyName(name) {
  * @param {string} canonicalName - Canonical property name
  * @returns {string} - Short name (or canonical if no short exists)
  */
-export function getShortPropertyName(canonicalName) {
+export function getShortPropertyName(canonicalName: string) {
   return PropertyShortNames[canonicalName] || canonicalName;
 }
 
@@ -139,4 +139,4 @@ export const OperatorSymbols = {
   DIV: '/',
   POW: '^',
   NEG: '-',
-};
+} as const;

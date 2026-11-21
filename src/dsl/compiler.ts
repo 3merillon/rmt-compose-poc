@@ -1,18 +1,20 @@
+import type { AstNode, NumberLiteral, NoteReference, BinaryOp, UnaryOp } from './ast.ts';
 /**
  * DSL Compiler
  *
  * Converts AST nodes into BinaryExpression bytecode.
  */
 
-import { BinaryExpression, OP, VAR } from '../binary-note.js';
-import { NodeType } from './ast.js';
-import { DSLCompileError } from './errors.js';
-import { bigGcd } from '../utils/fraction-num.js';
+import { BinaryExpression, OP, VAR } from '../binary-note.ts';
+import { NodeType } from './ast.ts';
+import { DSLCompileError } from './errors.ts';
+import { bigGcd } from '../utils/fraction-num.ts';
 
 /**
  * DSL Compiler class
  */
 export class DSLCompiler {
+  declare expr: BinaryExpression | null;
   constructor() {
     this.expr = null;
   }
@@ -23,7 +25,7 @@ export class DSLCompiler {
    * @param {string} [sourceText] - Original source text (for decompilation)
    * @returns {BinaryExpression}
    */
-  compile(ast, sourceText = '') {
+  compile(ast: AstNode, sourceText = ''): BinaryExpression {
     this.expr = new BinaryExpression();
     this.expr.sourceText = sourceText;
 
@@ -36,7 +38,8 @@ export class DSLCompiler {
    * Emit bytecode for an AST node
    * @param {Object} node - AST node
    */
-  emit(node) {
+  // compile() installs the output buffer before the first synchronous emission.
+  emit(node: AstNode): void {
     if (!node) {
       throw new DSLCompileError('Cannot emit null node');
     }
@@ -65,11 +68,11 @@ export class DSLCompiler {
       case NodeType.Approximate:
         // The literal, then APPROX: the value is approximate
         this.emit(node.literal);
-        this.expr.writeByte(OP.APPROX);
+        this.expr!.writeByte(OP.APPROX);
         break;
 
       default:
-        throw new DSLCompileError(`Unknown node type: ${node.type}`, node);
+        throw new DSLCompileError(`Unknown node type: ${(node as { type: unknown }).type}`, node);
     }
   }
 
@@ -77,7 +80,7 @@ export class DSLCompiler {
    * Emit a number literal
    * @param {Object} node - NumberLiteral node
    */
-  emitNumber(node) {
+  emitNumber(node: NumberLiteral): void {
     this.emitFraction(node.numerator, node.denominator);
   }
 
@@ -86,7 +89,7 @@ export class DSLCompiler {
    * @param {bigint|number} num - Numerator
    * @param {bigint|number} den - Denominator
    */
-  emitFraction(num, den) {
+  emitFraction(num: bigint, den: bigint): void {
     let finalNum = BigInt(num);
     let finalDen = BigInt(den);
 
@@ -108,14 +111,14 @@ export class DSLCompiler {
 
     if (finalNum >= MIN_I32 && finalNum <= MAX_I32 && finalDen <= MAX_I32) {
       // Use standard LOAD_CONST
-      this.expr.writeByte(OP.LOAD_CONST);
-      this.expr.writeInt32(Number(finalNum));
-      this.expr.writeInt32(Number(finalDen));
+      this.expr!.writeByte(OP.LOAD_CONST);
+      this.expr!.writeInt32(Number(finalNum));
+      this.expr!.writeInt32(Number(finalDen));
     } else {
       // Use BigInt format for large values
-      this.expr.writeByte(OP.LOAD_CONST_BIG);
-      this.expr.writeBigIntSigned(finalNum);
-      this.expr.writeBigIntUnsigned(finalDen);
+      this.expr!.writeByte(OP.LOAD_CONST_BIG);
+      this.expr!.writeBigIntSigned(finalNum);
+      this.expr!.writeBigIntUnsigned(finalDen);
     }
   }
 
@@ -123,25 +126,25 @@ export class DSLCompiler {
    * Emit a note reference
    * @param {Object} node - NoteReference node
    */
-  emitNoteReference(node) {
+  emitNoteReference(node: NoteReference): void {
     const varIndex = this.varNameToIndex(node.property);
 
     if (node.noteId === 'base' || node.noteId === 0) {
-      this.expr.writeByte(OP.LOAD_BASE);
-      this.expr.writeByte(varIndex);
-      this.expr.referencesBase = true;
+      this.expr!.writeByte(OP.LOAD_BASE);
+      this.expr!.writeByte(varIndex);
+      this.expr!.referencesBase = true;
     } else {
       // Two bytes of note id while they suffice, so every module whose ids
       // fit compiles to the same bytecode as before LOAD_REF_WIDE existed
       if (node.noteId > 0xFFFF) {
-        this.expr.writeByte(OP.LOAD_REF_WIDE);
-        this.expr.writeUint32(node.noteId);
+        this.expr!.writeByte(OP.LOAD_REF_WIDE);
+        this.expr!.writeUint32(node.noteId);
       } else {
-        this.expr.writeByte(OP.LOAD_REF);
-        this.expr.writeUint16(node.noteId);
+        this.expr!.writeByte(OP.LOAD_REF);
+        this.expr!.writeUint16(node.noteId);
       }
-      this.expr.writeByte(varIndex);
-      this.expr.addDependency(node.noteId);
+      this.expr!.writeByte(varIndex);
+      this.expr!.addDependency(node.noteId);
     }
   }
 
@@ -149,7 +152,7 @@ export class DSLCompiler {
    * Emit a binary operation
    * @param {Object} node - BinaryOp node
    */
-  emitBinaryOp(node) {
+  emitBinaryOp(node: BinaryOp): void {
     // Emit left operand
     this.emit(node.left);
     // Emit right operand
@@ -157,19 +160,19 @@ export class DSLCompiler {
     // Emit operator
     switch (node.operator) {
       case '+':
-        this.expr.writeByte(OP.ADD);
+        this.expr!.writeByte(OP.ADD);
         break;
       case '-':
-        this.expr.writeByte(OP.SUB);
+        this.expr!.writeByte(OP.SUB);
         break;
       case '*':
-        this.expr.writeByte(OP.MUL);
+        this.expr!.writeByte(OP.MUL);
         break;
       case '/':
-        this.expr.writeByte(OP.DIV);
+        this.expr!.writeByte(OP.DIV);
         break;
       case '^':
-        this.expr.writeByte(OP.POW);
+        this.expr!.writeByte(OP.POW);
         break;
       default:
         throw new DSLCompileError(`Unknown operator: ${node.operator}`, node);
@@ -180,11 +183,11 @@ export class DSLCompiler {
    * Emit a unary operation
    * @param {Object} node - UnaryOp node
    */
-  emitUnaryOp(node) {
+  emitUnaryOp(node: UnaryOp): void {
     this.emit(node.operand);
 
     if (node.operator === '-') {
-      this.expr.writeByte(OP.NEG);
+      this.expr!.writeByte(OP.NEG);
     } else {
       throw new DSLCompileError(`Unknown unary operator: ${node.operator}`, node);
     }
@@ -195,7 +198,7 @@ export class DSLCompiler {
    * @param {string} varName - Canonical variable name
    * @returns {number}
    */
-  varNameToIndex(varName) {
+  varNameToIndex(varName: string) {
     switch (varName) {
       case 'startTime':
         return VAR.START_TIME;
@@ -221,7 +224,7 @@ export class DSLCompiler {
  * @param {string} [sourceText] - Original source text
  * @returns {BinaryExpression}
  */
-export function compile(ast, sourceText = '') {
+export function compile(ast: AstNode, sourceText = '') {
   const compiler = new DSLCompiler();
   return compiler.compile(ast, sourceText);
 }
