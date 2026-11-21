@@ -28,10 +28,10 @@ const UNLOADABLE_KEY = 'unloadable';
 /** Where the autosave lived before, and where a script may still put a module to open. */
 export const LEGACY_KEY = 'rmt:moduleSnapshot:v1';
 
-let dbPromise = null;
+let dbPromise: Promise<IDBDatabase> | null = null;
 function openDb() {
   if (dbPromise) return dbPromise;
-  const opening = new Promise((resolve, reject) => {
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
     if (typeof indexedDB === 'undefined' || !indexedDB) {
       reject(new Error('IndexedDB is not available'));
       return;
@@ -55,29 +55,29 @@ function openDb() {
   return opening;
 }
 
-function request(mode, run) {
-  return openDb().then((db) => new Promise((resolve, reject) => {
+function request<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+  return openDb().then((db) => new Promise<T>((resolve, reject) => {
     const tx = db.transaction(STORE, mode);
     const req = run(tx.objectStore(STORE));
-    tx.oncomplete = () => resolve(req ? req.result : undefined);
+    tx.oncomplete = () => resolve(req.result);
     tx.onerror = () => reject(tx.error);
     tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
     if (mode === 'readwrite' && typeof tx.commit === 'function') { try { tx.commit(); } catch {} }
   }));
 }
-const idbPut = (key, value) => request('readwrite', (s) => s.put(value, key));
-const idbGet = (key) => request('readonly', (s) => s.get(key));
-const idbDelete = (key) => request('readwrite', (s) => s.delete(key));
+const idbPut = (key: string, value: string) => request('readwrite', (s) => s.put(value, key));
+const idbGet = (key: string) => request<unknown>('readonly', (s) => s.get(key));
+const idbDelete = (key: string) => request('readwrite', (s) => s.delete(key));
 
 // Whether localStorage holds a module under LEGACY_KEY that IndexedDB has not replaced
 let legacyPresent = false;
 // The text of the newest write started, and what waits for a frame
-let lastStarted = null;
-let pending = null; // { text, context }
+let lastStarted: string | null = null;
+let pending: {text: string; context: string | undefined} | null = null; // { text, context }
 let scheduleGen = 0;
 let scheduled = false;
 let inFlight = 0;
-let waiters = [];
+let waiters: (() => void)[] = [];
 // Set by clearSavedModule({ hold: true }): nothing more is written from this page
 let held = false;
 
@@ -94,7 +94,7 @@ function dropLegacy() {
   try { localStorage.removeItem(LEGACY_KEY); } catch {}
 }
 
-function write(text, context) {
+function write(text: string, context?: string) {
   if (held) { settle(); return; }
   lastStarted = text;
   inFlight++;
@@ -125,7 +125,7 @@ function runPending() {
  * callback runs just before the paint; a timer set from it runs after). A hidden tab
  * draws no frames, so a timer writes it too. Only the latest text is written.
  */
-export function saveModuleText(text, context = 'history capture') {
+export function saveModuleText(text: unknown, context = 'history capture') {
   if (typeof text !== 'string') return;
   pending = { text, context };
   if (scheduled) return;
@@ -142,7 +142,7 @@ export function saveModuleText(text, context = 'history capture') {
  * Save the module's text now (leaving or hiding the page). Nothing is written when
  * it is the text of the newest write and nothing newer waits.
  */
-export function saveModuleTextNow(text, context) {
+export function saveModuleTextNow(text: unknown, context?: string) {
   if (typeof text !== 'string') return;
   if (!pending && text === lastStarted) return;
   pending = null;
@@ -160,7 +160,7 @@ export function flushAutosave() {
 /** Resolves once nothing waits to be written and every write started has finished. */
 export function whenSaved() {
   if (!inFlight && !pending && !scheduled) return Promise.resolve();
-  return new Promise((resolve) => waiters.push(resolve));
+  return new Promise<void>((resolve) => waiters.push(resolve));
 }
 
 /**
@@ -173,13 +173,13 @@ export async function loadSavedModuleText() {
   try { text = localStorage.getItem(LEGACY_KEY); } catch {}
   if (text != null) {
     legacyPresent = true;
-    return { text, source: 'localStorage' };
+    return { text, source: 'localStorage' as const };
   }
   try {
     const value = await idbGet(MODULE_KEY);
     if (typeof value === 'string') {
       lastStarted = value;
-      return { text: value, source: 'indexedDB' };
+      return { text: value, source: 'indexedDB' as const };
     }
   } catch (e) {
     console.error('[RMT] Could not read the autosave from IndexedDB:', e);
@@ -221,7 +221,7 @@ export async function clearSavedModule({ hold = false } = {}) {
  * Make text the saved module, and write nothing more from this page (for a reload
  * that should open it: leaving the page would otherwise save the current module).
  */
-export async function replaceSavedModule(text) {
+export async function replaceSavedModule(text: string) {
   held = true;
   pending = null;
   scheduled = false;
@@ -237,7 +237,7 @@ export async function replaceSavedModule(text) {
 }
 
 /** Keep a session that could not be loaded, beside the autosave. */
-export async function keepUnloadable(text) {
+export async function keepUnloadable(text: string) {
   try {
     await idbPut(UNLOADABLE_KEY, text);
     return 'IndexedDB (rmt-compose / autosave / "unloadable")';

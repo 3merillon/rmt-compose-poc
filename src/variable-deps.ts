@@ -15,9 +15,11 @@
  * A variable is addressed as one integer, (noteId << 3) | varIndex.
  */
 
-import { VAR, VAR_NAMES, FIRST_INTERPRETATION_VAR } from './binary-note.js';
+import { VAR, VAR_NAMES, FIRST_INTERPRETATION_VAR } from './binary-note.ts';
+import type { BinaryExpression, VariableIndex } from './binary-note.ts';
+import type { ExpressionName, ExpressionNote, NoteLookup } from './model-types.ts';
 
-const NO_REFS = [];
+const NO_REFS: readonly number[] = [];
 
 // startTime ... release. Three bits address a variable, so eight is the limit.
 const VAR_COUNT = Object.keys(VAR).length;
@@ -27,8 +29,8 @@ const VAR_COUNT = Object.keys(VAR).length;
  * Works for both Note (`note.expressions.startTime`) and BinaryNote
  * (`note.startTime`).
  */
-export function getVariableExpression(note, varIndex) {
-  const expressions = note.expressions || note;
+export function getVariableExpression(note: ExpressionNote, varIndex: number) {
+  const expressions = 'expressions' in note ? note.expressions : note;
   let expr;
   // Spelled out per variable: this runs several times for every variable of
   // every evaluated note, and a fixed property name is far cheaper to load
@@ -48,7 +50,7 @@ export function getVariableExpression(note, varIndex) {
 /**
  * Whether evaluating `note` produces a value for this variable.
  */
-export function definesVariable(note, varIndex) {
+export function definesVariable(note: ExpressionNote | null | undefined, varIndex: number) {
   if (!note) return false;
   return getVariableExpression(note, varIndex) !== null;
 }
@@ -58,7 +60,7 @@ export function definesVariable(note, varIndex) {
  * entries, before inheritance is applied. Empty when the note does not define
  * the variable.
  */
-export function getVariableRefs(note, varIndex) {
+export function getVariableRefs(note: ExpressionNote, varIndex: number): readonly number[] {
   const expr = getVariableExpression(note, varIndex);
   return expr !== null ? expr.getVariableRefs() : NO_REFS;
 }
@@ -78,7 +80,7 @@ export function getVariableRefs(note, varIndex) {
  * @param {number} ref - Packed (noteId << 3) | varIndex
  * @returns {number} Packed variable, or -1
  */
-export function resolveVariableRef(getNote, ref) {
+export function resolveVariableRef(getNote: NoteLookup, ref: number) {
   const varIndex = ref & 7;
   const noteId = ref >> 3;
   if (definesVariable(getNote(noteId), varIndex)) return ref;
@@ -93,7 +95,7 @@ export function resolveVariableRef(getNote, ref) {
  * reference such as `[5].a` inherits when note 5 has no amplitude (attack,
  * release) of its own. Time and pitch never follow the BaseNote unless written.
  */
-export function inheritsFromBase(note) {
+export function inheritsFromBase(note: ExpressionNote | null | undefined) {
   if (!note || note.id === 0) return false;
   for (let varIndex = 0; varIndex < VAR_COUNT; varIndex++) {
     const refs = getVariableRefs(note, varIndex);
@@ -113,7 +115,7 @@ export function inheritsFromBase(note) {
  *   next and the last reading the first; null when `start` does not depend on
  *   itself. A direct self-reference returns [start].
  */
-export function findVariableCycle(getNote, start) {
+export function findVariableCycle(getNote: NoteLookup, start: number) {
   const startNote = getNote(start >> 3);
   if (!startNote) return null;
 
@@ -140,7 +142,7 @@ export function findVariableCycle(getNote, start) {
 
     visited.add(target);
     path.push(target);
-    pathRefs.push(getVariableRefs(getNote(target >> 3), target & 7));
+    pathRefs.push(getVariableRefs(getNote(target >> 3)!, target & 7));
     pathNext.push(0);
   }
 
@@ -157,11 +159,11 @@ export function findVariableCycle(getNote, start) {
  * @param {BinaryExpression} expr - The compiled candidate expression
  * @returns {number[]|null} See findVariableCycle()
  */
-export function findCycleIfAssigned(getNote, noteId, varIndex, expr) {
+export function findCycleIfAssigned(getNote: NoteLookup, noteId: number, varIndex: number, expr: BinaryExpression) {
   const current = getNote(noteId);
-  const expressions = {};
+  const expressions: Partial<Record<ExpressionName, BinaryExpression | null>> = {};
   for (let i = 0; i < VAR_COUNT; i++) {
-    expressions[VAR_NAMES[i]] = i === varIndex ? expr : (current ? getVariableExpression(current, i) : null);
+    expressions[VAR_NAMES[i as VariableIndex]] = i === varIndex ? expr : (current ? getVariableExpression(current, i) : null);
   }
   const edited = { id: noteId, expressions };
   return findVariableCycle(
@@ -181,10 +183,10 @@ export function findCycleIfAssigned(getNote, noteId, varIndex, expr) {
  * @param {BinaryExpression} expr - The compiled candidate expression
  * @returns {number[]|null} See findVariableCycle()
  */
-export function findDependencyCycle(moduleInstance, noteId, variableName, expr) {
+export function findDependencyCycle(moduleInstance: {getNoteById: NoteLookup} | null, noteId: number | string, variableName: string, expr: BinaryExpression) {
   let varIndex = -1;
   for (let i = 0; i < VAR_COUNT; i++) {
-    if (VAR_NAMES[i] === variableName) varIndex = i;
+    if (VAR_NAMES[i as VariableIndex] === variableName) varIndex = i;
   }
   // Not one of the six evaluated variables: nothing reads it, so no cycle
   if (varIndex < 0 || !moduleInstance) return null;
@@ -200,8 +202,8 @@ export function findDependencyCycle(moduleInstance, noteId, variableName, expr) 
 /**
  * Human-readable name of a packed variable: `[5].frequency`, `base.duration`.
  */
-export function describeVariable(ref) {
+export function describeVariable(ref: number) {
   const noteId = ref >> 3;
-  const name = VAR_NAMES[ref & 7] || `variable ${ref & 7}`;
+  const name = VAR_NAMES[(ref & 7) as VariableIndex] || `variable ${ref & 7}`;
   return noteId === 0 ? `base.${name}` : `[${noteId}].${name}`;
 }

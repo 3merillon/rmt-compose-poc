@@ -5,8 +5,15 @@
  * replacing the O(n) regex-based scanning in the original implementation.
  */
 
+import type { BinaryExpression } from './binary-note.ts';
+
+export type RelationName = 'startTime' | 'duration' | 'frequency';
+export interface DependencyEdge { parentId: number; childId: number; depth: number }
+type PropertyDependencies = ReadonlyMap<number, ReadonlySet<number>>;
+type NoteDependencies = { getAllDependencies(): Set<number>; referencesBaseNote(): boolean };
+
 /** Set's equality (SameValueZero) */
-const sameValueZero = (x, y) => x === y || (x !== x && y !== y);
+const sameValueZero = (x: number | undefined, y: number) => x === y || (x !== x && y !== y);
 
 /**
  * A set of note ids, the value of every per-note entry in the graph's maps.
@@ -21,6 +28,11 @@ const sameValueZero = (x, y) => x === y || (x !== x && y !== y);
  * an IdSet while iterating that same IdSet.
  */
 export class IdSet {
+  declare _a: number | undefined;
+  declare _b: number | undefined;
+  declare _n: number;
+  declare _big: Set<number> | null;
+
   constructor() {
     this._a = undefined;
     this._b = undefined;
@@ -29,7 +41,7 @@ export class IdSet {
   }
 
   /** An IdSet of what `iterable` holds, in its order. */
-  static from(iterable) {
+  static from(iterable: Iterable<number>) {
     const s = new IdSet();
     for (const v of iterable) s.add(v);
     return s;
@@ -39,12 +51,12 @@ export class IdSet {
     return this._big !== null ? this._big.size : this._n;
   }
 
-  has(v) {
+  has(v: number) {
     if (this._big !== null) return this._big.has(v);
     return (this._n > 0 && sameValueZero(this._a, v)) || (this._n > 1 && sameValueZero(this._b, v));
   }
 
-  add(v) {
+  add(v: number) {
     if (this._big !== null) {
       this._big.add(v);
     } else if (!this.has(v)) {
@@ -55,7 +67,7 @@ export class IdSet {
         this._b = v;
         this._n = 2;
       } else {
-        this._big = new Set([this._a, this._b, v]);
+        this._big = new Set([this._a!, this._b!, v]);
         this._a = undefined;
         this._b = undefined;
         this._n = 0;
@@ -64,7 +76,7 @@ export class IdSet {
     return this;
   }
 
-  delete(v) {
+  delete(v: number) {
     if (this._big !== null) return this._big.delete(v);
     if (this._n > 0 && sameValueZero(this._a, v)) {
       this._a = this._b;
@@ -89,8 +101,9 @@ export class IdSet {
 
   values() {
     if (this._big !== null) return this._big.values();
+    // The count records exactly which inline slots are occupied.
     const n = this._n;
-    return (n === 0 ? [] : n === 1 ? [this._a] : [this._a, this._b]).values();
+    return (n === 0 ? [] : n === 1 ? [this._a!] : [this._a!, this._b!]).values();
   }
 
   keys() {
@@ -103,11 +116,12 @@ export class IdSet {
 
   entries() {
     if (this._big !== null) return this._big.entries();
+    // The count records exactly which inline slots are occupied.
     const n = this._n;
-    return (n === 0 ? [] : n === 1 ? [[this._a, this._a]] : [[this._a, this._a], [this._b, this._b]]).values();
+    return (n === 0 ? [] : n === 1 ? [[this._a!, this._a!] as [number, number]] : [[this._a!, this._a!] as [number, number], [this._b!, this._b!] as [number, number]]).values();
   }
 
-  forEach(callback, thisArg) {
+  forEach(callback: (value: number, key: number, set: IdSet) => void, thisArg: unknown = undefined) {
     for (const v of this.values()) callback.call(thisArg, v, v, this);
   }
 
@@ -121,66 +135,91 @@ export class IdSet {
  * Dependency graph with bidirectional indexing
  */
 export class DependencyGraph {
+  declare dependencies: Map<number, IdSet>;
+  declare dependents: Map<number, IdSet>;
+  declare baseNoteDependents: Set<number>;
+  declare implicitBaseDependents: Set<number>;
+  declare startTimeDependencies: Map<number, IdSet>;
+  declare startTimeDependents: Map<number, IdSet>;
+  declare startTimeBaseNoteDependents: Set<number>;
+  declare startTimeOnStartTimeDependents: Map<number, IdSet>;
+  declare startTimeOnDurationDependents: Map<number, IdSet>;
+  declare startTimeOnFrequencyDependents: Map<number, IdSet>;
+  declare frequencyDependencies: Map<number, IdSet>;
+  declare frequencyDependents: Map<number, IdSet>;
+  declare frequencyBaseNoteDependents: Set<number>;
+  declare frequencyOnStartTimeDependents: Map<number, IdSet>;
+  declare frequencyOnDurationDependents: Map<number, IdSet>;
+  declare frequencyOnFrequencyDependents: Map<number, IdSet>;
+  declare durationDependencies: Map<number, IdSet>;
+  declare durationDependents: Map<number, IdSet>;
+  declare durationBaseNoteDependents: Set<number>;
+  declare durationOnStartTimeDependents: Map<number, IdSet>;
+  declare durationOnDurationDependents: Map<number, IdSet>;
+  declare durationOnFrequencyDependents: Map<number, IdSet>;
+  declare corruptionFlags: Map<number, number>;
+  declare _corruptionEpoch: number;
+
   constructor() {
     // Forward map: noteId -> Set<noteId it depends on>
-    this.dependencies = new Map();
+    this.dependencies = new Map<number, IdSet>();
 
     // Inverse map: noteId -> Set<noteId that depend on it>
-    this.dependents = new Map();
+    this.dependents = new Map<number, IdSet>();
 
     // Track baseNote references separately
-    this.baseNoteDependents = new Set();
+    this.baseNoteDependents = new Set<number>();
 
     // Notes that can follow the BaseNote without writing `base`: notes reading
     // `[n].a` (amplitude, attack, release), which inherit the BaseNote's when
     // note n has none of its own. Only re-evaluation needs these, so
     // they are kept apart from baseNoteDependents (which the UI also reads).
-    this.implicitBaseDependents = new Set();
+    this.implicitBaseDependents = new Set<number>();
 
     // StartTime-specific dependency tracking (for drag preview)
     // Forward map: noteId -> Set<noteId its startTime depends on>
-    this.startTimeDependencies = new Map();
+    this.startTimeDependencies = new Map<number, IdSet>();
     // Inverse map: noteId -> Set<noteId whose startTime depends on it>
-    this.startTimeDependents = new Map();
+    this.startTimeDependents = new Map<number, IdSet>();
     // Track notes whose startTime references baseNote
-    this.startTimeBaseNoteDependents = new Set();
+    this.startTimeBaseNoteDependents = new Set<number>();
 
     // Property-specific startTime dependency tracking (for resize vs move)
     // Inverse map: noteId -> Set<noteId whose startTime depends on this note's startTime>
-    this.startTimeOnStartTimeDependents = new Map();
+    this.startTimeOnStartTimeDependents = new Map<number, IdSet>();
     // Inverse map: noteId -> Set<noteId whose startTime depends on this note's duration>
-    this.startTimeOnDurationDependents = new Map();
+    this.startTimeOnDurationDependents = new Map<number, IdSet>();
     // Inverse map: noteId -> Set<noteId whose startTime depends on this note's frequency>
-    this.startTimeOnFrequencyDependents = new Map();
+    this.startTimeOnFrequencyDependents = new Map<number, IdSet>();
 
     // Frequency-specific dependency tracking (for property-colored visualization)
     // Forward map: noteId -> Set<noteId its frequency depends on>
-    this.frequencyDependencies = new Map();
+    this.frequencyDependencies = new Map<number, IdSet>();
     // Inverse map: noteId -> Set<noteId whose frequency depends on it>
-    this.frequencyDependents = new Map();
+    this.frequencyDependents = new Map<number, IdSet>();
     // Track notes whose frequency references baseNote
-    this.frequencyBaseNoteDependents = new Set();
+    this.frequencyBaseNoteDependents = new Set<number>();
     // Property-specific: which property of dependency is referenced by this note's frequency
-    this.frequencyOnStartTimeDependents = new Map();
-    this.frequencyOnDurationDependents = new Map();
-    this.frequencyOnFrequencyDependents = new Map();
+    this.frequencyOnStartTimeDependents = new Map<number, IdSet>();
+    this.frequencyOnDurationDependents = new Map<number, IdSet>();
+    this.frequencyOnFrequencyDependents = new Map<number, IdSet>();
 
     // Duration-specific dependency tracking (for property-colored visualization)
     // Forward map: noteId -> Set<noteId its duration depends on>
-    this.durationDependencies = new Map();
+    this.durationDependencies = new Map<number, IdSet>();
     // Inverse map: noteId -> Set<noteId whose duration depends on it>
-    this.durationDependents = new Map();
+    this.durationDependents = new Map<number, IdSet>();
     // Track notes whose duration references baseNote
-    this.durationBaseNoteDependents = new Set();
+    this.durationBaseNoteDependents = new Set<number>();
     // Property-specific: which property of dependency is referenced by this note's duration
-    this.durationOnStartTimeDependents = new Map();
-    this.durationOnDurationDependents = new Map();
-    this.durationOnFrequencyDependents = new Map();
+    this.durationOnStartTimeDependents = new Map<number, IdSet>();
+    this.durationOnDurationDependents = new Map<number, IdSet>();
+    this.durationOnFrequencyDependents = new Map<number, IdSet>();
 
     // Corruption tracking for irrational number support (TET scales)
     // Maps noteId -> u8 bitmask indicating which properties are corrupted (contain irrational values)
     // Bit flags: 0x01=startTime, 0x02=duration, 0x04=frequency, 0x08=amplitude, 0x10=attack, 0x20=release
-    this.corruptionFlags = new Map();
+    this.corruptionFlags = new Map<number, number>();
 
     // Epoch counter for corruption changes (allows renderer to skip buffer upload when unchanged)
     this._corruptionEpoch = 0;
@@ -192,7 +231,7 @@ export class DependencyGraph {
    * @param {number} noteId - The note being registered
    * @param {BinaryExpression} expr - The expression to extract dependencies from
    */
-  registerExpression(noteId, expr) {
+  registerExpression(noteId: number, expr: BinaryExpression) {
     const newDeps = expr.getDependencySet();
     this._updateDependencies(noteId, newDeps, expr.referencesBase);
   }
@@ -203,7 +242,7 @@ export class DependencyGraph {
    * @param {number} noteId - The note being registered
    * @param {BinaryNote} note - The binary note
    */
-  registerNote(noteId, note) {
+  registerNote(noteId: number, note: NoteDependencies) {
     const allDeps = note.getAllDependencies();
     const refsBase = note.referencesBaseNote();
     this._updateDependencies(noteId, allDeps, refsBase);
@@ -216,18 +255,18 @@ export class DependencyGraph {
    * @param {number} noteId - The note being registered
    * @param {BinaryExpression} startTimeExpr - The startTime expression
    */
-  registerStartTimeDependencies(noteId, startTimeExpr) {
-    const newDeps = startTimeExpr ? startTimeExpr.getDependencySet() : new Set();
+  registerStartTimeDependencies(noteId: number, startTimeExpr: BinaryExpression | null) {
+    const newDeps = startTimeExpr ? startTimeExpr.getDependencySet() : new Set<number>();
     const referencesBase = startTimeExpr ? startTimeExpr.referencesBase : false;
 
     // CRITICAL: Capture old deps BEFORE updating the forward index
     // This is needed for _updateStartTimePropertyDependencies to properly clean up stale inverse entries
-    const oldDeps = this.startTimeDependencies.get(noteId) || new Set();
+    const oldDeps = this.startTimeDependencies.get(noteId) || new Set<number>();
 
     this._updateStartTimeDependencies(noteId, newDeps, referencesBase);
 
     // Also update property-specific tracking, passing old deps for proper cleanup
-    const propDeps = startTimeExpr ? startTimeExpr.getPropertyDependencies() : new Map();
+    const propDeps = startTimeExpr ? startTimeExpr.getPropertyDependencies() : new Map<number, Set<number>>();
     this._updateStartTimePropertyDependencies(noteId, propDeps, oldDeps);
   }
 
@@ -238,7 +277,7 @@ export class DependencyGraph {
    * @param {Map} newPropDeps - New property dependencies from the expression
    * @param {Set} oldDeps - The OLD forward deps (captured before _updateStartTimeDependencies)
    */
-  _updateStartTimePropertyDependencies(noteId, newPropDeps, oldDeps) {
+  _updateStartTimePropertyDependencies(noteId: number, newPropDeps: PropertyDependencies, oldDeps: Iterable<number>) {
     // VAR indices: 0 = startTime, 1 = duration, 2 = frequency
     const VAR_START_TIME = 0;
     const VAR_DURATION = 1;
@@ -246,7 +285,7 @@ export class DependencyGraph {
 
     // Helper to update a specific property inverse map
     // varIndices is an array of VAR indices that should map to this property
-    const updatePropertyMap = (propMap, depNoteId, varIndices, newPropDeps) => {
+    const updatePropertyMap = (propMap: Map<number, IdSet>, depNoteId: number, varIndices: number[], newPropDeps: PropertyDependencies) => {
       const newNoteProps = newPropDeps.get(depNoteId);
       const shouldHave = newNoteProps && varIndices.some(idx => newNoteProps.has(idx));
 
@@ -259,7 +298,7 @@ export class DependencyGraph {
           propMap.set(depNoteId, depSet);
         }
         depSet.add(noteId);
-      } else if (!shouldHave && currentlyHas) {
+      } else if (!shouldHave && depSet && currentlyHas) {
         depSet.delete(noteId);
         if (depSet.size === 0) {
           propMap.delete(depNoteId);
@@ -285,9 +324,9 @@ export class DependencyGraph {
   /**
    * Internal: Update startTime-specific dependency tracking for a note
    */
-  _updateStartTimeDependencies(noteId, newDeps, referencesBase) {
+  _updateStartTimeDependencies(noteId: number, newDeps: ReadonlySet<number>, referencesBase: boolean) {
     // Get old dependencies
-    const oldDeps = this.startTimeDependencies.get(noteId) || new Set();
+    const oldDeps = this.startTimeDependencies.get(noteId) || new Set<number>();
 
     // Remove from inverse index for deps that are no longer referenced
     for (const oldDep of oldDeps) {
@@ -308,7 +347,7 @@ export class DependencyGraph {
         if (!this.startTimeDependents.has(newDep)) {
           this.startTimeDependents.set(newDep, new IdSet());
         }
-        this.startTimeDependents.get(newDep).add(noteId);
+        this.startTimeDependents.get(newDep)!.add(noteId);
       }
     }
 
@@ -330,26 +369,26 @@ export class DependencyGraph {
    * @param {number} noteId - The note being registered
    * @param {BinaryExpression} freqExpr - The frequency expression
    */
-  registerFrequencyDependencies(noteId, freqExpr) {
-    const newDeps = freqExpr ? freqExpr.getDependencySet() : new Set();
+  registerFrequencyDependencies(noteId: number, freqExpr: BinaryExpression | null) {
+    const newDeps = freqExpr ? freqExpr.getDependencySet() : new Set<number>();
     const referencesBase = freqExpr ? freqExpr.referencesBase : false;
 
     // CRITICAL: Capture old deps BEFORE updating the forward index
     // This is needed for _updateFrequencyPropertyDependencies to properly clean up stale inverse entries
-    const oldDeps = this.frequencyDependencies.get(noteId) || new Set();
+    const oldDeps = this.frequencyDependencies.get(noteId) || new Set<number>();
 
     this._updateFrequencyDependencies(noteId, newDeps, referencesBase);
 
     // Also update property-specific tracking, passing old deps for proper cleanup
-    const propDeps = freqExpr ? freqExpr.getPropertyDependencies() : new Map();
+    const propDeps = freqExpr ? freqExpr.getPropertyDependencies() : new Map<number, Set<number>>();
     this._updateFrequencyPropertyDependencies(noteId, propDeps, oldDeps);
   }
 
   /**
    * Internal: Update frequency-specific dependency tracking for a note
    */
-  _updateFrequencyDependencies(noteId, newDeps, referencesBase) {
-    const oldDeps = this.frequencyDependencies.get(noteId) || new Set();
+  _updateFrequencyDependencies(noteId: number, newDeps: ReadonlySet<number>, referencesBase: boolean) {
+    const oldDeps = this.frequencyDependencies.get(noteId) || new Set<number>();
 
     // Remove from inverse index for deps that are no longer referenced
     for (const oldDep of oldDeps) {
@@ -370,7 +409,7 @@ export class DependencyGraph {
         if (!this.frequencyDependents.has(newDep)) {
           this.frequencyDependents.set(newDep, new IdSet());
         }
-        this.frequencyDependents.get(newDep).add(noteId);
+        this.frequencyDependents.get(newDep)!.add(noteId);
       }
     }
 
@@ -392,13 +431,13 @@ export class DependencyGraph {
    * @param {Map} newPropDeps - New property dependencies from the expression
    * @param {Set} oldDeps - The OLD forward deps (captured before _updateFrequencyDependencies)
    */
-  _updateFrequencyPropertyDependencies(noteId, newPropDeps, oldDeps) {
+  _updateFrequencyPropertyDependencies(noteId: number, newPropDeps: PropertyDependencies, oldDeps: Iterable<number>) {
     // VAR indices: 0 = startTime, 1 = duration, 2 = frequency
     const VAR_START_TIME = 0;
     const VAR_DURATION = 1;
     const VAR_FREQUENCY = 2;
 
-    const updatePropertyMap = (propMap, depNoteId, varIndices, newPropDeps) => {
+    const updatePropertyMap = (propMap: Map<number, IdSet>, depNoteId: number, varIndices: number[], newPropDeps: PropertyDependencies) => {
       const newNoteProps = newPropDeps.get(depNoteId);
       const shouldHave = newNoteProps && varIndices.some(idx => newNoteProps.has(idx));
 
@@ -411,7 +450,7 @@ export class DependencyGraph {
           propMap.set(depNoteId, depSet);
         }
         depSet.add(noteId);
-      } else if (!shouldHave && currentlyHas) {
+      } else if (!shouldHave && depSet && currentlyHas) {
         depSet.delete(noteId);
         if (depSet.size === 0) {
           propMap.delete(depNoteId);
@@ -441,26 +480,26 @@ export class DependencyGraph {
    * @param {number} noteId - The note being registered
    * @param {BinaryExpression} durExpr - The duration expression
    */
-  registerDurationDependencies(noteId, durExpr) {
-    const newDeps = durExpr ? durExpr.getDependencySet() : new Set();
+  registerDurationDependencies(noteId: number, durExpr: BinaryExpression | null) {
+    const newDeps = durExpr ? durExpr.getDependencySet() : new Set<number>();
     const referencesBase = durExpr ? durExpr.referencesBase : false;
 
     // CRITICAL: Capture old deps BEFORE updating the forward index
     // This is needed for _updateDurationPropertyDependencies to properly clean up stale inverse entries
-    const oldDeps = this.durationDependencies.get(noteId) || new Set();
+    const oldDeps = this.durationDependencies.get(noteId) || new Set<number>();
 
     this._updateDurationDependencies(noteId, newDeps, referencesBase);
 
     // Also update property-specific tracking, passing old deps for proper cleanup
-    const propDeps = durExpr ? durExpr.getPropertyDependencies() : new Map();
+    const propDeps = durExpr ? durExpr.getPropertyDependencies() : new Map<number, Set<number>>();
     this._updateDurationPropertyDependencies(noteId, propDeps, oldDeps);
   }
 
   /**
    * Internal: Update duration-specific dependency tracking for a note
    */
-  _updateDurationDependencies(noteId, newDeps, referencesBase) {
-    const oldDeps = this.durationDependencies.get(noteId) || new Set();
+  _updateDurationDependencies(noteId: number, newDeps: ReadonlySet<number>, referencesBase: boolean) {
+    const oldDeps = this.durationDependencies.get(noteId) || new Set<number>();
 
     // Remove from inverse index for deps that are no longer referenced
     for (const oldDep of oldDeps) {
@@ -481,7 +520,7 @@ export class DependencyGraph {
         if (!this.durationDependents.has(newDep)) {
           this.durationDependents.set(newDep, new IdSet());
         }
-        this.durationDependents.get(newDep).add(noteId);
+        this.durationDependents.get(newDep)!.add(noteId);
       }
     }
 
@@ -503,13 +542,13 @@ export class DependencyGraph {
    * @param {Map} newPropDeps - New property dependencies from the expression
    * @param {Set} oldDeps - The OLD forward deps (captured before _updateDurationDependencies)
    */
-  _updateDurationPropertyDependencies(noteId, newPropDeps, oldDeps) {
+  _updateDurationPropertyDependencies(noteId: number, newPropDeps: PropertyDependencies, oldDeps: Iterable<number>) {
     // VAR indices: 0 = startTime, 1 = duration, 2 = frequency
     const VAR_START_TIME = 0;
     const VAR_DURATION = 1;
     const VAR_FREQUENCY = 2;
 
-    const updatePropertyMap = (propMap, depNoteId, varIndices, newPropDeps) => {
+    const updatePropertyMap = (propMap: Map<number, IdSet>, depNoteId: number, varIndices: number[], newPropDeps: PropertyDependencies) => {
       const newNoteProps = newPropDeps.get(depNoteId);
       const shouldHave = newNoteProps && varIndices.some(idx => newNoteProps.has(idx));
 
@@ -522,7 +561,7 @@ export class DependencyGraph {
           propMap.set(depNoteId, depSet);
         }
         depSet.add(noteId);
-      } else if (!shouldHave && currentlyHas) {
+      } else if (!shouldHave && depSet && currentlyHas) {
         depSet.delete(noteId);
         if (depSet.size === 0) {
           propMap.delete(depNoteId);
@@ -548,9 +587,9 @@ export class DependencyGraph {
   /**
    * Internal: Update dependency tracking for a note
    */
-  _updateDependencies(noteId, newDeps, referencesBase) {
+  _updateDependencies(noteId: number, newDeps: ReadonlySet<number>, referencesBase: boolean) {
     // Get old dependencies
-    const oldDeps = this.dependencies.get(noteId) || new Set();
+    const oldDeps = this.dependencies.get(noteId) || new Set<number>();
 
     // Check if dependencies actually changed - this affects transitive corruption visualization
     let depsChanged = oldDeps.size !== newDeps.size;
@@ -582,7 +621,7 @@ export class DependencyGraph {
         if (!this.dependents.has(newDep)) {
           this.dependents.set(newDep, new IdSet());
         }
-        this.dependents.get(newDep).add(noteId);
+        this.dependents.get(newDep)!.add(noteId);
       }
     }
 
@@ -609,7 +648,7 @@ export class DependencyGraph {
    *
    * @param {number} noteId - The note to remove
    */
-  removeNote(noteId) {
+  removeNote(noteId: number) {
     // Get and clear forward dependencies
     const deps = this.dependencies.get(noteId);
     if (deps) {
@@ -774,51 +813,14 @@ export class DependencyGraph {
   }
 
   /**
-   * Drop every edge and flag for every note. Used when a module empties itself
-   * (Clean Slate): deleting notes from the module map without pruning the graph
-   * leaves the old composition's edges alive, and ids reused by a later import
-   * inherit them — corrupting dirty propagation and evaluation order.
-   */
-  clear() {
-    this.dependencies.clear();
-    this.dependents.clear();
-    this.baseNoteDependents.clear();
-    this.implicitBaseDependents.clear();
-
-    this.startTimeDependencies.clear();
-    this.startTimeDependents.clear();
-    this.startTimeBaseNoteDependents.clear();
-    this.startTimeOnStartTimeDependents.clear();
-    this.startTimeOnDurationDependents.clear();
-    this.startTimeOnFrequencyDependents.clear();
-
-    this.frequencyDependencies.clear();
-    this.frequencyDependents.clear();
-    this.frequencyBaseNoteDependents.clear();
-    this.frequencyOnStartTimeDependents.clear();
-    this.frequencyOnDurationDependents.clear();
-    this.frequencyOnFrequencyDependents.clear();
-
-    this.durationDependencies.clear();
-    this.durationDependents.clear();
-    this.durationBaseNoteDependents.clear();
-    this.durationOnStartTimeDependents.clear();
-    this.durationOnDurationDependents.clear();
-    this.durationOnFrequencyDependents.clear();
-
-    this.corruptionFlags.clear();
-    this._corruptionEpoch++;
-  }
-
-  /**
    * Get direct dependencies for a note (what it depends on)
    * O(1) lookup
    *
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getDependencies(noteId) {
-    return this.dependencies.get(noteId) || new Set();
+  getDependencies(noteId: number) {
+    return this.dependencies.get(noteId) || new Set<number>();
   }
 
   /**
@@ -828,8 +830,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getDependents(noteId) {
-    return this.dependents.get(noteId) || new Set();
+  getDependents(noteId: number) {
+    return this.dependents.get(noteId) || new Set<number>();
   }
 
   /**
@@ -839,8 +841,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getAllDependents(noteId) {
-    const result = new Set();
+  getAllDependents(noteId: number) {
+    const result = new Set<number>();
     const queue = [noteId];
     let queueIdx = 0; // Use index instead of shift() for O(1)
     const visited = new Set([noteId]);
@@ -870,7 +872,7 @@ export class DependencyGraph {
    * @param {number} noteId
    * @param {boolean} inherits
    */
-  setImplicitBaseDependent(noteId, inherits) {
+  setImplicitBaseDependent(noteId: number, inherits: boolean) {
     if (inherits) {
       this.implicitBaseDependents.add(noteId);
     } else {
@@ -889,10 +891,10 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>} Transitive, excluding noteId itself
    */
-  getEvaluationDependents(noteId) {
-    const result = new Set();
+  getEvaluationDependents(noteId: number) {
+    const result = new Set<number>();
     const queue = [noteId];
-    const visit = (dep) => {
+    const visit = (dep: number) => {
       if (dep !== noteId && !result.has(dep)) {
         result.add(dep);
         queue.push(dep);
@@ -921,8 +923,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getStartTimeDependents(noteId) {
-    return this.startTimeDependents.get(noteId) || new Set();
+  getStartTimeDependents(noteId: number) {
+    return this.startTimeDependents.get(noteId) || new Set<number>();
   }
 
   /**
@@ -933,8 +935,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getAllStartTimeDependents(noteId) {
-    const result = new Set();
+  getAllStartTimeDependents(noteId: number) {
+    const result = new Set<number>();
     const queue = [noteId];
     let queueIdx = 0; // Use index instead of shift() for O(1)
     const visited = new Set([noteId]);
@@ -973,8 +975,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getStartTimeOnStartTimeDependents(noteId) {
-    return this.startTimeOnStartTimeDependents.get(noteId) || new Set();
+  getStartTimeOnStartTimeDependents(noteId: number) {
+    return this.startTimeOnStartTimeDependents.get(noteId) || new Set<number>();
   }
 
   /**
@@ -984,8 +986,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getStartTimeOnDurationDependents(noteId) {
-    return this.startTimeOnDurationDependents.get(noteId) || new Set();
+  getStartTimeOnDurationDependents(noteId: number) {
+    return this.startTimeOnDurationDependents.get(noteId) || new Set<number>();
   }
 
   /**
@@ -995,8 +997,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getAllStartTimeOnStartTimeDependents(noteId) {
-    const result = new Set();
+  getAllStartTimeOnStartTimeDependents(noteId: number) {
+    const result = new Set<number>();
     const queue = [noteId];
     let queueIdx = 0;
     const visited = new Set([noteId]);
@@ -1026,8 +1028,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getAllStartTimeOnDurationDependents(noteId) {
-    const result = new Set();
+  getAllStartTimeOnDurationDependents(noteId: number) {
+    const result = new Set<number>();
     const queue = [noteId];
     let queueIdx = 0;
     const visited = new Set([noteId]);
@@ -1075,8 +1077,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getStartTimeOnFrequencyDependents(noteId) {
-    return this.startTimeOnFrequencyDependents.get(noteId) || new Set();
+  getStartTimeOnFrequencyDependents(noteId: number) {
+    return this.startTimeOnFrequencyDependents.get(noteId) || new Set<number>();
   }
 
   /**
@@ -1086,8 +1088,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getAllStartTimeOnFrequencyDependents(noteId) {
-    const result = new Set();
+  getAllStartTimeOnFrequencyDependents(noteId: number) {
+    const result = new Set<number>();
     const queue = [noteId];
     let queueIdx = 0;
     const visited = new Set([noteId]);
@@ -1139,23 +1141,23 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getAllAffectedByFrequencyChange(noteId) {
-    const result = new Set();
-    const queue = [{ id: noteId, changedProp: 'frequency' }];
+  getAllAffectedByFrequencyChange(noteId: number) {
+    const result = new Set<number>();
+    const queue: {id: number; changedProp: RelationName}[] = [{ id: noteId, changedProp: 'frequency' }];
     let queueIdx = 0;
-    const visited = new Map(); // id -> Set of properties that have been processed
+    const visited = new Map<number, Set<RelationName>>(); // id -> Set of properties that have been processed
 
     while (queueIdx < queue.length) {
       const { id: current, changedProp } = queue[queueIdx++];
 
       // Track which properties we've processed for this note
       if (!visited.has(current)) {
-        visited.set(current, new Set());
+        visited.set(current, new Set<RelationName>());
       }
-      if (visited.get(current).has(changedProp)) {
+      if (visited.get(current)!.has(changedProp)) {
         continue;
       }
-      visited.get(current).add(changedProp);
+      visited.get(current)!.add(changedProp);
 
       if (changedProp === 'frequency') {
         // Notes whose startTime depends on current's frequency -> they MOVE (startTime changes)
@@ -1268,22 +1270,22 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getAllAffectedByDurationChange(noteId) {
-    const result = new Set();
-    const queue = [{ id: noteId, changedProp: 'duration' }];
+  getAllAffectedByDurationChange(noteId: number) {
+    const result = new Set<number>();
+    const queue: {id: number; changedProp: RelationName}[] = [{ id: noteId, changedProp: 'duration' }];
     let queueIdx = 0;
-    const visited = new Map();
+    const visited = new Map<number, Set<RelationName>>();
 
     while (queueIdx < queue.length) {
       const { id: current, changedProp } = queue[queueIdx++];
 
       if (!visited.has(current)) {
-        visited.set(current, new Set());
+        visited.set(current, new Set<RelationName>());
       }
-      if (visited.get(current).has(changedProp)) {
+      if (visited.get(current)!.has(changedProp)) {
         continue;
       }
-      visited.get(current).add(changedProp);
+      visited.get(current)!.add(changedProp);
 
       if (changedProp === 'frequency') {
         const stOnFreq = this.startTimeOnFrequencyDependents.get(current);
@@ -1354,22 +1356,22 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getAllAffectedByStartTimeChange(noteId) {
-    const result = new Set();
-    const queue = [{ id: noteId, changedProp: 'startTime' }];
+  getAllAffectedByStartTimeChange(noteId: number) {
+    const result = new Set<number>();
+    const queue: {id: number; changedProp: RelationName}[] = [{ id: noteId, changedProp: 'startTime' }];
     let queueIdx = 0;
-    const visited = new Map();
+    const visited = new Map<number, Set<RelationName>>();
 
     while (queueIdx < queue.length) {
       const { id: current, changedProp } = queue[queueIdx++];
 
       if (!visited.has(current)) {
-        visited.set(current, new Set());
+        visited.set(current, new Set<RelationName>());
       }
-      if (visited.get(current).has(changedProp)) {
+      if (visited.get(current)!.has(changedProp)) {
         continue;
       }
-      visited.get(current).add(changedProp);
+      visited.get(current)!.add(changedProp);
 
       if (changedProp === 'frequency') {
         const stOnFreq = this.startTimeOnFrequencyDependents.get(current);
@@ -1440,8 +1442,8 @@ export class DependencyGraph {
    * @param {number} noteId
    * @returns {Set<number>}
    */
-  getAllDependencies(noteId) {
-    const result = new Set();
+  getAllDependencies(noteId: number) {
+    const result = new Set<number>();
     const queue = [noteId];
     let queueIdx = 0; // Use index instead of shift() for O(1)
     const visited = new Set([noteId]);
@@ -1480,7 +1482,7 @@ export class DependencyGraph {
    * @param {number} target
    * @returns {boolean}
    */
-  hasDependencyPath(source, target) {
+  hasDependencyPath(source: number, target: number) {
     const queue = [source];
     let queueIdx = 0; // Use index instead of shift() for O(1)
     const visited = new Set([source]);
@@ -1510,12 +1512,12 @@ export class DependencyGraph {
    * @returns {Array<Array<number>>} - Array of cycles (each cycle is an array of note IDs)
    */
   detectCycles() {
-    const cycles = [];
-    const visited = new Set();
-    const recursionStack = new Set();
-    const path = [];
+    const cycles: number[][] = [];
+    const visited = new Set<number>();
+    const recursionStack = new Set<number>();
+    const path: number[] = [];
 
-    const dfs = (noteId) => {
+    const dfs = (noteId: number) => {
       visited.add(noteId);
       recursionStack.add(noteId);
       path.push(noteId);
@@ -1552,14 +1554,14 @@ export class DependencyGraph {
    * @param {Iterable<number>} noteIds - Notes to sort
    * @returns {Array<number>} - Sorted note IDs
    */
-  getEvaluationOrder(noteIds) {
+  getEvaluationOrder(noteIds: Iterable<number>) {
     const noteSet = new Set(noteIds);
-    const inDegree = new Map();
+    const inDegree = new Map<number, number>();
     const result = [];
 
     // Calculate in-degrees
     for (const id of noteSet) {
-      const deps = this.dependencies.get(id) || new Set();
+      const deps = this.dependencies.get(id) || new Set<number>();
       let count = 0;
       for (const d of deps) {
         if (noteSet.has(d)) count++;
@@ -1583,7 +1585,7 @@ export class DependencyGraph {
       if (dependents) {
         for (const dep of dependents) {
           if (!inDegree.has(dep)) continue;
-          const newDeg = inDegree.get(dep) - 1;
+          const newDeg = inDegree.get(dep)! - 1;
           inDegree.set(dep, newDeg);
           if (newDeg === 0) queue.push(dep);
         }
@@ -1605,11 +1607,11 @@ export class DependencyGraph {
    * @param {string} property - 'frequency' | 'startTime' | 'duration'
    * @returns {{ edges: Array<{parentId: number, childId: number, depth: number}>, maxDepth: number }}
    */
-  getChildrenTreeByProperty(noteId, property) {
-    const edges = [];
+  getChildrenTreeByProperty(noteId: number, property: RelationName) {
+    const edges: DependencyEdge[] = [];
     // Track visited as Map<noteId, Set<propertyThatCausedVisit>> to allow revisiting
     // with different property contexts while avoiding infinite loops
-    const visited = new Map();
+    const visited = new Map<number, Set<RelationName>>();
     visited.set(noteId, new Set([property]));
 
     const queue = [{ id: noteId, depth: 0, changedProp: property }];
@@ -1617,13 +1619,13 @@ export class DependencyGraph {
     let maxDepth = 0;
 
     // Helper to add edge and queue child if not visited with this property
-    const addEdge = (parentId, childId, depth, childChangedProp) => {
+    const addEdge = (parentId: number, childId: number, depth: number, childChangedProp: RelationName) => {
       if (!visited.has(childId)) {
-        visited.set(childId, new Set());
+        visited.set(childId, new Set<RelationName>());
       }
       // Only process if we haven't visited this child with this specific property change
-      if (!visited.get(childId).has(childChangedProp)) {
-        visited.get(childId).add(childChangedProp);
+      if (!visited.get(childId)!.has(childChangedProp)) {
+        visited.get(childId)!.add(childChangedProp);
         maxDepth = Math.max(maxDepth, depth);
         edges.push({ parentId, childId, depth });
         queue.push({ id: childId, depth, changedProp: childChangedProp });
@@ -1716,16 +1718,16 @@ export class DependencyGraph {
    * @param {number} noteId - The root note to start from
    * @returns {{ edgesByProperty: { frequency: Array, startTime: Array, duration: Array }, maxDepth: number }}
    */
-  getChildrenTreeByAllProperties(noteId) {
-    const edgesByProperty = { frequency: [], startTime: [], duration: [] };
-    const names = ['frequency', 'startTime', 'duration'];
+  getChildrenTreeByAllProperties(noteId: number) {
+    const edgesByProperty: Record<RelationName, DependencyEdge[]> = { frequency: [], startTime: [], duration: [] };
+    const names = ['frequency', 'startTime', 'duration'] as const;
     // Rows select the changed parent property, columns the child's property.
     const outgoing = [
       [this.frequencyOnFrequencyDependents, this.startTimeOnFrequencyDependents, this.durationOnFrequencyDependents],
       [this.frequencyOnStartTimeDependents, this.startTimeOnStartTimeDependents, this.durationOnStartTimeDependents],
       [this.frequencyOnDurationDependents, this.startTimeOnDurationDependents, this.durationOnDurationDependents],
     ];
-    const visited = new Map(); // id -> nine bits for (root property, changed property)
+    const visited = new Map<number, number>(); // id -> nine bits for (root property, changed property)
     const queue = names.map((_, origin) => ({ id: noteId, depth: 0, changed: origin, origin }));
     let maxDepth = 0;
     const childOrder = [1, 0, 2]; // start, frequency, duration: stable sibling order
@@ -1795,7 +1797,7 @@ export class DependencyGraph {
    * @param {number} noteId - The note ID
    * @param {number} flags - Bitmask of corrupted properties (0x01=startTime, 0x02=duration, 0x04=frequency, etc.)
    */
-  setCorruptionFlags(noteId, flags) {
+  setCorruptionFlags(noteId: number, flags: number) {
     const existing = this.corruptionFlags.get(noteId) || 0;
     if (existing === flags) return; // No change, skip epoch bump
     this._corruptionEpoch++;
@@ -1812,7 +1814,7 @@ export class DependencyGraph {
    * @param {number} noteId - The note ID
    * @returns {number} - Bitmask of corrupted properties (0 if not corrupted)
    */
-  getCorruptionFlags(noteId) {
+  getCorruptionFlags(noteId: number) {
     return this.corruptionFlags.get(noteId) || 0;
   }
 
@@ -1830,7 +1832,7 @@ export class DependencyGraph {
    * @param {number} noteId - The note ID
    * @returns {boolean} - True if any property is corrupted
    */
-  isNoteCorrupted(noteId) {
+  isNoteCorrupted(noteId: number) {
     return this.corruptionFlags.has(noteId) && this.corruptionFlags.get(noteId) !== 0;
   }
 
@@ -1841,7 +1843,7 @@ export class DependencyGraph {
    * @param {number} propertyFlag - The property flag to check (e.g., 0x04 for frequency)
    * @returns {boolean} - True if the property is corrupted
    */
-  isPropertyCorrupted(noteId, propertyFlag) {
+  isPropertyCorrupted(noteId: number, propertyFlag: number) {
     const flags = this.corruptionFlags.get(noteId) || 0;
     return (flags & propertyFlag) !== 0;
   }
@@ -1851,7 +1853,7 @@ export class DependencyGraph {
    *
    * @param {number} noteId - The note ID
    */
-  clearCorruptionFlags(noteId) {
+  clearCorruptionFlags(noteId: number) {
     this.corruptionFlags.delete(noteId);
   }
 
@@ -1861,7 +1863,7 @@ export class DependencyGraph {
    * @returns {Set<number>} - Set of note IDs that have corruption
    */
   getCorruptedNotes() {
-    const result = new Set();
+    const result = new Set<number>();
     for (const [noteId, flags] of this.corruptionFlags) {
       if (flags !== 0) {
         result.add(noteId);
@@ -1877,7 +1879,7 @@ export class DependencyGraph {
    * @param {number} noteId - The note ID
    * @returns {boolean} - True if frequency is transitively corrupted
    */
-  isFrequencyTransitivelyCorrupted(noteId) {
+  isFrequencyTransitivelyCorrupted(noteId: number) {
     // Check direct corruption first (fast path)
     if (this.isPropertyCorrupted(noteId, 0x04)) return true;
 
@@ -1906,8 +1908,8 @@ export class DependencyGraph {
    * @param {number} noteId - The note ID
    * @returns {Set<number>} - Set of note IDs that this note's frequency depends on
    */
-  getAllFrequencyDependencies(noteId) {
-    const result = new Set();
+  getAllFrequencyDependencies(noteId: number) {
+    const result = new Set<number>();
     const queue = [noteId];
     let idx = 0;
     const visited = new Set([noteId]);
@@ -1966,7 +1968,7 @@ export class DependencyGraph {
    * @param {function} [isChainLink] - Optional predicate (depId, parentId) => boolean to check if a dependent is a chain link (not anchor)
    * @returns {Array<{id: number, startSec: number}>} - Chain from earliest to latest
    */
-  getMeasureChain(measureId, isMeasure, getStartTime, isChainLink = null) {
+  getMeasureChain(measureId: number, isMeasure: (id: number) => boolean, getStartTime: (id: number) => number, isChainLink: ((id: number, parent: number) => boolean) | null = null) {
     // Step 1: Walk backward to find the earliest ancestor measure IN THIS CHAIN
     // Only walk backward through chain links (isChainLink returns true), not anchors
     let cur = measureId;
@@ -1993,10 +1995,10 @@ export class DependencyGraph {
     }
 
     // Step 2: Build chain forward from earliest ancestor
-    const chain = [];
-    const visited = new Set();
+    const chain: {id: number; startSec: number}[] = [];
+    const visited = new Set<number>();
 
-    const pushWithStart = (id) => {
+    const pushWithStart = (id: number) => {
       const t = getStartTime(id);
       chain.push({ id, startSec: t });
     };
