@@ -1,7 +1,7 @@
 // Transport with tails (Phase I, step 2), in the running app: headless Edge, a real AudioContext.
 // Needs the dev server: node scripts/perf/check-transport.mjs [http://localhost:3220/?perf=1]
 // Checks the module end (tails ring out), Play/Stop/Pause, loop seams and switching the loop off,
-// live tempo, undo during playback, and the voice limit. Exit 1 on any failure.
+// live tempo, undo during playback, the voice limit, and the master limiter. Exit 1 on any failure.
 import { chromium } from 'playwright';
 const URL = process.argv[2] || 'http://localhost:3220/?perf=1';
 const MODULE = {
@@ -221,6 +221,80 @@ check('violin: the same pitch again is a new bow stroke (30 ms), not a slur; aft
   Math.abs(lines.v2len - 0.04) < 1e-3 && lines.v3slur === false && lines.v4slur === false && lines.v3fade === false, `ends +${lines.v2len} s`);
 check('piano: a pitch struck again damps the voice still ringing on it (20 ms); another pitch rings on',
   Math.abs(lines.p5len - 0.03) < 1e-3 && lines.p6fade === false, `ends +${lines.p5len} s`);
+
+// 12. Check the actual stereo master output at float precision, before the device clips.
+const limiter = await page.evaluate(async () => {
+  const { AudioGraph } = await import('/src/player/audio-graph.js');
+  const { settingsStore } = await import('/src/settings/settings-store.js');
+  const sampleRate = 48000;
+  const frames = sampleRate * 2;
+  const delay = Math.round(sampleRate * 0.006);
+  const channels = [1, 0.75].map((level, channel) => Float32Array.from({ length: frames }, (_, i) => {
+    const t = i / sampleRate;
+    if (t < 0.5) return level * 0.025 * Math.sin(2 * Math.PI * (997 + channel * 100) * t);
+    if (t < 0.75 || t >= 1.75) return 0;
+    const attack = (t - 0.75) / 0.015;
+    const release = (1.75 - t) / 0.1;
+    // Equivalent to a high-polyphony same-pitch chord at the normal per-note level.
+    return level * 128 * 0.2 * Math.min(1, attack, release) * Math.sin(2 * Math.PI * 263 * (t - 0.75));
+  }));
+  async function render(mode) {
+    const ctx = new OfflineAudioContext(2, frames, sampleRate);
+    const graph = new AudioGraph(ctx);
+    try {
+      if (mode === 'compressor') {
+        graph.limiter.disconnect();
+        graph.outputTrim.disconnect();
+        graph.limiter.connect(ctx.destination);
+      } else if (mode === 'bypass') {
+        settingsStore.set('audio.limiter.enabled', false);
+      }
+      const buffer = ctx.createBuffer(2, frames, sampleRate);
+      channels.forEach((channel, i) => buffer.copyToChannel(channel, i));
+      const source = ctx.createBufferSource();
+      source.buffer = buffer;
+      source.connect(graph.getBus('sine-wave'));
+      source.start();
+      const output = await ctx.startRendering();
+      return channels.map((_, i) => output.getChannelData(i));
+    } finally {
+      graph.dispose();
+    }
+  }
+  const paths = ['audio.limiter.enabled', 'audio.reverb.enabled', 'audio.masterVolume'];
+  const saved = paths.map(path => settingsStore.get(path));
+  try {
+    settingsStore.set(paths[0], true);
+    settingsStore.set(paths[1], false);
+    settingsStore.set(paths[2], 1);
+    const compressor = await render('compressor');
+    const enabled = await render('enabled');
+    const bypassed = await render('bypass');
+    const peak = output => output.map(channel => channel.reduce((max, sample) => Math.max(max, Math.abs(sample)), 0));
+    const quiet = compressor.map((channel, c) => {
+      let energy = 0;
+      let difference = 0;
+      for (let i = sampleRate / 5; i < sampleRate * 0.4; i++) {
+        energy += channel[i] ** 2;
+        difference += (enabled[c][i + delay] - channel[i]) ** 2;
+      }
+      return Math.sqrt(difference / energy);
+    });
+    const bypassError = bypassed.map((channel, c) =>
+      channel.reduce((max, sample, i) => Math.max(max, Math.abs(sample - channels[c][i])), 0));
+    return { compressor: peak(compressor), enabled: peak(enabled), bypassed: peak(bypassed), quiet, bypassError };
+  } finally {
+    paths.forEach((path, i) => settingsStore.set(path, saved[i]));
+  }
+});
+check('master limiter: the stereo chord stays below full scale with peak protection enabled',
+  limiter.compressor.some(peak => peak > 1.05) && limiter.enabled.every(peak => peak < 1),
+  `compressor ${limiter.compressor.map(peak => peak.toFixed(3))}, protected ${limiter.enabled.map(peak => peak.toFixed(3))}`);
+check('master limiter: quiet audio retains its level and waveform after aligning lookahead',
+  limiter.quiet.every(error => error < 0.01), `relative RMS error ${limiter.quiet.map(error => error.toFixed(4))}`);
+check('master limiter: switching off bypasses both stages and preserves the stereo mix',
+  limiter.bypassed.every(peak => peak > 1) && limiter.bypassError.every(error => error < 1e-6),
+  `max sample error ${limiter.bypassError}`);
 
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 await page.evaluate(() => { localStorage.removeItem('rmt:moduleSnapshot:v1'); });

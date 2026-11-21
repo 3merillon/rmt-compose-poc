@@ -43,7 +43,7 @@ per note:  voice ──► voiceGain (ADSR; gain.value starts at 0) ──► [S
                                                                                      ▼
                                                                                masterGain
                                                                                      │
-                                                                [limiter: DynamicsCompressor]*
+                                                                [compressor → peak limiter → trim]*
                                                                                      │
                                                                               ctx.destination
 ```
@@ -91,17 +91,14 @@ instrument is cheaper than one per voice. Do not describe them as a mixing desk.
 | `attack` | **0.003 s** |
 | `release` | **0.25 s** |
 
-Default **ON** (`audio.limiter.enabled`, `settings-schema.js:130`).
+Dense chord attacks can still exceed full scale after this compressor. A second
+stereo-linked compressor catches those peaks with a −3 dB threshold, zero knee,
+20 to 1 ratio, zero attack setting and 100 ms release. The output gain offsets
+the second compressor’s automatic makeup gain, keeping quiet passages at their
+original level. This stage adds about 6 ms of lookahead in Edge.
 
-::: danger These are not the old numbers
-Earlier documentation described a compressor at `threshold −24 / knee 30 / ratio 12`. That was
-accidental heavy compression, and it is gone. If you are copying values from an old page, stop.
-:::
-
-`_connectMasterChain()` (`:105`) wires `masterGain → [limiter] →  destination`, honouring the enable
-flag. Toggling the setting disconnects and reconnects the chain — and `_onSettings` only calls it
-**when the flag actually changed** (`:186-190`), because the reconnect itself is a topology change on
-a live graph.
+The **Limiter** setting is on by default. Switching it off routes the master
+directly to the output, bypassing both compressors and the compensating gain.
 
 ## Pitch-driven stereo pan
 
