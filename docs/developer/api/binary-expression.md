@@ -30,7 +30,7 @@ const expr = new BinaryExpression(initialSize = 64)
 
 Creates an empty expression with a 64-byte bytecode buffer (it doubles as needed). You rarely
 build one by hand — the compilers do it. A note's unset variables share one frozen empty
-expression, `EMPTY_EXPRESSION` (`src/binary-note.js:458-466`); its `clone()` is an ordinary, writable
+expression, `EMPTY_EXPRESSION` (`src/binary-note.js`); its `clone()` is an ordinary, writable
 one.
 
 ## Properties
@@ -76,7 +76,7 @@ const copy = expr.clone()
 
 Deep copy. `ExpressionCompiler.compile()` always hands back a clone, never the cached instance.
 
-A clone is at its size (`src/binary-note.js:431-445`): `bytecode` holds exactly `length` bytes and
+A clone is at its size (`src/binary-note.js`): `bytecode` holds exactly `length` bytes and
 `dependencies` exactly `depCount` ids, as an `Array`. A 64-byte buffer and a 16-entry `Uint32Array`
 per expression cost about 530 B in Node for what is mostly a dozen bytes and one id. Writing to a
 clone grows it as it would any expression (`ensureCapacity()`, `addDependency()`, which grows from
@@ -219,7 +219,7 @@ numbers, up to `MAX_NOTE_ID`.
 can have. The renderer's picking draws each id in 24 bits of colour, and 2^24 − 1 is also the
 largest integer a float32 vertex attribute holds exactly. `Module.loadFromJSON()` rejects (skips,
 with a console warning) any note whose id is outside `0 … MAX_NOTE_ID`. The DSL parser enforces the
-same range at compile time — `[16777216].f` is a parse error (`src/dsl/parser.js:283-284`), and so is
+same range at compile time — `[16777216].f` is a parse error (`src/dsl/parser.js`), and so is
 `module.getNoteById(16777216)` in the converter of the retired method-chain syntax — so an id can
 never wrap.
 
@@ -332,7 +332,7 @@ decompiler.decompile(expr)   // sourceText verbatim if present, else decompileTo
 decompileToDSL(expr)         // always walks the bytecode, always emits DSL
 ```
 
-`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js:90`),
+`ExpressionDecompiler.decompile()` short-circuits on `sourceText` (`src/expression-compiler.js`),
 so for anything compiled from text it is a pass-through. A synthesised expression (empty
 `sourceText`) is decompiled to DSL.
 

@@ -42,7 +42,7 @@ Change Note 1 once and the other two move with it, exactly in tune, forever. Tha
 1. Click the **BaseNote**, **Clean Slate** the workspace, then click the BaseNote again.
 2. In **ADD NOTE / SILENCE / REFERENCE**, accept the defaults (`base.f`, `base.d`, `base.t`) and click **Create**.
 
-Note 1 inherits the BaseNote's pitch — **263 Hz** by default.
+Note 1 takes its pitch from the current BaseNote. In the startup canon this is 263 Hz.
 
 ### Step 2: a note that depends on it
 

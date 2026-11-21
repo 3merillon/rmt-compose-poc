@@ -17,12 +17,12 @@ Before you hand-enter a scale, check the library. The **Scale Systems** section 
 ready-made tuning systems, and **Intervals** holds 46 just ratios with their cents and limit
 family attached.
 
-| Scale Systems module | Notes | Step written as |
+| Scale Systems module | Notes | Note 2 frequency or step pattern |
 |---|---|---|
-| 12-TET | 13 | `[N-1].f * 2 ^ (1/12)` |
-| 19-TET | 20 | `[N-1].f * 2 ^ (1/19)` |
-| 31-TET | 32 | `[N-1].f * 2 ^ (1/31)` |
-| Bohlen–Pierce | 14 | `[N-1].f * 3 ^ (1/13)` |
+| 12-TET | 13 | `[1].f * 2 ^ (1/12)` |
+| 19-TET | 20 | `[1].f * 2 ^ (1/19)` |
+| 31-TET | 32 | `[1].f * 2 ^ (1/31)` |
+| Bohlen–Pierce | 14 | `[1].f * 3 ^ (1/13)` |
 | Tesla | 81 | successive odd harmonics over 9 |
 | Mixed-Base | 12 | alternating 2-, 3- and 5-based steps |
 

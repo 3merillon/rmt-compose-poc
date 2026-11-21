@@ -6,15 +6,12 @@ description: Structured listening experiments for TET systems, neutral and septi
 # Microtonal Experiments
 
 Seven experiments. Each one is a listening test with a controlled setup, and each takes a few
-minutes. Do the setup first — without it, most of these experiments measure your reverb rather than
-your tuning.
+minutes. Use the same instrument and effects for both versions of each comparison.
 
 ## Setup: make the app honest
 
-::: danger Turn reverb off before you listen to anything
-Reverb ships **on** (25% wet, 1.8 s decay). Every experiment below depends on hearing **beating** —
-the slow throb between two nearly-coincident partials — and reverb smears exactly that. An
-experiment run with reverb on is worthless.
+::: tip Hearing beating
+For comparisons of nearly coincident partials, temporarily turn reverb off so the tails from the previous tones fade quickly.
 
 Open the Settings panel from the **top-bar gear** → **Audio** tab → switch off **Enable reverb**.
 :::
@@ -273,18 +270,8 @@ There is one level of section — no nested folders. Use **Add Category** to mak
 for everything else.
 :::
 
-## Habits that make the difference
-
-**Always A/B.** A tuning never sounds like anything on its own; it sounds like something *compared*
-to another. Keep the reference note in every test.
-
-**Rest your ears.** Ear fatigue is real and it arrives faster than you think during beat-counting.
-
-**Trust your ears over the cents.** The numbers tell you what you *should* hear. They are frequently
-less interesting than what you actually hear.
-
 ## Next
 
 - [Microtonal Composition](/tutorials/advanced/microtonal) — turn discoveries into music
 - [Building a Module Library](/tutorials/workflows/module-library) — organise what you keep
-- [Exploring Intervals](/tutorials/workflows/intervals) — the 46 shipped ratios in full
+- [Exploring Intervals](/tutorials/workflows/intervals) — build a two-note comparison

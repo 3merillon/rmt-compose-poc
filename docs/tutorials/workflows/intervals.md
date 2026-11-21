@@ -31,91 +31,11 @@ Settings panel from the top-bar gear → **Audio** → switch off **Enable rever
 
 Then shift-click (or long-press) **Play** to loop, and let the dyad sustain while you listen.
 
-## The shipped intervals
+## Find a comparison pair
 
-Every ratio below exists as a module. Search the library bar's magnifier by ratio (`5/4`), by family
-(`7-limit`) or by tag (`comma`) to find one instantly.
+Open the library search and try `5/4`, then `81/64`. Both are major thirds. In the two-note setup above, enter `[1].f * (5/4)` for the upper pitch, listen, then change it to `[1].f * (81/64)`. Their ratio is 81/80, the syntonic comma. A sustained sound with upper partials, such as the harmonium, makes it easier to hear the change.
 
-### 3-limit (Pythagorean) — 11 modules
-
-Prime factors 2 and 3 only. Everything is built from stacked fifths.
-
-| Name | Ratio | Cents |
-|---|---|---|
-| Unison | 1/1 | 0 |
-| Major 2nd | 9/8 | 203.91 |
-| Pythagorean minor 3rd | 32/27 | 294.14 |
-| Pythagorean major 3rd | 81/64 | 407.82 |
-| Perfect 4th | 4/3 | 498.05 |
-| Pythagorean tritone | 729/512 | 611.73 |
-| Perfect 5th | 3/2 | 701.96 |
-| Pythagorean major 6th | 27/16 | 905.87 |
-| Pythagorean minor 7th | 16/9 | 996.09 |
-| Pythagorean major 7th | 243/128 | 1109.78 |
-| Octave | 2/1 | 1200 |
-
-### 5-limit (classic just) — 10 modules
-
-Add the prime 5, and thirds become sweet.
-
-| Name | Ratio | Cents |
-|---|---|---|
-| Just minor 2nd | 16/15 | 111.73 |
-| Minor whole tone | 10/9 | 182.40 |
-| Just minor 3rd | 6/5 | 315.64 |
-| Just major 3rd | 5/4 | 386.31 |
-| Just augmented 4th | 45/32 | 590.22 |
-| Just diminished 5th | 64/45 | 609.78 |
-| Just minor 6th | 8/5 | 813.69 |
-| Just major 6th | 5/3 | 884.36 |
-| Just minor 7th | 9/5 | 1017.60 |
-| Just major 7th | 15/8 | 1088.27 |
-
-### 7-limit (septimal) — 10 modules
-
-The seventh harmonic. Bluesy, barbershop, "locked".
-
-| Name | Ratio | Cents |
-|---|---|---|
-| Septimal whole tone | 8/7 | 231.17 |
-| Septimal minor 3rd | 7/6 | 266.87 |
-| Septimal major 3rd | 9/7 | 435.08 |
-| Septimal tritone | 7/5 | 582.51 |
-| Septimal tritone (wide) | 10/7 | 617.49 |
-| Septimal narrow 5th | 32/21 | 729.22 |
-| Septimal minor 6th | 14/9 | 764.92 |
-| Septimal major 6th | 12/7 | 933.13 |
-| Harmonic 7th | 7/4 | 968.83 |
-| Septimal major 7th | 63/32 | 1172.74 |
-
-### Higher limits (11–23) — 9 modules
-
-Neutral intervals — genuinely between major and minor.
-
-| Name | Ratio | Cents |
-|---|---|---|
-| 17th harmonic | 17/16 | 104.96 |
-| Tridecimal neutral 2nd | 13/12 | 138.57 |
-| 19th harmonic | 19/16 | 297.51 |
-| Undecimal neutral 3rd | 11/9 | 347.41 |
-| Undecimal tritone | 11/8 | 551.32 |
-| 23rd harmonic | 23/16 | 628.27 |
-| Tridecimal diminished 5th | 13/9 | 636.62 |
-| Tridecimal neutral 6th | 13/8 | 840.53 |
-| Undecimal neutral 7th | 11/6 | 1049.36 |
-
-### Commas — 6 modules
-
-The tiny gaps that make tuning systems necessary.
-
-| Name | Ratio | Cents |
-|---|---|---|
-| Schisma | 32805/32768 | 1.95 |
-| Diaschisma | 2048/2025 | 19.55 |
-| Syntonic comma | 81/80 | 21.51 |
-| Pythagorean comma | 531441/524288 | 23.46 |
-| Septimal comma | 64/63 | 27.26 |
-| Enharmonic diesis | 128/125 | 41.06 |
+The [module library](/user-guide/modules/module-library) lists the 46 intervals and six sections. Use that catalogue to choose further ratios for the experiments below.
 
 ## A systematic pass
 

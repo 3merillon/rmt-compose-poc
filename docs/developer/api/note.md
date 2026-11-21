@@ -42,7 +42,7 @@ is no evaluator to ask) and no dependency registration happens. Source text and 
 :::
 
 The constructor accepts a value per property in several shapes (`_initFromVariables`,
-`src/note.js:123-190`): a plain string (compiled), a `*String` key (preferred over the plain key
+`src/note.js`): a plain string (compiled), a `*String` key (preferred over the plain key
 when both are present), a legacy function (its `return` expression is extracted), or an existing
 `BinaryExpression` (adopted as-is).
 
@@ -65,7 +65,7 @@ note.expressions  // { [name: string]: BinaryExpression }
 Always all six keys, always a `BinaryExpression` object — an *unset* property is an **empty**
 expression, not a missing one. Use `hasExpression(name)` rather than a truthiness check.
 
-Every unset property holds the same object, `EMPTY_EXPRESSION` (`src/binary-note.js:458-466`), which
+Every unset property holds the same object, `EMPTY_EXPRESSION` (`src/binary-note.js`), which
 is frozen: setting a variable replaces it, and a write into it throws rather than reaching every
 note. Six expressions made for each note, each with its own buffers, cost about 1.8 KB per note in
 Node for the three a typical note leaves unset. Replace an expression; never write into one a note

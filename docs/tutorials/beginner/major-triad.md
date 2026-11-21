@@ -19,7 +19,7 @@ You will build a major chord whose three notes sound at once — and whose two u
 
 ## Root it properly
 
-There are two ways to write a chord, and only one of them is worth learning.
+Choose the anchor according to which pitches should move together.
 
 **Anchored to the BaseNote** — each tone is a ratio of `base.f`:
 
@@ -46,7 +46,7 @@ Every chord module shipped in the library uses the second form. So will you.
 1. Click the **BaseNote** (the orange circle).
 2. Scroll to **DELETE ALL NOTES** and click **Clean Slate**, then **Yes, Clean Slate**.
 
-The BaseNote keeps its defaults: 263 Hz, duration `3/5` s (100 BPM).
+Clean Slate keeps the current BaseNote pitch and duration. The startup canon uses 263 Hz and `3/5` second (100 BPM). Save your current work before clearing if you want to reload it after the exercise.
 
 ## Step 2: Create the root
 
@@ -74,7 +74,7 @@ This is the step that makes it a chord rather than a melody.
 (5/4) * [1].f
 ```
 
-4. Leave **Duration** as it is — it prefilled from Note 1, so the two notes are the same length.
+4. Enter `[1].d` for **Duration** so later changes to the root’s length also change the third.
 5. Click **Create Note**.
 
 ::: warning
@@ -91,7 +91,7 @@ If you forget to switch to **At Start**, you get an arpeggio, not a chord. The p
 (3/2) * [1].f
 ```
 
-4. Click **Create Note**.
+4. Set **Duration** to `[1].d` and click **Create Note**.
 
 ## Step 5: Listen and look
 

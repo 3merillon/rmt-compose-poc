@@ -169,7 +169,7 @@ Click **Octave 2/1** to put it back.
 
 ### 4. Prove the round trip
 
-Select a note and press ▲ five times, then ▼ five times. Read the `Raw:` field. It should be the expression you started with, character for character.
+Select a note and press ▲ five times, then ▼ five times. Read the `Raw:` field. The evaluated pitch should equal the starting pitch exactly. The saved expression may have been simplified.
 
 ## What you learned
 

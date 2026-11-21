@@ -31,7 +31,7 @@ module.notes.get(5)      // ❌ TypeError — notes is not a Map
 
 ### BaseNote defaults
 
-With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js:143-156`):
+With no JSON, the BaseNote is seeded from `defaultBaseNoteVariables` (`src/module.js`):
 
 | Property | Stored expression | Evaluates to |
 |---|---|---|
@@ -169,7 +169,7 @@ module.markNotesDirtyBatch(noteIds) // many notes, one pass
 `markNoteDirty()` re-registers the note, calls `invalidate()` on the incremental evaluator (its
 bytecode may have changed), then marks every transitive dependent with **`markDirtyOnly()`** — they
 need re-evaluating but must not be re-registered. A note already reached by a walk of the same dirty
-cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js:258`), so callers
+cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js`), so callers
 that mark a note and then each dependent cost one walk. If the note *is* the BaseNote, every
 `baseNoteDependents` entry is marked too.
 
@@ -294,7 +294,7 @@ const module = await Module.loadFromJSON(source)   // static, ASYNC
 4. `invalidateAll()` — mark everything dirty. It does **not** evaluate; the first
    `evaluateModule()` does that.
 
-Ids are guarded (`src/module.js:938-950`): non-integer, `< 0` or `> 16777215` ids (`MAX_NOTE_ID`, the
+Ids are guarded (`src/module.js`): non-integer, `< 0` or `> 16777215` ids (`MAX_NOTE_ID`, the
 largest id a note can have) are skipped with a `[RMT Security] Invalid note ID` warning, and `__proto__` /
 `constructor` / `prototype` are blocked outright as prototype-pollution vectors.
 

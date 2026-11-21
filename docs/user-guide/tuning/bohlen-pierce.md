@@ -23,7 +23,7 @@ Take a clarinet, or a square wave. Its spectrum has **only odd harmonics**: 1, 3
 
 Build a scale for that spectrum and the octave stops being special. The strongest simple ratio available is 3/1, and the consonances that fall out are ratios of odd numbers: 3, 5, 7, 9. Bohlen–Pierce is what you get when you take that seriously and divide 3/1 into thirteen equal parts.
 
-Thirteen is not arbitrary: it is the division that best approximates the just BP intervals (see the table below), the same way twelve best approximates 5-limit just intonation for the octave.
+The table below compares this thirteen-step division with just intervals built from odd harmonics.
 
 ## The scale
 

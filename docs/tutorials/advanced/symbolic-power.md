@@ -70,8 +70,7 @@ A plain decimal stays exact: `1.5` is exactly 3/2. Only `~` marks an approximati
 
 The hatching means "tempered or approximate, not a pure ratio". A note whose own expression holds an
 irrational power, a `~` number or a division by zero is crosshatched; a note that depends on one has
-a single diagonal hatch. The app's internal name for this state is *corrupted*, but nothing is
-damaged: every equal-tempered module is built from hatched notes.
+a single diagonal hatch.
 
 The note widget's `Evaluated:` line says which kind of value you have:
 
@@ -144,18 +143,7 @@ Evaluate to BaseNote and Evaluate Module write the exact relation: a 12-TET fift
 approximate value is written with `~`, for example `base.f * ~(14983/8000)`. Moving a note before its
 parent re-anchors its frequency with the exact ratio (`2^(5/6) * [1].f`), with the same value.
 
-## The value types, in the code
-
-The evaluator's exact value types are described on the developer page
-[Exact Values](/developer/core/symbolic-power). An irrational value is a sum of terms
-`coefficient × base₁^exp₁ × base₂^exp₂ × …`, a **list** of power terms. That is what lets a value
-carry a base-2 term and a base-3 term at once, which the shipped **Mixed-Base** scale needs:
-
-```
-[7].f * 2 ^ (-1/12) * 3 ^ (-1/13)
-```
-
-For the bytecode, see [Binary Evaluator](/developer/core/binary-evaluator).
+The [exact-value reference](/developer/core/symbolic-power) describes how the evaluator represents mixed bases.
 
 ## Different bases
 

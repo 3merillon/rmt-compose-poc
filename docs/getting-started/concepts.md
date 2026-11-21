@@ -264,28 +264,9 @@ Note 2 is a major third above note 1 — defined against *note 1*, not against t
 
 ### The module library
 
-The [module bar](/user-guide/interface/module-bar) under the top bar ships **81 modules** in six sections:
+Drag a module tile onto the BaseNote to hear it in your workspace’s tuning and pace. Drop it onto a sounding note to make that note its pitch anchor. The module keeps its internal intervals and its rhythm in BaseNote time units. For example, a ii–V–I dropped onto a note a fourth higher moves up a fourth.
 
-| Section | Count | Contents |
-|---------|-------|----------|
-| **Intervals** | 46 | Single intervals across the 3-, 5-, 7- and higher-limit families, plus six commas |
-| **Chords** | 11 | Major, minor, dom7, harm7, min7, maj7, dim, aug, sus4, and the RMT-native base-3 and base-5 chords |
-| **Progressions** | 8 | Four progressions (V7–I, ii–V–I, I–IV–V–I, I–vi–IV–V) and four cadences |
-| **Melodies** | 7 | Public-domain tunes: Ode to Joy, Twinkle Twinkle, Frère Jacques, Amazing Grace, Greensleeves, Bach Minuet in G, Scarborough Fair |
-| **Scale Systems** | 6 | 12-TET, 19-TET, 31-TET, Bohlen–Pierce, Tesla, Mixed-Base |
-| **Custom** | 3 | Where your own modules land. Ships with the canon per tonos: `canon` (the whole piece), `canon base` and `canon melody`. |
-
-Every module in the library is **relational and self-contained** — no expression refers to anything outside its own file. That is what lets you **drag a module onto any note** and have it re-root there: its `base.f` and `base.t` references become that note's frequency and start time, and the internal structure survives intact. Its `base.d` stays `base.d`: the module keeps its rhythm in time units and plays at your workspace's pace, whatever the length of the note you drop it on. Drop the ii–V–I onto a note a fourth up and you get the same progression, a fourth up.
-
-[The Module Library](/user-guide/modules/module-library) lists every module and how to search them. [Reading the canon and its cadences](/tutorials/workflows/canon-and-cadences) traces one pitch through two voices and shows how octave placement shapes the library progressions.
-
-### Getting your work into the library
-
-- **Save Module** (the **+** menu) downloads the whole workspace as `module.json`.
-- **Copy to Modules** (the group widget, when several notes are selected) saves just that selection into the library's **Custom** section, rooted at its earliest note.
-- A section's dashed **+** tile uploads a `.json` file into that section.
-
-See [Saving Modules](/user-guide/modules/saving-modules).
+Use **+ → Save Module** to download the workspace. Use **Copy to Modules** in the group widget to keep a selected passage in **Custom**. The [module library](/user-guide/modules/module-library) describes the shipped collections. [Reading the canon and its cadences](/tutorials/workflows/canon-and-cadences) shows how to follow a pitch through two voices and trace the bass of a progression.
 
 ## The ≈ symbol (approximation) {#the-symbol-approximation}
 
@@ -311,7 +292,7 @@ There is no fraction that equals it, so RMT Compose keeps it as the power it is.
 | **Crosshatch** (both diagonals) | This note's own expression contains an irrational power, a `~` number or a division by zero |
 | **Single diagonal hatch** | The note is pure itself, but something it depends on is tempered or approximate |
 
-The app's internal word for the hatched state is *corrupted*; nothing is broken. Not every `^` hatches: `4^(1/2)` is exactly 2, a perfect root, so the result is rational and the note stays clean.
+A perfect root such as `4^(1/2)` evaluates to the rational value 2 and produces no hatch of its own.
 
 ### Symbolic simplification
 

@@ -5,7 +5,7 @@ description: Thirty-one-tone equal temperament in RMT Compose — quarter-comma 
 
 # 31-TET
 
-31-TET divides the octave into thirty-one equal steps of 38.71 cents. It gives you a major third that is 0.8 cents off pure, a usable fifth, and — unusually — good septimal intervals as well. Christiaan Huygens worked it out in the 1690s. It is still the best all-round equal temperament under 50 notes.
+31-TET divides the octave into thirty-one equal steps of 38.71 cents. It gives you a major third that is 0.8 cents off pure, a usable fifth, and — unusually — good septimal intervals as well. Compare the 31-TET third and seventh against their just ratios below.
 
 | Property | Value |
 |---|---|

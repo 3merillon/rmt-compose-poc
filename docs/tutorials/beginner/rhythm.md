@@ -45,7 +45,7 @@ There is no tempo setting. The BaseNote's `duration` row in the note widget show
 
 Click the **BaseNote**, scroll to **DELETE ALL NOTES**, click **Clean Slate**, confirm.
 
-The BaseNote stays at 263 Hz, with a duration of 3/5 s (**= 100 BPM** in the widget).
+Clean Slate retains the current BaseNote settings. For the timings below, set its duration to `3/5` second (100 BPM).
 
 ## Step 2: The quarter note
 
@@ -69,7 +69,7 @@ Note 2 starts where Note 1 ends (`[1].t + [1].d`, filled in for you) and lasts h
 Now do it again from Note 2:
 
 1. Select **Note 2**. **At End**.
-2. **Frequency:** `base.f * (5/4)`. **Duration:** prefilled as `base.d * (1/2)` — inherited from Note 2, so leave it.
+2. **Frequency:** `base.f * (5/4)`. **Duration:** prefilled as `base.d * (1/2)` — copied from Note 2’s expression. Leave it as written.
 3. Click **Create Note**.
 
 ## Step 4: The half note

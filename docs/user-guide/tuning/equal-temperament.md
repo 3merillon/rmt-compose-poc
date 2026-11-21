@@ -86,7 +86,7 @@ When the app computes a note's frequency, an irrational power is kept exact: the
 
 ## The ≈ marker
 
-A note whose frequency involves an irrational power is **corrupted** — the app's word for "this value is tempered or approximate, not a pure ratio".
+Select a tempered note to compare its canvas label with the value in the widget.
 
 - On the canvas, the note is **cross-hatched** and its label shows its exact power relative to the BaseNote, such as `2^(7/12)`. Notes that merely *depend* on a tempered note get a single diagonal hatch; their label shows their own relation (a fraction when it is a pure ratio).
 - `≈` on a label means the label is rounded: the note is approximate (a `~` number), or its exact fraction is too long for the label.
@@ -109,7 +109,7 @@ The library ships **six** scale modules in a section called **Scale Systems**. I
 
 The tiles show the module **name**, not the filename. `TET-12.json` is what's on disk; **12-TET** is what you click.
 
-**Tesla** is an 81-note base-3 odd-harmonic scale — the odd numbers 9, 11, 13 … 169, each over 9, stored as a chain of ratios (`11/9`, then `13/11`, then `15/13`, …). It is not an equal temperament and it does not repeat at the octave: it spans 169/9 ≈ 5077 cents ≈ 4.23 octaves, and the steps taper from 347.4¢ down to 20.6¢. Because every step is rational, no Tesla note is corrupted.
+**Tesla** is an 81-note base-3 odd-harmonic scale — the odd numbers 9, 11, 13 … 169, each over 9, stored as a chain of ratios (`11/9`, then `13/11`, then `15/13`, …). It is not an equal temperament and it does not repeat at the octave: it spans 169/9 ≈ 5077 cents ≈ 4.23 octaves, and the steps taper from 347.4¢ down to 20.6¢. Its rational steps have plain labels.
 
 **Mixed-Base** is a 12-note experiment that alternates step bases — `2^(1/12)`, then `3^(1/13)`, then `2^(1/12)` again, with a `5^(1/7)` thrown in — and jumps straight back to `base.f` on note 12. It works because RMT keeps base-2, base-3 and base-5 powers as separate terms instead of collapsing them into one number.
 
@@ -122,7 +122,7 @@ The tiles show the module **name**, not the filename. `TET-12.json` is what's on
 ![The module bar with its six sections, including Scale Systems](/img/module-bar.png)
 
 ::: warning The drop must land on something
-Dropping on empty canvas is rejected — *"Drop onto a note or the BaseNote circle to import a module."* Dropping on a silence is rejected too. On a successful drop, the module's `base` references are rewritten to the note you dropped on, so the whole scale re-roots there.
+Dropping on empty canvas is rejected — *"Drop onto a note or the BaseNote circle to import a module."* Dropping on a silence is rejected too. On a successful drop, the module takes its pitch from the target note and its time unit from your BaseNote.
 :::
 
 ## Arrows and TET

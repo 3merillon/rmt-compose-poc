@@ -26,18 +26,16 @@ Note that fractions are parenthesised and whole numbers are not. `(9/8)` is a fr
 
 ## Step 1: Clear the workspace
 
-The app opens with a 169-note demo composition. Get rid of it.
+Save your current score with **+ → Save Module** before starting the exercise. On a fresh installation you will see the opening canon.
 
 1. Click the **BaseNote** — the orange circle at the far left.
 2. The note widget opens, titled **BaseNote Variables**.
 3. Scroll to the bottom, to the **DELETE ALL NOTES** section.
 4. Click **Clean Slate**, then **Yes, Clean Slate**.
 
-::: warning
-The dialog says "This action cannot be undone." It is wrong — Clean Slate is captured in the undo history and `Ctrl+Z` brings the composition back.
-:::
+Use **Ctrl/Cmd+Z** immediately after clearing to restore the score, or reload the saved file when you finish.
 
-Clean Slate closes the note widget and clears the selection. The BaseNote keeps its defaults: **263 Hz** and a duration of `3/5` s (**= 100 BPM** in the widget). Leave them alone — the scale is built from ratios, so the starting pitch does not matter.
+Clean Slate closes the note widget and clears the selection. It retains the current BaseNote pitch and duration. In the startup canon these are **263 Hz** and a duration of `3/5` s (**= 100 BPM** in the widget). Leave them alone — the scale is built from ratios, so the starting pitch does not matter.
 
 ## Step 2: Create Do
 

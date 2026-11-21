@@ -5,7 +5,7 @@ description: Twelve-tone equal temperament in RMT Compose — the step table, ce
 
 # 12-TET
 
-12-TET divides the octave into twelve equal semitones. It is the tuning of every piano, every fretted guitar, and almost every recording made in the last two centuries. In RMT Compose it is one option among several, and it is the useful reference point for all the others.
+12-TET divides the octave into twelve equal semitones. Use its 100-cent semitone as a reference when comparing the library’s just and tempered intervals.
 
 | Property | Value |
 |---|---|
@@ -16,9 +16,11 @@ description: Twelve-tone equal temperament in RMT Compose — the step table, ce
 
 ## The chromatic scale
 
-| Step | Note | Expression | Cents |
+With the BaseNote as C, multiply `base.f` by the ratio in the third column to enter a frequency.
+
+| Step | Note | Ratio above C | Cents |
 |---|---|---|---|
-| 0 | C | `base.f` | 0 |
+| 0 | C | `1` | 0 |
 | 1 | C♯/D♭ | `2^(1/12)` | 100 |
 | 2 | D | `2^(2/12)` | 200 |
 | 3 | D♯/E♭ | `2^(3/12)` | 300 |
@@ -96,7 +98,7 @@ Once loaded, the notes are cross-hatched and each label shows its exact step abo
 
 ## What it costs
 
-**The thirds.** Fourteen cents sharp on the major third is the single loudest compromise in Western music, and it is baked into every piano you have heard.
+**The thirds.** Compare the four-step third with `(5/4) * base.f`. The 12-TET third is about fourteen cents higher.
 
 **Every key sounds the same.** The historical character of keys — the reason a composer chose E♭ major over D major — is gone by construction.
 

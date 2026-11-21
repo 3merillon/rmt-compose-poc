@@ -102,7 +102,7 @@ Beat 3 of bar 2, two time units past the bar line:
 [2].t + base.d * 2
 ```
 
-Beats are counted from zero, so "beat 3" is `* 2`. This one does not scale with the bar; it always sits two time units in.
+Beat three begins two time units after the start of bar 2. Changing the bar’s length leaves this offset at `base.d * 2`.
 
 ## Practical: a kick-snare pattern
 

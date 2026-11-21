@@ -29,14 +29,14 @@ Creates a module with a BaseNote (id `0`) and nothing else.
 
 ::: warning Numbers are silently ignored
 The constructor only honours values that are a `string`, a `function`, a `*String` key, or
-`color` / `instrument` (`src/module.js:159-179`). `new Module({ duration: 0.5 })` drops the `0.5`
+`color` / `instrument` (`src/module.js`). `new Module({ duration: 0.5 })` drops the `0.5`
 and leaves the time unit at 1 s. Write `new Module({ duration: '1/2' })`.
 :::
 
 ### BaseNote defaults
 
 Any key you do not override falls back to these. They are **expression strings** in the DSL
-(`src/module.js:143-156`):
+(`src/module.js`):
 
 | Property | Default expression | Value |
 |---|---|---|
@@ -60,7 +60,7 @@ module.notes  // { [id: number]: Note } — a plain object, not a Map
 
 Keyed by note id, and it **includes the BaseNote at key `0`**. `module.notes.get(1)` throws;
 use `module.getNoteById(1)`. Iterating with `Object.values(module.notes)` yields the BaseNote
-too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js:1007`).
+too, which is why `createModuleJSON()` skips `note.id === 0` (`src/module.js`).
 
 ### baseNote
 
@@ -138,7 +138,7 @@ note that reads the BaseNote (by writing `base`, or by inheriting an amplitude, 
 and on through whatever reads those.
 
 Callers often mark a note and then each of its dependents. A note already reached by a walk of the
-same dirty cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js:258`),
+same dirty cycle only re-registers its own bytecode (`Module._dirtyClosed`, `src/module.js`),
 so the cycle costs one walk. The set is cleared whenever the dirty set is.
 
 ### markNotesDirtyBatch()
@@ -151,7 +151,7 @@ The same thing for many notes in one pass: it registers dependencies once, colle
 **and** the transitive dependencies of the marked notes, then invalidates the incremental
 evaluator selectively rather than wholesale. Collecting the *dependencies* matters — without them
 an imported note's parent may not be in the cache when the child evaluates. The module-import path
-(`src/player.js:1805`) uses it after grafting a library module onto a target note.
+(`src/player.js`) uses it after grafting a library module onto a target note.
 
 ### batchSetExpressions()
 
@@ -164,11 +164,11 @@ module.batchSetExpressions([
 
 Compiles all the expressions with per-note notifications suppressed, re-registers dependencies
 once, then calls `markNotesDirtyBatch()`. The widget's **Evaluate Module** action
-(`src/modals/index.js:811`) rewrites every note in the composition through this in one pass.
+(`src/modals/index.js`) rewrites every note in the composition through this in one pass.
 
 ::: danger The keys are `varName` and `expr`
 Not `property` and `expression`. The update objects are destructured as
-`{ noteId, varName, expr }` (`src/module.js:380`); passing the wrong keys throws
+`{ noteId, varName, expr }` (`src/module.js`); passing the wrong keys throws
 `TypeError: Cannot read properties of undefined (reading 'endsWith')`.
 :::
 
@@ -217,7 +217,7 @@ TET notes.
 const cache = module.getEvaluationCache()
 ```
 
-**Evaluates first if anything is dirty**, then returns the cache (`src/module.js:770-776`). This
+**Evaluates first if anything is dirty**, then returns the cache (`src/module.js`). This
 is the lazy entry point that `Note.getVariable()` goes through; it is not a peek.
 
 ### evaluateNoteVariable()
@@ -302,7 +302,7 @@ module.getParentChainByProperty(2, 'frequency')  // → [1, 0]
 ```
 
 The ancestor chain for one property, walking back to the BaseNote. **The starting note is not in
-the result** (`src/module.js:561`) — `chain[0]` is its parent. `property` is one of
+the result** (`src/module.js`) — `chain[0]` is its parent. `property` is one of
 `'frequency' | 'startTime' | 'duration'`.
 
 ### getChildrenTreeByProperty()
@@ -394,7 +394,7 @@ The optional second argument is a `Map` memo, shared by a caller that resolves m
 per note on it.
 
 That default is a module-scoped value, not a constant: `player.js` calls `setDefaultInstrument()`
-whenever the `audio.defaultInstrument` setting changes (`src/player.js:1017-1032`). This is the
+whenever the `audio.defaultInstrument` setting changes (`src/player.js`). This is the
 bridge between the Settings panel and note timbre.
 
 ```javascript
@@ -464,14 +464,14 @@ const text = module.createModuleJSONString()  // === JSON.stringify(module.creat
 ```
 
 Synchronous. The same text as `JSON.stringify(createModuleJSON())`, made without serializing every
-note again (`src/module.js:1031`). Each note keeps its text (`note._savedJSON`) with what it was made
+note again (`src/module.js`). Each note keeps its text (`note._savedJSON`) with what it was made
 from: its id, colour, instrument, measure flag and, per variable, whether the expression is empty
 and its source text. On the next call a note whose fields all read the same gives its kept text;
-any other is serialized again (`noteJSONText()`, `src/module.js:88`). Every note is still read, so
+any other is serialized again (`noteJSONText()`, `src/module.js`). Every note is still read, so
 an edit by any route is seen, including one that writes `note.expressions` or `note.properties`
 directly. Nothing is kept for a colour or instrument that is an object, or for an expression with
 bytecode and no source text. History and autosave receive the same canonical text from `moduleSnapshot()`
-(`src/store/history.js:183`). Workspace moves, resizes and octave edits use the tracked changes.
+(`src/store/history.js`). Workspace moves, resizes and octave edits use the tracked changes.
 The note and group widgets also supply the IDs of notes whose plain properties they edited.
 `scripts/test-edit-cost.mjs` holds it to `JSON.stringify(createModuleJSON())` on every library
 module and through edits by every route.
@@ -509,7 +509,7 @@ Before it builds any note, it runs the data through two conversions, in this ord
 Both are exact: every start, duration, frequency and interpretation value keeps the same fraction.
 See [Module System](/developer/architecture/module-system#loading-old-modules).
 
-Per-note id guards (`src/module.js:938-950`): ids that are not integers, are `< 0`, or are
+Per-note id guards (`src/module.js`): ids that are not integers, are `< 0`, or are
 `> 16777215` (`MAX_NOTE_ID`) are skipped with a `[RMT Security]` warning; the
 literal ids `__proto__`, `constructor` and `prototype` are blocked outright. There is no `eval()`
 anywhere in this path — expressions are compiled to bytecode.

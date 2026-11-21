@@ -22,7 +22,7 @@ To divide interval `I` into `N` equal steps, one step is `I ^ (1/N)`:
 
 ## Any positive rational base
 
-The interval of equivalence can be any positive rational, not only an integer. Bases are factored into primes, so the power stays exact: `(1618/1000)^(1/7)` for a golden-ratio scale is kept as the exact product `(1/10) * 2^(5/7) * 5^(4/7) * 809^(1/7)` (1618/1000 is 809/500), and every step is exact. Steps chain without error, and the scale closes exactly at the top.
+The interval of equivalence can be any positive rational, not only an integer. Bases are factored into primes, so the power stays exact: `(1618/1000)^(1/7)` for a scale based on the rational approximation 1.618 to the golden ratio is kept as the exact product `(1/10) * 2^(5/7) * 5^(4/7) * 809^(1/7)` (1618/1000 is 809/500), and every step is exact. Steps chain without error, and the scale closes exactly at the top.
 
 `2^(1/17)`, `3^(1/8)`, `5^(1/5)` and `(1618/1000)^(1/7)` are all exact. A plain decimal such as `1.618` is exactly 1618/1000. Only a base written with `~` (for example `~1.618`) is approximate, and so is anything computed from it; see [Approximate numbers](/reference/expressions/syntax#approximate-numbers).
 

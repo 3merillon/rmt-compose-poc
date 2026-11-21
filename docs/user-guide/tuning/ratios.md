@@ -134,11 +134,9 @@ Set the interval to **3/2** and every ▲ click walks the note up a pure fifth. 
 
 The interval must be a ratio of positive integers between 1/16 and 16 — you cannot bind an arrow to a TET step like `2^(1/12)`, and an invalid ratio resets to the default octave 2/1. The controls, the quick-pick chips and the folding rules are all on [Transposing with Arrows](/user-guide/notes/transposing).
 
-## Pure ratios never show ≈
+## Read an exact ratio
 
-A note built from ratios evaluates to an exact fraction. It renders with a plain fraction label and no hatching. The moment a note's frequency involves an irrational power — a TET step — it gets flagged: the canvas label shows the power (`2^(7/12)`) instead of a fraction, and the note is cross-hatched. The value itself stays exact; the hatching says it is tempered, not a pure ratio.
-
-That contrast is the fastest way to see, at a glance, which parts of a piece are just and which are tempered. See [Equal Temperament](/user-guide/tuning/equal-temperament) for what happens on the other side of the line.
+Select a note and read **Evaluated** on its frequency row for the exact fraction. A long fraction can have a shortened canvas label marked ≈. The widget distinguishes a rounded label from a value actually stored as approximate. [How the display marks exact and approximate values](/getting-started/concepts#the-symbol-approximation)
 
 ## Just versus 12-TET
 

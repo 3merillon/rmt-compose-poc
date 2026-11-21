@@ -5,7 +5,7 @@ description: Nineteen-tone equal temperament in RMT Compose — near-just thirds
 
 # 19-TET
 
-19-TET divides the octave into nineteen equal steps of 63.16 cents. It buys you thirds and sixths that are almost exactly just, and it pays for them with a fifth that is 7 cents flat. It is the cheapest good answer to 12-TET's worst problem.
+19-TET divides the octave into nineteen equal steps of 63.16 cents. It buys you thirds and sixths that are almost exactly just, and it pays for them with a fifth that is 7 cents flat. Compare its six-step major third with the four-step third in 12-TET.
 
 | Property | Value |
 |---|---|
