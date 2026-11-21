@@ -73,7 +73,7 @@ What you get is a genuinely reusable module, not a snapshot:
 
 Measures keep their flags, offsets, lengths and internal links. Choose **Start** or **End** in the library toolbar, then drag the copy onto a sounding note, the BaseNote or a measure triangle. Start aligns the earliest item with the target start. End aligns it with the end of a note or bar.
 
-For standalone copies with note references in the BaseNote or spaces inside bracketed IDs, see [copy portability](/user-guide/notes/selection#when-a-copy-will-be-opened-on-its-own).
+Open the copied phrase as its own score to keep the original pitches, or drop it onto a new pitch to transpose it. The [330 Hz octave example](/user-guide/notes/selection#when-a-copy-will-be-opened-on-its-own) shows which pitch to change if you want the copy to follow a different anchor.
 
 Per-note `color` and `instrument` are carried into the copied module too, along with the BaseNote's
 instrument — the copy keeps its look and its timbre, not just its pitch, timing and structure.

@@ -173,19 +173,10 @@ Measures keep their bar handles, lengths, offsets and links inside the selection
 
 The copy preserves the following relationships:
 
-- An expression is copied **as written** when every note it names travels with it. `[1].t + [1].d`
-  stays `[1].t + [1].d`, with the ids renumbered `1..N` in time order.
-- An expression that reaches **outside** the selection would dangle, so it is rebuilt against the
-  new base from the note's current value: `base.t + base.d * 4`, `base.d * (1/2)`,
-  `(3/2) * base.f`.
-- A note whose start-time chain leaves the selection is always re-anchored to the new base, even if
-  its expression names no note at all. Otherwise it would stay pinned to its original absolute time
-  instead of following the module to wherever you drop it.
-- The new module's BaseNote is a **copy of the current one** — same frequency, duration (the time
-  unit) and interpretation, with its start time set to 0 — so `base.f` and `base.d` keep meaning
-  what they meant. Pitches survive as **ratios** and rhythms as multiples of the time unit, not
-  frozen numbers, which is what lets the copy transpose correctly when you drop it
-  on a different note.
+- When both notes travel, the copy renumbers their link. A note that starts at the end of its neighbour still reads that neighbour’s start and duration. The copy adjusts expressions that read an absolute start time to account for the phrase’s new time origin.
+- When a pitch or duration reaches outside the selection, the copy writes its evaluated value relative to the new BaseNote where it can do so exactly. For example, a fifth can become `base.f * (3/2)`. If that conversion would round the value, the copy keeps the value itself.
+- A start anchored outside the group becomes an offset from the phrase’s beginning. When you drop the phrase, **Start** or **End** places that beginning on the chosen target.
+- The copied BaseNote supplies the source pitch, time unit and interpretation. Its start is zero. [See how the pitch anchor travels](#when-a-copy-will-be-opened-on-its-own).
 - Per-note colour and instrument come along when they are set.
 
 A five-note phrase chained end to end comes out with these start times (the exported file also
@@ -208,9 +199,13 @@ Choose **Start** and drop this example on its original root to align their start
 
 ### When a copy will be opened on its own
 
-For a portable copy, use compact IDs such as `[21].f` in expressions between the selected notes. The copy renumbers this spelling. Spaces inside the brackets, as in `[ 21 ].f`, can leave the old ID in the tile.
+To open a Custom tile as a separate score, choose **Save UI** in the library footer. In the downloaded `ui-state.json`, find the named tile under the Custom category. Copy its `moduleData` object into a new JSON file. Open that file with **+ → Load Module ▾ → Load Module from file…**. For ordinary reuse in another score, drag the tile onto its target.
 
-Also check the BaseNote if its frequency or duration reads another note. The copy carries the BaseNote’s raw expression with the original ID. For example, a BaseNote reading `[20].f` at 330 Hz can reopen at 440 Hz when note 20 is absent. Give that BaseNote property its evaluated value before copying, then undo the edit in the source score. Ordinary library drops take their anchor from the destination.
+Opening the copied module on its own keeps the source pitches. Suppose the BaseNote reads `[20].f` at 330 Hz, and you copy two notes at `base.f` and `base.f * 2` without note 20. The copy writes 330 Hz on its BaseNote. Its notes reopen at **330 and 660 Hz**. Change the copied BaseNote to 350 Hz and the pair follows to **350 and 700 Hz**.
+
+A pitch link between selected notes stays editable. If note 22 reads `[ 21 ].f * 2`, copying both notes updates the ID, including when there is whitespace inside the brackets. Change the first copied note and the second still follows an octave above. The same renumbering applies to BaseNote fields whose inputs travel intact. If a BaseNote field depends on an omitted note or a start time that is being rebased, the copy stores its evaluated value, preserving symbolic tuning and explicit approximation.
+
+If you already have a tile from an earlier build that reopens at the wrong pitch, copy the phrase again from the original score. Dropping a tile onto another note takes its pitch anchor from the destination. [Placing a module](/user-guide/interface/module-bar)
 
 ## What clears a selection
 

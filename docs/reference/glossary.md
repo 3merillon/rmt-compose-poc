@@ -60,7 +60,7 @@ On the canvas, corruption shows as hatching:
 In the note widget the value shows by its kind: an irrational value as its exact form and its value, an approximate value with an `≈` prefix, a rational value as its fraction.
 
 ### Copy to Modules
-The [group widget](#group-widget) action that turns the current multi-selection into a new, self-contained module in the library's **Custom** section, named `Selection (N notes)`. The copy is **rooted at the selection's earliest note** — that note starts exactly on the new module's BaseNote (`base.t`), and the rest keep their relative times as `base.t + base.d * k`. References that point *inside* the selection are kept and renumbered, so the dependency tree survives; references that point outside it are frozen to the value they had. Colors and per-note instruments come across unchanged.
+The [group widget](#group-widget) action that saves a selection as a reusable module under **Custom**. The earliest timed item becomes the start of the copied phrase. Notes and measures keep their links to other copied items under their new IDs. [Selection and standalone copies](/user-guide/notes/selection#when-a-copy-will-be-opened-on-its-own)
 
 ### Custom (library section)
 The module-library section that [Copy to Modules](#copy-to-modules) writes into. It is not where uploads land: an uploaded module joins whichever section's **+** placeholder you clicked.

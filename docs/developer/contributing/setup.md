@@ -6,11 +6,13 @@ The configured dev port is 3000. Use `npm run dev -- --host 127.0.0.1 --port 300
 
 ## npm test
 
-Run `npm test` for the module validator and the test scripts listed in the root `package.json`. They exercise the shipped library against its score oracle, rational and symbolic evaluation, cycle rejection, migration, history-related edit costs, player assignment, MIDI encoding, group editing and the visible-detail threshold. Run `node scripts/gen-canon-parts.mjs --check` separately to check the generated canon parts.
+Run `npm test` for the module validator and the test scripts listed in the root `package.json`. They exercise the shipped library against its score oracle, rational and symbolic evaluation, cycle rejection, migration, history-related edit costs, player assignment, MIDI encoding, group editing, reopening copied scores and the visible-detail threshold. Run `node scripts/gen-canon-parts.mjs --check` separately to check the generated canon parts.
 
 ## Performance and visual regression harness
 
 Install Playwright’s Chromium once with `npx playwright install chromium`. Some audio/gesture scripts specifically launch an installed Edge or Chrome. Use `?perf=1` for the renderer/workspace probes and the lazy `window.__rmtPerf` harness. Use a disposable browser profile for `loadStress` because it replaces that origin’s autosaved piece. [Harnesses and fixtures](/developer/performance#the-benchmark-harness)
+
+To exercise group-copy pitches through the UI, run `node scripts/perf/check-group-copy-pitches.mjs http://127.0.0.1:4175` with the app on that address. It uses the group widget, reloads the Custom library, opens the copy from JSON and edits its pitch anchor.
 
 ## Local listening room
 

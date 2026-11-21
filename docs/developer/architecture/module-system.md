@@ -361,9 +361,9 @@ you loaded: it round-trips through `createModuleJSON()` → `loadFromJSON()` →
 module.reindexModule()
 ```
 
-Renumbers from 1 — **measure bars first** (`isMeasureNote()`, sorted by evaluated `startTime`), then regular notes (also by
-`startTime`) — and rewrites every `[N]` reference to match. Then it
-rebuilds the dependency graph and re-evaluates.
+Reindexing assigns IDs from 1, first to measure bars and then to the other notes, in start-time order within each set. The DSL lexer identifies references in note fields, BaseNote fields and a note-based repeat. The remapper updates the ID token and preserves whitespace and comments. The module rebuilds the dependency graph and evaluates the result.
+
+**Copy to Modules** uses the same reference remapper with a map containing only the selected IDs. `src/utils/copy-selection.js` builds the standalone score. For a BaseNote field it checks the input properties before retaining the expression. A dependency on an omitted note can feed back into the new BaseNote when the copied note is re-anchored, so that BaseNote field takes its evaluated value. [Opening a copy on its own](/user-guide/notes/selection#when-a-copy-will-be-opened-on-its-own)
 
 ::: warning Ids change on save
 Because `exportOrderedModule()` reindexes, the ids in a downloaded `module.json` will generally
