@@ -4,7 +4,7 @@ import type { PagedSnapshot } from './store/snapshot-pages.ts';
 import type { RelationName } from './dependency-graph.ts';
 interface TimingSummary {
   revision: number; generation: number; blocks: Map<number, number>;
-  measureIds: Set<number>; measures: Note[]; soundEnd: number; moduleEnd?: number;
+  measureIds: Set<number>; measures: Note[]; soundEnd: number; moduleEnd?: number; playerEnd?: number;
 }
 export interface ExpressionUpdate {noteId: number; varName: string; expr: string}
 import { snapshotPages, changedRows } from './store/snapshot-pages.ts';

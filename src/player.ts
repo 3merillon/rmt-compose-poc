@@ -1,61 +1,73 @@
+import type { WorkspaceElement } from './renderer/webgl2/player-surface.ts';
+import { isInputScore, isRecord, type EvaluationCache, type InputScore, type ExpressionName } from './model-types.ts';
+import type { ExactValue } from './value/exact.ts';
+import type { Note } from './note.ts';
+import type { GroupEdit } from './modals/group-widget.ts';
+import type { Preview, SceneHit } from './renderer/webgl2/render-types.ts';
+
+declare global {
+    interface Window { __RMT_DEBUG_GL_MOVE?: boolean }
+    interface Document { __rmtScaleAutoCloseAttached?: boolean }
+}
+
 import Fraction from 'fraction.js';
-import { getDisplayTransposition, setDisplayTransposition, clearDisplayTransposition, passTransposition, moduleRepeatRatio, setModuleRepeat } from './player/display-transpose.js';
-import { equals as X_equals } from './value/exact.js';
-const X_isOne = (v) => { try { return X_equals(v, new Fraction(1)); } catch { return false; } };
-import { Module, setDefaultInstrument } from './module.js';
-import { modals } from './modals/index.js';
-import { updateStackClickSelectedNote } from './stack-click.js';
-import { eventBus } from './utils/event-bus.js';
-import { audioEngine } from './player/audio-engine.js';
-import { setModule, setEvaluatedNotes } from './store/app-state.js';
-import { moduleSnapshot } from './store/history.js';
-import { saveModuleText, saveModuleTextNow, loadSavedModuleText, clearSavedModule, keepUnloadable } from './store/autosave.js';
-import { multiplyExpressionByFraction } from './utils/simplify.js';
-import { Workspace, startParentIdFromRaw, measureChainLinkParentId } from './renderer/webgl2/workspace.js';
-import { isMeasureNote, EXPRESSION_VARS } from './note.js';
-import { menuBar } from './menu/menu-bar.js';
-import { ratioToAnchorExpr, valueFactor, timeUnitsExpr } from './utils/value-expr.js';
-import { compare as compareExact, mul as mulExact } from './value/exact.js';
-import { rewriteNoteReferences } from './dsl/remap-note-ids.js';
-import { PropertyMap } from './dsl/constants.js';
-import { compiler } from './expression-compiler.js';
-import { findDependencyCycle } from './variable-deps.js';
-import { findFollowedNote, followExpr } from './utils/followed-note.js';
-import { escapeHtml, validateColorInput } from './utils/html-escape.js';
-import { buildModuleFromSelection } from './utils/copy-selection.js';
-import * as groupEdit from './utils/group-edit.js';
-import { settingsStore } from './settings/settings-store.js';
-import { scaleStep } from './settings/settings-schema.js';
-import { themeManager } from './theme/theme-manager.js';
-import { showGroupWidget, hideGroupWidget, selectionLabel } from './modals/group-widget.js';
-import { registerPanel, raisePanel } from './utils/panel-stack.js';
-import { toNumber } from './utils/fraction-num.js';
-import { planMidi, encodeMidi } from './midi/midi-export.js';
-import { snapTempo } from './player/time-map.js';
-import { tempoSliderBounds } from './settings/settings-schema.js';
-import { MAX_MODULE_NOTES, MAX_MODULE_BYTES } from './limits.js';
+import { getDisplayTransposition, setDisplayTransposition, clearDisplayTransposition, passTransposition, moduleRepeatRatio, setModuleRepeat } from './player/display-transpose.ts';
+import { equals as X_equals } from './value/exact.ts';
+const X_isOne = (v: ExactValue) => { try { return X_equals(v, new Fraction(1)); } catch { return false; } };
+import { Module, setDefaultInstrument } from './module.ts';
+import { modals } from './modals/index.ts';
+import { updateStackClickSelectedNote } from './stack-click.ts';
+import { eventBus } from './utils/event-bus.ts';
+import { audioEngine } from './player/audio-engine.ts';
+import { setModule, setEvaluatedNotes } from './store/app-state.ts';
+import { moduleSnapshot } from './store/history.ts';
+import { saveModuleText, saveModuleTextNow, loadSavedModuleText, clearSavedModule, keepUnloadable } from './store/autosave.ts';
+import { multiplyExpressionByFraction } from './utils/simplify.ts';
+import { Workspace, startParentIdFromRaw, measureChainLinkParentId } from './renderer/webgl2/workspace.ts';
+import { isMeasureNote, EXPRESSION_VARS } from './note.ts';
+import { menuBar } from './menu/menu-bar.ts';
+import { ratioToAnchorExpr, valueFactor, timeUnitsExpr } from './utils/value-expr.ts';
+import { compare as compareExact, mul as mulExact } from './value/exact.ts';
+import { rewriteNoteReferences } from './dsl/remap-note-ids.ts';
+import { PropertyMap } from './dsl/constants.ts';
+import { compiler } from './expression-compiler.ts';
+import { findDependencyCycle } from './variable-deps.ts';
+import { findFollowedNote, followExpr } from './utils/followed-note.ts';
+import { escapeHtml, validateColorInput } from './utils/html-escape.ts';
+import { buildModuleFromSelection } from './utils/copy-selection.ts';
+import * as groupEdit from './utils/group-edit.ts';
+import { settingsStore } from './settings/settings-store.ts';
+import { scaleStep } from './settings/settings-schema.ts';
+import { themeManager } from './theme/theme-manager.ts';
+import { showGroupWidget, hideGroupWidget, selectionLabel } from './modals/group-widget.ts';
+import { registerPanel, raisePanel } from './utils/panel-stack.ts';
+import { toNumber } from './utils/fraction-num.ts';
+import { planMidi, encodeMidi } from './midi/midi-export.ts';
+import { snapTempo } from './player/time-map.ts';
+import { tempoSliderBounds } from './settings/settings-schema.ts';
+import { MAX_MODULE_NOTES, MAX_MODULE_BYTES } from './limits.ts';
 
 // Legacy __evalExpr removed - binary evaluation is now the sole evaluation path
 
 // Exact expression fragments from a Fraction — BigInt template interpolation
 // prints every digit, so these stay exact at any magnitude.
-function fracToDSL(f) {
+function fracToDSL(f: Fraction) {
   const n = f.s * f.n;
   return f.d === 1n ? `${n}` : `(${n}/${f.d})`;
 }
-function fracIsOne(f) {
+function fracIsOne(f: Fraction) {
   return f.s === 1n && f.n === 1n && f.d === 1n;
 }
 
 // k time units as an expression: `base.d` / `base.d * k`. The time unit is the
 // BaseNote's duration, the same for every note.
-function unitsToDSL(k) {
+function unitsToDSL(k: Fraction) {
   return fracIsOne(k) ? 'base.d' : `base.d * ${fracToDSL(k)}`;
 }
 
 // Defer heavy UI sync without feature flags or polyfills
 // Use requestAnimationFrame to guarantee next-frame execution even when idle callbacks are throttled.
-function scheduleDeferred(cb) {
+function scheduleDeferred(cb: () => void) {
   try {
     if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
       window.requestAnimationFrame(() => { try { cb(); } catch {} });
@@ -70,7 +82,7 @@ function scheduleDeferred(cb) {
 document.addEventListener('DOMContentLoaded', async function() {
     const INITIAL_VOLUME = 0.2, ATTACK_TIME_RATIO = 0.1, DECAY_TIME_RATIO = 0.1, SUSTAIN_LEVEL = 0.7, RELEASE_TIME_RATIO = 0.2, GENERAL_VOLUME_RAMP_TIME = 0.2, OSCILLATOR_POOL_SIZE = 64, DRAG_THRESHOLD = 5;
     
-    let currentTime = 0, playheadTime = 0, isPlaying = false, isPaused = false, isFadingOut = false, totalPausedTime = 0, isTrackingEnabled = false, isDragging = false, dragStartX = 0, dragStartY = 0, isLocked = false, lastSelectedNote = null, originalNoteOrder = new Map();
+    let currentTime = 0, playheadTime = 0, isPlaying = false, isPaused = false, isFadingOut = false, totalPausedTime = 0, isTrackingEnabled = false, isDragging = false, dragStartX = 0, dragStartY = 0, isLocked = false, lastSelectedNote: Note | null = null, originalNoteOrder = new Map<number, unknown>();
 
     // Loop playback — the hidden mode behind shift-click / long-press on Play.
     // Ephemeral, like isTrackingEnabled and isLocked: never persisted, gone on reload.
@@ -84,13 +96,13 @@ document.addEventListener('DOMContentLoaded', async function() {
     // disarmed — that pass still has to wrap correctly if it started mid-module.
     let isLoopEnabled = false;   // mode armed → the .looping icon
     let isLoopDisarming = false; // toggled off; the engine is finishing the current pass
-    let loopEndAudioTime = null; // absolute audioContext time that final pass ends
+    let loopEndAudioTime: number | null = null; // absolute audioContext time that final pass ends
     let loopPeriod = 0;          // frozen getModuleEndTime() for the active playback; 0 = don't wrap
     // Repeat transposition (the module's BaseNote `repeat`, else Settings > Audio > Loop):
     // the pass this playback started in (kept across Pause and seeks, 0 after Stop),
     // the ratio and fold it plays with, and the pass on screen.
     let loopPassOffset = 0;
-    let playTranspose = null;    // { ratio, fold, offset } of the playback in flight, or null
+    let playTranspose: ReturnType<typeof repeatTranspose> | null = null;    // { ratio, fold, offset } of the playback in flight, or null
     let shownPass = 0;
     let playbackRequest = 0;
     let playbackBaseTime = 0;    // baseStartTime of the active playback (to arm mid-play)
@@ -110,25 +122,26 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     } catch {}
 
-    let glWorkspace = null;
+    let glWorkspace: Workspace | null = null;
 
     // Multi-note selection (marquee / shift-click). Holds note ids, never the base
     // note (0) — it is not marquee-selectable and must never be group-deletable.
     // Declared HERE, above the GL bootstrap, on purpose: the bootstrap's sync() call
     // reads selection state, and a `let` declared further down would be in its TDZ
     // (which the bootstrap's try/catch would swallow, leaving the highlight dead).
-    const multiSelection = new Set();
+    const multiSelection = new Set<number>();
     let touchMultiSelect = false;
 
     // Suppress playhead recentering during X-scale adjustments to avoid 1-frame pop
     let __rmtScalingXActive = false;
     // While dragging/resizing, feed temp overrides each frame so animation loop does not overwrite preview
-    let glTempOverrides = null;
+    let glTempOverrides: Record<number, Preview> | null = null;
 
-    function isWebGL2RendererEnabled() {
+    let cachedWebGL2Support: boolean | undefined;
+    function isWebGL2RendererEnabled(): boolean {
         try {
             // Cache the probe result to avoid repeatedly creating GL contexts (prevents "Too many active WebGL contexts").
-            if (typeof isWebGL2RendererEnabled.__cached !== 'undefined') return isWebGL2RendererEnabled.__cached;
+            if (typeof cachedWebGL2Support !== 'undefined') return cachedWebGL2Support;
 
             let supported = false;
 
@@ -168,11 +181,11 @@ document.addEventListener('DOMContentLoaded', async function() {
                 } catch {}
             }
 
-            isWebGL2RendererEnabled.__cached = !!supported;
-            return isWebGL2RendererEnabled.__cached;
+            cachedWebGL2Support = !!supported;
+            return cachedWebGL2Support;
         } catch (e) {
             try { console.warn('RMT: isWebGL2RendererEnabled probe failed', e); } catch {}
-            isWebGL2RendererEnabled.__cached = false;
+            cachedWebGL2Support = false;
             return false;
         }
     }
@@ -189,27 +202,27 @@ document.addEventListener('DOMContentLoaded', async function() {
     }
     
     const domCache = {
-        resetViewBtn: document.getElementById('resetViewBtn'),
-        noteWidget: document.getElementById('note-widget'),
-        closeWidgetBtn: document.querySelector('.note-widget-close'),
-        saveModuleBtn: document.getElementById('saveModuleBtn'),
-        exportMidiBtn: document.getElementById('exportMidiBtn'),
-        widgetContent: document.querySelector('.note-widget-content'),
-        widgetTitle: document.getElementById('note-widget-title'),
-        volumeSlider: document.getElementById('volumeSlider'),
-        loadModuleInput: document.getElementById('loadModuleInput'),
-        loadModuleBtn: document.getElementById('loadModuleBtn'),
-        reorderModuleBtn: document.getElementById('reorderModuleBtn'),
-        trackingToggle: document.getElementById('trackingToggle'),
-        playPauseBtn: document.getElementById('playPauseBtn'),
-        stopButton: document.getElementById('stopButton'),
-        ppElement: document.querySelector('.pp'),
-        dropdownButton: document.querySelector('.dropdown-button'),
-        plusminus: document.querySelector('.plusminus'),
-        generalWidget: document.getElementById('general-widget'),
-        loadModuleDropdown: document.getElementById('loadModuleDropdown'),
-        loadFromFileItem: document.getElementById('loadFromFileItem'),
-        resetDefaultModuleItem: document.getElementById('resetDefaultModuleItem')
+        resetViewBtn: document.getElementById('resetViewBtn')!,
+        noteWidget: document.getElementById('note-widget')!,
+        closeWidgetBtn: document.querySelector<HTMLElement>('.note-widget-close')!,
+        saveModuleBtn: document.getElementById('saveModuleBtn')!,
+        exportMidiBtn: document.getElementById('exportMidiBtn')!,
+        widgetContent: document.querySelector<HTMLElement>('.note-widget-content')!,
+        widgetTitle: document.getElementById('note-widget-title')!,
+        volumeSlider: document.querySelector<HTMLInputElement>('#volumeSlider')!,
+        loadModuleInput: document.querySelector<HTMLInputElement>('#loadModuleInput')!,
+        loadModuleBtn: document.getElementById('loadModuleBtn')!,
+        reorderModuleBtn: document.getElementById('reorderModuleBtn')!,
+        trackingToggle: document.querySelector<HTMLInputElement>('#trackingToggle')!,
+        playPauseBtn: document.getElementById('playPauseBtn')!,
+        stopButton: document.getElementById('stopButton')!,
+        ppElement: document.querySelector<HTMLElement>('.pp')!,
+        dropdownButton: document.querySelector<HTMLElement>('.dropdown-button')!,
+        plusminus: document.querySelector<HTMLElement>('.plusminus')!,
+        generalWidget: document.getElementById('general-widget')!,
+        loadModuleDropdown: document.getElementById('loadModuleDropdown')!,
+        loadFromFileItem: document.getElementById('loadFromFileItem')!,
+        resetDefaultModuleItem: document.getElementById('resetDefaultModuleItem')!
     };
 
     
@@ -237,7 +250,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     // Settings → Scale, and a limits edit that clamps an out-of-range value all
     // arrive here by way of the settings store, so exactly one place knows how to
     // move the workspace.
-    function applyXScale(next) {
+    function applyXScale(next: number) {
         if (typeof next !== 'number' || !isFinite(next) || next === xScaleFactor) return;
 
         __rmtScalingXActive = true;
@@ -307,7 +320,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         try { updatePlayhead(); } catch {}
     }
 
-    function applyYScale(next) {
+    function applyYScale(next: number) {
         if (typeof next !== 'number' || !isFinite(next) || next === yScaleFactor) return;
 
         yScaleFactor = next;
@@ -334,7 +347,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         if (existingContainer) existingContainer.remove();
         if (existingToggle) existingToggle.remove();
 
-        const scaleControlsContainer = document.createElement('div');
+        const scaleControlsContainer: HTMLDivElement & {handlers?: {xInput(): void; yInput(): void; toggle(): void}} = document.createElement('div');
         scaleControlsContainer.id = 'scale-controls';
         scaleControlsContainer.className = 'scale-controls';
 
@@ -363,20 +376,20 @@ document.addEventListener('DOMContentLoaded', async function() {
 
         document.body.append(toggleButton, scaleControlsContainer);
 
-        const xScaleSlider = document.getElementById('x-scale-slider');
-        const yScaleSlider = document.getElementById('y-scale-slider');
+        const xScaleSlider = document.querySelector<HTMLInputElement>('#x-scale-slider')!;
+        const yScaleSlider = document.querySelector<HTMLInputElement>('#y-scale-slider')!;
 
         // These sliders only WRITE the setting; the store subscriber below is what
         // applies it. That single funnel is what keeps the widget and the Settings
         // panel on the same number, whichever one you touch. ('input' alone: it
         // already covers dragging, clicking the track and the arrow keys.)
         const handlers = {
-            xInput: (e) => {
-                const v = parseFloat(e.target.value);
+            xInput: () => {
+                const v = parseFloat(xScaleSlider.value);
                 if (isFinite(v)) settingsStore.set('scale.x', v);
             },
-            yInput: (e) => {
-                const v = parseFloat(e.target.value);
+            yInput: () => {
+                const v = parseFloat(yScaleSlider.value);
                 if (isFinite(v)) settingsStore.set('scale.y', v);
             },
             toggle: () => { setScaleControlsVisible(scaleControlsContainer.inert); },
@@ -401,9 +414,10 @@ document.addEventListener('DOMContentLoaded', async function() {
         };
     };
     
-    function setScaleControlsVisible(visible) {
+    function setScaleControlsVisible(visible: boolean) {
         const panel = document.getElementById('scale-controls');
         const toggle = document.getElementById('scale-controls-toggle');
+        if (!panel || !toggle) return;
         panel.inert = !visible;
         panel.classList.toggle('visible', visible);
         toggle.classList.toggle('active', visible);
@@ -414,7 +428,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         try {
             if (document.__rmtScaleAutoCloseAttached) return;
             document.__rmtScaleAutoCloseAttached = true;
-            const handler = (e) => {
+            const handler = (e: Event) => {
                 try {
                     // Ignore if a drag/zoom gesture is in progress; only close on genuine clicks
                     if (typeof isDragging !== 'undefined' && isDragging) return;
@@ -423,6 +437,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     if (!cont || !togg) return;
                     if (!cont.classList.contains('visible')) return;
                     const t = e.target;
+                    if (!(t instanceof Node)) return;
                     if (cont.contains(t) || togg.contains(t)) return;
                     setScaleControlsVisible(false);
                 } catch {}
@@ -441,28 +456,28 @@ document.addEventListener('DOMContentLoaded', async function() {
     function applyScaleSettings() {
         const sc = settingsStore.get('scale') || {};
         const lim = sc.limits || {};
-        const tune = (slider, lo, hi) => {
+        const tune = (slider: HTMLInputElement | null, lo: number, hi: number) => {
             if (!slider || !isFinite(lo) || !isFinite(hi)) return;
-            slider.min = lo;
-            slider.max = hi;
-            slider.step = scaleStep(lo, hi);
+            slider.min = String(lo);
+            slider.max = String(hi);
+            slider.step = String(scaleStep(lo, hi));
         };
         tune(scaleControls.xSlider, lim.xMin, lim.xMax);
         tune(scaleControls.ySlider, lim.yMin, lim.yMax);
         applyYScale(sc.y);
         applyXScale(sc.x);
         if (scaleControls.xSlider && scaleControls.xSlider !== document.activeElement) {
-            scaleControls.xSlider.value = xScaleFactor;
+            scaleControls.xSlider.value = String(xScaleFactor);
         }
         if (scaleControls.ySlider && scaleControls.ySlider !== document.activeElement) {
-            scaleControls.ySlider.value = yScaleFactor;
+            scaleControls.ySlider.value = String(yScaleFactor);
         }
     }
     settingsStore.subscribe(({ path }) => {
         if (!path || path === 'scale' || path.indexOf('scale.') === 0) applyScaleSettings();
     });
 
-    function batchClassOperation(elements, classesToAdd = [], classesToRemove = []) {
+    function batchClassOperation(elements: ArrayLike<Element>, classesToAdd: string[] = [], classesToRemove: string[] = []) {
         if (!elements || elements.length === 0) return;
         
         const BATCH_SIZE = 50;
@@ -484,16 +499,16 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }
   
-    function debounce(func, wait) {
-        let timeout;
-        return function(...args) {
+    function debounce<T extends unknown[]>(func: (...args: T) => void, wait: number) {
+        let timeout: ReturnType<typeof setTimeout>;
+        return function(this: unknown, ...args: T) {
             const context = this;
             clearTimeout(timeout);
             timeout = setTimeout(() => func.apply(context, args), wait);
         };
     }
   
-    let wakeLock = null;
+    let wakeLock: WakeLockSentinel | null = null;
   
     async function requestWakeLock() {
         try {
@@ -531,7 +546,7 @@ document.addEventListener('DOMContentLoaded', async function() {
   
     requestWakeLock();
 
-    function notify(message, type = 'info', duration = 3000) {
+    function notify(message: string, type = 'info', duration = 3000) {
         try {
             const notification = document.createElement('div');
             notification.textContent = message;
@@ -573,11 +588,11 @@ document.addEventListener('DOMContentLoaded', async function() {
       `;
     }
   
-    function showDeleteConfirmation(noteId) {
+    function showDeleteConfirmation(noteId: number) {
         modals.showDeleteConfirmation(noteId);
     }
   
-    function deleteNoteAndDependencies(noteId) {
+    function deleteNoteAndDependencies(noteId: number) {
         const dependents = myModule.getDependentNotes(noteId);
         const idsToDelete = new Set([noteId, ...dependents]);
         
@@ -634,11 +649,11 @@ document.addEventListener('DOMContentLoaded', async function() {
         try { captureSnapshot('Clean Slate'); } catch {}
     }
   
-    function showDeleteConfirmationKeepDependencies(noteId) {
+    function showDeleteConfirmationKeepDependencies(noteId: number) {
         modals.showDeleteConfirmationKeepDependencies(noteId);
     }
   
-    function updateDependentRawExpressions(selectedNoteId, selectedRaw) {
+    function updateDependentRawExpressions(selectedNoteId: number, selectedRaw: Record<string, string>) {
         // Interpretation variables a note may leave unset: it then reads the BaseNote's.
         const inheritedVars = ['amplitude', 'attack', 'release'];
 
@@ -657,7 +672,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
             Object.keys(depNote.variables).forEach(key => {
                 if (key.endsWith("String")) {
-                    let rawExp = depNote.variables[key];
+                    let rawExp = depNote.getVariable(key);
                     if (typeof rawExp !== "string") {
                         console.warn("Skipping update for key", key, "in dependent note", depId, "as value is not a string:", rawExp);
                         return;
@@ -666,7 +681,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     if (new RegExp("\\[" + selectedNoteId + "\\]").test(rawExp)) {
                         // Replace [N].t/d/f with the selected note's own expression:
                         // this rewires the dependency chain around the liberated note
-                        const newRawExp = rawExp.replace(dslVarRegex, (match, prop) => {
+                        const newRawExp = rawExp.replace(dslVarRegex, (match: string, prop: keyof typeof PropertyMap) => {
                             const varName = PropertyMap[prop];
                             const noteExpr = selectedRaw[varName];
                             if (noteExpr === undefined) {
@@ -694,18 +709,19 @@ document.addEventListener('DOMContentLoaded', async function() {
     //
     // Deliberately no evaluate/render/snapshot: the caller owns those, so a group delete
     // batches them and lands as ONE undo entry.
-    function liberateAndRemoveNoteGL(noteId) {
+    function liberateAndRemoveNoteGL(noteId: number) {
         const selectedNote = myModule.getNoteById(noteId);
         if (!selectedNote) return false;
 
-        let selectedRaw = {};
-        ["startTime", "duration", "frequency"].forEach(varName => {
-            if (selectedNote.variables[varName + "String"]) {
-                selectedRaw[varName] = selectedNote.variables[varName + "String"];
+        let selectedRaw: Record<string, string> = {};
+        (["startTime", "duration", "frequency"] as const).forEach(varName => {
+            const source = selectedNote.getExpressionSource(varName);
+            if (source) {
+                selectedRaw[varName] = source;
             } else {
                 const exact = selectedNote.getExactVariable(varName);
                 if (exact != null) {
-                    selectedRaw[varName] = valueFactor(exact);
+                    selectedRaw[varName] = valueFactor(exact)!;
                 } else {
                     selectedRaw[varName] = (varName === "frequency") ? "1" : "0";
                 }
@@ -715,8 +731,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         // amplitude, attack and release only when the note defines its own; left
         // undefined each is substituted by the BaseNote's (see updateDependentRawExpressions).
         for (const v of ['amplitude', 'attack', 'release']) {
-            if (selectedNote.variables[v + 'String']) {
-                selectedRaw[v] = selectedNote.variables[v + 'String'];
+            const source = selectedNote.getExpressionSource(v);
+            if (source) {
+                selectedRaw[v] = source;
             }
         }
 
@@ -727,7 +744,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         // overwrote every dependent's own instrument with this note's.)
         const directDependents = myModule.getDependentNotes(noteId);
         const instrumentMemo = new Map();
-        const keep = [];
+        const keep: [Note, string][] = [];
         directDependents.forEach(depId => {
             const depNote = myModule.getNoteById(depId);
             if (depNote && !isMeasureNote(depNote) && !depNote.properties.instrument) keep.push([depNote, myModule.findInstrument(depNote, instrumentMemo)]);
@@ -750,7 +767,7 @@ document.addEventListener('DOMContentLoaded', async function() {
         return true;
     }
 
-    function deleteNoteKeepDependencies(noteId) {
+    function deleteNoteKeepDependencies(noteId: number) {
         if (!liberateAndRemoveNoteGL(noteId)) return;
 
         evaluatedNotes = myModule.evaluateModule();
@@ -805,7 +822,9 @@ document.addEventListener('DOMContentLoaded', async function() {
         let lastMeasure = measureNotes[0];
         for (let i = 1; i < measureNotes.length; i++) {
             try {
-                if (compareExact(measureNotes[i].getExactVariable('startTime'), lastMeasure.getExactVariable('startTime')) > 0) {
+                const start = measureNotes[i].getExactVariable('startTime');
+                const lastStart = lastMeasure.getExactVariable('startTime');
+                if (start && lastStart && compareExact(start, lastStart) > 0) {
                     lastMeasure = measureNotes[i];
                 }
             } catch { /* non-Fraction value — keep current candidate */ }
@@ -813,8 +832,8 @@ document.addEventListener('DOMContentLoaded', async function() {
         return lastMeasure.id;
     }
 
-    function isLastMeasureInChain(measureId) {
-        const measure = myModule.getNoteById(parseInt(measureId, 10));
+    function isLastMeasureInChain(measureId: number) {
+        const measure = myModule.getNoteById(parseInt(String(measureId), 10));
         if (!measure) return false;
 
         // Is any other bar a CHAIN LINK to this one (starts at `[id].t + [id].d`)?
@@ -858,13 +877,13 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Load the last session if there is one (src/store/autosave.js: IndexedDB, or a
     // module left in localStorage); otherwise load the default module
-    let savedSnapshot = null;
+    let savedSnapshot: unknown = null;
     let saved = null;
     try {
       saved = await loadSavedModuleText();
       savedSnapshot = saved ? JSON.parse(saved.text) : null;
       // Validate the snapshot has proper expression strings (not legacy function format)
-      if (savedSnapshot && savedSnapshot.baseNote) {
+      if (isRecord(savedSnapshot) && isRecord(savedSnapshot.baseNote)) {
         const testExpr = savedSnapshot.baseNote.frequency || savedSnapshot.baseNote.duration;
         // Check if any expression contains legacy function wrapper patterns
         if (testExpr && (typeof testExpr !== 'string' || testExpr.includes('newFunc') || testExpr.includes('__evalExpr'))) {
@@ -878,18 +897,18 @@ document.addEventListener('DOMContentLoaded', async function() {
       savedSnapshot = null;
     }
     // Use Module for binary expression evaluation (performance optimization)
-    let myModule;
+    let myModule: Module;
     try {
       myModule = await Module.loadFromJSON(savedSnapshot || 'modules/defaultModule.json');
       // A session found in localStorage moves to IndexedDB now, edited or not
       if (saved && saved.source === 'localStorage') saveModuleTextNow(saved.text, 'migration');
     } catch (e) {
-      if (!savedSnapshot) throw e;
+      if (!savedSnapshot || !saved) throw e;
       // The last session could not be loaded (for instance a module of the old
       // time model the conversion refuses). Keep it under its own key before
       // the autosave replaces the snapshot, and start from the default module.
       const keptIn = await keepUnloadable(saved.text);
-      console.error(`[RMT] The last session could not be loaded and was kept${keptIn ? ' in ' + keptIn : ' nowhere (no storage)'}: ` + (e && e.message));
+      console.error(`[RMT] The last session could not be loaded and was kept${keptIn ? ' in ' + keptIn : ' nowhere (no storage)'}: ` + (e && (e instanceof Error ? e.message : String(e))));
       myModule = await Module.loadFromJSON('modules/defaultModule.json');
     }
     console.log('[RMT] Loaded Module with binary expression system');
@@ -908,10 +927,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap });
       }
     } catch {}
-    let newNotes = Object.keys(evaluatedNotes).filter(id => Number(id) !== 0).map(id => evaluatedNotes[id]).filter(note =>
-        note.startTime && note.duration && note.frequency
-    );
-  
     // Legacy DOM viewport/space removed; not used
     const viewport = null;
     const space = null;
@@ -928,7 +943,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     // Initialize WebGL2 renderer overlay if enabled
     try {
-        const containerEl = document.querySelector('.myspaceapp');
+        const containerEl = document.querySelector<WorkspaceElement>('.myspaceapp');
         let __rmtDidInitGL = false;
 
         // Workspace mode: initialize interactive GL workspace with native camera
@@ -941,13 +956,7 @@ document.addEventListener('DOMContentLoaded', async function() {
             } else {
                 try {
                     glWorkspace.setPlayhead(playheadTime);
-                    glWorkspace.sync({
-                        evaluatedNotes,
-                        module: myModule,
-                        xScaleFactor,
-                        yScaleFactor,
-                        selectedNoteId: currentSelectedNote ? currentSelectedNote.id : null
-                    });
+                    // initializeModule submits the scene once selection state is ready.
                 } catch {}
 
                 // Dev perf harness hook: expose workspace/renderer for sync-isolation
@@ -955,7 +964,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 try {
                     if (typeof location !== 'undefined' && new URLSearchParams(location.search).has('perf')) {
                         window.__rmtWorkspace = glWorkspace;
-                        window.__rmtRenderer = glWorkspace.renderer;
+                        if (glWorkspace.renderer) window.__rmtRenderer = glWorkspace.renderer;
                     }
                 } catch {}
 
@@ -989,10 +998,10 @@ document.addEventListener('DOMContentLoaded', async function() {
                 // master-volume control were disconnected; the graph is now the
                 // single applier via audio.masterVolume.)
                 try {
-                    const syncVolumeUI = (v) => {
+                    const syncVolumeUI = (v: number) => {
                         try {
                             if (!(typeof v === 'number') || !isFinite(v)) return;
-                            if (domCache.volumeSlider) domCache.volumeSlider.value = v;
+                            if (domCache.volumeSlider) domCache.volumeSlider.value = String(v);
                         } catch {}
                     };
                     const persistedVol = settingsStore.get('audio.masterVolume');
@@ -1004,7 +1013,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     // localStorage churn during the drag).
                     if (domCache.volumeSlider) {
                         domCache.volumeSlider.addEventListener('change', (e) => {
-                            try { settingsStore.set('audio.masterVolume', parseFloat(e.target.value)); } catch {}
+                            try { settingsStore.set('audio.masterVolume', parseFloat(domCache.volumeSlider.value)); } catch {}
                         });
                     }
                     // Reflect changes made elsewhere (Settings panel / reset).
@@ -1041,7 +1050,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                 // (height/border/corner) changes.
                 try {
                     themeManager.init({
-                        renderer: glWorkspace.renderer,
+                        renderer: glWorkspace.renderer ?? undefined,
                         requestResync: () => {
                             try {
                                 if (glWorkspace) {
@@ -1083,7 +1092,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                     // Honor current tracking mode on init (lock X panning when tracking)
                     glWorkspace.camera.lockX = !!isTrackingEnabled;
                   }
-                  if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
+                  if (glWorkspace?.camera && glWorkspace.renderer && typeof glWorkspace.renderer.updateViewportBasis === 'function') {
                     glWorkspace.renderer.updateViewportBasis(glWorkspace.camera.getBasis());
                   }
                   // Initialize renderer tracking mode based on current tracking state
@@ -1138,7 +1147,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                         let targetEntry = null;
                         try {
                           const prev = containerEl.__rmtWsStack || { entries: [], index: -1 };
-                          let entries;
+                          let entries: SceneHit[];
                           if (!prev.entries.length && !currentSelectedNote) {
                             const top = glWorkspace?.pickAt(event.clientX, event.clientY, 3);
                             entries = top ? [top] : [];
@@ -1201,7 +1210,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                               if (el) {
                                 showNoteVariables(note, el);
                               } else {
-                                const baseEl = document.querySelector('.base-note-circle');
+                                const baseEl = document.querySelector<HTMLElement>('.base-note-circle');
                                 showNoteVariables(note, baseEl || document.body);
                               }
                               event.stopPropagation();
@@ -1224,7 +1233,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                           } else if (t === 'base') {
                             currentSelectedNote = myModule.baseNote;
                             try { syncRendererSelection(); } catch {}
-                            let anchor = document.querySelector('.base-note-circle') || document.body;
+                            let anchor = document.querySelector<HTMLElement>('.base-note-circle') || document.body;
                             showNoteVariables(myModule.baseNote, anchor);
                             event.stopPropagation();
                             event.preventDefault();
@@ -1261,7 +1270,7 @@ document.addEventListener('DOMContentLoaded', async function() {
                             }
                             const dd = document.getElementById('loadModuleDropdown');
                             const lb = domCache && domCache.loadModuleBtn;
-                            if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
+                            if (dd && lb && event.target instanceof Node && !dd.contains(event.target) && !lb.contains(event.target)) {
                                 dd.style.display = 'none';
                             }
                         } catch {}
@@ -1322,7 +1331,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
                         // Track active pointers to distinguish pinch from tap
                         containerEl.__rmtActivePointers = (containerEl.__rmtActivePointers || 0) + 1;
-                        const dec = (ev) => {
+                        const dec = (ev: Event) => {
                           try { containerEl.__rmtActivePointers = Math.max(0, (containerEl.__rmtActivePointers || 1) - 1); } catch {}
                           try { containerEl.removeEventListener('pointerup', dec, true); } catch {}
                           try { containerEl.removeEventListener('pointercancel', dec, true); } catch {}
@@ -1332,7 +1341,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
                         // Ignore starting on legacy DOM overlays; their own handlers will manage interactions
                         const t = event.target;
-                        if (t && t.closest && (t.closest('.note-rect') || t.closest('.measure-bar-triangle') || t.closest('#baseNoteCircle'))) {
+                        if (t instanceof Element && (t.closest<HTMLElement>('.note-rect') || t.closest<HTMLElement>('.measure-bar-triangle') || t.closest<HTMLElement>('#baseNoteCircle'))) {
                           return;
                         }
 
@@ -1363,7 +1372,7 @@ document.addEventListener('DOMContentLoaded', async function() {
 
 
 // Accept module JSON drops from the Module Bar onto the workspace (GL-only)
-const canvasEl = document.querySelector('.myspaceapp');
+const canvasEl = document.querySelector<WorkspaceElement>('.myspaceapp');
 if (canvasEl) {
   canvasEl.addEventListener('dragover', (event) => {
     try {
@@ -1371,7 +1380,7 @@ if (canvasEl) {
       if (types.includes('application/json') || types.includes('text/plain')) {
         event.preventDefault();
         // Hint a copy action for better UX
-        try { event.dataTransfer.dropEffect = 'copy'; } catch {}
+        try { if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; } catch {}
       }
     } catch {
       // Be permissive if probing types fails
@@ -1424,15 +1433,15 @@ if (canvasEl) {
     // Read the transferred data (Module Bar sets application/json and text/plain)
     let raw = null;
     try {
-      raw = event.dataTransfer.getData('application/json');
-      if (!raw) raw = event.dataTransfer.getData('text/plain');
+      raw = event.dataTransfer?.getData('application/json');
+      if (!raw) raw = event.dataTransfer?.getData('text/plain');
     } catch {}
     if (!raw) {
       // No transferable data payload found
       return;
     }
 
-    let data = null;
+    let data: unknown;
     try {
       data = JSON.parse(raw);
     } catch {
@@ -1441,7 +1450,7 @@ if (canvasEl) {
     }
 
     // Basic sanity check to avoid accepting arbitrary content
-    const looksLikeModule = !!(data && (data.baseNote || data.notes || data.filename));
+    const looksLikeModule = isRecord(data) && !!(data.baseNote || data.notes || data.filename);
     if (!looksLikeModule) return;
 
     let targetNote = myModule.getNoteById(Number(targetNoteId));
@@ -1454,7 +1463,7 @@ if (canvasEl) {
 }
     let centerPoint = null;
   
-    let currentSelectedNote = null;
+    let currentSelectedNote: Note | null = null;
 
   
     if (domCache.saveModuleBtn) {
@@ -1477,7 +1486,7 @@ if (canvasEl) {
                 return;
             }
 
-            const baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+            const baseNoteFreq = myModule.baseNote.getVariable('frequency')!.valueOf();
             const baseNoteY = frequencyToY(baseNoteFreq);
             if (glWorkspace && glWorkspace.camera && glWorkspace.containerEl) {
 // Reset view in Workspace: center world (0, baseY) to container center, keep current zoom
@@ -1494,7 +1503,7 @@ if (canvasEl) {
         });
     }
   
-    async function importModuleAtTarget(targetNote, moduleData) {
+    async function importModuleAtTarget(targetNote: Note, moduleData: unknown) {
         if (isPlaying) {
             pause();
         }
@@ -1507,7 +1516,7 @@ if (canvasEl) {
             // Reject drop on silences (notes with startTime+duration and no frequency).
             // A measure bar is built the same way but is a valid target.
             try {
-              const __isSilence = (n) => {
+              const __isSilence = (n: Note) => {
                 try { return !!(n && !isMeasureNote(n) && n.getVariable('startTime') && n.getVariable('duration') && !n.getVariable('frequency')); } catch { return false; }
               };
               if (__isSilence(targetNote)) {
@@ -1519,14 +1528,15 @@ if (canvasEl) {
             let importedModule;
             let filename = null;
             
-            if (typeof moduleData === 'object' && moduleData.filename) {
-                filename = moduleData.filename;
+            const importedScore = isRecord(moduleData) ? moduleData : null;
+            if (importedScore && typeof importedScore.filename === 'string') {
+                filename = importedScore.filename;
                 importedModule = await Module.loadFromJSON(moduleData);
             } else {
                 importedModule = await Module.loadFromJSON(moduleData);
             }
         
-            const mapping = {};
+            const mapping: Record<number, number> = {};
             mapping[0] = targetNote.id;
             
             let maxId = 0;
@@ -1536,24 +1546,25 @@ if (canvasEl) {
             let newId = myModule.nextId;
             for (const id in importedModule.notes) {
                 if (Number(id) === 0) continue;
-                mapping[id] = newId;
+                mapping[Number(id)] = newId;
                 newId++;
             }
             myModule.nextId = newId;
 
             // Per-import cache to avoid repeating the same string remapping across many notes
-            const exprRemapCache = new Map();
+            const exprRemapCache = new Map<string, string | null>();
 
             // A drop takes pitch and start from the target and keeps the receiving time unit.
             const dropAtEnd = menuBar?.getModuleDropMode?.() === 'end' && targetNote.id !== 0;
 
-            function updateExpression(source) {
-                if (exprRemapCache.has(source)) return exprRemapCache.get(source);
+            function updateExpression(source: string) {
+                const cached = exprRemapCache.get(source);
+                if (cached !== undefined) return cached;
                 // One pass over the source: a target id may also have been an id
                 // in the imported phrase. Never remap a replacement a second time.
                 const result = rewriteNoteReferences(source, (id, prop, match) => {
                     if (id !== 0) return mapping[id] ?? id;
-                    const property = PropertyMap[prop];
+                    const property = Object.hasOwn(PropertyMap, prop) ? PropertyMap[prop as keyof typeof PropertyMap] : undefined;
                     if (targetNote.id === 0 || property === 'duration' ||
                         (targetIsMeasure && property !== 'startTime')) return `base.${prop}`;
                     const anchor = `[${targetNote.id}].${prop}`;
@@ -1592,6 +1603,7 @@ if (canvasEl) {
                 for (const key of EXPRESSION_VARS) {
                     if (!impNote.hasExpression(key)) continue;
                     const source = impNote.getExpressionSource(key);
+                    if (source == null) continue;
                     const remapped = updateExpression(source);
                     if (remapped !== source) impNote.setVariable(key + 'String', remapped);
                 }
@@ -1601,7 +1613,7 @@ if (canvasEl) {
         
 
             // Incremental import path with targeted dirty marking and timings
-            const importedIds = Object.keys(mapping).filter(k => Number(k) !== 0).map(k => mapping[k]);
+            const importedIds = Object.keys(mapping).filter(k => Number(k) !== 0).map(k => mapping[Number(k)]);
 
             // A bar's start expression defines its chain. Preserve offsets, branches
             // and starts anchored to ordinary notes, including on measure targets.
@@ -1685,7 +1697,7 @@ if (canvasEl) {
     }
     requestAnimationFrame(animationLoop);
 
-    function bringSelectedNoteToFront(note, clickedElement) {
+    function bringSelectedNoteToFront(note: Note, clickedElement: Element | null) {
         try {
             if (!note) return;
             if (typeof updateStackClickSelectedNote === 'function') {
@@ -1698,12 +1710,12 @@ if (canvasEl) {
         } catch {}
     }
     
-    function restoreNotePointerEvents(note) {
+    function restoreNotePointerEvents(note: Note) {
         // No-op in GL-only mode; DOM note elements are not used
         return;
     }
     
-    function restoreNotePosition(note) {
+    function restoreNotePosition(note: Note) {
         // No-op in GL-only mode; selection/z-order handled by renderer
         try {
             if (note && originalNoteOrder.has(note.id)) {
@@ -1717,7 +1729,7 @@ if (canvasEl) {
         try { originalNoteOrder.clear(); } catch {}
     }
 
-    function showNoteVariables(note, clickedElement, measureId = null) {
+    function showNoteVariables(note: Note, clickedElement: Element | null, measureId: number | null = null) {
         if (modals) {
             if (note !== myModule.baseNote && measureId === null) {
                 bringSelectedNoteToFront(note, clickedElement);
@@ -1755,7 +1767,7 @@ if (canvasEl) {
     // A GROUP is held by note id, not by Note object, so it survives the swap: it is
     // remembered here and selected again once the restored module is in place, so
     // undoing a group edit leaves the same notes selected for the next try.
-    let groupBeforeRestore = null;
+    let groupBeforeRestore: {ids: number[]; touch: boolean} | null = null;
     try {
         eventBus.on('history:requestRestore', () => {
             groupBeforeRestore = multiSelection.size ? { ids: [...multiSelection], touch: touchMultiSelect } : null;
@@ -1775,11 +1787,11 @@ if (canvasEl) {
         clearSelection();
     });
       
-    function addNoteClickHandler(noteElement, note) {
-        const noteRect = noteElement.element.querySelector('.note-rect');
-        const noteContent = noteElement.element.querySelector('.note-content');
+    function addNoteClickHandler(noteElement: { element: HTMLElement }, note: Note) {
+        const noteRect = noteElement.element.querySelector<HTMLElement & {element?: {__rmtSuppressClickOnce?: boolean}}>('.note-rect');
+        const noteContent = noteElement.element.querySelector<HTMLElement>('.note-content');
         if (noteRect && noteContent) {
-            const debouncedShowNoteVariables = debounce((note, noteContent) => {
+            const debouncedShowNoteVariables = debounce((note: Note, noteContent: HTMLElement) => {
                 currentSelectedNote = note;
                 // Ensure WebGL renderer draws selection on top
                 try { syncRendererSelection(); } catch {}
@@ -1809,7 +1821,7 @@ if (canvasEl) {
       
     function setupBaseNoteClickHandler() {
         const baseNoteCircle = document.getElementById('baseNoteCircle');
-        const baseNoteElement = baseNoteCircle?.querySelector('.base-note-circle');
+        const baseNoteElement = baseNoteCircle?.querySelector<HTMLElement>('.base-note-circle');
         if (baseNoteCircle && baseNoteElement) {
             baseNoteCircle.addEventListener('click', (event) => {
                 if (isLocked) {
@@ -1831,18 +1843,18 @@ if (canvasEl) {
         return;
     }
       
-    function frequencyToY(freq) {
+    function frequencyToY(freq: number) {
         // Use evaluated cache when available to avoid recomputing base frequency repeatedly
         let baseNoteFreq;
         try {
-            const baseEv = evaluatedNotes && evaluatedNotes[0] && evaluatedNotes[0].frequency;
+            const baseEv = evaluatedNotes?.get(0)?.frequency;
             if (baseEv != null) {
-                baseNoteFreq = (typeof baseEv.valueOf === 'function') ? baseEv.valueOf() : baseEv;
+                baseNoteFreq = baseEv.valueOf();
             } else {
-                baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+                baseNoteFreq = myModule.baseNote.getVariable('frequency')!.valueOf();
             }
         } catch {
-            baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+            baseNoteFreq = myModule.baseNote.getVariable('frequency')!.valueOf();
         }
         const logRatio = Math.log2(baseNoteFreq / freq);
         return logRatio * 100 * yScaleFactor;
@@ -1860,7 +1872,7 @@ if (canvasEl) {
         if (baseNoteFreq instanceof Fraction) {
             // Sign belongs to the numerator; elide huge digit runs so the
             // circle stays readable (exact value lives in the Raw field)
-            const elide = (s) => s.length > 12 ? `${s.slice(0, 6)}…${s.slice(-4)}` : s;
+            const elide = (s: string) => s.length > 12 ? `${s.slice(0, 6)}…${s.slice(-4)}` : s;
             numerator = elide((baseNoteFreq.s * baseNoteFreq.n).toString());
             denominator = elide(baseNoteFreq.d.toString());
         } else {
@@ -1868,10 +1880,10 @@ if (canvasEl) {
             denominator = '1';
         }
 
-        const fractionElements = document.querySelector('.base-note-fraction');
+        const fractionElements = document.querySelector<HTMLElement>('.base-note-fraction');
         if (fractionElements) {
-            const numeratorDisplay = fractionElements.querySelector('.fraction-numerator');
-            const denominatorDisplay = fractionElements.querySelector('.fraction-denominator');
+            const numeratorDisplay = fractionElements.querySelector<HTMLElement>('.fraction-numerator');
+            const denominatorDisplay = fractionElements.querySelector<HTMLElement>('.fraction-denominator');
 
             if (numeratorDisplay && denominatorDisplay) {
                 numeratorDisplay.textContent = numerator;
@@ -1902,58 +1914,15 @@ if (canvasEl) {
         } catch {}
     }
     
-    let earliestStart = Infinity;
-    let latestEnd = 0;
-    let lowestFreq = Infinity;
-    let highestFreq = 0;
-    
     function updateTimingBoundaries() {
-        earliestStart = Infinity;
-        latestEnd = 0;
-        lowestFreq = Infinity;
-        highestFreq = 0;
-
-        const baseStart = myModule.baseNote.getVariable('startTime')?.valueOf() ?? 0;
-        earliestStart = baseStart;
-        if (newNotes && newNotes.length > 0) {
-            newNotes.forEach(note => {
-                if (note) {
-                    const startTime = note.startTime?.valueOf() ?? 0;
-                    const duration = note.duration?.valueOf() ?? 0;
-                    const freq = note.frequency?.valueOf() ?? 440;
-                    earliestStart = Math.min(earliestStart, startTime);
-                    latestEnd = Math.max(latestEnd, startTime + duration);
-                    lowestFreq = Math.min(lowestFreq, freq);
-                    highestFreq = Math.max(highestFreq, freq);
-                }
-            });
-        }
-        if (evaluatedNotes) {
-            Object.values(evaluatedNotes).forEach(note => {
-                if (note && note.startTime) {
-                    const startTime = note.startTime?.valueOf() ?? 0;
-                    const duration = note.duration?.valueOf() ?? 0;
-                    const endTime = startTime + duration;
-                    earliestStart = Math.min(earliestStart, startTime);
-                    latestEnd = Math.max(latestEnd, endTime);
-                    if (note.frequency) {
-                        const freq = note.frequency?.valueOf() ?? 440;
-                        lowestFreq = Math.min(lowestFreq, freq);
-                        highestFreq = Math.max(highestFreq, freq);
-                    }
-                }
-            });
-        }
+        // The GL workspace owns timing bounds. Keep the existing inspector callback.
     }
-    
-    updateTimingBoundaries();
-    
-    let measureBars = [];
-    let playhead = null;
-    let playheadContainer = null;
+
+    let measureBars: HTMLElement[] = [];
+
     
     
-    function getFrequencyMultiplier(note) {
+    function getFrequencyMultiplier(note: Note) {
         if (note.variables && note.variables.color) {
             if (typeof note.variables.color === 'function') {
                 return note.variables.color();
@@ -1965,17 +1934,17 @@ if (canvasEl) {
         if (note.setVariable) {
             note.setVariable('color', newColor);
         } else {
-            note.color = newColor;
+            note.properties.color = newColor;
         }
         return newColor;
     }
     
-    function getFrequencyFraction(note) {
+    function getFrequencyFraction(note: Note) {
         try {
             if (!note) return "1/1";
 
             // Fast path: use evaluated cache to avoid executing getters for every note
-            const ev = evaluatedNotes && evaluatedNotes[note.id];
+            const ev = evaluatedNotes?.get(note.id);
             if (ev && ev.frequency) {
                 const fv = ev.frequency;
                 if (fv instanceof Fraction && typeof fv.toFraction === 'function') {
@@ -1991,19 +1960,19 @@ if (canvasEl) {
                 if (freq instanceof Fraction && typeof freq.toFraction === "function") {
                     return freq.toFraction();
                 } else {
-                    return freq.toString();
+                    return freq?.toString() ?? "1/1";
                 }
             }
         } catch {}
         return "1/1";
     }
 
-    function getFrequencyRatio(note) {
+    function getFrequencyRatio(note: Note) {
         // Fast path: use evaluated cache to avoid executing getters for every note
         try {
             if (!note) return "1/1";
-            const ev = evaluatedNotes && evaluatedNotes[note.id];
-            const baseEv = evaluatedNotes && evaluatedNotes[0];
+            const ev = evaluatedNotes?.get(note.id);
+            const baseEv = evaluatedNotes?.get(0);
             if (ev && baseEv && ev.frequency && baseEv.frequency) {
                 const f = ev.frequency instanceof Fraction
                     ? ev.frequency
@@ -2043,9 +2012,9 @@ if (canvasEl) {
         }
     }
 
-    function getMovedNotes(draggedNote, newDraggedStart, originalDraggedStart) {
+    function getMovedNotes(draggedNote: Note, newDraggedStart: Fraction, originalDraggedStart: Fraction) {
         const affectedIds = myModule.getDependentNotes(draggedNote.id);
-        const originalValues = {};
+        const originalValues: Record<number, Fraction | null> = {};
         affectedIds.forEach(id => {
             const depNote = myModule.getNoteById(id);
             if (depNote && typeof depNote.getVariable === 'function') {
@@ -2056,7 +2025,7 @@ if (canvasEl) {
         const savedStartFunc = draggedNote.variables.startTime;
         draggedNote.variables.startTime = () => newDraggedStart;
 
-        const moved = [];
+        const moved: { note: Note; newStart: Fraction }[] = [];
         const tol = new Fraction(1, 10000);
         affectedIds.forEach(id => {
             const depNote = myModule.getNoteById(id);
@@ -2077,14 +2046,14 @@ if (canvasEl) {
 // Shared helper: the note a start expression hangs from: the note whose
 // start it reads, else the BaseNote when it reads base.t, else the first note it names.
 // Returns the numeric note ID, or 0 for baseNote, or -1 if no reference found.
-function __extractNoteRefFromRaw(raw) {
+function __extractNoteRefFromRaw(raw: string | null | undefined) {
   return startParentIdFromRaw(raw);
 }
 
 // Shared helper: check if a raw expression references a specific note ID ([N].prop).
 // (Until v2 the pattern sat in a template literal with single backslashes, which
 // the literal drops: `[5].` matched any "5" followed by a character.)
-function __rawReferencesNoteId(raw, noteId) {
+function __rawReferencesNoteId(raw: string | null | undefined, noteId: number) {
   if (!raw || typeof raw !== 'string') return false;
   return new RegExp(String.raw`\[\s*${noteId}\s*\]\s*\.`).test(raw);
 }
@@ -2095,9 +2064,9 @@ function __rawReferencesNoteId(raw, noteId) {
 // variables (1.f from 2.f while 2.t comes from 1.t), and then the walk can arrive back
 // at the note being rewritten. A retarget that would close such a loop is skipped: the
 // note keeps the expression it has.
-function __retargetWouldCycleGL(note, varName, raw) {
+function __retargetWouldCycleGL(note: Note, varName: ExpressionName, raw: string | null | undefined) {
   try {
-    return findDependencyCycle(myModule, note.id, varName, compiler.compile(raw)) !== null;
+    return typeof raw === 'string' && findDependencyCycle(myModule, note.id, varName, compiler.compile(raw)) !== null;
   } catch {
     return false;
   }
@@ -2106,23 +2075,23 @@ function __retargetWouldCycleGL(note, varName, raw) {
 // Shared helper: check if a frequency expression references a specific note's frequency ([N].f).
 // (Until v2 the `\b` of the pattern sat in a template literal, where it is a
 // backspace character, so this never matched.)
-function __freqReferencesNoteId(fRaw, noteId) {
+function __freqReferencesNoteId(fRaw: string | null | undefined, noteId: number) {
   if (!fRaw || typeof fRaw !== 'string') return false;
   return new RegExp(String.raw`\[\s*${noteId}\s*\]\s*\.\s*(?:f|freq|frequency)\b`).test(fRaw);
 }
 
 // A measure bar: a note flagged `measure` (see isMeasureNote in note.js).
-function __isMeasureNoteGL(note) {
+function __isMeasureNoteGL(note: Note) {
   return isMeasureNote(note);
 }
 
 // The start of a bar chained onto bar `prevId`: it begins where that bar ends.
 // Written in exactly the form measureChainLinkParentId() recognises, never simplified.
-function __measureChainLinkExpr(prevId) {
+function __measureChainLinkExpr(prevId: number) {
   return `[${prevId}].t + [${prevId}].d`;
 }
 
-function __parseParentFromStartTimeStringGL(note) {
+function __parseParentFromStartTimeStringGL(note: Note) {
   try {
     const raw = note?.variables?.startTimeString || '';
     const ref = __extractNoteRefFromRaw(raw);
@@ -2145,16 +2114,18 @@ function __parseParentFromStartTimeStringGL(note) {
  * power such as 2^(7/12) stays a power. null when the ratio is approximate; the
  * note then keeps its expression.
  */
-function rebuildFrequencyForAnchor(note, newAnchor) {
+function rebuildFrequencyForAnchor(note: Note, newAnchor: Note) {
   try {
     const ref = newAnchor.id === 0 ? 'base.f' : `[${newAnchor.id}].f`;
-    return ratioToAnchorExpr(note.getExactVariable('frequency'), newAnchor.getExactVariable('frequency'), ref);
+    const pitch = note.getExactVariable('frequency');
+    const anchor = newAnchor.getExactVariable('frequency');
+    return pitch && anchor ? ratioToAnchorExpr(pitch, anchor, ref) : null;
   } catch {
     return null;
   }
 }
 
-function __findNextMeasureInChainGL(measure) {
+function __findNextMeasureInChainGL(measure: Note) {
   try {
     if (!__isMeasureNoteGL(measure)) return null;
     // Only find CHAIN LINKS (bars starting at `[id].t + [id].d`), not anchors starting new chains
@@ -2177,7 +2148,7 @@ function __findNextMeasureInChainGL(measure) {
   } catch { return null; }
 }
 
-function selectSuitableParentForStartGL(note, newStartSec) {
+function selectSuitableParentForStartGL(note: Note, newStartSec: number) {
   try {
     const tol = 1e-2;
     let parent = __parseParentFromStartTimeStringGL(note);
@@ -2192,7 +2163,7 @@ function selectSuitableParentForStartGL(note, newStartSec) {
     if (newStartSec > parentStart + tol) {
       // Dragging forward: if parent is a measure, walk forward across measure chain as needed
       if (__isMeasureNoteGL(parent)) {
-        let cur = parent;
+        let cur: Note | undefined = parent;
         let curStart = parentStart;
         let advanced = true;
         while (advanced) {
@@ -2215,7 +2186,7 @@ function selectSuitableParentForStartGL(note, newStartSec) {
     } else if (newStartSec < parentStart - tol) {
       // Dragging backward: climb ancestor chain until an ancestor starts before newStartSec
       let chain = [];
-      let cur = parent;
+      let cur: Note | undefined = parent;
       while (cur && cur.id !== 0) {
         const raw = cur.variables.startTimeString || '';
         const ref = __extractNoteRefFromRaw(raw);
@@ -2253,7 +2224,7 @@ function selectSuitableParentForStartGL(note, newStartSec) {
   }
 }
 
-function emitStartTimeExprForParentGL(parent, newStartSec, note) {
+function emitStartTimeExprForParentGL(parent: Note, newStartSec: number, note: Note) {
   try {
     const parentStartFrac = parent.getVariable('startTime');
     const parentStart = toNumber(parentStartFrac, 0);
@@ -2274,7 +2245,7 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
     const unitFrac = myModule.getTimeUnit();
     let frac;
     try {
-      frac = new Fraction(newStartSec).sub(parentStartFrac).div(unitFrac).abs();
+      frac = new Fraction(newStartSec).sub(parentStartFrac ?? 0).div(unitFrac).abs();
     } catch {
       const unit = toNumber(unitFrac, 1) || 1;
       const offsetBeats = Math.abs(delta) / unit;
@@ -2294,13 +2265,13 @@ function emitStartTimeExprForParentGL(parent, newStartSec, note) {
   }
 }
 
-function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
+function retargetDependentFrequencyOnTemporalViolationGL(movedNote: Note) {
   try {
     // Resolve an ancestor of "note" whose startTime is at or before cutoffSec.
     // Falls back to BaseNote when none qualifies. Local to avoid global pollution.
-    function __resolveAncestorAtOrBefore(note, cutoffSec, requireFrequency = false) {
+    function __resolveAncestorAtOrBefore(note: Note, cutoffSec: number, requireFrequency = false) {
       try {
-        let anc = __parseParentFromStartTimeStringGL(note);
+        let anc: Note | undefined = __parseParentFromStartTimeStringGL(note);
         const tol = 1e-6;
         while (anc && anc.id !== 0) {
           const st = toNumber(anc.getVariable('startTime'), 0);
@@ -2392,11 +2363,11 @@ function retargetDependentFrequencyOnTemporalViolationGL(movedNote) {
     });
   } catch {}
 }
-function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
+function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote: Note) {
   try {
-    function __resolveAncestorAtOrBefore(note, cutoffSec, requireFrequency = false) {
+    function __resolveAncestorAtOrBefore(note: Note, cutoffSec: number, requireFrequency = false) {
       try {
-        let anc = __parseParentFromStartTimeStringGL(note);
+        let anc: Note | undefined = __parseParentFromStartTimeStringGL(note);
         const tol = 1e-6;
         while (anc && anc.id !== 0) {
           const st = toNumber(anc.getVariable('startTime'), 0);
@@ -2500,18 +2471,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 }
  // === End GL move helpers ===
 
-    function createNoteElement(note, index) {
+    function createNoteElement(note: Note, index: number) {
         // Legacy DOM creation removed. Rendering and interactions are handled by the WebGL2 Workspace.
         // This stub ensures any legacy callers receive a benign value.
         return null;
     }// Fast incremental renderer to append only specified notes after import.
-    function renderNotesIncrementally(noteIds) {
+    function renderNotesIncrementally(noteIds: number[]) {
         // GL-only: no DOM rendering path
         return 0;
     }
 
-    function handleOctaveChange(noteId, direction) {
-        const note = myModule.getNoteById(parseInt(noteId, 10));
+    function handleOctaveChange(noteId: number, direction: 'up' | 'down') {
+        const note = myModule.getNoteById(parseInt(String(noteId), 10));
         if (!note) {
             console.error(`Note with ID ${noteId} not found`);
             return;
@@ -2522,7 +2493,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
 
         const selectedNote = currentSelectedNote;
-        const noteWidgetVisible = document.getElementById('note-widget').classList.contains('visible');
+        const noteWidgetVisible = document.getElementById('note-widget')?.classList.contains('visible');
 
         // Arrow interval is user-configurable (Settings → Arrows). Defaults to
         // the octave (up ×2/1, down ×1/2). When arrows are disabled entirely we
@@ -2552,7 +2523,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
             if (!rawExpression) {
                 // No raw expression to preserve: the exact value times the factor
-                const newFrequency = mulExact(note.getExactVariable('frequency'), new Fraction(factor.n, factor.d));
+                const pitch = note.getExactVariable('frequency');
+              if (!pitch) return;
+              const newFrequency = mulExact(pitch, new Fraction(factor.n, factor.d));
                 note.setVariable('frequencyString', valueFactor(newFrequency));
             } else {
                 // Fold the factor into the expression's coefficient instead of
@@ -2588,7 +2561,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
               if (isVisible && currentSelectedNote && ((currentSelectedNote === note) || (currentSelectedNote.id === note.id))) {
                 let anchor = null;
                 if (currentSelectedNote === myModule.baseNote) {
-                  anchor = document.querySelector('.base-note-circle');
+                  anchor = document.querySelector<HTMLElement>('.base-note-circle');
                 } else {
                   anchor = document.querySelector(
                     `.note-content[data-note-id="${currentSelectedNote.id}"], ` +
@@ -2616,11 +2589,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
 
-    function createMeasureBarTriangle(measureBar, measurePoint, id) {
+    function createMeasureBarTriangle(measureBar: HTMLElement, measurePoint: Note, id: number) {
         if (!measurePoint) return null;
         const triangle = document.createElement('div');
         triangle.className = 'measure-bar-triangle';
-        triangle.setAttribute("data-note-id", id);
+        triangle.setAttribute("data-note-id", String(id));
         triangle.innerHTML = `<span class="measure-id">[${escapeHtml(String(id))}]</span>`;
         triangle.addEventListener('click', (event) => {
             if (isLocked) {
@@ -2629,7 +2602,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 return;
             }
             event.stopPropagation();
-            document.querySelectorAll('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected').forEach(el => {
+            document.querySelectorAll<HTMLElement>('.note-content.selected, .base-note-circle.selected, .measure-bar-triangle.selected').forEach(el => {
                 el.classList.remove('selected');
             });
             triangle.classList.add('selected');
@@ -2650,20 +2623,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         // When WebGL overlay is enabled, suppress DOM bars and playhead; keep triangles for interactions.
     
         // Preserve currently selected triangles
-        const selectedMeasureBars = document.querySelectorAll('.measure-bar-triangle.selected');
+        const selectedMeasureBars = document.querySelectorAll<HTMLElement>('.measure-bar-triangle.selected');
         const selectedMeasureBarIds = Array.from(selectedMeasureBars).map(el => el.getAttribute('data-note-id'));
     
         // Clear previous DOM artifacts
         measureBars.forEach(bar => bar.remove());
         measureBars = [];
     
-        const barsContainer = domCache.measureBarsContainer;
-        const trianglesContainer = domCache.trianglesContainer;
-        playheadContainer = domCache.playheadContainer;
-    
-        if (barsContainer) barsContainer.innerHTML = '';
-        if (playheadContainer) playheadContainer.innerHTML = '';
-        if (trianglesContainer) trianglesContainer.innerHTML = '';
+        // The GL workspace owns bars, triangles and the playhead.
     
         // GL-only: DOM measure triangles are disabled; Workspace handles measure interactions.
         // No triangles are created.
@@ -2680,7 +2647,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             : { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
         const scale = Math.sqrt((basis.a || 1) * (basis.a || 1) + (basis.b || 0) * (basis.b || 0));
     
-        const xToScreen = (xWorld) => (basis.a * xWorld + basis.e);
+        const xToScreen = (xWorld: number) => (basis.a * xWorld + basis.e);
     
         measureBars.forEach(bar => {
             let xWorld = 0;
@@ -2697,9 +2664,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             } else {
                 const noteId = bar.getAttribute("data-note-id");
                 if (noteId) {
-                    const note = myModule.getNoteById(parseInt(noteId, 10));
+                    const note = myModule.getNoteById(parseInt(String(noteId), 10));
                     if (note) {
-                        xWorld = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
+                        xWorld = note.getVariable('startTime')!.valueOf() * 200 * xScaleFactor;
                     }
                 }
             }
@@ -2707,19 +2674,19 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             bar.style.transform = `translate(${screenX}px, 0) scale(${1 / Math.max(scale, 1e-6)}, 1)`;
         });
     
-        const triangles = document.querySelectorAll('.measure-bar-triangle');
+        const triangles = document.querySelectorAll<HTMLElement>('.measure-bar-triangle');
         triangles.forEach(triangle => {
             const noteId = triangle.getAttribute("data-note-id");
             if (!noteId) return;
-            const note = myModule.getNoteById(parseInt(noteId, 10));
+            const note = myModule.getNoteById(parseInt(String(noteId), 10));
             if (!note) return;
-            const xWorld = note.getVariable('startTime').valueOf() * 200 * xScaleFactor;
+            const xWorld = note.getVariable('startTime')!.valueOf() * 200 * xScaleFactor;
             const screenX = xToScreen(xWorld);
             triangle.style.transform = `translateX(${screenX}px)`;
         });
     }
     
-    let playheadAnimationId = null;
+    let playheadAnimationId: number | null = null;
 
     function updatePlayhead() {
         if (playheadAnimationId) {
@@ -2806,13 +2773,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 }
             }
             
-            // If GPU overlay is active or DOM playhead is not present, skip DOM transform
-            // Also skip during active X scaling to avoid a 1-frame pop before camera recenter completes
-            if (playhead && !__rmtScalingXActive) {
-                const __basisPH = computeWorldToScreenAffine();
-                const screenX = (__basisPH.a || 1) * x + (__basisPH.e || 0);
-                playhead.style.transform = `translate(${screenX}px, 0)`;
-            }
+
             
             playheadAnimationId = requestAnimationFrame(update);
         };
@@ -2820,14 +2781,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         update();
     }
     
-    function handleBackgroundGesture(gestureEvent) {
+    function handleBackgroundGesture(gestureEvent: Event) {
         // Legacy gesture path removed; Workspace manages background interactions.
         return;
     }
     
     createMeasureBars();
     updateVisualNotes(evaluatedNotes);
-    function getColorForNote(note) {
+    function getColorForNote(note: Note) {
         if (note.variables && note.variables.color) {
             if (typeof note.variables.color === 'function') {
                 return note.variables.color();
@@ -2839,12 +2800,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         if (note.setVariable) {
             note.setVariable('color', newColor);
         } else {
-            note.color = newColor;
+            note.properties.color = newColor;
         }
         return newColor;
     }
     
-    function updateVisualNotes(nextEvaluated, incremental = false) {
+    function updateVisualNotes(nextEvaluated: EvaluationCache, incremental = false) {
         // GL-only: update evaluated notes and sync the workspace renderer. No DOM mirroring.
         evaluatedNotes = nextEvaluated;
         try { refreshTempoUI(); } catch {}
@@ -2886,7 +2847,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
     // Open the note widget on a note, GL-only (there is no DOM note element to anchor
     // to, so we fall back to document.body — showNoteVariables tolerates that).
-    function showNoteVariablesForNote(note) {
+    function showNoteVariablesForNote(note: Note) {
         const anchor = document.querySelector(
             `.note-content[data-note-id="${CSS.escape(String(note.id))}"], ` +
             `.measure-bar-triangle[data-note-id="${CSS.escape(String(note.id))}"]`
@@ -2912,7 +2873,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
 
         try { glWorkspace?.renderer?.syncMultiSelection(multiSelection); } catch {}
-        try { glWorkspace?.requestRender?.(); } catch {}
+        try { if (glWorkspace && 'requestRender' in glWorkspace && typeof glWorkspace.requestRender === 'function') glWorkspace.requestRender(); } catch {}
 
         if (multiSelection.size > 0) {
             // modals.clearSelection() (not our own clearSelection()) — we want the note
@@ -2943,11 +2904,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         syncMultiSelection();
     }
 
-    function isGroupSelectable(id) {
+    function isGroupSelectable(id: number) {
         return Number.isInteger(Number(id)) && Number(id) > 0 && !!myModule.getNoteById(Number(id));
     }
 
-    function selectedMeasureCount(ids) {
+    function selectedMeasureCount(ids: Iterable<number>) {
         let count = 0;
         if (ids instanceof Set) {
             const barIds = myModule.getTimingSummary().measureIds;
@@ -2961,7 +2922,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
     // ids: iterable of note ids. additive => union with the existing set.
-    function setMultiSelectionIds(ids, additive = false) {
+    function setMultiSelectionIds(ids: Iterable<number>, additive = false) {
         if (!additive) multiSelection.clear();
         else if (currentSelectedNote && isGroupSelectable(currentSelectedNote.id)) multiSelection.add(currentSelectedNote.id);
         for (const raw of (ids || [])) {
@@ -2970,7 +2931,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         syncMultiSelection();
     }
 
-    function toggleMultiSelectId(id) {
+    function toggleMultiSelectId(id: number) {
         const n = Number(id);
         if (multiSelection.has(n)) {           // always allow removal
             multiSelection.delete(n);
@@ -3008,7 +2969,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     // A is selected; X is NOT selected and is anchored to A; M is selected and
     // anchored to X. M's direct anchor (X) is outside the selection, but X follows A,
     // so M already rides. Testing only the direct anchor would move M twice.
-    function __startChainTouchesSetGL(note, ids) {
+    function __startChainTouchesSetGL(note: Note, ids: Set<number>) {
         let cur = __parseParentFromStartTimeStringGL(note);
         const seen = new Set();
         while (cur) {
@@ -3040,7 +3001,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     // variable (src/utils/group-edit.js), as a group selection. From the first note
     // of a chained melody, "dependents by t" is the melody.
     const RELATION_WORD = { t: 'its start', f: 'its frequency', d: 'its duration', all: 'any variable' };
-    function selectRelatedNotes(noteId, direction, which) {
+    function selectRelatedNotes(noteId: number, direction: 'dependencies' | 'dependents', which: keyof typeof groupEdit.RELATION_VARS) {
         const id = Number(noteId);
         let related;
         try {
@@ -3063,15 +3024,18 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     // Group widget, CHANGE / INSTRUMENT / COLOUR: one edit on every selected note,
     // one undo step. The selection stays, so edits can follow one another.
     const GROUP_OP_WORD = { set: 'set', scale: '×', inherit: 'inherits' };
-    function applyGroupEdit({ op, varName, text }) {
+    function applyGroupEdit({ op, varName, text = '' }: GroupEdit) {
         const ids = [...multiSelection];
         if (!ids.length) return;
         try { eventBus.emit('player:requestPause'); } catch {}
         let r;
         try {
-            if (op === 'set') r = groupEdit.setGroup(myModule, ids, varName, text);
-            else if (op === 'scale') r = groupEdit.scaleGroup(myModule, ids, varName, text);
-            else if (op === 'inherit') r = groupEdit.inheritGroup(myModule, ids, varName);
+            if (op === 'set' || op === 'scale' || op === 'inherit') {
+                if (!(varName === 'amplitude' || varName === 'attack' || varName === 'release' || varName === 'frequency' || varName === 'duration')) return;
+                if (op === 'set') r = groupEdit.setGroup(myModule, ids, varName, text);
+                else if (op === 'scale') r = groupEdit.scaleGroup(myModule, ids, varName, text);
+                else r = groupEdit.inheritGroup(myModule, ids, varName);
+            }
             else if (op === 'instrument') r = groupEdit.setGroupProperty(myModule, ids, 'instrument', text || null);
             else if (op === 'instrumentOnePlayer') r = groupEdit.setGroupOnePlayer(myModule, ids, text || null);
             else if (op === 'color') {
@@ -3080,7 +3044,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 r = groupEdit.setGroupProperty(myModule, ids, 'color', c);
             } else return;
         } catch (e) {
-            try { menuBar.notify(e.message, 'error'); } catch {}
+            try { menuBar.notify((e instanceof Error ? e.message : String(e)), 'error'); } catch {}
             return;
         }
 
@@ -3095,7 +3059,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             updateVisualNotes(evaluatedNotes, true);
             createMeasureBars();
             invalidateModuleEndTimeCache();
-            try { glWorkspace?.requestRender?.(); } catch {}
+            try { if (glWorkspace && 'requestRender' in glWorkspace && typeof glWorkspace.requestRender === 'function') glWorkspace.requestRender(); } catch {}
             const what = op === 'instrument' ? `Instrument ${text || 'inherited'}`
                 : op === 'instrumentOnePlayer' ? `Instrument ${text || 'inherited'} (one player)`
                 : op === 'color' ? 'Colour'
@@ -3104,7 +3068,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
 
         const parts = [`${changed} changed`];
-        if (op === 'instrumentOnePlayer' && text && r.players) parts.push(`${r.players} player${r.players === 1 ? '' : 's'}`);
+        if (op === 'instrumentOnePlayer' && text && 'players' in r && r.players) parts.push(`${r.players} player${r.players === 1 ? '' : 's'}`);
         if (r.followed.length) parts.push(`${r.followed.length} follow${r.followed.length === 1 ? 's' : ''} a selected item`);
         if (r.skipped.length) {
             const reasons = [...new Set(r.skipped.map((s) => s.reason))];
@@ -3121,7 +3085,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         return ['sine-wave', 'square-wave', 'sawtooth-wave', 'triangle-wave', 'organ', 'vibraphone'];
     }
 
-    function classifyGroupMoveGL(ids) {
+    function classifyGroupMoveGL(ids: Set<number>) {
         const movers = [], riders = [];
         for (const raw of ids) {
             const n = myModule.getNoteById(Number(raw));
@@ -3148,13 +3112,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
 
-    function preparePlayback(fromTime) {
+    function preparePlayback(fromTime: number) {
         return audioEngine.preparePlayback(myModule, fromTime);
     }
 
     // The ratio from one repeat to the next: the module's own (its BaseNote's
     // `repeat`); null when it sets none. Folding is a listening preference (Settings).
-    function repeatTranspose(offset) {
+    function repeatTranspose(offset: number) {
         let ratio = null;
         try { ratio = moduleRepeatRatio(myModule); } catch {}
         if (!ratio || (X_isOne(ratio))) return null;
@@ -3163,10 +3127,10 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
     // The pass being heard, on screen: every absolute value times its factor.
     eventBus.on('display:transposition', () => {
-        glWorkspace?.renderer?.syncBaseFrequencyLabel();
+        glWorkspace?.renderer?.syncBaseFrequencyLabel(undefined);
     });
 
-    function showPass(pass) {
+    function showPass(pass: number) {
         if (!playTranspose || pass === shownPass) return;
         shownPass = pass;
         const factor = pass > 0 ? passTransposition(playTranspose.ratio, pass, playTranspose.fold) : null;
@@ -3198,7 +3162,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         return playTranspose.offset;
     }
 
-    function play(fromTime = null) {
+    function play(fromTime: number | null = null) {
         // A restart or a seek mid-loop continues in the key being heard.
         if (isPlaying) loopPassOffset = currentPass();
         if (isPlaying) {
@@ -3444,7 +3408,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         loopEndAudioTime = null;
     }
 
-    function setVolume(value) {
+    function setVolume(value: number) {
         audioEngine.setVolume(value);
         return;
     }
@@ -3465,13 +3429,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
     // A declaration, not a const: refreshTempoUI() first runs during the initial load,
     // before this part of the closure has executed.
-    function fmtBpm(v) { return Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(2); }
+    function fmtBpm(v: number) { return Math.abs(v - Math.round(v)) < 1e-9 ? String(Math.round(v)) : v.toFixed(2); }
     // The control sits in the library toolbar, which menu-bar.js builds; look it up
     // when needed rather than caching it at boot.
     function refreshTempoUI() {
-        const slider = document.getElementById('tempoSlider');
+        const slider = document.querySelector<HTMLInputElement>('#tempoSlider');
         const valueEl = document.getElementById('tempoValue');
-        const commitBtn = document.getElementById('tempoCommitBtn');
+        const commitBtn = document.querySelector<HTMLButtonElement>('#tempoCommitBtn');
         if (!slider) return;
         const base = notatedBpm();
         const rate = audioEngine.rate;
@@ -3492,7 +3456,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
         if (commitBtn) commitBtn.hidden = !changed;
     }
-    function setLiveTempoBpm(bpm) {
+    function setLiveTempoBpm(bpm: number) {
         const base = notatedBpm();
         const b = Number(bpm);
         if (!(b > 0)) return;
@@ -3565,8 +3529,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     // uses a few lines below — a non-modal panel is not "outside".
     const PEER_PANELS = '.rmt-set-panel, #settingsGearBtn, #note-widget, #group-widget, .delete-confirm-overlay';
 
-    function closeGeneralWidgetOnOutsideClick(event) {
+    function closeGeneralWidgetOnOutsideClick(event: Event) {
         const t = event.target;
+        if (!(t instanceof Element)) return;
         if (domCache.generalWidget.contains(t) || domCache.dropdownButton.contains(t)) return;
         if (t && t.closest && t.closest(PEER_PANELS)) return;
         domCache.plusminus.classList.remove('open');
@@ -3574,11 +3539,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
     document.addEventListener('mouseup', (event) => {
+        if (!(event.target instanceof Element)) return;
         if (!isDragging) {
             // Suppress global clearSelection if a GL octave action just occurred
             let suppressClear = false;
             try {
-                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector<WorkspaceElement>('.myspaceapp');
                 const nowTs = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
                 suppressClear = !!(cont && cont.__rmtSuppressClickUntil && Math.sign(cont.__rmtSuppressClickUntil - nowTs) === 1);
             } catch {}
@@ -3591,29 +3557,29 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 !event.shiftKey &&
                 !(multiSelection.size && glWorkspace?.containerEl?.contains(event.target)) &&
                 !domCache.noteWidget.contains(event.target) &&
-                !event.target.closest('.note-rect') &&
-                !event.target.closest('#baseNoteCircle') &&
-                !event.target.closest('.measure-bar-triangle') &&
-                !event.target.closest('.delete-confirm-overlay') &&
+                !event.target.closest<HTMLElement>('.note-rect') &&
+                !event.target.closest<HTMLElement>('#baseNoteCircle') &&
+                !event.target.closest<HTMLElement>('.measure-bar-triangle') &&
+                !event.target.closest<HTMLElement>('.delete-confirm-overlay') &&
                 // The settings panel is non-modal: working in it must not drop
                 // the note selection out from under you (nor must opening it).
-                !event.target.closest('.rmt-set-panel') &&
-                !event.target.closest('#settingsGearBtn') &&
+                !event.target.closest<HTMLElement>('.rmt-set-panel') &&
+                !event.target.closest<HTMLElement>('#settingsGearBtn') &&
                 // Same for the group-actions widget: clicking its own buttons must
                 // not wipe the very selection those buttons act on.
-                !event.target.closest('#group-widget') &&
+                !event.target.closest<HTMLElement>('#group-widget') &&
                 // And for the module bar's toolbar (search + undo/redo): it is chrome, like
                 // the settings gear. Reaching for Undo, or for the search field to find a
                 // module to drop, must not drop the selection out from under you first.
-                !event.target.closest('.library-toolbar') &&
-                !event.target.closest('.octave-button')) {
+                !event.target.closest<HTMLElement>('.library-toolbar') &&
+                !event.target.closest<HTMLElement>('.octave-button')) {
                 clearSelection();
             }
             closeGeneralWidgetOnOutsideClick(event);
             // Close Load Module dropdown when clicking outside
             const dd = document.getElementById('loadModuleDropdown');
             const lb = domCache.loadModuleBtn;
-            if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
+            if (dd && lb && event.target instanceof Node && !dd.contains(event.target) && !lb.contains(event.target)) {
                 dd.style.display = 'none';
             }
         }
@@ -3640,11 +3606,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }, { passive: true });
 
     document.addEventListener('pointerup', (event) => {
+        if (!(event.target instanceof Element)) return;
         if (event.pointerType === 'mouse') return;
         if (!isDragging) {
             let suppressClear = false;
             try {
-                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector<WorkspaceElement>('.myspaceapp');
                 const nowTs = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
                 suppressClear = !!(cont && cont.__rmtSuppressClickUntil && Math.sign(cont.__rmtSuppressClickUntil - nowTs) === 1);
             } catch {}
@@ -3657,28 +3624,28 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 !event.shiftKey &&
                 !(multiSelection.size && glWorkspace?.containerEl?.contains(event.target)) &&
                 !domCache.noteWidget.contains(event.target) &&
-                !event.target.closest('.note-rect') &&
-                !event.target.closest('#baseNoteCircle') &&
-                !event.target.closest('.measure-bar-triangle') &&
-                !event.target.closest('.delete-confirm-overlay') &&
+                !event.target.closest<HTMLElement>('.note-rect') &&
+                !event.target.closest<HTMLElement>('#baseNoteCircle') &&
+                !event.target.closest<HTMLElement>('.measure-bar-triangle') &&
+                !event.target.closest<HTMLElement>('.delete-confirm-overlay') &&
                 // The settings panel is non-modal: working in it must not drop
                 // the note selection out from under you (nor must opening it).
-                !event.target.closest('.rmt-set-panel') &&
-                !event.target.closest('#settingsGearBtn') &&
+                !event.target.closest<HTMLElement>('.rmt-set-panel') &&
+                !event.target.closest<HTMLElement>('#settingsGearBtn') &&
                 // Same for the group-actions widget: clicking its own buttons must
                 // not wipe the very selection those buttons act on.
-                !event.target.closest('#group-widget') &&
+                !event.target.closest<HTMLElement>('#group-widget') &&
                 // And for the module bar's toolbar (search + undo/redo): it is chrome, like
                 // the settings gear. Reaching for Undo, or for the search field to find a
                 // module to drop, must not drop the selection out from under you first.
-                !event.target.closest('.library-toolbar') &&
-                !event.target.closest('.octave-button')) {
+                !event.target.closest<HTMLElement>('.library-toolbar') &&
+                !event.target.closest<HTMLElement>('.octave-button')) {
                 clearSelection();
             }
             closeGeneralWidgetOnOutsideClick(event);
             const dd = document.getElementById('loadModuleDropdown');
             const lb = domCache.loadModuleBtn;
-            if (dd && lb && !dd.contains(event.target) && !lb.contains(event.target)) {
+            if (dd && lb && event.target instanceof Node && !dd.contains(event.target) && !lb.contains(event.target)) {
                 dd.style.display = 'none';
             }
         }
@@ -3703,13 +3670,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
     // Delegated: the toolbar may be built after this runs.
     document.addEventListener('input', (e) => {
-        if (e.target && e.target.id === 'tempoSlider') setLiveTempoBpm(parseFloat(e.target.value));
+        if (e.target instanceof HTMLInputElement && e.target.id === 'tempoSlider') setLiveTempoBpm(parseFloat(e.target.value));
     });
     document.addEventListener('dblclick', (e) => {
-        if (e.target && e.target.closest && e.target.closest('.library-tempo')) resetLiveTempo();
+        if (e.target instanceof Element && e.target.closest<HTMLElement>('.library-tempo')) resetLiveTempo();
     });
     document.addEventListener('click', (e) => {
-        if (e.target && e.target.closest && e.target.closest('#tempoCommitBtn')) commitLiveTempo();
+        if (e.target instanceof Element && e.target.closest<HTMLElement>('#tempoCommitBtn')) commitLiveTempo();
     });
     refreshTempoUI();
     // The toolbar is usually built after this point (and after the first refresh).
@@ -3726,16 +3693,16 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         this.classList.remove('active');
     });
 
-    const sliders = document.querySelectorAll('.slider-container input[type="range"]');
+    const sliders = document.querySelectorAll<HTMLInputElement>('.slider-container input[type="range"]');
     sliders.forEach(slider => {
-        const valueDisplay = slider.parentElement.querySelector('span');
+        const valueDisplay = slider.parentElement?.querySelector('span');
         slider.addEventListener('input', (e) => {
-            valueDisplay.textContent = e.target.value;
+            if (valueDisplay) valueDisplay.textContent = slider.value;
         });
     });
 
     domCache.trackingToggle.addEventListener('change', (event) => {
-        isTrackingEnabled = event.target.checked;
+        isTrackingEnabled = domCache.trackingToggle.checked;
         // Keep renderer tracking mode in sync with tracking toggle
         try {
             if (glWorkspace && glWorkspace.renderer && typeof glWorkspace.renderer.setTrackingMode === 'function') {
@@ -3819,7 +3786,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     // (Workspace.MARQUEE_LONG_PRESS_MS / _SLOP_PX) so the gesture is learnable.
     const PP_LONG_PRESS_MS = 500;
     const PP_LONG_PRESS_SLOP_PX = 8;
-    let ppPressTimer = null;
+    let ppPressTimer: ReturnType<typeof setTimeout> | null = null;
     let ppLongPressFired = false;
 
     function ppCancelLongPress() {
@@ -3831,7 +3798,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     // read it as play/pause — you would toggle the mode and start playback in one
     // gesture. Capture phase, because that handler must never see the event.
     function ppSuppressTrailingClick() {
-        const eat = (e) => {
+        const eat = (e: Event) => {
             e.stopPropagation();
             e.preventDefault();
             clearTimeout(disarm);
@@ -3859,7 +3826,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
         const startX = event.clientX, startY = event.clientY;
 
-        const onMove = (e) => {
+        const onMove = (e: PointerEvent) => {
             if (Math.abs(e.clientX - startX) > PP_LONG_PRESS_SLOP_PX ||
                 Math.abs(e.clientY - startY) > PP_LONG_PRESS_SLOP_PX) {
                 ppCancelLongPress();
@@ -3883,7 +3850,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             // for anything not in their allow-list, and the top bar is not in it. The
             // release that ends this press must not wipe the user's selection.
             try {
-                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+                const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector<WorkspaceElement>('.myspaceapp');
                 if (cont) cont.__rmtSuppressClickUntil = performance.now() + 400;
             } catch {}
             toggleLoop();
@@ -3918,7 +3885,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     });
 
     domCache.volumeSlider.addEventListener('input', (event) => {
-        const v = parseFloat(event.target.value);
+        const v = parseFloat(domCache.volumeSlider.value);
         setVolume(v);
         // Live echo for any UI mirroring this value (Settings → Audio). The store
         // write stays on 'change' (drag end) so we don't hammer localStorage, but
@@ -3958,11 +3925,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
 
         domCache.loadModuleInput.addEventListener('change', (event) => {
-            const file = event.target.files[0];
+            const file = domCache.loadModuleInput.files?.[0];
             if (file) {
                 loadModule(file);
             }
-            event.target.value = '';
+            domCache.loadModuleInput.value = '';
         });
     } else {
         console.error('Load Module button or input not found!');
@@ -3977,7 +3944,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
     // Generic confirm overlay using existing modal styles
-    function showConfirm(message, yesLabel, onYes) {
+    function showConfirm(message: string, yesLabel: string, onYes: () => void) {
         try {
             const overlay = document.createElement('div');
             overlay.className = 'delete-confirm-overlay';
@@ -4042,7 +4009,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             console.error('Error resetting default module:', error);
             const errorMsg = document.createElement('div');
             errorMsg.className = 'error-message';
-            errorMsg.textContent = `Error resetting default module: ${error.message}`;
+            errorMsg.textContent = `Error resetting default module: ${(error instanceof Error ? error.message : String(error))}`;
             document.body.appendChild(errorMsg);
             setTimeout(() => errorMsg.remove(), 3000);
         }
@@ -4050,7 +4017,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
     function reorderCurrentModule() {
         myModule.exportOrderedModule().then(orderedJSONString => {
-            const data = JSON.parse(orderedJSONString);
+            const data: unknown = JSON.parse(orderedJSONString);
             if (isPlaying || isPaused) {
                 stop(true);
             }
@@ -4101,7 +4068,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 console.error('Error reordering module:', error);
                 const errorMsg = document.createElement('div');
                 errorMsg.className = 'error-message';
-                errorMsg.textContent = `Error reordering module: ${error.message}`;
+                errorMsg.textContent = `Error reordering module: ${(error instanceof Error ? error.message : String(error))}`;
                 document.body.appendChild(errorMsg);
                 setTimeout(() => errorMsg.remove(), 3000);
             });
@@ -4115,9 +4082,9 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
      * Checks for reasonable limits on depth, array sizes, and required structure
      * (MAX_MODULE_NOTES, src/limits.js).
      */
-    function validateModuleStructure(data, maxDepth = 20, maxArraySize = MAX_MODULE_NOTES) {
+    function validateModuleStructure(data: unknown, maxDepth = 20, maxArraySize = MAX_MODULE_NOTES) {
         // Check basic structure requirements
-        if (typeof data !== 'object' || data === null) {
+        if (!isRecord(data)) {
             console.error('[RMT Security] Module data must be an object');
             return false;
         }
@@ -4141,11 +4108,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         }
 
         // Check for excessive nesting depth (prevents stack overflow on deeply nested structures)
-        function checkDepth(obj, currentDepth) {
+        function checkDepth(obj: unknown, currentDepth: number) {
             if (currentDepth > maxDepth) {
                 return false;
             }
-            if (typeof obj !== 'object' || obj === null) {
+            if (!isRecord(obj) && !Array.isArray(obj)) {
                 return true;
             }
             if (Array.isArray(obj)) {
@@ -4179,7 +4146,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         return true;
     }
 
-    function loadModule(file) {
+    function loadModule(file: File) {
         try {
             // SECURITY: Enforce file size limit to prevent DoS (src/limits.js)
             const MAX_MODULE_SIZE = MAX_MODULE_BYTES;
@@ -4190,7 +4157,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
 
             file.text().then((fileContent) => {
-                const moduleData = JSON.parse(fileContent);
+                const moduleData: unknown = JSON.parse(fileContent);
 
                 // SECURITY: Validate JSON structure to prevent DoS via deeply nested/malformed data
                 if (!validateModuleStructure(moduleData)) {
@@ -4228,7 +4195,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                     console.error('Error loading module:', error);
                     const errorMsg = document.createElement('div');
                     errorMsg.className = 'error-message';
-                    errorMsg.textContent = `Error loading module: ${error.message}`;
+                    errorMsg.textContent = `Error loading module: ${(error instanceof Error ? error.message : String(error))}`;
                     document.body.appendChild(errorMsg);
                     setTimeout(() => errorMsg.remove(), 3000);
                 });
@@ -4237,7 +4204,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 // picked) — without this catch it is an unhandled rejection and
                 // the user gets no feedback at all.
                 console.error('Error reading module file:', error);
-                notify(`Error loading module: ${error.message}`, 'error');
+                notify(`Error loading module: ${(error instanceof Error ? error.message : String(error))}`, 'error');
             });
         } catch (error) {
             console.error('Error reading module file:', error);
@@ -4248,13 +4215,12 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         try { cleanupAudio(); } catch {}
         try {
             // Remove any legacy DOM artifacts if present
-            document.querySelectorAll('.note-container, .note-rect, .note-content').forEach(el => el.remove());
+            document.querySelectorAll<HTMLElement>('.note-container, .note-rect, .note-content').forEach(el => el.remove());
         } catch {}
         measureBars.forEach(bar => { try { bar.remove(); } catch {} });
         measureBars = [];
         playheadTime = 0;
         totalPausedTime = 0;
-        newNotes = [];
         // Clear GL previews/end previews
         try {
             if (glWorkspace && glWorkspace.renderer) {
@@ -4268,10 +4234,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     function initializeModule(incremental = false) {
         evaluatedNotes = myModule.evaluateModule();
         setEvaluatedNotes(evaluatedNotes);
-        newNotes = Object.keys(evaluatedNotes)
-            .map(id => evaluatedNotes[id])
-            .filter(note => note.startTime && note.duration && note.frequency);
-        baseNoteFreq = myModule.baseNote.getVariable('frequency').valueOf();
+        baseNoteFreq = myModule.baseNote.getVariable('frequency')!.valueOf();
         baseNoteY = frequencyToY(baseNoteFreq);
         baseNoteDisplay = createBaseNoteDisplay();
         // Center workspace camera to world (0, baseNoteY)
@@ -4311,7 +4274,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             console.error('Error exporting module:', error);
             const errorMsg = document.createElement('div');
             errorMsg.className = 'error-message';
-            errorMsg.textContent = `Error exporting module: ${error.message}`;
+            errorMsg.textContent = `Error exporting module: ${(error instanceof Error ? error.message : String(error))}`;
             document.body.appendChild(errorMsg);
             setTimeout(() => errorMsg.remove(), 3000);
         });
@@ -4357,11 +4320,11 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
         } catch (error) {
             console.error('Error exporting MIDI:', error);
-            notify(`Error exporting MIDI: ${error.message}`, 'error');
+            notify(`Error exporting MIDI: ${(error instanceof Error ? error.message : String(error))}`, 'error');
         }
     }
 
-    function validateExpression(moduleInstance, noteId, expression, variableType) {
+    function validateExpression(moduleInstance: Module, noteId: number, expression: string, variableType: ExpressionName) {
         return modals.validateExpression(moduleInstance, noteId, expression, variableType);
     }
 
@@ -4375,8 +4338,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
     updateNoteWidgetHeight();
 
-    const lockButton = document.getElementById('lockButton');
-    const lockIcon = lockButton.querySelector('.lock-icon');
+    const lockButton = document.getElementById('lockButton')!;
+    const lockIcon = lockButton.querySelector<HTMLElement>('.lock-icon')!;
 
     function updateLockButton() {
         if (isLocked) {
@@ -4391,7 +4354,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                 }
             } catch {}
             try {
-                const cont = document.querySelector('.myspaceapp');
+                const cont = document.querySelector<WorkspaceElement>('.myspaceapp');
                 if (cont) cont.style.cursor = '';
             } catch {}
         } else {
@@ -4403,25 +4366,25 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
     }
 
     function updateNotesPointerEvents() {
-        const allNoteElements = document.querySelectorAll('.note-content, .note-rect, .base-note-circle, .measure-bar-triangle');
+        const allNoteElements = document.querySelectorAll<HTMLElement>('.note-content, .note-rect, .base-note-circle, .measure-bar-triangle');
         
         allNoteElements.forEach(element => {
             if (isLocked) {
                 element.style.pointerEvents = 'none';
-                const children = element.querySelectorAll('*');
+                const children = element.querySelectorAll<HTMLElement | SVGElement>('*');
                 children.forEach(child => {
                     child.style.pointerEvents = 'none';
                 });
             } else {
                 element.style.pointerEvents = 'auto';
-                const children = element.querySelectorAll('*');
+                const children = element.querySelectorAll<HTMLElement | SVGElement>('*');
                 children.forEach(child => {
                     child.style.pointerEvents = 'auto';
                 });
             }
         });
         
-        const octaveButtons = document.querySelectorAll('.octave-button, .octave-up, .octave-down');
+        const octaveButtons = document.querySelectorAll<HTMLElement>('.octave-button, .octave-up, .octave-down');
         octaveButtons.forEach(button => {
             if (isLocked) {
                 button.style.pointerEvents = 'none';
@@ -4432,7 +4395,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
             }
         });
         
-        const resizeHandles = document.querySelectorAll('.resize-handle-icon, [style*="cursor: ew-resize"]');
+        const resizeHandles = document.querySelectorAll<HTMLElement>('.resize-handle-icon, [style*="cursor: ew-resize"]');
         resizeHandles.forEach(handle => {
             if (isLocked) {
                 handle.style.pointerEvents = 'none';
@@ -4499,14 +4462,14 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
         try {
           // Suppress container click selection right after octave actions so stack-click does not run
           try {
-            const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector('.myspaceapp');
+            const cont = (glWorkspace && glWorkspace.containerEl) || document.querySelector<WorkspaceElement>('.myspaceapp');
             if (cont) {
               const nowTs = (typeof performance !== 'undefined' && performance && typeof performance.now === 'function') ? performance.now() : Date.now();
               cont.__rmtSuppressClickUntil = nowTs + 300; try { window.__rmtLastOctaveChangeTs = nowTs; } catch {}
             }
           } catch {}
           if (noteId != null) {
-            handleOctaveChange(parseInt(noteId, 10), direction);
+            handleOctaveChange(parseInt(String(noteId), 10), direction);
           }
         } catch (e) {
           console.warn('octaveChange handler failed', e);
@@ -4553,7 +4516,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       eventBus.on('player:invalidateModuleEndTimeCache', (change) => {
         try {
           // An external explicit invalidation can follow a direct field write.
-          if (change?.noteId == null) myModule._timingSummary = null;
+          if (change?.noteId == null) myModule._timingSummary = undefined;
           invalidateModuleEndTimeCache();
           updateMeasureBarPositions();
         } catch {}
@@ -4593,7 +4556,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
       // It deliberately does NOT retarget dependents, re-evaluate, re-render or
       // snapshot. The caller owns those, so a group move can do them ONCE for the
       // whole batch and land as a single undo entry.
-      function commitNoteStartGL(n, newStartSec, { followEnd = false } = {}) {
+      function commitNoteStartGL(n: Note, newStartSec: number, { followEnd = false } = {}) {
           if (!n || typeof newStartSec !== 'number' || !isFinite(newStartSec)) return;
           const noteId = n.id;
 
@@ -4657,7 +4620,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
               // Local resolver: climb ancestors until startTime <= cutoffSec, else BaseNote
               // If requireFrequency is true, skip measure bars (they have no frequency expression)
-              function __resolveAncestorAtOrBeforeLocal(node, cutoffSec, requireFrequency = false) {
+              function __resolveAncestorAtOrBeforeLocal(node: Note, cutoffSec: number, requireFrequency = false) {
                 try {
                   let anc = node || myModule.baseNote;
                   const tol = 1e-6;
@@ -4753,7 +4716,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
 
               if (refsLaterNote && isFinite(durSec) && durSec >= 0) {
                 const unitExact = myModule.baseNote.getExactVariable('duration') ?? myModule.getTimeUnit();
-                const rawDur = timeUnitsExpr(n.getExactVariable('duration'), unitExact);
+                const duration = n.getExactVariable('duration');
+                const rawDur = duration && timeUnitsExpr(duration, unitExact);
                 if (rawDur && !__retargetWouldCycleGL(n, 'duration', rawDur)) {
                   n.setVariable('durationString', rawDur);
                 }
@@ -4999,13 +4963,13 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
          // OPTIMIZED: Use DependencyGraph.getMeasureChain() when available for O(d) vs O(n²) performance
          const chain = (() => {
            const depGraph = myModule._dependencyGraph;
-           const isMeasureById = (id) => {
+           const isMeasureById = (id: number) => {
              try {
                const n = myModule.getNoteById(Number(id));
                return __isMeasure(n);
              } catch { return false; }
            };
-           const getStartTime = (id) => {
+           const getStartTime = (id: number) => {
              try {
                const n = myModule.getNoteById(Number(id));
                const st = n && n.getVariable && n.getVariable('startTime');
@@ -5016,15 +4980,15 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
              }
            };
            // The bar a chain link continues, or null for an anchor (starts a new chain) or root
-           const chainLinkParentOf = (n) => {
+           const chainLinkParentOf = (n: Note) => {
              const pid = measureChainLinkParentId((n && n.variables && n.variables.startTimeString) || '');
              return (pid != null && __isMeasure(myModule.getNoteById(pid))) ? pid : null;
            };
            // Check if a dependent is a chain link of parentId vs an anchor (starts new chain)
-           const isChainLinkById = (depId, parentId) => {
+           const isChainLinkById = (depId: number, parentId: number) => {
              try {
                const n = myModule.getNoteById(Number(depId));
-               return __isMeasure(n) && chainLinkParentOf(n) === Number(parentId);
+               return !!n && __isMeasure(n) && chainLinkParentOf(n) === Number(parentId);
              } catch { return false; }
            };
 
@@ -5034,27 +4998,29 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
            }
 
            // Fallback to original implementation
-           const out = [];
+           const out: {id: number; startSec: number}[] = [];
            // Walk backward to earliest measure in this chain (only through chain links, not anchors)
            let cur = note;
            let guard = 0;
            while (guard++ < 1024) {
              const pid = chainLinkParentOf(cur);
              if (pid == null) break; // an anchor or root - stop backward walk
-             cur = myModule.getNoteById(pid);
+             const previous = myModule.getNoteById(pid);
+             if (!previous) break;
+             cur = previous;
            }
-           const pushWithStart = (n) => {
+           const pushWithStart = (n: Note) => {
              try { out.push({ id: Number(n.id), startSec: toNumber(n.getVariable('startTime'), 0) }); }
              catch { out.push({ id: Number(n.id), startSec: 0 }); }
            };
            pushWithStart(cur);
            // Forward: at each step pick the next CHAIN LINK measure (not anchors from other chains)
-           const findNextChainLink = (m) => {
+           const findNextChainLink = (m: Note) => {
              const candidates = [];
              try {
                for (const id in myModule.notes) {
                  const nn = myModule.getNoteById(Number(id));
-                 if (isChainLinkById(nn && nn.id, m.id)) candidates.push(nn);
+                 if (nn && isChainLinkById(nn.id, m.id)) candidates.push(nn);
                }
              } catch {}
              // Sort by startTime and return earliest (there should typically
@@ -5164,6 +5130,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
            // then anchor the current bar to that end.
            const prevMeta = chain[idx - 1];
            const prev = myModule.getNoteById(Number(prevMeta.id));
+           if (!prev) return;
            const prevStart = Number.isFinite(prevMeta.startSec) && prevMeta.startSec !== 0
              ? prevMeta.startSec
              : toNumber(prev.getVariable('startTime'), 0);
@@ -5196,7 +5163,8 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                    keepRaw = prevDurRaw;
                  } else {
                    try {
-                     keepRaw = unitsToDSL(note.getVariable('duration').div(unitFrac));
+                     const duration = note.getVariable('duration');
+                     if (duration) keepRaw = unitsToDSL(duration.div(unitFrac));
                    } catch {}
                  }
                  if (keepRaw && !__retargetWouldCycleGL(note, 'duration', keepRaw)) {
@@ -5248,7 +5216,7 @@ function retargetDependentStartAndDurationOnTemporalViolationGL(movedNote) {
                eventBus.emit('modals:requestRefresh', { note: mNote, measureId: mId, clickedElement: anchor });
              } catch {
                // Fallback to direct call; still pass measureId to ensure Measure modal stays selected
-               showNoteVariables(mNote, anchor, mId);
+               if (mNote) showNoteVariables(mNote, anchor, mId);
              }
            }
          } catch {}
@@ -5270,7 +5238,7 @@ function liveModuleText() {
   return snap ? JSON.stringify(snap) : null;
 }
 
-function captureSnapshot(label = 'Change', tracked = false) {
+function captureSnapshot(label = 'Change', tracked: boolean | number[] = false) {
   if (!myModule) return;
   const snap = moduleSnapshot(myModule, tracked);
   eventBus.emit('history:seedIfEmpty', { label: 'Initial', ...snap });
@@ -5290,14 +5258,14 @@ try {
 } catch {}
 
 // Wire Undo/Redo buttons
-const undoBtn = document.getElementById('undoBtn');
-const redoBtn = document.getElementById('redoBtn');
+const undoBtn = document.querySelector<HTMLButtonElement>('#undoBtn');
+const redoBtn = document.querySelector<HTMLButtonElement>('#redoBtn');
 if (undoBtn) undoBtn.addEventListener('click', () => { try { eventBus.emit('history:undo'); } catch {} });
 if (redoBtn) redoBtn.addEventListener('click', () => { try { eventBus.emit('history:redo'); } catch {} });
 
 // Keyboard shortcuts: Ctrl/Cmd+Z (Undo), Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y (Redo)
 document.addEventListener('keydown', (e) => {
-  const el = e.target;
+  const el = e.target instanceof HTMLElement ? e.target : null;
   const tag = (el && el.tagName) ? el.tagName.toLowerCase() : '';
   const isEditable = tag === 'input' || tag === 'textarea' || (el && el.isContentEditable);
   if (isEditable) return;
@@ -5369,7 +5337,7 @@ try {
       // Persist restored state so reloads resume exactly where the user left
       try {
         let text;
-        if (patched) text = version.text;
+        if (patched && version) text = version.text;
         else {
           const snap = moduleSnapshot(myModule);
           text = snap.snapshotStr ?? JSON.stringify(snap.snapshot);

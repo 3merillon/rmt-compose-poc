@@ -97,6 +97,7 @@ export class Note {
   declare lastModifiedTime: number;
   declare expressions: Record<ExpressionName, BinaryExpression> & Partial<Record<string, BinaryExpression>>;
   declare properties: NoteProperties;
+  declare originalFilename?: string;
   declare _depsEpoch: number;
   declare _depsRegKey: string | number | null;
   declare _depsRegModule: Module | null;
